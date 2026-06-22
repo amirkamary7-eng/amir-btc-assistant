@@ -102,6 +102,7 @@ function getCoinFullName(sym) {
     return names[sym] || sym;
 }
 
+// تابع رندر کردن بازار همراه با هوش مصنوعی آیکون جایگزین برای جلوگیری از باگ غیب شدن ارزها
 function renderMarketList(coins) {
     const marketListEl = document.getElementById("market-list");
     if (!marketListEl) return;
@@ -110,7 +111,7 @@ function renderMarketList(coins) {
     coins.forEach(coin => {
         const price = parseFloat(coin.priceUsd);
         const change = parseFloat(coin.changePercent24Hr);
-        const formattedPrice = price > 1 ? price.toLocaleString(undefined, {maximumFractionDigits: 2}) : price.toFixed(4);
+        const formattedPrice = price > 1 ? price.toLocaleString(undefined, {maximumFractionDigits: 2}) : price.toFixed(5);
         
         const changeColor = change >= 0 ? "#00ff99" : "#ff4a5a";
         const changeSign = change >= 0 ? "+" : "";
@@ -120,7 +121,14 @@ function renderMarketList(coins) {
         marketHtml += `
         <div class="coin-row" onclick="openChart('${coin.symbol}')">
             <div style="display: flex; align-items: center; gap: 12px;">
-                <img src="${iconUrl}" onerror="this.src='https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/generic.png'" style="width: 32px; height: 32px; border-radius: 50%;">
+                <div class="coin-icon-container" style="width: 35px; height: 35px; display: flex; align-items: center; justify-content: center;">
+                    <img src="${iconUrl}" 
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" 
+                         style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
+                    <div class="fake-icon" style="display: none; width: 35px; height: 35px; border-radius: 50%; background: linear-gradient(135deg, #f7931a, #ff4a5a); color: white; font-weight: bold; font-size: 14px; align-items: center; justify-content: center; font-family: sans-serif;">
+                        ${coin.symbol.substring(0, 2)}
+                    </div>
+                </div>
                 <div class="coin-info">
                     <span class="coin-symbol">${coin.symbol}</span>
                     <span class="coin-name">${coin.name}</span>
@@ -139,7 +147,7 @@ function renderMarketList(coins) {
 }
 
 // =====================
-// LIVE SEARCH FILTER (SMART & FAST)
+// LIVE SEARCH FILTER (SMART & FAST FOR ALL COINS)
 // =====================
 let searchTimeout = null;
 
@@ -178,7 +186,7 @@ async function filterMarket() {
             } else {
                 document.getElementById("market-list").innerHTML = `
                     <div style="text-align: center; color: #8f98aa; margin-top: 30px; font-size: 14px;">
-                        ❌ Coin "${query}" not found on Binance!
+                        ❌ ارز "${query}" در صرافی یافت نشد!
                     </div>`;
             }
         } catch (err) {
@@ -349,5 +357,5 @@ window.addEventListener("DOMContentLoaded", () => {
 
     setInterval(loadMarketAndPrices, 5000);
     setInterval(loadCryptoNews, 300000);
-    setInterval(loadAnalysisData, 15000); // چک کردن خودکار تحلیل‌های جدید کانال هر ۱۵ ثانیه
+    setInterval(loadAnalysisData, 15000);
 });
