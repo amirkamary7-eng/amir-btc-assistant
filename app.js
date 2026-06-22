@@ -95,7 +95,6 @@ function getCoinFullName(sym) {
     return names[sym] || sym;
 }
 
-// برگرداندن ۱۰۰٪ دقیقِ تگ‌ها و ساختار گرافیکی لوکس اولیه شما
 function renderMarketList(coins) {
     const marketListEl = document.getElementById("market-list");
     if (!marketListEl) return;
@@ -116,7 +115,6 @@ function renderMarketList(coins) {
         
         const changeColor = change >= 0 ? "#00ff99" : "#ff4a5a";
         const changeSign = change >= 0 ? "+" : "";
-
         const iconUrl = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${coin.symbol.toLowerCase()}.png`;
 
         marketHtml += `
@@ -148,7 +146,7 @@ function renderMarketList(coins) {
 }
 
 // =====================
-// GUARANTEED SEARCH FUNCTION (MULTI-EXCHANGE DYNAMIC)
+// GUARANTEED SEARCH FUNCTION
 // =====================
 async function filterMarket() {
     const searchInput = document.getElementById("market-search");
@@ -178,7 +176,6 @@ async function filterMarket() {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(async () => {
         try {
-            // ۱. صرافی بایننس
             try {
                 const r = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`);
                 if (r.ok) {
@@ -188,7 +185,6 @@ async function filterMarket() {
                 }
             } catch(e){}
 
-            // ۲. صرافی بای‌بیت (ارزهای جدید مثل HYPE)
             try {
                 const r = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${query}USDT`);
                 const data = await r.json();
@@ -199,7 +195,6 @@ async function filterMarket() {
                 }
             } catch(e){}
 
-            // ۳. صرافی اوکی‌اکس
             try {
                 const r = await fetch(`https://www.okx.com/api/v5/market/ticker?instId=${query}-USDT`);
                 const data = await r.json();
@@ -210,7 +205,6 @@ async function filterMarket() {
                 }
             } catch(e){}
 
-            // ۴. صرافی گیت
             try {
                 const r = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${query}_USDT`);
                 const data = await r.json();
@@ -240,6 +234,44 @@ function renderSingleSearchCoin(symbol, price, change, exchangeName) {
         exchange: exchangeName.toUpperCase().replace(".", "")
     }];
     renderMarketList(searchedCoin);
+}
+
+// =====================
+// TELEGRAM REAL USER DETECTOR (FIXED & IMPROVED)
+// =====================
+function loadTelegramUser() {
+    const nameEl = document.getElementById("user-name");
+    const idEl = document.getElementById("user-id");
+    const usernameEl = document.getElementById("user-username");
+    const imgEl = document.getElementById("profile-img");
+
+    // گرفتن دیتای زنده کاربر از لایه امنیتی تلگرام
+    const userData = tg?.initDataUnsafe?.user;
+
+    if (userData) {
+        // ۱. چسباندن نام و نام خانوادگی واقعی کاربر تلگرام
+        const firstName = userData.first_name || "";
+        const lastName = userData.last_name || "";
+        if (nameEl) nameEl.innerText = `${firstName} ${lastName}`.trim();
+
+        // ۲. نمایش آیدی عددی دقیق تلگرام کاربر
+        if (idEl) idEl.innerText = userData.id || "نامشخص";
+
+        // ۳. نمایش یوزرنیم کاربر تلگرام
+        if (usernameEl) {
+            usernameEl.innerText = userData.username ? `@${userData.username}` : "بدون یوزرنیم";
+        }
+
+        // ۴. دریافت هوشمند عکس پروفایل از سرور تلگرام
+        if (imgEl && userData.username) {
+            imgEl.src = `https://t.me/i/userpic/320/${userData.username}.jpg`;
+        }
+    } else {
+        // اطلاعات نمونه لوکس برای زمانی که خارج از تلگرام و در مرورگر تست میکنید
+        if (nameEl) nameEl.innerText = "امیر کریپتو (تست سیستم)";
+        if (idEl) idEl.innerText = "584930291";
+        if (usernameEl) usernameEl.innerText = "@Amir_Crypto";
+    }
 }
 
 // =====================
@@ -342,7 +374,11 @@ async function loadAnalysisData() {
     } catch (e) {}
 }
 
+// =====================
+// INITIALIZATION
+// =====================
 window.addEventListener("DOMContentLoaded", () => {
+    loadTelegramUser(); // اجرای فوری موتور شناسایی کاربر تلگرام
     loadMarketAndPrices();
     loadCryptoNews();
     loadAnalysisData();
