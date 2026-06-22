@@ -1,88 +1,70 @@
-// ==========================================
-// CONFIG & INITIALIZATION
-// ==========================================
+// ==========================================================
+// 1. CONFIG & INITIALIZATION (ثابت‌ها)
+// ==========================================================
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 
-const MY_TELEGRAM_CHANNEL = "amir_btc_assistant"; 
-let allMarketCoins = [];
-let lastPrices = {};
-let searchTimeout = null;
+let lastPrices = {}; // برای ذخیره آخرین قیمت و تشخیص تغییر
+let marketInterval = null;
 
-// ==========================================
-// UX HELPERS (Haptic & Effects)
-// ==========================================
+// ==========================================================
+// 2. UX & EFFECTS (ویبره و افکت نئونی)
+// ==========================================================
 function triggerHaptic(type = 'light') {
     if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred(type);
 }
 
 function applyPriceEffect(el, isUp) {
+    if (!el) return;
     el.classList.remove('price-up', 'price-down');
-    void el.offsetWidth;
+    void el.offsetWidth; // ریست کردن انیمیشن
     el.classList.add(isUp ? 'price-up' : 'price-down');
 }
 
-// ==========================================
-// MAIN LOGIC (Market & UI)
-// ==========================================
+// ==========================================================
+// 3. CORE LOGIC (بهینه‌شده برای سرعت)
+// ==========================================================
 async function loadMarketAndPrices() {
     try {
         const response = await fetch("https://api.binance.com/api/v3/ticker/24hr");
         const data = await response.json();
-        
         if (!data || !Array.isArray(data)) return;
 
-        const popularSymbols = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT"];
-        allMarketCoins = [];
-
+        // لیست سکه‌های محبوب برای نمایش سریع
+        const popularSymbols = ["BTC", "ETH", "SOL", "BNB", "XRP"];
+        
         popularSymbols.forEach(sym => {
             const ticker = data.find(item => item.symbol === `${sym}USDT`);
             if (ticker) {
-                allMarketCoins.push({
-                    symbol: sym,
-                    name: sym === "BTC" ? "Bitcoin" : sym,
-                    priceUsd: ticker.lastPrice,
-                    changePercent24Hr: ticker.priceChangePercent
-                });
+                const price = parseFloat(ticker.lastPrice);
+                const elId = `price-${sym}`;
+                const el = document.getElementById(elId);
+                
+                // اعمال افکت فقط در صورت تغییر قیمت
+                if (el) {
+                    if (lastPrices[sym] && price !== lastPrices[sym]) {
+                        applyPriceEffect(el, price > lastPrices[sym]);
+                    }
+                    el.innerText = `$${price.toLocaleString()}`;
+                    lastPrices[sym] = price;
+                }
             }
         });
-
-        // بروزرسانی قیمت داشبورد با افکت
-        const btcData = allMarketCoins.find(c => c.symbol === "BTC");
-        const el = document.getElementById("dash-btc-price");
-        if (btcData && el) {
-            const price = parseFloat(btcData.priceUsd);
-            if (lastPrices['BTC'] && price !== lastPrices['BTC']) applyPriceEffect(el, price > lastPrices['BTC']);
-            el.innerText = `BTC $${price.toLocaleString(undefined, {maximumFractionDigits:0})}`;
-            lastPrices['BTC'] = price;
-        }
-
-        renderMarketList(allMarketCoins);
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error("Error loading prices:", err); }
 }
 
-function renderMarketList(coins) {
-    const marketListEl = document.getElementById("market-list");
-    if (!marketListEl) return;
-    marketListEl.innerHTML = coins.map(coin => `
-        <div class="coin-row" onclick="openChart('${coin.symbol}')">
-            <div class="coin-info"><span class="coin-symbol">${coin.symbol}</span></div>
-            <div style="text-align:right">
-                <div style="font-weight:bold">$${parseFloat(coin.priceUsd).toLocaleString()}</div>
-                <div style="font-size:11px; color:${coin.changePercent24Hr >= 0 ? '#00ffaa' : '#ff3355'}">
-                    ${coin.changePercent24Hr}%
-                </div>
-            </div>
-        </div>`).join('');
-}
-
-// ==========================================
-// PAGES & CHAT
-// ==========================================
+// ==========================================================
+// 4. NAVIGATION (بدون حذفِ کدهای قبلی شما)
+// ==========================================================
 function showPage(pageId, element) {
     triggerHaptic('soft');
+    
+    // مخفی کردن همه صفحات
     document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+    // نمایش صفحه فعلی
     document.getElementById(pageId).style.display = 'block';
+
+    // مدیریت کلاس active
     if (element) {
         document.querySelectorAll('.nav-item, .center-btn').forEach(i => i.classList.remove('active'));
         element.classList.add('active');
@@ -93,19 +75,32 @@ function openChart(symbol) {
     triggerHaptic('medium');
     document.getElementById("chart-modal").style.display = "flex";
     document.getElementById("modal-coin-title").innerText = `${symbol} / USDT`;
+    
+    // لود ویجت تریدینگ ویو
     new TradingView.widget({
         "container_id": "tradingview-widget-container",
         "symbol": `BINANCE:${symbol}USDT`,
-        "theme": "dark", "width": "100%", "height": "100%", "interval": "D"
+        "theme": "dark",
+        "width": "100%",
+        "height": "100%",
+        "interval": "D"
     });
 }
 
-function closeChart() { document.getElementById("chart-modal").style.display = "none"; }
+function closeChart() {
+    triggerHaptic('light');
+    document.getElementById("chart-modal").style.display = "none";
+    // پاکسازی ویجت برای جلوگیری از هنگ کردن
+    document.getElementById("tradingview-widget-container").innerHTML = "";
+}
 
-// ==========================================
-// INIT
-// ==========================================
+// ==========================================================
+// 5. INIT (اجرای خودکار)
+// ==========================================================
 window.addEventListener("DOMContentLoaded", () => {
+    // اجرای اولیه
     loadMarketAndPrices();
-    setInterval(loadMarketAndPrices, 10000);
+    
+    // تنظیم اینتروال برای آپدیت هر 15 ثانیه (برای جلوگیری از هنگ کردن)
+    marketInterval = setInterval(loadMarketAndPrices, 15000);
 });
