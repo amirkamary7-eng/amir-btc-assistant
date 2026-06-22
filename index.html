@@ -278,16 +278,16 @@
     </div>
 
     <div id="analysis-page" class="page">
-    <div style="padding: 20px 20px 10px 20px; text-align: right; font-size: 20px; font-weight: bold; color: var(--primary);">🎯 سیگنال و تحلیل تکنیکال</div>
-    <!-- ویجت را مستقیماً اینجا بنویسید (نه با اسکریپت) -->
-    <div id="telegram-feed-container" style="padding: 0 16px; margin-top: 10px;">
-        <script async src="https://telegram.org/js/telegram-widget.js?22" 
-                data-telegram-discussion="amir_btc_2024" 
-                data-comments-limit="5"
-                data-color="F7931A"
-                data-dark="1">
-        </script>
+    <div style="padding: 20px; text-align: center; color: var(--text-sub);">
+        <p>برای مشاهده تحلیل‌های تکنیکال و سیگنال‌ها، وارد بخش تحلیل‌ها شوید.</p>
+        <button onclick="loadTelegramWidgetDirect()" style="padding: 10px 20px; background: var(--primary); border: none; border-radius: 8px; color: #fff; cursor: pointer;">
+            نمایش تحلیل‌ها
+        </button>
     </div>
+    
+    <!-- این کانتینر در ابتدا خالی است -->
+    <div id="telegram-feed-container" style="padding: 0 16px; margin-top: 10px;"></div>
+</div>
 </div>
 </div>
 

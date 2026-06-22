@@ -7,7 +7,7 @@ if (tg) {
     tg.expand();
 }
 
-const MY_TELEGRAM_CHANNEL = "amir_btc_2024"; 
+const MY_TELEGRAM_CHANNEL = "amir_btc_a"; 
 
 let allMarketCoins = [];
 let searchTimeout = null;
@@ -271,3 +271,20 @@ window.addEventListener("DOMContentLoaded", () => {
     loadCryptoNews();
     setInterval(loadMarketAndPrices, 10000);
 });
+
+function loadTelegramWidgetDirect() {
+    const container = document.getElementById("telegram-feed-container");
+    // پاک کردن متن راهنما
+    container.parentElement.querySelector('div').style.display = 'none';
+
+    // تزریق ویجت
+    container.innerHTML = `
+        <script async src="https://telegram.org/js/telegram-widget.js?22" 
+                data-telegram-discussion="amir_btc_2024" 
+                data-comments-limit="5"
+                data-color="F7931A"
+                data-dark="1"
+                data-width="100%">
+        </script>
+    `;
+}
