@@ -7,6 +7,9 @@ if (tg) {
     tg.expand();
 }
 
+// 🔴 آیدی عمومی کانال تلگرامت را اینجا بنویس (بدون علامت @)
+const MY_TELEGRAM_CHANNEL = "YOUR_CHANNEL_USERNAME"; 
+
 let allMarketCoins = [];
 let searchTimeout = null;
 
@@ -237,7 +240,7 @@ function renderSingleSearchCoin(symbol, price, change, exchangeName) {
 }
 
 // =====================
-// TELEGRAM REAL USER DETECTOR (FIXED & IMPROVED)
+// TELEGRAM REAL USER DETECTOR
 // =====================
 function loadTelegramUser() {
     const nameEl = document.getElementById("user-name");
@@ -245,32 +248,83 @@ function loadTelegramUser() {
     const usernameEl = document.getElementById("user-username");
     const imgEl = document.getElementById("profile-img");
 
-    // گرفتن دیتای زنده کاربر از لایه امنیتی تلگرام
     const userData = tg?.initDataUnsafe?.user;
 
     if (userData) {
-        // ۱. چسباندن نام و نام خانوادگی واقعی کاربر تلگرام
         const firstName = userData.first_name || "";
         const lastName = userData.last_name || "";
         if (nameEl) nameEl.innerText = `${firstName} ${lastName}`.trim();
-
-        // ۲. نمایش آیدی عددی دقیق تلگرام کاربر
         if (idEl) idEl.innerText = userData.id || "نامشخص";
-
-        // ۳. نمایش یوزرنیم کاربر تلگرام
         if (usernameEl) {
             usernameEl.innerText = userData.username ? `@${userData.username}` : "بدون یوزرنیم";
         }
-
-        // ۴. دریافت هوشمند عکس پروفایل از سرور تلگرام
         if (imgEl && userData.username) {
             imgEl.src = `https://t.me/i/userpic/320/${userData.username}.jpg`;
         }
     } else {
-        // اطلاعات نمونه لوکس برای زمانی که خارج از تلگرام و در مرورگر تست میکنید
         if (nameEl) nameEl.innerText = "امیر کریپتو (تست سیستم)";
         if (idEl) idEl.innerText = "584930291";
         if (usernameEl) usernameEl.innerText = "@Amir_Crypto";
+    }
+}
+
+// =====================
+// LIVE ANALYSIS FROM TELEGRAM CHANNEL (SMART HASH-DETECTOR)
+// =====================
+async function loadAnalysisData() {
+    const analysisListEl = document.getElementById("analysis-list");
+    if (!analysisListEl) return;
+
+    if (!MY_TELEGRAM_CHANNEL || MY_TELEGRAM_CHANNEL === "YOUR_CHANNEL_USERNAME") {
+        analysisListEl.innerHTML = `<div class="card" style="text-align:center; color:#8f98aa; padding: 20px;">⚠️ لطفا ابتدا آیدی کانال خود را در خط ۱۱ فایل app.js تنظیم کنید.</div>`;
+        return;
+    }
+
+    try {
+        const response = await fetch(`https://rss2json.com/api.json?rss_url=https://tg.b612.me/feed/${MY_TELEGRAM_CHANNEL}`);
+        const result = await response.json();
+
+        if (result.status === "ok" && result.items.length > 0) {
+            let analysisHtml = "";
+            let hasAnalysis = false;
+
+            result.items.forEach(item => {
+                let textContent = item.description.replace(/<[^>]*>/g, '').trim();
+                
+                const hashtagRegex = /#\w+/g;
+                const foundHashtags = textContent.match(hashtagRegex);
+
+                if (foundHashtags && foundHashtags.length > 0) {
+                    hasAnalysis = true;
+                    
+                    let tagsHtml = foundHashtags.map(tag => 
+                        `<span style="background: rgba(247, 147, 26, 0.15); color: #f7931a; padding: 4px 8px; border-radius: 6px; margin-left: 6px; font-size: 11px; font-family: monospace;">${tag.toUpperCase()}</span>`
+                    ).join("");
+
+                    let postDate = new Date(item.pubDate).toLocaleDateString('fa-IR');
+
+                    analysisHtml += `
+                    <div class="card" style="padding: 18px; margin-bottom: 15px; direction: rtl; text-align:right; border-left: 4px solid #f7931a;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: bold;">
+                            <div style="display: flex; gap: 4px;">${tagsHtml}</div>
+                            <span style="color: #8f98aa; font-weight: normal; font-size: 12px; font-family: monospace;">📅 ${postDate}</span>
+                        </div>
+                        <p style="color: #e1e4ea; font-size: 14px; white-space: pre-line; line-height: 1.6; margin: 0;">${textContent}</p>
+                    </div>`;
+                }
+            });
+
+            if (hasAnalysis) {
+                analysisListEl.innerHTML = analysisHtml;
+            } else {
+                analysisListEl.innerHTML = `<div class="card" style="text-align:center; color:#8f98aa; padding: 20px;">🔍 هیچ تحلیلی با هشتگ در کانال یافت نشد.</div>`;
+            }
+        } else {
+            analysisListEl.innerHTML = `<div class="card" style="text-align:center; color:#8f98aa; padding: 20px;">❌ خطا در دریافت اطلاعات کانال. مطمئن شوید کانال عمومی (Public) است.</div>`;
+        }
+    } catch (e) {
+        console.error("Telegram Feed Error:", e);
+        analysisListEl.innerHTML = `<div class="card" style="text-align:center; color:#8f98aa; padding: 20px;">⚠️ خطایی در ارتباط با سرور رخ داد.</div>`;
     }
 }
 
@@ -350,35 +404,11 @@ async function loadCryptoNews() {
     }
 }
 
-async function loadAnalysisData() {
-    const analysisListEl = document.getElementById("analysis-list");
-    if (!analysisListEl) return;
-    try {
-        const response = await fetch("http://127.0.0.1:8000/api/analysis");
-        const result = await response.json();
-        if (result.status === "success" && result.data.length > 0) {
-            let analysisHtml = "";
-            result.data.forEach(item => {
-                analysisHtml += `
-                <div class="card" style="padding: 18px; margin-bottom: 15px; direction: rtl; text-align:right;">
-                    <div style="display: flex; justify-content: space-between; color: #f7931a; margin-bottom: 10px; font-weight: bold;">
-                        <span>🎯 ${item.title}</span>
-                        <span style="color: #8f98aa; font-weight: normal;">${item.date}</span>
-                    </div>
-                    <p style="color: #e1e4ea; font-size: 14px; white-space: pre-line;">${item.text}</p>
-                    <div style="color: #00ff99; font-weight: bold; margin-top:10px;">${item.tag}</div>
-                </div>`;
-            });
-            analysisListEl.innerHTML = analysisHtml;
-        }
-    } catch (e) {}
-}
-
 // =====================
 // INITIALIZATION
 // =====================
 window.addEventListener("DOMContentLoaded", () => {
-    loadTelegramUser(); // اجرای فوری موتور شناسایی کاربر تلگرام
+    loadTelegramUser();
     loadMarketAndPrices();
     loadCryptoNews();
     loadAnalysisData();
