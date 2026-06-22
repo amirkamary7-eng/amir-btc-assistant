@@ -15,20 +15,16 @@ let searchTimeout = null;
 // PAGE SWITCH SYSTEM
 // =====================
 function showPage(pageId, element) {
-    document.querySelectorAll('.page').forEach(page => {
-        page.style.display = 'none';
-    });
+    document.querySelectorAll('.page').forEach(page => page.style.display = 'none');
     const activePage = document.getElementById(pageId);
     if (activePage) activePage.style.display = 'block';
 
-    document.querySelectorAll('.nav-item, .center-btn').forEach(item => {
-        item.classList.remove('active');
-    });
+    document.querySelectorAll('.nav-item, .center-btn').forEach(item => item.classList.remove('active'));
     if (element) element.classList.add('active');
 }
 
 // =====================
-// LIVE PRICES & MARKET (BINANCE API)
+// LIVE PRICES & MARKET
 // =====================
 async function loadMarketAndPrices() {
     try {
@@ -57,12 +53,9 @@ async function loadMarketAndPrices() {
             const btcPrice = parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
             document.getElementById("dash-btc-price").innerHTML = `BTC $${btcPrice}`;
         }
-
         renderMarketList(allMarketCoins);
         renderDashMiniMarket();
-    } catch (err) {
-        console.error("Binance API error:", err);
-    }
+    } catch (err) { console.error("Binance API error:", err); }
 }
 
 function getCoinFullName(sym) {
@@ -140,7 +133,7 @@ function getFarsiFngStatus(status) {
 }
 
 // =====================
-// NEWS SYSTEM (اصلاح شده)
+// NEWS SYSTEM (FIXED)
 // =====================
 async function loadPersianNews() {
     const newsListEl = document.getElementById("news-list");
@@ -190,12 +183,29 @@ function showNewsModal(title, description, content) {
 }
 
 // =====================
-// TELEGRAM & CHART
+// TELEGRAM & USER
 // =====================
 function loadTelegramUser() {
     const userData = tg?.initDataUnsafe?.user;
+    const nameEl = document.getElementById("user-name");
+    const dashNameEl = document.getElementById("dash-user-name");
+    const idEl = document.getElementById("user-id");
+    const usernameEl = document.getElementById("user-username");
+    const imgEl = document.getElementById("profile-img");
+
     if (userData) {
-        if (document.getElementById("user-name")) document.getElementById("user-name").innerText = `${userData.first_name || ""} ${userData.last_name || ""}`;
+        const fullName = `${userData.first_name || ""} ${userData.last_name || ""}`.trim();
+        if (nameEl) nameEl.innerText = fullName;
+        if (dashNameEl) dashNameEl.innerText = fullName;
+        if (idEl) idEl.innerText = userData.id;
+        if (usernameEl) usernameEl.innerText = userData.username ? `@${userData.username}` : "بدون یوزرنیم";
+        if (imgEl && userData.username) {
+            imgEl.src = `https://t.me/i/userpic/320/${userData.username}.jpg`;
+            imgEl.onerror = () => imgEl.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
+        }
+    } else {
+        if (nameEl) nameEl.innerText = "امیر کریپتو (تست)";
+        if (imgEl) imgEl.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
     }
 }
 
