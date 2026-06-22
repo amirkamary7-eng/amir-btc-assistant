@@ -107,4 +107,9 @@ window.addEventListener("DOMContentLoaded", () => {
     
     // تنظیم اینتروال برای آپدیت هر 15 ثانیه (برای جلوگیری از هنگ کردن)
     marketInterval = setInterval(loadMarketAndPrices, 15000);
+    
+// مطمئن شو که این خط در انتهای فایل app.js وجود دارد
+document.addEventListener("DOMContentLoaded", function() {
+    console.log("در حال اجرای تابع لود...");
+    loadMarketAndPrices(); 
 });
