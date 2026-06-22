@@ -20,205 +20,38 @@
         }
 
         body {
-            margin: 0;
-            padding: 0;
-            background-color: var(--bg-color);
+            margin: 0; padding: 0; background-color: var(--bg-color);
             background-image: radial-gradient(circle at 50% 0%, #16192b 0%, #04060a 70%);
-            color: var(--text-main);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            overflow-x: hidden;
-            -webkit-user-select: none;
-            user-select: none;
+            color: var(--text-main); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow-x: hidden; -webkit-user-select: none; user-select: none;
         }
 
-        /* استایل پایه شیشه‌ای (Glassmorphism) */
         .glass-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid var(--glass-border);
-            border-radius: 20px;
-            margin: 14px 16px;
-            padding: 18px;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            background: var(--card-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border); border-radius: 20px;
+            margin: 14px 16px; padding: 18px; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         }
 
-        .glass-card:active {
-            transform: scale(0.98);
-        }
+        .page { display: none; padding-bottom: 100px; animation: fadeIn 0.4s; }
+        .page.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.97) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 
-        .page {
-            display: none;
-            padding-bottom: 100px;
-            animation: cubic-bezier(0.4, 0, 0.2, 1) fadeIn 0.4s;
-        }
+        .grid-dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px; }
+        .grid-item { background: var(--card-bg); backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; min-height: 100px; }
 
-        .page.active {
-            display: block;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: scale(0.97) translateY(10px); }
-            to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-
-        /* ساختار مجله‌ای داشبورد */
-        .grid-dashboard {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            padding: 0 16px;
-        }
-
-        .grid-item {
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid var(--glass-border);
-            border-radius: 18px;
-            padding: 16px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            min-height: 100px;
-            cursor: pointer;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-        }
-
-        /* ردیف‌های لیست مارکت */
-        .coin-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 14px 16px;
-            border-bottom: 1px solid var(--glass-border);
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .coin-row:last-child { border-bottom: none; }
-        .coin-row:hover { background: rgba(255,255,255,0.02); }
-
+        .coin-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--glass-border); cursor: pointer; }
         .search-container { padding: 16px 16px 4px 16px; }
-        .search-box {
-            width: 100%;
-            padding: 14px;
-            border-radius: 14px;
-            border: 1px solid var(--glass-border);
-            background: rgba(18, 22, 34, 0.8);
-            color: var(--text-main);
-            text-align: center;
-            font-size: 14px;
-            box-sizing: border-box;
-            outline: none;
-            backdrop-filter: blur(5px);
-            transition: all 0.3s;
-        }
-        .search-box:focus {
-            border-color: var(--primary);
-            box-shadow: 0 0 15px var(--primary-glow);
-        }
-
-        /* پاپ‌آپ چارت */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(4, 6, 10, 0.98);
-            z-index: 1000;
-            flex-direction: column;
-        }
-
-        /* ناوبری بهینه‌شده تحت وب با جلوه بصری مدرن */
-        .navbar {
-            position: fixed;
-            bottom: 0; left: 0; width: 100%; height: 74px;
-            background: rgba(10, 14, 23, 0.75);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-top: 1px solid var(--glass-border);
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            z-index: 999;
-        }
-
-        .nav-item {
-            color: var(--text-sub);
-            font-size: 11px;
-            cursor: pointer;
-            text-align: center;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.3s ease;
-        }
-
-        .nav-item svg {
-            width: 22px;
-            height: 22px;
-            fill: currentColor;
-            transition: transform 0.2s;
-        }
-
-        .nav-item.active {
-            color: var(--primary);
-            font-weight: 600;
-            filter: drop-shadow(0 0 8px var(--primary-glow));
-        }
-
-        .nav-item.active svg {
-            transform: translateY(-2px);
-        }
-        /* دکمه دایره‌ای هوم / داشبورد در مرکز */
-        .center-btn {
-            width: 60px;
-            height: 60px;
-            background: linear-gradient(135deg, #f7931a, #ff3355);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            margin-top: -28px;
-            box-shadow: 0 4px 20px rgba(247, 147, 26, 0.4);
-            cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-
-        .center-btn:active {
-            transform: scale(0.9) rotate(-10deg);
-        }
-
-        .center-btn svg {
-            width: 26px;
-            height: 26px;
-            fill: white;
-        }
-
-        /* استایل‌های بخش شاخص ترس و طمع اختصاصی */
-        .index-value {
-            font-size: 28px;
-            font-weight: 800;
-            font-family: monospace;
-            line-height: 1;
-        }
-        .news-card {
-    background: rgba(18, 22, 34, 0.65);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 20px;
-    padding: 18px;
-    margin: 10px 16px;
-    cursor: pointer;
-    text-align: right;
-    direction: rtl;
-    transition: transform 0.2s;
-}
-.news-card:active { transform: scale(0.97); }
+        .search-box { width: 100%; padding: 14px; border-radius: 14px; border: 1px solid var(--glass-border); background: rgba(18, 22, 34, 0.8); color: var(--text-main); text-align: center; box-sizing: border-box; outline: none; }
+        
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(4, 6, 10, 0.98); z-index: 1000; flex-direction: column; }
+        
+        .navbar { position: fixed; bottom: 0; left: 0; width: 100%; height: 74px; background: rgba(10, 14, 23, 0.75); backdrop-filter: blur(20px); border-top: 1px solid var(--glass-border); display: flex; justify-content: space-around; align-items: center; z-index: 999; }
+        .nav-item { color: var(--text-sub); font-size: 11px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+        .nav-item.active { color: var(--primary); font-weight: 600; }
+        .center-btn { width: 60px; height: 60px; background: linear-gradient(135deg, #f7931a, #ff3355); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; margin-top: -28px; cursor: pointer; }
+        
+        .index-value { font-size: 28px; font-weight: 800; font-family: monospace; }
+        .news-card { background: rgba(18, 22, 34, 0.65); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 20px; padding: 18px; margin: 10px 16px; cursor: pointer; text-align: right; direction: rtl; }
     </style>
     
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -242,144 +75,78 @@
                 <span style="font-size: 12px; background: var(--primary); color: #000; padding: 2px 8px; border-radius: 6px; font-weight: bold;">سیگنال زنده</span>
                 <span style="font-size: 11px; color: var(--text-sub);">ورود به صفحه تحلیل‌ها 🎯</span>
             </div>
-            <div style="font-size: 15px; font-weight: bold; margin-top: 12px; color: #fff;" id="dash-last-analysis-title">در حال بارگذاری آخرین تحلیل کانال...</div>
+            <div style="font-size: 15px; font-weight: bold; margin-top: 12px; color: #fff;" id="dash-last-analysis-title">در حال بارگذاری تحلیل...</div>
         </div>
 
         <div class="grid-dashboard">
             <div class="grid-item" style="direction: rtl;">
-                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <span style="font-size: 12px; color: var(--text-sub); font-weight: bold;">ترس و طمع</span>
-                    <span style="font-size: 16px;">📊</span>
-                </div>
-                <div style="margin: 12px 0;">
-                    <div id="fg-value" class="index-value" style="color: var(--green);">--</div>
-                    <div id="fg-status" style="font-size: 12px; color: var(--text-sub); margin-top: 4px;">Loading...</div>
-                </div>
+                <span style="font-size: 12px; color: var(--text-sub);">ترس و طمع</span>
+                <div id="fg-value" class="index-value" style="color: var(--green);">--</div>
+                <div id="fg-status" style="font-size: 12px; color: var(--text-sub);">Loading...</div>
             </div>
             <div class="grid-item" style="direction: rtl;">
-                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <span style="font-size: 12px; color: var(--text-sub); font-weight: bold;">لیکوئیدی ۲۴ساعت</span>
-                    <span style="font-size: 16px;">🔥</span>
-                </div>
-                <div style="margin: 12px 0;">
-                    <div id="liq-value" class="index-value" style="color: var(--red); font-size: 22px; font-family: monospace; font-weight: bold;">$--M</div>
-                    <div style="font-size: 11px; color: var(--text-sub); margin-top: 6px;">مجموع لانگ و شورت</div>
-                </div>
+                <span style="font-size: 12px; color: var(--text-sub);">لیکوئیدی ۲۴ساعت</span>
+                <div id="liq-value" class="index-value" style="color: var(--red); font-size: 22px;">$--M</div>
             </div>
         </div>
 
-        <div class="glass-card" onclick="showPage('market-page', document.getElementById('nav-market'))" style="direction: rtl; margin-top: 14px;">
+        <div class="glass-card" onclick="showPage('market-page', document.getElementById('nav-market'))" style="direction: rtl;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <span style="font-weight: bold; font-size: 14px;">⚡ دیدبان سریع بازار</span>
-                <span style="font-size: 12px; color: var(--primary);">مشاهده همه ←</span>
             </div>
-            <div id="dash-mini-market">
-                </div>
+            <div id="dash-mini-market"></div>
         </div>
     </div>
 
     <div id="market-page" class="page">
         <div class="search-container">
-            <input type="text" id="market-search" oninput="filterMarket()" placeholder="جستجوی پیشرفته در تمام صرافی‌ها..." class="search-box">
+            <input type="text" id="market-search" oninput="filterMarket()" placeholder="جستجوی پیشرفته..." class="search-box">
         </div>
         <div id="market-list" class="glass-card" style="padding: 0; overflow: hidden;"></div>
     </div>
 
     <div id="news-page" class="page">
-    <div style="padding: 20px; font-weight: bold; color: var(--primary); text-align: right;">📰 آخرین اخبار ارز دیجیتال</div>
-    <div id="news-list">
-        <!-- اخبار اینجا لود می‌شوند -->
-        <div style="text-align:center; color:var(--text-sub); margin-top:20px;">در حال دریافت اخبار...</div>
-    </div>
-</div>
-</div>
-<div id="analysis-page" class="page" style="display:none;">
-    <div id="telegram-feed-container" style="padding: 10px;">
-        <script async src="https://telegram.org/js/telegram-widget.js?22" 
-                data-telegram-discussion="amir_btc_a" 
-                data-comments-limit="5"
-                data-color="F7931A"
-                data-dark="1"
-                data-width="100%">
-        </script>
-    </div>
-</div>
-</div>
-</div>
-
-   <div id="profile-page" class="page" style="display: none; padding: 20px;">
-    <!-- بخش آواتار و نام (وسط‌چین) -->
-    <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
-        <div style="width: 110px; height: 110px; margin: 0 auto 15px; border-radius: 50%; border: 3px solid var(--primary); padding: 3px; overflow: hidden;">
-            <img id="profile-img" src="https://via.placeholder.com/150" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
-        </div>
-        <h2 id="user-name" style="margin: 0; color: #fff;">در حال دریافت...</h2>
-        <p style="color: var(--text-sub); margin-top: 5px;">کاربر عضو</p>
+        <div style="padding: 20px; font-weight: bold; color: var(--primary); text-align: right;">📰 آخرین اخبار</div>
+        <div id="news-list"></div>
     </div>
 
-    <!-- بخش مشخصات (کادرها) -->
-    <div style="background: rgba(255, 255, 255, 0.05); border-radius: 20px; padding: 15px; border: 1px solid rgba(255, 255, 255, 0.1);">
-        
-        <!-- یوزرنیم -->
-        <div style="display: flex; justify-content: space-between; padding: 15px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
-            <span style="color: var(--text-sub);">یوزرنیم:</span>
-            <span id="user-username" style="color: #fff; font-weight: bold; direction: ltr;">---</span>
-        </div>
+    <div id="analysis-page" class="page">
+        <div id="telegram-feed-container" style="padding: 10px;"></div>
+    </div>
 
-        <!-- آیدی عددی -->
-        <div style="display: flex; justify-content: space-between; padding: 15px 10px;">
-            <span style="color: var(--text-sub);">آیدی عددی:</span>
-            <span id="user-id" style="color: var(--primary); font-family: monospace; font-weight: bold; direction: ltr;">000000</span>
+    <div id="profile-page" class="page" style="padding: 20px;">
+        <div style="text-align: center; margin-top: 20px;">
+            <img id="profile-img" src="https://via.placeholder.com/150" style="width: 110px; height: 110px; border-radius: 50%; border: 3px solid var(--primary);">
+            <h2 id="user-name">---</h2>
+            <p id="user-username" style="color:var(--text-sub);">---</p>
         </div>
     </div>
-</div>
+
+    <!-- مودال‌ها -->
     <div id="chart-modal" class="modal">
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: #0c0f17; border-bottom: 1px solid var(--glass-border);">
-            <button onclick="closeChart()" style="background: var(--red); border: none; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px;">بستن ✕</button>
-            <span id="modal-coin-title" style="font-weight: bold; font-size: 16px; color: var(--text-main);">CHART</span>
+        <div style="display: flex; justify-content: space-between; padding: 15px; background: #0c0f17;">
+            <button onclick="closeChart()" style="background: var(--red); border:none; color:white; padding: 8px 16px; border-radius: 8px;">بستن</button>
+            <span id="modal-coin-title">CHART</span>
         </div>
         <div id="tradingview-widget-container" style="flex: 1; width: 100%;"></div>
-        <!-- مودال نمایش متن خبر -->
-<div id="news-modal" class="modal" style="display:none; padding: 20px;">
-    <div style="background: var(--card-bg); height: 90%; border-radius: 20px; padding: 20px; overflow-y: auto; border: 1px solid var(--glass-border);">
-        <button onclick="document.getElementById('news-modal').style.display='none'" style="background: var(--red); border:none; color:white; padding: 5px 15px; border-radius: 10px; cursor:pointer;">بستن</button>
-        <h2 id="news-title-modal" style="color: var(--primary); margin-top: 15px;"></h2>
-        <div id="news-content-modal" style="color: #fff; line-height: 1.8; font-size: 15px;"></div>
     </div>
-</div>s
+
+    <div id="news-modal" class="modal" style="z-index: 9999; flex-direction: column; padding: 20px; overflow-y: auto; text-align: right; direction: rtl;">
+        <div style="background: #121622; border-radius: 20px; padding: 20px; border: 1px solid var(--glass-border);">
+            <button onclick="closeNewsModal()" style="background: var(--red); border:none; padding:10px; color:white; border-radius:8px;">بستن ✕</button>
+            <h2 id="news-title-modal" style="color:white; margin:20px 0;"></h2>
+            <div id="news-content-modal" style="color:#ddd; line-height:1.8;"></div>
+        </div>
     </div>
 
     <div class="navbar">
-        <div id="nav-market" class="nav-item" onclick="Page('market-page', this)">
-            <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
-            <span>دیدبان</span>
-        </div>
-        <div id="nav-news" class="nav-item" onclick="showPage('news-page', this)">
-            <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"/></svg>
-            <span>اخبار</span>
-        </div>
-        
-        <div id="nav-dashboard" class="center-btn" onclick="showPage('dashboard-page', null)">
-            <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
-        </div>
-        
-        <div id="nav-analysis" class="nav-item" onclick="showPage('analysis-page', this)">
-            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-            <span>تحلیل‌ها</span>
-        </div>
-        <div id="nav-profile" class="nav-item" onclick="showPage('profile-page', this)">
-            <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-            <span>حساب</span>
-        </div>
+        <div id="nav-market" class="nav-item" onclick="showPage('market-page', this)"><span>دیدبان</span></div>
+        <div id="nav-news" class="nav-item" onclick="showPage('news-page', this)"><span>اخبار</span></div>
+        <div id="nav-dashboard" class="center-btn" onclick="showPage('dashboard-page', null)"><span>هوم</span></div>
+        <div id="nav-analysis" class="nav-item" onclick="showPage('analysis-page', this)"><span>تحلیل</span></div>
+        <div id="nav-profile" class="nav-item" onclick="showPage('profile-page', this)"><span>حساب</span></div>
     </div>
-<script src="app.js"></script>
-    
-    <div id="news-modal" class="modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:9999; flex-direction:column; padding:20px; overflow-y:auto; text-align:right; direction:rtl;">
-        <div style="background: rgba(18, 22, 34, 0.9); border-radius: 20px; padding: 20px; border: 1px solid rgba(255, 255, 255, 0.1);">
-            <button onclick="closeNewsModal()" style="background: #ff3355; border:none; padding:10px; color:white; border-radius:8px; cursor:pointer;">بستن ✕</button>
-            <h2 id="news-title-modal" style="color:white; margin:20px 0;"></h2>
-            <div id="news-content-modal" style="color:#ddd; line-height:1.8; font-size:16px;"></div>
-        </div>
-    </div>
+
+    <script src="app.js"></script>
 </body>
 </html>
