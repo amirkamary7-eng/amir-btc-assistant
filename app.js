@@ -312,3 +312,48 @@ async function fetchNews() {
         newsList.innerHTML = '<div style="padding:20px; text-align:center;">خطا در دریافت اخبار</div>';
     }
 }
+async function loadPersianNews() {
+    const newsListEl = document.getElementById("news-list");
+    // استفاده از مبدل RSS به JSON برای سایت ارزدیجیتال
+    const rssUrl = "https://arzdigital.com/feed/"; 
+    const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
+
+    try {
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        
+        if (data.status === 'ok') {
+            newsListEl.innerHTML = ""; // پاک کردن لودینگ
+            data.items.slice(0, 7).forEach(item => {
+                const div = document.createElement("div");
+                div.className = "glass-card";
+                div.style.textAlign = "right";
+                div.style.direction = "rtl";
+                
+                // نمایش عنوان و خلاصه خبر
+                div.innerHTML = `
+                    <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">${item.title}</div>
+                    <div style="font-size: 12px; color: var(--text-sub); line-height: 1.5;">${item.description.substring(0, 100)}...</div>
+                    <div style="font-size: 10px; color: var(--primary); margin-top: 10px; text-align: left;">زمان: ${new Date(item.pubDate).toLocaleDateString('fa-IR')}</div>
+                `;
+                
+                // باز کردن خبر در یک مودال (برای اینکه از اپ خارج نشوند)
+                div.onclick = () => showNewsModal(item.title, item.content);
+                newsListEl.appendChild(div);
+            });
+        }
+    } catch (e) {
+        newsListEl.innerHTML = `<div style="text-align:center; padding:20px;">امکان دریافت اخبار وجود ندارد.</div>`;
+    }
+}
+
+// تابع نمایش خبر کامل در یک پنجره کوچک (بدون خروج از اپ)
+function showNewsModal(title, content) {
+    // می‌توانید یک modal جدید مثل chart-modal بسازید و متن خبر را داخل آن نمایش دهید
+    alert(title + "\n\n" + content.replace(/<[^>]*>?/gm, '').substring(0, 300) + "...");
+}
+
+// فراخوانی در لود صفحه
+window.addEventListener("DOMContentLoaded", () => {
+    loadPersianNews();
+});

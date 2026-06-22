@@ -273,24 +273,12 @@
     </div>
 
     <div id="news-page" class="page">
-    <div style="padding: 20px 20px 10px 20px; font-weight: bold; color: var(--primary);">📰 آخرین اخبار بازار</div>
-    
-    <!-- ویجت اختصاصی تریدینگ ویو -->
-    <div class="tradingview-widget-container" style="padding: 10px;">
-        <div class="tradingview-widget-container__widget"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-timeline.js" async>
-        {
-            "feedMode": "market",
-            "market": "crypto",
-            "isTransparent": true,
-            "displayMode": "regular",
-            "width": "100%",
-            "height": "500",
-            "colorTheme": "dark",
-            "locale": "en"
-        }
-        </script>
+    <div style="padding: 20px; font-weight: bold; color: var(--primary); text-align: right;">📰 آخرین اخبار ارز دیجیتال</div>
+    <div id="news-list">
+        <!-- اخبار اینجا لود می‌شوند -->
+        <div style="text-align:center; color:var(--text-sub); margin-top:20px;">در حال دریافت اخبار...</div>
     </div>
+</div>
 </div>
 <div id="analysis-page" class="page" style="display:none;">
     <div id="telegram-feed-container" style="padding: 10px;">
