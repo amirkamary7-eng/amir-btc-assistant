@@ -1,36 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amir BTC Assistant</title>
+
+<link rel="stylesheet" href="style.css">
+
+</head>
+<body>
+
 <div class="container">
 
     <!-- HOME -->
+
     <div id="home-page" class="page">
 
-        <h1>₿ Amir BTC Assistant</h1>
-
-        <div class="card" id="btc">
-            Loading BTC...
+        <div class="logo">
+            <h1>₿ Amir BTC</h1>
+            <p>Crypto Dashboard</p>
         </div>
 
-        <div class="card" id="eth">
-            Loading ETH...
+        <div class="card">
+            <div class="card-title">Bitcoin</div>
+            <div class="card-price" id="btc">
+                Loading...
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Ethereum</div>
+            <div class="card-price" id="eth">
+                Loading...
+            </div>
+        </div>
+
+        <div class="card">
+            🔥 Fear & Greed Index
+        </div>
+
+        <div class="card">
+            📰 Top Market News
         </div>
 
     </div>
 
     <!-- MARKET -->
+
     <div id="market-page" class="page" style="display:none">
 
-        <h2>📈 Market</h2>
+        <div class="logo">
+            <h1>📈 Market</h1>
+            <p>Crypto Prices</p>
+        </div>
 
         <div class="card">BTC</div>
         <div class="card">ETH</div>
         <div class="card">SOL</div>
         <div class="card">BNB</div>
+        <div class="card">XRP</div>
 
     </div>
 
     <!-- ANALYSIS -->
+
     <div id="analysis-page" class="page" style="display:none">
 
-        <h2>₿ Analysis</h2>
+        <div class="logo">
+            <h1>₿ Analysis</h1>
+            <p>Market Analysis</p>
+        </div>
 
         <div class="card">
             No Analysis Yet
@@ -39,9 +78,13 @@
     </div>
 
     <!-- NEWS -->
+
     <div id="news-page" class="page" style="display:none">
 
-        <h2>📰 News</h2>
+        <div class="logo">
+            <h1>📰 News</h1>
+            <p>Latest Crypto News</p>
+        </div>
 
         <div class="card">
             Loading News...
@@ -50,19 +93,23 @@
     </div>
 
     <!-- PROFILE -->
+
     <div id="profile-page" class="page" style="display:none">
 
-        <h2>👤 Profile</h2>
+        <div class="logo">
+            <h1>👤 Profile</h1>
+            <p>User Information</p>
+        </div>
 
         <div class="card">
-            User Profile
+            Telegram User
         </div>
 
     </div>
 
 </div>
 
-<!-- Bottom Nav -->
+<!-- Bottom Navigation -->
 
 <div class="bottom-nav">
 
@@ -76,7 +123,7 @@
         <div>Market</div>
     </div>
 
-    <div class="center-btn" onclick="showPage('analysis-page', this)">
+    <div class="center-btn" onclick="showPage('analysis-page')">
         ₿
     </div>
 
@@ -93,3 +140,6 @@
 </div>
 
 <script src="app.js"></script>
+
+</body>
+</html>
