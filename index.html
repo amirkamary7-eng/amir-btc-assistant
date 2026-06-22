@@ -37,8 +37,13 @@
             <div class="header-title">
                 <span class="header-emoji">📈</span> Market
             </div>
-            <div class="header-subtitle">Crypto Prices</div>
+            <div class="header-subtitle">Top 100 Crypto Prices</div>
         </div>
+        
+        <div class="search-container">
+            <input type="text" id="market-search" placeholder="Search coin (e.g. BTC, SOL)..." oninput="filterMarket()">
+        </div>
+
         <div id="market-list"></div>
     </div>
 
@@ -91,6 +96,16 @@
         </div>
     </div>
 
+</div>
+
+<div id="chart-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span id="modal-coin-title">Chart</span>
+            <button class="close-btn" onclick="closeChart()">✕</button>
+        </div>
+        <div id="tradingview-widget-container"></div>
+    </div>
 </div>
 
 <div class="bottom-nav">
