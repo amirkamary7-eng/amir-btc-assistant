@@ -67,10 +67,12 @@ async function loadMarketAndPrices() {
         const ethData = allMarketCoins.find(c => c.symbol === "ETH");
 
         if (btcData && document.getElementById("btc")) {
-            document.getElementById("btc").innerHTML = `₿ BTC: $${parseFloat(btcData.priceUsd).toLocaleString()}`;
+            const btcPrice = parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById("btc").innerHTML = `₿ BTC: $${btcPrice}`;
         }
         if (ethData && document.getElementById("eth")) {
-            document.getElementById("eth").innerHTML = `Ξ ETH: $${parseFloat(ethData.priceUsd).toLocaleString()}`;
+            const ethPrice = parseFloat(ethData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById("eth").innerHTML = `Ξ ETH: $${ethPrice}`;
         }
 
         const searchInput = document.getElementById("market-search");
@@ -85,11 +87,15 @@ async function loadMarketAndPrices() {
 function getCoinFullName(sym) {
     const names = {
         "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "BNB": "BNB", "XRP": "Ripple",
-        "ADA": "Cardano", "DOGE": "Dogecoin", "AVAX": "Avalanche", "SHIB": "Shiba Inu", "DOT": "Polkadot"
+        "ADA": "Cardano", "DOGE": "Dogecoin", "AVAX": "Avalanche", "SHIB": "Shiba Inu", "DOT": "Polkadot",
+        "LINK": "Chainlink", "MATIC": "Polygon", "TRX": "TRON", "UNI": "Uniswap", "LTC": "Litecoin",
+        "NEAR": "Near Protocol", "APT": "Aptos", "FIL": "Filecoin", "OP": "Optimism", "ARB": "Arbitrum",
+        "SUI": "Sui", "FTM": "Fantom", "ATOM": "Cosmos", "XLM": "Stellar", "ETC": "Ethereum Classic"
     };
     return names[sym] || sym;
 }
 
+// همان رندر زیبا و جذاب قبلی شما با حفظ آیکون و استایل اختصاصی کریپتو
 function renderMarketList(coins) {
     const marketListEl = document.getElementById("market-list");
     if (!marketListEl) return;
@@ -98,18 +104,41 @@ function renderMarketList(coins) {
     coins.forEach(coin => {
         const price = parseFloat(coin.priceUsd);
         const change = parseFloat(coin.changePercent24Hr);
-        const formattedPrice = price > 1 ? price.toLocaleString() : price.toFixed(4);
+        
+        let formattedPrice = "";
+        if (price > 1) {
+            formattedPrice = price.toLocaleString(undefined, {maximumFractionDigits: 2});
+        } else if (price > 0.0001) {
+            formattedPrice = price.toFixed(4);
+        } else {
+            formattedPrice = price.toFixed(6);
+        }
+        
         const changeColor = change >= 0 ? "#00ff99" : "#ff4a5a";
+        const changeSign = change >= 0 ? "+" : "";
+        const iconUrl = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${coin.symbol.toLowerCase()}.png`;
 
         marketHtml += `
-        <div class="coin-row" onclick="openChart('${coin.symbol}', '${coin.exchange || ''}')" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #1a2235; cursor: pointer;">
-            <div>
-                <span class="coin-symbol" style="font-weight: bold; color: #fff;">${coin.symbol}</span>
-                <span class="coin-name" style="font-size: 12px; color: #8f98aa; margin-left: 8px;">${coin.name}</span>
+        <div class="coin-row" onclick="openChart('${coin.symbol}', '${coin.exchange || ''}')">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="coin-icon-container" style="width: 35px; height: 35px; display: flex; align-items: center; justify-content: center;">
+                    <img src="${iconUrl}" 
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" 
+                         style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
+                    <div class="fake-icon" style="display: none; width: 35px; height: 35px; border-radius: 50%; background: linear-gradient(135deg, #f7931a, #ff4a5a); color: white; font-weight: bold; font-size: 13px; align-items: center; justify-content: center; font-family: sans-serif;">
+                        ${coin.symbol.substring(0, 2)}
+                    </div>
+                </div>
+                <div class="coin-info">
+                    <span class="coin-symbol">${coin.symbol}</span>
+                    <span class="coin-name">${coin.name}</span>
+                </div>
             </div>
             <div style="text-align: right;">
-                <div style="color: #fff; font-weight: bold;">$${formattedPrice}</div>
-                <div style="color: ${changeColor}; font-size: 12px;">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</div>
+                <div style="font-weight: 700; font-family: monospace; font-size: 16px; color:#fff;">$${formattedPrice}</div>
+                <div style="color: ${changeColor}; font-size: 12px; margin-top: 4px; font-family: monospace;">
+                    ${changeSign}${change.toFixed(2)}%
+                </div>
             </div>
         </div>`;
     });
@@ -117,7 +146,7 @@ function renderMarketList(coins) {
 }
 
 // =====================
-// GUARANTEED SEARCH FUNCTION
+// GUARANTEED SEARCH FUNCTION (MULTI-EXCHANGE DYNAMIC)
 // =====================
 async function filterMarket() {
     const searchInput = document.getElementById("market-search");
@@ -125,13 +154,11 @@ async function filterMarket() {
 
     const query = searchInput.value.trim().toUpperCase();
     
-    // اگر کادر جستجو خالی بود، لیست اصلی را برگردان
     if (!query) {
         renderMarketList(allMarketCoins);
         return;
     }
 
-    // ۱. سرچ فوری در لیست ۱۰۰ ارز برتر داخلی
     const localFiltered = allMarketCoins.filter(coin => 
         coin.symbol.includes(query) || coin.name.toUpperCase().includes(query)
     );
@@ -141,37 +168,36 @@ async function filterMarket() {
         return;
     }
 
-    // نمایش وضعیت در حال جستجو
     document.getElementById("market-list").innerHTML = `
-        <div style="text-align: center; color: #f7931a; margin-top: 30px; font-size: 14px;">
-            🔍 در حال جستجوی جهانی ارز "${query}"...
+        <div style="text-align: center; color: #f7931a; margin-top: 30px; font-size: 14px; font-family: sans-serif;">
+            🔍 در حال جستجوی لایو صرافی‌ها برای "${query}"...
         </div>`;
 
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(async () => {
         try {
-            // ۲. بررسی صرافی بایننس
+            // ۱. صرافی بایننس
             try {
                 const r = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`);
                 if (r.ok) {
                     const data = await r.json();
-                    renderSingleSearchCoin(query, data.lastPrice, data.priceChangePercent, "BINANCE");
+                    renderSingleSearchCoin(query, data.lastPrice, data.priceChangePercent, "Binance");
                     return;
                 }
             } catch(e){}
 
-            // ۳. بررسی صرافی بای‌بیت (بهترین گزینه برای ارزهایی مثل HYPE)
+            // ۲. صرافی بای‌بیت (بهترین جا برای ارزهای جدید مثل HYPE)
             try {
                 const r = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${query}USDT`);
                 const data = await r.json();
                 if (data?.result?.list?.length > 0) {
                     const ticker = data.result.list[0];
-                    renderSingleSearchCoin(query, ticker.lastPrice, parseFloat(ticker.price24hPcnt) * 100, "BYBIT");
+                    renderSingleSearchCoin(query, ticker.lastPrice, parseFloat(ticker.price24hPcnt) * 100, "Bybit");
                     return;
                 }
             } catch(e){}
 
-            // ۴. بررسی صرافی اوکی‌اکس
+            // ۳. صرافی اوکی‌اکس
             try {
                 const r = await fetch(`https://www.okx.com/api/v5/market/ticker?instId=${query}-USDT`);
                 const data = await r.json();
@@ -182,20 +208,19 @@ async function filterMarket() {
                 }
             } catch(e){}
 
-            // ۵. بررسی صرافی گیت
+            // ۴. صرافی گیت
             try {
                 const r = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${query}_USDT`);
                 const data = await r.json();
                 if (Array.isArray(data) && data.length > 0) {
-                    renderSingleSearchCoin(query, data[0].last, data[0].change_percentage, "GATEIO");
+                    renderSingleSearchCoin(query, data[0].last, data[0].change_percentage, "Gate.io");
                     return;
                 }
             } catch(e){}
 
-            // اگر در هیچ صرافی پیدا نشد
             document.getElementById("market-list").innerHTML = `
-                <div style="text-align: center; color: #ff4a5a; margin-top: 30px; font-size: 14px;">
-                    ❌ ارز "${query}" در هیچ صرافی معتبری پیدا نشد.
+                <div style="text-align: center; color: #ff4a5a; margin-top: 30px; font-size: 14px; font-family: sans-serif;">
+                    ❌ ارز "${query}" در صرافی‌های برتر بازار یافت نشد!
                 </div>`;
 
         } catch (err) {
@@ -207,16 +232,16 @@ async function filterMarket() {
 function renderSingleSearchCoin(symbol, price, change, exchangeName) {
     const searchedCoin = [{
         symbol: symbol,
-        name: `${symbol} (${exchangeName} Market)`,
+        name: `Market: ${exchangeName}`,
         priceUsd: price,
         changePercent24Hr: String(change),
-        exchange: exchangeName
+        exchange: exchangeName.toUpperCase().replace(".", "")
     }];
     renderMarketList(searchedCoin);
 }
 
 // =====================
-// CHART & OTHERS (NO CHANGE)
+// CHART & OTHERS
 // =====================
 function openChart(symbol, exchange) {
     document.getElementById("chart-modal").style.display = "flex";
@@ -225,7 +250,7 @@ function openChart(symbol, exchange) {
     let tvSymbol = `BINANCE:${symbol}USDT`;
     if (exchange === "BYBIT") tvSymbol = `BYBIT:${symbol}USDT`;
     else if (exchange === "OKX") tvSymbol = `OKX:${symbol}USDT`;
-    else if (exchange === "GATEIO") tvSymbol = `GATE:${symbol}USDT`;
+    else if (exchange === "GATEIO" || exchange === "GATE") tvSymbol = `GATE:${symbol}USDT`;
     else if (symbol !== "BTC" && symbol !== "ETH") tvSymbol = `${symbol}USDT`;
 
     document.getElementById("tradingview-widget-container").innerHTML = "";
