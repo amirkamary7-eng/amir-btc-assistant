@@ -237,7 +237,34 @@ function loadAnalysisData() {
     const titleEl = document.getElementById("dash-last-analysis-title");
     if(titleEl) titleEl.innerText = `مشاهده جدیدترین چارت‌ها و تحلیل‌های لایو در کانال @${MY_TELEGRAM_CHANNEL}`;
 }
+// =====================
+// تنظیمات کانال شما
+// =====================
+const MY_TELEGRAM_CHANNEL = "amir_btc_2024"; 
 
+// =====================
+// تابع لود تحلیل‌ها
+// =====================
+function loadAnalysisData() {
+    const container = document.getElementById("telegram-feed-container");
+    if (!container) return;
+    
+    // پاک کردن محتوای قبلی برای جلوگیری از تداخل
+    container.innerHTML = "";
+    
+    // ایجاد تگ اسکریپت برای نمایش پست کانال
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.setAttribute("data-telegram-post", `${MY_TELEGRAM_CHANNEL}/1`); // نمایش اولین پست
+    script.setAttribute("data-width", "100%");
+    script.setAttribute("data-dark", "1");
+    
+    container.appendChild(script);
+    
+    const titleEl = document.getElementById("dash-last-analysis-title");
+    if(titleEl) titleEl.innerText = `تحلیل‌های لایو در کانال: @${MY_TELEGRAM_CHANNEL}`;
+}
 // =====================
 // CHART & NEWS
 // =====================
