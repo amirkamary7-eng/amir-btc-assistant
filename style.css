@@ -175,3 +175,13 @@ body::before {
     100% { opacity: 0.5; }
 }
 .loading { animation: pulse 1.5s infinite; }
+
+/* افکتِ ظاهر شدنِ نرم اعداد */
+@keyframes fadeInData {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.index-value {
+    animation: fadeInData 0.6s ease-out;
+}
