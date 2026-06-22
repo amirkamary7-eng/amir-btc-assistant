@@ -1,12 +1,17 @@
-h1{
-    text-align:center;
-    margin-bottom:25px;
+.nav-item.active{
+    color:#F7931A;
 }
 
-.card{
-    background:#161b22;
-    padding:20px;
-    border-radius:20px;
-    margin-top:15px;
-    font-size:18px;
+.nav-item.active i{
+    transform:scale(1.2);
+}
+
+.nav-item.active::before{
+    content:'';
+    position:absolute;
+    width:40px;
+    height:40px;
+    background:rgba(247,147,26,.2);
+    border-radius:50%;
+    filter:blur(15px);
 }
