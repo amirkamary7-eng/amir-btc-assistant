@@ -69,3 +69,25 @@ async function loadMarket() {
 }
 
 loadMarket();
+
+function loadTelegramUser(){
+
+    const tg = window.Telegram.WebApp;
+
+    if(!tg.initDataUnsafe.user){
+        return;
+    }
+
+    const user = tg.initDataUnsafe.user;
+
+    document.getElementById("user-name").innerText =
+        user.first_name || "Unknown";
+
+    document.getElementById("user-id").innerText =
+        user.id || "-";
+
+    document.getElementById("user-lang").innerText =
+        user.language_code || "-";
+}
+
+loadTelegramUser();
