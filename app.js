@@ -8,79 +8,170 @@ if (tg) {
     tg.expand();
 }
 
+// متغیر جهانی برای ذخیره لیست ۱۰۰ کوین جهت جستجو
+let allMarketCoins = [];
+
 // =====================
 // PAGE SWITCH SYSTEM
 // =====================
 function showPage(pageId, element) {
-    // پنهان کردن تمام صفحات
     document.querySelectorAll('.page').forEach(page => {
         page.style.display = 'none';
     });
 
-    // نمایش صفحه مورد نظر
     const activePage = document.getElementById(pageId);
     if (activePage) {
         activePage.style.display = 'block';
     }
 
-    // بازنشانی وضعیت دکمه‌های منو
     document.querySelectorAll('.nav-item, .center-btn').forEach(item => {
         item.classList.remove('active');
     });
 
-    // فعال کردن دکمه جاری
     if (element) {
         element.classList.add('active');
     }
 }
 
 // =====================
-// LIVE PRICES & MARKET (BINANCE GLOBAL FETCH)
+// LIVE PRICES & MARKET (WITH OFFICIAL ICONS)
 // =====================
 async function loadMarketAndPrices() {
     try {
-        const response = await fetch("https://api.binance.com/api/v3/ticker/price");
-        const allPrices = await response.json();
+        // دریافت داده ۱۰۰ ارز برتر از CoinCap
+        const response = await fetch("https://api.coincap.io/v2/assets?limit=100");
+        const result = await response.json();
+        
+        if (!result || !result.data) return;
+        allMarketCoins = result.data; // ذخیره در آرایه جهانی برای سیستم جستجو
 
-        // تبدیل آرایه به نقشه کلید-مقدار برای دسترسی فوق سریع
-        const priceMap = {};
-        allPrices.forEach(item => {
-            priceMap[item.symbol] = parseFloat(item.price);
-        });
+        // ۱. بروزرسانی قیمت صفحه اصلی (Home)
+        const btcData = allMarketCoins.find(c => c.symbol === "BTC");
+        const ethData = allMarketCoins.find(c => c.symbol === "ETH");
 
-        // ۱. بروزرسانی صفحه اصلی (Home)
-        if (priceMap["BTCUSDT"]) {
-            document.getElementById("btc").innerHTML = `₿ BTC: $${priceMap["BTCUSDT"].toLocaleString()}`;
+        if (btcData && document.getElementById("btc")) {
+            document.getElementById("btc").innerHTML = `₿ BTC: $${parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0})}`;
         }
-        if (priceMap["ETHUSDT"]) {
-            document.getElementById("eth").innerHTML = `Ξ ETH: $${priceMap["ETHUSDT"].toLocaleString()}`;
+        if (ethData && document.getElementById("eth")) {
+            document.getElementById("eth").innerHTML = `Ξ ETH: $${parseFloat(ethData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0})}`;
         }
 
-        // ۲. بروزرسانی صفحه لیست بازار (Market)
-        const targetCoins = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
-        let marketHtml = "";
-
-        targetCoins.forEach(coin => {
-            if (priceMap[coin]) {
-                const cleanName = coin.replace("USDT", "");
-                marketHtml += `
-                <div class="card" style="display: flex; flex-direction: row; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: bold; color: #8f98aa;">🪙 ${cleanName}</span>
-                    <span style="font-size: 20px; font-weight: 700; color: #00ff99;">$${priceMap[coin].toLocaleString()}</span>
-                </div>`;
-            }
-        });
-
-        const marketListEl = document.getElementById("market-list");
-        if (marketListEl) marketListEl.innerHTML = marketHtml;
+        // ۲. رندر کردن لیست بازار (اگر کاربر در حال تایپ نبود لیست اصلی بروز شود)
+        const searchInput = document.getElementById("market-search");
+        if (searchInput && searchInput.value === "") {
+            renderMarketList(allMarketCoins);
+        }
 
     } catch (err) {
-        console.error("Price error:", err);
+        console.error("Market API error:", err);
     }
 }
 
+// تابع رندر کردن کارت‌های بازار همراه با آیکون رسمی
+function renderMarketList(coins) {
+    const marketListEl = document.getElementById("market-list");
+    if (!marketListEl) return;
+
+    let marketHtml = "";
+    coins.forEach(coin => {
+        const price = parseFloat(coin.priceUsd);
+        const change = parseFloat(coin.changePercent24Hr);
+        const formattedPrice = price > 1 ? price.toLocaleString(undefined, {maximumFractionDigits: 2}) : price.toFixed(4);
+        
+        const changeColor = change >= 0 ? "#00ff99" : "#ff4a5a";
+        const changeSign = change >= 0 ? "+" : "";
+
+        // آیکون رسمی ارز دیجیتال بر اساس سمبل کوین
+        const coinSymbolLower = coin.symbol.toLowerCase();
+        const iconUrl = `https://assets.coincap.io/assets/icons/${coinSymbolLower}@2x.png`;
+
+        marketHtml += `
+        <div class="coin-row" onclick="openChart('${coin.symbol}')">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <img src="${iconUrl}" onerror="this.src='https://assets.coincap.io/assets/icons/generic@2x.png'" style="width: 32px; height: 32px; border-radius: 50%;">
+                <div class="coin-info">
+                    <span class="coin-symbol">${coin.symbol}</span>
+                    <span class="coin-name">${coin.name}</span>
+                </div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-weight: 700; font-family: monospace; font-size: 16px;">$${formattedPrice}</div>
+                <div style="color: ${changeColor}; font-size: 12px; margin-top: 4px; font-family: monospace;">
+                    ${changeSign}${change.toFixed(2)}%
+                </div>
+            </div>
+        </div>`;
+    });
+
+    marketListEl.innerHTML = marketHtml;
+}
+
 // =====================
-// TELEGRAM USER DATA (FIXED LOADING ISSUE)
+// LIVE SEARCH FILTER (FIXED)
+// =====================
+function filterMarket() {
+    const query = document.getElementById("market-search").value.trim().toUpperCase();
+    if (!query) {
+        renderMarketList(allMarketCoins);
+        return;
+    }
+    const filtered = allMarketCoins.filter(coin => 
+        coin.symbol.toUpperCase().includes(query) || 
+        coin.name.toUpperCase().includes(query)
+    );
+    renderMarketList(filtered);
+}
+
+// =====================
+// TRADINGVIEW CHART SYSTEM (FIXED)
+// =====================
+function openChart(symbol) {
+    document.getElementById("chart-modal").style.display = "flex";
+    document.getElementById("modal-coin-title").innerText = `${symbol} / USDT Chart`;
+
+    let tvSymbol = `BINANCE:${symbol}USDT`;
+    if (symbol === "USDC") tvSymbol = "BINANCE:USDCUSDT";
+
+    document.getElementById("tradingview-widget-container").innerHTML = "";
+
+    // تزریق اسکریپت و لود مستقیم ویجت بدون تداخل پلتفرمی
+    if (window.TradingView) {
+        createTradingViewWidget(tvSymbol);
+    } else {
+        const script = document.createElement('script');
+        script.src = 'https://s3.tradingview.com/tv.js';
+        script.type = 'text/javascript';
+        script.async = true;
+        script.onload = () => { createTradingViewWidget(tvSymbol); };
+        document.head.appendChild(script);
+    }
+}
+
+function createTradingViewWidget(tvSymbol) {
+    new TradingView.widget({
+        "width": "100%",
+        "height": "100%",
+        "symbol": tvSymbol,
+        "interval": "240", // تایم‌فریم ۴ ساعته برای مینی‌اپ عالی است
+        "timezone": "Etc/UTC",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "toolbar_bg": "#121622",
+        "enable_publishing": false,
+        "hide_side_toolbar": true,
+        "allow_symbol_change": false,
+        "container_id": "tradingview-widget-container"
+    });
+}
+
+function closeChart() {
+    document.getElementById("chart-modal").style.display = "none";
+    document.getElementById("tradingview-widget-container").innerHTML = "";
+}
+
+// =====================
+// TELEGRAM USER DATA
 // =====================
 function loadTelegramUser() {
     const nameEl = document.getElementById("user-name");
@@ -88,12 +179,9 @@ function loadTelegramUser() {
     const usernameEl = document.getElementById("user-username");
     const imgEl = document.getElementById("profile-img");
 
-    // بررسی وجود آبجکت تلگرام و داده‌های کاربر
     const user = tg?.initDataUnsafe?.user;
 
     if (!tg || !user) {
-        console.log("Not running inside Telegram WebApp or No User Data. Using Mock Data.");
-        // مقادیر تستی جهت بالا آمدن در مرورگر عادی و عدم فریز روی لودینگ
         if (nameEl) nameEl.innerText = "Amir (Guest)";
         if (idEl) idEl.innerText = "987654321";
         if (usernameEl) usernameEl.innerText = "@amir_crypto";
@@ -101,14 +189,12 @@ function loadTelegramUser() {
         return;
     }
 
-    // تزریق داده‌های واقعی تلگرام به دام (DOM)
     if (nameEl) nameEl.innerText = (user.first_name || "") + " " + (user.last_name || "");
     if (idEl) idEl.innerText = user.id || "Unknown ID";
     if (usernameEl) {
         usernameEl.innerText = user.username ? "@" + user.username : "no_username";
     }
 
-    // دریافت هوشمند آواتار
     if (imgEl) {
         if (user.username) {
             imgEl.src = `https://t.me/i/userpic/320/${user.username}.jpg`;
@@ -119,7 +205,7 @@ function loadTelegramUser() {
 }
 
 // =====================
-// NEWS SYSTEM (REAL CRYPTO NEWS)
+// NEWS SYSTEM
 // =====================
 async function loadCryptoNews() {
     const newsListEl = document.getElementById("news-list");
@@ -131,7 +217,7 @@ async function loadCryptoNews() {
 
         if (data && data.Data && data.Data.length > 0) {
             let newsHtml = "";
-            const topNews = data.Data.slice(0, 6); // دریافت ۶ خبر اول
+            const topNews = data.Data.slice(0, 6);
 
             topNews.forEach(article => {
                 newsHtml += `
@@ -149,7 +235,6 @@ async function loadCryptoNews() {
         }
     } catch (error) {
         console.error("Error fetching news:", error);
-        newsListEl.innerHTML = '<div class="card">Error loading news data.</div>';
     }
 }
 
@@ -157,14 +242,11 @@ async function loadCryptoNews() {
 // INITIALIZATION
 // =====================
 window.addEventListener("DOMContentLoaded", () => {
-    // بارگذاری سریع اطلاعات کاربر
     loadTelegramUser();
-    
-    // بارگذاری داده‌های شبکه
     loadMarketAndPrices();
     loadCryptoNews();
 
-    // اینتروال‌های بروزرسانی منظم دیتای زنده بازار
-    setInterval(loadMarketAndPrices, 5000); // قیمت‌ها هر ۵ ثانیه
-    setInterval(loadCryptoNews, 300000);   // اخبار هر ۵ دقیقه
+    // به‌روزرسانی قیمت‌ها هر ۸ ثانیه (برای اینکه با تایپ تداخل سنگین ایجاد نکند)
+    setInterval(loadMarketAndPrices, 8000);
+    setInterval(loadCryptoNews, 300000);
 });

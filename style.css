@@ -233,13 +233,13 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 15px 20px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 12px 15px;
+    background: rgba(255, 255, 255, .03);
+    border: 1px solid rgba(255, 255, 255, .05);
     border-radius: 18px;
     margin-bottom: 10px;
     cursor: pointer;
-    transition: 0.2s ease;
+    transition: .2s ease;
 }
 
 .coin-row:active {
