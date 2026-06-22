@@ -72,30 +72,32 @@ loadMarket();
 
 function loadTelegramUser() {
 
+    const tg = window.Telegram?.WebApp;
+
     const nameEl = document.getElementById("user-name");
     const idEl = document.getElementById("user-id");
     const usernameEl = document.getElementById("user-username");
 
-    if (!window.Telegram || !window.Telegram.WebApp) {
+    if (!tg) {
         nameEl.innerText = "Not in Telegram";
-        idEl.innerText = "-";
-        usernameEl.innerText = "-";
         return;
     }
-
-    const tg = window.Telegram.WebApp;
 
     tg.ready();
     tg.expand();
 
     const user = tg.initDataUnsafe?.user;
 
+    console.log("TG USER:", user);
+
     if (!user) {
-        nameEl.innerText = "No User Data";
+        nameEl.innerText = "No Telegram User";
         return;
     }
 
     nameEl.innerText = user.first_name || "-";
-    idEl.innerText = "ID: " + (user.id || "-");
+    idEl.innerText = "ID: " + user.id;
     usernameEl.innerText = "@" + (user.username || "no_username");
 }
+
+window.addEventListener("load", loadTelegramUser);

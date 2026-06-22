@@ -6,14 +6,13 @@
 <title>Amir BTC Assistant</title>
 
 <link rel="stylesheet" href="style.css">
-
 </head>
+
 <body>
 
 <div class="container">
 
     <!-- HOME -->
-
     <div id="home-page" class="page">
 
         <div class="logo">
@@ -23,30 +22,20 @@
 
         <div class="card">
             <div class="card-title">Bitcoin</div>
-            <div class="card-price" id="btc">
-                Loading...
-            </div>
+            <div class="card-price" id="btc">Loading...</div>
         </div>
 
         <div class="card">
             <div class="card-title">Ethereum</div>
-            <div class="card-price" id="eth">
-                Loading...
-            </div>
+            <div class="card-price" id="eth">Loading...</div>
         </div>
 
-        <div class="card">
-            🔥 Fear & Greed Index
-        </div>
-
-        <div class="card">
-            📰 Top Market News
-        </div>
+        <div class="card">🔥 Fear & Greed Index</div>
+        <div class="card">📰 Top Market News</div>
 
     </div>
 
     <!-- MARKET -->
-
     <div id="market-page" class="page" style="display:none">
 
         <div class="logo">
@@ -59,7 +48,6 @@
     </div>
 
     <!-- ANALYSIS -->
-
     <div id="analysis-page" class="page" style="display:none">
 
         <div class="logo">
@@ -74,7 +62,6 @@
     </div>
 
     <!-- NEWS -->
-
     <div id="news-page" class="page" style="display:none">
 
         <div class="logo">
@@ -89,50 +76,32 @@
     </div>
 
     <!-- PROFILE -->
+    <div id="profile-page" class="page" style="display:none">
 
-   <!-- PROFILE -->
-
-<div id="profile-page" class="page" style="display:none">
-
-    <div class="logo">
-        <h1>👤 Profile</h1>
-        <p>User Information</p>
-    </div>
-
-    <!-- 👇 پروفایل جدید شیک -->
-    <div class="profile-box">
-
-        <div class="profile-top">
-            <img id="profile-img" src="default.png">
+        <div class="logo">
+            <h1>👤 Profile</h1>
+            <p>User Information</p>
         </div>
 
-        <div class="profile-name" id="user-name">Loading...</div>
+        <div class="profile-box">
 
-        <div class="profile-username" id="user-username">@loading</div>
+            <div class="profile-top">
+                <img id="profile-img" src="default.png">
+            </div>
 
-        <div class="profile-id" id="user-id">ID: loading...</div>
+            <div class="profile-name" id="user-name">Loading...</div>
 
-    </div>
+            <div class="profile-username" id="user-username">@loading</div>
 
-</div>
-</div>
+            <div class="profile-id" id="user-id">ID: loading...</div>
 
-<div class="card">
-    <div class="card-title">User ID</div>
-    <div id="user-id">Loading...</div>
-</div>
-
-<div class="card">
-    <div class="card-title">Language</div>
-    <div id="user-lang">Loading...</div>
-</div>
+        </div>
 
     </div>
 
 </div>
 
 <!-- Bottom Navigation -->
-
 <div class="bottom-nav">
 
     <div class="nav-item active" onclick="showPage('home-page', this)">
@@ -161,6 +130,7 @@
 
 </div>
 
+<!-- Telegram + App JS -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="app.js"></script>
 
