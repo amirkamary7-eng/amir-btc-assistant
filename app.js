@@ -98,18 +98,13 @@ function closeChart() {
     document.getElementById("tradingview-widget-container").innerHTML = "";
 }
 
-// ==========================================================
+// ==========================================
 // 5. INIT (اجرای خودکار)
-// ==========================================================
+// ==========================================
 window.addEventListener("DOMContentLoaded", () => {
     // اجرای اولیه
     loadMarketAndPrices();
     
-    // تنظیم اینتروال برای آپدیت هر 15 ثانیه (برای جلوگیری از هنگ کردن)
+    // تنظیم اینتروال برای آپدیت هر 15 ثانیه
     marketInterval = setInterval(loadMarketAndPrices, 15000);
-    
-// مطمئن شو که این خط در انتهای فایل app.js وجود دارد
-document.addEventListener("DOMContentLoaded", function() {
-    console.log("در حال اجرای تابع لود...");
-    loadMarketAndPrices(); 
 });
