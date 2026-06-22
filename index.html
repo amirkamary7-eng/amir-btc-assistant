@@ -1,27 +1,95 @@
+<div class="container">
+
+    <!-- HOME -->
+    <div id="home-page" class="page">
+
+        <h1>₿ Amir BTC Assistant</h1>
+
+        <div class="card" id="btc">
+            Loading BTC...
+        </div>
+
+        <div class="card" id="eth">
+            Loading ETH...
+        </div>
+
+    </div>
+
+    <!-- MARKET -->
+    <div id="market-page" class="page" style="display:none">
+
+        <h2>📈 Market</h2>
+
+        <div class="card">BTC</div>
+        <div class="card">ETH</div>
+        <div class="card">SOL</div>
+        <div class="card">BNB</div>
+
+    </div>
+
+    <!-- ANALYSIS -->
+    <div id="analysis-page" class="page" style="display:none">
+
+        <h2>₿ Analysis</h2>
+
+        <div class="card">
+            No Analysis Yet
+        </div>
+
+    </div>
+
+    <!-- NEWS -->
+    <div id="news-page" class="page" style="display:none">
+
+        <h2>📰 News</h2>
+
+        <div class="card">
+            Loading News...
+        </div>
+
+    </div>
+
+    <!-- PROFILE -->
+    <div id="profile-page" class="page" style="display:none">
+
+        <h2>👤 Profile</h2>
+
+        <div class="card">
+            User Profile
+        </div>
+
+    </div>
+
+</div>
+
+<!-- Bottom Nav -->
+
 <div class="bottom-nav">
 
-    <div class="nav-item active">
+    <div class="nav-item active" onclick="showPage('home-page', this)">
         <div>🏠</div>
         <div>Home</div>
     </div>
 
-    <div class="nav-item">
+    <div class="nav-item" onclick="showPage('market-page', this)">
         <div>📈</div>
         <div>Market</div>
     </div>
 
-    <div class="center-btn">
+    <div class="center-btn" onclick="showPage('analysis-page', this)">
         ₿
     </div>
 
-    <div class="nav-item">
+    <div class="nav-item" onclick="showPage('news-page', this)">
         <div>📰</div>
         <div>News</div>
     </div>
 
-    <div class="nav-item">
+    <div class="nav-item" onclick="showPage('profile-page', this)">
         <div>👤</div>
         <div>Profile</div>
     </div>
 
 </div>
+
+<script src="app.js"></script>

@@ -20,3 +20,20 @@ async function loadPrices() {
 }
 
 loadPrices();
+
+function showPage(pageId, element){
+
+    document.querySelectorAll('.page').forEach(page=>{
+        page.style.display='none';
+    });
+
+    document.getElementById(pageId).style.display='block';
+
+    document.querySelectorAll('.nav-item').forEach(item=>{
+        item.classList.remove('active');
+    });
+
+    if(element.classList.contains('nav-item')){
+        element.classList.add('active');
+    }
+}
