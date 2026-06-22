@@ -207,6 +207,16 @@
             font-family: monospace;
             line-height: 1;
         }
+        /* افکت تغییر قیمت */
+.price-up { animation: flashGreen 0.8s ease; }
+.price-down { animation: flashRed 0.8s ease; }
+
+@keyframes flashGreen { 0% { color: #fff; } 50% { color: #00ffaa; } 100% { color: #fff; } }
+@keyframes flashRed { 0% { color: #fff; } 50% { color: #ff3355; } 100% { color: #fff; } }
+
+/* اصلاح فونت مونو برای جلوگیری از پرش */
+#dash-btc-price { font-family: 'Courier New', Courier, monospace; }
+
     </style>
     
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
