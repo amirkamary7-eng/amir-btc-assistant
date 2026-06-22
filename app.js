@@ -245,35 +245,23 @@ function openChart(symbol, exchange) {
 function closeChart() { document.getElementById("chart-modal").style.display = "none"; }
 // [تمام توابع قبلی شما از بالا تا قبل از بخش News دست نخورده باقی می‌ماند]
 // ... (کد تلگرام، مارکت، اکسترا متریکس، فیلتر و ...) ...
-
-// این بخش اخبار شماست که با استایل مودالِ نمودار شما یکی شده است:
 async function loadPersianNews() {
     const newsListEl = document.getElementById("news-list");
     if (!newsListEl) return;
     
-    const rssUrl = "https://arzdigital.com/feed/"; 
-    const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
-
     try {
-        const response = await fetch(apiUrl);
+        const response = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent("https://arzdigital.com/feed/")}`);
         const data = await response.json();
         
         if (data.status === 'ok') {
             newsListEl.innerHTML = ""; 
             data.items.slice(0, 7).forEach(item => {
                 const div = document.createElement("div");
-                div.className = "glass-card";
-                div.style.textAlign = "right";
-                div.style.direction = "rtl";
-                div.style.padding = "15px";
-                div.style.marginBottom = "10px";
-                div.style.cursor = "pointer";
-                
+                div.className = "news-card"; // از این کلاس برای استایل جدید استفاده می‌کنیم
                 div.innerHTML = `
-                    <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">${item.title}</div>
-                    <div style="font-size: 12px; color: var(--text-sub);">${item.description.substring(0, 100)}...</div>
+                    <div style="font-size: 15px; font-weight: bold; margin-bottom: 8px;">${item.title}</div>
+                    <div style="font-size: 12px; color: var(--text-sub);">${item.description.substring(0, 80)}...</div>
                 `;
-                // تغییر در اینجا: فراخوانی تابع نمایش مودال خبر
                 div.onclick = () => showNewsModal(item.title, item.content || item.description);
                 newsListEl.appendChild(div);
             });
@@ -282,7 +270,6 @@ async function loadPersianNews() {
         newsListEl.innerHTML = `<div style="text-align:center; padding:20px;">خطا در دریافت اخبار</div>`;
     }
 }
-
 // تابع باز کردن مودال خبر (مشابه همان منطقِ openChart شما)
 function showNewsModal(title, content) {
     const modal = document.getElementById("news-modal");
@@ -304,6 +291,9 @@ window.addEventListener("DOMContentLoaded", () => {
     loadMarketAndPrices();
     loadExtraMetrics();
     loadAnalysisData();
-    loadPersianNews(); // اضافه شده
-    setInterval(loadMarketAndPrices, 10000);
+    loadPersianNews(); // این تابع قبلاً بود
+    
+    // کدهای زیر را اضافه کنید تا اخبار خودکار هر ۱ دقیقه آپدیت شود
+    setInterval(loadMarketAndPrices, 10000); // به‌روزرسانی قیمت‌ها هر 10 ثانیه
+    setInterval(loadPersianNews, 60000);     // به‌روزرسانی اخبار هر 60 ثانیه
 });
