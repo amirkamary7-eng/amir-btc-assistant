@@ -49,7 +49,7 @@ async function loadMarketAndPrices() {
             "ARB", "INJ", "RNDR", "TIA", "SUI", "GALA", "GRT", "FTM", "STX", "THETA",
             "IMX", "LDO", "FLOW", "CRV", "SAND", "MANA", "AXS", "APE", "EGLD", "ALGO",
             "VET", "CHZ", "ZIL", "ENJ", "ONE", "MINA", "DYDX", "WOO", "JUP", "PYTH",
-            "ORDI", "1INCH", "AAVE", "AGIX", "ANKR", "BAT", "COMP", "DASH", "EGLD", "ENS",
+            "ORDI", "1INCH", "AAVE", "AGIX", "ANKR", "BAT", "COMP", "DASH", "ENS",
             "ETC", "FET", "FXS", "GMT", "HOT", "IOTX", "KAVA", "KSM", "LRC", "MKR",
             "NEO", "OCEAN", "OMG", "QTUM", "ROSE", "RUNE", "RVN", "SNX", "STORJ", "SUSHI",
             "WAVES", "XCH", "XEC", "XLM", "XMR", "XTZ", "YFI", "ZEC", "ZEN", "ZRX"
@@ -102,7 +102,6 @@ function getCoinFullName(sym) {
     return names[sym] || sym;
 }
 
-// تابع رندر کردن بازار همراه با هوش مصنوعی آیکون جایگزین برای جلوگیری از باگ غیب شدن ارزها
 function renderMarketList(coins) {
     const marketListEl = document.getElementById("market-list");
     if (!marketListEl) return;
@@ -111,7 +110,15 @@ function renderMarketList(coins) {
     coins.forEach(coin => {
         const price = parseFloat(coin.priceUsd);
         const change = parseFloat(coin.changePercent24Hr);
-        const formattedPrice = price > 1 ? price.toLocaleString(undefined, {maximumFractionDigits: 2}) : price.toFixed(5);
+        
+        let formattedPrice = "";
+        if (price > 1) {
+            formattedPrice = price.toLocaleString(undefined, {maximumFractionDigits: 2});
+        } else if (price > 0.0001) {
+            formattedPrice = price.toFixed(4);
+        } else {
+            formattedPrice = price.toFixed(6);
+        }
         
         const changeColor = change >= 0 ? "#00ff99" : "#ff4a5a";
         const changeSign = change >= 0 ? "+" : "";
@@ -125,7 +132,7 @@ function renderMarketList(coins) {
                     <img src="${iconUrl}" 
                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" 
                          style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
-                    <div class="fake-icon" style="display: none; width: 35px; height: 35px; border-radius: 50%; background: linear-gradient(135deg, #f7931a, #ff4a5a); color: white; font-weight: bold; font-size: 14px; align-items: center; justify-content: center; font-family: sans-serif;">
+                    <div class="fake-icon" style="display: none; width: 35px; height: 35px; border-radius: 50%; background: linear-gradient(135deg, #f7931a, #ff4a5a); color: white; font-weight: bold; font-size: 13px; align-items: center; justify-content: center; font-family: sans-serif;">
                         ${coin.symbol.substring(0, 2)}
                     </div>
                 </div>
@@ -146,24 +153,22 @@ function renderMarketList(coins) {
     marketListEl.innerHTML = marketHtml;
 }
 
-/// =====================
-// LIVE SEARCH FILTER (GLOBAL & COINGECKO POWERED)
+// =====================
+// LIVE SEARCH FILTER (BINANCE -> GLOBAL HYBRID)
 // =====================
 let searchTimeout = null;
 
 async function filterMarket() {
-    const query = document.getElementById("market-search").value.trim().toLowerCase();
+    const query = document.getElementById("market-search").value.trim().toUpperCase();
     
-    // اگر باکس جستجو خالی بود، همان ۱۰۰ ارز برتر اصلی را نشان بده
     if (!query) {
         renderMarketList(allMarketCoins);
         return;
     }
 
-    // ۱. اول در بین همان ۱۰۰ ارز برتر خودمان جستجو می‌کنه (سریع و بدون تاخیر)
     const localFiltered = allMarketCoins.filter(coin => 
-        coin.symbol.toLowerCase().includes(query) || 
-        coin.name.toLowerCase().includes(query)
+        coin.symbol.toUpperCase().includes(query) || 
+        coin.name.toUpperCase().includes(query)
     );
 
     if (localFiltered.length > 0) {
@@ -171,56 +176,66 @@ async function filterMarket() {
         return;
     }
 
-    // ۲. اگر ارز در آن ۱۰۰ تا نبود، از دیتابیس جهانی CoinGecko استعلام می‌گیره (برای ارزهایی مثل HYPE)
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(async () => {
         try {
-            // سرچ در کل بازار کریپتو
-            const searchResponse = await fetch(`https://api.coingecko.com/api/v3/search?query=${query}`);
-            const searchResult = await searchResponse.json();
+            // ۱. بررسی صرافی بایننس
+            const binanceResp = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`);
             
-            if (searchResult && searchResult.coins && searchResult.coins.length > 0) {
-                // دریافت مشخصات اولین کوین یافت شده
-                const topFoundCoin = searchResult.coins[0];
-                const coinId = topFoundCoin.id; // مثلاً hyperliquid
-                
-                // دریافت قیمت لحظه‌ای آن ارز
-                const priceResponse = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`);
-                const priceResult = await priceResponse.json();
-                
-                if (priceResult[coinId]) {
-                    const searchedCoin = [{
-                        symbol: topFoundCoin.symbol.toUpperCase(),
-                        name: topFoundCoin.name,
-                        priceUsd: priceResult[coinId].usd,
-                        changePercent24Hr: priceResult[coinId].usd_24h_change || 0
-                    }];
-                    
-                    renderMarketList(searchedCoin);
-                    return;
-                }
+            if (binanceResp.ok) {
+                const ticker = await binanceResp.json();
+                const searchedCoin = [{
+                    symbol: query,
+                    name: query,
+                    priceUsd: ticker.lastPrice,
+                    changePercent24Hr: ticker.priceChangePercent
+                }];
+                renderMarketList(searchedCoin);
+                return;
             }
+
+            // ۲. بررسی صرافی جانبی برای ارزهایی مثل HYPE
+            const globalResp = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${query}USDT`);
+            const globalData = await globalResp.json();
             
-            // اگر ارز اصلاً در کل بازار کریپتو هم وجود نداشت
+            if (globalData && globalData.result && globalData.result.list && globalData.result.list.length > 0) {
+                const ticker = globalData.result.list[0];
+                const searchedCoin = [{
+                    symbol: query,
+                    name: query,
+                    priceUsd: ticker.lastPrice,
+                    changePercent24Hr: (parseFloat(ticker.price24hPcnt) * 100).toString()
+                }];
+                renderMarketList(searchedCoin);
+                return;
+            }
+
             document.getElementById("market-list").innerHTML = `
                 <div style="text-align: center; color: #8f98aa; margin-top: 30px; font-size: 14px;">
-                    ❌ ارز "${query.toUpperCase()}" در بازار یافت نشد!
+                    ❌ ارز "${query}" یافت نشد!
                 </div>`;
-                
+
         } catch (err) {
-            console.error("Global Search Error:", err);
+            console.error("Hybrid Search Error:", err);
         }
-    }, 600); // تاخیر برای اینکه تایپ کاربر تمام شود
+    }, 500);
 }
 
 // =====================
-// TRADINGVIEW CHART SYSTEM
+// TRADINGVIEW CHART SYSTEM (AUTO EXCHANGE)
 // =====================
 function openChart(symbol) {
     document.getElementById("chart-modal").style.display = "flex";
     document.getElementById("modal-coin-title").innerText = `${symbol} / USDT Chart`;
 
+    const foundCoin = allMarketCoins.find(c => c.symbol === symbol);
     let tvSymbol = `BINANCE:${symbol}USDT`;
+    
+    // اگر ارز در لیست ۱00 تای بایننس نبود، اجازه بده تریدینگ‌وی صرافی مناسب (مثل BYBIT یا OKX) را خودش پیدا کند
+    if (!foundCoin && symbol !== "BTC" && symbol !== "ETH") {
+        tvSymbol = `${symbol}USDT`; 
+    }
+
     document.getElementById("tradingview-widget-container").innerHTML = "";
 
     if (window.TradingView) {
@@ -363,8 +378,9 @@ function loadTelegramUser() {
         imgEl.src = `https://t.me/i/userpic/320/${user.username}.jpg`;
     }
 }
+
 // =====================
-// INITIALIZATION (اتصال نهایی دکمه سرچ)
+// INITIALIZATION
 // =====================
 window.addEventListener("DOMContentLoaded", () => {
     loadTelegramUser();
@@ -372,7 +388,7 @@ window.addEventListener("DOMContentLoaded", () => {
     loadCryptoNews();
     loadAnalysisData();
 
-    // این بخش جدید، باکس سرچ شما را به موتور هوشمند بایننس متصل می‌کند
+    // متصل کردن فیلد سرچ به موتور جستجو
     const searchInput = document.getElementById("market-search");
     if (searchInput) {
         searchInput.addEventListener("input", filterMarket);
