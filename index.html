@@ -2,7 +2,7 @@
 <html lang="fa">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Crypto Pro Dashboard</title>
     
     <style>
@@ -120,7 +120,7 @@
             box-shadow: 0 0 15px var(--primary-glow);
         }
 
-        /* پاپ‌آپ چارت */
+        /* پاپ‌آ‌پ‌ها */
         .modal {
             display: none;
             position: fixed;
@@ -130,7 +130,7 @@
             flex-direction: column;
         }
 
-        /* ناوبری بهینه‌شده تحت وب با جلوه بصری مدرن */
+        /* ناوبری بهینه‌شده تحت وب */
         .navbar {
             position: fixed;
             bottom: 0; left: 0; width: 100%; height: 74px;
@@ -173,7 +173,8 @@
         .nav-item.active svg {
             transform: translateY(-2px);
         }
-        /* دکمه دایره‌ای هوم / داشبورد در مرکز */
+
+        /* دکمه دایره‌ای هوم در مرکز */
         .center-btn {
             width: 60px;
             height: 60px;
@@ -199,26 +200,27 @@
             fill: white;
         }
 
-        /* استایل‌های بخش شاخص ترس و طمع اختصاصی */
+        /* شاخص ترس و طمع */
         .index-value {
             font-size: 28px;
             font-weight: 800;
             font-family: monospace;
             line-height: 1;
         }
+
         .news-card {
-    background: rgba(18, 22, 34, 0.65);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 20px;
-    padding: 18px;
-    margin: 10px 16px;
-    cursor: pointer;
-    text-align: right;
-    direction: rtl;
-    transition: transform 0.2s;
-}
-.news-card:active { transform: scale(0.97); }
+            background: rgba(18, 22, 34, 0.65);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 18px;
+            margin: 10px 16px;
+            cursor: pointer;
+            text-align: right;
+            direction: rtl;
+            transition: transform 0.2s;
+        }
+        .news-card:active { transform: scale(0.97); }
     </style>
     
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -226,6 +228,7 @@
 </head>
 <body>
 
+    <!-- صفحه ۱: داشبورد اصلی -->
     <div id="dashboard-page" class="page active">
         <div style="padding: 24px 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; direction: rtl;">
             <div>
@@ -242,7 +245,7 @@
                 <span style="font-size: 12px; background: var(--primary); color: #000; padding: 2px 8px; border-radius: 6px; font-weight: bold;">سیگنال زنده</span>
                 <span style="font-size: 11px; color: var(--text-sub);">ورود به صفحه تحلیل‌ها 🎯</span>
             </div>
-            <div style="font-size: 15px; font-weight: bold; margin-top: 12px; color: #fff;" id="dash-last-analysis-title">در حال بارگذاری آخرین تحلیل کانال...</div>
+            <div style="font-size: 15px; font-weight: bold; margin-top: 12px; color: #fff;" id="dash-last-analysis-title">مشاهده آخرین گفتگوها و سیگنال‌ها</div>
         </div>
 
         <div class="grid-dashboard">
@@ -273,11 +276,11 @@
                 <span style="font-weight: bold; font-size: 14px;">⚡ دیدبان سریع بازار</span>
                 <span style="font-size: 12px; color: var(--primary);">مشاهده همه ←</span>
             </div>
-            <div id="dash-mini-market">
-                </div>
+            <div id="dash-mini-market"></div>
         </div>
     </div>
 
+    <!-- صفحه ۲: مارکت و دیدبان کامل -->
     <div id="market-page" class="page">
         <div class="search-container">
             <input type="text" id="market-search" oninput="filterMarket()" placeholder="جستجوی پیشرفته در تمام صرافی‌ها..." class="search-box">
@@ -285,72 +288,62 @@
         <div id="market-list" class="glass-card" style="padding: 0; overflow: hidden;"></div>
     </div>
 
+    <!-- صفحه ۳: اخبار -->
     <div id="news-page" class="page">
-    <div style="padding: 20px; font-weight: bold; color: var(--primary); text-align: right;">📰 آخرین اخبار ارز دیجیتال</div>
-    <div id="news-list">
-        <!-- اخبار اینجا لود می‌شوند -->
-        <div style="text-align:center; color:var(--text-sub); margin-top:20px;">در حال دریافت اخبار...</div>
-    </div>
-</div>
-</div>
-<div id="analysis-page" class="page" style="display:none;">
-    <div id="telegram-feed-container" style="padding: 10px;">
-        <script async src="https://telegram.org/js/telegram-widget.js?22" 
-                data-telegram-discussion="amir_btc_a" 
-                data-comments-limit="5"
-                data-color="F7931A"
-                data-dark="1"
-                data-width="100%">
-        </script>
-    </div>
-</div>
-</div>
-</div>
-
-   <div id="profile-page" class="page" style="display: none; padding: 20px;">
-    <!-- بخش آواتار و نام (وسط‌چین) -->
-    <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
-        <div style="width: 110px; height: 110px; margin: 0 auto 15px; border-radius: 50%; border: 3px solid var(--primary); padding: 3px; overflow: hidden;">
-            <img id="profile-img" src="https://via.placeholder.com/150" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
-        </div>
-        <h2 id="user-name" style="margin: 0; color: #fff;">در حال دریافت...</h2>
-        <p style="color: var(--text-sub); margin-top: 5px;">کاربر عضو</p>
-    </div>
-
-    <!-- بخش مشخصات (کادرها) -->
-    <div style="background: rgba(255, 255, 255, 0.05); border-radius: 20px; padding: 15px; border: 1px solid rgba(255, 255, 255, 0.1);">
-        
-        <!-- یوزرنیم -->
-        <div style="display: flex; justify-content: space-between; padding: 15px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
-            <span style="color: var(--text-sub);">یوزرنیم:</span>
-            <span id="user-username" style="color: #fff; font-weight: bold; direction: ltr;">---</span>
-        </div>
-
-        <!-- آیدی عددی -->
-        <div style="display: flex; justify-content: space-between; padding: 15px 10px;">
-            <span style="color: var(--text-sub);">آیدی عددی:</span>
-            <span id="user-id" style="color: var(--primary); font-family: monospace; font-weight: bold; direction: ltr;">000000</span>
+        <div style="padding: 20px; font-weight: bold; color: var(--primary); text-align: right;">📰 آخرین اخبار ارز دیجیتال</div>
+        <div id="news-list">
+            <div style="text-align:center; color:var(--text-sub); margin-top:20px;">در حال دریافت اخبار...</div>
         </div>
     </div>
-</div>
+
+    <!-- صفحه ۴: تحلیل‌ها (ویجت تلگرام) -->
+    <div id="analysis-page" class="page">
+        <div id="telegram-feed-container" style="padding: 10px;"></div>
+    </div>
+
+    <!-- صفحه ۵: پروفایل کاربری -->
+    <div id="profile-page" class="page" style="padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
+            <div style="width: 110px; height: 110px; margin: 0 auto 15px; border-radius: 50%; border: 3px solid var(--primary); padding: 3px; overflow: hidden;">
+                <img id="profile-img" src="https://img.icons8.com/clouds/200/000000/bitcoin.png" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
+            </div>
+            <h2 id="user-name" style="margin: 0; color: #fff;">در حال دریافت...</h2>
+            <p style="color: var(--text-sub); margin-top: 5px;">کاربر عضو مینی اپ</p>
+        </div>
+
+        <div style="background: rgba(255, 255, 255, 0.05); border-radius: 20px; padding: 15px; border: 1px solid rgba(255, 255, 255, 0.1);">
+            <div style="display: flex; justify-content: space-between; padding: 15px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+                <span style="color: var(--text-sub);">یوزرنیم:</span>
+                <span id="user-username" style="color: #fff; font-weight: bold; direction: ltr;">---</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 15px 10px;">
+                <span style="color: var(--text-sub);">آیدی عددی:</span>
+                <span id="user-id" style="color: var(--primary); font-family: monospace; font-weight: bold; direction: ltr;">000000</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال ۱: نمایش چارت لایو TradingView -->
     <div id="chart-modal" class="modal">
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: #0c0f17; border-bottom: 1px solid var(--glass-border);">
             <button onclick="closeChart()" style="background: var(--red); border: none; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px;">بستن ✕</button>
             <span id="modal-coin-title" style="font-weight: bold; font-size: 16px; color: var(--text-main);">CHART</span>
         </div>
         <div id="tradingview-widget-container" style="flex: 1; width: 100%;"></div>
-        <!-- مودال نمایش متن خبر -->
-<div id="news-modal" class="modal" style="display:none; padding: 20px;">
-    <div style="background: var(--card-bg); height: 90%; border-radius: 20px; padding: 20px; overflow-y: auto; border: 1px solid var(--glass-border);">
-        <button onclick="document.getElementById('news-modal').style.display='none'" style="background: var(--red); border:none; color:white; padding: 5px 15px; border-radius: 10px; cursor:pointer;">بستن</button>
-        <h2 id="news-title-modal" style="color: var(--primary); margin-top: 15px;"></h2>
-        <div id="news-content-modal" style="color: #fff; line-height: 1.8; font-size: 15px;"></div>
-    </div>
-</div>s
     </div>
 
+    <!-- مودال ۲: نمایش متن کامل خبر -->
+    <div id="news-modal" class="modal" style="padding: 20px; background: rgba(4, 6, 10, 0.95); text-align: right; direction: rtl;">
+        <div style="background: var(--card-bg); border-radius: 20px; padding: 20px; border: 1px solid var(--glass-border); max-height: 85vh; overflow-y: auto;">
+            <button onclick="closeNewsModal()" style="background: var(--red); border:none; padding:10px 18px; color:white; border-radius:10px; cursor:pointer; font-weight: bold;">بستن ✕</button>
+            <h2 id="news-title-modal" style="color: var(--primary); margin-top: 20px;"></h2>
+            <div id="news-content-modal" style="color: #ddd; line-height: 1.8; font-size: 15px;"></div>
+        </div>
+    </div>
+
+    <!-- منوی ناوبری باتم‌بار (Navbar) -->
     <div class="navbar">
-        <div id="nav-market" class="nav-item" onclick="Page('market-page', this)">
+        <div id="nav-market" class="nav-item" onclick="showPage('market-page', this)">
             <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
             <span>دیدبان</span>
         </div>
@@ -372,14 +365,8 @@
             <span>حساب</span>
         </div>
     </div>
-<script src="app.js"></script>
-    
-    <div id="news-modal" class="modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:9999; flex-direction:column; padding:20px; overflow-y:auto; text-align:right; direction:rtl;">
-        <div style="background: rgba(18, 22, 34, 0.9); border-radius: 20px; padding: 20px; border: 1px solid rgba(255, 255, 255, 0.1);">
-            <button onclick="closeNewsModal()" style="background: #ff3355; border:none; padding:10px; color:white; border-radius:8px; cursor:pointer;">بستن ✕</button>
-            <h2 id="news-title-modal" style="color:white; margin:20px 0;"></h2>
-            <div id="news-content-modal" style="color:#ddd; line-height:1.8; font-size:16px;"></div>
-        </div>
-    </div>
+
+    <!-- اتصال به اسکریپت منطقی برنامه -->
+    <script src="app.js"></script>
 </body>
 </html>

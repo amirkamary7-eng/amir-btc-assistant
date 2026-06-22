@@ -12,6 +12,12 @@ const MY_TELEGRAM_CHANNEL = "amir_btc_a";
 let allMarketCoins = [];
 let searchTimeout = null;
 
+// لیست نمادهای محبوب برای بهینه‌سازی ترافیک مصرفی
+const POPULAR_SYMBOLS = [
+    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT",
+    "LINK", "MATIC", "TRX", "UNI", "LTC"
+];
+
 // =====================
 // PAGE SWITCH SYSTEM
 // =====================
@@ -29,23 +35,20 @@ function showPage(pageId, element) {
 }
 
 // =====================
-// LIVE PRICES & MARKET (BINANCE API)
+// LIVE PRICES & MARKET (OPTIMIZED BINANCE API)
 // =====================
 async function loadMarketAndPrices() {
     try {
-        const response = await fetch("https://api.binance.com/api/v3/ticker/24hr");
+        // تبدیل نمادها به فرمت مورد نیاز بایننس: ["BTCUSDT","ETHUSDT",...]
+        const formattedSymbols = JSON.stringify(POPULAR_SYMBOLS.map(sym => `${sym}USDT`));
+        const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(formattedSymbols)}`);
         const data = await response.json();
         
         if (!data || !Array.isArray(data)) return;
 
-        const popularSymbols = [
-            "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT",
-            "LINK", "MATIC", "TRX", "UNI", "LTC"
-        ];
-
         allMarketCoins = [];
 
-        popularSymbols.forEach(sym => {
+        POPULAR_SYMBOLS.forEach(sym => {
             const ticker = data.find(item => item.symbol === `${sym}USDT`);
             if (ticker) {
                 allMarketCoins.push({
@@ -58,13 +61,19 @@ async function loadMarketAndPrices() {
             }
         });
 
+        // آپدیت قیمت بیت‌کوین در داشبورد
         const btcData = allMarketCoins.find(c => c.symbol === "BTC");
         if (btcData && document.getElementById("dash-btc-price")) {
             const btcPrice = parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
             document.getElementById("dash-btc-price").innerHTML = `BTC $${btcPrice}`;
         }
 
-        renderMarketList(allMarketCoins);
+        // حل باگ تداخل: تنها در صورتی منو را بازنشانی کن که کاربر در حال جستجو نباشد
+        const searchInput = document.getElementById("market-search");
+        if (!searchInput || !searchInput.value.trim()) {
+            renderMarketList(allMarketCoins);
+        }
+        
         renderDashMiniMarket(); 
     } catch (err) {
         console.error("Binance API error:", err);
@@ -207,8 +216,9 @@ function loadTelegramUser() {
             }
         }
     } else {
-        if (nameEl) nameEl.innerText = "امیر کریپتو (تست)";
-        if (dashNameEl) dashNameEl.innerText = "امیر کریپتو (تست)";
+        const defaultName = "امیر کریپتو (تست)";
+        if (nameEl) nameEl.innerText = defaultName;
+        if (dashNameEl) dashNameEl.innerText = defaultName;
         if (idEl) idEl.innerText = "123456789";
         if (usernameEl) usernameEl.innerText = "@test_user";
         if (imgEl) imgEl.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
@@ -217,9 +227,8 @@ function loadTelegramUser() {
 
 function loadAnalysisData() {
     const container = document.getElementById("telegram-feed-container");
-    if (!container) return;
-
-    container.innerHTML = "";
+    // جلوگیری از تزریق مجدد اسکریپت و کند شدن تلگرام
+    if (!container || container.children.length > 0) return;
 
     const script = document.createElement("script");
     script.src = "https://telegram.org/js/telegram-widget.js?22";
@@ -235,16 +244,25 @@ function openChart(symbol, exchange) {
     document.getElementById("chart-modal").style.display = "flex";
     document.getElementById("modal-coin-title").innerText = `${symbol} / USDT`;
     document.getElementById("tradingview-widget-container").innerHTML = "";
-    new TradingView.widget({
-        "width": "100%", "height": "100%", "symbol": `BINANCE:${symbol}USDT`,
-        "interval": "240", "theme": "dark", "style": "1", "locale": "en",
-        "container_id": "tradingview-widget-container", "hide_side_toolbar": true
-    });
+    
+    if (typeof TradingView !== 'undefined') {
+        new TradingView.widget({
+            "width": "100%", "height": "100%", "symbol": `BINANCE:${symbol}USDT`,
+            "interval": "240", "theme": "dark", "style": "1", "locale": "en",
+            "container_id": "tradingview-widget-container", "hide_side_toolbar": true
+        });
+    }
 }
 
 function closeChart() { document.getElementById("chart-modal").style.display = "none"; }
-// [تمام توابع قبلی شما از بالا تا قبل از بخش News دست نخورده باقی می‌ماند]
-// ... (کد تلگرام، مارکت، اکسترا متریکس، فیلتر و ...) ...
+
+// تابع کمکی برای پاک‌سازی کدهای HTML اخبار و جلوگیری از به‌هم ریختن قالب مینی‌اپ
+function stripHtml(htmlString) {
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = htmlString;
+    return tempDiv.textContent || tempDiv.innerText || "";
+}
+
 async function loadPersianNews() {
     const newsListEl = document.getElementById("news-list");
     if (!newsListEl) return;
@@ -257,10 +275,14 @@ async function loadPersianNews() {
             newsListEl.innerHTML = ""; 
             data.items.slice(0, 7).forEach(item => {
                 const div = document.createElement("div");
-                div.className = "news-card"; // از این کلاس برای استایل جدید استفاده می‌کنیم
+                div.className = "news-card";
+                
+                // پاک‌سازی تگ‌ها قبل از اعمال متد substring
+                const cleanDescription = stripHtml(item.description).substring(0, 80);
+
                 div.innerHTML = `
                     <div style="font-size: 15px; font-weight: bold; margin-bottom: 8px;">${item.title}</div>
-                    <div style="font-size: 12px; color: var(--text-sub);">${item.description.substring(0, 80)}...</div>
+                    <div style="font-size: 12px; color: var(--text-sub);">${cleanDescription}...</div>
                 `;
                 div.onclick = () => showNewsModal(item.title, item.content || item.description);
                 newsListEl.appendChild(div);
@@ -270,7 +292,7 @@ async function loadPersianNews() {
         newsListEl.innerHTML = `<div style="text-align:center; padding:20px;">خطا در دریافت اخبار</div>`;
     }
 }
-// تابع باز کردن مودال خبر (مشابه همان منطقِ openChart شما)
+
 function showNewsModal(title, content) {
     const modal = document.getElementById("news-modal");
     if (!modal) return;
@@ -280,20 +302,21 @@ function showNewsModal(title, content) {
     document.getElementById("news-content-modal").innerHTML = content;
 }
 
-// تابع بستن مودال خبر
 function closeNewsModal() {
     document.getElementById("news-modal").style.display = "none";
 }
 
-// [در پایان فایل، در بخش Initialization]
+// =====================
+// INITIALIZATION
+// =====================
 window.addEventListener("DOMContentLoaded", () => {
     loadTelegramUser();
     loadMarketAndPrices();
     loadExtraMetrics();
     loadAnalysisData();
-    loadPersianNews(); // این تابع قبلاً بود
+    loadPersianNews();
     
-    // کدهای زیر را اضافه کنید تا اخبار خودکار هر ۱ دقیقه آپدیت شود
-    setInterval(loadMarketAndPrices, 10000); // به‌روزرسانی قیمت‌ها هر 10 ثانیه
-    setInterval(loadPersianNews, 60000);     // به‌روزرسانی اخبار هر 60 ثانیه
+    // تنظیم فواصل زمانی بهینه برای جلوگیری از بلاک شدن IP و مصرف اینترنت کاربر
+    setInterval(loadMarketAndPrices, 15000); // به‌روزرسانی قیمت‌ها هر ۱۵ ثانیه
+    setInterval(loadPersianNews, 120000);    // به‌روزرسانی اخبار هر ۲ دقیقه
 });
