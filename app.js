@@ -2,14 +2,13 @@
 // GLOBAL CONFIG & TELEGRAM INIT
 // =====================
 const tg = window.Telegram?.WebApp;
-
 if (tg) {
     tg.ready();
     tg.expand();
 }
 
-// متغیر جهانی برای ذخیره لیست ۱۰۰ کوین جهت جستجو
 let allMarketCoins = [];
+let searchTimeout = null;
 
 // =====================
 // PAGE SWITCH SYSTEM
@@ -18,23 +17,17 @@ function showPage(pageId, element) {
     document.querySelectorAll('.page').forEach(page => {
         page.style.display = 'none';
     });
-
     const activePage = document.getElementById(pageId);
-    if (activePage) {
-        activePage.style.display = 'block';
-    }
+    if (activePage) activePage.style.display = 'block';
 
     document.querySelectorAll('.nav-item, .center-btn').forEach(item => {
         item.classList.remove('active');
     });
-
-    if (element) {
-        element.classList.add('active');
-    }
+    if (element) element.classList.add('active');
 }
 
 // =====================
-// LIVE PRICES & MARKET (POWERED BY BINANCE API)
+// LIVE PRICES & MARKET (BINANCE API)
 // =====================
 async function loadMarketAndPrices() {
     try {
@@ -74,31 +67,25 @@ async function loadMarketAndPrices() {
         const ethData = allMarketCoins.find(c => c.symbol === "ETH");
 
         if (btcData && document.getElementById("btc")) {
-            const btcPrice = parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
-            document.getElementById("btc").innerHTML = `₿ BTC: $${btcPrice}`;
+            document.getElementById("btc").innerHTML = `₿ BTC: $${parseFloat(btcData.priceUsd).toLocaleString()}`;
         }
         if (ethData && document.getElementById("eth")) {
-            const ethPrice = parseFloat(ethData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
-            document.getElementById("eth").innerHTML = `Ξ ETH: $${ethPrice}`;
+            document.getElementById("eth").innerHTML = `Ξ ETH: $${parseFloat(ethData.priceUsd).toLocaleString()}`;
         }
 
         const searchInput = document.getElementById("market-search");
-        if (searchInput && searchInput.value === "") {
+        if (searchInput && searchInput.value.trim() === "") {
             renderMarketList(allMarketCoins);
         }
-
     } catch (err) {
-        console.error("Binance API Network error:", err);
+        console.error("Binance API error:", err);
     }
 }
 
 function getCoinFullName(sym) {
     const names = {
         "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "BNB": "BNB", "XRP": "Ripple",
-        "ADA": "Cardano", "DOGE": "Dogecoin", "AVAX": "Avalanche", "SHIB": "Shiba Inu", "DOT": "Polkadot",
-        "LINK": "Chainlink", "MATIC": "Polygon", "TRX": "TRON", "UNI": "Uniswap", "LTC": "Litecoin",
-        "NEAR": "Near Protocol", "APT": "Aptos", "FIL": "Filecoin", "OP": "Optimism", "ARB": "Arbitrum",
-        "SUI": "Sui", "FTM": "Fantom", "ATOM": "Cosmos", "XLM": "Stellar", "ETC": "Ethereum Classic"
+        "ADA": "Cardano", "DOGE": "Dogecoin", "AVAX": "Avalanche", "SHIB": "Shiba Inu", "DOT": "Polkadot"
     };
     return names[sym] || sym;
 }
@@ -111,67 +98,42 @@ function renderMarketList(coins) {
     coins.forEach(coin => {
         const price = parseFloat(coin.priceUsd);
         const change = parseFloat(coin.changePercent24Hr);
-        
-        let formattedPrice = "";
-        if (price > 1) {
-            formattedPrice = price.toLocaleString(undefined, {maximumFractionDigits: 2});
-        } else if (price > 0.0001) {
-            formattedPrice = price.toFixed(4);
-        } else {
-            formattedPrice = price.toFixed(6);
-        }
-        
+        const formattedPrice = price > 1 ? price.toLocaleString() : price.toFixed(4);
         const changeColor = change >= 0 ? "#00ff99" : "#ff4a5a";
-        const changeSign = change >= 0 ? "+" : "";
 
-        const iconUrl = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${coin.symbol.toLowerCase()}.png`;
-
-        // انتقال نام صرافی فعال به دکمه کلیک جهت لود دقیق چارت
         marketHtml += `
-        <div class="coin-row" onclick="openChart('${coin.symbol}', '${coin.exchange || ''}')">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div class="coin-icon-container" style="width: 35px; height: 35px; display: flex; align-items: center; justify-content: center;">
-                    <img src="${iconUrl}" 
-                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" 
-                         style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
-                    <div class="fake-icon" style="display: none; width: 35px; height: 35px; border-radius: 50%; background: linear-gradient(135deg, #f7931a, #ff4a5a); color: white; font-weight: bold; font-size: 13px; align-items: center; justify-content: center; font-family: sans-serif;">
-                        ${coin.symbol.substring(0, 2)}
-                    </div>
-                </div>
-                <div class="coin-info">
-                    <span class="coin-symbol">${coin.symbol}</span>
-                    <span class="coin-name">${coin.name}</span>
-                </div>
+        <div class="coin-row" onclick="openChart('${coin.symbol}', '${coin.exchange || ''}')" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #1a2235; cursor: pointer;">
+            <div>
+                <span class="coin-symbol" style="font-weight: bold; color: #fff;">${coin.symbol}</span>
+                <span class="coin-name" style="font-size: 12px; color: #8f98aa; margin-left: 8px;">${coin.name}</span>
             </div>
             <div style="text-align: right;">
-                <div style="font-weight: 700; font-family: monospace; font-size: 16px; color:#fff;">$${formattedPrice}</div>
-                <div style="color: ${changeColor}; font-size: 12px; margin-top: 4px; font-family: monospace;">
-                    ${changeSign}${change.toFixed(2)}%
-                </div>
+                <div style="color: #fff; font-weight: bold;">$${formattedPrice}</div>
+                <div style="color: ${changeColor}; font-size: 12px;">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</div>
             </div>
         </div>`;
     });
-
     marketListEl.innerHTML = marketHtml;
 }
 
 // =====================
-// MULTI-EXCHANGE ULTRA SEARCH (BINANCE -> BYBIT -> OKX -> GATE -> KUCOIN)
+// GUARANTEED SEARCH FUNCTION
 // =====================
-let searchTimeout = null;
-
 async function filterMarket() {
-    const query = document.getElementById("market-search").value.trim().toUpperCase();
+    const searchInput = document.getElementById("market-search");
+    if (!searchInput) return;
+
+    const query = searchInput.value.trim().toUpperCase();
     
+    // اگر کادر جستجو خالی بود، لیست اصلی را برگردان
     if (!query) {
         renderMarketList(allMarketCoins);
         return;
     }
 
-    // ۱. سرچ محلی سریع در ۱۰۰ ارز برتر
+    // ۱. سرچ فوری در لیست ۱۰۰ ارز برتر داخلی
     const localFiltered = allMarketCoins.filter(coin => 
-        coin.symbol.toUpperCase().includes(query) || 
-        coin.name.toUpperCase().includes(query)
+        coin.symbol.includes(query) || coin.name.toUpperCase().includes(query)
     );
 
     if (localFiltered.length > 0) {
@@ -179,74 +141,73 @@ async function filterMarket() {
         return;
     }
 
+    // نمایش وضعیت در حال جستجو
+    document.getElementById("market-list").innerHTML = `
+        <div style="text-align: center; color: #f7931a; margin-top: 30px; font-size: 14px;">
+            🔍 در حال جستجوی جهانی ارز "${query}"...
+        </div>`;
+
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(async () => {
         try {
-            // ۲. اجرای استعلام هم‌زمان و موازی از ۵ صرافی بزرگ برای پیدا کردن بهترین بازار
-            const results = await Promise.allSettled([
-                fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`).then(r => r.ok ? r.json() : null),
-                fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${query}USDT`).then(r => r.json()),
-                fetch(`https://www.okx.com/api/v5/market/ticker?instId=${query}-USDT`).then(r => r.json()),
-                fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${query}_USDT`).then(r => r.json()),
-                fetch(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${query}-USDT`).then(r => r.json())
-            ]);
+            // ۲. بررسی صرافی بایننس
+            try {
+                const r = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`);
+                if (r.ok) {
+                    const data = await r.json();
+                    renderSingleSearchCoin(query, data.lastPrice, data.priceChangePercent, "BINANCE");
+                    return;
+                }
+            } catch(e){}
 
-            // بررسی دیتای بایننس (Binance)
-            if (results[0].status === 'fulfilled' && results[0].value) {
-                const data = results[0].value;
-                renderSingleSearchCoin(query, data.lastPrice, data.priceChangePercent, "BINANCE");
-                return;
-            }
+            // ۳. بررسی صرافی بای‌بیت (بهترین گزینه برای ارزهایی مثل HYPE)
+            try {
+                const r = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${query}USDT`);
+                const data = await r.json();
+                if (data?.result?.list?.length > 0) {
+                    const ticker = data.result.list[0];
+                    renderSingleSearchCoin(query, ticker.lastPrice, parseFloat(ticker.price24hPcnt) * 100, "BYBIT");
+                    return;
+                }
+            } catch(e){}
 
-            // بررسی دیتای بای‌بیت (Bybit)
-            if (results[1].status === 'fulfilled' && results[1].value?.result?.list?.length > 0) {
-                const data = results[1].value.result.list[0];
-                renderSingleSearchCoin(query, data.lastPrice, parseFloat(data.price24hPcnt) * 100, "BYBIT");
-                return;
-            }
+            // ۴. بررسی صرافی اوکی‌اکس
+            try {
+                const r = await fetch(`https://www.okx.com/api/v5/market/ticker?instId=${query}-USDT`);
+                const data = await r.json();
+                if (data?.data?.length > 0) {
+                    const ticker = data.data[0];
+                    renderSingleSearchCoin(query, ticker.last, 0, "OKX");
+                    return;
+                }
+            } catch(e){}
 
-            // بررسی دیتای اوکی‌اکس (OKX)
-            if (results[2].status === 'fulfilled' && results[2].value?.data?.length > 0) {
-                const data = results[2].value.data[0];
-                const openPrice = parseFloat(data.sodUtc0 || data.open24h);
-                const lastPrice = parseFloat(data.last);
-                const change = openPrice ? ((lastPrice - openPrice) / openPrice) * 100 : 0;
-                renderSingleSearchCoin(query, data.last, change, "OKX");
-                return;
-            }
-
-            // بررسی دیتای گیت (Gate.io)
-            if (results[3].status === 'fulfilled' && Array.isArray(results[3].value) && results[3].value.length > 0) {
-                const data = results[3].value[0];
-                renderSingleSearchCoin(query, data.last, data.change_percentage, "GATEIO");
-                return;
-            }
-
-            // بررسی دیتای کوکوین (KuCoin)
-            if (results[4].status === 'fulfilled' && results[4].value?.data) {
-                const data = results[4].value.data;
-                // کوکوین درصد ۲۴ ساعته را در متد لول ۱ مستقیم نمیدهد، از صفر یا تقریب استفاده میکنیم
-                renderSingleSearchCoin(query, data.price, 0, "KUCOIN");
-                return;
-            }
+            // ۵. بررسی صرافی گیت
+            try {
+                const r = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${query}_USDT`);
+                const data = await r.json();
+                if (Array.isArray(data) && data.length > 0) {
+                    renderSingleSearchCoin(query, data[0].last, data[0].change_percentage, "GATEIO");
+                    return;
+                }
+            } catch(e){}
 
             // اگر در هیچ صرافی پیدا نشد
             document.getElementById("market-list").innerHTML = `
-                <div style="text-align: center; color: #8f98aa; margin-top: 30px; font-size: 14px;">
-                    ❌ ارز "${query}" در هیچ‌کدام از صرافی‌های برتر یافت نشد!
+                <div style="text-align: center; color: #ff4a5a; margin-top: 30px; font-size: 14px;">
+                    ❌ ارز "${query}" در هیچ صرافی معتبری پیدا نشد.
                 </div>`;
 
         } catch (err) {
-            console.error("Global Multi-Exchange Search Error:", err);
+            console.error("Global Search Error:", err);
         }
-    }, 500);
+    }, 600);
 }
 
-// تابع کمکی برای رندر کردن تک ارز پیدا شده
 function renderSingleSearchCoin(symbol, price, change, exchangeName) {
     const searchedCoin = [{
         symbol: symbol,
-        name: `${symbol} (${exchangeName})`,
+        name: `${symbol} (${exchangeName} Market)`,
         priceUsd: price,
         changePercent24Hr: String(change),
         exchange: exchangeName
@@ -255,24 +216,17 @@ function renderSingleSearchCoin(symbol, price, change, exchangeName) {
 }
 
 // =====================
-// TRADINGVIEW CHART SYSTEM (DYNAMIC EXCHANGE ROUTER)
+// CHART & OTHERS (NO CHANGE)
 // =====================
 function openChart(symbol, exchange) {
     document.getElementById("chart-modal").style.display = "flex";
     document.getElementById("modal-coin-title").innerText = `${symbol} / USDT Chart`;
 
-    // تنظیم پیش‌فرض روی بایننس
     let tvSymbol = `BINANCE:${symbol}USDT`;
-    
-    // هماهنگ‌سازی هوشمند صرافی صادرکننده قیمت با چارت تریدینگ‌وی
     if (exchange === "BYBIT") tvSymbol = `BYBIT:${symbol}USDT`;
     else if (exchange === "OKX") tvSymbol = `OKX:${symbol}USDT`;
     else if (exchange === "GATEIO") tvSymbol = `GATE:${symbol}USDT`;
-    else if (exchange === "KUCOIN") tvSymbol = `KUCOIN:${symbol}USDT`;
-    else if (!exchange && symbol !== "BTC" && symbol !== "ETH") {
-        // اگر صرافی مشخص نبود، به تریدینگ‌وی اجازه بده خودش بگردد
-        tvSymbol = `${symbol}USDT`;
-    }
+    else if (symbol !== "BTC" && symbol !== "ETH") tvSymbol = `${symbol}USDT`;
 
     document.getElementById("tradingview-widget-container").innerHTML = "";
 
@@ -308,31 +262,23 @@ function createTradingViewWidget(tvSymbol) {
 
 function closeChart() {
     document.getElementById("chart-modal").style.display = "none";
-    document.getElementById("tradingview-widget-container").innerHTML = "";
 }
 
-// =====================
-// NEWS SYSTEM (FARSI TRANSLATED FROM PYTHON)
-// =====================
 async function loadCryptoNews() {
     const newsListEl = document.getElementById("news-list");
     if (!newsListEl) return;
-
     try {
-        const YOUR_SERVER_URL = "http://127.0.0.1:8000"; 
-        const response = await fetch(`${YOUR_SERVER_URL}/api/farsi-news`);
+        const response = await fetch("http://127.0.0.1:8000/api/farsi-news");
         const result = await response.json();
-
         if (result.status === "success" && result.data.length > 0) {
             let newsHtml = "";
-
             result.data.forEach(article => {
                 newsHtml += `
-                <div class="card" style="min-height: auto; padding: 15px; margin-bottom: 12px; cursor: pointer; direction: rtl;" onclick="window.open('${article.url}', '_blank')">
+                <div class="card" style="padding: 15px; margin-bottom: 12px; direction: rtl;" onclick="window.open('${article.url}', '_blank')">
                     <div style="display: flex; gap: 12px; align-items: center; flex-direction: row-reverse;">
                         <img src="${article.image}" style="width: 55px; height: 55px; border-radius: 12px; object-fit: cover;">
                         <div style="flex: 1; text-align: right;">
-                            <div style="font-size: 14px; font-weight: bold; line-height: 1.5; color: #fff; font-family: Tahoma, sans-serif;">${article.title}</div>
+                            <div style="font-size: 14px; font-weight: bold; color: #fff;">${article.title}</div>
                             <div style="font-size: 11px; color: #8f98aa; margin-top: 6px;">📰 منبع: ${article.source}</div>
                         </div>
                     </div>
@@ -340,98 +286,38 @@ async function loadCryptoNews() {
             });
             newsListEl.innerHTML = newsHtml;
         }
-    } catch (error) {
-        console.error("Error fetching Farsi news:", error);
-        newsListEl.innerHTML = `<div class="card" style="text-align:center;">خطا در بارگذاری اخبار فارسی.</div>`;
+    } catch (e) {
+        newsListEl.innerHTML = `<div class="card" style="text-align:center; color:#8f98aa;">خطا در بارگذاری اخبار.</div>`;
     }
 }
 
-// =====================
-// ANALYSIS SYSTEM (LIVE FROM PYTHON DATABASE)
-// =====================
 async function loadAnalysisData() {
     const analysisListEl = document.getElementById("analysis-list");
     if (!analysisListEl) return;
-
     try {
-        const YOUR_SERVER_URL = "http://127.0.0.1:8000"; 
-        const response = await fetch(`${YOUR_SERVER_URL}/api/analysis`);
+        const response = await fetch("http://127.0.0.1:8000/api/analysis");
         const result = await response.json();
-
         if (result.status === "success" && result.data.length > 0) {
             let analysisHtml = "";
-
             result.data.forEach(item => {
                 analysisHtml += `
-                <div class="card" style="min-height: auto; padding: 18px; margin-bottom: 15px; direction: rtl;">
-                    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #f7931a; margin-bottom: 10px; font-weight: bold;">
+                <div class="card" style="padding: 18px; margin-bottom: 15px; direction: rtl; text-align:right;">
+                    <div style="display: flex; justify-content: space-between; color: #f7931a; margin-bottom: 10px; font-weight: bold;">
                         <span>🎯 ${item.title}</span>
                         <span style="color: #8f98aa; font-weight: normal;">${item.date}</span>
                     </div>
-                    <p style="font-size: 14px; line-height: 1.7; margin: 0; color: #e1e4ea; text-align: right; white-space: pre-line; font-family: Tahoma, sans-serif;">
-                        ${item.text}
-                    </p>
-                    <div style="margin-top: 12px; font-size: 12px; color: #00ff99; font-weight: bold; text-align: right;">${item.tag}</div>
+                    <p style="color: #e1e4ea; font-size: 14px; white-space: pre-line;">${item.text}</p>
+                    <div style="color: #00ff99; font-weight: bold; margin-top:10px;">${item.tag}</div>
                 </div>`;
             });
             analysisListEl.innerHTML = analysisHtml;
-        } else {
-            analysisListEl.innerHTML = `
-                <div class="card" style="text-align: center; color: #8f98aa;">
-                    📥 هنوز تحلیلی منتشر نشده است.
-                </div>`;
         }
-    } catch (error) {
-        console.error("Error fetching analysis:", error);
-        analysisListEl.innerHTML = `<div class="card" style="text-align: center;">خطا در دریافت تحلیل‌ها.</div>`;
-    }
+    } catch (e) {}
 }
 
-// =====================
-// TELEGRAM USER DATA
-// =====================
-function loadTelegramUser() {
-    const nameEl = document.getElementById("user-name");
-    const idEl = document.getElementById("user-id");
-    const usernameEl = document.getElementById("user-username");
-    const imgEl = document.getElementById("profile-img");
-
-    const user = tg?.initDataUnsafe?.user;
-
-    if (!tg || !user) {
-        if (nameEl) nameEl.innerText = "Amir (Guest)";
-        if (idEl) idEl.innerText = "987654321";
-        if (usernameEl) usernameEl.innerText = "@amir_crypto";
-        if (imgEl) imgEl.src = "default.png";
-        return;
-    }
-
-    if (nameEl) nameEl.innerText = (user.first_name || "") + " " + (user.last_name || "");
-    if (idEl) idEl.innerText = user.id || "Unknown ID";
-    if (usernameEl) {
-        usernameEl.innerText = user.username ? "@" + user.username : "no_username";
-    }
-
-    if (imgEl && user.username) {
-        imgEl.src = `https://t.me/i/userpic/320/${user.username}.jpg`;
-    }
-}
-
-// =====================
-// INITIALIZATION
-// =====================
 window.addEventListener("DOMContentLoaded", () => {
-    loadTelegramUser();
     loadMarketAndPrices();
     loadCryptoNews();
     loadAnalysisData();
-
-    const searchInput = document.getElementById("market-search");
-    if (searchInput) {
-        searchInput.addEventListener("input", filterMarket);
-    }
-
-    setInterval(loadMarketAndPrices, 5000);
-    setInterval(loadCryptoNews, 300000);
-    setInterval(loadAnalysisData, 15000);
+    setInterval(loadMarketAndPrices, 8000);
 });

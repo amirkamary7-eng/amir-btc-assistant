@@ -1,141 +1,169 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fa">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Amir BTC Assistant</title>
-    <link rel="stylesheet" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Crypto Mini-App</title>
+    <!-- استایل‌های پایه برنامه -->
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0c0f17;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .page {
+            display: none;
+            padding-bottom: 80px;
+        }
+        .page.active {
+            display: block;
+        }
+        .card {
+            background: #121622;
+            border: 1px solid #1a2235;
+            border-radius: 12px;
+            margin: 10px 15px;
+            padding: 15px;
+        }
+        .coin-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 15px;
+            border-bottom: 1px solid #1a2235;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .coin-row:hover {
+            background: #161c2e;
+        }
+        /* استایل مودال چارت */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(6, 9, 15, 0.95);
+            z-index: 1000;
+            flex-direction: column;
+        }
+        /* منوی ناوبری پایین صفحه */
+        .navbar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 65px;
+            background: #121622;
+            border-top: 1px solid #1a2235;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            z-index: 999;
+        }
+        .nav-item {
+            color: #8f98aa;
+            font-size: 12px;
+            cursor: pointer;
+            text-align: center;
+            flex: 1;
+        }
+        .nav-item.active {
+            color: #f7931a;
+        }
+    </style>
+    <!-- بارگذاری اسکریپت وب‌اپ تلگرام -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- بارگذاری اسکریپت تریدینگ‌وی -->
     <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
 
-<div class="container">
-
-    <div id="home-page" class="page">
-        <div class="app-header">
-            <div class="header-title">
-                <span class="header-emoji">₿</span> Amir BTC
-            </div>
-            <div class="header-subtitle">Crypto Dashboard</div>
+    <!-- ========================================== -->
+    <!-- ۱. صفحه اصلی مارکت و قیمت‌های زنده -->
+    <!-- ========================================== -->
+    <div id="market-page" class="page active">
+        <!-- هدر قیمت‌های شاخص -->
+        <div style="display: flex; justify-content: space-around; background: #121622; padding: 12px; font-weight: bold; font-size: 13px; border-bottom: 1px solid #1a2235;">
+            <span id="btc" style="color: #f7931a;">₿ BTC: بارگذاری...</span>
+            <span id="eth" style="color: #627eea;">Ξ ETH: بارگذاری...</span>
         </div>
 
-        <div class="card">
-            <div class="card-title">Bitcoin</div>
-            <div class="card-price" id="btc">Loading...</div>
+        <!-- باکس فوق‌پیشرفته جستجوی لایو صرافی‌ها -->
+        <div style="padding: 15px 15px 5px 15px;">
+            <input type="text" 
+                   id="market-search" 
+                   oninput="filterMarket()" 
+                   placeholder="جستجوی سریع ارزها (مثلاً BTC, HYPE)..." 
+                   style="width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #1a2235; background: #121622; color: #fff; text-align: center; font-size: 14px; box-sizing: border-box; outline: none;">
         </div>
 
-        <div class="card">
-            <div class="card-title">Ethereum</div>
-            <div class="card-price" id="eth">Loading...</div>
-        </div>
-
-        <div class="card">🔥 Fear & Greed Index</div>
-        <div class="card">📰 Top Market News</div>
-    </div>
-
-    <div id="market-page" class="page" style="display:none">
-        <div class="app-header">
-            <div class="header-title">
-                <span class="header-emoji">📈</span> Market
-            </div>
-            <div class="header-subtitle">Top 100 Crypto Prices</div>
-        </div>
-        
-        <div class="search-container">
-            <input type="text" id="market-search" placeholder="Search coin (e.g. BTC, SOL)..." oninput="filterMarket()">
-        </div>
-
-        <div id="market-list"></div>
-    </div>
-
-    <div id="analysis-page" class="page" style="display:none">
-        <div class="app-header">
-            <div class="header-title">
-                <span class="header-emoji">₿</span> Analysis
-            </div>
-            <div class="header-subtitle">Market Analysis</div>
-        </div>
-        <div id="analysis-list">
-            <div class="card">No Analysis Yet</div>
+        <!-- لیست ارزهای دیجیتال -->
+        <div id="market-list" style="margin-top: 10px;">
+            <!-- ارزها به صورت پویا توسط جاوااسکریپت در اینجا رندر می‌شوند -->
         </div>
     </div>
 
-    <div id="news-page" class="page" style="display:none">
-        <div class="app-header">
-            <div class="header-title">
-                <span class="header-emoji">📰</span> News
-            </div>
-            <div class="header-subtitle">Latest Crypto News</div>
-        </div>
-        <div id="news-list">
-            <div class="card">Loading News...</div>
-        </div>
+    <!-- ========================================== -->
+    <!-- ۲. صفحه اخبار ارزهای دیجیتال -->
+    <!-- ========================================== -->
+    <div id="news-page" class="page">
+        <div style="padding: 15px 15px 0 15px; text-align: right; font-size: 18px; font-weight: bold;">📰 آخرین اخبار بازار</div>
+        <div id="news-list" style="margin-top: 10px;"></div>
     </div>
 
-    <div id="profile-page" class="page" style="display:none">
-        <div class="app-header">
-            <div class="header-title">
-                <span class="header-emoji">👤</span> Profile
-            </div>
-            <div class="header-subtitle">User Information</div>
-        </div>
+    <!-- ========================================== -->
+    <!-- ۳. صفحه تحلیل‌های تکنیکال و فاندامنتال -->
+    <!-- ========================================== -->
+    <div id="analysis-page" class="page">
+        <div style="padding: 15px 15px 0 15px; text-align: right; font-size: 18px; font-weight: bold;">🎯 تحلیل‌های اختصاصی</div>
+        <div id="analysis-list" style="margin-top: 10px;"></div>
+    </div>
 
-        <div class="profile-box">
-            <img id="profile-img" class="profile-img" src="default.png" alt="Profile">
-
-            <div id="user-name" class="profile-name">Loading...</div>
-
-            <div class="card small-card">
-                <div class="card-title">Username</div>
-                <div id="user-username">@loading</div>
-            </div>
-
-            <div class="card small-card">
-                <div class="card-title">Telegram ID</div>
-                <div id="user-id">Loading...</div>
+    <!-- ========================================== -->
+    <!-- ۴. صفحه پروفایل کاربر تلگرام -->
+    <!-- ========================================== -->
+    <div id="profile-page" class="page">
+        <div class="card" style="text-align: center; margin-top: 30px; padding: 25px 15px;">
+            <img id="profile-img" src="" onerror="this.src='https://img.icons8.com/clouds/100/000000/user.png'" style="width: 90px; height: 90px; border-radius: 50%; border: 3px solid #f7931a; object-fit: cover;">
+            <h3 id="user-name" style="margin: 15px 0 5px 0; font-size: 18px;">کاربر مهمان</h3>
+            <p id="user-username" style="margin: 0; color: #8f98aa; font-size: 14px;">@guest</p>
+            <div style="margin-top: 20px; border-top: 1px solid #1a2235; padding-top: 15px; font-size: 13px; color: #8f98aa; text-align: left; direction: ltr;">
+                ID: <span id="user-id" style="color: #fff; font-weight: bold;">000000000</span>
             </div>
         </div>
     </div>
 
-</div>
-
-<div id="chart-modal" class="modal" style="display: none;">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span id="modal-coin-title">Chart</span>
-            <button class="close-btn" onclick="closeChart()">✕</button>
+    <!-- ========================================== -->
+    <!-- سیستم پاپ‌آپ (مودال) نمایش چارت تریدینگ‌وی -->
+    <!-- ========================================== -->
+    <div id="chart-modal" class="modal">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: #121622; border-bottom: 1px solid #1a2235;">
+            <button onclick="closeChart()" style="background: #ff4a5a; border: none; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; cursor: pointer;">بستن ✕</button>
+            <span id="modal-coin-title" style="font-weight: bold; font-size: 15px;">نمودار قیمت</span>
         </div>
-        <div id="tradingview-widget-container"></div>
-    </div>
-</div>
-
-<div class="bottom-nav">
-    <div class="nav-item active" onclick="showPage('home-page', this)">
-        <div>🏠</div>
-        <div>Home</div>
+        <div id="tradingview-widget-container" style="flex: 1; width: 100%;">
+            <!-- ویجت چارت لوپ در این قسمت ساخته می‌شود -->
+        </div>
     </div>
 
-    <div class="nav-item" onclick="showPage('market-page', this)">
-        <div>📈</div>
-        <div>Market</div>
+    <!-- ========================================== -->
+    <!-- منوی سیستم ناوبری (تغییر صفحات) -->
+    <!-- ========================================== -->
+    <div class="navbar">
+        <div class="nav-item active" onclick="showPage('market-page', this)">📊 مارکت</div>
+        <div class="nav-item" onclick="showPage('news-page', this)">📰 اخبار</div>
+        <div class="nav-item" onclick="showPage('analysis-page', this)">🎯 تحلیل‌ها</div>
+        <div class="nav-item" onclick="showPage('profile-page', this)">👤 پروفایل</div>
     </div>
 
-    <div class="center-btn" onclick="showPage('analysis-page', this)">
-        ₿
-    </div>
-
-    <div class="nav-item" onclick="showPage('news-page', this)">
-        <div>📰</div>
-        <div>News</div>
-    </div>
-
-    <div class="nav-item" onclick="showPage('profile-page', this)">
-        <div>👤</div>
-        <div>Profile</div>
-    </div>
-</div>
-
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="app.js"></script>
+    <!-- بارگذاری کدهای منطقی برنامه -->
+    <script src="app.js"></script>
 </body>
 </html>
