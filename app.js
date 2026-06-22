@@ -95,7 +95,7 @@ function getCoinFullName(sym) {
     return names[sym] || sym;
 }
 
-// همان رندر زیبا و جذاب قبلی شما با حفظ آیکون و استایل اختصاصی کریپتو
+// برگرداندن ۱۰۰٪ دقیقِ تگ‌ها و ساختار گرافیکی لوکس اولیه شما
 function renderMarketList(coins) {
     const marketListEl = document.getElementById("market-list");
     if (!marketListEl) return;
@@ -116,6 +116,7 @@ function renderMarketList(coins) {
         
         const changeColor = change >= 0 ? "#00ff99" : "#ff4a5a";
         const changeSign = change >= 0 ? "+" : "";
+
         const iconUrl = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${coin.symbol.toLowerCase()}.png`;
 
         marketHtml += `
@@ -142,6 +143,7 @@ function renderMarketList(coins) {
             </div>
         </div>`;
     });
+
     marketListEl.innerHTML = marketHtml;
 }
 
@@ -186,7 +188,7 @@ async function filterMarket() {
                 }
             } catch(e){}
 
-            // ۲. صرافی بای‌بیت (بهترین جا برای ارزهای جدید مثل HYPE)
+            // ۲. صرافی بای‌بیت (ارزهای جدید مثل HYPE)
             try {
                 const r = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${query}USDT`);
                 const data = await r.json();
