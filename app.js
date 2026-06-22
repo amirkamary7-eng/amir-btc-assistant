@@ -8,7 +8,7 @@ if (tg) {
 }
 
 // 🔴 آیدی عمومی کانال تلگرامت را اینجا بنویس (بدون علامت @)
-const MY_TELEGRAM_CHANNEL = "YOUR_CHANNEL_USERNAME"; 
+const MY_TELEGRAM_CHANNEL = "Amir_btc_2024"; 
 
 let allMarketCoins = [];
 let searchTimeout = null;
