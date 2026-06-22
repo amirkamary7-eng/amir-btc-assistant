@@ -166,7 +166,7 @@ body::before {
     backdrop-filter: blur(15px);
     -webkit-backdrop-filter: blur(15px);
     z-index: 10000;
-    display: none; /* اصلاح شد: پیش‌فرض پنهان باشد و با کلاس active باز شود */
+    display: none;
     justify-content: center;
     align-items: center;
 }
@@ -190,21 +190,80 @@ body::before {
     border-color: var(--primary);
 }
 
+/* =======================
+   RESPONSIVE NEWS SECTION
+======================= */
+#news-page {
+    width: 100%;
+    max-width: 600px; /* استانداردسازی برای دسکتاپ و تبلت */
+    margin: 0 auto;
+    padding: 15px 0 100px 0; /* فاصله ایمن تا نوار ابزار پایین */
+    box-sizing: border-box;
+}
+
+#news-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px; /* فاصله یکنواخت عمودی بدون شکستگی المان‌ها */
+    padding: 0 16px; /* پدینگ کناری ثابت جهت هماهنگی با لبه نمایشگر */
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .news-card {
-    background: rgba(18, 22, 34, 0.8);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 16px;
+    background: rgba(18, 22, 34, 0.7);
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
     padding: 16px;
-    margin: 0 15px 12px 15px;
+    margin: 0; /* مدیریت موقعیت توسط کانتینر اصلی صورت می‌گیرد */
+    width: 100%;
+    box-sizing: border-box;
+    text-align: right;
+    direction: rtl;
+    transition: transform 0.2s ease, border-color 0.2s ease;
     cursor: pointer;
-    transition: transform 0.2s;
 }
 
 .news-card:active {
     transform: scale(0.98);
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--primary);
+}
+
+/* منظم‌سازی ساختار متن داخل کارت‌های خبر */
+.news-card h3 {
+    margin: 0 0 6px 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* کوتاه کردن خودکار عناوین طولانی به ۲ خط */
+    line-clamp: 2;         /* رفع هشدار VS Code و استانداردسازی وب */
+    -webkit-box-orient: vertical;  
+    overflow: hidden;
+}
+
+.news-card p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 3; /* کوتاه کردن بدنه خبر طولانی به ۳ خط برای حفظ توازن کادر */
+    line-clamp: 3;         /* رفع هشدار VS Code و استانداردسازی وب */
+    -webkit-box-orient: vertical;  
+    overflow: hidden;
+}
+
+.news-date {
+    display: block;
+    font-size: 11px;
+    color: var(--primary);
+    margin-top: 10px;
+    font-family: monospace;
 }
 
 /* =======================
