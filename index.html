@@ -326,10 +326,18 @@
             <span id="modal-coin-title" style="font-weight: bold; font-size: 16px; color: var(--text-main);">CHART</span>
         </div>
         <div id="tradingview-widget-container" style="flex: 1; width: 100%;"></div>
+        <!-- مودال نمایش متن خبر -->
+<div id="news-modal" class="modal" style="display:none; padding: 20px;">
+    <div style="background: var(--card-bg); height: 90%; border-radius: 20px; padding: 20px; overflow-y: auto; border: 1px solid var(--glass-border);">
+        <button onclick="document.getElementById('news-modal').style.display='none'" style="background: var(--red); border:none; color:white; padding: 5px 15px; border-radius: 10px; cursor:pointer;">بستن</button>
+        <h2 id="news-title-modal" style="color: var(--primary); margin-top: 15px;"></h2>
+        <div id="news-content-modal" style="color: #fff; line-height: 1.8; font-size: 15px;"></div>
+    </div>
+</div>s
     </div>
 
     <div class="navbar">
-        <div id="nav-market" class="nav-item" onclick="showPage('market-page', this)">
+        <div id="nav-market" class="nav-item" onclick="Page('market-page', this)">
             <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
             <span>دیدبان</span>
         </div>

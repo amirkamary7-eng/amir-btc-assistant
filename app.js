@@ -243,10 +243,10 @@ function openChart(symbol, exchange) {
 }
 
 function closeChart() { document.getElementById("chart-modal").style.display = "none"; }
+// [تمام توابع قبلی شما از بالا تا قبل از بخش News دست نخورده باقی می‌ماند]
+// ... (کد تلگرام، مارکت، اکسترا متریکس، فیلتر و ...) ...
 
-// =====================
-// NEWS SYSTEM (NEW ADDITION)
-// =====================
+// این بخش اخبار شماست که با استایل مودالِ نمودار شما یکی شده است:
 async function loadPersianNews() {
     const newsListEl = document.getElementById("news-list");
     if (!newsListEl) return;
@@ -273,7 +273,8 @@ async function loadPersianNews() {
                     <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">${item.title}</div>
                     <div style="font-size: 12px; color: var(--text-sub);">${item.description.substring(0, 100)}...</div>
                 `;
-                div.onclick = () => showNewsModal(item.title, item.description, item.content);
+                // تغییر در اینجا: فراخوانی تابع نمایش مودال خبر
+                div.onclick = () => showNewsModal(item.title, item.content || item.description);
                 newsListEl.appendChild(div);
             });
         }
@@ -282,21 +283,22 @@ async function loadPersianNews() {
     }
 }
 
-function showNewsModal(title, description, content) {
+// تابع باز کردن مودال خبر (مشابه همان منطقِ openChart شما)
+function showNewsModal(title, content) {
     const modal = document.getElementById("news-modal");
-    const titleEl = document.getElementById("news-title-modal");
-    const contentEl = document.getElementById("news-content-modal");
-
-    if (modal && titleEl && contentEl) {
-        titleEl.innerText = title;
-        contentEl.innerHTML = content || description; 
-        modal.style.display = "flex";
-    }
+    if (!modal) return;
+    
+    modal.style.display = "flex";
+    document.getElementById("news-title-modal").innerText = title;
+    document.getElementById("news-content-modal").innerHTML = content;
 }
 
-// =====================
-// INITIALIZATION
-// =====================
+// تابع بستن مودال خبر
+function closeNewsModal() {
+    document.getElementById("news-modal").style.display = "none";
+}
+
+// [در پایان فایل، در بخش Initialization]
 window.addEventListener("DOMContentLoaded", () => {
     loadTelegramUser();
     loadMarketAndPrices();
