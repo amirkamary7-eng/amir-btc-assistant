@@ -37,3 +37,35 @@ function showPage(pageId, element){
         element.classList.add('active');
     }
 }
+
+async function loadMarket() {
+
+    const coins = [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "BNBUSDT"
+    ];
+
+    let html = "";
+
+    for(const coin of coins){
+
+        const response = await fetch(
+            `https://api.binance.com/api/v3/ticker/price?symbol=${coin}`
+        );
+
+        const data = await response.json();
+
+        html += `
+        <div class="card">
+            ${coin.replace("USDT","")}
+            <br>
+            $${Number(data.price).toLocaleString()}
+        </div>`;
+    }
+
+    document.getElementById("market-list").innerHTML = html;
+}
+
+loadMarket();
