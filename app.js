@@ -77,6 +77,7 @@ function loadTelegramUser() {
     const nameEl = document.getElementById("user-name");
     const idEl = document.getElementById("user-id");
     const usernameEl = document.getElementById("user-username");
+    const imgEl = document.getElementById("profile-img");
 
     if (!tg) {
         nameEl.innerText = "Not in Telegram";
@@ -95,9 +96,19 @@ function loadTelegramUser() {
         return;
     }
 
+    // اسم
     nameEl.innerText = user.first_name || "-";
-    idEl.innerText = "ID: " + user.id;
+
+    // یوزرنیم
     usernameEl.innerText = "@" + (user.username || "no_username");
+
+    // ID
+    idEl.innerText = user.id || "-";
+
+    // عکس پروفایل (روش مطمئن)
+    if (user.username) {
+        imgEl.src = `https://t.me/i/userpic/320/${user.username}.jpg`;
+    }
 }
 
 window.addEventListener("load", loadTelegramUser);
