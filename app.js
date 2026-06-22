@@ -232,29 +232,21 @@ function loadTelegramUser() {
         if (imgEl) imgEl.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
     }
 }
-
 function loadAnalysisData() {
     const container = document.getElementById("telegram-feed-container");
     if (!container) return;
 
+    // پاک کردن محتوای قبلی برای جلوگیری از تکرار
     container.innerHTML = "";
+
     const script = document.createElement("script");
     script.src = "https://telegram.org/js/telegram-widget.js?22";
-    script.setAttribute("data-telegram-discussion", MY_TELEGRAM_CHANNEL);
-    script.setAttribute("data-comments-limit", "0");
+    script.setAttribute("data-telegram-discussion", "amir_btc_a"); // آیدی کانال شما
+    script.setAttribute("data-comments-limit", "5");
     script.setAttribute("data-dark", "1");
     script.setAttribute("data-width", "100%");
-
-    const wrapper = document.createElement("div");
-    wrapper.style.borderRadius = "16px";
-    wrapper.style.overflow = "hidden";
-    wrapper.style.border = "1px solid var(--glass-border)";
-    wrapper.appendChild(script);
-    container.appendChild(wrapper);
-
-    // تغییر عنوان بنر خانه متناسب با کانال شما
-    const titleEl = document.getElementById("dash-last-analysis-title");
-    if(titleEl) titleEl.innerText = `مشاهده جدیدترین تحلیل‌ها در کانال @${MY_TELEGRAM_CHANNEL}`;
+    
+    container.appendChild(script);
 }
 
 // =====================
