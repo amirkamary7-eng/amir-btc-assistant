@@ -34,40 +34,82 @@ function showPage(pageId, element) {
 }
 
 // =====================
-// LIVE PRICES & MARKET (WITH OFFICIAL ICONS)
+// LIVE PRICES & MARKET (POWERED BY BINANCE API)
 // =====================
 async function loadMarketAndPrices() {
     try {
-        // دریافت داده ۱۰۰ ارز برتر از CoinCap
-        const response = await fetch("https://api.coincap.io/v2/assets?limit=100");
-        const result = await response.json();
+        // دریافت داده‌های لحظه‌ای بازار از سرور بدون محدودیت بایننس (۲۴ ساعت گذشته)
+        const response = await fetch("https://api.binance.com/api/v3/ticker/24hr");
+        const data = await response.json();
         
-        if (!result || !result.data) return;
-        allMarketCoins = result.data; // ذخیره در آرایه جهانی برای سیستم جستجو
+        if (!data || !Array.isArray(data)) return;
+
+        // فیلتر کردن ۱۰۰ جفت ارز برتر بر پایه USDT
+        // لیست جفت‌ارزهای محبوب برای نمایش سریع و منظم در مارکت
+        const popularSymbols = [
+            "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT",
+            "LINK", "MATIC", "TRX", "UNI", "LTC", "ICP", "NEAR", "APT", "FIL", "OP",
+            "ARB", "INJ", "RNDR", "TIA", "SUI", "GALA", "GRT", "FTM", "STX", "THETA",
+            "IMX", "LDO", "FLOW", "CRV", "SAND", "MANA", "AXS", "APE", "EGLD", "ALGO",
+            "VET", "CHZ", "ZIL", "ENJ", "ONE", "MINA", "DYDX", "WOO", "JUP", "PYTH",
+            "ORDI", "1INCH", "AAVE", "AGIX", "ANKR", "BAT", "COMP", "DASH", "EGLD", "ENS",
+            "ETC", "FET", "FXS", "GMT", "HOT", "IOTX", "KAVA", "KSM", "LRC", "MKR",
+            "NEO", "OCEAN", "OMG", "QTUM", "ROSE", "RUNE", "RVN", "SNX", "STORJ", "SUSHI",
+            "WAVES", "XCH", "XEC", "XLM", "XMR", "XTZ", "YFI", "ZEC", "ZEN", "ZRX"
+        ];
+
+        allMarketCoins = [];
+
+        // استخراج و مرتب‌سازی دیتای دریافتی بر اساس لیست بالا
+        popularSymbols.forEach(sym => {
+            const ticker = data.find(item => item.symbol === `${sym}USDT`);
+            if (ticker) {
+                allMarketCoins.push({
+                    symbol: sym,
+                    name: getCoinFullName(sym), // دریافت نام کامل ارز
+                    priceUsd: ticker.lastPrice,
+                    changePercent24Hr: ticker.priceChangePercent
+                });
+            }
+        });
 
         // ۱. بروزرسانی قیمت صفحه اصلی (Home)
         const btcData = allMarketCoins.find(c => c.symbol === "BTC");
         const ethData = allMarketCoins.find(c => c.symbol === "ETH");
 
         if (btcData && document.getElementById("btc")) {
-            document.getElementById("btc").innerHTML = `₿ BTC: $${parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0})}`;
+            const btcPrice = parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById("btc").innerHTML = `₿ BTC: $${btcPrice}`;
         }
         if (ethData && document.getElementById("eth")) {
-            document.getElementById("eth").innerHTML = `Ξ ETH: $${parseFloat(ethData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0})}`;
+            const ethPrice = parseFloat(ethData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById("eth").innerHTML = `Ξ ETH: $${ethPrice}`;
         }
 
-        // ۲. رندر کردن لیست بازار (اگر کاربر در حال تایپ نبود لیست اصلی بروز شود)
+        // ۲. رندر کردن لیست بازار (اگر کاربر در حال سرچ نبود لیست اصلی آپدیت شود)
         const searchInput = document.getElementById("market-search");
         if (searchInput && searchInput.value === "") {
             renderMarketList(allMarketCoins);
         }
 
     } catch (err) {
-        console.error("Market API error:", err);
+        console.error("Binance API Network error:", err);
     }
 }
 
-// تابع رندر کردن کارت‌های بازار همراه با آیکون رسمی
+// تابع کمکی برای تبدیل سمبل به نام کامل ارز جهت زیبایی بیشتر
+function getCoinFullName(sym) {
+    const names = {
+        "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "BNB": "BNB", "XRP": "Ripple",
+        "ADA": "Cardano", "DOGE": "Dogecoin", "AVAX": "Avalanche", "SHIB": "Shiba Inu", "DOT": "Polkadot",
+        "LINK": "Chainlink", "MATIC": "Polygon", "TRX": "TRON", "UNI": "Uniswap", "LTC": "Litecoin",
+        "NEAR": "Near Protocol", "APT": "Aptos", "FIL": "Filecoin", "OP": "Optimism", "ARB": "Arbitrum",
+        "SUI": "Sui", "FTM": "Fantom", "ATOM": "Cosmos", "XLM": "Stellar", "ETC": "Ethereum Classic"
+    };
+    return names[sym] || sym;
+}
+
+// تابع رندر کردن کارت‌های بازار همراه با آیکون باکیفیت و زنده
 function renderMarketList(coins) {
     const marketListEl = document.getElementById("market-list");
     if (!marketListEl) return;
@@ -81,21 +123,21 @@ function renderMarketList(coins) {
         const changeColor = change >= 0 ? "#00ff99" : "#ff4a5a";
         const changeSign = change >= 0 ? "+" : "";
 
-        // آیکون رسمی ارز دیجیتال بر اساس سمبل کوین
-        const coinSymbolLower = coin.symbol.toLowerCase();
-        const iconUrl = `https://assets.coincap.io/assets/icons/${coinSymbolLower}@2x.png`;
+        // استفاده از دیتابیس تصاویر وستاتیک برای لود ۱۰۰٪ موفق آیکون‌ها بر اساس سمبل ارز
+        const iconUrl = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${coin.symbol.toLowerCase()}.png`;
 
         marketHtml += `
         <div class="coin-row" onclick="openChart('${coin.symbol}')">
             <div style="display: flex; align-items: center; gap: 12px;">
-                <img src="${iconUrl}" onerror="this.src='https://assets.coincap.io/assets/icons/generic@2x.png'" style="width: 32px; height: 32px; border-radius: 50%;">
+                <!-- تصویر آیکون رسمی کوین با لودر کمکی در صورت عدم وجود آیکون خاص -->
+                <img src="${iconUrl}" onerror="this.src='https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/generic.png'" style="width: 32px; height: 32px; border-radius: 50%;">
                 <div class="coin-info">
                     <span class="coin-symbol">${coin.symbol}</span>
                     <span class="coin-name">${coin.name}</span>
                 </div>
             </div>
             <div style="text-align: right;">
-                <div style="font-weight: 700; font-family: monospace; font-size: 16px;">$${formattedPrice}</div>
+                <div style="font-weight: 700; font-family: monospace; font-size: 16px; color:#fff;">$${formattedPrice}</div>
                 <div style="color: ${changeColor}; font-size: 12px; margin-top: 4px; font-family: monospace;">
                     ${changeSign}${change.toFixed(2)}%
                 </div>
@@ -123,18 +165,15 @@ function filterMarket() {
 }
 
 // =====================
-// TRADINGVIEW CHART SYSTEM (FIXED)
+// TRADINGVIEW CHART SYSTEM
 // =====================
 function openChart(symbol) {
     document.getElementById("chart-modal").style.display = "flex";
     document.getElementById("modal-coin-title").innerText = `${symbol} / USDT Chart`;
 
     let tvSymbol = `BINANCE:${symbol}USDT`;
-    if (symbol === "USDC") tvSymbol = "BINANCE:USDCUSDT";
-
     document.getElementById("tradingview-widget-container").innerHTML = "";
 
-    // تزریق اسکریپت و لود مستقیم ویجت بدون تداخل پلتفرمی
     if (window.TradingView) {
         createTradingViewWidget(tvSymbol);
     } else {
@@ -152,7 +191,7 @@ function createTradingViewWidget(tvSymbol) {
         "width": "100%",
         "height": "100%",
         "symbol": tvSymbol,
-        "interval": "240", // تایم‌فریم ۴ ساعته برای مینی‌اپ عالی است
+        "interval": "240",
         "timezone": "Etc/UTC",
         "theme": "dark",
         "style": "1",
@@ -246,7 +285,7 @@ window.addEventListener("DOMContentLoaded", () => {
     loadMarketAndPrices();
     loadCryptoNews();
 
-    // به‌روزرسانی قیمت‌ها هر ۸ ثانیه (برای اینکه با تایپ تداخل سنگین ایجاد نکند)
-    setInterval(loadMarketAndPrices, 8000);
+    // به‌روزرسانی روان قیمت‌ها هر ۵ ثانیه یک‌بار از سرور بایننس
+    setInterval(loadMarketAndPrices, 5000);
     setInterval(loadCryptoNews, 300000);
 });
