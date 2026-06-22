@@ -146,22 +146,24 @@ function renderMarketList(coins) {
     marketListEl.innerHTML = marketHtml;
 }
 
-// =====================
-// LIVE SEARCH FILTER (SMART & FAST FOR ALL COINS)
+/// =====================
+// LIVE SEARCH FILTER (GLOBAL & COINGECKO POWERED)
 // =====================
 let searchTimeout = null;
 
 async function filterMarket() {
-    const query = document.getElementById("market-search").value.trim().toUpperCase();
+    const query = document.getElementById("market-search").value.trim().toLowerCase();
     
+    // اگر باکس جستجو خالی بود، همان ۱۰۰ ارز برتر اصلی را نشان بده
     if (!query) {
         renderMarketList(allMarketCoins);
         return;
     }
 
+    // ۱. اول در بین همان ۱۰۰ ارز برتر خودمان جستجو می‌کنه (سریع و بدون تاخیر)
     const localFiltered = allMarketCoins.filter(coin => 
-        coin.symbol.toUpperCase().includes(query) || 
-        coin.name.toUpperCase().includes(query)
+        coin.symbol.toLowerCase().includes(query) || 
+        coin.name.toLowerCase().includes(query)
     );
 
     if (localFiltered.length > 0) {
@@ -169,30 +171,46 @@ async function filterMarket() {
         return;
     }
 
+    // ۲. اگر ارز در آن ۱۰۰ تا نبود، از دیتابیس جهانی CoinGecko استعلام می‌گیره (برای ارزهایی مثل HYPE)
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(async () => {
         try {
-            const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`);
+            // سرچ در کل بازار کریپتو
+            const searchResponse = await fetch(`https://api.coingecko.com/api/v3/search?query=${query}`);
+            const searchResult = await searchResponse.json();
             
-            if (response.ok) {
-                const ticker = await response.json();
-                const searchedCoin = [{
-                    symbol: query,
-                    name: query,
-                    priceUsd: ticker.lastPrice,
-                    changePercent24Hr: ticker.priceChangePercent
-                }];
-                renderMarketList(searchedCoin);
-            } else {
-                document.getElementById("market-list").innerHTML = `
-                    <div style="text-align: center; color: #8f98aa; margin-top: 30px; font-size: 14px;">
-                        ❌ ارز "${query}" در صرافی یافت نشد!
-                    </div>`;
+            if (searchResult && searchResult.coins && searchResult.coins.length > 0) {
+                // دریافت مشخصات اولین کوین یافت شده
+                const topFoundCoin = searchResult.coins[0];
+                const coinId = topFoundCoin.id; // مثلاً hyperliquid
+                
+                // دریافت قیمت لحظه‌ای آن ارز
+                const priceResponse = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`);
+                const priceResult = await priceResponse.json();
+                
+                if (priceResult[coinId]) {
+                    const searchedCoin = [{
+                        symbol: topFoundCoin.symbol.toUpperCase(),
+                        name: topFoundCoin.name,
+                        priceUsd: priceResult[coinId].usd,
+                        changePercent24Hr: priceResult[coinId].usd_24h_change || 0
+                    }];
+                    
+                    renderMarketList(searchedCoin);
+                    return;
+                }
             }
+            
+            // اگر ارز اصلاً در کل بازار کریپتو هم وجود نداشت
+            document.getElementById("market-list").innerHTML = `
+                <div style="text-align: center; color: #8f98aa; margin-top: 30px; font-size: 14px;">
+                    ❌ ارز "${query.toUpperCase()}" در بازار یافت نشد!
+                </div>`;
+                
         } catch (err) {
             console.error("Global Search Error:", err);
         }
-    }, 500);
+    }, 600); // تاخیر برای اینکه تایپ کاربر تمام شود
 }
 
 // =====================
