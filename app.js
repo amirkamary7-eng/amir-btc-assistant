@@ -38,14 +38,11 @@ function showPage(pageId, element) {
 // =====================
 async function loadMarketAndPrices() {
     try {
-        // دریافت داده‌های لحظه‌ای بازار از سرور بدون محدودیت بایننس (۲۴ ساعت گذشته)
         const response = await fetch("https://api.binance.com/api/v3/ticker/24hr");
         const data = await response.json();
         
         if (!data || !Array.isArray(data)) return;
 
-        // فیلتر کردن ۱۰۰ جفت ارز برتر بر پایه USDT
-        // لیست جفت‌ارزهای محبوب برای نمایش سریع و منظم در مارکت
         const popularSymbols = [
             "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT",
             "LINK", "MATIC", "TRX", "UNI", "LTC", "ICP", "NEAR", "APT", "FIL", "OP",
@@ -60,20 +57,18 @@ async function loadMarketAndPrices() {
 
         allMarketCoins = [];
 
-        // استخراج و مرتب‌سازی دیتای دریافتی بر اساس لیست بالا
         popularSymbols.forEach(sym => {
             const ticker = data.find(item => item.symbol === `${sym}USDT`);
             if (ticker) {
                 allMarketCoins.push({
                     symbol: sym,
-                    name: getCoinFullName(sym), // دریافت نام کامل ارز
+                    name: getCoinFullName(sym),
                     priceUsd: ticker.lastPrice,
                     changePercent24Hr: ticker.priceChangePercent
                 });
             }
         });
 
-        // ۱. بروزرسانی قیمت صفحه اصلی (Home)
         const btcData = allMarketCoins.find(c => c.symbol === "BTC");
         const ethData = allMarketCoins.find(c => c.symbol === "ETH");
 
@@ -86,7 +81,6 @@ async function loadMarketAndPrices() {
             document.getElementById("eth").innerHTML = `Ξ ETH: $${ethPrice}`;
         }
 
-        // ۲. رندر کردن لیست بازار (اگر کاربر در حال سرچ نبود لیست اصلی آپدیت شود)
         const searchInput = document.getElementById("market-search");
         if (searchInput && searchInput.value === "") {
             renderMarketList(allMarketCoins);
@@ -97,7 +91,6 @@ async function loadMarketAndPrices() {
     }
 }
 
-// تابع کمکی برای تبدیل سمبل به نام کامل ارز جهت زیبایی بیشتر
 function getCoinFullName(sym) {
     const names = {
         "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "BNB": "BNB", "XRP": "Ripple",
@@ -109,7 +102,6 @@ function getCoinFullName(sym) {
     return names[sym] || sym;
 }
 
-// تابع رندر کردن کارت‌های بازار همراه با آیکون باکیفیت و زنده
 function renderMarketList(coins) {
     const marketListEl = document.getElementById("market-list");
     if (!marketListEl) return;
@@ -123,13 +115,11 @@ function renderMarketList(coins) {
         const changeColor = change >= 0 ? "#00ff99" : "#ff4a5a";
         const changeSign = change >= 0 ? "+" : "";
 
-        // استفاده از دیتابیس تصاویر وستاتیک برای لود ۱۰۰٪ موفق آیکون‌ها بر اساس سمبل ارز
         const iconUrl = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${coin.symbol.toLowerCase()}.png`;
 
         marketHtml += `
         <div class="coin-row" onclick="openChart('${coin.symbol}')">
             <div style="display: flex; align-items: center; gap: 12px;">
-                <!-- تصویر آیکون رسمی کوین با لودر کمکی در صورت عدم وجود آیکون خاص -->
                 <img src="${iconUrl}" onerror="this.src='https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/generic.png'" style="width: 32px; height: 32px; border-radius: 50%;">
                 <div class="coin-info">
                     <span class="coin-symbol">${coin.symbol}</span>
@@ -149,19 +139,52 @@ function renderMarketList(coins) {
 }
 
 // =====================
-// LIVE SEARCH FILTER (FIXED)
+// LIVE SEARCH FILTER (SMART & FAST)
 // =====================
-function filterMarket() {
+let searchTimeout = null;
+
+async function filterMarket() {
     const query = document.getElementById("market-search").value.trim().toUpperCase();
+    
     if (!query) {
         renderMarketList(allMarketCoins);
         return;
     }
-    const filtered = allMarketCoins.filter(coin => 
+
+    const localFiltered = allMarketCoins.filter(coin => 
         coin.symbol.toUpperCase().includes(query) || 
         coin.name.toUpperCase().includes(query)
     );
-    renderMarketList(filtered);
+
+    if (localFiltered.length > 0) {
+        renderMarketList(localFiltered);
+        return;
+    }
+
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(async () => {
+        try {
+            const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`);
+            
+            if (response.ok) {
+                const ticker = await response.json();
+                const searchedCoin = [{
+                    symbol: query,
+                    name: query,
+                    priceUsd: ticker.lastPrice,
+                    changePercent24Hr: ticker.priceChangePercent
+                }];
+                renderMarketList(searchedCoin);
+            } else {
+                document.getElementById("market-list").innerHTML = `
+                    <div style="text-align: center; color: #8f98aa; margin-top: 30px; font-size: 14px;">
+                        ❌ Coin "${query}" not found on Binance!
+                    </div>`;
+            }
+        } catch (err) {
+            console.error("Global Search Error:", err);
+        }
+    }, 500);
 }
 
 // =====================
@@ -210,6 +233,82 @@ function closeChart() {
 }
 
 // =====================
+// NEWS SYSTEM (FARSI TRANSLATED FROM PYTHON)
+// =====================
+async function loadCryptoNews() {
+    const newsListEl = document.getElementById("news-list");
+    if (!newsListEl) return;
+
+    try {
+        const YOUR_SERVER_URL = "http://127.0.0.1:8000"; 
+        const response = await fetch(`${YOUR_SERVER_URL}/api/farsi-news`);
+        const result = await response.json();
+
+        if (result.status === "success" && result.data.length > 0) {
+            let newsHtml = "";
+
+            result.data.forEach(article => {
+                newsHtml += `
+                <div class="card" style="min-height: auto; padding: 15px; margin-bottom: 12px; cursor: pointer; direction: rtl;" onclick="window.open('${article.url}', '_blank')">
+                    <div style="display: flex; gap: 12px; align-items: center; flex-direction: row-reverse;">
+                        <img src="${article.image}" style="width: 55px; height: 55px; border-radius: 12px; object-fit: cover;">
+                        <div style="flex: 1; text-align: right;">
+                            <div style="font-size: 14px; font-weight: bold; line-height: 1.5; color: #fff; font-family: Tahoma, sans-serif;">${article.title}</div>
+                            <div style="font-size: 11px; color: #8f98aa; margin-top: 6px;">📰 منبع: ${article.source}</div>
+                        </div>
+                    </div>
+                </div>`;
+            });
+            newsListEl.innerHTML = newsHtml;
+        }
+    } catch (error) {
+        console.error("Error fetching Farsi news:", error);
+        newsListEl.innerHTML = `<div class="card" style="text-align:center;">خطا در بارگذاری اخبار فارسی.</div>`;
+    }
+}
+
+// =====================
+// ANALYSIS SYSTEM (LIVE FROM PYTHON DATABASE)
+// =====================
+async function loadAnalysisData() {
+    const analysisListEl = document.getElementById("analysis-list");
+    if (!analysisListEl) return;
+
+    try {
+        const YOUR_SERVER_URL = "http://127.0.0.1:8000"; 
+        const response = await fetch(`${YOUR_SERVER_URL}/api/analysis`);
+        const result = await response.json();
+
+        if (result.status === "success" && result.data.length > 0) {
+            let analysisHtml = "";
+
+            result.data.forEach(item => {
+                analysisHtml += `
+                <div class="card" style="min-height: auto; padding: 18px; margin-bottom: 15px; direction: rtl;">
+                    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #f7931a; margin-bottom: 10px; font-weight: bold;">
+                        <span>🎯 ${item.title}</span>
+                        <span style="color: #8f98aa; font-weight: normal;">${item.date}</span>
+                    </div>
+                    <p style="font-size: 14px; line-height: 1.7; margin: 0; color: #e1e4ea; text-align: right; white-space: pre-line; font-family: Tahoma, sans-serif;">
+                        ${item.text}
+                    </p>
+                    <div style="margin-top: 12px; font-size: 12px; color: #00ff99; font-weight: bold; text-align: right;">${item.tag}</div>
+                </div>`;
+            });
+            analysisListEl.innerHTML = analysisHtml;
+        } else {
+            analysisListEl.innerHTML = `
+                <div class="card" style="text-align: center; color: #8f98aa;">
+                    📥 هنوز تحلیلی منتشر نشده است.
+                </div>`;
+        }
+    } catch (error) {
+        console.error("Error fetching analysis:", error);
+        analysisListEl.innerHTML = `<div class="card" style="text-align: center;">خطا در دریافت تحلیل‌ها.</div>`;
+    }
+}
+
+// =====================
 // TELEGRAM USER DATA
 // =====================
 function loadTelegramUser() {
@@ -234,46 +333,8 @@ function loadTelegramUser() {
         usernameEl.innerText = user.username ? "@" + user.username : "no_username";
     }
 
-    if (imgEl) {
-        if (user.username) {
-            imgEl.src = `https://t.me/i/userpic/320/${user.username}.jpg`;
-        } else {
-            imgEl.src = "default.png";
-        }
-    }
-}
-
-// =====================
-// NEWS SYSTEM
-// =====================
-async function loadCryptoNews() {
-    const newsListEl = document.getElementById("news-list");
-    if (!newsListEl) return;
-
-    try {
-        const response = await fetch("https://min-api.cryptocompare.com/data/v1/news/?lang=EN");
-        const data = await response.json();
-
-        if (data && data.Data && data.Data.length > 0) {
-            let newsHtml = "";
-            const topNews = data.Data.slice(0, 6);
-
-            topNews.forEach(article => {
-                newsHtml += `
-                <div class="card" style="min-height: auto; padding: 15px; margin-bottom: 12px; cursor: pointer;" onclick="window.open('${article.url}', '_blank')">
-                    <div style="display: flex; gap: 12px; align-items: center;">
-                        <img src="${article.imageurl}" style="width: 55px; height: 55px; border-radius: 12px; object-fit: cover;">
-                        <div style="flex: 1;">
-                            <div style="font-size: 13px; font-weight: bold; line-height: 1.4; color: #fff;">${article.title.substring(0, 75)}...</div>
-                            <div style="font-size: 11px; color: #8f98aa; margin-top: 5px;">📰 ${article.source_info.name}</div>
-                        </div>
-                    </div>
-                </div>`;
-            });
-            newsListEl.innerHTML = newsHtml;
-        }
-    } catch (error) {
-        console.error("Error fetching news:", error);
+    if (imgEl && user.username) {
+        imgEl.src = `https://t.me/i/userpic/320/${user.username}.jpg`;
     }
 }
 
@@ -284,8 +345,9 @@ window.addEventListener("DOMContentLoaded", () => {
     loadTelegramUser();
     loadMarketAndPrices();
     loadCryptoNews();
+    loadAnalysisData();
 
-    // به‌روزرسانی روان قیمت‌ها هر ۵ ثانیه یک‌بار از سرور بایننس
     setInterval(loadMarketAndPrices, 5000);
     setInterval(loadCryptoNews, 300000);
+    setInterval(loadAnalysisData, 15000); // چک کردن خودکار تحلیل‌های جدید کانال هر ۱۵ ثانیه
 });
