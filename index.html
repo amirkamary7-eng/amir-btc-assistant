@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Crypto Mini-App</title>
     
+    <!-- تمام استایل‌های اصلی، قالب لوکس و تیره اولیه شما -->
     <style>
         :root {
             --bg-color: #06090f;
@@ -168,11 +169,15 @@
         }
     </style>
     
+    <!-- اسکریپت‌های مورد نیاز وب‌اپ تلگرام و تریدینگ‌وی -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
 
+    <!-- ========================================== -->
+    <!-- ۱. صفحه مارکت (لیست ارزها و سرچ صرافی‌ها) -->
+    <!-- ========================================== -->
     <div id="market-page" class="page active">
         <div style="display: flex; justify-content: space-around; background: var(--card-bg); padding: 14px; font-weight: bold; font-size: 13px; border-bottom: 1px solid var(--border-color); font-family: monospace;">
             <span id="btc" style="color: var(--primary);">₿ BTC: $00,000</span>
@@ -187,20 +192,28 @@
                    class="search-box">
         </div>
 
-        <div id="market-list">
-            </div>
+        <div id="market-list"></div>
     </div>
 
+    <!-- ========================================== -->
+    <!-- ۲. صفحه اخبار فارسی کریپتو -->
+    <!-- ========================================== -->
     <div id="news-page" class="page">
         <div style="padding: 20px 20px 0 20px; text-align: right; font-size: 20px; font-weight: bold; color: var(--primary);">📰 اخبار لایو بازار</div>
         <div id="news-list" style="margin-top: 10px;"></div>
     </div>
 
+    <!-- ========================================== -->
+    <!-- ۳. صفحه تحلیل‌های اختصاصی ربات -->
+    <!-- ========================================== -->
     <div id="analysis-page" class="page">
-        <div style="padding: 20px 20px 0 20px; text-align: right; font-size: 20px; font-weight: bold; color: var(--primary);">🎯 سیگنال و تحلیل تکنیکال</div>
-        <div id="analysis-list" style="margin-top: 10px;"></div>
+        <div style="padding: 20px 20px 10px 20px; text-align: right; font-size: 20px; font-weight: bold; color: var(--primary);">🎯 سیگنال و تحلیل تکنیکال</div>
+        <div id="telegram-feed-container" style="padding: 0 16px; margin-top: 10px;"></div>
     </div>
 
+    <!-- ========================================== -->
+    <!-- ۴. صفحه پروفایل لوکس کاربر تلگرام -->
+    <!-- ========================================== -->
     <div id="profile-page" class="page">
         <div class="card" style="text-align: center; margin-top: 40px; padding: 30px 20px;">
             <div style="position: relative; display: inline-block;">
@@ -215,6 +228,7 @@
         </div>
     </div>
 
+    <!-- پاپ‌آپ تمام‌صفحه لود نمودار TradingView -->
     <div id="chart-modal" class="modal">
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: var(--card-bg); border-bottom: 1px solid var(--border-color);">
             <button onclick="closeChart()" style="background: var(--red); border: none; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px;">بستن ✕</button>
@@ -223,6 +237,7 @@
         <div id="tradingview-widget-container" style="flex: 1; width: 100%;"></div>
     </div>
 
+    <!-- منوی شیک ناوبری پایینی کل برنامه -->
     <div class="navbar">
         <div class="nav-item active" onclick="showPage('market-page', this)">
             <span style="font-size: 20px;">📊</span><span>مارکت</span>
@@ -231,7 +246,6 @@
             <span style="font-size: 20px;">📰</span><span>اخبار</span>
         </div>
         <div class="center-btn" onclick="showPage('market-page', document.querySelectorAll('.nav-item')[0])">📈</div>
-        
         <div class="nav-item" onclick="showPage('analysis-page', this)">
             <span style="font-size: 20px;">🎯</span><span>تحلیل‌ها</span>
         </div>
