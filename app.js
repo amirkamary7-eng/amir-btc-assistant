@@ -8,7 +8,6 @@ if (tg) {
 }
 
 const MY_TELEGRAM_CHANNEL = "amir_btc_a"; 
-
 let allMarketCoins = [];
 let searchTimeout = null;
 
@@ -35,14 +34,9 @@ async function loadMarketAndPrices() {
     try {
         const response = await fetch("https://api.binance.com/api/v3/ticker/24hr");
         const data = await response.json();
-        
         if (!data || !Array.isArray(data)) return;
 
-        const popularSymbols = [
-            "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT",
-            "LINK", "MATIC", "TRX", "UNI", "LTC"
-        ];
-
+        const popularSymbols = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT", "LINK", "MATIC", "TRX", "UNI", "LTC"];
         allMarketCoins = [];
 
         popularSymbols.forEach(sym => {
@@ -58,7 +52,6 @@ async function loadMarketAndPrices() {
             }
         });
 
-        // بروزرسانی قیمت هدر داشبورد شیشه‌ای
         const btcData = allMarketCoins.find(c => c.symbol === "BTC");
         if (btcData && document.getElementById("dash-btc-price")) {
             const btcPrice = parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
@@ -66,7 +59,7 @@ async function loadMarketAndPrices() {
         }
 
         renderMarketList(allMarketCoins);
-        renderDashMiniMarket(); // تغذیه دیدبان سریع داشبورد
+        renderDashMiniMarket();
     } catch (err) {
         console.error("Binance API error:", err);
     }
@@ -80,14 +73,12 @@ function getCoinFullName(sym) {
 function renderMarketList(coins) {
     const marketListEl = document.getElementById("market-list");
     if (!marketListEl) return;
-
     let marketHtml = "";
     coins.forEach(coin => {
         const price = parseFloat(coin.priceUsd);
         const change = parseFloat(coin.changePercent24Hr);
         const formattedPrice = price > 1 ? price.toLocaleString(undefined, {maximumFractionDigits: 2}) : price.toFixed(4);
         const changeColor = change >= 0 ? "#00ffaa" : "#ff3355";
-        const changeSign = change >= 0 ? "+" : "";
         const iconUrl = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${coin.symbol.toLowerCase()}.png`;
 
         marketHtml += `
@@ -101,27 +92,24 @@ function renderMarketList(coins) {
             </div>
             <div style="text-align: right;">
                 <div style="font-weight: 700; font-family: monospace; font-size: 15px;">$${formattedPrice}</div>
-                <div style="color: ${changeColor}; font-size: 11px; margin-top: 2px; font-family: monospace;">${changeSign}${change.toFixed(2)}%</div>
+                <div style="color: ${changeColor}; font-size: 11px; margin-top: 2px; font-family: monospace;">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</div>
             </div>
         </div>`;
     });
     marketListEl.innerHTML = marketHtml;
 }
 
-// تولید دیدبان ۳ ارز اول در صفحه مجله‌ای خانه
 function renderDashMiniMarket() {
     const miniEl = document.getElementById("dash-mini-market");
     if (!miniEl || allMarketCoins.length < 3) return;
-    
     let html = "";
     for(let i=0; i<3; i++) {
         let coin = allMarketCoins[i];
         let change = parseFloat(coin.changePercent24Hr);
-        let changeColor = change >= 0 ? "#00ffaa" : "#ff3355";
         html += `
         <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.02)">
             <span style="font-weight:bold;">${coin.symbol}</span>
-            <span style="font-family:monospace; color:${changeColor}">${change >= 0 ? '+':''}${change.toFixed(2)}%</span>
+            <span style="font-family:monospace; color:${change >= 0 ? "#00ffaa" : "#ff3355"}">${change >= 0 ? '+':''}${change.toFixed(2)}%</span>
             <span style="font-family:monospace;">$${parseFloat(coin.priceUsd).toLocaleString()}</span>
         </div>`;
     }
@@ -129,31 +117,21 @@ function renderDashMiniMarket() {
 }
 
 // =====================
-// EXTRA CRYPTO METRICS (FEAR & GREED & LIQUIDATIONS)
+// EXTRA METRICS
 // =====================
 async function loadExtraMetrics() {
-    // ۱. دریافت زنده شاخص ترس و طمع
     try {
         const res = await fetch("https://api.alternative.me/fng/");
         const json = await res.json();
         if(json?.data?.[0]) {
             const val = json.data[0].value;
             const status = json.data[0].value_classification;
-            const elVal = document.getElementById("fg-value");
-            const elStatus = document.getElementById("fg-status");
-            if(elVal) elVal.innerText = val;
-            if(elStatus) elStatus.innerText = getFarsiFngStatus(status);
-            if(val > 50) elVal.style.color = "var(--green)";
-            else elVal.style.color = "var(--red)";
+            if(document.getElementById("fg-value")) document.getElementById("fg-value").innerText = val;
+            if(document.getElementById("fg-status")) document.getElementById("fg-status").innerText = getFarsiFngStatus(status);
         }
     } catch(e){}
-
-    // ۲. شبیه‌ساز داده لیکوئیدی زنده بازار کریپتو در ۲۴ ساعت گذشته
     const liqEl = document.getElementById("liq-value");
-    if(liqEl) {
-        const randomLiq = (Math.random() * (180 - 110) + 110).toFixed(1);
-        liqEl.innerText = `$${randomLiq}M`;
-    }
+    if(liqEl) liqEl.innerText = `$${(Math.random() * (180 - 110) + 110).toFixed(1)}M`;
 }
 
 function getFarsiFngStatus(status) {
@@ -162,113 +140,86 @@ function getFarsiFngStatus(status) {
 }
 
 // =====================
-// GUARANTEED SEARCH FUNCTION
+// NEWS SYSTEM (اصلاح شده)
 // =====================
-async function filterMarket() {
-    const searchInput = document.getElementById("market-search");
-    if (!searchInput) return;
-    const query = searchInput.value.trim().toUpperCase();
-    if (!query) { renderMarketList(allMarketCoins); return; }
+async function loadPersianNews() {
+    const newsListEl = document.getElementById("news-list");
+    if (!newsListEl) return;
+    
+    const rssUrl = "https://arzdigital.com/feed/"; 
+    const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
 
-    const localFiltered = allMarketCoins.filter(coin => coin.symbol.includes(query));
-    if (localFiltered.length > 0) { renderMarketList(localFiltered); return; }
-
-    document.getElementById("market-list").innerHTML = `<div style="text-align:center; color:#f7931a; padding:20px;">🔍 در حال جستجوی صرافی‌ها...</div>`;
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(async () => {
-        try {
-            const r = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`);
-            if (r.ok) {
-                const data = await r.json();
-                const searchedCoin = [{ symbol: query, name: "Market Result", priceUsd: data.lastPrice, changePercent24Hr: data.priceChangePercent }];
-                renderMarketList(searchedCoin);
-            } else {
-                document.getElementById("market-list").innerHTML = `<div style="text-align:center; color:var(--red); padding:20px;">❌ یافت نشد</div>`;
-            }
-        } catch (e){}
-    }, 600);
-}
-
-function loadTelegramUser() {
-    const nameEl = document.getElementById("user-name");
-    const dashNameEl = document.getElementById("dash-user-name");
-    const idEl = document.getElementById("user-id");
-    const usernameEl = document.getElementById("user-username");
-    const imgEl = document.getElementById("profile-img");
-
-    const userData = tg?.initDataUnsafe?.user;
-
-    if (userData) {
-        // ۱. ست کردن نام و نام خانوادگی
-        const fullName = `${userData.first_name || ""} ${userData.last_name || ""}`.trim();
-        if (nameEl) nameEl.innerText = fullName;
-        if (dashNameEl) dashNameEl.innerText = fullName;
-
-        // ۲. ست کردن آیدی عددی
-        if (idEl) idEl.innerText = userData.id;
-
-        // ۳. ست کردن یوزرنیم (با فرمت استاندارد)
-        if (usernameEl) {
-            usernameEl.innerText = userData.username ? `@${userData.username}` : "بدون یوزرنیم";
+    try {
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        
+        if (data.status === 'ok') {
+            newsListEl.innerHTML = ""; 
+            data.items.slice(0, 7).forEach(item => {
+                const div = document.createElement("div");
+                div.className = "glass-card";
+                div.style.textAlign = "right";
+                div.style.direction = "rtl";
+                div.style.padding = "15px";
+                div.style.marginBottom = "10px";
+                div.style.cursor = "pointer";
+                
+                div.innerHTML = `
+                    <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">${item.title}</div>
+                    <div style="font-size: 12px; color: var(--text-sub);">${item.description.substring(0, 100)}...</div>
+                `;
+                div.onclick = () => showNewsModal(item.title, item.description, item.content);
+                newsListEl.appendChild(div);
+            });
         }
-
-        // ۴. ست کردن عکس پروفایل با مدیریت خطای لود نشدن
-        if (imgEl) {
-            if (userData.username) {
-                imgEl.src = `https://t.me/i/userpic/320/${userData.username}.jpg`;
-                imgEl.onerror = function() {
-                    this.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
-                };
-            } else {
-                imgEl.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
-            }
-        }
-    } else {
-        // حالت تست برای زمانی که برنامه در مرورگرِ عادی باز شده
-        if (nameEl) nameEl.innerText = "امیر کریپتو (تست)";
-        if (dashNameEl) dashNameEl.innerText = "امیر کریپتو (تست)";
-        if (idEl) idEl.innerText = "123456789";
-        if (usernameEl) usernameEl.innerText = "@test_user";
-        if (imgEl) imgEl.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
+    } catch (e) {
+        newsListEl.innerHTML = `<div style="text-align:center; padding:20px;">خطا در دریافت اخبار</div>`;
     }
 }
+
+function showNewsModal(title, description, content) {
+    const modal = document.getElementById("news-modal");
+    const titleEl = document.getElementById("news-title-modal");
+    const contentEl = document.getElementById("news-content-modal");
+
+    if (modal && titleEl && contentEl) {
+        titleEl.innerText = title;
+        contentEl.innerHTML = content || description; 
+        modal.style.display = "flex";
+    }
+}
+
+// =====================
+// TELEGRAM & CHART
+// =====================
+function loadTelegramUser() {
+    const userData = tg?.initDataUnsafe?.user;
+    if (userData) {
+        if (document.getElementById("user-name")) document.getElementById("user-name").innerText = `${userData.first_name || ""} ${userData.last_name || ""}`;
+    }
+}
+
 function loadAnalysisData() {
     const container = document.getElementById("telegram-feed-container");
     if (!container) return;
-
-    // پاک کردن محتوای قبلی برای جلوگیری از تکرار
     container.innerHTML = "";
-
     const script = document.createElement("script");
     script.src = "https://telegram.org/js/telegram-widget.js?22";
-    script.setAttribute("data-telegram-discussion", "amir_btc_a"); // آیدی کانال شما
+    script.setAttribute("data-telegram-discussion", "amir_btc_a");
     script.setAttribute("data-comments-limit", "5");
     script.setAttribute("data-dark", "1");
     script.setAttribute("data-width", "100%");
-    
     container.appendChild(script);
 }
 
-// =====================
-// CHART & NEWS
-// =====================
-function openChart(symbol, exchange) {
+function openChart(symbol) {
     document.getElementById("chart-modal").style.display = "flex";
     document.getElementById("modal-coin-title").innerText = `${symbol} / USDT`;
     document.getElementById("tradingview-widget-container").innerHTML = "";
     new TradingView.widget({
         "width": "100%", "height": "100%", "symbol": `BINANCE:${symbol}USDT`,
-        "interval": "240", "theme": "dark", "style": "1", "locale": "en",
-        "container_id": "tradingview-widget-container", "hide_side_toolbar": true
+        "interval": "240", "theme": "dark", "style": "1", "container_id": "tradingview-widget-container"
     });
-}
-
-function closeChart() { document.getElementById("chart-modal").style.display = "none"; }
-
-async function loadCryptoNews() {
-    const newsListEl = document.getElementById("news-list");
-    if (!newsListEl) return;
-    newsListEl.innerHTML = `<div class="glass-card" style="text-align:center; color:var(--text-sub);">در حال خواندن آخرین اخبار کریپتو...</div>`;
 }
 
 // =====================
@@ -279,81 +230,6 @@ window.addEventListener("DOMContentLoaded", () => {
     loadMarketAndPrices();
     loadExtraMetrics();
     loadAnalysisData();
-    loadCryptoNews();
-    setInterval(loadMarketAndPrices, 10000);
-});
-
-async function fetchNews() {
-    const newsList = document.getElementById("news-list");
-    newsList.innerHTML = '<div style="text-align:center; padding:20px;">در حال دریافت اخبار...</div>';
-
-    try {
-        // استفاده از API رایگان CryptoPanic
-        const response = await fetch('https://cryptopanic.com/api/v1/posts/?auth_token=YOUR_API_TOKEN&kind=news');
-        const data = await response.json();
-
-        newsList.innerHTML = ""; // پاک کردن لودینگ
-
-        data.results.slice(0, 10).forEach(post => {
-            const newsItem = document.createElement("div");
-            newsItem.className = "glass-card";
-            newsItem.style.margin = "10px 16px";
-            newsItem.innerHTML = `
-                <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">${post.title}</div>
-                <div style="font-size: 11px; color: var(--text-sub); display: flex; justify-content: space-between;">
-                    <span>${post.source.title}</span>
-                    <span>${new Date(post.created_at).toLocaleTimeString('fa-IR')}</span>
-                </div>
-            `;
-            newsItem.onclick = () => window.open(post.url, '_blank');
-            newsList.appendChild(newsItem);
-        });
-    } catch (error) {
-        newsList.innerHTML = '<div style="padding:20px; text-align:center;">خطا در دریافت اخبار</div>';
-    }
-}
-async function loadPersianNews() {
-    const newsListEl = document.getElementById("news-list");
-    // استفاده از مبدل RSS به JSON برای سایت ارزدیجیتال
-    const rssUrl = "https://arzdigital.com/feed/"; 
-    const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
-
-    try {
-        const response = await fetch(apiUrl);
-        const data = await response.json();
-        
-        if (data.status === 'ok') {
-            newsListEl.innerHTML = ""; // پاک کردن لودینگ
-            data.items.slice(0, 7).forEach(item => {
-                const div = document.createElement("div");
-                div.className = "glass-card";
-                div.style.textAlign = "right";
-                div.style.direction = "rtl";
-                
-                // نمایش عنوان و خلاصه خبر
-                div.innerHTML = `
-                    <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">${item.title}</div>
-                    <div style="font-size: 12px; color: var(--text-sub); line-height: 1.5;">${item.description.substring(0, 100)}...</div>
-                    <div style="font-size: 10px; color: var(--primary); margin-top: 10px; text-align: left;">زمان: ${new Date(item.pubDate).toLocaleDateString('fa-IR')}</div>
-                `;
-                
-                // باز کردن خبر در یک مودال (برای اینکه از اپ خارج نشوند)
-                div.onclick = () => showNewsModal(item.title, item.content);
-                newsListEl.appendChild(div);
-            });
-        }
-    } catch (e) {
-        newsListEl.innerHTML = `<div style="text-align:center; padding:20px;">امکان دریافت اخبار وجود ندارد.</div>`;
-    }
-}
-
-// تابع نمایش خبر کامل در یک پنجره کوچک (بدون خروج از اپ)
-function showNewsModal(title, content) {
-    // می‌توانید یک modal جدید مثل chart-modal بسازید و متن خبر را داخل آن نمایش دهید
-    alert(title + "\n\n" + content.replace(/<[^>]*>?/gm, '').substring(0, 300) + "...");
-}
-
-// فراخوانی در لود صفحه
-window.addEventListener("DOMContentLoaded", () => {
     loadPersianNews();
+    setInterval(loadMarketAndPrices, 10000);
 });
