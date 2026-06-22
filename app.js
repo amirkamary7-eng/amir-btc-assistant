@@ -345,15 +345,20 @@ function loadTelegramUser() {
         imgEl.src = `https://t.me/i/userpic/320/${user.username}.jpg`;
     }
 }
-
 // =====================
-// INITIALIZATION
+// INITIALIZATION (اتصال نهایی دکمه سرچ)
 // =====================
 window.addEventListener("DOMContentLoaded", () => {
     loadTelegramUser();
     loadMarketAndPrices();
     loadCryptoNews();
     loadAnalysisData();
+
+    // این بخش جدید، باکس سرچ شما را به موتور هوشمند بایننس متصل می‌کند
+    const searchInput = document.getElementById("market-search");
+    if (searchInput) {
+        searchInput.addEventListener("input", filterMarket);
+    }
 
     setInterval(loadMarketAndPrices, 5000);
     setInterval(loadCryptoNews, 300000);
