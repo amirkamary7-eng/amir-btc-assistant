@@ -284,3 +284,47 @@ body::before {
 .index-value {
     animation: fadeInData 0.6s ease-out;
 }
+/* =======================
+   PROFILE SKELETON LOADER
+======================= */
+.skeleton-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    margin: 0 auto 15px auto;
+}
+
+.skeleton-text {
+    height: 14px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    margin: 10px auto;
+}
+
+.skeleton-text.title { width: 40%; height: 18px; }
+.skeleton-text.subtitle { width: 60%; }
+
+/* انیمیشن درخشش موجی نئونی روی اسکلتون */
+.skeleton-loading {
+    position: relative;
+    overflow: hidden;
+}
+
+.skeleton-loading::after {
+    content: "";
+    position: absolute;
+    top: 0; right: 0; bottom: 0; left: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(247, 147, 26, 0.08) 50%,
+        transparent
+    );
+    animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+    100% { transform: translateX(100%); }
+}
