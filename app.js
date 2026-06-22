@@ -283,3 +283,32 @@ window.addEventListener("DOMContentLoaded", () => {
     setInterval(loadMarketAndPrices, 10000);
 });
 
+async function fetchNews() {
+    const newsList = document.getElementById("news-list");
+    newsList.innerHTML = '<div style="text-align:center; padding:20px;">در حال دریافت اخبار...</div>';
+
+    try {
+        // استفاده از API رایگان CryptoPanic
+        const response = await fetch('https://cryptopanic.com/api/v1/posts/?auth_token=YOUR_API_TOKEN&kind=news');
+        const data = await response.json();
+
+        newsList.innerHTML = ""; // پاک کردن لودینگ
+
+        data.results.slice(0, 10).forEach(post => {
+            const newsItem = document.createElement("div");
+            newsItem.className = "glass-card";
+            newsItem.style.margin = "10px 16px";
+            newsItem.innerHTML = `
+                <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">${post.title}</div>
+                <div style="font-size: 11px; color: var(--text-sub); display: flex; justify-content: space-between;">
+                    <span>${post.source.title}</span>
+                    <span>${new Date(post.created_at).toLocaleTimeString('fa-IR')}</span>
+                </div>
+            `;
+            newsItem.onclick = () => window.open(post.url, '_blank');
+            newsList.appendChild(newsItem);
+        });
+    } catch (error) {
+        newsList.innerHTML = '<div style="padding:20px; text-align:center;">خطا در دریافت اخبار</div>';
+    }
+}
