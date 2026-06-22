@@ -64,7 +64,8 @@ async function loadMarketAndPrices() {
                     symbol: sym,
                     name: getCoinFullName(sym),
                     priceUsd: ticker.lastPrice,
-                    changePercent24Hr: ticker.priceChangePercent
+                    changePercent24Hr: ticker.priceChangePercent,
+                    exchange: "BINANCE"
                 });
             }
         });
@@ -125,8 +126,9 @@ function renderMarketList(coins) {
 
         const iconUrl = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${coin.symbol.toLowerCase()}.png`;
 
+        // انتقال نام صرافی فعال به دکمه کلیک جهت لود دقیق چارت
         marketHtml += `
-        <div class="coin-row" onclick="openChart('${coin.symbol}')">
+        <div class="coin-row" onclick="openChart('${coin.symbol}', '${coin.exchange || ''}')">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div class="coin-icon-container" style="width: 35px; height: 35px; display: flex; align-items: center; justify-content: center;">
                     <img src="${iconUrl}" 
@@ -154,7 +156,7 @@ function renderMarketList(coins) {
 }
 
 // =====================
-// LIVE SEARCH FILTER (BINANCE -> GLOBAL HYBRID)
+// MULTI-EXCHANGE ULTRA SEARCH (BINANCE -> BYBIT -> OKX -> GATE -> KUCOIN)
 // =====================
 let searchTimeout = null;
 
@@ -166,6 +168,7 @@ async function filterMarket() {
         return;
     }
 
+    // ۱. سرچ محلی سریع در ۱۰۰ ارز برتر
     const localFiltered = allMarketCoins.filter(coin => 
         coin.symbol.toUpperCase().includes(query) || 
         coin.name.toUpperCase().includes(query)
@@ -179,61 +182,96 @@ async function filterMarket() {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(async () => {
         try {
-            // ۱. بررسی صرافی بایننس
-            const binanceResp = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`);
-            
-            if (binanceResp.ok) {
-                const ticker = await binanceResp.json();
-                const searchedCoin = [{
-                    symbol: query,
-                    name: query,
-                    priceUsd: ticker.lastPrice,
-                    changePercent24Hr: ticker.priceChangePercent
-                }];
-                renderMarketList(searchedCoin);
+            // ۲. اجرای استعلام هم‌زمان و موازی از ۵ صرافی بزرگ برای پیدا کردن بهترین بازار
+            const results = await Promise.allSettled([
+                fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`).then(r => r.ok ? r.json() : null),
+                fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${query}USDT`).then(r => r.json()),
+                fetch(`https://www.okx.com/api/v5/market/ticker?instId=${query}-USDT`).then(r => r.json()),
+                fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${query}_USDT`).then(r => r.json()),
+                fetch(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${query}-USDT`).then(r => r.json())
+            ]);
+
+            // بررسی دیتای بایننس (Binance)
+            if (results[0].status === 'fulfilled' && results[0].value) {
+                const data = results[0].value;
+                renderSingleSearchCoin(query, data.lastPrice, data.priceChangePercent, "BINANCE");
                 return;
             }
 
-            // ۲. بررسی صرافی جانبی برای ارزهایی مثل HYPE
-            const globalResp = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${query}USDT`);
-            const globalData = await globalResp.json();
-            
-            if (globalData && globalData.result && globalData.result.list && globalData.result.list.length > 0) {
-                const ticker = globalData.result.list[0];
-                const searchedCoin = [{
-                    symbol: query,
-                    name: query,
-                    priceUsd: ticker.lastPrice,
-                    changePercent24Hr: (parseFloat(ticker.price24hPcnt) * 100).toString()
-                }];
-                renderMarketList(searchedCoin);
+            // بررسی دیتای بای‌بیت (Bybit)
+            if (results[1].status === 'fulfilled' && results[1].value?.result?.list?.length > 0) {
+                const data = results[1].value.result.list[0];
+                renderSingleSearchCoin(query, data.lastPrice, parseFloat(data.price24hPcnt) * 100, "BYBIT");
                 return;
             }
 
+            // بررسی دیتای اوکی‌اکس (OKX)
+            if (results[2].status === 'fulfilled' && results[2].value?.data?.length > 0) {
+                const data = results[2].value.data[0];
+                const openPrice = parseFloat(data.sodUtc0 || data.open24h);
+                const lastPrice = parseFloat(data.last);
+                const change = openPrice ? ((lastPrice - openPrice) / openPrice) * 100 : 0;
+                renderSingleSearchCoin(query, data.last, change, "OKX");
+                return;
+            }
+
+            // بررسی دیتای گیت (Gate.io)
+            if (results[3].status === 'fulfilled' && Array.isArray(results[3].value) && results[3].value.length > 0) {
+                const data = results[3].value[0];
+                renderSingleSearchCoin(query, data.last, data.change_percentage, "GATEIO");
+                return;
+            }
+
+            // بررسی دیتای کوکوین (KuCoin)
+            if (results[4].status === 'fulfilled' && results[4].value?.data) {
+                const data = results[4].value.data;
+                // کوکوین درصد ۲۴ ساعته را در متد لول ۱ مستقیم نمیدهد، از صفر یا تقریب استفاده میکنیم
+                renderSingleSearchCoin(query, data.price, 0, "KUCOIN");
+                return;
+            }
+
+            // اگر در هیچ صرافی پیدا نشد
             document.getElementById("market-list").innerHTML = `
                 <div style="text-align: center; color: #8f98aa; margin-top: 30px; font-size: 14px;">
-                    ❌ ارز "${query}" یافت نشد!
+                    ❌ ارز "${query}" در هیچ‌کدام از صرافی‌های برتر یافت نشد!
                 </div>`;
 
         } catch (err) {
-            console.error("Hybrid Search Error:", err);
+            console.error("Global Multi-Exchange Search Error:", err);
         }
     }, 500);
 }
 
+// تابع کمکی برای رندر کردن تک ارز پیدا شده
+function renderSingleSearchCoin(symbol, price, change, exchangeName) {
+    const searchedCoin = [{
+        symbol: symbol,
+        name: `${symbol} (${exchangeName})`,
+        priceUsd: price,
+        changePercent24Hr: String(change),
+        exchange: exchangeName
+    }];
+    renderMarketList(searchedCoin);
+}
+
 // =====================
-// TRADINGVIEW CHART SYSTEM (AUTO EXCHANGE)
+// TRADINGVIEW CHART SYSTEM (DYNAMIC EXCHANGE ROUTER)
 // =====================
-function openChart(symbol) {
+function openChart(symbol, exchange) {
     document.getElementById("chart-modal").style.display = "flex";
     document.getElementById("modal-coin-title").innerText = `${symbol} / USDT Chart`;
 
-    const foundCoin = allMarketCoins.find(c => c.symbol === symbol);
+    // تنظیم پیش‌فرض روی بایننس
     let tvSymbol = `BINANCE:${symbol}USDT`;
     
-    // اگر ارز در لیست ۱00 تای بایننس نبود، اجازه بده تریدینگ‌وی صرافی مناسب (مثل BYBIT یا OKX) را خودش پیدا کند
-    if (!foundCoin && symbol !== "BTC" && symbol !== "ETH") {
-        tvSymbol = `${symbol}USDT`; 
+    // هماهنگ‌سازی هوشمند صرافی صادرکننده قیمت با چارت تریدینگ‌وی
+    if (exchange === "BYBIT") tvSymbol = `BYBIT:${symbol}USDT`;
+    else if (exchange === "OKX") tvSymbol = `OKX:${symbol}USDT`;
+    else if (exchange === "GATEIO") tvSymbol = `GATE:${symbol}USDT`;
+    else if (exchange === "KUCOIN") tvSymbol = `KUCOIN:${symbol}USDT`;
+    else if (!exchange && symbol !== "BTC" && symbol !== "ETH") {
+        // اگر صرافی مشخص نبود، به تریدینگ‌وی اجازه بده خودش بگردد
+        tvSymbol = `${symbol}USDT`;
     }
 
     document.getElementById("tradingview-widget-container").innerHTML = "";
@@ -388,7 +426,6 @@ window.addEventListener("DOMContentLoaded", () => {
     loadCryptoNews();
     loadAnalysisData();
 
-    // متصل کردن فیلد سرچ به موتور جستجو
     const searchInput = document.getElementById("market-search");
     if (searchInput) {
         searchInput.addEventListener("input", filterMarket);
