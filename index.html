@@ -173,7 +173,6 @@
         .nav-item.active svg {
             transform: translateY(-2px);
         }
-
         /* دکمه دایره‌ای هوم / داشبورد در مرکز */
         .center-btn {
             width: 60px;
@@ -244,18 +243,16 @@
                     <div id="fg-status" style="font-size: 12px; color: var(--text-sub); margin-top: 4px;">Loading...</div>
                 </div>
             </div>
-
-<div id="analysis-page" class="page">
-        <div style="padding: 20px 20px 10px 20px; text-align: right; font-size: 20px; font-weight: bold; color: var(--primary);">🎯 سیگنال و تحلیل تکنیکال</div>
-        <div id="telegram-feed-container" style="padding: 0 16px; margin-top: 10px;">
-            <script async src="https://telegram.org/js/telegram-widget.js?22" 
-                    data-telegram-discussion="amir_btc_2024/1" 
-                    data-comments-limit="5"
-                    data-color="F7931A"
-                    data-dark="1">
-            </script>
-        </div>
-    </div>
+            <div class="grid-item" style="direction: rtl;">
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <span style="font-size: 12px; color: var(--text-sub); font-weight: bold;">لیکوئیدی ۲۴ساعت</span>
+                    <span style="font-size: 16px;">🔥</span>
+                </div>
+                <div style="margin: 12px 0;">
+                    <div id="liq-value" class="index-value" style="color: var(--red); font-size: 22px; font-family: monospace; font-weight: bold;">$--M</div>
+                    <div style="font-size: 11px; color: var(--text-sub); margin-top: 6px;">مجموع لانگ و شورت</div>
+                </div>
+            </div>
         </div>
 
         <div class="glass-card" onclick="showPage('market-page', document.getElementById('nav-market'))" style="direction: rtl; margin-top: 14px;">
@@ -282,7 +279,14 @@
 
     <div id="analysis-page" class="page">
         <div style="padding: 20px 20px 10px 20px; text-align: right; font-size: 20px; font-weight: bold; color: var(--primary);">🎯 سیگنال و تحلیل تکنیکال</div>
-        <div id="telegram-feed-container" style="padding: 0 16px; margin-top: 10px;"></div>
+        <div id="telegram-feed-container" style="padding: 0 16px; margin-top: 10px;">
+            <script async src="https://telegram.org/js/telegram-widget.js?22" 
+                    data-telegram-discussion="amir_btc_2024/1" 
+                    data-comments-limit="5"
+                    data-color="F7931A"
+                    data-dark="1">
+            </script>
+        </div>
     </div>
 
     <div id="profile-page" class="page">
