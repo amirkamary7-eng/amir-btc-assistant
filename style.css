@@ -21,25 +21,58 @@ body {
 }
 
 /* =======================
-   HEADER / LOGO
+   MODERN APP HEADER
 ======================= */
-.logo {
+.app-header {
     text-align: center;
-    margin-top: 20px;
+    padding: 25px 15px 15px 15px;
     margin-bottom: 25px;
+    background: linear-gradient(180deg, rgba(247, 147, 26, 0.05) 0%, rgba(11, 15, 25, 0) 100%);
+    border-radius: 0 0 30px 30px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
-.logo h1 {
+.header-title {
     margin: 0;
-    font-size: 32px;
-    font-weight: 700;
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    /* افکت گرادینت روی متن */
+    background: linear-gradient(120deg, #ffffff 30%, #a2aab8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
 }
 
-.logo p {
+.header-emoji {
+    -webkit-text-fill-color: initial; /* جلوگیری از شفاف شدن ایموجی یا نماد */
+    font-size: 30px;
+    text-shadow: 0 0 20px rgba(247, 147, 26, 0.6); /* درخشش نماد اصلی */
+}
+
+.header-subtitle {
     color: #8f98aa;
-    margin-top: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.8;
 }
 
+/* افکت درخشش اختصاصی برای هدر صفحه اصلی */
+#home-page .header-emoji {
+    text-shadow: 0 0 25px rgba(247, 147, 26, 0.7);
+}
+
+/* افکت درخشش اختصاصی برای هدر مارکت */
+#market-page .header-title {
+    background: linear-gradient(120deg, #ffffff 40%, #00ff99 100%);
+    -webkit-background-clip: text;
+}
 /* =======================
    CARD
 ======================= */
