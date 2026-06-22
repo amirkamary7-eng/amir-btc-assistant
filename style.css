@@ -1,3 +1,7 @@
+
+/* =======================
+   GENERAL
+======================= */
 body{
     margin:0;
     padding:0;
@@ -11,105 +15,13 @@ body{
     padding-bottom:100px;
 }
 
-.header{
-    text-align:center;
-    margin-bottom:25px;
-}
-
-.header h1{
-    margin:0;
-    font-size:28px;
-}
-
-.card{
-    background:rgba(255,255,255,.05);
-    backdrop-filter:blur(20px);
-
-    border:1px solid rgba(255,255,255,.08);
-
-    border-radius:22px;
-
-    padding:20px;
-
-    margin-bottom:15px;
-
-    box-shadow:
-    0 8px 32px rgba(0,0,0,.3);
-}
-
-.price{
-    font-size:24px;
-    font-weight:bold;
-}
-
-.bottom-nav{
-    position:fixed;
-
-    left:15px;
-    right:15px;
-    bottom:15px;
-
-    height:70px;
-
-    background:rgba(18,22,34,.85);
-
-    backdrop-filter:blur(25px);
-
-    border:1px solid rgba(255,255,255,.08);
-
-    border-radius:25px;
-
-    display:flex;
-    justify-content:space-around;
-    align-items:center;
-
-    box-shadow:
-    0 10px 40px rgba(0,0,0,.4);
-}
-
-.nav-item{
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-
-    color:#8f98aa;
-
-    font-size:12px;
-
-    transition:.3s;
-}
-
-.nav-item.active{
-    color:#f7931a;
-    transform:translateY(-3px);
-}
-
-.center-btn{
-    width:58px;
-    height:58px;
-
-    border-radius:50%;
-
-    background:#f7931a;
-
-    display:flex;
-    align-items:center;
-    justify-content:center;
-
-    font-size:26px;
-
-    color:white;
-
-    margin-top:-30px;
-
-    box-shadow:
-    0 0 30px rgba(247,147,26,.5);
-}
-
 .page{
     padding-bottom:120px;
 }
 
+/* =======================
+   HEADER / LOGO
+======================= */
 .logo{
     text-align:center;
     margin-top:20px;
@@ -127,11 +39,21 @@ body{
     margin-top:8px;
 }
 
+/* =======================
+   CARD
+======================= */
 .card{
+    background:rgba(255,255,255,.05);
+    backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:22px;
+    padding:20px;
+    margin-bottom:15px;
     min-height:90px;
     display:flex;
     flex-direction:column;
     justify-content:center;
+    box-shadow:0 8px 32px rgba(0,0,0,.3);
 }
 
 .card-title{
@@ -145,104 +67,92 @@ body{
     font-weight:700;
 }
 
+/* =======================
+   NAVIGATION
+======================= */
 .bottom-nav{
+    position:fixed;
+    left:15px;
+    right:15px;
+    bottom:15px;
+    height:70px;
+    background:rgba(18,22,34,.85);
+    backdrop-filter:blur(25px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:25px;
+    display:flex;
+    justify-content:space-around;
+    align-items:center;
     z-index:9999;
+    box-shadow:0 10px 40px rgba(0,0,0,.4);
 }
 
 .nav-item{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    color:#8f98aa;
+    font-size:12px;
     cursor:pointer;
     min-width:55px;
+    transition:.3s;
 }
 
 .nav-item div:first-child{
     font-size:22px;
 }
 
+.nav-item.active{
+    color:#f7931a;
+    transform:translateY(-3px);
+}
+
 .center-btn{
+    width:58px;
+    height:58px;
+    border-radius:50%;
+    background:#f7931a;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:26px;
+    color:white;
+    margin-top:-12px;
     cursor:pointer;
-    transform:translateY(-12px);
+    box-shadow:0 0 30px rgba(247,147,26,.5);
 }
 
-.profile-box{
-    margin-top: 20px;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-}
-
-.profile-top img{
-    width: 100px;
-    height: 100px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 2px solid #00ff99;
-}
-
-.profile-name{
-    font-size: 18px;
-    font-weight: bold;
-}
-
-.profile-username{
-    font-size: 14px;
-    color: #aaa;
-}
-
-.profile-id{
-    font-size: 12px;
-    color: #777;
-}
-.profile-container{
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 15px;
-    margin-top: 20px;
-}
-
-.profile-avatar img{
-    width: 110px;
-    height: 110px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 3px solid #00ff99;
-    box-shadow: 0 0 15px rgba(0,255,153,0.3);
-}
-
-.profile-name{
-    font-size: 20px;
-    font-weight: bold;
-}
+/* =======================
+   PROFILE (FIXED - CLEAN)
+======================= */
 .profile-box{
     display:flex;
     flex-direction:column;
     align-items:center;
     gap:12px;
-    margin-top:15px;
+    margin-top:20px;
 }
 
-/* عکس کوچیک‌تر و خوش‌فرم */
+/* فقط همین عکس */
 .profile-img{
-    width:80px;
-    height:80px;
+    width:85px;
+    height:85px;
     border-radius:50%;
     object-fit:cover;
     border:2px solid #00ff99;
     box-shadow:0 0 10px rgba(0,255,153,0.2);
 }
 
-/* اسم جمع‌وجور */
+/* اسم */
 .profile-name{
-    font-size:16px;
+    font-size:18px;
     font-weight:600;
-    margin-bottom:5px;
 }
 
-/* کارت کوچیک‌تر */
+/* کارت کوچیک */
 .small-card{
     width:90%;
-    padding:10px;
+    padding:12px;
     font-size:14px;
+    text-align:center;
 }
