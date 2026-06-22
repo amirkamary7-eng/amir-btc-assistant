@@ -2,8 +2,12 @@
 // 1. CONFIG & INITIALIZATION (ثابت‌ها)
 // ==========================================================
 const tg = window.Telegram?.WebApp;
-if (tg) { tg.ready(); tg.expand(); }
 
+if (tg) { tg.ready(); tg.expand(); }
+window.onerror = function(message, source, lineno, colno, error) {
+    console.error("خطای شناسایی شده: " + message + " در خط " + lineno);
+    return true; // جلوگیری از متوقف شدن اجرای برنامه
+};
 let lastPrices = {}; // برای ذخیره آخرین قیمت و تشخیص تغییر
 let marketInterval = null;
 
