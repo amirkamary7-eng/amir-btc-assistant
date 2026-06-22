@@ -70,18 +70,26 @@ async function loadMarket() {
 
 loadMarket();
 
-function loadTelegramUser(){
+function loadTelegramUser() {
 
-    const tg = window.Telegram.WebApp;
-
-    if(!tg.initDataUnsafe.user){
+    if (!window.Telegram) {
+        document.getElementById("user-name").innerText = "Open in Telegram";
         return;
     }
 
-    const user = tg.initDataUnsafe.user;
+    const tg = window.Telegram.WebApp;
+
+    tg.ready();
+
+    const user = tg.initDataUnsafe?.user;
+
+    if (!user) {
+        document.getElementById("user-name").innerText = "No Telegram User";
+        return;
+    }
 
     document.getElementById("user-name").innerText =
-        user.first_name || "Unknown";
+        user.first_name || "-";
 
     document.getElementById("user-id").innerText =
         user.id || "-";
