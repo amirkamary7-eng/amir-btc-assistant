@@ -79,33 +79,23 @@ function loadTelegramUser() {
     const usernameEl = document.getElementById("user-username");
     const imgEl = document.getElementById("profile-img");
 
-    if (!tg) {
-        nameEl.innerText = "Not in Telegram";
-        return;
-    }
+    if (!tg) return;
 
     tg.ready();
     tg.expand();
 
     const user = tg.initDataUnsafe?.user;
 
-    console.log("TG USER:", user);
-
     if (!user) {
-        nameEl.innerText = "No Telegram User";
+        nameEl.innerText = "No User";
         return;
     }
 
-    // اسم
     nameEl.innerText = user.first_name || "-";
-
-    // یوزرنیم
+    idEl.innerText = user.id || "-";
     usernameEl.innerText = "@" + (user.username || "no_username");
 
-    // ID
-    idEl.innerText = user.id || "-";
-
-    // عکس پروفایل (روش مطمئن)
+    // عکس کوچیک و درست
     if (user.username) {
         imgEl.src = `https://t.me/i/userpic/320/${user.username}.jpg`;
     }
