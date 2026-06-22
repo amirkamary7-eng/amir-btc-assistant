@@ -145,3 +145,33 @@ body::before {
     justify-content: center;
     align-items: center;
 }
+/* دکمه‌های پویا */
+.nav-item {
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.nav-item:active {
+    transform: scale(0.9);
+}
+
+/* کارت‌های شیشه‌ای مدرن */
+.glass-card {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 20px;
+    transition: border 0.3s ease;
+}
+
+.glass-card:hover {
+    border-color: #f7931a; /* رنگ اصلی شما */
+}
+
+/* افکتِ لودینگِ زیبا */
+@keyframes pulse {
+    0% { opacity: 0.5; }
+    50% { opacity: 1; }
+    100% { opacity: 0.5; }
+}
+.loading { animation: pulse 1.5s infinite; }

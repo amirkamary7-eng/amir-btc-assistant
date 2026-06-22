@@ -235,7 +235,7 @@ function loadAnalysisData() {
 
     // تغییر عنوان بنر خانه متناسب با کانال شما
     const titleEl = document.getElementById("dash-last-analysis-title");
-    if(titleEl) titleEl.innerText = `مشاهده جدیدترین چارت‌ها و تحلیل‌های لایو در کانال @${MY_TELEGRAM_CHANNEL}`;
+    if(titleEl) titleEl.innerText = `مشاهده جدیدترین تحلیل‌ها در کانال @${MY_TELEGRAM_CHANNEL}`;
 }
 
 // =====================
