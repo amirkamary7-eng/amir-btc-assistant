@@ -189,9 +189,6 @@ async function filterMarket() {
     }, 600);
 }
 
-// =====================
-// TELEGRAM DETECTOR & EMBED CHANNEL
-// =====================
 function loadTelegramUser() {
     const nameEl = document.getElementById("user-name");
     const dashNameEl = document.getElementById("dash-user-name");
@@ -202,15 +199,37 @@ function loadTelegramUser() {
     const userData = tg?.initDataUnsafe?.user;
 
     if (userData) {
+        // ۱. ست کردن نام و نام خانوادگی
         const fullName = `${userData.first_name || ""} ${userData.last_name || ""}`.trim();
         if (nameEl) nameEl.innerText = fullName;
         if (dashNameEl) dashNameEl.innerText = fullName;
+
+        // ۲. ست کردن آیدی عددی
         if (idEl) idEl.innerText = userData.id;
-        if (usernameEl) usernameEl.innerText = userData.username ? `@${userData.username}` : "";
-        if (imgEl && userData.username) imgEl.src = `https://t.me/i/userpic/320/${userData.username}.jpg`;
+
+        // ۳. ست کردن یوزرنیم (با فرمت استاندارد)
+        if (usernameEl) {
+            usernameEl.innerText = userData.username ? `@${userData.username}` : "بدون یوزرنیم";
+        }
+
+        // ۴. ست کردن عکس پروفایل با مدیریت خطای لود نشدن
+        if (imgEl) {
+            if (userData.username) {
+                imgEl.src = `https://t.me/i/userpic/320/${userData.username}.jpg`;
+                imgEl.onerror = function() {
+                    this.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
+                };
+            } else {
+                imgEl.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
+            }
+        }
     } else {
+        // حالت تست برای زمانی که برنامه در مرورگرِ عادی باز شده
         if (nameEl) nameEl.innerText = "امیر کریپتو (تست)";
         if (dashNameEl) dashNameEl.innerText = "امیر کریپتو (تست)";
+        if (idEl) idEl.innerText = "123456789";
+        if (usernameEl) usernameEl.innerText = "@test_user";
+        if (imgEl) imgEl.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png';
     }
 }
 
