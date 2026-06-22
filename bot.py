@@ -13,7 +13,7 @@ from telegram.ext import (
 
 TOKEN = "8989227188:AAGg504dd7By2MF3Wl_YT-HHcoBwGX3lCpw"
 
-WEBAPP_URL = "https://example.com"
+WEBAPP_URL = "https://amir-btc-assistant.vercel.app"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
