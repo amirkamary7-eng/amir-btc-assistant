@@ -238,6 +238,71 @@ body {
     text-shadow: 0 0 10px currentColor; /* افکت نئونی ملایم */
 }
 
+.fg-meter {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.fg-meter-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.fg-value-label {
+    font-weight: 700;
+    color: #fff;
+}
+
+.fg-value-unit {
+    font-size: 10px;
+    color: rgba(255,255,255,0.6);
+}
+
+.fg-gauge-track {
+    position: relative;
+    width: 100%;
+    height: 14px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.14);
+}
+
+.fg-gauge-fill {
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(90deg, #ffb300, #ff3d6d);
+    border-radius: 999px;
+    transition: width 0.8s ease, background 0.6s ease;
+}
+
+.fg-gauge-pointer {
+    position: absolute;
+    top: -8px;
+    left: calc(50% - 2px);
+    width: 4px;
+    height: 30px;
+    background: #fff;
+    border-radius: 999px;
+    box-shadow: 0 0 12px rgba(255,255,255,0.35);
+    transition: left 0.8s ease;
+}
+
+.fg-gauge-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 600;
+}
+
 .coin-name {
     font-size: 12px;
     color: var(--text-dim);

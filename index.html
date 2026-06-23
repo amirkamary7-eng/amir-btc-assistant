@@ -34,8 +34,23 @@
         <div class="liquidation-grid-wrapper">
             <div class="liq-card-metric" style="grid-column: span 2;">
                 <div class="card-title">Crypto Fear & Greed Index</div>
-                <div class="card-price fg-value-el" style="color: var(--neon-amber);">50</div>
+                <div class="card-price fg-value-el">50</div>
                 <div class="coin-name fg-status-el">Neutral</div>
+                <div class="fg-meter">
+                    <div class="fg-meter-top">
+                        <span class="fg-value-label">Fear Meter</span>
+                        <span class="fg-value-unit">0 - 100</span>
+                    </div>
+                    <div class="fg-gauge-track">
+                        <div class="fg-gauge-fill"></div>
+                        <div class="fg-gauge-pointer"></div>
+                    </div>
+                    <div class="fg-gauge-scale">
+                        <span>Fear</span>
+                        <span>Neutral</span>
+                        <span>Greed</span>
+                    </div>
+                </div>
             </div>
             <div class="liq-card-metric">
                 <div class="card-title" style="color:var(--green);">Long Liquidations</div>
