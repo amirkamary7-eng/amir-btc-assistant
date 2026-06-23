@@ -10,15 +10,12 @@
 </head>
 <body>
 
-    <!-- هدر ثابت اپلیکیشن -->
     <div class="app-header-container">
         <div class="noti-btn" onclick="openNotificationCenter()">🔔</div>
         <div class="header-title">Amir BTC Assistant</div>
     </div>
 
-    <!-- ۱. صفحه داشبورد (Dashboard Page) -->
     <div id="dashboard-page" class="page">
-        <!-- هدر خوشامدگویی پویا متصل به تلگرام -->
         <div class="dashboard-welcome-bar" style="padding: 0 15px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; direction: rtl;">
             <div>
                 <span style="color: var(--text-dim); font-size: 11px;">خوش آمدید،</span>
@@ -59,7 +56,6 @@
         </div>
     </div>
 
-    <!-- ۲. صفحه مارکت (Market Page) -->
     <div id="market-page" class="page">
         <input type="text" id="market-search" class="search-box" placeholder="جستجو بین ۱۰۰ ارز برتر بازار...">
         
@@ -80,7 +76,6 @@
         <div id="market-coin-list"></div>
     </div>
 
-    <!-- ۳. صفحه اخبار و تقویم اقتصادی (News Page) -->
     <div id="news-page" class="page">
         <div class="market-trend-selector" style="margin-bottom:10px;">
             <button class="news-tab-btn active" onclick="switchNewsTab('all-news')">All</button>
@@ -91,69 +86,89 @@
         <div id="news-tab-content-area" style="padding: 0 15px;"></div>
     </div>
 
-    <!-- ۴. صفحه تحلیل‌ها (Analysis Page) -->
     <div id="analysis-page" class="page">
         <div id="telegram-feed-container" style="padding:15px;"></div>
     </div>
 
-    <!-- ۵. صفحه پروفایل و تنظیمات (Profile & Settings Page) -->
     <div id="profile-page" class="page" style="padding:15px;">
-        <!-- نمای اصلی پروفایل -->
+        
         <div id="profile-main-view">
-            <div class="glass-card" style="text-align:center; padding:20px; border-radius:24px; margin-bottom:15px; position: relative;">
-                <!-- دکمه ورود به تنظیمات مستقل اختصاصی V1 -->
-                <div onclick="openSettingsPage()" style="position: absolute; top: 15px; right: 20px; font-size: 20px; cursor: pointer;">⚙️</div>
+            <div class="glass-card" style="text-align:center; padding:25px 20px; border-radius:24px; margin-bottom:15px; position: relative;">
+                <div onclick="openSettingsPage()" style="position: absolute; top: 18px; right: 20px; font-size: 22px; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='rotate(45deg)'" onmouseout="this.style.transform='rotate(0deg)'">⚙️</div>
                 
-                <img id="profile-avatar-img" src="https://img.icons8.com/clouds/200/000000/bitcoin.png" style="width:75px; height:75px; border-radius:50%; margin-bottom:10px;">
-                <h3 class="user-full-name" style="margin:0; font-size:18px;">کاربر تلگرام</h3>
-                <span id="user-username-val" style="color:var(--text-sub); font-size:12px;">@username</span>
-                <div style="font-size:11px; color:var(--text-dim); margin-top:4px;">ID: <span id="user-id-val">000000</span></div>
+                <img id="profile-avatar-img" src="https://img.icons8.com/clouds/200/000000/bitcoin.png" style="width:80px; height:80px; border-radius:50%; margin-bottom:12px; border: 2px solid rgba(247, 147, 26, 0.2);">
+                <h3 class="user-full-name" style="margin:0; font-size:18px; font-weight: bold; color: white;">کاربر تلگرام</h3>
+                <span id="user-username-val" style="color:var(--text-dim); font-size:13px; display: block; margin-top: 4px;">@username</span>
+                <div style="font-size:11px; color:var(--text-sub); margin-top:6px; font-family: monospace;">ID: <span id="user-id-val">000000</span></div>
             </div>
 
-            <button class="glass-card" onclick="openReferralPage()" style="width:100%; text-align:right; display:flex; justify-content:space-between; align-items:center; color:white; font-weight:bold; font-size:14px; border:1px solid rgba(247,147,26,0.2); cursor:pointer; padding: 15px; border-radius: 16px; margin-bottom: 15px;">
-                <span>برنامه دعوت و پاداش (Referral)</span>
-                <span style="color:var(--primary);">🎁 🪙</span>
+            <button class="glass-card" onclick="openReferralPage()" style="width:100%; text-align:right; display:flex; justify-content:space-between; align-items:center; color:white; font-weight:bold; font-size:14px; border:1px solid rgba(247,147,26,0.25); cursor:pointer; padding: 18px; border-radius: 18px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 18px;">🎁</span>
+                    <span>برنامه دعوت و پاداش (Referral)</span>
+                </div>
+                <span style="color:var(--primary); font-size: 16px;">➔</span>
             </button>
-
-            <div class="settings-list-group">
-                <div class="settings-row-item" onclick="openSettingsPage()"><span>Language / زبان</span><span style="color:var(--text-sub);">فارسی</span></div>
-                <div class="settings-row-item" onclick="openSettingsPage()"><span>Notifications / اعلانات</span><span style="color:var(--green);">فعال</span></div>
-                <div class="settings-row-item" onclick="openSettingsPage()"><span>Support / پشتیبانی</span><span style="color:var(--primary);">ارتباط</span></div>
-                <div class="settings-row-item" onclick="openSettingsPage()"><span>Privacy Policy / قوانین</span><span>📄</span></div>
-            </div>
         </div>
 
-        <!-- نمای زیرمجموعه رفرال (Referral Sub-view) -->
         <div id="referral-page-view" style="display:none;">
-            <div style="margin-bottom:15px;"><button onclick="closeReferralPage()" style="background:transparent; border:none; color:var(--primary); font-weight:bold; cursor:pointer; direction: rtl;">➔ بازگشت به پروفایل</button></div>
-            <div class="referral-card-box">
-                <h3 style="margin:0 0 10px 0; text-align: right;">برنامه کسب پاداش</h3>
-                <p style="margin:0; font-size:12px; color:var(--text-dim); text-align: right; direction: rtl;">با دعوت دوستان خود به ربات، پاداش‌های اختصاصی و دسترسی پریمیوم دریافت کنید.</p>
+            <div style="margin-bottom:15px; text-align: right;">
+                <button onclick="closeReferralPage()" style="background:transparent; border:none; color:var(--primary); font-weight:bold; cursor:pointer; direction: rtl; font-size: 14px; display: inline-flex; align-items: center; gap: 5px;">
+                    <span>➔</span> بازگشت به پروفایل
+                </button>
+            </div>
+            
+            <div class="referral-card-box" style="padding: 20px; border-radius: 20px;">
+                <h3 style="margin:0 0 10px 0; text-align: right; font-size: 16px; color: white;">سیستم دعوت و محاسبه آنی</h3>
+                <p style="margin:0; font-size:12px; color:var(--text-dim); text-align: right; direction: rtl; line-height: 1.5;">
+                    دوستان خود را دعوت کنید! سیستم هوشمند به صورت خودکار و بر اساس آیدی عددی تلگرام، ورودی‌های جدید را بدون خطای دیتای پرت ثبت خواهد کرد.
+                </p>
                 
-                <div class="ref-input-group" style="margin-top:15px;">
-                    <input type="text" id="ref-link-input" readonly value="">
+                <div class="ref-input-group" style="margin-top:18px;">
+                    <input type="text" id="ref-link-input" readonly value="در حال بارگذاری لینک دعوت..." style="text-align: left; direction: ltr;">
                     <button class="ref-copy-btn" onclick="copyReferralLink()">کپی</button>
                 </div>
-                <button class="banner-join-btn" onclick="shareReferralLink()" style="width:100%; margin-top:10px;">اشتراک‌گذاری در تلگرام</button>
+                <button class="banner-join-btn" onclick="shareReferralLink()" style="width:100%; margin-top:12px; height: 45px; border-radius: 12px; font-size: 13px;">اشتراک‌گذاری مستقیم در تلگرام</button>
                 
                 <div class="settings-list-group" style="margin-top:20px;">
-                    <div class="settings-row-item"><span>تعداد کل دعوت‌ها</span><span id="total-ref-count">۰ نفر</span></div>
-                    <div class="settings-row-item"><span>کاربران فعال</span><span id="active-ref-count" style="color:var(--green);">۰ نفر</span></div>
-                    <div class="settings-row-item"><span>پاداش کل دریافتی</span><span id="ref-rewards-val" style="color:var(--neon-amber);">۰ ساتوشی</span></div>
+                    <div class="settings-row-item">
+                        <span>تعداد کل دعوت‌ها</span>
+                        <span id="total-ref-count" style="font-family: monospace; font-weight: bold; color: white;">0 نفر</span>
+                    </div>
+                    <div class="settings-row-item">
+                        <span>کاربران فعال</span>
+                        <span id="active-ref-count" style="color:var(--green); font-family: monospace; font-weight: bold;">0 نفر</span>
+                    </div>
+                    <div class="settings-row-item">
+                        <span>پاداش کل دریافتی</span>
+                        <span id="ref-rewards-val" style="color:var(--neon-amber); font-family: monospace; font-weight: bold;">0 Satoshi</span>
+                    </div>
+                </div>
+
+                <div class="glass-card" style="margin: 20px 0 0 0; padding: 20px; text-align: center; border: 1px dashed rgba(247, 147, 26, 0.4); background: rgba(247, 147, 26, 0.02); border-radius: 18px; position: relative; overflow: hidden;">
+                    <div style="position: absolute; top: 8px; left: 8px; background: var(--primary-gradient); color: white; font-size: 9px; padding: 3px 10px; border-radius: 20px; font-weight: bold; letter-spacing: 0.5px;">Soon</div>
+                    <span style="font-size: 32px; display: block; margin-bottom: 8px; filter: drop-shadow(0 0 8px rgba(247,147,26,0.3));">🎁</span>
+                    <h4 style="margin: 5px 0; color: #fff; font-size: 14px; font-weight: bold;">بخش جوایز و فروشگاه</h4>
+                    <p style="margin: 5px 0 0 0; font-size: 11px; color: var(--text-dim); line-height: 1.6; direction: rtl; text-align: center;">
+                        بزودی بخش جوایز فعال میشه! شما می‌تونید ساتوشی‌های حاصل از دعوت رو با اشتراک‌های VIP کانال، اکانت‌های پریمیوم و جوایز ویژه تعویض کنید.
+                    </p>
                 </div>
             </div>
         </div>
 
-        <!-- نمای زیرمجموعه تنظیمات ساختاری V1 (Settings Sub-view) -->
         <div id="settings-page-view" style="display:none;">
-            <div style="margin-bottom:15px;"><button onclick="closeSettingsPage()" style="background:transparent; border:none; color:var(--primary); font-weight:bold; cursor:pointer; direction: rtl;">➔ بازگشت به پروفایل</button></div>
-            <div class="glass-card" style="padding:15px; border-radius: 16px;">
-                <h3 style="margin:0 0 15px 0; text-align:right; font-size: 16px;">تنظیمات پیشرفته برنامه</h3>
+            <div style="margin-bottom:15px; text-align: right;">
+                <button onclick="closeSettingsPage()" style="background:transparent; border:none; color:var(--primary); font-weight:bold; cursor:pointer; direction: rtl; font-size: 14px; display: inline-flex; align-items: center; gap: 5px;">
+                    <span>➔</span> بازگشت به پروفایل
+                </button>
+            </div>
+            <div class="glass-card" style="padding:20px; border-radius: 20px;">
+                <h3 style="margin:0 0 15px 0; text-align:right; font-size: 16px; color: white; font-weight: bold;">تنظیمات پیشرفته برنامه</h3>
                 <div class="settings-list-group">
                     <div class="settings-row-item"><span>تغییر زبان (Language)</span><span style="color:var(--text-sub);">فارسی (FA)</span></div>
-                    <div class="settings-row-item"><span>اعلانات آنی قیمت</span><span style="color:var(--green);">روشن</span></div>
-                    <div class="settings-row-item"><span>ارتباط با پشتیبانی</span><span style="color:var(--primary);">ارسال پیام</span></div>
-                    <div class="settings-row-item"><span>درباره ما (About)</span><span style="color:var(--text-dim);">نسخه 1.0.0</span></div>
+                    <div class="settings-row-item"><span>اعلانات آنی قیمت</span><span style="color:var(--green); font-weight: bold;">روشن</span></div>
+                    <div class="settings-row-item"><span>ارتباط با پشتیبانی</span><span style="color:var(--primary); font-weight: bold;">ارسال پیام</span></div>
+                    <div class="settings-row-item"><span>درباره ما (About)</span><span style="color:var(--text-dim); font-family: monospace;">v1.0.0</span></div>
                     <div class="settings-row-item"><span>حریم خصوصی (Privacy)</span><span>📄</span></div>
                     <div class="settings-row-item"><span>شرایط استفاده (Terms)</span><span>📄</span></div>
                 </div>
@@ -161,16 +176,43 @@
         </div>
     </div>
 
-    <!-- منوی ناوبری پایینی (Bottom Navigation) -->
     <div class="bottom-nav">
-        <div id="nav-dashboard" class="nav-item" onclick="switchTab('dashboard-page', this)">🏠</div>
-        <div id="nav-market" class="nav-item" onclick="switchTab('market-page', this)">📈</div>
-        <div id="nav-news" class="nav-item" onclick="switchTab('news-page', this)">📰</div>
-        <div id="nav-analysis" class="nav-item" onclick="switchTab('analysis-page', this)">📉</div>
-        <div id="nav-profile" class="nav-item" onclick="switchTab('profile-page', this)">👤</div>
+        <button id="nav-dashboard" class="nav-item" onclick="switchTab('dashboard-page', this)" aria-label="Dashboard">
+            <div class="nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 11.5L12 4l9 7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 21V11h14v10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="nav-label">داشبورد</div>
+        </button>
+
+        <button id="nav-market" class="nav-item" onclick="switchTab('market-page', this)" aria-label="Market">
+            <div class="nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 3v18h18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 14l3-4 4 6 3-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="nav-label">مارکت</div>
+        </button>
+
+        <button id="nav-news" class="nav-item" onclick="switchTab('news-page', this)" aria-label="News">
+            <div class="nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M7 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </div>
+            <div class="nav-label">اخبار</div>
+        </button>
+
+        <button id="nav-analysis" class="nav-item" onclick="switchTab('analysis-page', this)" aria-label="Analysis">
+            <div class="nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 3v18h18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 14v-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 18v-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M16 10v6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </div>
+            <div class="nav-label">تحلیل</div>
+        </button>
+
+        <button id="nav-profile" class="nav-item" onclick="switchTab('profile-page', this)" aria-label="Profile">
+            <div class="nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="nav-label">پروفایل</div>
+        </button>
     </div>
 
-    <!-- مودال نمایش جزئیات اخبار -->
     <div id="details-modal" class="modal" onclick="if(event.target===this) this.style.display='none'">
         <div class="glass-card" style="width: 90%; max-width: 500px; max-height: 80vh; overflow-y: auto; position: relative;">
             <button onclick="document.getElementById('details-modal').style.display='none'" style="position: absolute; top: 15px; left: 15px; background: rgba(255,255,255,0.05); border: none; color: white; border-radius: 50%; width: 30px; height: 30px; cursor: pointer;">✕</button>
@@ -184,7 +226,6 @@
         </div>
     </div>
 
-    <!-- مودال نمودار لایو تک‌ارز (TradingView) -->
     <div id="chart-modal" class="modal" onclick="if(event.target===this) closeChart()">
         <div class="glass-card" style="width: 95%; max-width: 600px; height: 75vh; display: flex; flex-direction: column; position: relative; padding: 15px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">

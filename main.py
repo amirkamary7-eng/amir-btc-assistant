@@ -30,6 +30,9 @@ app.add_middleware(
 # کش مرکزی اخبار
 news_cache = {"data": None, "expiry": 0}
 
+# telegram app instance (set on startup)
+telegram_app = None
+
 # ==========================================
 # ۲. توابع بخش اخبار و ترجمه
 # ==========================================
@@ -158,14 +161,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # سیستم راه‌اندازی همزمان ربات تلگرام در پس‌زمینه FastAPI
 @app.on_event("startup")
 async def startup_event():
+    global telegram_app
     telegram_app = ApplicationBuilder().token(TOKEN).build()
     telegram_app.add_handler(CommandHandler("start", start))
-    
+
     # اجرای ربات به صورت ناهمگام (Async) تا سرور FastAPI قفل نشود
     await telegram_app.initialize()
     await telegram_app.start()
-    asyncio.create_task(telegram_app.updater.start_polling())
+    # run polling in background task to avoid blocking FastAPI
+    asyncio.create_task(telegram_app.run_polling())
     print("🚀 ربات تلگرام با موفقیت در پس‌زمینه فعال شد!")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global telegram_app
+    if telegram_app:
+        try:
+            await telegram_app.stop()
+            await telegram_app.shutdown()
+        except Exception:
+            pass
+        print("🔌 ربات تلگرام متوقف شد.")
 
 # ==========================================
 # ۴. اجرای نهایی سرور
