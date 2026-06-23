@@ -292,8 +292,16 @@ async function fetchCryptoNews() {
     }
 
     try {
-        const response = await fetch("https://min-api.cryptocompare.com/data/v1/news/?lang=EN");
-        const result = await response.json();
+        // آدرس اصلی خبر
+        const targetUrl = "https://min-api.cryptocompare.com/data/v1/news/?lang=EN";
+        // دور زدن فیلترینگ با پروکسی AllOrigins
+        const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl);
+
+        const response = await fetch(proxyUrl);
+        const proxyData = await response.json();
+        
+        // دیتا در آل‌اورجینز داخل contents به صورت متن قرار دارد که باید پارس شود
+        const result = JSON.parse(proxyData.contents);
 
         if (result && result.Data && Array.isArray(result.Data)) {
             const mappedArticles = result.Data.map(item => ({
@@ -306,19 +314,19 @@ async function fetchCryptoNews() {
                 tags: (item.tags || "").toLowerCase()
             }));
 
-            AppCache.set("premium_news", mappedArticles, 300); // ۵ دقیقه کش داخلی
+            AppCache.set("premium_news", mappedArticles, 300); 
             renderPremiumNewsDOM(mappedArticles);
             return;
         }
     } catch (error) {
-        console.error("خطا در دریافت اخبار زنده...");
+        console.error("خطا در دریافت اخبار از طریق پروکسی:", error);
+        // اگر پروکسی هم به مشکل خورد، یک پیام خطای تمیز به کاربر نمایش داده می‌شود
         const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
         if (newsListEl) {
-            newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red); font-size:13px; margin-top:20px;">❌ ارتباط با سرور اخبار برقرار نشد. لطفاً وضعیت اتصال خود را بررسی کنید.</div>`;
+            newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red); font-size:13px; margin-top:20px;">❌ دریافت اخبار با خطا مواجه شد. لطفاً دوباره تلاش کنید.</div>`;
         }
     }
 }
-
 function formatTimeAgo(unixTimestamp) {
     const diff = Math.floor(Date.now() / 1000) - unixTimestamp;
     if (diff < 60) return "اخیراً";
