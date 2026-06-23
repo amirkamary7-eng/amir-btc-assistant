@@ -7,7 +7,7 @@ if (tg) {
     tg.expand();
 }
 
-const MY_TELEGRAM_CHANNEL = "amir_btc_a"; 
+const MY_TELEGRAM_CHANNEL = "amir_btc_2024"; 
 let allMarketCoins = [];
 let searchTimeout = null;
 

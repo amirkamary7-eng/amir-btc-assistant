@@ -11,7 +11,7 @@ from telegram.ext import (
     ContextTypes
 )
 
-TOKEN = "8989227188:AAGg504dd7By2MF3Wl_YT-HHcoBwGX3lCpw"
+TOKEN = "8989227188:AAH0KCEIonjRmN45zLtRq65JIbkY8ON990k"
 
 WEBAPP_URL = "https://amir-btc-assistant.vercel.app"
 
