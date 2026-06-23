@@ -14,6 +14,7 @@
             --text-main: #ffffff;
             --text-sub: #8a94a6;
             --primary: #f7931a;
+            --primary-gradient: linear-gradient(135deg, #f7931a, #ff3355);
             --primary-glow: rgba(247, 147, 26, 0.3);
             --green: #00ffaa;
             --red: #ff3355;
@@ -51,7 +52,7 @@
         .page {
             display: none;
             padding-bottom: 100px;
-            animation: cubic-bezier(0.4, 0, 0.2, 1) fadeIn 0.4s;
+            animation: cubic-bezier(0.4, 0, 0.2, 1) fadeIn 0.3s;
         }
 
         .page.active {
@@ -59,7 +60,7 @@
         }
 
         @keyframes fadeIn {
-            from { opacity: 0; transform: scale(0.97) translateY(10px); }
+            from { opacity: 0; transform: scale(0.99) translateY(4px); }
             to { opacity: 1; transform: scale(1) translateY(0); }
         }
 
@@ -178,7 +179,7 @@
         .center-btn {
             width: 60px;
             height: 60px;
-            background: linear-gradient(135deg, #f7931a, #ff3355);
+            background: var(--primary-gradient);
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -221,6 +222,59 @@
             transition: transform 0.2s;
         }
         .news-card:active { transform: scale(0.97); }
+
+        .news-card h3 {
+            margin: 0 0 6px 0;
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-main);
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;  
+            overflow: hidden;
+        }
+
+        .news-card p {
+            margin: 0;
+            font-size: 13px;
+            color: var(--text-sub);
+            line-height: 1.6;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            line-clamp: 3;
+            -webkit-box-orient: vertical;  
+            overflow: hidden;
+        }
+
+        /* =======================
+           قانون 4: اسکلتون لودر مرکزی
+        ======================= */
+        .skeleton-block {
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .skeleton-shimmer::after {
+            content: "";
+            position: absolute;
+            top: 0; right: 0; bottom: 0; left: 0;
+            transform: translateX(-100%);
+            background: linear-gradient(
+                90deg,
+                transparent,
+                rgba(247, 147, 26, 0.06) 50%,
+                transparent
+            );
+            animation: appShimmer 1.5s infinite;
+        }
+
+        @keyframes appShimmer {
+            100% { transform: translateX(100%); }
+        }
     </style>
     
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -228,7 +282,6 @@
 </head>
 <body>
 
-    <!-- صفحه ۱: داشبورد اصلی -->
     <div id="dashboard-page" class="page active">
         <div style="padding: 24px 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; direction: rtl;">
             <div>
@@ -242,10 +295,10 @@
 
         <div class="glass-card" onclick="showPage('analysis-page', document.getElementById('nav-analysis'))" style="direction: rtl; background: linear-gradient(135deg, rgba(247,147,26,0.1), rgba(18,22,34,0.65));">
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 12px; background: var(--primary); color: #000; padding: 2px 8px; border-radius: 6px; font-weight: bold;">سیگنال زنده</span>
-                <span style="font-size: 11px; color: var(--text-sub);">ورود به صفحه تحلیل‌ها 🎯</span>
+                <span style="font-size: 12px; background: var(--primary); color: #000; padding: 2px 8px; border-radius: 6px; font-weight: bold;">آخرین تحلیل کانال</span>
+                <span style="font-size: 11px; color: var(--text-sub);">ورود به بخش تحلیل‌ها 🎯</span>
             </div>
-            <div style="font-size: 15px; font-weight: bold; margin-top: 12px; color: #fff;" id="dash-last-analysis-title">مشاهده آخرین گفتگوها و سیگنال‌ها</div>
+            <div style="font-size: 15px; font-weight: bold; margin-top: 12px; color: #fff;" id="dash-last-analysis-title">در حال دریافت جدیدترین تحلیل...</div>
         </div>
 
         <div class="grid-dashboard">
@@ -266,64 +319,98 @@
                 </div>
                 <div style="margin: 12px 0;">
                     <div id="liq-value" class="index-value" style="color: var(--red); font-size: 22px; font-family: monospace; font-weight: bold;">$--M</div>
-                    <div style="font-size: 11px; color: var(--text-sub); margin-top: 6px;">مجموع لانگ و شورت</div>
+                    <div style="font-size: 11px; color: var(--text-sub); margin-top: 6px;">مجموع بازار</div>
                 </div>
             </div>
         </div>
 
-        <div class="glass-card" onclick="showPage('market-page', document.getElementById('nav-market'))" style="direction: rtl; margin-top: 14px;">
+        <div class="glass-card" style="direction: rtl; margin-top: 14px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <span style="font-weight: bold; font-size: 14px;">⚡ دیدبان سریع بازار</span>
-                <span style="font-size: 12px; color: var(--primary);">مشاهده همه ←</span>
+                <span style="font-weight: bold; font-size: 14px;">⭐️ واچ‌لیست شما</span>
+                <span onclick="showPage('market-page', document.getElementById('nav-market'))" style="font-size: 12px; color: var(--primary); cursor:pointer;">مدیریت دیدبان ←</span>
             </div>
-            <div id="dash-mini-market"></div>
+            <div id="dash-mini-market">
+                <div class="skeleton-block skeleton-shimmer" style="height: 50px; margin-bottom: 8px;"></div>
+                <div class="skeleton-block skeleton-shimmer" style="height: 50px;"></div>
+            </div>
+        </div>
+
+        <div class="glass-card" style="direction: rtl; margin-top: 14px; padding-bottom: 4px;">
+            <div style="font-weight: bold; font-size: 14px; margin-bottom: 12px;">🔥 خبرهای فوق‌العاده مهم امروز</div>
+            <div id="dash-top-news">
+                <div class="skeleton-block skeleton-shimmer" style="height: 40px; margin-bottom: 8px;"></div>
+                <div class="skeleton-block skeleton-shimmer" style="height: 40px;"></div>
+            </div>
         </div>
     </div>
 
-    <!-- صفحه ۲: مارکت و دیدبان کامل -->
     <div id="market-page" class="page">
         <div class="search-container">
-            <input type="text" id="market-search" oninput="filterMarket()" placeholder="جستجوی پیشرفته در تمام صرافی‌ها..." class="search-box">
+            <input type="text" id="market-search" placeholder="جستجوی پیشرفته در بازار..." class="search-box">
         </div>
-        <div id="market-list" class="glass-card" style="padding: 0; overflow: hidden;"></div>
+        <div id="market-list" class="glass-card" style="padding: 0; overflow: hidden;">
+            <div style="padding: 16px;">
+                <div class="skeleton-block skeleton-shimmer" style="height: 45px; margin-bottom: 12px;"></div>
+                <div class="skeleton-block skeleton-shimmer" style="height: 45px; margin-bottom: 12px;"></div>
+                <div class="skeleton-block skeleton-shimmer" style="height: 45px;"></div>
+            </div>
+        </div>
     </div>
 
-    <!-- صفحه ۳: اخبار -->
     <div id="news-page" class="page">
-        <div style="padding: 20px; font-weight: bold; color: var(--primary); text-align: right;">📰 آخرین اخبار ارز دیجیتال</div>
+        <div style="padding: 20px 20px 4px 20px; font-weight: bold; color: var(--primary); text-align: right; font-size: 16px;">📰 آخرین اخبار ارز دیجیتال و اقتصاد</div>
         <div id="news-list">
-            <div style="text-align:center; color:var(--text-sub); margin-top:20px;">در حال دریافت اخبار...</div>
+            <div class="news-card" style="pointer-events: none;">
+                <div class="skeleton-block skeleton-shimmer" style="width: 70%; height: 18px; margin-bottom: 8px; margin-left: auto;"></div>
+                <div class="skeleton-block skeleton-shimmer" style="width: 100%; height: 40px;"></div>
+            </div>
+            <div class="news-card" style="pointer-events: none;">
+                <div class="skeleton-block skeleton-shimmer" style="width: 50%; height: 18px; margin-bottom: 8px; margin-left: auto;"></div>
+                <div class="skeleton-block skeleton-shimmer" style="width: 100%; height: 40px;"></div>
+            </div>
         </div>
     </div>
 
-    <!-- صفحه ۴: تحلیل‌ها (ویجت تلگرام) -->
     <div id="analysis-page" class="page">
-        <div id="telegram-feed-container" style="padding: 10px;"></div>
+        <div style="padding: 20px 20px 0 20px; font-weight: bold; color: var(--primary); text-align: right; font-size: 16px;">📉 آرشیو سیگنال‌ها و تحلیل‌های کانال</div>
+        <div id="telegram-feed-container" style="padding: 10px;">
+            <div class="glass-card">
+                <div class="skeleton-block skeleton-shimmer" style="height: 150px; border-radius: 14px; margin-bottom: 12px;"></div>
+                <div class="skeleton-block skeleton-shimmer" style="width: 40%; height: 16px; margin-left: auto;"></div>
+            </div>
+        </div>
     </div>
 
-    <!-- صفحه ۵: پروفایل کاربری -->
     <div id="profile-page" class="page" style="padding: 20px;">
-        <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
-            <div style="width: 110px; height: 110px; margin: 0 auto 15px; border-radius: 50%; border: 3px solid var(--primary); padding: 3px; overflow: hidden;">
-                <img id="profile-img" src="https://img.icons8.com/clouds/200/000000/bitcoin.png" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
-            </div>
-            <h2 id="user-name" style="margin: 0; color: #fff;">در حال دریافت...</h2>
-            <p style="color: var(--text-sub); margin-top: 5px;">کاربر عضو مینی اپ</p>
+        <div id="profile-skeleton" style="text-align: center; margin-top: 20px;">
+            <div class="skeleton-block skeleton-shimmer" style="width: 110px; height: 110px; border-radius: 50%; margin: 0 auto 15px;"></div>
+            <div class="skeleton-block skeleton-shimmer" style="width: 40%; height: 20px; margin: 0 auto 8px;"></div>
+            <div class="skeleton-block skeleton-shimmer" style="width: 30%; height: 14px; margin: 0 auto 30px;"></div>
+            <div class="skeleton-block skeleton-shimmer" style="height: 120px; border-radius: 20px;"></div>
         </div>
 
-        <div style="background: rgba(255, 255, 255, 0.05); border-radius: 20px; padding: 15px; border: 1px solid rgba(255, 255, 255, 0.1);">
-            <div style="display: flex; justify-content: space-between; padding: 15px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
-                <span style="color: var(--text-sub);">یوزرنیم:</span>
-                <span id="user-username" style="color: #fff; font-weight: bold; direction: ltr;">---</span>
+        <div id="profile-content" style="display: none;">
+            <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
+                <div style="width: 110px; height: 110px; margin: 0 auto 15px; border-radius: 50%; border: 3px solid var(--primary); padding: 3px; overflow: hidden;">
+                    <img id="profile-img" src="https://img.icons8.com/clouds/200/000000/bitcoin.png" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
+                </div>
+                <h2 id="user-name" style="margin: 0; color: #fff;">---</h2>
+                <p style="color: var(--text-sub); margin-top: 5px;">کاربر ویژه مینی‌اپ</p>
             </div>
-            <div style="display: flex; justify-content: space-between; padding: 15px 10px;">
-                <span style="color: var(--text-sub);">آیدی عددی:</span>
-                <span id="user-id" style="color: var(--primary); font-family: monospace; font-weight: bold; direction: ltr;">000000</span>
+
+            <div style="background: rgba(255, 255, 255, 0.05); border-radius: 20px; padding: 15px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div style="display: flex; justify-content: space-between; padding: 15px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+                    <span style="color: var(--text-sub);">یوزرنیم:</span>
+                    <span id="user-username" style="color: #fff; font-weight: bold; direction: ltr;">---</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 15px 10px;">
+                    <span style="color: var(--text-sub);">آیدی عددی:</span>
+                    <span id="user-id" style="color: var(--primary); font-family: monospace; font-weight: bold; direction: ltr;">000000</span>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- مودال ۱: نمایش چارت لایو TradingView -->
     <div id="chart-modal" class="modal">
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: #0c0f17; border-bottom: 1px solid var(--glass-border);">
             <button onclick="closeChart()" style="background: var(--red); border: none; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px;">بستن ✕</button>
@@ -332,7 +419,6 @@
         <div id="tradingview-widget-container" style="flex: 1; width: 100%;"></div>
     </div>
 
-    <!-- مودال ۲: نمایش متن کامل خبر -->
     <div id="news-modal" class="modal" style="padding: 20px; background: rgba(4, 6, 10, 0.95); text-align: right; direction: rtl;">
         <div style="background: var(--card-bg); border-radius: 20px; padding: 20px; border: 1px solid var(--glass-border); max-height: 85vh; overflow-y: auto;">
             <button onclick="closeNewsModal()" style="background: var(--red); border:none; padding:10px 18px; color:white; border-radius:10px; cursor:pointer; font-weight: bold;">بستن ✕</button>
@@ -341,32 +427,30 @@
         </div>
     </div>
 
-    <!-- منوی ناوبری باتم‌بار (Navbar) -->
     <div class="navbar">
-        <div id="nav-market" class="nav-item" onclick="showPage('market-page', this)">
+        <div id="nav-market" class="nav-item" onclick="switchTab('market-page', this)">
             <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
             <span>مارکت</span>
         </div>
-        <div id="nav-news" class="nav-item" onclick="showPage('news-page', this)">
+        <div id="nav-news" class="nav-item" onclick="switchTab('news-page', this)">
             <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"/></svg>
             <span>اخبار</span>
         </div>
         
-        <div id="nav-dashboard" class="center-btn" onclick="showPage('dashboard-page', null)">
+        <div id="nav-dashboard" class="center-btn" onclick="switchTab('dashboard-page', null)">
             <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
         </div>
         
-        <div id="nav-analysis" class="nav-item" onclick="showPage('analysis-page', this)">
+        <div id="nav-analysis" class="nav-item" onclick="switchTab('analysis-page', this)">
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
             <span>تحلیل‌ها</span>
         </div>
-        <div id="nav-profile" class="nav-item" onclick="showPage('profile-page', this)">
+        <div id="nav-profile" class="nav-item" onclick="switchTab('profile-page', this)">
             <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
             <span>پروفایل</span>
         </div>
     </div>
 
-    <!-- اتصال به اسکریپت منطقی برنامه -->
     <script src="app.js"></script>
 </body>
 </html>
