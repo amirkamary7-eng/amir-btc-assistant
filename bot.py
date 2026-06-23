@@ -1,4 +1,5 @@
 import os
+import sys
 
 from telegram import (
     Update,
@@ -17,7 +18,9 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
 
 if TOKEN == "REPLACE_WITH_TOKEN":
-    print("⚠️ WARNING: TELEGRAM_BOT_TOKEN not set in environment. Set TELEGRAM_BOT_TOKEN to enable bot.")
+    print("⚠️ ERROR: TELEGRAM_BOT_TOKEN not set in environment. Set TELEGRAM_BOT_TOKEN to enable bot.")
+    print("Example (PowerShell): $env:TELEGRAM_BOT_TOKEN = '8989227188:AAH0KCEIonjRmN45zLtRq65JIbkY8ON990k'")
+    sys.exit(1)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 

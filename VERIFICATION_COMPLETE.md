@@ -183,9 +183,9 @@ Binance API (via proxy)
 
 #### Environment Variables (.env):
 ```
-TELEGRAM_BOT_TOKEN=...
+TELEGRAM_BOT_TOKEN=8989227188:AAH0KCEIonjRmN45zLtRq65JIbkY8ON990k
 BACKEND_URL=https://amir-btc-assistant-production.up.railway.app
-WEBAPP_URL=https://...
+WEBAPP_URL=https://amir-btc-assistant.vercel.app/
 PORT=8000
 ```
 
