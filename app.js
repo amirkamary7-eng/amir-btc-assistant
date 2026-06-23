@@ -269,8 +269,8 @@ function loadLiquidationData() {
     const mockLiq = cachedLiq || {
         longVol: (Math.random() * 15 + 50).toFixed(2) + "M",
         shortVol: (Math.random() * 12 + 30).toFixed(2) + "M",
-        statusLong: "حمایت خریداران",
-        statusShort: "فشار فروشندگان"
+        statusLong: "لانگ لیکویید",
+        statusShort: "شورت لیکویید"
     };
     if (!cachedLiq) AppCache.set("market_liquidations", mockLiq, 60);
 
