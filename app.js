@@ -11,6 +11,7 @@ if (tg) {
 // بخش ۲: متغیرهای ثابت، آدرس‌ها و آرایه‌ها (Constants & States)
 // =========================================================================
 const MY_TELEGRAM_CHANNEL = "amir_btc_2024";
+// ⚠️ این آدرس را به آدرس بک‌اند خودت تغییر بده (بدون اسلش انتهایی)
 const BACKEND_URL = "https://amir-btc-assistant-production.up.railway.app";
 const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
 
@@ -34,7 +35,7 @@ let currentSliderIndex = 0;
 let cachedNewsArticles = [];
 
 // =========================================================================
-// بخش ۳: موتور کش مرکزی ارتقاءیافته (Enhanced Cache Engine)
+// بخش ۳: موتور کش مرکزی (Cache Engine)
 // =========================================================================
 const AppCache = {
     storage: {},
@@ -56,7 +57,45 @@ const AppCache = {
 };
 
 // =========================================================================
-// بخش ۴: روتر و سیستم ناوبری هوشمند (Lazy-Load Tab Router)
+// بخش ۴: توابع واچ‌لیست (برای هماهنگی با watchlist.js)
+// =========================================================================
+// این توابع قبل از هر چیز تعریف می‌شوند تا در دسترس باشند
+window.getWatchlist = window.getWatchlist || function() {
+    const stored = localStorage.getItem('watchlist');
+    return stored ? JSON.parse(stored) : [];
+};
+
+window.addToWatchlist = window.addToWatchlist || function(symbol) {
+    const list = window.getWatchlist();
+    if (!list.includes(symbol)) {
+        list.push(symbol);
+        localStorage.setItem('watchlist', JSON.stringify(list));
+        if (typeof renderWatchlist === 'function') renderWatchlist();
+    }
+};
+
+window.removeFromWatchlist = window.removeFromWatchlist || function(symbol) {
+    let list = window.getWatchlist();
+    list = list.filter(s => s !== symbol);
+    localStorage.setItem('watchlist', JSON.stringify(list));
+    if (typeof renderWatchlist === 'function') renderWatchlist();
+};
+
+window.openAddCoinModal = window.openAddCoinModal || function() {
+    const modal = document.getElementById('add-coin-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        if (typeof populateAddCoinModal === 'function') populateAddCoinModal();
+    }
+};
+
+window.closeAddCoinModal = window.closeAddCoinModal || function() {
+    const modal = document.getElementById('add-coin-modal');
+    if (modal) modal.style.display = 'none';
+};
+
+// =========================================================================
+// بخش ۵: روتر و سیستم ناوبری
 // =========================================================================
 function switchTab(pageId, element) {
     document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
@@ -93,7 +132,6 @@ function switchTab(pageId, element) {
         loadMarketAndPrices();
         loadLiquidationData();
         loadExtraMetrics();
-        // دکمه افزودن به واچ‌لیست در صفحه مارکت نمایش داده می‌شود
         renderAddWatchlistButton();
     } else if (pageId === 'news-page') {
         switchNewsTab('all-news');
@@ -132,7 +170,7 @@ function removeSkeletons() {
 }
 
 // =========================================================================
-// بخش ۵: دریافت قیمت‌ها و دسته‌بندی بازار (Binance Fetcher & Bull/Bear)
+// بخش ۶: دریافت قیمت‌ها و دسته‌بندی بازار
 // =========================================================================
 async function loadMarketAndPrices() {
     const cachedPrices = AppCache.get("market_prices");
@@ -150,7 +188,6 @@ async function loadMarketAndPrices() {
             const chunk = POPULAR_SYMBOLS.slice(i, i + chunkSize);
             const formattedSymbols = JSON.stringify(chunk.map(sym => `${sym}USDT`));
             const targetUrl = `https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(formattedSymbols)}`;
-
             const response = await fetch(PROXY_BASE_URL + encodeURIComponent(targetUrl));
             const data = await response.json();
             if (data && Array.isArray(data)) {
@@ -162,31 +199,26 @@ async function loadMarketAndPrices() {
             throw new Error("No tickers returned from Binance API.");
         }
 
-        allMarketCoins = [];
-        POPULAR_SYMBOLS.forEach((sym, index) => {
+        allMarketCoins = POPULAR_SYMBOLS.map((sym, index) => {
             const ticker = fetchedTickers.find(item => item.symbol === `${sym}USDT`);
-            if (ticker) {
-                allMarketCoins.push({
-                    symbol: sym,
-                    name: getCoinFullName(sym),
-                    priceUsd: ticker.lastPrice,
-                    changePercent24Hr: ticker.priceChangePercent,
-                    rank: index + 1
-                });
-            }
-        });
+            return ticker ? {
+                symbol: sym,
+                name: getCoinFullName(sym),
+                priceUsd: ticker.lastPrice,
+                changePercent24Hr: ticker.priceChangePercent,
+                rank: index + 1
+            } : null;
+        }).filter(Boolean);
 
         AppCache.set("market_prices", allMarketCoins, 15);
         renderMarketData();
         removeSkeletons();
     } catch (err) {
         console.error("Binance Fetch Error:", err);
-        // نمایش پیام خطا به جای داده‌های تصادفی
         const marketList = document.getElementById("market-coin-list");
         if (marketList) {
             marketList.innerHTML = `<div style="padding:20px; color:var(--red); text-align:center;">خطا در دریافت داده‌های بازار. لطفاً بعداً تلاش کنید.</div>`;
         }
-        // اگر داده‌های قبلی در کش وجود دارد، از آن استفاده کنیم
         const oldData = AppCache.get("market_prices");
         if (oldData) {
             allMarketCoins = oldData;
@@ -208,14 +240,12 @@ function renderWatchlist() {
     const container = document.getElementById("watchlist-container");
     if (!container) return;
 
-    // دریافت واچ‌لیست از localStorage
-    const watchlistSymbols = getWatchlist();
+    const watchlistSymbols = window.getWatchlist();
     if (watchlistSymbols.length === 0) {
         container.innerHTML = `<div class="watchlist-card" style="min-width:100%; justify-content:center; color:var(--text-sub);">هیچ کوینی به واچ‌لیست اضافه نشده است.</div>`;
         return;
     }
 
-    // فیلتر کردن کوین‌های موجود در allMarketCoins که در واچ‌لیست هستند
     const watchlistCoins = allMarketCoins.filter(coin => watchlistSymbols.includes(coin.symbol));
     if (watchlistCoins.length === 0) {
         container.innerHTML = `<div class="watchlist-card" style="min-width:100%; justify-content:center; color:var(--text-sub);">هیچ کوینی از واچ‌لیست در داده‌های بازار یافت نشد.</div>`;
@@ -227,7 +257,6 @@ function renderWatchlist() {
         const change = parseFloat(coin.changePercent24Hr) || 0;
         const isPositive = change >= 0;
         const sign = isPositive ? "+" : "";
-
         html += `
             <div class="watchlist-card" onclick="openChart('${coin.symbol}')">
                 <div class="watchlist-card-header">
@@ -263,7 +292,6 @@ function renderMarketTabLists(filterType = 'all') {
         const change = parseFloat(coin.changePercent24Hr) || 0;
         const isPositive = change >= 0;
         const badgeClass = isPositive ? 'badge-success' : 'badge-danger';
-
         html += `
             <div class="coin-row" onclick="openChart('${coin.symbol}')">
                 <div style="display: flex; align-items: center; gap: 12px;">
@@ -290,8 +318,27 @@ function filterMarketCategory(category, element) {
     renderMarketTabLists(category);
 }
 
+function renderAddWatchlistButton() {
+    const marketPage = document.getElementById('market-page');
+    if (!marketPage) return;
+    if (document.getElementById('add-watchlist-btn-container')) return;
+
+    const container = document.createElement('div');
+    container.id = 'add-watchlist-btn-container';
+    container.style.cssText = 'display:flex; justify-content:center; margin: 5px 15px 15px;';
+    container.innerHTML = `
+        <button class="banner-join-btn" onclick="openAddCoinModal()" style="width:100%; background: linear-gradient(135deg, #f7931a, #ff6a00);">
+            ➕ افزودن/مدیریت واچ‌لیست
+        </button>
+    `;
+    const marketList = document.getElementById('market-coin-list');
+    if (marketList) {
+        marketList.parentNode.insertBefore(container, marketList);
+    }
+}
+
 // =========================================================================
-// بخش ۶: دریافت داده‌های داینامیک لیکوئیدی (Liquidations Fetcher)
+// بخش ۷: لیکوئیدیشن
 // =========================================================================
 function loadLiquidationData() {
     const cachedLiq = AppCache.get("market_liquidations");
@@ -326,7 +373,7 @@ function loadLiquidationData() {
 }
 
 // =========================================================================
-// بخش ۷: اسلایدر اخبار و تب‌های ۴ گانه اخبار (News Engine & Slider)
+// بخش ۸: اخبار و اسلایدر
 // =========================================================================
 async function fetchDashboardNews() {
     try {
@@ -342,7 +389,6 @@ async function fetchDashboardNews() {
     } catch (e) {
         console.warn("Dashboard News Error:", e);
     }
-    // fallback به اخبار ساختگی ولی با کیفیت بهتر
     const mockNews = [{
         title: "فورى: بیت‌کوین سقف مقاومتی جدید را شکست!",
         description: "بازار ارزهای دیجیتال شاهد رشد است.",
@@ -358,7 +404,6 @@ async function fetchDashboardNews() {
 function initNewsSlider(articles) {
     const sliderContainer = document.getElementById("news-slider-content");
     if (!sliderContainer || articles.length === 0) return;
-
     clearInterval(newsSliderInterval);
 
     const renderSlide = (index) => {
@@ -366,7 +411,6 @@ function initNewsSlider(articles) {
         const artId = "slide_" + index;
         window.newsArticlesStorage[artId] = art;
         const fallbackImg = "https://img.icons8.com/clouds/200/000000/bitcoin.png";
-
         sliderContainer.innerHTML = `
             <div class="slide-item" onclick="openArticleDetailsById('${artId}')" style="animation: fadeInData 0.5s ease-in-out; cursor: pointer;">
                 <img src="${art.image || fallbackImg}" onerror="this.src='${fallbackImg}'" class="slider-bg-img">
@@ -383,7 +427,6 @@ function initNewsSlider(articles) {
 
     currentSliderIndex = 0;
     renderSlide(currentSliderIndex);
-
     newsSliderInterval = setInterval(() => {
         currentSliderIndex = (currentSliderIndex + 1) % articles.length;
         renderSlide(currentSliderIndex);
@@ -436,7 +479,6 @@ async function switchNewsTab(tabId) {
         const id = `tab_art_${tabId}_${index}`;
         window.newsArticlesStorage[id] = article;
         const fallbackImg = "https://img.icons8.com/clouds/200/000000/bitcoin.png";
-
         html += `
             <div class="news-card" onclick="openArticleDetailsById('${id}')" style="cursor: pointer;">
                 <div class="news-card-text-wrapper">
@@ -456,7 +498,7 @@ async function switchNewsTab(tabId) {
 }
 
 // =========================================================================
-// بخش ۸: تقویم اقتصادی تفکیک‌شده (Today/Tomorrow/This Week)
+// بخش ۹: تقویم اقتصادی
 // =========================================================================
 async function renderEconomicCalendarAdvanced(subFilter = 'today') {
     const container = document.getElementById("news-tab-content-area");
@@ -477,18 +519,15 @@ async function renderEconomicCalendarAdvanced(subFilter = 'today') {
         const url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json";
         const response = await fetch(PROXY_BASE_URL + encodeURIComponent(url));
         const events = await response.json();
-
         if (!events || events.length === 0) throw new Error("دیتایی یافت نشد");
 
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
-
         const tomorrow = new Date();
         tomorrow.setDate(today.getDate() + 1);
         const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
         let filteredEvents = events.filter(e => (e.impact === 'High' || e.impact === 'Medium'));
-
         if (subFilter === 'today') {
             filteredEvents = filteredEvents.filter(e => e.date && e.date.includes(todayStr));
         } else if (subFilter === 'tomorrow') {
@@ -505,7 +544,6 @@ async function renderEconomicCalendarAdvanced(subFilter = 'today') {
             const impactClass = ev.impact === 'High' ? 'badge-danger' : 'badge-warning';
             const impactText = ev.impact === 'High' ? '🔥 مهم' : '⚡ متوسط';
             const time = ev.date ? new Date(ev.date).toLocaleTimeString('fa-IR', {hour: '2-digit', minute:'2-digit'}) : '--:--';
-
             html += `
             <div class="news-card" style="border-left: 4px solid ${ev.impact === 'High' ? '#e17055' : '#f3ba2f'};">
                 <div style="display:flex; flex-direction:column; gap:6px; flex:1;">
@@ -521,26 +559,22 @@ async function renderEconomicCalendarAdvanced(subFilter = 'today') {
         html += `</div>`;
         listArea.innerHTML = html;
         removeSkeletons();
-
     } catch (e) {
         listArea.innerHTML = `<div style="text-align:center; padding:20px; color:#e17055;">خطا در دریافت تقویم اقتصادی.</div>`;
     }
 }
 
 // =========================================================================
-// بخش ۹: مدیریت سیستم رفرال و منوی تنظیمات (Subsystems & Navigation)
+// بخش ۱۰: رفرال و تنظیمات
 // =========================================================================
 function openReferralPage() {
     const userData = tg?.initDataUnsafe?.user;
     const userId = userData ? userData.id : "12345678";
     const refLink = `https://t.me/AmirBtcBot/app?startapp=ref_${userId}`;
-
     if (document.getElementById("ref-link-input")) document.getElementById("ref-link-input").value = refLink;
-
     if (document.getElementById("total-ref-count")) document.getElementById("total-ref-count").innerText = "۱۲ نفر";
     if (document.getElementById("active-ref-count")) document.getElementById("active-ref-count").innerText = "۵ نفر";
     if (document.getElementById("ref-rewards-val")) document.getElementById("ref-rewards-val").innerText = "۱۲۰,۰۰۰ ساتوشی";
-
     document.getElementById("profile-main-view").style.display = "none";
     document.getElementById("referral-page-view").style.display = "block";
 }
@@ -570,7 +604,6 @@ function copyReferralLink() {
     } catch (e) {
         document.execCommand('copy');
     }
-
     if (tg && typeof tg.showPopup === 'function') {
         tg.showPopup({
             title: "موفقیت‌آمیز",
@@ -589,7 +622,7 @@ function shareReferralLink() {
 }
 
 // =========================================================================
-// بخش ۱۰: توابع کمکی، ساب‌روتین‌ها و اینتگریشن مودال‌ها (Helpers & Search)
+// بخش ۱۱: توابع کمکی و ابزاری
 // =========================================================================
 function getCoinFullName(sym) {
     const names = {
@@ -624,7 +657,6 @@ function openNotificationCenter() {
 }
 
 function joinChannelAction() {
-    // استفاده از متد اختصاصی تلگرام
     if (tg && typeof tg.openTelegramLink === 'function') {
         tg.openTelegramLink(`https://t.me/${MY_TELEGRAM_CHANNEL}`);
     } else {
@@ -637,11 +669,9 @@ function loadTelegramUser() {
     const fullName = userData ? `${userData.first_name || ""} ${userData.last_name || ""}`.trim() : "کاربر میهمان";
     const userId = userData?.id || "000000";
     const username = userData?.username ? `@${userData.username}` : "@guest";
-
     document.querySelectorAll(".user-full-name").forEach(el => el.innerText = fullName);
     if (document.getElementById("user-id-val")) document.getElementById("user-id-val").innerText = userId;
     if (document.getElementById("user-username-val")) document.getElementById("user-username-val").innerText = username;
-
     const profileImg = document.getElementById("profile-avatar-img");
     if (profileImg && userData?.photo_url) profileImg.src = userData.photo_url;
 }
@@ -649,14 +679,11 @@ function loadTelegramUser() {
 function openArticleDetailsById(id) {
     const article = window.newsArticlesStorage[id];
     if (!article) return;
-
     const modal = document.getElementById('details-modal');
     if (!modal) return;
-
     document.getElementById('modal-title').innerText = article.title;
     document.getElementById('modal-source').innerText = article.source || "اخبار بازار";
     document.getElementById('modal-time').innerText = article.time_ago ? `⏱️ ${article.time_ago}` : "اخیراً";
-
     const mImage = document.getElementById('modal-image');
     if (article.image) {
         mImage.src = article.image;
@@ -664,9 +691,7 @@ function openArticleDetailsById(id) {
     } else {
         mImage.style.display = "none";
     }
-
-    let formattedText = article.description || "محتوایی برای نمایش وجود ندارد.";
-    document.getElementById('modal-content').innerHTML = formattedText;
+    document.getElementById('modal-content').innerHTML = article.description || "محتوایی برای نمایش وجود ندارد.";
     modal.style.display = "flex";
 }
 
@@ -678,7 +703,6 @@ function openChart(symbol) {
     const container = document.getElementById("tradingview-widget-container");
     if (container) {
         container.innerHTML = "";
-        // بررسی وجود TradingView
         if (typeof TradingView !== 'undefined') {
             new TradingView.widget({
                 "width": "100%",
@@ -703,7 +727,7 @@ function closeChart() {
 }
 
 // =========================================================================
-// بخش ۱۱: ترس و طمع با استفاده از Proxy
+// بخش ۱۲: شاخص ترس و طمع
 // =========================================================================
 function loadExtraMetrics() {
     const cachedMetrics = AppCache.get("extra_metrics");
@@ -730,7 +754,6 @@ function applyMetrics(val, status) {
     const statusMap = { "Extreme Fear": "ترس شدید", "Fear": "ترس", "Neutral": "خنثی", "Greed": "طمع", "Extreme Greed": "طمع شدید" };
     const finalStatus = statusMap[status] || status || (safeVal <= 25 ? 'ترس شدید' : safeVal <= 45 ? 'ترس' : safeVal <= 55 ? 'خنثی' : safeVal <= 75 ? 'طمع' : 'طمع شدید');
     document.querySelectorAll(".fg-status-el").forEach(el => el.innerText = finalStatus);
-
     const fillElement = document.querySelector('.fg-gauge-fill');
     const pointerElement = document.querySelector('.fg-gauge-pointer');
     if (fillElement) {
@@ -759,7 +782,7 @@ function setInitialFearGauge() {
 }
 
 // =========================================================================
-// بخش ۱۲: بارگذاری تحلیل‌ها (Telegram Widget)
+// بخش ۱۳: تحلیل (Telegram Widget)
 // =========================================================================
 function loadAnalysisData() {
     const container = document.getElementById("telegram-feed-container");
@@ -776,78 +799,36 @@ function loadAnalysisData() {
 }
 
 // =========================================================================
-// بخش ۱۳: دکمه افزودن به واچ‌لیست در صفحه مارکت
-// =========================================================================
-function renderAddWatchlistButton() {
-    const marketPage = document.getElementById('market-page');
-    if (!marketPage) return;
-    // اگر دکمه قبلاً اضافه شده، دوباره اضافه نکن
-    if (document.getElementById('add-watchlist-btn-container')) return;
-
-    const container = document.createElement('div');
-    container.id = 'add-watchlist-btn-container';
-    container.style.cssText = 'display:flex; justify-content:center; margin: 5px 15px 15px;';
-    container.innerHTML = `
-        <button class="banner-join-btn" onclick="openAddCoinModal()" style="width:100%; background: linear-gradient(135deg, #f7931a, #ff6a00);">
-            ➕ افزودن/مدیریت واچ‌لیست
-        </button>
-    `;
-    // قرار دادن قبل از لیست کوین‌ها
-    const marketList = document.getElementById('market-coin-list');
-    if (marketList) {
-        marketList.parentNode.insertBefore(container, marketList);
-    }
-}
-
-// =========================================================================
-// بخش ۱۴: توابع واچ‌لیست (هماهنگ با watchlist.js)
-// =========================================================================
-// این توابع در watchlist.js تعریف شده‌اند، اما برای اطمینان از وجود آن‌ها:
-window.getWatchlist = window.getWatchlist || function() {
-    const stored = localStorage.getItem('watchlist');
-    return stored ? JSON.parse(stored) : [];
-};
-
-window.addToWatchlist = window.addToWatchlist || function(symbol) {
-    const list = window.getWatchlist();
-    if (!list.includes(symbol)) {
-        list.push(symbol);
-        localStorage.setItem('watchlist', JSON.stringify(list));
-        renderWatchlist();
-    }
-};
-
-window.removeFromWatchlist = window.removeFromWatchlist || function(symbol) {
-    let list = window.getWatchlist();
-    list = list.filter(s => s !== symbol);
-    localStorage.setItem('watchlist', JSON.stringify(list));
-    renderWatchlist();
-};
-
-window.openAddCoinModal = window.openAddCoinModal || function() {
-    const modal = document.getElementById('add-coin-modal');
-    if (modal) {
-        modal.style.display = 'flex';
-        if (window.populateAddCoinModal) window.populateAddCoinModal();
-    }
-};
-
-window.closeAddCoinModal = window.closeAddCoinModal || function() {
-    const modal = document.getElementById('add-coin-modal');
-    if (modal) modal.style.display = 'none';
-};
-
-// =========================================================================
-// بخش ۱۵: لوپ‌های آغازین مینی‌اپ (Lifecycle Hooks)
+// بخش ۱۴: رویداد شروع (DOMContentLoaded)
 // =========================================================================
 window.addEventListener("DOMContentLoaded", () => {
     loadTelegramUser();
     switchTab('dashboard-page');
     setInitialFearGauge();
-
     const searchInput = document.getElementById("market-search");
     if (searchInput) searchInput.addEventListener("input", filterMarketSearch);
-
-    // به‌روزرسانی دوره‌ای قیمت‌ها (هر ۱۵ ثانیه)
     setInterval(loadMarketAndPrices, 15000);
 });
+
+// اطمینان از اینکه توابع در سطح global در دسترس باشند
+window.switchTab = switchTab;
+window.filterMarketCategory = filterMarketCategory;
+window.filterMarketSearch = filterMarketSearch;
+window.openNotificationCenter = openNotificationCenter;
+window.joinChannelAction = joinChannelAction;
+window.openChart = openChart;
+window.closeChart = closeChart;
+window.openArticleDetailsById = openArticleDetailsById;
+window.switchNewsTab = switchNewsTab;
+window.renderEconomicCalendarAdvanced = renderEconomicCalendarAdvanced;
+window.copyReferralLink = copyReferralLink;
+window.shareReferralLink = shareReferralLink;
+window.openReferralPage = openReferralPage;
+window.closeReferralPage = closeReferralPage;
+window.openSettingsPage = openSettingsPage;
+window.closeSettingsPage = closeSettingsPage;
+window.loadExtraMetrics = loadExtraMetrics;
+window.loadLiquidationData = loadLiquidationData;
+window.loadAnalysisData = loadAnalysisData;
+window.renderWatchlist = renderWatchlist;
+window.renderAddWatchlistButton = renderAddWatchlistButton;

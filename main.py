@@ -8,6 +8,7 @@ import requests
 import xml.etree.ElementTree as ET
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from deep_translator import GoogleTranslator
 
 # کتابخانه‌های ربات تلگرام
@@ -27,14 +28,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# کش مرکزی اخبار (با زمان انقضای طولانی‌تر)
+# کش مرکزی اخبار
 news_cache = {"data": None, "expiry": 0}
 CACHE_TTL = 900  # ۱۵ دقیقه
 
 telegram_app = None
 
 # ==========================================
-# ۲. توابع بخش اخبار و ترجمه
+# ۲. مسیر ریشه برای تست سلامت سرور
+# ==========================================
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Amir BTC Assistant Backend is running!"}
+
+# ==========================================
+# ۳. توابع بخش اخبار و ترجمه
 # ==========================================
 def clean_html(raw_html):
     if not raw_html: return ""
@@ -78,24 +86,23 @@ def fetch_raw_news_rss():
             res = requests.get(url, headers=headers, timeout=6)
             if res.status_code == 200 and "<item>" in res.text:
                 return res.text, name
-        except Exception:
-            print(f"⚠️ منبع {name} در دسترس نبود.")
+        except Exception as e:
+            print(f"⚠️ منبع {name} در دسترس نبود: {e}")
     return None, None
 
 @app.get("/api/farsi-news")
-def get_optimized_farsi_news():
+async def get_optimized_farsi_news():
     current_time = time.time()
     if news_cache["data"] and current_time < news_cache["expiry"]:
-        return {"status": "success", "source": "cache", "data": news_cache["data"]}
+        return JSONResponse(content={"status": "success", "source": "cache", "data": news_cache["data"]})
 
     rss_data, source_name = fetch_raw_news_rss()
     if not rss_data:
         if news_cache["data"]:
-            return {"status": "success", "source": "expired_cache", "data": news_cache["data"]}
-        return {"status": "success", "source": "mock_fallback", "data": MOCK_NEWS}
+            return JSONResponse(content={"status": "success", "source": "expired_cache", "data": news_cache["data"]})
+        return JSONResponse(content={"status": "success", "source": "mock_fallback", "data": MOCK_NEWS})
 
     try:
-        # استفاده از XML با مدیریت بهتر خطا
         root = ET.fromstring(rss_data)
         items = root.findall(".//item")[:6]
         optimized_articles = []
@@ -133,16 +140,16 @@ def get_optimized_farsi_news():
         if optimized_articles:
             news_cache["data"] = optimized_articles
             news_cache["expiry"] = current_time + CACHE_TTL
-            return {"status": "success", "source": f"{source_name}_live", "data": optimized_articles}
+            return JSONResponse(content={"status": "success", "source": f"{source_name}_live", "data": optimized_articles})
     except ET.ParseError as e:
         print(f"XML Parse Error: {e}")
     except Exception as e:
         print(f"Unexpected error: {e}")
 
-    return {"status": "success", "source": "mock_fallback", "data": MOCK_NEWS}
+    return JSONResponse(content={"status": "success", "source": "mock_fallback", "data": MOCK_NEWS})
 
 # ==========================================
-# ۳. تنظیمات و توابع ربات تلگرام
+# ۴. تنظیمات و توابع ربات تلگرام (در صورت نیاز)
 # ==========================================
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
@@ -181,7 +188,6 @@ async def startup_event():
     print("🚀 ربات تلگرام با موفقیت در پس‌زمینه فعال شد!")
 
 async def run_bot_polling():
-    """اجرای polling با مدیریت خودکار خطا و reconnect"""
     while True:
         try:
             await telegram_app.run_polling()
@@ -201,7 +207,7 @@ async def shutdown_event():
         print("🔌 ربات تلگرام متوقف شد.")
 
 # ==========================================
-# ۴. اجرای نهایی سرور
+# ۵. اجرای نهایی سرور
 # ==========================================
 if __name__ == "__main__":
     import uvicorn
