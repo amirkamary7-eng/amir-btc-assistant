@@ -1,30 +1,36 @@
-// ==========================================
-// ۱. تنظیمات عمومی و راه‌اندازی تلگرام
-// ==========================================
+// =========================================================================
+// بخش ۱: راه‌اندازی ابزارهای اولیه و تلگرام (Telegram WebApp Init)
+// وظیفه: تنظیمات اولیه مینی‌اپ و ارتباط با تلگرام
+// =========================================================================
 const tg = window.Telegram?.WebApp;
 if (tg) {
     tg.ready();
     tg.expand();
 }
 
+// =========================================================================
+// بخش ۲: متغیرهای ثابت و آدرس‌های سرور (Constants & URLs)
+// وظیفه: آدرس بک‌اند، کانال تلگرام و نمادهای ارزهایی که می‌خواهیم لود کنیم
+// تغییرات بعدی: برای اضافه یا حذف کردن کوین‌ها، آرایه POPULAR_SYMBOLS را تغییر دهید
+// =========================================================================
 const MY_TELEGRAM_CHANNEL = "amir_btc_2024"; 
 const BACKEND_URL = "https://amir-btc-assistant-production.up.railway.app";
 const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
-
-let allMarketCoins = [];
-let searchTimeout = null;
 
 const POPULAR_SYMBOLS = [
     "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT",
     "LINK", "MATIC", "TRX", "UNI", "LTC"
 ];
 
-// آبجکت گلوبال برای ذخیره امن دیتای اخبار جهت جلوگیری از ارور رشته‌ها در اونکلیک
+// دیتابیس موقت مرورگر برای ذخیره امن دیتای اخبار جهت فرار از ارور رشته‌ها در اونکلیک
 window.newsArticlesStorage = {};
+let allMarketCoins = [];
+let searchTimeout = null;
 
-// ==========================================
-// ۲. موتور کش مرکزی کلاینت (Cache Engine)
-// ==========================================
+// =========================================================================
+// بخش ۳: موتور کش مرکزی (Cache Engine)
+// وظیفه: ذخیره موقت قیمت‌ها و اخبار در مرورگر کاربر برای بالا رفتن سرعت مینی‌اپ
+// =========================================================================
 const AppCache = {
     storage: {},
     set(key, data, ttlSeconds) {
@@ -44,9 +50,10 @@ const AppCache = {
     }
 };
 
-// ==========================================
-// ۳. روتر ناوبری و لود تنبل تب‌ها
-// ==========================================
+// =========================================================================
+// بخش ۴: روتر و سیستم ناوبری (Tab Router)
+// وظیفه: جابجایی بین صفحات (داشبورد، مارکت، اخبار و تحلیل) و لود تنبل دیتا
+// =========================================================================
 function switchTab(pageId, element) {
     document.querySelectorAll('.page').forEach(page => {
         page.classList.remove('active');
@@ -64,6 +71,7 @@ function switchTab(pageId, element) {
         document.getElementById('nav-dashboard')?.classList.add('active');
     }
 
+    // لود هوشمند دیتا فقط در زمان ورود به تب مربوطه
     if (pageId === 'analysis-page') {
         loadAnalysisData();
     } else if (pageId === 'news-page') {
@@ -74,9 +82,10 @@ function switchTab(pageId, element) {
     }
 }
 
-// ==========================================
-// ۴. بخش قیمت‌های زنده
-// ==========================================
+// =========================================================================
+// بخش ۵: ارتباط با API بینانس و دریافت قیمت‌ها (Binance Fetcher)
+// وظیفه: گرفتن قیمت زنده ارزها از طریق پروکسی ورکر کلودفلر
+// =========================================================================
 async function loadMarketAndPrices() {
     const cachedPrices = AppCache.get("market_prices");
     if (cachedPrices) {
@@ -107,16 +116,17 @@ async function loadMarketAndPrices() {
             }
         });
 
-        AppCache.set("market_prices", allMarketCoins, 15);
+        AppCache.set("market_prices", allMarketCoins, 15); // کش قیمت‌ها برای ۱۵ ثانیه
         if (typeof renderMarketStates === 'function') renderMarketStates();
     } catch (err) {
         console.error("Binance Fetch Error:", err);
     }
 }
 
-// ==========================================
-// ۵. شاخص ترس و طمع
-// ==========================================
+// =========================================================================
+// بخش ۶: شاخص ترس و طمع (Fear and Greed Index)
+// وظیفه: دریافت دیتای شاخص روانشناسی بازارکریپتو
+// =========================================================================
 async function loadExtraMetrics() {
     const cachedMetrics = AppCache.get("extra_metrics");
     if (cachedMetrics) {
@@ -130,7 +140,7 @@ async function loadExtraMetrics() {
             if(json?.data?.[0]) {
                 const val = json.data[0].value;
                 const status = json.data[0].value_classification;
-                AppCache.set("extra_metrics", {val, status}, 1800);
+                AppCache.set("extra_metrics", {val, status}, 1800); // کش شاخص برای نیم ساعت
                 if (typeof applyMetrics === 'function') applyMetrics(val, status);
             }
         } catch(e){ 
@@ -140,9 +150,10 @@ async function loadExtraMetrics() {
     }
 }
 
-// ==========================================
-// ۶. پردازش دیتای کاربری تلگرام
-// ==========================================
+// =========================================================================
+// بخش ۷: اطلاعات کاربر تلگرام (Telegram User Data)
+// وظیفه: خواندن عکس پروفایل، نام و آیدی کاربر از تلگرام و قرار دادن در هدر مینی‌اپ
+// =========================================================================
 function loadTelegramUser() {
     const nameEl = document.getElementById("user-name");
     const dashNameEl = document.getElementById("dash-user-name");
@@ -181,9 +192,10 @@ function loadTelegramUser() {
     if(document.getElementById("profile-content")) document.getElementById("profile-content").style.display = "block";
 }
 
-// ==========================================
-// ۷. دریافت اخبار بازار (متصل شده به بک‌اند اختصاصی پایتون)
-// ==========================================
+// =========================================================================
+// بخش ۸: دریافت اخبار از بک‌اند اختصاصی (Python Backend News)
+// وظیفه: متصل شدن به سرور پایتون ریلی‌وی و دریافت اخبار ترجمه‌شده فارسی
+// =========================================================================
 async function fetchCryptoNews() {
     const cachedNews = AppCache.get("premium_news");
     if (cachedNews) {
@@ -204,7 +216,7 @@ async function fetchCryptoNews() {
         }
 
         if (articlesArray.length > 0) {
-            AppCache.set("premium_news", articlesArray, 300); 
+            AppCache.set("premium_news", articlesArray, 300); // کش اخبار برای ۵ دقیقه
             if (typeof renderPremiumNewsDOM === 'function') {
                 renderPremiumNewsDOM(articlesArray);
             }
@@ -220,9 +232,10 @@ async function fetchCryptoNews() {
     }
 }
 
-// ==========================================
-// ۸. تقویم اقتصادی جهان (یکپارچه با ورکر کلودفلر و نئون دیزاین)
-// ==========================================
+// =========================================================================
+// بخش ۹: تقویم اقتصادی جهان (Economic Calendar)
+// وظیفه: لود داده‌های اقتصادی این هفته جهان و فیلتر کردن رویدادهای مهم امروز
+// =========================================================================
 async function renderEconomicCalendar() {
     const area = document.getElementById("news-content-area");
     if (!area) return;
@@ -274,9 +287,10 @@ async function renderEconomicCalendar() {
     }
 }
 
-// ==========================================
-// ۹. سیستم باز کردن پاپ‌آپ اخبار و نمایش متن کامل (کاملاً منطبق با المان‌های شیشه‌ای)
-// ==========================================
+// =========================================================================
+// بخش ۱۰: مدیریت مدال‌ها و پاپ‌آپ‌ها (Modal Manager)
+// وظیفه: باز و بسته کردن پنجره جزئیات اخبار بدون تداخل کاراکترها
+// =========================================================================
 function openArticleDetailsById(id) {
     const article = window.newsArticlesStorage[id];
     if (!article) return;
@@ -339,9 +353,10 @@ function closeNewsModal() {
     if(document.getElementById("news-modal")) document.getElementById("news-modal").style.display = "none";
 }
 
-// ==========================================
-// ۱۰. کامپوننت چارت‌های معاملاتی اختصاصی
-// ==========================================
+// =========================================================================
+// بخش ۱۱: مدال چارت‌های لایو تریدینگ‌وی (TradingView Charts)
+// وظیفه: بارگذاری ویجت نمودارهای شمعی به صورت داینامیک برای هر کوین
+// =========================================================================
 function openChart(symbol) {
     const chartModal = document.getElementById("chart-modal");
     if(!chartModal) return;
@@ -366,9 +381,10 @@ function closeChart() {
     if(document.getElementById("chart-modal")) document.getElementById("chart-modal").style.display = "none"; 
 }
 
-// ==========================================
-// ۱۱. فید تلگرام (بخش تحلیل‌ها)
-// ==========================================
+// =========================================================================
+// بخش ۱۲: کامپوننت نظرات تلگرام (Telegram Comments Widget)
+// وظیفه: نمایش دیسکاشن و کامنت‌های چنل تلگرام در تب تحلیل‌ها
+// =========================================================================
 function loadAnalysisData() {
     const container = document.getElementById("telegram-feed-container");
     if (!container || container.querySelector("script[data-telegram-discussion]")) return;
@@ -384,29 +400,10 @@ function loadAnalysisData() {
     container.appendChild(script);
 }
 
-// ==========================================
-// ۱۲. لود اولیه و تایمرها
-// ==========================================
-window.addEventListener("DOMContentLoaded", () => {
-    loadTelegramUser();
-    loadMarketAndPrices();
-    loadExtraMetrics();
-    
-    setTimeout(fetchCryptoNews, 400);
-
-    const searchInput = document.getElementById("market-search");
-    if(searchInput && typeof filterMarket === 'function') {
-        searchInput.addEventListener("input", filterMarket);
-    }
-    
-    setInterval(loadMarketAndPrices, 15000); 
-    setInterval(fetchCryptoNews, 300000);   
-});
-
-// ==========================================
-// ۱۳. توابع رندر (تزریق به قالب کارت‌های نئونی)
-// ==========================================
-
+// =========================================================================
+// بخش ۱۳: تزریق قیمت‌ها در ساختار نئونی (DOM Renderer - Market)
+// وظیفه: گرفتن دیتای خام ارزها و تولید کارت‌های نئونی متحرک در HTML
+// =========================================================================
 function renderMarketStates() {
     const marketList = document.getElementById("market-list");
     const dashMiniMarket = document.getElementById("dash-mini-market");
@@ -454,6 +451,10 @@ function renderMarketStates() {
     if (dashMiniMarket) dashMiniMarket.innerHTML = miniHtml;
 }
 
+// =========================================================================
+// بخش ۱۴: تزریق اخبار در ساختار نئونی (DOM Renderer - News)
+// وظیفه: تبدیل داده‌های خام بک‌اند به کارت‌های خبری نئونی و زیبا در برنامه
+// =========================================================================
 function renderPremiumNewsDOM(articles) {
     const newsList = document.getElementById("news-list");
     const dashTopNews = document.getElementById("dash-top-news");
@@ -492,6 +493,10 @@ function renderPremiumNewsDOM(articles) {
     if (dashTopNews) dashTopNews.innerHTML = miniNewsHtml;
 }
 
+// =========================================================================
+// بخش ۱۵: اعمال رنگ‌های شاخص ترس و طمع (Metrics Renderer)
+// وظیفه: تغییر رنگ متن لایو بر اساس شدت عدد ترس و طمع بازار
+// =========================================================================
 function applyMetrics(val, status) {
     const fgValueEl = document.getElementById("fg-value");
     const fgStatusEl = document.getElementById("fg-status");
@@ -515,9 +520,10 @@ function applyMetrics(val, status) {
     }
 }
 
-// ==========================================
-// ۱۴. توابع کمکی (Helpers)
-// ==========================================
+// =========================================================================
+// بخش ۱۶: توابع کمکی و فیلتر موتور سرچ (Utility Helpers)
+// وظیفه: پیدا کردن نام کامل کوین‌ها و فیلتر کردن ردیف‌ها هنگام تایپ در سرچ‌باکس
+// =========================================================================
 function getCoinFullName(sym) {
     const names = { 
         BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", BNB: "BNB", 
@@ -526,14 +532,6 @@ function getCoinFullName(sym) {
         TRX: "TRON", UNI: "Uniswap", LTC: "Litecoin" 
     };
     return names[sym] || sym;
-}
-
-function formatTimeAgo(ts) {
-    const now = Math.floor(Date.now() / 1000);
-    const diff = now - ts;
-    if (diff < 3600) return Math.floor(diff / 60) + " دقیقه پیش";
-    if (diff < 86400) return Math.floor(diff / 3600) + " ساعت پیش";
-    return Math.floor(diff / 86400) + " روز پیش";
 }
 
 function filterMarket(e) {
@@ -548,3 +546,23 @@ function filterMarket(e) {
         }
     });
 }
+
+// =========================================================================
+// بخش ۱۷: مدیریت اجرای اولیه و اینتروال‌ها (App Init Loops)
+// وظیفه: زدن استارت اولیه توابع بلافاصله پس از لود صفحه و تکرار خودکار آنها
+// =========================================================================
+window.addEventListener("DOMContentLoaded", () => {
+    loadTelegramUser();
+    loadMarketAndPrices();
+    loadExtraMetrics();
+    
+    setTimeout(fetchCryptoNews, 400);
+
+    const searchInput = document.getElementById("market-search");
+    if(searchInput && typeof filterMarket === 'function') {
+        searchInput.addEventListener("input", filterMarket);
+    }
+    
+    setInterval(loadMarketAndPrices, 15000); // به روزرسانی قیمت‌ها هر ۱۵ ثانیه
+    setInterval(fetchCryptoNews, 300000);    // به روزرسانی اخبار هر ۵ دقیقه
+});
