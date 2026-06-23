@@ -270,11 +270,11 @@ function loadTelegramUser() {
             imgEl.onerror = function() { this.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png'; };
         }
     } else {
-        const defaultName = "کاربر دمو سیستم";
+        const defaultName = "کاربر ناشناس";
         if (nameEl) nameEl.innerText = defaultName;
         if (dashNameEl) dashNameEl.innerText = defaultName;
-        if (idEl) idEl.innerText = "987654321";
-        if (usernameEl) usernameEl.innerText = "@demo_crypto";
+        if (idEl) idEl.innerText = "Loding...";
+        if (usernameEl) usernameEl.innerText = "@Looding";
     }
 
     if(document.getElementById("profile-skeleton")) document.getElementById("profile-skeleton").style.display = "none";
@@ -282,7 +282,7 @@ function loadTelegramUser() {
 }
 
 // ==========================================
-// ۸. پلتفرم اخبار هوشمند جدید (اتصال مستقیم به موتور پایدار CoinGecko + بک‌آپ آفلاین)
+// ۸. سیستم مدیریت پیشرفته اخبار و تقویم اقتصادی
 // ==========================================
 async function fetchCryptoNews() {
     const cachedNews = AppCache.get("premium_news");
@@ -292,22 +292,19 @@ async function fetchCryptoNews() {
     }
 
     try {
-        // اتصال به API عمومی و کاملاً رایگان و بدون تحریم CoinGecko
         const response = await fetch("https://api.coingecko.com/api/v3/news");
         const result = await response.json();
 
         if (result && result.data && Array.isArray(result.data)) {
-            const mappedArticles = result.data.map(item => {
-                return {
-                    title: item.title,
-                    description: item.description ? item.description.substring(0, 200) + '...' : 'جهت مطالعه کامل خبر کلیک کنید.',
-                    image: item.thumb_2x || "https://images.cryptocompare.com/news/default/bitcoin.png",
-                    source: item.author || "CoinGecko",
-                    time_ago: "اخیراً"
-                };
-            });
+            const mappedArticles = result.data.map(item => ({
+                title: item.title,
+                description: item.description ? item.description.substring(0, 200) + '...' : 'جهت مطالعه کامل خبر کلیک کنید.',
+                image: item.thumb_2x || "https://images.cryptocompare.com/news/default/bitcoin.png",
+                source: item.author || "CoinGecko",
+                time_ago: "اخیراً"
+            }));
 
-            AppCache.set("premium_news", mappedArticles, 600); // ۱۰ دقیقه کش فرانت
+            AppCache.set("premium_news", mappedArticles, 600);
             renderPremiumNewsDOM(mappedArticles);
             return;
         }
@@ -315,7 +312,7 @@ async function fetchCryptoNews() {
         console.error("خطا در لود زنده اخبار. فعالسازی سیستم اخبار پشتیبان...");
     }
 
-    // سیستم اخبار پشتیبان هوشمند (اگر اینترنت کاربر قطع بود یا API پاسخ نداد، ظاهر برنامه خراب نمیشود)
+    // سیستم اخبار پشتیبان (برای زمان قطعی اینترنت یا محدودیت API)
     const fallbackNews = [
         {
             title: "بیت‌کوین در حال آماده‌سازی برای شکستن سقف تاریخی جدید است",
@@ -343,38 +340,18 @@ async function fetchCryptoNews() {
 }
 
 function renderPremiumNewsDOM(articles) {
-    const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
+    window.currentNewsArticles = articles;
+
+    // ۱. آپدیت بخش داشبورد 
     const dashNewsEl = document.getElementById("dash-top-news");
     const dashAnalysisEl = document.getElementById("dash-last-analysis-title");
 
-    if (newsListEl) newsListEl.innerHTML = "";
     if (dashNewsEl) dashNewsEl.innerHTML = "";
-
     if (articles[0] && dashAnalysisEl) {
         dashAnalysisEl.innerText = articles[0].title;
     }
 
     articles.forEach((article, index) => {
-        if (newsListEl) {
-            const card = document.createElement('div');
-            card.className = "news-card";
-            card.style = "display: flex; align-items: center; padding: 12px; margin-bottom: 12px; background: #12161a; border: 1px solid #1e2329; border-radius: 12px; cursor: pointer; color: #eaecef; gap: 12px; text-align: right; direction: rtl;";
-            
-            card.innerHTML = `
-                <img src="${article.image}" style="width: 75px; height: 75px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.src='https://images.cryptocompare.com/news/default/bitcoin.png'">
-                <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
-                    <h3 style="font-size: 14px; font-weight: bold; margin: 0 0 4px 0; color: #eaecef; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${article.title}</h3>
-                    <p style="font-size: 12px; margin: 0 0 6px 0; color: #848e9c; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5;">${article.description}</p>
-                    <div style="font-size: 10px; color: #909294; display: flex; justify-content: space-between; align-items: center;">
-                        <span style="background: #2b2f36; padding: 2px 6px; border-radius: 4px; color: #f0b90b;">${article.source}</span>
-                        <span>⏱️ ${article.time_ago}</span>
-                    </div>
-                </div>
-            `;
-            card.onclick = () => openArticleDetails(article.title, article.description, article.image, article.source, article.time_ago);
-            newsListEl.appendChild(card);
-        }
-
         if (index < 3 && dashNewsEl) {
             const miniNewsRow = document.createElement("div");
             miniNewsRow.style = "padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.03); cursor:pointer; font-size:13px; color:#fff; text-align: right; direction: rtl;";
@@ -386,6 +363,100 @@ function renderPremiumNewsDOM(articles) {
             dashNewsEl.appendChild(miniNewsRow);
         }
     });
+
+    // ۲. رندر کردن تب‌بندی‌ها در صفحه اصلی اخبار
+    const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
+    if (!newsListEl) return;
+
+    newsListEl.innerHTML = `
+        <div style="display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; padding: 5px 0; scrollbar-width: none; direction: rtl;">
+            <button onclick="filterNewsView('all', this)" style="background:var(--primary); color:#000; border:none; padding:8px 16px; border-radius:20px; font-weight:bold; cursor:pointer; flex-shrink:0;">همه اخبار</button>
+            <button onclick="filterNewsView('crypto', this)" style="background:#1e2329; color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; flex-shrink:0;">ارزها 💎</button>
+            <button onclick="filterNewsView('economic', this)" style="background:#1e2329; color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; flex-shrink:0;">اقتصاد 🏦</button>
+            <button onclick="filterNewsView('calendar', this)" style="background:#1e2329; color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; flex-shrink:0;">تقویم 📅</button>
+        </div>
+        <div id="news-content-area"></div>
+    `;
+    
+    displayNewsItems(articles);
+}
+
+function displayNewsItems(articles) {
+    const area = document.getElementById("news-content-area");
+    if (!area) return;
+    area.innerHTML = "";
+
+    if (articles.length === 0) {
+        area.innerHTML = `<div style="text-align:center; padding:20px; color:#848e9c; font-size:13px;">موردی در این دسته‌بندی یافت نشد.</div>`;
+        return;
+    }
+
+    articles.forEach(article => {
+        const card = document.createElement('div');
+        card.className = "news-card";
+        card.style = "display: flex; align-items: center; padding: 12px; margin-bottom: 12px; background: #12161a; border: 1px solid #1e2329; border-radius: 12px; cursor: pointer; color: #eaecef; gap: 12px; text-align: right; direction: rtl;";
+        
+        card.innerHTML = `
+            <img src="${article.image}" style="width: 75px; height: 75px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.src='https://images.cryptocompare.com/news/default/bitcoin.png'">
+            <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
+                <h3 style="font-size: 14px; font-weight: bold; margin: 0 0 4px 0; color: #eaecef; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${article.title}</h3>
+                <p style="font-size: 12px; margin: 0 0 6px 0; color: #848e9c; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5;">${article.description}</p>
+                <div style="font-size: 10px; color: #909294; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="background: #2b2f36; padding: 2px 6px; border-radius: 4px; color: #f0b90b;">${article.source}</span>
+                    <span>⏱️ ${article.time_ago}</span>
+                </div>
+            </div>
+        `;
+        card.onclick = () => openArticleDetails(article.title, article.description, article.image, article.source, article.time_ago);
+        area.appendChild(card);
+    });
+}
+
+function filterNewsView(category, btn) {
+    document.querySelectorAll('#news-list button').forEach(b => {
+        b.style.background = '#1e2329';
+        b.style.color = '#fff';
+        b.style.fontWeight = 'normal';
+    });
+    btn.style.background = 'var(--primary)';
+    btn.style.color = '#000';
+    btn.style.fontWeight = 'bold';
+    
+    const area = document.getElementById("news-content-area");
+    
+    if (category === 'calendar') {
+        area.innerHTML = renderEconomicCalendar();
+        return;
+    }
+
+    const filtered = window.currentNewsArticles.filter(a => {
+        const t = (a.title + " " + a.description).toLowerCase();
+        if (category === 'crypto') return t.includes('bitcoin') || t.includes('crypto') || t.includes('solana') || t.includes('eth');
+        if (category === 'economic') return t.includes('fed') || t.includes('rate') || t.includes('economy') || t.includes('inflation') || t.includes('bank');
+        return true; 
+    });
+    
+    displayNewsItems(filtered);
+}
+
+function renderEconomicCalendar() {
+    return `
+        <div style="background:#12161a; padding:15px; border-radius:16px; border:1px solid #1e2329; color:#fff; margin-top:10px; text-align:right; direction:rtl;">
+            <h4 style="margin:0 0 15px 0; border-bottom:1px solid #333; padding-bottom:10px; font-size:15px;">تقویم اقتصادی این هفته 🗓️</h4>
+            <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:1px solid #222; font-size:14px;">
+                <span>نرخ بهره فدرال رزرو (FED)</span>
+                <span style="color:#ff4d4d; font-weight:bold; background:rgba(255,77,77,0.1); padding:2px 8px; border-radius:6px;">🔴 بالا</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:1px solid #222; font-size:14px;">
+                <span>شاخص تورم آمریکا (CPI)</span>
+                <span style="color:#ffcc00; font-weight:bold; background:rgba(255,204,0,0.1); padding:2px 8px; border-radius:6px;">🟡 متوسط</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; padding:12px 0; font-size:14px;">
+                <span>گزارش تراز تجاری</span>
+                <span style="color:#00ff99; font-weight:bold; background:rgba(0,255,153,0.1); padding:2px 8px; border-radius:6px;">🟢 پایین</span>
+            </div>
+        </div>
+    `;
 }
 
 // ==========================================
