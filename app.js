@@ -283,7 +283,7 @@ function loadTelegramUser() {
 }
 
 // ==========================================
-// ۸. پلتفرم اخبار هوشمند جدید (اتصال به بک‌اند پایتون)
+// ۸. پلتفرم اخبار هوشمند جدید (اتصال مستقیم به سرور پایدار جهانی)
 // ==========================================
 async function fetchCryptoNews() {
     const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
@@ -295,16 +295,36 @@ async function fetchCryptoNews() {
     }
 
     try {
-        const response = await fetch(`${BACKEND_URL}/api/farsi-news`);
+        // اتصال مستقیم و بدون واسطه به سرور جهانی CryptoCompare بدون نیاز به پروکسی یا پایتون
+        const response = await fetch("https://min-api.cryptocompare.com/data/v2/news/?lang=EN");
         const result = await response.json();
 
-        if (result.status === "success" && result.data) {
-            AppCache.set("premium_news", result.data, 300); // ۵ دقیقه کش محلی فرانت
-            renderPremiumNewsDOM(result.data);
+        if (result && result.Data && Array.isArray(result.Data)) {
+            // تبدیل ساختار داده سرور جهانی به ساختار لوکسی که در قالب شما تعریف شده است
+            const mappedArticles = result.Data.map(item => {
+                // محاسبه زمان گذشته برای نمایش شیک فارسی
+                const seconds = Math.floor((new Date() - new Date(item.published_on * 1000)) / 1000);
+                let timeText = "اخیراً";
+                if (seconds < 60) timeText = "همین الان";
+                else if (seconds < 3600) timeText = `${Math.floor(seconds / 60)} دقیقه پیش`;
+                else if (seconds < 86400) timeText = `${Math.floor(seconds / 3600)} ساعت پیش`;
+                else timeText = `${Math.floor(seconds / 86400)} روز پیش`;
+
+                return {
+                    title: item.title,
+                    description: item.body,
+                    image: item.imageurl,
+                    source: item.source_info?.name || "CryptoNews",
+                    time_ago: timeText
+                };
+            });
+
+            AppCache.set("premium_news", mappedArticles, 300); // ۵ دقیقه کش محلی جهت بهینه‌سازی مصرف دیتای کاربر
+            renderPremiumNewsDOM(mappedArticles);
         }
     } catch (error) {
-        console.error("خطا در لود اخبار پایتون:", error);
-        if (newsListEl) newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red);">خطا در دریافت سرور اخبار</div>`;
+        console.error("خطا در لود اخبار سرور جهانی:", error);
+        if (newsListEl) newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red);">خطا در ارتباط با سرور اخبار جهانی</div>`;
     }
 }
 
@@ -334,7 +354,7 @@ function renderPremiumNewsDOM(articles) {
                     <h3 style="font-size: 14px; font-weight: bold; margin: 0 0 4px 0; color: #eaecef; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${article.title}</h3>
                     <p style="font-size: 12px; margin: 0 0 6px 0; color: #848e9c; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5;">${article.description || 'جهت مطالعه جزئیات، کلیک کنید.'}</p>
                     <div style="font-size: 10px; color: #909294; display: flex; justify-content: space-between; align-items: center;">
-                        <span style="background: #2b2f36; padding: 2px 6px; rounded: 4px; color: #f0b90b;">${article.source}</span>
+                        <span style="background: #2b2f36; padding: 2px 6px; border-radius: 4px; color: #f0b90b;">${article.source}</span>
                         <span>⏱️ ${article.time_ago}</span>
                     </div>
                 </div>
