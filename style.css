@@ -1,9 +1,21 @@
-/* متغیرهای پایه تکمیلی جهت پشتیبانی از ساختار جدید کامپوننت‌ها */
+/* =========================================================================
+   ۱. کدهای ریست پایه، انیمیشن‌ها و فونت مینی‌اپ
+   ========================================================================= */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+}
+
 :root {
     --primary: #f7931a;
     --primary-gradient: linear-gradient(135deg, #f7931a, #ff3355);
     --bg-dark: #0b0f19;
-    --card-bg: rgba(18, 22, 34, 0.7);
+    --card-bg: rgba(22, 28, 45, 0.6);
+    --glass-bg: rgba(255, 255, 255, 0.03);
+    --border-color: rgba(255, 255, 255, 0.08);
     --text-main: #ffffff;
     --text-dim: #8f98aa;
     --text-sub: #6c7a93;
@@ -16,57 +28,177 @@
     --neon-yellow: #ffd500;
 }
 
-/* هدر مدرن با دکمه اعلان‌ها */
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    overflow-x: hidden;
+    padding-bottom: 90px; /* فضای کافی برای منوی ناوبری پایین */
+}
+
+@keyframes fadeInData {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* =========================================================================
+   ۲. مدیریت سیستم ناوبری صفحات (اصلاح تداخل و همپوشانی)
+   ========================================================================= */
+.page {
+    display: none; /* مخفی بودن پیش‌فرض تمام صفحات */
+    width: 100%;
+    padding: 10px 0;
+    animation: fadeInData 0.3s ease-in-out forwards;
+}
+
+.page.active {
+    display: block; /* فقط صفحه فعال نمایش داده می‌شود */
+}
+
+/* =========================================================================
+   ۳. هدر و منوی ناوبری پایینی (Bottom Navigation Fixed)
+   ========================================================================= */
 .app-header-container {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 20px 15px 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 20px;
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(11, 15, 25, 0.8);
+    backdrop-filter: blur(10px);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.header-title {
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
 }
 
 .noti-btn {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    width: 42px;
-    height: 42px;
+    background: var(--glass-bg);
+    border: 1px solid var(--border-color);
+    width: 40px;
+    height: 40px;
     border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    font-size: 18px;
-    color: var(--text-main);
+    font-size: 16px;
     transition: 0.2s;
 }
 
-/* بنر بزرگ کانال تلگرام */
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 70px;
+    background: rgba(18, 22, 34, 0.85);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    z-index: 1000;
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.nav-item {
+    font-size: 22px;
+    cursor: pointer;
+    opacity: 0.4;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 10px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 45px;
+    height: 45px;
+}
+
+.nav-item.active {
+    opacity: 1;
+    background: rgba(247, 147, 26, 0.15);
+    color: var(--primary);
+    transform: translateY(-2px);
+}
+
+/* =========================================================================
+   ۴. بنرها و کامپوننت‌های داشبورد و گلس‌مورفیسم
+   ========================================================================= */
 .premium-channel-banner {
-    background: linear-gradient(135deg, rgba(247, 147, 26, 0.15) 0%, rgba(255, 51, 85, 0.05) 100%);
-    border: 1px solid rgba(247, 147, 26, 0.3);
-    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(247, 147, 26, 0.12) 0%, rgba(255, 51, 85, 0.04) 100%);
+    border: 1px solid rgba(247, 147, 26, 0.25);
+    border-radius: 20px;
     padding: 20px;
     margin: 15px;
     text-align: right;
     direction: rtl;
-    position: relative;
-    overflow: hidden;
 }
 
 .banner-join-btn {
     background: var(--primary-gradient);
     color: white;
     border: none;
-    padding: 10px 22px;
-    border-radius: 14px;
+    padding: 10px 24px;
+    border-radius: 12px;
     font-weight: bold;
     font-size: 13px;
     cursor: pointer;
-    margin-top: 12px;
-    box-shadow: 0 4px 15px rgba(247, 147, 26, 0.3);
+    margin-top: 15px;
+    box-shadow: 0 4px 15px rgba(247, 147, 26, 0.2);
 }
 
-/* واچ‌لیست اسکرول افقی */
+.card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin: 15px 15px 8px 15px;
+}
+
+.glass-card, .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    padding: 15px;
+    margin: 10px 15px;
+}
+
+/* گرید شاخص‌ها و لیکیودی‌ها */
+.liquidation-grid-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 0 15px;
+}
+
+.liq-card-metric {
+    background: var(--card-bg);
+    border-radius: 18px;
+    padding: 16px;
+    border: 1px solid var(--border-color);
+    text-align: center;
+}
+
+.card-price {
+    font-size: 22px;
+    font-weight: bold;
+    margin: 5px 0;
+    font-family: monospace;
+}
+
+.coin-name {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+/* =========================================================================
+   ۵. واچ‌لیست افقی و اسلایدر اخبار مدرن
+   ========================================================================= */
 .watchlist-slider {
     display: flex;
     gap: 12px;
@@ -81,10 +213,10 @@
 
 .watchlist-card {
     background: var(--card-bg);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 18px;
-    padding: 14px;
-    min-width: 110px;
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 12px;
+    min-width: 115px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -92,8 +224,8 @@
 }
 
 .coin-icon-mini {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
 }
 
@@ -104,21 +236,40 @@
     margin-bottom: 6px;
 }
 
-/* اسلایدر هوشمند روان اخبار */
+.coin-symbol {
+    font-weight: bold;
+    font-size: 13px;
+}
+
+.coin-price {
+    font-size: 14px;
+    font-family: monospace;
+    font-weight: 600;
+}
+
+.badge {
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: bold;
+}
+.badge-success { background: rgba(0, 255, 170, 0.15); color: var(--green); }
+.badge-danger { background: rgba(255, 51, 85, 0.15); color: var(--red); }
+.badge-primary { background: rgba(247, 147, 26, 0.15); color: var(--primary); }
+
 .news-slider-container {
-    margin: 15px;
-    border-radius: 22px;
+    margin: 10px 15px 20px 15px;
+    border-radius: 20px;
     overflow: hidden;
-    height: 160px;
+    height: 150px;
     position: relative;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-color);
 }
 
 .slide-item {
     width: 100%;
     height: 100%;
     position: relative;
-    cursor: pointer;
 }
 
 .slider-bg-img {
@@ -130,7 +281,7 @@
 .slider-overlay {
     position: absolute;
     bottom: 0; left: 0; right: 0;
-    background: linear-gradient(0deg, rgba(11, 15, 25, 0.95) 0%, rgba(11, 15, 25, 0.4) 70%, transparent 100%);
+    background: linear-gradient(0deg, rgba(11,15,25,0.95) 0%, rgba(11,15,25,0.3) 70%, transparent 100%);
     padding: 15px;
     display: flex;
     flex-direction: column;
@@ -141,46 +292,50 @@
 }
 
 .slider-title {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: bold;
-    color: white;
-    margin: 6px 0 0 0;
+    color: #fff;
+    margin-top: 5px;
     line-height: 1.4;
 }
 
-/* ساختار لیکوییدی دیتابیس مارکت */
-.liquidation-grid-wrapper {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin: 0 15px 15px 15px;
+/* =========================================================================
+   ۶. ساختار سرچ‌باکس و لیست‌های مارکت و اخبار
+   ========================================================================= */
+.search-box {
+    width: calc(100% - 30px);
+    margin: 10px 15px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    padding: 12px 16px;
+    border-radius: 14px;
+    color: white;
+    font-size: 13px;
+    outline: none;
+    text-align: right;
+    direction: rtl;
 }
 
-.liq-card-metric {
-    background: var(--card-bg);
-    border-radius: 18px;
-    padding: 14px;
-    border: 1px solid rgba(255,255,255,0.05);
-    text-align: center;
+.search-box:focus {
+    border-color: rgba(247, 147, 26, 0.5);
 }
 
 .compare-bar-container {
-    height: 8px;
-    border-radius: 4px;
+    height: 6px;
+    border-radius: 3px;
     overflow: hidden;
-    background: rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.08);
     display: flex;
-    margin-top: 10px;
+    margin-top: 8px;
 }
 
-/* تب‌های فرعی کتگوری مارکت و اخبار */
 .market-trend-selector, .calendar-sub-nav {
     display: flex;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border-color);
     padding: 4px;
-    border-radius: 14px;
-    margin: 10px 15px 15px 15px;
+    border-radius: 12px;
+    margin: 10px 15px;
     gap: 4px;
 }
 
@@ -189,8 +344,8 @@
     background: transparent;
     border: none;
     color: var(--text-dim);
-    padding: 8px;
-    border-radius: 10px;
+    padding: 8px 0;
+    border-radius: 9px;
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;
@@ -198,17 +353,84 @@
 }
 
 .trend-tab-btn.active, .news-tab-btn.active, .cal-sub-btn.active {
-    background: rgba(255,255,255,0.08);
+    background: rgba(255, 255, 255, 0.08);
     color: white;
-    border: 1px solid rgba(255,255,255,0.05);
 }
 
-/* بخش اختصاصی رفرال */
+/* ردیف کوین‌ها */
+.coin-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 15px;
+    margin: 0 15px 8px 15px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    cursor: pointer;
+}
+
+.coin-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+}
+
+/* کارت‌های اخبار و اسکلتون لودینگ */
+.news-card {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    align-items: center;
+}
+
+.news-card-text-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: right;
+    direction: rtl;
+}
+
+.news-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    line-height: 1.4;
+}
+
+.news-img {
+    width: 70px;
+    height: 70px;
+    object-fit: cover;
+    border-radius: 12px;
+}
+
+.skeleton-block {
+    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+    background-size: 200% 100%;
+    animation: loadingSkeleton 1.5s infinite;
+}
+
+@keyframes loadingSkeleton {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* =========================================================================
+   ۷. تنظیمات و سیستم رفرال پروفایل
+   ========================================================================= */
 .referral-card-box {
-    background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
-    border: 1px solid rgba(255,255,255,0.06);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 20px;
-    padding: 16px;
+    padding: 20px;
     text-align: right;
     direction: rtl;
 }
@@ -216,17 +438,17 @@
 .ref-input-group {
     display: flex;
     background: rgba(0,0,0,0.2);
-    border: 1px solid rgba(255,255,255,0.08);
+    border: 1px solid var(--border-color);
     border-radius: 12px;
     overflow: hidden;
-    margin-top: 12px;
+    margin-top: 15px;
 }
 
 .ref-input-group input {
     background: transparent;
     border: none;
     color: white;
-    padding: 10px;
+    padding: 12px;
     flex: 1;
     font-size: 12px;
     outline: none;
@@ -240,7 +462,6 @@
     padding: 0 15px;
     font-weight: bold;
     cursor: pointer;
-    font-size: 12px;
 }
 
 .settings-list-group {
@@ -255,9 +476,24 @@
     justify-content: space-between;
     align-items: center;
     background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.04);
+    border: 1px solid var(--border-color);
     padding: 14px 16px;
     border-radius: 14px;
     font-size: 13px;
     cursor: pointer;
+}
+
+/* =========================================================================
+   ۸. مودال‌ها (Popups Framework)
+   ========================================================================= */
+.modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(11, 15, 25, 0.85);
+    backdrop-filter: blur(8px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 15px;
 }
