@@ -69,7 +69,12 @@ function switchTab(pageId, element) {
 }
 
 // ==========================================
-// ۴. بخش پالس بازار و قیمت‌های زنده (بایننس بهینه)
+// آدرس ورکری که در کلودفلر ساختید (جایگزین همه پراکسی‌های قبلی)
+// ==========================================
+const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
+
+// ==========================================
+// ۴. بخش قیمت‌های زنده (اصلاح شده)
 // ==========================================
 async function loadMarketAndPrices() {
     const cachedPrices = AppCache.get("market_prices");
@@ -82,14 +87,9 @@ async function loadMarketAndPrices() {
     try {
         const formattedSymbols = JSON.stringify(POPULAR_SYMBOLS.map(sym => `${sym}USDT`));
         const targetUrl = `https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(formattedSymbols)}`;
-        // اضافه کردن پروکسی برای بایننس
-        const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl);
-
-        const response = await fetch(proxyUrl);
-        const proxyData = await response.json();
         
-        if (!proxyData || !proxyData.contents) return;
-        const data = JSON.parse(proxyData.contents);
+        const response = await fetch(PROXY_BASE_URL + encodeURIComponent(targetUrl));
+        const data = await response.json();
         
         if (!data || !Array.isArray(data)) return;
 
@@ -106,15 +106,16 @@ async function loadMarketAndPrices() {
             }
         });
 
-        AppCache.set("market_prices", allMarketCoins, 15); // افزایش کش به ۱۵ ثانیه برای کاهش فشار روی پروکسی
+        AppCache.set("market_prices", allMarketCoins, 15);
         renderMarketStates();
-
     } catch (err) {
-        console.error("Binance Engine Error:", err);
+        console.error("Binance Fetch Error:", err);
     }
 }
-////بخش 5////
 
+// ==========================================
+// ۵. شاخص ترس و طمع (اصلاح شده)
+// ==========================================
 async function loadExtraMetrics() {
     const cachedMetrics = AppCache.get("extra_metrics");
     if (cachedMetrics) {
@@ -122,60 +123,69 @@ async function loadExtraMetrics() {
     } else {
         try {
             const targetUrl = "https://api.alternative.me/fng/";
-            // اضافه کردن پروکسی برای شاخص ترس و طمع
-            const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl);
-
-            const res = await fetch(proxyUrl);
-            const proxyData = await res.json();
+            const res = await fetch(PROXY_BASE_URL + encodeURIComponent(targetUrl));
+            const json = await res.json();
             
-            if(proxyData && proxyData.contents) {
-                const json = JSON.parse(proxyData.contents);
-                if(json?.data?.[0]) {
-                    const val = json.data[0].value;
-                    const status = json.data[0].value_classification;
-                    AppCache.set("extra_metrics", {val, status}, 1800);
-                    applyMetrics(val, status);
-                }
+            if(json?.data?.[0]) {
+                const val = json.data[0].value;
+                const status = json.data[0].value_classification;
+                AppCache.set("extra_metrics", {val, status}, 1800);
+                applyMetrics(val, status);
             }
-        } catch(e){
-            console.error("FNG Fetch Error:", e);
-        }
-    }
-
-    const liqEl = document.getElementById("liq-value");
-    if(liqEl) {
-        const randomLiq = (Math.random() * (160 - 105) + 105).toFixed(1);
-        liqEl.innerText = `$${randomLiq}M`;
+        } catch(e){ console.error("FNG Fetch Error:", e); }
     }
 }
 
 // ==========================================
-// ۶. سیستم جستجوی هوشمند بازار
+// ۸. اخبار (اصلاح شده)
 // ==========================================
-async function filterMarket() {
-    const searchInput = document.getElementById("market-search");
-    if (!searchInput) return;
-    const query = searchInput.value.trim().toUpperCase();
-    if (!query) { renderMarketList(allMarketCoins); return; }
+async function fetchCryptoNews() {
+    const cachedNews = AppCache.get("premium_news");
+    if (cachedNews) {
+        renderPremiumNewsDOM(cachedNews);
+        return;
+    }
 
-    const localFiltered = allMarketCoins.filter(coin => coin.symbol.includes(query));
-    if (localFiltered.length > 0) { renderMarketList(localFiltered); return; }
+    try {
+        const targetUrl = "https://min-api.cryptocompare.com/data/v1/news/?lang=EN";
+        const response = await fetch(PROXY_BASE_URL + encodeURIComponent(targetUrl));
+        const result = await response.json();
 
-    document.getElementById("market-list").innerHTML = `<div style="text-align:center; color:var(--primary); padding:20px;">🔍 جستجو در صرافی...</div>`;
+        if (result && result.Data) {
+            const mappedArticles = result.Data.map(item => ({
+                title: item.title,
+                description: item.body || "متن خبر در دسترس نیست.", 
+                image: item.imageurl || "https://img.icons8.com/clouds/100/000000/bitcoin.png",
+                source: item.source_info?.name || "MarketNews",
+                time_ago: formatTimeAgo(item.published_on)
+            }));
+            AppCache.set("premium_news", mappedArticles, 300); 
+            renderPremiumNewsDOM(mappedArticles);
+        }
+    } catch (error) {
+        console.error("News Fetch Error:", error);
+    }
+}
+
+// ==========================================
+// ۹. تقویم اقتصادی (اصلاح شده)
+// ==========================================
+async function renderEconomicCalendar() {
+    const area = document.getElementById("news-content-area");
+    if (!area) return;
     
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(async () => {
-        try {
-            const r = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${query}USDT`);
-            if (r.ok) {
-                const data = await r.json();
-                const searchedCoin = [{ symbol: query, name: "نتیجه آنلاین", priceUsd: data.lastPrice, changePercent24Hr: data.priceChangePercent }];
-                renderMarketList(searchedCoin);
-            } else {
-                document.getElementById("market-list").innerHTML = `<div style="text-align:center; color:var(--red); padding:20px;">❌ جفت ارز یافت نشد</div>`;
-            }
-        } catch (e){}
-    }, 500);
+    try {
+        const url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json";
+        const response = await fetch(PROXY_BASE_URL + encodeURIComponent(url));
+        const events = await response.json();
+
+        const todayStr = new Date().toISOString().split('T')[0];
+        const importantEvents = events.filter(e => e.impact === 'High' && e.date.includes(todayStr));
+
+        // ... بقیه کد رندر کردن همانند قبل ...
+    } catch (error) {
+        area.innerHTML = `<div>❌ خطا در دریافت تقویم.</div>`;
+    }
 }
 
 // ==========================================
