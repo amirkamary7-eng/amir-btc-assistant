@@ -86,6 +86,8 @@ function switchTab(pageId, element) {
 
     // ریست کردن اسلایدر برای بهینه‌سازی مصرف پردازنده
     clearInterval(newsSliderInterval); 
+    // show lightweight skeleton for the target tab to improve perceived performance
+    showTabSkeleton(pageId);
     
     if (pageId === 'dashboard-page') {
         loadTelegramUser(); // به‌روزرسانی هدر خوشامدگویی داشبورد
@@ -104,6 +106,34 @@ function switchTab(pageId, element) {
     } else if (pageId === 'profile-page') {
         loadTelegramUser();
     }
+}
+
+// نمایش و مخفی‌سازی skeleton برای تب‌ها
+function showTabSkeleton(pageId) {
+    try {
+        if (pageId === 'dashboard-page') {
+            const watch = document.getElementById('watchlist-container');
+            if (watch) watch.innerHTML = Array(4).fill('<div class="watchlist-card skeleton-block skeleton-card"></div>').join('');
+            const slider = document.getElementById('news-slider-content');
+            if (slider) slider.innerHTML = '<div class="slide-item skeleton-block skeleton-image"></div>';
+        } else if (pageId === 'market-page') {
+            const marketList = document.getElementById('market-coin-list');
+            if (marketList) marketList.innerHTML = Array(6).fill('<div class="coin-row skeleton-block" style="height:72px; border-radius:12px;"></div>').join('');
+        } else if (pageId === 'news-page') {
+            const container = document.getElementById('news-tab-content-area');
+            if (container) container.innerHTML = Array(6).fill('<div class="news-card skeleton-block" style="height:95px; margin-bottom:12px;"></div>').join('');
+        } else if (pageId === 'analysis-page') {
+            const container = document.getElementById('telegram-feed-container');
+            if (container) container.innerHTML = '<div class="card skeleton-block skeleton-card" style="height:140px;"></div>';
+        } else if (pageId === 'profile-page') {
+            const profile = document.getElementById('profile-main-view');
+            if (profile) profile.innerHTML = '<div class="glass-card skeleton-block" style="height:120px;"></div>';
+        }
+    } catch (e) { console.warn('skeleton render error', e); }
+}
+
+function removeSkeletons() {
+    document.querySelectorAll('.skeleton-block').forEach(el => el.classList.remove('skeleton-block'));
 }
 
 // =========================================================================
@@ -152,6 +182,7 @@ async function loadMarketAndPrices() {
 
         AppCache.set("market_prices", allMarketCoins, 15); // کش قیمت‌ها برای ۱۵ ثانیه
         renderMarketData();
+        removeSkeletons();
     } catch (err) {
         console.error("Binance Fetch Error:", err);
     }
@@ -314,6 +345,8 @@ function initNewsSlider(articles) {
         currentSliderIndex = (currentSliderIndex + 1) % articles.length;
         renderSlide(currentSliderIndex);
     }, 5000); // چرخش اتوماتیک هر ۵ ثانیه یکبار بر اساس داکیومنت V1
+    // hide skeletons after slider initialized
+    removeSkeletons();
 }
 
 async function switchNewsTab(tabId) {
@@ -377,6 +410,7 @@ async function switchNewsTab(tabId) {
     });
     html += '</div>';
     container.innerHTML = html;
+    removeSkeletons();
 }
 
 // =========================================================================
@@ -444,6 +478,7 @@ async function renderEconomicCalendarAdvanced(subFilter = 'today') {
         });
         html += `</div>`;
         listArea.innerHTML = html;
+        removeSkeletons();
 
     } catch (e) {
         listArea.innerHTML = `<div style="text-align:center; padding:20px; color:#e17055;">خطا در دریافت تقویم اقتصادی.</div>`;
@@ -644,6 +679,8 @@ function loadAnalysisData() {
     script.setAttribute("data-dark", "1");
     script.setAttribute("data-width", "100%");
     container.appendChild(script);
+    // remove skeleton once widget appended
+    removeSkeletons();
 }
 
 // =========================================================================
