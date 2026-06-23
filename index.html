@@ -293,7 +293,7 @@
             </div>
         </div>
 
-        <div class="glass-card" onclick="showPage('analysis-page', document.getElementById('nav-analysis'))" style="direction: rtl; background: linear-gradient(135deg, rgba(247,147,26,0.1), rgba(18,22,34,0.65));">
+        <div class="glass-card" onclick="switchTab('analysis-page', document.getElementById('nav-analysis'))" style="direction: rtl; background: linear-gradient(135deg, rgba(247,147,26,0.1), rgba(18,22,34,0.65));">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <span style="font-size: 12px; background: var(--primary); color: #000; padding: 2px 8px; border-radius: 6px; font-weight: bold;">آخرین تحلیل کانال</span>
                 <span style="font-size: 11px; color: var(--text-sub);">ورود به بخش تحلیل‌ها 🎯</span>
@@ -327,7 +327,7 @@
         <div class="glass-card" style="direction: rtl; margin-top: 14px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <span style="font-weight: bold; font-size: 14px;">⭐️ واچ‌لیست شما</span>
-                <span onclick="showPage('market-page', document.getElementById('nav-market'))" style="font-size: 12px; color: var(--primary); cursor:pointer;">مدیریت دیدبان ←</span>
+                <span onclick="switchTab('market-page', document.getElementById('nav-market'))" style="font-size: 12px; color: var(--primary); cursor:pointer;">مدیریت دیدبان ←</span>
             </div>
             <div id="dash-mini-market">
                 <div class="skeleton-block skeleton-shimmer" style="height: 50px; margin-bottom: 8px;"></div>
@@ -358,14 +358,15 @@
     </div>
 
     <div id="news-page" class="page">
-        <div style="padding: 20px 20px 4px 20px; font-weight: bold; color: var(--primary); text-align: right; font-size: 16px;">📰 آخرین اخبار ارز دیجیتال و اقتصاد</div>
+        <div style="padding: 20px 20px 4px 20px; font-weight: bold; color: var(--primary); text-align: right; font-size: 16px;">📅 تقویم اقتصادی امروز</div>
+        <div id="news-content-area" class="px-4">
+            <div class="skeleton-block skeleton-shimmer" style="height: 60px; margin-bottom: 8px; border-radius:12px;"></div>
+        </div>
+
+        <div style="padding: 24px 20px 4px 20px; font-weight: bold; color: var(--primary); text-align: right; font-size: 16px;">📰 آخرین اخبار ارز دیجیتال و اقتصاد</div>
         <div id="news-list">
             <div class="news-card" style="pointer-events: none;">
                 <div class="skeleton-block skeleton-shimmer" style="width: 70%; height: 18px; margin-bottom: 8px; margin-left: auto;"></div>
-                <div class="skeleton-block skeleton-shimmer" style="width: 100%; height: 40px;"></div>
-            </div>
-            <div class="news-card" style="pointer-events: none;">
-                <div class="skeleton-block skeleton-shimmer" style="width: 50%; height: 18px; margin-bottom: 8px; margin-left: auto;"></div>
                 <div class="skeleton-block skeleton-shimmer" style="width: 100%; height: 40px;"></div>
             </div>
         </div>
@@ -425,23 +426,17 @@
 
     <div id="details-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 transition-all duration-300">
         <div class="bg-[#12161a] w-full max-w-md h-[85vh] sm:h-auto sm:max-h-[80vh] rounded-t-2xl sm:rounded-2xl border-t sm:border border-[#1e2329] flex flex-col overflow-hidden shadow-2xl">
-            
             <div class="p-4 border-b border-[#1e2329] flex justify-between items-center bg-[#171c22] shrink-0">
                 <span id="modal-source" class="text-xs bg-[#2b2f36] text-[#f0b90b] px-2 py-0.5 rounded-full font-medium">منبع</span>
                 <button onclick="closeModal()" class="text-xs bg-[#cf304a]/10 hover:bg-[#cf304a]/20 text-[#cf304a] px-3 py-1.5 rounded-lg font-bold transition-all">
                     بستن ×
                 </button>
             </div>
-
             <div class="p-5 overflow-y-auto space-y-4 text-right select-text custom-scrollbar">
                 <img id="modal-image" src="" alt="Crypto News" class="w-full max-h-48 object-cover rounded-xl border border-[#1e2329] hidden shadow-md">
-                
                 <h2 id="modal-title" class="text-base font-bold text-[#eaecef] leading-snug"></h2>
-                
                 <div id="modal-time" class="text-[11px] text-[#909294] flex items-center gap-1"></div>
-                
                 <hr class="border-[#1e2329]">
-                
                 <div id="modal-content" class="text-sm text-[#b5b9be] leading-loose space-y-3 whitespace-pre-line break-words pb-6"></div>
             </div>
         </div>
@@ -457,7 +452,7 @@
             <span>اخبار</span>
         </div>
         
-        <div id="nav-dashboard" class="center-btn" onclick="switchTab('dashboard-page', null)">
+        <div id="nav-dashboard" class="center-btn active" onclick="switchTab('dashboard-page', null)">
             <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
         </div>
         
