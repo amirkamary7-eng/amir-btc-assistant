@@ -1,5 +1,5 @@
 // ==========================================
-// ۱. تنظیمات عمومی و راه‌اندازی تلگرام (قانون ۱)
+// ۱. تنظیمات عمومی و راه‌اندازی تلگرام
 // ==========================================
 const tg = window.Telegram?.WebApp;
 if (tg) {
@@ -8,6 +8,7 @@ if (tg) {
 }
 
 const MY_TELEGRAM_CHANNEL = "amir_btc_2024"; 
+const BACKEND_URL = "http://127.0.0.1:8000"; // آدرس بک‌اند پایتون شما
 let allMarketCoins = [];
 let searchTimeout = null;
 
@@ -17,7 +18,7 @@ const POPULAR_SYMBOLS = [
 ];
 
 // ==========================================
-// ۲. موتور کش مرکزی کلاینت (قانون ۲ - Cache Engine)
+// ۲. موتور کش مرکزی کلاینت (Cache Engine)
 // ==========================================
 const AppCache = {
     storage: {},
@@ -39,17 +40,15 @@ const AppCache = {
 };
 
 // ==========================================
-// ۳. روتر ناوبری و لود تنبل تب‌ها (قانون ۱ & ۵)
+// ۳. روتر ناوبری و لود تنبل تب‌ها
 // ==========================================
 function switchTab(pageId, element) {
-    // مدیریت کلاس اکتیو صفحات
     document.querySelectorAll('.page').forEach(page => {
         page.classList.remove('active');
     });
     const activePage = document.getElementById(pageId);
     if (activePage) activePage.classList.add('active');
 
-    // مدیریت وضعیت منو
     document.querySelectorAll('.nav-item, .center-btn').forEach(item => {
         item.classList.remove('active');
     });
@@ -60,11 +59,11 @@ function switchTab(pageId, element) {
         document.getElementById('nav-dashboard')?.classList.add('active');
     }
 
-    // لود تنبل و هدفمند دیتا بر اساس نیاز کاربر (On-Demand)
+    // لود هوشمند دیتا بر اساس تب انتخابی
     if (pageId === 'analysis-page') {
         loadAnalysisData();
     } else if (pageId === 'news-page') {
-        loadPersianNews();
+        fetchCryptoNews(); // فراخوانی موتور اخبار بهینه‌شده جدید
     } else if (pageId === 'market-page') {
         loadMarketAndPrices();
     }
@@ -74,7 +73,6 @@ function switchTab(pageId, element) {
 // ۴. بخش پالس بازار و قیمت‌های زنده (بایننس بهینه)
 // ==========================================
 async function loadMarketAndPrices() {
-    // بررسی وجود دیتای معتبر در کش برای جلوگیری از ریکوئست‌های تکراری
     const cachedPrices = AppCache.get("market_prices");
     if (cachedPrices) {
         allMarketCoins = cachedPrices;
@@ -102,7 +100,6 @@ async function loadMarketAndPrices() {
             }
         });
 
-        // ذخیره دیتای جدید در کش برای ۱۲ ثانیه آینده
         AppCache.set("market_prices", allMarketCoins, 12);
         renderMarketStates();
 
@@ -112,14 +109,12 @@ async function loadMarketAndPrices() {
 }
 
 function renderMarketStates() {
-    // آپدیت هدر قیمت بیت‌کوین در داشبورد
     const btcData = allMarketCoins.find(c => c.symbol === "BTC");
     if (btcData && document.getElementById("dash-btc-price")) {
         const btcPrice = parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
         document.getElementById("dash-btc-price").innerHTML = `BTC $${btcPrice}`;
     }
 
-    // رندر بخش‌های مختلف مارکت در صورت عدم فرآیند جستجو
     const searchInput = document.getElementById("market-search");
     if (!searchInput || !searchInput.value.trim()) {
         renderMarketList(allMarketCoins);
@@ -196,13 +191,12 @@ async function loadExtraMetrics() {
             if(json?.data?.[0]) {
                 const val = json.data[0].value;
                 const status = json.data[0].value_classification;
-                AppCache.set("extra_metrics", {val, status}, 1800); // کش ۳۰ دقیقه‌ای شاخص ترس و طمع
+                AppCache.set("extra_metrics", {val, status}, 1800);
                 applyMetrics(val, status);
             }
         } catch(e){}
     }
 
-    // شبیه‌سازی حجم لیکوئیدی ۲۴ ساعته بر پایه دیتای زنده روندهای بازار
     const liqEl = document.getElementById("liq-value");
     if(liqEl) {
         const randomLiq = (Math.random() * (160 - 105) + 105).toFixed(1);
@@ -255,7 +249,7 @@ async function filterMarket() {
 }
 
 // ==========================================
-// ۷. پردازش دیتای کاربری تلگرام (قانون ۴)
+// ۷. پردازش دیتای کاربری تلگرام
 // ==========================================
 function loadTelegramUser() {
     const nameEl = document.getElementById("user-name");
@@ -277,7 +271,6 @@ function loadTelegramUser() {
             imgEl.onerror = function() { this.src = 'https://img.icons8.com/clouds/200/000000/bitcoin.png'; };
         }
     } else {
-        // اطلاعات دمو پیش‌فرض جهت تست تحت وب
         const defaultName = "کاربر دمو سیستم";
         if (nameEl) nameEl.innerText = defaultName;
         if (dashNameEl) dashNameEl.innerText = defaultName;
@@ -285,98 +278,139 @@ function loadTelegramUser() {
         if (usernameEl) usernameEl.innerText = "@demo_crypto";
     }
 
-    // حذف اسکلتون لودر پروفایل و فعال‌سازی بخش اصلی چیدمان پروفایل
-    document.getElementById("profile-skeleton").style.display = "none";
-    document.getElementById("profile-content").style.display = "block";
+    if(document.getElementById("profile-skeleton")) document.getElementById("profile-skeleton").style.display = "none";
+    if(document.getElementById("profile-content")) document.getElementById("profile-content").style.display = "block";
 }
 
 // ==========================================
-// ۸. پلتفرم اخبار پارسی و سیستم تگ‌زدایی
+// ۸. پلتفرم اخبار هوشمند جدید (اتصال به بک‌اند پایتون)
 // ==========================================
-function stripHtml(htmlString) {
-    const tempDiv = document.createElement("div");
-    tempDiv.innerHTML = htmlString;
-    return tempDiv.textContent || tempDiv.innerText || "";
-}
-
-async function loadPersianNews() {
-    const newsListEl = document.getElementById("news-list");
-    const cachedNews = AppCache.get("persian_news");
+async function fetchCryptoNews() {
+    const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
+    const cachedNews = AppCache.get("premium_news");
 
     if (cachedNews) {
-        renderNewsDOM(cachedNews);
+        renderPremiumNewsDOM(cachedNews);
         return;
     }
 
     try {
-        const response = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent("https://arzdigital.com/feed/")}`);
-        const data = await response.json();
-        
-        if (data.status === 'ok' && data.items) {
-            AppCache.set("persian_news", data.items, 300); // تنظیم ۵ دقیقه زمان کش اخبار
-            renderNewsDOM(data.items);
+        const response = await fetch(`${BACKEND_URL}/api/farsi-news`);
+        const result = await response.json();
+
+        if (result.status === "success" && result.data) {
+            AppCache.set("premium_news", result.data, 300); // ۵ دقیقه کش محلی فرانت
+            renderPremiumNewsDOM(result.data);
         }
-    } catch (e) {
-        if(newsListEl) newsListEl.innerHTML = `<div style="text-align:center; padding:20px;">خطا در دریافت سرور اخبار</div>`;
+    } catch (error) {
+        console.error("خطا در لود اخبار پایتون:", error);
+        if (newsListEl) newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red);">خطا در دریافت سرور اخبار</div>`;
     }
 }
 
-function renderNewsDOM(items) {
-    const newsListEl = document.getElementById("news-list");
+function renderPremiumNewsDOM(articles) {
+    const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
     const dashNewsEl = document.getElementById("dash-top-news");
     const dashAnalysisEl = document.getElementById("dash-last-analysis-title");
 
     if (newsListEl) newsListEl.innerHTML = "";
     if (dashNewsEl) dashNewsEl.innerHTML = "";
 
-    // تزریق پویای آخرین تیتر دریافتی به عنوان تاپیک داینامیک تحلیل در داشبورد
-    if(items[0] && dashAnalysisEl) {
-        dashAnalysisEl.innerText = items[0].title;
+    // ست کردن تیتر اولین خبر داغ بازار روی باکس تحلیل داشبورد
+    if (articles[0] && dashAnalysisEl) {
+        dashAnalysisEl.innerText = articles[0].title;
     }
 
-    items.slice(0, 7).forEach((item, index) => {
-        const cleanDescription = stripHtml(item.description).substring(0, 95);
-        
-        // ۱. رندر در تب اختصاصی اخبار
+    articles.forEach((article, index) => {
+        // الف) رندر کردن در تب اصلی اخبار (با ساختار کارتی فوق‌العاده شیک لوکس)
         if (newsListEl) {
-            const div = document.createElement("div");
-            div.className = "news-card";
-            div.innerHTML = `
-                <h3 style="font-size: 15px; font-weight: bold; margin-bottom: 8px;">${item.title}</h3>
-                <p style="font-size: 12px; color: var(--text-sub);">${cleanDescription}...</p>
+            const card = document.createElement('div');
+            card.className = "news-card";
+            card.style = "display: flex; align-items: center; padding: 12px; margin-bottom: 12px; background: #12161a; border: 1px solid #1e2329; border-radius: 12px; cursor: pointer; color: #eaecef; gap: 12px; text-align: right; direction: rtl;";
+            
+            card.innerHTML = `
+                <img src="${article.image}" style="width: 75px; height: 75px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.src='https://images.cryptocompare.com/news/default/bitcoin.png'">
+                <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
+                    <h3 style="font-size: 14px; font-weight: bold; margin: 0 0 4px 0; color: #eaecef; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${article.title}</h3>
+                    <p style="font-size: 12px; margin: 0 0 6px 0; color: #848e9c; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5;">${article.description || 'جهت مطالعه جزئیات، کلیک کنید.'}</p>
+                    <div style="font-size: 10px; color: #909294; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="background: #2b2f36; padding: 2px 6px; rounded: 4px; color: #f0b90b;">${article.source}</span>
+                        <span>⏱️ ${article.time_ago}</span>
+                    </div>
+                </div>
             `;
-            div.onclick = () => showNewsModal(item.title, item.content || item.description);
-            newsListEl.appendChild(div);
+            // اتصال اکشن کلیک به پاپ آپ جدید و باکلاس شما
+            card.onclick = () => openArticleDetails(article.title, article.description, article.image, article.source, article.time_ago);
+            newsListEl.appendChild(card);
         }
 
-        // ۲. رندر ۳ خبر اول شاخص در کانتینر داشبورد اصلی
+        // ب) رندر کردن ۳ تیتر اول در باکس ویجت داشبورد
         if (index < 3 && dashNewsEl) {
             const miniNewsRow = document.createElement("div");
-            miniNewsRow.style = "padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.03); cursor:pointer; font-size:13px; color:#fff;";
-            miniNewsRow.innerText = `• ${item.title}`;
+            miniNewsRow.style = "padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.03); cursor:pointer; font-size:13px; color:#fff; text-align: right; direction: rtl;";
+            miniNewsRow.innerText = `• ${article.title}`;
             miniNewsRow.onclick = () => {
                 switchTab('news-page', document.getElementById('nav-news'));
-                showNewsModal(item.title, item.content || item.description);
+                openArticleDetails(article.title, article.description, article.image, article.source, article.time_ago);
             };
             dashNewsEl.appendChild(miniNewsRow);
         }
     });
 }
 
+// ==========================================
+// ۹. مدیریت سیستم پاپ‌آپ (Modal Engine) جدید و لوکس
+// ==========================================
+function openArticleDetails(title, text, image, source, time_ago) {
+    const modal = document.getElementById('details-modal');
+    // اگر مودال جدید در HTML نباشد، به پاپ‌آپ قدیمی سرور سوییچ می‌کند تا ارور ندهد
+    if(!modal) { showNewsModal(title, text); return; } 
+
+    const mTitle = document.getElementById('modal-title');
+    const mImage = document.getElementById('modal-image');
+    const mSource = document.getElementById('modal-source');
+    const mTime = document.getElementById('modal-time');
+    const mContent = document.getElementById('modal-content');
+
+    mTitle.innerText = title;
+    mSource.innerText = source || "اخبار بازار";
+    mTime.innerText = time_ago ? `⏱️ ${time_ago}` : "اخیراً";
+    
+    if (image && image.trim() !== "" && !image.includes("default")) {
+        mImage.src = image;
+        mImage.classList.remove('hidden');
+    } else {
+        mImage.classList.add('hidden');
+    }
+
+    let formattedText = text || "محتوایی برای نمایش وجود ندارد.";
+    formattedText = formattedText.replace(/•/g, '<span class="text-[#f0b90b] text-base font-bold ml-1">•</span>');
+    
+    mContent.innerHTML = formattedText;
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden'; 
+}
+
+function closeModal() {
+    const modal = document.getElementById('details-modal');
+    if(modal) modal.classList.add('hidden');
+    document.body.style.overflow = ''; 
+}
+
+// توابع زاپاس برای همخوانی با بخش‌های قدیمی قالب شما
 function showNewsModal(title, content) {
     const modal = document.getElementById("news-modal");
     if (!modal) return;
     modal.style.display = "flex";
-    document.getElementById("news-title-modal").innerText = title;
-    document.getElementById("news-content-modal").innerHTML = content;
+    if(document.getElementById("news-title-modal")) document.getElementById("news-title-modal").innerText = title;
+    if(document.getElementById("news-content-modal")) document.getElementById("news-content-modal").innerHTML = content;
 }
-
 function closeNewsModal() {
-    document.getElementById("news-modal").style.display = "none";
+    if(document.getElementById("news-modal")) document.getElementById("news-modal").style.display = "none";
 }
 
 // ==========================================
-// ۹. کامپوننت چارت‌های معاملاتی اختصاصی (قانون ۳)
+// ۱۰. کامپوننت چارت‌های معاملاتی اختصاصی
 // ==========================================
 function openChart(symbol) {
     document.getElementById("chart-modal").style.display = "flex";
@@ -396,13 +430,13 @@ function openChart(symbol) {
 function closeChart() { document.getElementById("chart-modal").style.display = "none"; }
 
 // ==========================================
-// ۱۰. ایزولاسیون دیتابیس آرشیو تحلیل‌ها (قانون ۵)
+// ۱۱. ایزولاسیون دیتابیس آرشیو تحلیل‌ها (فید تلگرام)
 // ==========================================
 function loadAnalysisData() {
     const container = document.getElementById("telegram-feed-container");
     if (!container || container.querySelector("script[data-telegram-discussion]")) return;
 
-    container.innerHTML = ""; // حذف پلاس هولدر اسکلتون
+    container.innerHTML = ""; 
     const script = document.createElement("script");
     script.src = "https://telegram.org/js/telegram-widget.js?22";
     script.setAttribute("data-telegram-discussion", MY_TELEGRAM_CHANNEL);
@@ -414,96 +448,19 @@ function loadAnalysisData() {
 }
 
 // ==========================================
-// ۱۱. مدیریت چرخه عمر لود اولیه (Initialization)
+// ۱۲. مدیریت چرخه عمر لود اولیه (Initialization)
 // ==========================================
 window.addEventListener("DOMContentLoaded", () => {
-    // تسک‌های با اولویت بالا برای فرآیند رندر سریع‌تر فرانت (First Meaningful Paint)
     loadTelegramUser();
     loadMarketAndPrices();
     loadExtraMetrics();
     
-    // لود پسیو و غیر همزمان اخبار جهت بهینه‌سازی ریسورس دستگاه
-    setTimeout(loadPersianNews, 400);
+    // اجرای پسیو موتور اخبار جدید به محض بالا آمدن برنامه
+    setTimeout(fetchCryptoNews, 400);
 
-    // مدیریت اونت باکس سرچ مارکت
     document.getElementById("market-search")?.addEventListener("input", filterMarket);
     
-    // اینتروال‌های بهینه زمانی آپدیت پس‌زمینه
+    // زمان‌بندی‌های بهینه آپدیت زنده
     setInterval(loadMarketAndPrices, 15000); 
-    setInterval(loadPersianNews, 180000);   
+    setInterval(fetchCryptoNews, 180000);   
 });
-const BACKEND_URL = "http://127.0.0.1:8000"; 
-
-async function fetchCryptoNews() {
-    const container = document.getElementById('news-container');
-    if (!container) return;
-
-    try {
-        const response = await fetch(`${BACKEND_URL}/api/farsi-news`);
-        const result = await response.json();
-
-        if (result.status === "success") {
-            container.innerHTML = ""; 
-            
-            result.data.forEach(article => {
-                const card = document.createElement('a');
-                card.href = article.url;
-                card.target = "_blank";
-                card.style = "display: flex; align-items: center; padding: 12px; margin-bottom: 12px; background: #12161a; border: 1px solid #1e2329; border-radius: 12px; text-decoration: none; color: #eaecef; gap: 12px;";
-
-                card.innerHTML = `
-                    <img src="${article.image}" style="w: 80px; h: 80px; border-radius: 8px; object-fit: cover;" onerror="this.src='https://images.cryptocompare.com/news/default/bitcoin.png'">
-                    <div>
-                        <h3 style="font-size: 14px; margin: 0 0 4px 0; color: #eaecef;">${article.title}</h3>
-                        <p style="font-size: 12px; margin: 0 0 6px 0; color: #848e9c;">${article.description || ''}</p>
-                        <div style="font-size: 10px; color: #909294;">⏱️ ${article.time_ago} | 📢 ${article.source}</div>
-                    </div>
-                `;
-                container.appendChild(card);
-            });
-        }
-    } catch (error) {
-        console.error("خطا در لود اخبار:", error);
-    }
-}
-
-document.addEventListener("DOMContentLoaded", fetchCryptoNews);
-
-function openArticleDetails(title, text, image, source, time_ago) {
-    const modal = document.getElementById('details-modal');
-    const mTitle = document.getElementById('modal-title');
-    const mImage = document.getElementById('modal-image');
-    const mSource = document.getElementById('modal-source');
-    const mTime = document.getElementById('modal-time');
-    const mContent = document.getElementById('modal-content');
-
-    // ۱. تزریق متون اصلی
-    mTitle.innerText = title;
-    mSource.innerText = source || "تحلیل اختصاصی";
-    mTime.innerText = time_ago ? `⏱️ ${time_ago}` : "اخیراً";
-    
-    // ۲. کنترل هوشمند ابعاد تصویر برای جلوگیری از کشیدگی یا بزرگ شدن بیش از حد
-    if (image && image.trim() !== "" && !image.includes("default")) {
-        mImage.src = image;
-        mImage.classList.remove('hidden');
-    } else {
-        mImage.classList.add('hidden'); // اگر خبری عکس نداشت کادر عکس مخفی شود
-    }
-
-    // ۳. بهینه‌سازی متون بالت‌دار (•) و تحلیل‌های کانال تلگرام برای نمایش شکیل
-    let formattedText = text || "محتوایی برای نمایش وجود ندارد.";
-    
-    // رنگی کردن دایره‌های لیست (•) برای خوانایی فوق‌العاده بالا در حالت موبایل
-    formattedText = formattedText.replace(/•/g, '<span class="text-[#f0b90b] text-base font-bold ml-1">•</span>');
-    
-    mContent.innerHTML = formattedText;
-
-    // ۴. نمایش مودال با حذف کلاس hidden و قفل کردن اسکرول پس‌زمینه
-    modal.classList.remove('hidden');
-    document.body.style.overflow = 'hidden'; 
-}
-
-function closeModal() {
-    document.getElementById('details-modal').classList.add('hidden');
-    document.body.style.overflow = ''; // آزاد کردن مجدد اسکرول صفحه اصلی
-}
