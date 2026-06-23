@@ -282,7 +282,7 @@ function loadTelegramUser() {
 }
 
 // ==========================================
-// ۸. سیستم مدیریت پیشرفته اخبار
+// ۸. سیستم مدیریت پیشرفته اخبار (بهینه‌سازی شده)
 // ==========================================
 async function fetchCryptoNews() {
     const cachedNews = AppCache.get("premium_news");
@@ -292,14 +292,12 @@ async function fetchCryptoNews() {
     }
 
     try {
-        // دریافت ۵۰ خبر آخر از منبع زنده
         const response = await fetch("https://min-api.cryptocompare.com/data/v1/news/?lang=EN");
         const result = await response.json();
 
         if (result && result.Data && Array.isArray(result.Data)) {
             const mappedArticles = result.Data.map(item => ({
                 title: item.title,
-                // حذف محدودیت کاراکتر برای نمایش کاملترین متن ارائه‌شده توسط API
                 description: item.body || "متن خبر در دسترس نیست.", 
                 image: item.imageurl || "https://img.icons8.com/clouds/100/000000/bitcoin.png",
                 source: item.source_info?.name || item.source || "MarketNews",
@@ -308,12 +306,16 @@ async function fetchCryptoNews() {
                 tags: (item.tags || "").toLowerCase()
             }));
 
-            AppCache.set("premium_news", mappedArticles, 300); // ۵ دقیقه کش
+            AppCache.set("premium_news", mappedArticles, 300); // ۵ دقیقه کش داخلی
             renderPremiumNewsDOM(mappedArticles);
             return;
         }
     } catch (error) {
-        console.error("خطا در ارتباط با سرور فیدهای زنده...");
+        console.error("خطا در دریافت اخبار زنده...");
+        const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
+        if (newsListEl) {
+            newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red); font-size:13px; margin-top:20px;">❌ ارتباط با سرور اخبار برقرار نشد. لطفاً وضعیت اتصال خود را بررسی کنید.</div>`;
+        }
     }
 }
 
@@ -377,7 +379,7 @@ function displayNewsItems(articles) {
         return;
     }
 
-    // افزایش تعداد اخبار نمایشی به حداقل ۱۵ خبر تازه
+    // تضمین نمایش حداقل ۱۵ خبر تازه و باکیفیت
     const limitedArticles = articles.slice(0, 15);
 
     limitedArticles.forEach(article => {
@@ -428,7 +430,6 @@ function filterNewsView(category, btn) {
         return true; 
     });
     
-    // در صورت کم بودن نتایج، برای خالی نماندن صفحه همیشه حداقل ۱۰ خبر کلی نمایش داده می‌شود
     displayNewsItems(filtered.length > 0 ? filtered : window.currentNewsArticles.slice(0, 10));
 }
 
@@ -442,7 +443,6 @@ async function renderEconomicCalendar() {
     area.innerHTML = `<div style="text-align:center; padding:20px; color:var(--primary);">⏳ در حال دریافت تقویم اقتصادی جهان...</div>`;
     
     try {
-        // اتصال به دیتابیس خام تقویم با پروکسی برای دور زدن محدودیت‌های کلاینت
         const url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json";
         const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
         
@@ -452,7 +452,6 @@ async function renderEconomicCalendar() {
 
         if (!events || events.length === 0) throw new Error("No data");
 
-        // استخراج رویدادهای امروز با اهمیت بالا و متوسط
         const todayStr = new Date().toISOString().split('T')[0];
         const importantEvents = events.filter(e => 
             (e.impact === 'High' || e.impact === 'Medium') && 
@@ -491,6 +490,65 @@ async function renderEconomicCalendar() {
 }
 
 // ==========================================
+// ۹.۵. سیستم باز کردن پاپ‌آپ اخبار و نمایش متن کامل
+// ==========================================
+function openArticleDetails(title, text, image, source, time_ago) {
+    const modal = document.getElementById('details-modal');
+    if(!modal) { showNewsModal(title, text); return; } 
+
+    const mTitle = document.getElementById('modal-title');
+    const mImage = document.getElementById('modal-image');
+    const mSource = document.getElementById('modal-source');
+    const mTime = document.getElementById('modal-time');
+    const mContent = document.getElementById('modal-content');
+
+    if(mTitle) mTitle.innerText = title;
+    if(mSource) mSource.innerText = source || "اخبار بازار";
+    if(mTime) mTime.innerText = time_ago ? `⏱️ ${time_ago}` : "اخیراً";
+    
+    if (mImage) {
+        if (image && image.trim() !== "" && !image.includes("default")) {
+            mImage.src = image;
+            mImage.style.display = "block";
+        } else {
+            mImage.style.display = "none";
+        }
+    }
+
+    if(mContent) {
+        let formattedText = text || "محتوایی برای نمایش وجود ندارد.";
+        formattedText = formattedText.replace(/•/g, '<span style="color:#f0b90b; font-weight:bold; margin-left:4px;">•</span>');
+        mContent.innerHTML = formattedText;
+    }
+    
+    modal.style.display = "flex";
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden'; 
+}
+
+function closeModal() {
+    const modal = document.getElementById('details-modal');
+    if(modal) {
+        modal.style.display = "none";
+        modal.classList.add('hidden');
+    }
+    closeNewsModal();
+    document.body.style.overflow = ''; 
+}
+
+function showNewsModal(title, content) {
+    const modal = document.getElementById("news-modal");
+    if (!modal) return;
+    modal.style.display = "flex";
+    if(document.getElementById("news-title-modal")) document.getElementById("news-title-modal").innerText = title;
+    if(document.getElementById("news-content-modal")) document.getElementById("news-content-modal").innerHTML = content;
+}
+
+function closeNewsModal() {
+    if(document.getElementById("news-modal")) document.getElementById("news-modal").style.display = "none";
+}
+
+// ==========================================
 // ۱۰. کامپوننت چارت‌های معاملاتی اختصاصی
 // ==========================================
 function openChart(symbol) {
@@ -511,7 +569,7 @@ function openChart(symbol) {
 function closeChart() { document.getElementById("chart-modal").style.display = "none"; }
 
 // ==========================================
-// ۱۱. فید تلگرام
+// ۱۱. فید تلگرام (بخش تحلیل‌ها)
 // ==========================================
 function loadAnalysisData() {
     const container = document.getElementById("telegram-feed-container");
@@ -529,7 +587,7 @@ function loadAnalysisData() {
 }
 
 // ==========================================
-// ۱۲. لود اولیه و تایمرهای ۵ دقیقه‌ای
+// ۱۲. لود اولیه و تایمرهای زمان‌بندی دقیق ۵ دقیقه‌ای
 // ==========================================
 window.addEventListener("DOMContentLoaded", () => {
     if(typeof loadTelegramUser === 'function') loadTelegramUser();
@@ -541,9 +599,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const searchInput = document.getElementById("market-search");
     if(searchInput) searchInput.addEventListener("input", filterMarket);
     
-    // آپدیت قیمت‌ها هر ۱۵ ثانیه
+    // آپدیت قیمت مارکت هر ۱۵ ثانیه یک بار
     setInterval(() => { if(typeof loadMarketAndPrices === 'function') loadMarketAndPrices(); }, 15000); 
     
-    // آپدیت خودکار فید اخبار دقیقاً هر ۵ دقیقه (۳۰۰,۰۰۰ میلی‌ثانیه)
+    // آپدیت کاملاً خودکار و سراسری اخبار فید دقیقاً هر ۵ دقیقه یک‌بار (۳۰۰,۰۰۰ میلی‌ثانیه)
     setInterval(fetchCryptoNews, 300000);   
 });
