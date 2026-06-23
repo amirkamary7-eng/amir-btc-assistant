@@ -27,10 +27,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# کش مرکزی اخبار
+# کش مرکزی اخبار (با زمان انقضای طولانی‌تر)
 news_cache = {"data": None, "expiry": 0}
+CACHE_TTL = 900  # ۱۵ دقیقه
 
-# telegram app instance (set on startup)
 telegram_app = None
 
 # ==========================================
@@ -69,18 +69,17 @@ MOCK_NEWS = [{
 
 def fetch_raw_news_rss():
     headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        res = requests.get("https://cointelegraph.com/rss", headers=headers, timeout=6)
-        if res.status_code == 200 and "<item>" in res.text:
-            return res.text, "کوین‌تلگراف"
-    except Exception:
-        print("⚠️ منبع اول در دسترس نبود...")
-    try:
-        res = requests.get("https://www.coindesk.com/arc/outboundfeeds/rss/", headers=headers, timeout=6)
-        if res.status_code == 200 and "<item>" in res.text:
-            return res.text, "کوین‌دسک"
-    except Exception:
-        print("⚠️ منبع دوم در دسترس نبود.")
+    sources = [
+        ("https://cointelegraph.com/rss", "کوین‌تلگراف"),
+        ("https://www.coindesk.com/arc/outboundfeeds/rss/", "کوین‌دسک")
+    ]
+    for url, name in sources:
+        try:
+            res = requests.get(url, headers=headers, timeout=6)
+            if res.status_code == 200 and "<item>" in res.text:
+                return res.text, name
+        except Exception:
+            print(f"⚠️ منبع {name} در دسترس نبود.")
     return None, None
 
 @app.get("/api/farsi-news")
@@ -88,7 +87,7 @@ def get_optimized_farsi_news():
     current_time = time.time()
     if news_cache["data"] and current_time < news_cache["expiry"]:
         return {"status": "success", "source": "cache", "data": news_cache["data"]}
-        
+
     rss_data, source_name = fetch_raw_news_rss()
     if not rss_data:
         if news_cache["data"]:
@@ -96,6 +95,7 @@ def get_optimized_farsi_news():
         return {"status": "success", "source": "mock_fallback", "data": MOCK_NEWS}
 
     try:
+        # استفاده از XML با مدیریت بهتر خطا
         root = ET.fromstring(rss_data)
         items = root.findall(".//item")[:6]
         optimized_articles = []
@@ -106,7 +106,7 @@ def get_optimized_farsi_news():
             url = item.find("link").text if item.find("link") is not None else ""
             desc_en = item.find("description").text if item.find("description") is not None else ""
             pub_date = item.find("pubDate").text if item.find("pubDate") is not None else ""
-            
+
             clean_desc_en = clean_html(desc_en)
             image_url = "https://images.cryptocompare.com/news/default/bitcoin.png"
             img_match = re.search(r'src="([^"]+)"', desc_en)
@@ -116,7 +116,8 @@ def get_optimized_farsi_news():
             try:
                 translated_title = translator.translate(title_en) if title_en else "بدون عنوان"
                 translated_desc = translator.translate(clean_desc_en) if clean_desc_en else ""
-            except Exception:
+            except Exception as e:
+                print(f"Translation error: {e}")
                 translated_title = title_en
                 translated_desc = clean_desc_en
 
@@ -128,13 +129,16 @@ def get_optimized_farsi_news():
                 "image": image_url,
                 "url": url
             })
-            
+
         if optimized_articles:
             news_cache["data"] = optimized_articles
-            news_cache["expiry"] = current_time + 900
+            news_cache["expiry"] = current_time + CACHE_TTL
             return {"status": "success", "source": f"{source_name}_live", "data": optimized_articles}
+    except ET.ParseError as e:
+        print(f"XML Parse Error: {e}")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Unexpected error: {e}")
+
     return {"status": "success", "source": "mock_fallback", "data": MOCK_NEWS}
 
 # ==========================================
@@ -161,7 +165,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     )
 
-# سیستم راه‌اندازی همزمان ربات تلگرام در پس‌زمینه FastAPI
 @app.on_event("startup")
 async def startup_event():
     global telegram_app
@@ -172,13 +175,19 @@ async def startup_event():
     telegram_app = ApplicationBuilder().token(TOKEN).build()
     telegram_app.add_handler(CommandHandler("start", start))
 
-    # اجرای ربات به صورت ناهمگام (Async) تا سرور FastAPI قفل نشود
     await telegram_app.initialize()
     await telegram_app.start()
-    # run polling in background task to avoid blocking FastAPI
-    asyncio.create_task(telegram_app.run_polling())
+    asyncio.create_task(run_bot_polling())
     print("🚀 ربات تلگرام با موفقیت در پس‌زمینه فعال شد!")
 
+async def run_bot_polling():
+    """اجرای polling با مدیریت خودکار خطا و reconnect"""
+    while True:
+        try:
+            await telegram_app.run_polling()
+        except Exception as e:
+            print(f"⚠️ خطا در polling ربات: {e}. تلاش مجدد در ۵ ثانیه...")
+            await asyncio.sleep(5)
 
 @app.on_event("shutdown")
 async def shutdown_event():
