@@ -419,13 +419,30 @@
         <div id="tradingview-widget-container" style="flex: 1; width: 100%;"></div>
     </div>
 
-    <div id="news-modal" class="modal" style="padding: 20px; background: rgba(4, 6, 10, 0.95); text-align: right; direction: rtl;">
-        <div style="background: var(--card-bg); border-radius: 20px; padding: 20px; border: 1px solid var(--glass-border); max-height: 85vh; overflow-y: auto;">
-            <button onclick="closeNewsModal()" style="background: var(--red); border:none; padding:10px 18px; color:white; border-radius:10px; cursor:pointer; font-weight: bold;">بستن ✕</button>
-            <h2 id="news-title-modal" style="color: var(--primary); margin-top: 20px;"></h2>
-            <div id="news-content-modal" style="color: #ddd; line-height: 1.8; font-size: 15px;"></div>
+    <div id="details-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 transition-all duration-300">
+    <div class="bg-[#12161a] w-full max-w-md h-[85vh] sm:h-auto sm:max-h-[80vh] rounded-t-2xl sm:rounded-2xl border-t sm:border border-[#1e2329] flex flex-col overflow-hidden shadow-2xl">
+        
+        <div class="p-4 border-b border-[#1e2329] flex justify-between items-center bg-[#171c22] shrink-0">
+            <span id="modal-source" class="text-xs bg-[#2b2f36] text-[#f0b90b] px-2 py-0.5 rounded-full font-medium">منبع</span>
+            <button onclick="closeModal()" class="text-xs bg-[#cf304a]/10 hover:bg-[#cf304a]/20 text-[#cf304a] px-3 py-1.5 rounded-lg font-bold transition-all">
+                بستن ×
+            </button>
+        </div>
+
+        <div class="p-5 overflow-y-auto space-y-4 text-right select-text custom-scrollbar">
+            <img id="modal-image" src="" alt="Crypto News" class="w-full max-h-48 object-cover rounded-xl border border-[#1e2329] hidden shadow-md">
+            
+            <h2 id="modal-title" class="text-base font-bold text-[#eaecef] leading-snug"></h2>
+            
+            <div id="modal-time" class="text-[11px] text-[#909294] flex items-center gap-1"></div>
+            
+            <hr class="border-[#1e2329]">
+            
+            <div id="modal-content" class="text-sm text-[#b5b9be] leading-loose space-y-3 whitespace-pre-line break-words pb-6">
+                </div>
         </div>
     </div>
+</div>
 
     <div class="navbar">
         <div id="nav-market" class="nav-item" onclick="switchTab('market-page', this)">

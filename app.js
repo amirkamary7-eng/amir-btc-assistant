@@ -468,3 +468,42 @@ async function fetchCryptoNews() {
 }
 
 document.addEventListener("DOMContentLoaded", fetchCryptoNews);
+
+function openArticleDetails(title, text, image, source, time_ago) {
+    const modal = document.getElementById('details-modal');
+    const mTitle = document.getElementById('modal-title');
+    const mImage = document.getElementById('modal-image');
+    const mSource = document.getElementById('modal-source');
+    const mTime = document.getElementById('modal-time');
+    const mContent = document.getElementById('modal-content');
+
+    // ۱. تزریق متون اصلی
+    mTitle.innerText = title;
+    mSource.innerText = source || "تحلیل اختصاصی";
+    mTime.innerText = time_ago ? `⏱️ ${time_ago}` : "اخیراً";
+    
+    // ۲. کنترل هوشمند ابعاد تصویر برای جلوگیری از کشیدگی یا بزرگ شدن بیش از حد
+    if (image && image.trim() !== "" && !image.includes("default")) {
+        mImage.src = image;
+        mImage.classList.remove('hidden');
+    } else {
+        mImage.classList.add('hidden'); // اگر خبری عکس نداشت کادر عکس مخفی شود
+    }
+
+    // ۳. بهینه‌سازی متون بالت‌دار (•) و تحلیل‌های کانال تلگرام برای نمایش شکیل
+    let formattedText = text || "محتوایی برای نمایش وجود ندارد.";
+    
+    // رنگی کردن دایره‌های لیست (•) برای خوانایی فوق‌العاده بالا در حالت موبایل
+    formattedText = formattedText.replace(/•/g, '<span class="text-[#f0b90b] text-base font-bold ml-1">•</span>');
+    
+    mContent.innerHTML = formattedText;
+
+    // ۴. نمایش مودال با حذف کلاس hidden و قفل کردن اسکرول پس‌زمینه
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden'; 
+}
+
+function closeModal() {
+    document.getElementById('details-modal').classList.add('hidden');
+    document.body.style.overflow = ''; // آزاد کردن مجدد اسکرول صفحه اصلی
+}
