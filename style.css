@@ -297,3 +297,22 @@ body {
     border-radius: 20px; width: 100%; max-width: 400px; padding: 20px;
     max-height: 80vh; overflow-y: auto;
 }
+/* =========================================================================
+   ستاره واچ‌لیست
+   ========================================================================= */
+.watchlist-star {
+    font-size: 22px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    line-height: 1;
+    display: inline-block;
+}
+
+.watchlist-star:hover {
+    transform: scale(1.2);
+}
+
+.coin-row {
+    position: relative;
+}

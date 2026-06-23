@@ -59,7 +59,6 @@ const AppCache = {
 // =========================================================================
 // بخش ۴: توابع واچ‌لیست (برای هماهنگی با watchlist.js)
 // =========================================================================
-// این توابع قبل از هر چیز تعریف می‌شوند تا در دسترس باشند
 window.getWatchlist = window.getWatchlist || function() {
     const stored = localStorage.getItem('watchlist');
     return stored ? JSON.parse(stored) : [];
@@ -71,6 +70,7 @@ window.addToWatchlist = window.addToWatchlist || function(symbol) {
         list.push(symbol);
         localStorage.setItem('watchlist', JSON.stringify(list));
         if (typeof renderWatchlist === 'function') renderWatchlist();
+        renderMarketTabLists(document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all');
     }
 };
 
@@ -79,19 +79,20 @@ window.removeFromWatchlist = window.removeFromWatchlist || function(symbol) {
     list = list.filter(s => s !== symbol);
     localStorage.setItem('watchlist', JSON.stringify(list));
     if (typeof renderWatchlist === 'function') renderWatchlist();
+    renderMarketTabLists(document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all');
 };
 
-window.openAddCoinModal = window.openAddCoinModal || function() {
-    const modal = document.getElementById('add-coin-modal');
-    if (modal) {
-        modal.style.display = 'flex';
-        if (typeof populateAddCoinModal === 'function') populateAddCoinModal();
+window.isInWatchlist = window.isInWatchlist || function(symbol) {
+    return window.getWatchlist().includes(symbol);
+};
+
+window.toggleWatchlist = window.toggleWatchlist || function(symbol, event) {
+    if (event) event.stopPropagation();
+    if (window.isInWatchlist(symbol)) {
+        window.removeFromWatchlist(symbol);
+    } else {
+        window.addToWatchlist(symbol);
     }
-};
-
-window.closeAddCoinModal = window.closeAddCoinModal || function() {
-    const modal = document.getElementById('add-coin-modal');
-    if (modal) modal.style.display = 'none';
 };
 
 // =========================================================================
@@ -132,13 +133,16 @@ function switchTab(pageId, element) {
         loadMarketAndPrices();
         loadLiquidationData();
         loadExtraMetrics();
-        renderAddWatchlistButton();
     } else if (pageId === 'news-page') {
         switchNewsTab('all-news');
     } else if (pageId === 'analysis-page') {
         loadAnalysisData();
     } else if (pageId === 'profile-page') {
         loadTelegramUser();
+        // اطمینان از نمایش پروفایل
+        document.getElementById('profile-main-view').style.display = 'block';
+        document.getElementById('referral-page-view').style.display = 'none';
+        document.getElementById('settings-page-view').style.display = 'none';
     }
 }
 
@@ -292,9 +296,11 @@ function renderMarketTabLists(filterType = 'all') {
         const change = parseFloat(coin.changePercent24Hr) || 0;
         const isPositive = change >= 0;
         const badgeClass = isPositive ? 'badge-success' : 'badge-danger';
+        const inWatchlist = window.isInWatchlist(coin.symbol);
+
         html += `
             <div class="coin-row" onclick="openChart('${coin.symbol}')">
-                <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px; flex:1; min-width:0;">
                     <span style="color:var(--text-sub); font-size:11px; font-family:monospace; width:15px;">#${coin.rank}</span>
                     <img src="https://assets.coincap.io/assets/icons/${coin.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" class="coin-icon">
                     <div style="display: flex; flex-direction: column; text-align: left;">
@@ -302,9 +308,15 @@ function renderMarketTabLists(filterType = 'all') {
                         <span class="coin-name" style="font-size: 11px; color: var(--text-dim);">${coin.name}</span>
                     </div>
                 </div>
-                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                    <span class="coin-price" style="font-weight: bold; font-family: monospace;">$${parseFloat(coin.priceUsd).toLocaleString()}</span>
-                    <span class="badge ${badgeClass}">${isPositive ? '+' : ''}${change.toFixed(2)}%</span>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                        <span class="coin-price" style="font-weight: bold; font-family: monospace;">$${parseFloat(coin.priceUsd).toLocaleString()}</span>
+                        <span class="badge ${badgeClass}">${isPositive ? '+' : ''}${change.toFixed(2)}%</span>
+                    </div>
+                    <!-- ستاره واچ‌لیست -->
+                    <span class="watchlist-star" onclick="toggleWatchlist('${coin.symbol}', event)" style="font-size:20px; cursor:pointer; color:${inWatchlist ? '#f7931a' : '#555'}; transition: all 0.2s; user-select:none;">
+                        ${inWatchlist ? '⭐' : '☆'}
+                    </span>
                 </div>
             </div>
         `;
@@ -315,26 +327,8 @@ function renderMarketTabLists(filterType = 'all') {
 function filterMarketCategory(category, element) {
     document.querySelectorAll('.trend-tab-btn').forEach(btn => btn.classList.remove('active'));
     element.classList.add('active');
+    element.dataset.filter = category;
     renderMarketTabLists(category);
-}
-
-function renderAddWatchlistButton() {
-    const marketPage = document.getElementById('market-page');
-    if (!marketPage) return;
-    if (document.getElementById('add-watchlist-btn-container')) return;
-
-    const container = document.createElement('div');
-    container.id = 'add-watchlist-btn-container';
-    container.style.cssText = 'display:flex; justify-content:center; margin: 5px 15px 15px;';
-    container.innerHTML = `
-        <button class="banner-join-btn" onclick="openAddCoinModal()" style="width:100%; background: linear-gradient(135deg, #f7931a, #ff6a00);">
-            ➕ افزودن/مدیریت واچ‌لیست
-        </button>
-    `;
-    const marketList = document.getElementById('market-coin-list');
-    if (marketList) {
-        marketList.parentNode.insertBefore(container, marketList);
-    }
 }
 
 // =========================================================================
@@ -577,6 +571,7 @@ function openReferralPage() {
     if (document.getElementById("ref-rewards-val")) document.getElementById("ref-rewards-val").innerText = "۱۲۰,۰۰۰ ساتوشی";
     document.getElementById("profile-main-view").style.display = "none";
     document.getElementById("referral-page-view").style.display = "block";
+    document.getElementById("settings-page-view").style.display = "none";
 }
 
 function closeReferralPage() {
@@ -587,6 +582,7 @@ function closeReferralPage() {
 function openSettingsPage() {
     document.getElementById("profile-main-view").style.display = "none";
     document.getElementById("settings-page-view").style.display = "block";
+    document.getElementById("referral-page-view").style.display = "none";
 }
 
 function closeSettingsPage() {
@@ -831,4 +827,4 @@ window.loadExtraMetrics = loadExtraMetrics;
 window.loadLiquidationData = loadLiquidationData;
 window.loadAnalysisData = loadAnalysisData;
 window.renderWatchlist = renderWatchlist;
-window.renderAddWatchlistButton = renderAddWatchlistButton;
+window.toggleWatchlist = toggleWatchlist;
