@@ -419,3 +419,90 @@ button:active {
     );
     animation: shimmer 1.5s infinite;
 }
+/* ==========================================
+   استایل‌های تکمیلی برای پورت کدهای جاوااسکریپت
+   ========================================== */
+
+/* کلاس‌های کمکی برای نشان‌ها (Badges) */
+.badge {
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: bold;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.badge-success {
+    background: rgba(0, 230, 118, 0.15);
+    color: var(--neon-green);
+    border: 1px solid rgba(0, 230, 118, 0.3);
+}
+.badge-danger {
+    background: rgba(255, 35, 102, 0.15);
+    color: var(--neon-red);
+    border: 1px solid rgba(255, 35, 102, 0.3);
+}
+.badge-warning {
+    background: rgba(255, 213, 0, 0.15);
+    color: var(--neon-yellow);
+    border: 1px solid rgba(255, 213, 0, 0.3);
+}
+.badge-primary {
+    background: rgba(0, 229, 255, 0.15);
+    color: var(--neon-blue);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+}
+
+/* افکت هاله نور پویا برای کارت‌های قیمت (Glow) */
+.crypto-card-glow-green:hover {
+    border-color: var(--neon-green);
+    box-shadow: 0 0 15px rgba(0, 230, 118, 0.25);
+}
+.crypto-card-glow-red:hover {
+    border-color: var(--neon-red);
+    box-shadow: 0 0 15px rgba(255, 35, 102, 0.25);
+}
+
+/* المان‌های داخلی کارت‌های کوین */
+.coin-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px;
+    object-fit: cover;
+}
+.coin-symbol {
+    font-weight: 700;
+    font-size: 15px;
+    color: #ffffff;
+}
+.coin-name {
+    font-size: 11px;
+    color: var(--text-sub);
+}
+.coin-price {
+    font-weight: 700;
+    font-family: 'monospace', sans-serif;
+    font-size: 15px;
+    color: #ffffff;
+}
+
+/* استایل‌های بخش اخبار بازار */
+.news-title {
+    font-size: 14px;
+    line-height: 1.5;
+    text-align: right;
+    margin: 0;
+    color: #ffffff;
+    font-weight: 500;
+}
+.news-img {
+    width: 70px;
+    height: 70px;
+    border-radius: 10px;
+    object-fit: cover;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}

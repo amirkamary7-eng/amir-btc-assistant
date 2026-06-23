@@ -6,6 +6,7 @@
     <title>Crypto Pro Dashboard</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <style>
         :root {
@@ -20,6 +21,7 @@
             --primary-glow: rgba(247, 147, 26, 0.3);
             --green: #00ffaa;
             --red: #ff3355;
+            --accent-color: linear-gradient(90deg, #6366f1, #a855f7);
         }
 
         body {
@@ -211,43 +213,94 @@
             line-height: 1;
         }
 
-        .news-card {
-            background: rgba(18, 22, 34, 0.65);
+        /* استایل اختصاصی کارت‌های پیشرفته جدید بخش اخبار */
+        .news-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            padding: 4px 16px;
+        }
+
+        .news-card-item {
+            background: var(--card-bg);
             backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 20px;
-            padding: 18px;
-            margin: 10px 16px;
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             cursor: pointer;
+        }
+
+        .news-card-item:active {
+            transform: scale(0.97);
+        }
+
+        .news-image {
+            width: 100%;
+            height: 170px;
+            object-fit: cover;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .news-body {
+            padding: 18px;
             text-align: right;
             direction: rtl;
-            transition: transform 0.2s;
         }
-        .news-card:active { transform: scale(0.97); }
 
-        .news-card h3 {
-            margin: 0 0 6px 0;
-            font-size: 15px;
+        .news-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            color: var(--text-sub);
+            margin-bottom: 10px;
+        }
+
+        .news-item-title {
+            font-size: 1.05rem;
             font-weight: 700;
+            line-height: 1.6;
             color: var(--text-main);
-            line-height: 1.5;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            line-clamp: 2;
-            -webkit-box-orient: vertical;  
-            overflow: hidden;
+            margin-bottom: 8px;
         }
 
-        .news-card p {
-            margin: 0;
-            font-size: 13px;
+        .news-item-desc {
+            font-size: 0.9rem;
             color: var(--text-sub);
             line-height: 1.6;
             display: -webkit-box;
-            -webkit-line-clamp: 3;
-            line-clamp: 3;
-            -webkit-box-orient: vertical;  
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
             overflow: hidden;
+        }
+
+        /* انیمیشن لودینگ چرخشی شیک و پرمیوم اخبار */
+        .loader-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 50px 0;
+            gap: 15px;
+        }
+
+        .premium-spinner {
+            width: 44px;
+            height: 44px;
+            border: 4px solid rgba(247, 147, 26, 0.1);
+            border-left-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
         /* اسکلتون لودر مرکزی */
@@ -363,11 +416,16 @@
             <div class="skeleton-block skeleton-shimmer" style="height: 60px; margin-bottom: 8px; border-radius:12px;"></div>
         </div>
 
-        <div style="padding: 24px 20px 4px 20px; font-weight: bold; color: var(--primary); text-align: right; font-size: 16px;">📰 آخرین اخبار ارز دیجیتال و اقتصاد</div>
-        <div id="news-list">
-            <div class="news-card" style="pointer-events: none;">
-                <div class="skeleton-block skeleton-shimmer" style="width: 70%; height: 18px; margin-bottom: 8px; margin-left: auto;"></div>
-                <div class="skeleton-block skeleton-shimmer" style="width: 100%; height: 40px;"></div>
+        <div style="padding: 24px 20px 12px 20px; font-weight: bold; color: var(--primary); text-align: right; font-size: 16px;">📰 آخرین اخبار ارز دیجیتال و اقتصاد</div>
+        
+        <div id="news-list" class="news-grid">
+            <div class="news-card-item">
+                <div class="skeleton-block skeleton-shimmer" style="width: 100%; height: 170px;"></div>
+                <div class="news-body">
+                    <div class="skeleton-block skeleton-shimmer" style="width: 40%; height: 14px; margin-bottom: 12px; margin-left: auto;"></div>
+                    <div class="skeleton-block skeleton-shimmer" style="width: 90%; height: 18px; margin-bottom: 8px; margin-left: auto;"></div>
+                    <div class="skeleton-block skeleton-shimmer" style="width: 100%; height: 35px;"></div>
+                </div>
             </div>
         </div>
         

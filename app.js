@@ -135,7 +135,6 @@ async function loadExtraMetrics() {
             }
         } catch(e){ 
             console.error("FNG Fetch Error:", e); 
-            // در صورت خطا، نمایش حالت پیش‌فرض برای عبور از حالت Loading
             if (typeof applyMetrics === 'function') applyMetrics("50", "Neutral");
         }
     }
@@ -197,7 +196,6 @@ async function fetchCryptoNews() {
         const response = await fetch(targetUrl);
         const result = await response.json();
 
-        // بررسی و انعطاف‌پذیری نسبت به فرمت‌های مختلف خروجی پایتون
         let articlesArray = [];
         if (result && result.status === "success" && Array.isArray(result.data)) {
             articlesArray = result.data;
@@ -223,7 +221,7 @@ async function fetchCryptoNews() {
 }
 
 // ==========================================
-// ۸. تقویم اقتصادی جهان (یکپارچه با ورکر کلودفلر)
+// ۸. تقویم اقتصادی جهان (یکپارچه با ورکر کلودفلر و نئون دیزاین)
 // ==========================================
 async function renderEconomicCalendar() {
     const area = document.getElementById("news-content-area");
@@ -249,21 +247,21 @@ async function renderEconomicCalendar() {
             return;
         }
 
-        let html = `<div style="display:flex; flex-direction:column; gap:10px; margin-top:10px; direction:rtl; text-align:right;">`;
+        let html = `<div style="display:flex; flex-direction:column; gap:12px; margin-top:10px; direction:rtl; text-align:right;">`;
         importantEvents.forEach(ev => {
-            const impactColor = ev.impact === 'High' ? '#f6465d' : '#f0b90b';
+            const impactClass = ev.impact === 'High' ? 'badge-danger' : 'badge-warning';
             const impactText = ev.impact === 'High' ? '🔥 مهم' : '⚡ متوسط';
             const time = new Date(ev.date).toLocaleTimeString('fa-IR', {hour: '2-digit', minute:'2-digit'});
             
             html += `
-            <div style="background:#12161a; border:1px solid #1e2329; border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                    <span style="color:#eaecef; font-weight:bold; font-size:14px;">${ev.title}</span>
-                    <span style="color:#848e9c; font-size:11px;">ارز درگیر: <b>${ev.country}</b> | قبلی: <span>${ev.previous || '-'}</span> | پیش‌بینی: <span>${ev.forecast || '-'}</span></span>
+            <div class="news-card" style="display:flex; justify-content:space-between; align-items:center; padding:14px; border-left: 4px solid ${ev.impact === 'High' ? 'var(--neon-red)' : 'var(--neon-yellow)'};">
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <span style="color:#fff; font-weight:bold; font-size:14px;">${ev.title}</span>
+                    <span style="color:var(--text-sub); font-size:11px;">ارز درگیر: <b style="color:var(--neon-blue);">${ev.country}</b> | قبلی: <span>${ev.previous || '-'}</span> | پیش‌بینی: <span>${ev.forecast || '-'}</span></span>
                 </div>
-                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
-                    <span style="color:${impactColor}; font-size:11px; font-weight:bold; background:rgba(255,255,255,0.05); padding:2px 6px; border-radius:4px;">${impactText}</span>
-                    <span style="color:#848e9c; font-size:12px; font-family:monospace;">⏱️ ${time}</span>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex-shrink:0;">
+                    <span class="badge ${impactClass}">${impactText}</span>
+                    <span style="color:var(--text-sub); font-size:12px; font-family:monospace;">⏱️ ${time}</span>
                 </div>
             </div>`;
         });
@@ -272,12 +270,12 @@ async function renderEconomicCalendar() {
 
     } catch (error) {
         console.error("Calendar Error:", error);
-        area.innerHTML = `<div style="text-align:center; padding:20px; color:#f6465d;">❌ دریافت تقویم موقتاً در دسترس نیست.</div>`;
+        area.innerHTML = `<div style="text-align:center; padding:20px; color:var(--neon-red);">❌ دریافت تقویم موقتاً در دسترس نیست.</div>`;
     }
 }
 
 // ==========================================
-// ۹. سیستم باز کردن پاپ‌آپ اخبار و نمایش متن کامل
+// ۹. سیستم باز کردن پاپ‌آپ اخبار و نمایش متن کامل (کاملاً منطبق با المان‌های شیشه‌ای)
 // ==========================================
 function openArticleDetailsById(id) {
     const article = window.newsArticlesStorage[id];
@@ -310,7 +308,7 @@ function openArticleDetails(title, text, image, source, time_ago) {
 
     if(mContent) {
         let formattedText = text || "محتوایی برای نمایش وجود ندارد.";
-        formattedText = formattedText.replace(/•/g, '<span style="color:#f0b90b; font-weight:bold; margin-left:4px;">•</span>');
+        formattedText = formattedText.replace(/•/g, '<span style="color:var(--neon-amber); font-weight:bold; margin-left:4px;">•</span>');
         mContent.innerHTML = formattedText;
     }
     
@@ -406,7 +404,7 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 // ==========================================
-// ۱۳. توابع رندر (نمایش دیتا در HTML)
+// ۱۳. توابع رندر (تزریق به قالب کارت‌های نئونی)
 // ==========================================
 
 function renderMarketStates() {
@@ -428,22 +426,23 @@ function renderMarketStates() {
         const price = parseFloat(coin.priceUsd);
         const change = parseFloat(coin.changePercent24Hr);
         const isPositive = change >= 0;
-        const changeColor = isPositive ? 'var(--green)' : 'var(--red)';
+        const badgeClass = isPositive ? 'badge-success' : 'badge-danger';
+        const glowClass = isPositive ? 'crypto-card-glow-green' : 'crypto-card-glow-red';
         const changeSign = isPositive ? '+' : '';
         const formattedPrice = price > 1 ? price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : price.toFixed(6);
         
         const rowHtml = `
-            <div class="coin-row" onclick="openChart('${coin.symbol}')">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <img src="https://assets.coincap.io/assets/icons/${coin.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" style="width: 32px; height: 32px; border-radius: 50%; background: #fff;">
-                    <div style="display: flex; flex-direction: column;">
-                        <span style="font-weight: bold; font-size: 15px;">${coin.symbol}</span>
-                        <span style="font-size: 11px; color: var(--text-sub);">${coin.name}</span>
+            <div class="coin-row ${glowClass}" onclick="openChart('${coin.symbol}')">
+                <div style="display: flex; align-items: center; gap: 14px;">
+                    <img src="https://assets.coincap.io/assets/icons/${coin.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" class="coin-icon">
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span class="coin-symbol">${coin.symbol}</span>
+                        <span class="coin-name">${coin.name}</span>
                     </div>
                 </div>
-                <div style="display: flex; flex-direction: column; align-items: flex-end;">
-                    <span style="font-weight: bold; font-family: monospace; font-size: 15px;">$${formattedPrice}</span>
-                    <span style="font-size: 12px; color: ${changeColor}; font-weight: bold; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; margin-top: 4px;">${changeSign}${change.toFixed(2)}%</span>
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                    <span class="coin-price">$${formattedPrice}</span>
+                    <span class="badge ${badgeClass}">${changeSign}${change.toFixed(2)}%</span>
                 </div>
             </div>
         `;
@@ -465,7 +464,6 @@ function renderPremiumNewsDOM(articles) {
     let miniNewsHtml = '';
 
     articles.forEach((article, index) => {
-        // ایجاد شناسه یکتا برای هر خبر و ذخیره آن در متغیر امن گلوبال مرورگر (حل مشکل خرابی کاراکترها)
         const articleId = "art_" + index + "_" + Date.now();
         window.newsArticlesStorage[articleId] = article;
         
@@ -474,15 +472,15 @@ function renderPremiumNewsDOM(articles) {
 
         const cardHtml = `
             <div class="news-card" onclick="openArticleDetailsById('${articleId}')">
-                <div style="display: flex; gap: 12px; width:100%; align-items:center;">
-                    <div style="flex: 1;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px; color: var(--primary);">
-                            <span style="background: rgba(247,147,26,0.1); padding: 2px 6px; border-radius: 4px;">${article.source || "منبع اصلی"}</span>
-                            <span style="color: var(--text-sub);">${article.time_ago || "اخیراً"}</span>
+                <div style="display: flex; gap: 14px; width:100%; align-items:center;">
+                    <div style="flex: 1; display:flex; flex-direction:column; gap:6px;">
+                        <div style="display: flex; justify-content: space-between; align-items:center;">
+                            <span class="badge badge-primary">${article.source || "منبع اصلی"}</span>
+                            <span style="color: var(--text-sub); font-size: 11px;">⏱️ ${article.time_ago || "اخیراً"}</span>
                         </div>
-                        <h3 style="font-size:14px; line-height:1.4; text-align:right; margin:0; color:#fff;">${article.title}</h3>
+                        <h3 class="news-title">${article.title}</h3>
                     </div>
-                    <img src="${imgSrc}" onerror="this.src='${fallbackImg}'" style="width: 75px; height: 75px; border-radius: 12px; object-fit: cover; flex-shrink:0;">
+                    <img src="${imgSrc}" onerror="this.src='${fallbackImg}'" class="news-img">
                 </div>
             </div>
         `;
@@ -500,9 +498,9 @@ function applyMetrics(val, status) {
     
     if(fgValueEl) {
         fgValueEl.innerText = val;
-        if (val < 40) fgValueEl.style.color = "var(--red)";
-        else if (val > 60) fgValueEl.style.color = "var(--green)";
-        else fgValueEl.style.color = "var(--primary)";
+        if (val < 40) fgValueEl.style.color = "var(--neon-red)";
+        else if (val > 60) fgValueEl.style.color = "var(--neon-green)";
+        else fgValueEl.style.color = "var(--neon-amber)";
     }
     
     if(fgStatusEl) {
