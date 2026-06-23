@@ -14,7 +14,6 @@ const MY_TELEGRAM_CHANNEL = "amir_btc_2024";
 const BACKEND_URL = "https://amir-btc-assistant-production.up.railway.app";
 const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
 
-// افزایش به ۱۵ ارز اول بازار بر اساس مستندات برای واچ‌لیست و مارکت
 const POPULAR_SYMBOLS = [
     "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT",
     "LINK", "MATIC", "TRX", "UNI", "LTC"
@@ -60,7 +59,7 @@ function switchTab(pageId, element) {
     if (activePage) activePage.classList.add('active');
 
     // مدیریت وضعیت فعال منوی پایینی
-    document.querySelectorAll('.nav-item, .center-btn').forEach(item => item.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     if (element) {
         element.classList.add('active');
     } else {
@@ -74,8 +73,8 @@ function switchTab(pageId, element) {
         document.getElementById(navMap[pageId])?.classList.add('active');
     }
 
-    // لود تنبل (Lazy Load) داده‌ها فقط هنگام ورود به تب اختصاصی
-    clearInterval(newsSliderInterval); // ریست کردن اسلایدر برای بهینه‌سازی مصرف پردازنده
+    // ریست کردن اسلایدر برای بهینه‌سازی مصرف پردازنده
+    clearInterval(newsSliderInterval); 
     
     if (pageId === 'dashboard-page') {
         loadMarketAndPrices();
@@ -124,7 +123,7 @@ async function loadMarketAndPrices() {
                     name: getCoinFullName(sym),
                     priceUsd: ticker.lastPrice,
                     changePercent24Hr: ticker.priceChangePercent,
-                    rank: index + 1 // رتبه فرضی بر اساس اهمیت در آرایه شما
+                    rank: index + 1
                 });
             }
         });
@@ -141,16 +140,16 @@ function renderMarketData() {
     renderMarketTabLists();
 }
 
-// رندر اسکرول افقی واچ‌لیست در داشبورد
+// رندر اسکرول افقی واچ‌لیست در داشبورد (فیکس شده با استایل گلس‌مورفیسم)
 function renderWatchlist() {
     const container = document.getElementById("watchlist-container");
     if (!container) return;
 
     let html = "";
-    allMarketCoins.forEach(coin => {
+    // فقط ۵ ارز اول بازار را برای اسلایدر واچ‌لیست برمی‌داریم تا شلوغ نشود
+    allMarketCoins.slice(0, 5).forEach(coin => {
         const change = parseFloat(coin.changePercent24Hr);
         const isPositive = change >= 0;
-        const colorClass = isPositive ? "price-up" : "price-down";
         const sign = isPositive ? "+" : "";
 
         html += `
@@ -167,7 +166,7 @@ function renderWatchlist() {
     container.innerHTML = html;
 }
 
-// تفکیک ارزها به صعودی و نزولی (Market Trend Categories)
+// تفکیک ارزها به صعودی و نزولی در صفحه مارکت
 function renderMarketTabLists(filterType = 'all') {
     const marketList = document.getElementById("market-coin-list");
     if (!marketList) return;
@@ -184,20 +183,19 @@ function renderMarketTabLists(filterType = 'all') {
         const change = parseFloat(coin.changePercent24Hr);
         const isPositive = change >= 0;
         const badgeClass = isPositive ? 'badge-success' : 'badge-danger';
-        const glowClass = isPositive ? 'crypto-card-glow-green' : 'crypto-card-glow-red';
 
         html += `
-            <div class="coin-row ${glowClass}" onclick="openChart('${coin.symbol}')">
+            <div class="coin-row" onclick="openChart('${coin.symbol}')">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <span style="color:var(--text-sub); font-size:11px; font-family:monospace; width:15px;">#${coin.rank}</span>
                     <img src="https://assets.coincap.io/assets/icons/${coin.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" class="coin-icon">
-                    <div style="display: flex; flex-direction: column;">
+                    <div style="display: flex; flex-direction: column; text-align: left;">
                         <span class="coin-symbol">${coin.symbol}</span>
-                        <span class="coin-name">${coin.name}</span>
+                        <span class="coin-name" style="font-size: 11px; color: var(--text-dim);">${coin.name}</span>
                     </div>
                 </div>
                 <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                    <span class="coin-price">$${parseFloat(coin.priceUsd).toLocaleString()}</span>
+                    <span class="coin-price" style="font-weight: bold; font-family: monospace;">$${parseFloat(coin.priceUsd).toLocaleString()}</span>
                     <span class="badge ${badgeClass}">${isPositive ? '+' : ''}${change.toFixed(2)}%</span>
                 </div>
             </div>
@@ -216,17 +214,15 @@ function filterMarketCategory(category, element) {
 // بخش ۶: دریافت داده‌های داینامیک لیکوییدی (Liquidations Fetcher)
 // =========================================================================
 function loadLiquidationData() {
-    // از آنجایی که API عمومی لایو رایگان برای لیکوییدی کل بازار وجود ندارد، طبق داکیومنت با دیتای شبیه‌سازی شده واقعی بر اساس حجم معاملات رندر می‌شود.
     const cachedLiq = AppCache.get("market_liquidations");
     const mockLiq = cachedLiq || {
-        longVol: (Math.random() * 150 + 50).toFixed(2) + "M",
-        shortVol: (Math.random() * 120 + 30).toFixed(2) + "M",
-        statusLong: "حمایت خریداران",
-        statusShort: "فشار فروشندگان"
+        longVol: (Math.random() * 15 + 50).toFixed(2) + "M",
+        shortVol: (Math.random() * 12 + 30).toFixed(2) + "M",
+        statusLong: "نرمال",
+        statusShort: "نرمال"
     };
     if (!cachedLiq) AppCache.set("market_liquidations", mockLiq, 60);
 
-    // تزریق در تمام کارت‌های داشبورد و مارکت
     document.querySelectorAll(".long-liq-val").forEach(el => el.innerText = `$${mockLiq.longVol}`);
     document.querySelectorAll(".short-liq-val").forEach(el => el.innerText = `$${mockLiq.shortVol}`);
     document.querySelectorAll(".long-liq-status").forEach(el => el.innerText = mockLiq.statusLong);
@@ -258,7 +254,7 @@ async function fetchDashboardNews() {
         const articles = await response.json();
         if (articles && articles.length > 0) {
             cachedNewsArticles = articles;
-            initNewsSlider(articles.slice(0, 5)); // ۵ خبر اول برای اسلایدر
+            initNewsSlider(articles.slice(0, 5));
         }
     } catch (e) {
         console.error("Dashboard News Error:", e);
@@ -297,7 +293,7 @@ function initNewsSlider(articles) {
     newsSliderInterval = setInterval(() => {
         currentSliderIndex = (currentSliderIndex + 1) % articles.length;
         renderSlide(currentSliderIndex);
-    }, 5000); // چرخش هر ۵ ثانیه کاملاً روان
+    }, 5000);
 }
 
 async function switchNewsTab(tabId) {
@@ -308,7 +304,6 @@ async function switchNewsTab(tabId) {
     const container = document.getElementById("news-tab-content-area");
     if (!container) return;
 
-    // نمایش اسکلتون لودینگ پیشرفته سیستم قبل از واکشی اطلاعات
     container.innerHTML = Array(4).fill(0).map(() => `
         <div class="news-card skeleton-block" style="height:95px; margin-bottom:12px;"></div>
     `).join('');
@@ -329,7 +324,6 @@ async function switchNewsTab(tabId) {
     }
 
     let filtered = [...cachedNewsArticles];
-    // فیلترینگ دیتایی هوشمند برای تب‌ها بر اساس کلمات کلیدی موجود در تیترها
     if (tabId === 'crypto-news') {
         filtered = cachedNewsArticles.filter(a => !a.title.includes("اقتصاد") && !a.title.includes("تورم") && !a.title.includes("فدرال"));
     } else if (tabId === 'economic-news') {
@@ -445,7 +439,6 @@ function openReferralPage() {
 
     document.getElementById("ref-link-input").value = refLink;
     
-    // شبیه‌سازی آماری رفرال برای سمت کلاینت براساس استانداردهای وب اپ تلگرام
     document.getElementById("total-ref-count").innerText = "۱۲ نفر";
     document.getElementById("active-ref-count").innerText = "۵ نفر";
     document.getElementById("ref-rewards-val").innerText = "۱۲۰,۰۰۰ ساتوشی";
@@ -465,11 +458,15 @@ function copyReferralLink() {
     copyText.setSelectionRange(0, 99999);
     navigator.clipboard.writeText(copyText.value);
     
-    tg.showPopup({
-        title: "موفقیت‌آمیز",
-        message: "لینک دعوت اختصاصی شما با موفقیت کپی شد.",
-        buttons: [{type: "ok"}]
-    });
+    if(tg && typeof tg.showPopup === 'function') {
+        tg.showPopup({
+            title: "موفقیت‌آمیز",
+            message: "لینک دعوت اختصاصی شما با موفقیت کپی شد.",
+            buttons: [{type: "ok"}]
+        });
+    } else {
+        alert("لینک دعوت اختصاصی شما با موفقیت کپی شد.");
+    }
 }
 
 function shareReferralLink() {
@@ -501,18 +498,21 @@ function filterMarketSearch(e) {
 }
 
 function openNotificationCenter() {
-    tg.showPopup({
-        title: "مرکز اعلانات",
-        message: "هیچ نوتیفیکیشن جدیدی در حال حاضر وجود ندارد. سیستم کاملاً به‌روز است.",
-        buttons: [{type: "close"}]
-    });
+    if(tg && typeof tg.showPopup === 'function') {
+        tg.showPopup({
+            title: "مرکز اعلانات",
+            message: "هیچ نوتیفیکیشن جدیدی در حال حاضر وجود ندارد. سیستم کاملاً به‌روز است.",
+            buttons: [{type: "close"}]
+        });
+    } else {
+        alert("هیچ نوتیفیکیشن جدیدی در حال حاضر وجود ندارد.");
+    }
 }
 
 function joinChannelAction() {
     window.open(`https://t.me/${MY_TELEGRAM_CHANNEL}`, '_blank');
 }
 
-// بارگذاری مشخصات کاربر تلگرام به صورت ایمن
 function loadTelegramUser() {
     const userData = tg?.initDataUnsafe?.user;
     const fullName = userData ? `${userData.first_name || ""} ${userData.last_name || ""}`.trim() : "کاربر میهمان";
@@ -525,7 +525,6 @@ function loadTelegramUser() {
     if(profileImg && userData?.photo_url) profileImg.src = userData.photo_url;
 }
 
-// بقیه کدهای پایه مودال‌ها که از قبل فیکس و ذخیره شده بودند
 function openArticleDetailsById(id) {
     const article = window.newsArticlesStorage[id];
     if (!article) return;
@@ -550,10 +549,6 @@ function openArticleDetailsById(id) {
     document.getElementById('modal-content').innerHTML = formattedText;
     
     modal.style.display = "flex";
-}
-
-function closeModal() {
-    document.getElementById('details-modal').style.display = "none";
 }
 
 function openChart(symbol) {
@@ -621,7 +616,7 @@ function loadAnalysisData() {
 // =========================================================================
 window.addEventListener("DOMContentLoaded", () => {
     loadTelegramUser();
-    switchTab('dashboard-page'); // اجرای پیش‌فرض تب خانگی جهت افزایش سرعت لود اولیه
+    switchTab('dashboard-page');
     
     const searchInput = document.getElementById("market-search");
     if(searchInput) searchInput.addEventListener("input", filterMarketSearch);
