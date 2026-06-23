@@ -12,10 +12,11 @@ import xml.etree.ElementTree as ET
 
 app = FastAPI(title="Crypto Premium News Engine")
 
+# اصلاح لایه CORS جهت سازگاری کامل با Vercel و مرورگر تلگرام
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # برای جلوگیری از بلاک شدن توسط مرورگر روی False تنظیم شد
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -37,7 +38,6 @@ def clean_html(raw_html):
 def parse_relative_time(date_str):
     try:
         # فرمت استاندارد RSS (مثال: Wed, 23 Jun 2026 07:20:00 +0000)
-        # برای سادگی و امنیت از حذف بخش منطقه زمانی استفاده می‌کنیم
         clean_date = date_str.split(" +")[0].split(" GMT")[0].strip()
         parsed_time = datetime.strptime(clean_date, "%a, %d %b %Y %H:%M:%S").replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
@@ -55,7 +55,7 @@ def parse_relative_time(date_str):
     except Exception:
         return "اخیراً"
 
-# دیتای دمو فوق‌العاده شیک در صورت قطعی کامل اینترنت
+# دیتای دمو فوق‌العاده شیک در صورت قطعی کامل اینترنت یا بلاک بودن آی‌پی سرور
 MOCK_NEWS = [
     {
         "title": "فورى: بیت‌کوین سقف مقاومتی جدید را شکست!",
@@ -99,14 +99,13 @@ def get_optimized_farsi_news():
     rss_data, source_name = fetch_raw_news_rss()
     
     if not rss_data:
-        # اگر کلاً اینترنت سرور قطع بود یا هر دو بلاک بودن، آخرین کش یا دیتای مابک شیک را بده
         if news_cache["data"]:
             return {"status": "success", "source": "expired_cache", "data": news_cache["data"]}
         return {"status": "success", "source": "mock_fallback", "data": MOCK_NEWS}
 
     try:
         root = ET.fromstring(rss_data)
-        items = root.findall(".//item")[:6] # گلچین ۶ خبر داغ و اول بازار
+        items = root.findall(".//item")[:6] # گلچین ۶ خبر داغ اول بازار
         
         optimized_articles = []
         translator = GoogleTranslator(source='en', target='fa')
@@ -117,10 +116,9 @@ def get_optimized_farsi_news():
             desc_en = item.find("description").text if item.find("description") is not None else ""
             pub_date = item.find("pubDate").text if item.find("pubDate") is not None else ""
             
-            # تمیزکاری متن انگلیسی قبل از ترجمه برای بالا رفتن کیفیت مترجم
             clean_desc_en = clean_html(desc_en)
             
-            # استخراج هوشمند عکس اصلی خبر
+            # استخراج هوشمند عکس اصلی خبر با فیلتر آدرس‌های نامعتبر
             image_url = "https://images.cryptocompare.com/news/default/bitcoin.png"
             img_match = re.search(r'src="([^"]+)"', desc_en)
             if img_match:
@@ -130,7 +128,7 @@ def get_optimized_farsi_news():
                 if media is not None and "url" in media.attrib:
                     image_url = media.attrib["url"]
 
-            # ترجمه روان عنوان و توضیحات
+            # ترجمه روان عنوان و توضیحات با هندل کردن خطاها
             try:
                 translated_title = translator.translate(title_en) if title_en else "بدون عنوان"
                 translated_desc = translator.translate(clean_desc_en) if clean_desc_en else ""
@@ -138,9 +136,10 @@ def get_optimized_farsi_news():
                 translated_title = title_en
                 translated_desc = clean_desc_en
 
+            # بهینه‌سازی نهایی متون برای جلوگیری از شکستن کدهای جاوااسکریپت
             optimized_articles.append({
-                "title": translated_title.strip(),
-                "description": translated_desc.strip(),
+                "title": translated_title.replace("\n", " ").strip(),
+                "description": translated_desc.replace("\n", " ").strip(),
                 "time_ago": parse_relative_time(pub_date),
                 "source": source_name,
                 "image": image_url,
@@ -149,7 +148,7 @@ def get_optimized_farsi_news():
             
         if optimized_articles:
             news_cache["data"] = optimized_articles
-            news_cache["expiry"] = current_time + 900 # کش کردن به مدت ۱۵ دقیقه برای سرعت فوق‌العاده فرانت‌اند
+            news_cache["expiry"] = current_time + 900 # کش ۱۵ دقیقه‌ای
             return {"status": "success", "source": f"{source_name}_live", "data": optimized_articles}
             
     except Exception as e:
@@ -157,9 +156,10 @@ def get_optimized_farsi_news():
         
     return {"status": "success", "source": "mock_fallback", "data": MOCK_NEWS}
 
-# بقیه کدهای ربات و تحلیل تلگرام بدون تغییر در لایه پایین باقی می‌مانند...
+# بخش استارت اتوماتیک و هماهنگ با فرآیند دیپلوی وب
 if __name__ == "__main__":
     import uvicorn
-    import os
+    # استخراج نام فایل جاری پایتون به صورت پویا جهت هماهنگی کامل با سرور ریلوِی
+    file_name = os.path.basename(__file__).split('.')[0]
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run(f"{file_name}:app", host="0.0.0.0", port=port)

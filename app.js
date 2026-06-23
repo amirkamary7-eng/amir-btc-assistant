@@ -19,6 +19,9 @@ const POPULAR_SYMBOLS = [
     "LINK", "MATIC", "TRX", "UNI", "LTC"
 ];
 
+// آبجکت گلوبال برای ذخیره امن دیتای اخبار جهت جلوگیری از ارور رشته‌ها در اونکلیک
+window.newsArticlesStorage = {};
+
 // ==========================================
 // ۲. موتور کش مرکزی کلاینت (Cache Engine)
 // ==========================================
@@ -65,7 +68,7 @@ function switchTab(pageId, element) {
         loadAnalysisData();
     } else if (pageId === 'news-page') {
         fetchCryptoNews(); 
-        renderEconomicCalendar(); // لود تقویم همزمان با صفحه اخبار
+        renderEconomicCalendar(); 
     } else if (pageId === 'market-page') {
         loadMarketAndPrices();
     }
@@ -130,7 +133,11 @@ async function loadExtraMetrics() {
                 AppCache.set("extra_metrics", {val, status}, 1800);
                 if (typeof applyMetrics === 'function') applyMetrics(val, status);
             }
-        } catch(e){ console.error("FNG Fetch Error:", e); }
+        } catch(e){ 
+            console.error("FNG Fetch Error:", e); 
+            // در صورت خطا، نمایش حالت پیش‌فرض برای عبور از حالت Loading
+            if (typeof applyMetrics === 'function') applyMetrics("50", "Neutral");
+        }
     }
 }
 
@@ -186,27 +193,31 @@ async function fetchCryptoNews() {
     }
 
     try {
-        // اتصال مستقیم به سرور پایتون شما بدون نیاز به پروکسی کلودفلر
         const targetUrl = `${BACKEND_URL}/api/farsi-news`;
-        
         const response = await fetch(targetUrl);
         const result = await response.json();
 
-        // بررسی ساختار پاسخ خروجی FastAPI شما
+        // بررسی و انعطاف‌پذیری نسبت به فرمت‌های مختلف خروجی پایتون
+        let articlesArray = [];
         if (result && result.status === "success" && Array.isArray(result.data)) {
-            
-            // دیتا در بک‌اند پایتون شما قبلاً ترجمه و مپ شده است، پس مستقیم ذخیره و رندر می‌کنیم
-            AppCache.set("premium_news", result.data, 300); 
-            
+            articlesArray = result.data;
+        } else if (Array.isArray(result)) {
+            articlesArray = result;
+        }
+
+        if (articlesArray.length > 0) {
+            AppCache.set("premium_news", articlesArray, 300); 
             if (typeof renderPremiumNewsDOM === 'function') {
-                renderPremiumNewsDOM(result.data);
+                renderPremiumNewsDOM(articlesArray);
             }
+        } else {
+            throw new Error("Empty news data structure");
         }
     } catch (error) {
         console.error("خطا در دریافت اخبار از بک‌اند پایتون:", error);
-        const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
+        const newsListEl = document.getElementById("news-list") || document.getElementById('news-container') || document.getElementById("dash-top-news");
         if (newsListEl) {
-            newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red); font-size:13px; margin-top:20px;">❌ دریافت اخبار از سرور مخدوش شد.</div>`;
+            newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red); font-size:13px; margin-top:20px;">❌ دریافت اخبار از سرور مخدوش شد یا سرور در حال استراحت است.</div>`;
         }
     }
 }
@@ -230,7 +241,7 @@ async function renderEconomicCalendar() {
         const todayStr = new Date().toISOString().split('T')[0];
         const importantEvents = events.filter(e => 
             (e.impact === 'High' || e.impact === 'Medium') && 
-            e.date.includes(todayStr)
+            e.date && e.date.includes(todayStr)
         );
 
         if (importantEvents.length === 0) {
@@ -268,6 +279,12 @@ async function renderEconomicCalendar() {
 // ==========================================
 // ۹. سیستم باز کردن پاپ‌آپ اخبار و نمایش متن کامل
 // ==========================================
+function openArticleDetailsById(id) {
+    const article = window.newsArticlesStorage[id];
+    if (!article) return;
+    openArticleDetails(article.title, article.description, article.image, article.source, article.time_ago);
+}
+
 function openArticleDetails(title, text, image, source, time_ago) {
     const modal = document.getElementById('details-modal');
     if(!modal) { showNewsModal(title, text); return; } 
@@ -283,7 +300,7 @@ function openArticleDetails(title, text, image, source, time_ago) {
     if(mTime) mTime.innerText = time_ago ? `⏱️ ${time_ago}` : "اخیراً";
     
     if (mImage) {
-        if (image && image.trim() !== "" && !image.includes("default")) {
+        if (image && image.trim() !== "" && !image.includes("default") && !image.includes("undefined")) {
             mImage.src = image;
             mImage.style.display = "block";
         } else {
@@ -384,10 +401,7 @@ window.addEventListener("DOMContentLoaded", () => {
         searchInput.addEventListener("input", filterMarket);
     }
     
-    // آپدیت قیمت مارکت هر ۱۵ ثانیه
     setInterval(loadMarketAndPrices, 15000); 
-    
-    // آپدیت اخبار هر ۵ دقیقه
     setInterval(fetchCryptoNews, 300000);   
 });
 
@@ -395,7 +409,6 @@ window.addEventListener("DOMContentLoaded", () => {
 // ۱۳. توابع رندر (نمایش دیتا در HTML)
 // ==========================================
 
-// رندر کردن لیست قیمت‌ها در داشبورد و صفحه مارکت
 function renderMarketStates() {
     const marketList = document.getElementById("market-list");
     const dashMiniMarket = document.getElementById("dash-mini-market");
@@ -403,7 +416,6 @@ function renderMarketStates() {
 
     if (!allMarketCoins || allMarketCoins.length === 0) return;
 
-    // آپدیت قیمت بیت‌کوین در هدر داشبورد
     let btcData = allMarketCoins.find(c => c.symbol === "BTC");
     if (btcData && dashBtcPrice) {
         dashBtcPrice.innerText = `BTC $${parseFloat(btcData.priceUsd).toLocaleString()}`;
@@ -436,14 +448,13 @@ function renderMarketStates() {
             </div>
         `;
         listHtml += rowHtml;
-        if (index < 3) miniHtml += rowHtml; // ۳ ارز اول برای داشبورد
+        if (index < 3) miniHtml += rowHtml; 
     });
 
     if (marketList) marketList.innerHTML = listHtml;
     if (dashMiniMarket) dashMiniMarket.innerHTML = miniHtml;
 }
 
-// رندر کردن اخبار در صفحه اخبار و داشبورد
 function renderPremiumNewsDOM(articles) {
     const newsList = document.getElementById("news-list");
     const dashTopNews = document.getElementById("dash-top-news");
@@ -454,47 +465,47 @@ function renderPremiumNewsDOM(articles) {
     let miniNewsHtml = '';
 
     articles.forEach((article, index) => {
-        // جلوگیری از تداخل کاراکترهای رشته در توابع onclick
-        const escapedTitle = article.title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        const escapedDesc = article.description.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        // ایجاد شناسه یکتا برای هر خبر و ذخیره آن در متغیر امن گلوبال مرورگر (حل مشکل خرابی کاراکترها)
+        const articleId = "art_" + index + "_" + Date.now();
+        window.newsArticlesStorage[articleId] = article;
         
+        const fallbackImg = "https://img.icons8.com/clouds/200/000000/bitcoin.png";
+        const imgSrc = (article.image && article.image !== "undefined") ? article.image : fallbackImg;
+
         const cardHtml = `
-            <div class="news-card" onclick="openArticleDetails('${escapedTitle}', '${escapedDesc}', '${article.image}', '${article.source}', '${article.time_ago}')">
-                <div style="display: flex; gap: 12px;">
+            <div class="news-card" onclick="openArticleDetailsById('${articleId}')">
+                <div style="display: flex; gap: 12px; width:100%; align-items:center;">
                     <div style="flex: 1;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px; color: var(--primary);">
-                            <span style="background: rgba(247,147,26,0.1); padding: 2px 6px; border-radius: 4px;">${article.source}</span>
-                            <span style="color: var(--text-sub);">${article.time_ago}</span>
+                            <span style="background: rgba(247,147,26,0.1); padding: 2px 6px; border-radius: 4px;">${article.source || "منبع اصلی"}</span>
+                            <span style="color: var(--text-sub);">${article.time_ago || "اخیراً"}</span>
                         </div>
-                        <h3>${article.title}</h3>
+                        <h3 style="font-size:14px; line-height:1.4; text-align:right; margin:0; color:#fff;">${article.title}</h3>
                     </div>
-                    <img src="${article.image}" style="width: 75px; height: 75px; border-radius: 12px; object-fit: cover; border: 1px solid var(--glass-border);">
+                    <img src="${imgSrc}" onerror="this.src='${fallbackImg}'" style="width: 75px; height: 75px; border-radius: 12px; object-fit: cover; flex-shrink:0;">
                 </div>
             </div>
         `;
         newsHtml += cardHtml;
-        if (index < 2) miniNewsHtml += cardHtml; // ۲ خبر اول برای داشبورد
+        if (index < 2) miniNewsHtml += cardHtml; 
     });
 
     if (newsList) newsList.innerHTML = newsHtml;
     if (dashTopNews) dashTopNews.innerHTML = miniNewsHtml;
 }
 
-// آپدیت شاخص ترس و طمع
 function applyMetrics(val, status) {
     const fgValueEl = document.getElementById("fg-value");
     const fgStatusEl = document.getElementById("fg-status");
     
     if(fgValueEl) {
         fgValueEl.innerText = val;
-        // تغییر رنگ بر اساس عدد
         if (val < 40) fgValueEl.style.color = "var(--red)";
         else if (val > 60) fgValueEl.style.color = "var(--green)";
         else fgValueEl.style.color = "var(--primary)";
     }
     
     if(fgStatusEl) {
-        // ترجمه وضعیت به فارسی
         const statusMap = {
             "Extreme Fear": "ترس شدید",
             "Fear": "ترس",
@@ -509,8 +520,6 @@ function applyMetrics(val, status) {
 // ==========================================
 // ۱۴. توابع کمکی (Helpers)
 // ==========================================
-
-// تبدیل اسم اختصاری به اسم کامل
 function getCoinFullName(sym) {
     const names = { 
         BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", BNB: "BNB", 
@@ -521,7 +530,6 @@ function getCoinFullName(sym) {
     return names[sym] || sym;
 }
 
-// تبدیل تایم‌ستمپ به زمان گذشته (مثلاً "۲ ساعت پیش")
 function formatTimeAgo(ts) {
     const now = Math.floor(Date.now() / 1000);
     const diff = now - ts;
@@ -530,12 +538,10 @@ function formatTimeAgo(ts) {
     return Math.floor(diff / 86400) + " روز پیش";
 }
 
-// فیلتر کردن جستجو در مارکت
 function filterMarket(e) {
     const term = e.target.value.toLowerCase();
     const rows = document.querySelectorAll('#market-list .coin-row');
     rows.forEach(row => {
-        // جستجو در نام و نماد
         const text = row.innerText.toLowerCase();
         if (text.includes(term)) {
             row.style.display = 'flex';
