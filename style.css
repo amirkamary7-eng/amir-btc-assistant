@@ -13,9 +13,9 @@
     --primary: #f7931a;
     --primary-gradient: linear-gradient(135deg, #f7931a, #ff3355);
     --bg-dark: #0b0f19;
-    --card-bg: rgba(22, 28, 45, 0.6);
-    --glass-bg: rgba(255, 255, 255, 0.03);
-    --border-color: rgba(255, 255, 255, 0.08);
+    --card-bg: rgba(22, 28, 45, 0.45); /* شفافیت بیشتر برای اثر شیشه‌ای */
+    --glass-bg: rgba(255, 255, 255, 0.05);
+    --border-color: rgba(255, 255, 255, 0.1);
     --text-main: #ffffff;
     --text-dim: #8f98aa;
     --text-sub: #6c7a93;
@@ -32,30 +32,35 @@ body {
     background-color: var(--bg-dark);
     color: var(--text-main);
     overflow-x: hidden;
-    padding-bottom: 90px; /* فضای کافی برای منوی ناوبری پایین */
+    padding-bottom: 90px;
 }
 
 @keyframes fadeInData {
-    from { opacity: 0; transform: translateY(8px); }
+    from { opacity: 0; transform: translateY(12px); }
     to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes scaleUpFade {
+    from { opacity: 0; transform: scale(0.92); }
+    to { opacity: 1; transform: scale(1); }
+}
+
 /* =========================================================================
-   ۲. مدیریت سیستم ناوبری صفحات (اصلاح تداخل و همپوشانی)
+   ۲. مدیریت سیستم ناوبری صفحات
    ========================================================================= */
 .page {
-    display: none; /* مخفی بودن پیش‌فرض تمام صفحات */
+    display: none;
     width: 100%;
     padding: 10px 0;
-    animation: fadeInData 0.3s ease-in-out forwards;
+    animation: fadeInData 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .page.active {
-    display: block; /* فقط صفحه فعال نمایش داده می‌شود */
+    display: block;
 }
 
 /* =========================================================================
-   ۳. هدر و منوی ناوبری پایینی (Bottom Navigation Fixed)
+   ۳. هدر و منوی ناوبری پایینی
    ========================================================================= */
 .app-header-container {
     display: flex;
@@ -63,8 +68,9 @@ body {
     align-items: center;
     padding: 20px;
     border-bottom: 1px solid var(--border-color);
-    background: rgba(11, 15, 25, 0.8);
-    backdrop-filter: blur(10px);
+    background: rgba(11, 15, 25, 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     position: sticky;
     top: 0;
     z-index: 100;
@@ -87,7 +93,11 @@ body {
     justify-content: center;
     cursor: pointer;
     font-size: 16px;
-    transition: 0.2s;
+    transition: all 0.2s ease;
+}
+
+.noti-btn:active {
+    transform: scale(0.9);
 }
 
 .bottom-nav {
@@ -95,9 +105,10 @@ body {
     bottom: 0;
     left: 0;
     right: 0;
-    height: 70px;
-    background: rgba(18, 22, 34, 0.85);
+    height: 75px;
+    background: rgba(18, 22, 34, 0.75);
     backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border-top: 1px solid var(--border-color);
     display: flex;
     justify-content: space-around;
@@ -107,37 +118,40 @@ body {
 }
 
 .nav-item {
-    font-size: 22px;
+    font-size: 24px;
     cursor: pointer;
     opacity: 0.4;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     padding: 10px;
-    border-radius: 50%;
+    border-radius: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 45px;
-    height: 45px;
+    width: 50px;
+    height: 50px;
 }
 
 .nav-item.active {
     opacity: 1;
     background: rgba(247, 147, 26, 0.15);
     color: var(--primary);
-    transform: translateY(-2px);
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(247, 147, 26, 0.2);
 }
 
 /* =========================================================================
    ۴. بنرها و کامپوننت‌های داشبورد و گلس‌مورفیسم
    ========================================================================= */
 .premium-channel-banner {
-    background: linear-gradient(135deg, rgba(247, 147, 26, 0.12) 0%, rgba(255, 51, 85, 0.04) 100%);
-    border: 1px solid rgba(247, 147, 26, 0.25);
+    background: linear-gradient(135deg, rgba(247, 147, 26, 0.15) 0%, rgba(255, 51, 85, 0.05) 100%);
+    border: 1px solid rgba(247, 147, 26, 0.3);
     border-radius: 20px;
     padding: 20px;
     margin: 15px;
     text-align: right;
     direction: rtl;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
 }
 
 .banner-join-btn {
@@ -150,7 +164,13 @@ body {
     font-size: 13px;
     cursor: pointer;
     margin-top: 15px;
-    box-shadow: 0 4px 15px rgba(247, 147, 26, 0.2);
+    box-shadow: 0 4px 15px rgba(247, 147, 26, 0.3);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.banner-join-btn:active {
+    transform: scale(0.95);
+    box-shadow: 0 2px 8px rgba(247, 147, 26, 0.2);
 }
 
 .card-title {
@@ -160,15 +180,21 @@ body {
     margin: 15px 15px 8px 15px;
 }
 
-.glass-card, .card {
+.glass-card, .card, .liq-card-metric, .watchlist-card, .coin-row, .news-card, .referral-card-box {
     background: var(--card-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border-color);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05), 0 4px 16px rgba(0, 0, 0, 0.2);
     border-radius: 20px;
+}
+
+.glass-card, .card {
     padding: 15px;
     margin: 10px 15px;
 }
 
-/* گرید شاخص‌ها و لیکیودی‌ها */
+/* گرید شاخص‌ها */
 .liquidation-grid-wrapper {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -177,10 +203,7 @@ body {
 }
 
 .liq-card-metric {
-    background: var(--card-bg);
-    border-radius: 18px;
     padding: 16px;
-    border: 1px solid var(--border-color);
     text-align: center;
 }
 
@@ -189,6 +212,7 @@ body {
     font-weight: bold;
     margin: 5px 0;
     font-family: monospace;
+    text-shadow: 0 0 10px currentColor; /* افکت نئونی ملایم */
 }
 
 .coin-name {
@@ -197,7 +221,7 @@ body {
 }
 
 /* =========================================================================
-   ۵. واچ‌لیست افقی و اسلایدر اخبار مدرن
+   ۵. واچ‌لیست و اسلایدر اخبار
    ========================================================================= */
 .watchlist-slider {
     display: flex;
@@ -205,6 +229,7 @@ body {
     overflow-x: auto;
     padding: 5px 15px 15px 15px;
     direction: ltr;
+    scroll-behavior: smooth;
 }
 
 .watchlist-slider::-webkit-scrollbar {
@@ -212,28 +237,30 @@ body {
 }
 
 .watchlist-card {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
     padding: 12px;
-    min-width: 115px;
+    min-width: 120px;
     display: flex;
     flex-direction: column;
     align-items: center;
     flex-shrink: 0;
+    transition: transform 0.2s ease;
+}
+
+.watchlist-card:active {
+    transform: scale(0.96);
 }
 
 .coin-icon-mini {
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
 }
 
 .watchlist-card-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
+    gap: 8px;
+    margin-bottom: 8px;
 }
 
 .coin-symbol {
@@ -261,9 +288,10 @@ body {
     margin: 10px 15px 20px 15px;
     border-radius: 20px;
     overflow: hidden;
-    height: 150px;
+    height: 160px;
     position: relative;
     border: 1px solid var(--border-color);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
 }
 
 .slide-item {
@@ -281,7 +309,7 @@ body {
 .slider-overlay {
     position: absolute;
     bottom: 0; left: 0; right: 0;
-    background: linear-gradient(0deg, rgba(11,15,25,0.95) 0%, rgba(11,15,25,0.3) 70%, transparent 100%);
+    background: linear-gradient(0deg, rgba(11,15,25,0.95) 0%, rgba(11,15,25,0.4) 60%, transparent 100%);
     padding: 15px;
     display: flex;
     flex-direction: column;
@@ -292,51 +320,56 @@ body {
 }
 
 .slider-title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: bold;
     color: #fff;
-    margin-top: 5px;
-    line-height: 1.4;
+    margin-top: 6px;
+    line-height: 1.5;
 }
 
 /* =========================================================================
-   ۶. ساختار سرچ‌باکس و لیست‌های مارکت و اخبار
+   ۶. سرچ‌باکس و لیست‌های مارکت
    ========================================================================= */
 .search-box {
     width: calc(100% - 30px);
     margin: 10px 15px;
-    background: var(--card-bg);
+    background: rgba(255,255,255,0.03);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border: 1px solid var(--border-color);
-    padding: 12px 16px;
-    border-radius: 14px;
+    padding: 14px 16px;
+    border-radius: 16px;
     color: white;
     font-size: 13px;
     outline: none;
     text-align: right;
     direction: rtl;
+    transition: all 0.3s ease;
 }
 
 .search-box:focus {
-    border-color: rgba(247, 147, 26, 0.5);
+    border-color: rgba(247, 147, 26, 0.6);
+    background: rgba(255,255,255,0.06);
+    box-shadow: 0 0 12px rgba(247, 147, 26, 0.15);
 }
 
 .compare-bar-container {
-    height: 6px;
-    border-radius: 3px;
+    height: 8px;
+    border-radius: 4px;
     overflow: hidden;
     background: rgba(255,255,255,0.08);
     display: flex;
-    margin-top: 8px;
+    margin-top: 10px;
 }
 
 .market-trend-selector, .calendar-sub-nav {
     display: flex;
-    background: rgba(255,255,255,0.02);
+    background: rgba(0,0,0,0.2);
     border: 1px solid var(--border-color);
-    padding: 4px;
-    border-radius: 12px;
+    padding: 5px;
+    border-radius: 14px;
     margin: 10px 15px;
-    gap: 4px;
+    gap: 5px;
 }
 
 .trend-tab-btn, .news-tab-btn, .cal-sub-btn {
@@ -344,78 +377,84 @@ body {
     background: transparent;
     border: none;
     color: var(--text-dim);
-    padding: 8px 0;
-    border-radius: 9px;
+    padding: 10px 0;
+    border-radius: 10px;
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;
-    transition: 0.2s;
+    transition: all 0.25s ease;
 }
 
 .trend-tab-btn.active, .news-tab-btn.active, .cal-sub-btn.active {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.1);
     color: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 
-/* ردیف کوین‌ها */
 .coin-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 14px 15px;
-    margin: 0 15px 8px 15px;
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
+    padding: 14px 16px;
+    margin: 0 15px 10px 15px;
     cursor: pointer;
+    border-radius: 18px;
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.coin-row:active {
+    transform: scale(0.97);
+    background: rgba(255,255,255,0.08);
 }
 
 .coin-icon {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
 }
 
-/* کارت‌های اخبار و اسکلتون لودینگ */
 .news-card {
     display: flex;
     gap: 12px;
     padding: 12px;
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     cursor: pointer;
     align-items: center;
+    border-radius: 18px;
+    transition: transform 0.2s ease;
+}
+
+.news-card:active {
+    transform: scale(0.97);
 }
 
 .news-card-text-wrapper {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     text-align: right;
     direction: rtl;
 }
 
 .news-title {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: bold;
     color: white;
-    line-height: 1.4;
+    line-height: 1.5;
 }
 
 .news-img {
-    width: 70px;
-    height: 70px;
+    width: 75px;
+    height: 75px;
     object-fit: cover;
-    border-radius: 12px;
+    border-radius: 14px;
 }
 
 .skeleton-block {
-    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+    background: linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.02) 75%);
     background-size: 200% 100%;
-    animation: loadingSkeleton 1.5s infinite;
+    animation: loadingSkeleton 1.5s ease-in-out infinite;
 }
 
 @keyframes loadingSkeleton {
@@ -427,9 +466,6 @@ body {
    ۷. تنظیمات و سیستم رفرال پروفایل
    ========================================================================= */
 .referral-card-box {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 20px;
     padding: 20px;
     text-align: right;
     direction: rtl;
@@ -437,9 +473,9 @@ body {
 
 .ref-input-group {
     display: flex;
-    background: rgba(0,0,0,0.2);
+    background: rgba(0,0,0,0.3);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
+    border-radius: 14px;
     overflow: hidden;
     margin-top: 15px;
 }
@@ -448,26 +484,31 @@ body {
     background: transparent;
     border: none;
     color: white;
-    padding: 12px;
+    padding: 14px;
     flex: 1;
-    font-size: 12px;
+    font-size: 13px;
     outline: none;
     font-family: monospace;
 }
 
 .ref-copy-btn {
-    background: rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.08);
     border: none;
     color: var(--primary);
-    padding: 0 15px;
+    padding: 0 18px;
     font-weight: bold;
     cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.ref-copy-btn:active {
+    background: rgba(255,255,255,0.15);
 }
 
 .settings-list-group {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     margin-top: 15px;
 }
 
@@ -475,12 +516,18 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: rgba(255,255,255,0.02);
+    background: rgba(255,255,255,0.03);
     border: 1px solid var(--border-color);
-    padding: 14px 16px;
-    border-radius: 14px;
+    padding: 16px;
+    border-radius: 16px;
     font-size: 13px;
     cursor: pointer;
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.settings-row-item:active {
+    transform: scale(0.98);
+    background: rgba(255,255,255,0.06);
 }
 
 /* =========================================================================
@@ -490,10 +537,15 @@ body {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(11, 15, 25, 0.85);
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     display: none;
     align-items: center;
     justify-content: center;
     z-index: 2000;
     padding: 15px;
+}
+
+.modal .glass-card {
+    animation: scaleUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
