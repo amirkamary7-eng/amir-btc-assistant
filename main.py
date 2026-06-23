@@ -158,3 +158,8 @@ def get_optimized_farsi_news():
     return {"status": "success", "source": "mock_fallback", "data": MOCK_NEWS}
 
 # بقیه کدهای ربات و تحلیل تلگرام بدون تغییر در لایه پایین باقی می‌مانند...
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)

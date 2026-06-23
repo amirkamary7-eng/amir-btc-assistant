@@ -8,7 +8,7 @@ if (tg) {
 }
 
 const MY_TELEGRAM_CHANNEL = "amir_btc_2024"; 
-const BACKEND_URL = "http://127.0.0.1:8000"; 
+const BACKEND_URL = "https://amir-btc-assistant-production.up.railway.app";
 const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
 
 let allMarketCoins = [];
