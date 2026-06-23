@@ -81,8 +81,15 @@ async function loadMarketAndPrices() {
 
     try {
         const formattedSymbols = JSON.stringify(POPULAR_SYMBOLS.map(sym => `${sym}USDT`));
-        const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(formattedSymbols)}`);
-        const data = await response.json();
+        const targetUrl = `https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(formattedSymbols)}`;
+        // اضافه کردن پروکسی برای بایننس
+        const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl);
+
+        const response = await fetch(proxyUrl);
+        const proxyData = await response.json();
+        
+        if (!proxyData || !proxyData.contents) return;
+        const data = JSON.parse(proxyData.contents);
         
         if (!data || !Array.isArray(data)) return;
 
@@ -99,82 +106,40 @@ async function loadMarketAndPrices() {
             }
         });
 
-        AppCache.set("market_prices", allMarketCoins, 12);
+        AppCache.set("market_prices", allMarketCoins, 15); // افزایش کش به ۱۵ ثانیه برای کاهش فشار روی پروکسی
         renderMarketStates();
 
     } catch (err) {
         console.error("Binance Engine Error:", err);
     }
 }
+////بخش 5////
 
-function renderMarketStates() {
-    const btcData = allMarketCoins.find(c => c.symbol === "BTC");
-    if (btcData && document.getElementById("dash-btc-price")) {
-        const btcPrice = parseFloat(btcData.priceUsd).toLocaleString(undefined, {maximumFractionDigits: 0});
-        document.getElementById("dash-btc-price").innerHTML = `BTC $${btcPrice}`;
-    }
-
-    const searchInput = document.getElementById("market-search");
-    if (!searchInput || !searchInput.value.trim()) {
-        renderMarketList(allMarketCoins);
-    }
-    renderDashMiniMarket();
-}
-
-function getCoinFullName(sym) {
-    const names = { "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "BNB": "BNB", "XRP": "Ripple", "ADA": "Cardano", "DOGE": "Dogecoin" };
-    return names[sym] || sym;
-}
-
-function renderMarketList(coins) {
-    const marketListEl = document.getElementById("market-list");
-    if (!marketListEl) return;
-
-    let marketHtml = "";
-    coins.forEach(coin => {
-        const price = parseFloat(coin.priceUsd);
-        const change = parseFloat(coin.changePercent24Hr);
-        const formattedPrice = price > 1 ? price.toLocaleString(undefined, {maximumFractionDigits: 2}) : price.toFixed(4);
-        const changeColor = change >= 0 ? "var(--green)" : "var(--red)";
-        const changeSign = change >= 0 ? "+" : "";
-        const iconUrl = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${coin.symbol.toLowerCase()}.png`;
-
-        marketHtml += `
-        <div class="coin-row" onclick="openChart('${coin.symbol}')">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <img src="${iconUrl}" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" style="width: 32px; height: 32px; border-radius: 50%;">
-                <div style="display:flex; flex-direction:column; text-align:left;">
-                    <span style="font-weight:700; font-size:15px;">${coin.symbol}</span>
-                    <span style="font-size:11px; color:var(--text-sub);">${coin.name}</span>
-                </div>
-            </div>
-            <div style="text-align: right;">
-                <div style="font-weight: 700; font-family: monospace; font-size: 15px;">$${formattedPrice}</div>
-                <div style="color: ${changeColor}; font-size: 11px; margin-top: 2px; font-family: monospace;">${changeSign}${change.toFixed(2)}%</div>
-            </div>
-        </div>`;
-    });
-    marketListEl.innerHTML = marketHtml;
-}
-
-// ==========================================
-// ۵. شاخص‌ها و اطلاعات تکمیلی داشبورد
-// ==========================================
 async function loadExtraMetrics() {
     const cachedMetrics = AppCache.get("extra_metrics");
     if (cachedMetrics) {
         applyMetrics(cachedMetrics.val, cachedMetrics.status);
     } else {
         try {
-            const res = await fetch("https://api.alternative.me/fng/");
-            const json = await res.json();
-            if(json?.data?.[0]) {
-                const val = json.data[0].value;
-                const status = json.data[0].value_classification;
-                AppCache.set("extra_metrics", {val, status}, 1800);
-                applyMetrics(val, status);
+            const targetUrl = "https://api.alternative.me/fng/";
+            // اضافه کردن پروکسی برای شاخص ترس و طمع
+            const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl);
+
+            const res = await fetch(proxyUrl);
+            const proxyData = await res.json();
+            
+            if(proxyData && proxyData.contents) {
+                const json = JSON.parse(proxyData.contents);
+                if(json?.data?.[0]) {
+                    const val = json.data[0].value;
+                    const status = json.data[0].value_classification;
+                    AppCache.set("extra_metrics", {val, status}, 1800);
+                    applyMetrics(val, status);
+                }
             }
-        } catch(e){}
+        } catch(e){
+            console.error("FNG Fetch Error:", e);
+        }
     }
 
     const liqEl = document.getElementById("liq-value");
@@ -182,40 +147,6 @@ async function loadExtraMetrics() {
         const randomLiq = (Math.random() * (160 - 105) + 105).toFixed(1);
         liqEl.innerText = `$${randomLiq}M`;
     }
-}
-
-function applyMetrics(val, status) {
-    const elVal = document.getElementById("fg-value");
-    const elStatus = document.getElementById("fg-status");
-    if(elVal) {
-        elVal.innerText = val;
-        elVal.style.color = val > 50 ? "var(--green)" : "var(--red)";
-    }
-    if(elStatus) elStatus.innerText = getFarsiFngStatus(status);
-}
-
-function getFarsiFngStatus(status) {
-    const trans = { "Extreme Fear": "ترس شدید 😨", "Fear": "ترس 📉", "Neutral": "خنثی 😐", "Greed": "طمع 📈", "Extreme Greed": "طمع شدید 🚀" };
-    return trans[status] || status;
-}
-
-function renderDashMiniMarket() {
-    const miniEl = document.getElementById("dash-mini-market");
-    if (!miniEl || allMarketCoins.length < 3) return;
-    
-    let html = "";
-    for(let i=0; i<3; i++) {
-        let coin = allMarketCoins[i];
-        let change = parseFloat(coin.changePercent24Hr);
-        let changeColor = change >= 0 ? "var(--green)" : "var(--red)";
-        html += `
-        <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.02)">
-            <span style="font-weight:bold;">${coin.symbol}</span>
-            <span style="font-family:monospace; color:${changeColor}">${change >= 0 ? '+':''}${change.toFixed(2)}%</span>
-            <span style="font-family:monospace;">$${parseFloat(coin.priceUsd).toLocaleString()}</span>
-        </div>`;
-    }
-    miniEl.innerHTML = html;
 }
 
 // ==========================================
@@ -281,9 +212,6 @@ function loadTelegramUser() {
     if(document.getElementById("profile-content")) document.getElementById("profile-content").style.display = "block";
 }
 
-// ==========================================
-// ۸. سیستم مدیریت پیشرفته اخبار (بهینه‌سازی شده)
-// ==========================================
 async function fetchCryptoNews() {
     const cachedNews = AppCache.get("premium_news");
     if (cachedNews) {
@@ -292,15 +220,17 @@ async function fetchCryptoNews() {
     }
 
     try {
-        // آدرس اصلی خبر
         const targetUrl = "https://min-api.cryptocompare.com/data/v1/news/?lang=EN";
-        // دور زدن فیلترینگ با پروکسی AllOrigins
         const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl);
 
         const response = await fetch(proxyUrl);
         const proxyData = await response.json();
         
-        // دیتا در آل‌اورجینز داخل contents به صورت متن قرار دارد که باید پارس شود
+        // شرط ایمنی: اگر contents خالی بود مجاز به ادامه نیستیم
+        if (!proxyData || !proxyData.contents) {
+            throw new Error("پروکسی دیتای خالی برگرداند");
+        }
+        
         const result = JSON.parse(proxyData.contents);
 
         if (result && result.Data && Array.isArray(result.Data)) {
@@ -319,126 +249,12 @@ async function fetchCryptoNews() {
             return;
         }
     } catch (error) {
-        console.error("خطا در دریافت اخبار از طریق پروکسی:", error);
-        // اگر پروکسی هم به مشکل خورد، یک پیام خطای تمیز به کاربر نمایش داده می‌شود
+        console.error("خطا در دریافت اخبار:", error);
         const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
         if (newsListEl) {
             newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red); font-size:13px; margin-top:20px;">❌ دریافت اخبار با خطا مواجه شد. لطفاً دوباره تلاش کنید.</div>`;
         }
     }
-}
-function formatTimeAgo(unixTimestamp) {
-    const diff = Math.floor(Date.now() / 1000) - unixTimestamp;
-    if (diff < 60) return "اخیراً";
-    const mins = Math.floor(diff / 60);
-    if (mins < 60) return `${mins} دقیقه پیش`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours} ساعت پیش`;
-    return `${Math.floor(hours / 24)} روز پیش`;
-}
-
-function renderPremiumNewsDOM(articles) {
-    window.currentNewsArticles = articles;
-
-    const dashNewsEl = document.getElementById("dash-top-news");
-    const dashAnalysisEl = document.getElementById("dash-last-analysis-title");
-
-    if (dashNewsEl) dashNewsEl.innerHTML = "";
-    if (articles[0] && dashAnalysisEl) {
-        dashAnalysisEl.innerText = articles[0].title;
-    }
-
-    articles.forEach((article, index) => {
-        if (index < 3 && dashNewsEl) {
-            const miniNewsRow = document.createElement("div");
-            miniNewsRow.style = "padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.03); cursor:pointer; font-size:13px; color:#fff; text-align: right; direction: rtl;";
-            miniNewsRow.innerText = `• ${article.title}`;
-            miniNewsRow.onclick = () => {
-                switchTab('news-page', document.getElementById('nav-news'));
-                openArticleDetails(article.title, article.description, article.image, article.source, article.time_ago);
-            };
-            dashNewsEl.appendChild(miniNewsRow);
-        }
-    });
-
-    const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
-    if (!newsListEl) return;
-
-    newsListEl.innerHTML = `
-        <div style="display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; padding: 5px 0; scrollbar-width: none; direction: rtl;">
-            <button onclick="filterNewsView('all', this)" style="background:var(--primary); color:#000; border:none; padding:8px 16px; border-radius:20px; font-weight:bold; cursor:pointer; flex-shrink:0;">همه اخبار</button>
-            <button onclick="filterNewsView('crypto', this)" style="background:#1e2329; color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; flex-shrink:0;">ارزها 💎</button>
-            <button onclick="filterNewsView('economic', this)" style="background:#1e2329; color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; flex-shrink:0;">اقتصاد 🏦</button>
-            <button onclick="filterNewsView('calendar', this)" style="background:#1e2329; color:#fff; border:none; padding:8px 16px; border-radius:20px; cursor:pointer; flex-shrink:0;">تقویم 📅</button>
-        </div>
-        <div id="news-content-area"></div>
-    `;
-    
-    displayNewsItems(articles);
-}
-
-function displayNewsItems(articles) {
-    const area = document.getElementById("news-content-area");
-    if (!area) return;
-    area.innerHTML = "";
-
-    if (articles.length === 0) {
-        area.innerHTML = `<div style="text-align:center; padding:20px; color:#848e9c; font-size:13px;">موردی در این دسته‌بندی یافت نشد.</div>`;
-        return;
-    }
-
-    // تضمین نمایش حداقل ۱۵ خبر تازه و باکیفیت
-    const limitedArticles = articles.slice(0, 15);
-
-    limitedArticles.forEach(article => {
-        const card = document.createElement('div');
-        card.className = "news-card";
-        card.style = "display: flex; align-items: center; padding: 12px; margin-bottom: 12px; background: #12161a; border: 1px solid #1e2329; border-radius: 12px; cursor: pointer; color: #eaecef; gap: 12px; text-align: right; direction: rtl;";
-        
-        card.innerHTML = `
-            <img src="${article.image}" style="width: 75px; height: 75px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: #1a1f26;" onerror="this.onerror=null; this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png';">
-            <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
-                <h3 style="font-size: 14px; font-weight: bold; margin: 0 0 4px 0; color: #eaecef; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${article.title}</h3>
-                <p style="font-size: 12px; margin: 0 0 6px 0; color: #848e9c; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5;">${article.description}</p>
-                <div style="font-size: 10px; color: #909294; display: flex; justify-content: space-between; align-items: center;">
-                    <span style="background: #2b2f36; padding: 2px 6px; border-radius: 4px; color: #f0b90b;">${article.source}</span>
-                    <span>⏱️ ${article.time_ago}</span>
-                </div>
-            </div>
-        `;
-        card.onclick = () => openArticleDetails(article.title, article.description, article.image, article.source, article.time_ago);
-        area.appendChild(card);
-    });
-}
-
-function filterNewsView(category, btn) {
-    document.querySelectorAll('#news-list button').forEach(b => {
-        b.style.background = '#1e2329';
-        b.style.color = '#fff';
-        b.style.fontWeight = 'normal';
-    });
-    btn.style.background = 'var(--primary)';
-    btn.style.color = '#000';
-    btn.style.fontWeight = 'bold';
-    
-    if (category === 'calendar') {
-        renderEconomicCalendar();
-        return;
-    }
-
-    const filtered = window.currentNewsArticles.filter(a => {
-        if (category === 'all') return true;
-        const text = (a.title + " " + a.description + " " + a.categories + " " + a.tags).toLowerCase();
-        if (category === 'crypto') {
-            return text.includes('bitcoin') || text.includes('crypto') || text.includes('solana') || text.includes('eth') || text.includes('btc') || text.includes('market');
-        }
-        if (category === 'economic') {
-            return text.includes('fed') || text.includes('rate') || text.includes('economy') || text.includes('inflation') || text.includes('bank') || text.includes('macro');
-        }
-        return true; 
-    });
-    
-    displayNewsItems(filtered.length > 0 ? filtered : window.currentNewsArticles.slice(0, 10));
 }
 
 // ==========================================
