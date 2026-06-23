@@ -336,3 +336,86 @@ button:active {
 #news-list::-webkit-scrollbar {
     display: none; /* مخفی کردن اسکرول‌بار نوار تب‌ها */
 }
+/* ==========================================
+   تکمیلی: اصلاحات تصاویر و چیدمان پاپ‌آپ‌ها
+   ========================================== */
+
+/* فیکس کردن نمایش تصاویر در کارت‌های خبر */
+.news-card img {
+    width: 75px;
+    height: 75px;
+    border-radius: 14px;
+    object-fit: cover;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    flex-shrink: 0; /* جلوگیری از فشرده شدن عکس در متون طولانی */
+}
+
+/* اصلاح چیدمان محتوای متنی خبرها به صورت افقی */
+.news-card-body {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    width: 100%;
+}
+
+/* اسکرول‌بار شیک و مینیمال برای مودال جزئیات خبر */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
+}
+
+/* استایل تکمیلی تگ‌های داخل مودال نمایش کامل خبر */
+#modal-content {
+    direction: rtl;
+    text-align: justify;
+    text-align-last: right;
+}
+
+/* رفع باگ پرش ناگهانی صفحات در هنگام سوییچ تب‌ها */
+.page {
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    will-change: transform, opacity;
+}
+
+/* اصلاح رنگ پس‌زمینه ورودی جستجو با تم نئونی شما */
+.search-box {
+    direction: rtl;
+    background: rgba(18, 22, 34, 0.8) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    color: var(--text-main) !important;
+}
+.search-box:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 15px rgba(247, 147, 26, 0.2) !important;
+}
+
+/* فیکس کردن ارتفاع المان‌های اسکلتون لودینگ روی داشبورد */
+.skeleton-block {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 14px;
+    position: relative;
+    overflow: hidden;
+}
+.skeleton-block::after {
+    content: "";
+    position: absolute;
+    top: 0; right: 0; bottom: 0; left: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(247, 147, 26, 0.06) 50%,
+        transparent
+    );
+    animation: shimmer 1.5s infinite;
+}

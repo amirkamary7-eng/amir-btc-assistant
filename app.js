@@ -176,7 +176,7 @@ function loadTelegramUser() {
 }
 
 // ==========================================
-// ۷. دریافت اخبار بازار (یکپارچه شده با ورکر کلودفلر)
+// ۷. دریافت اخبار بازار (متصل شده به بک‌اند اختصاصی پایتون)
 // ==========================================
 async function fetchCryptoNews() {
     const cachedNews = AppCache.get("premium_news");
@@ -186,29 +186,27 @@ async function fetchCryptoNews() {
     }
 
     try {
-        const targetUrl = "https://min-api.cryptocompare.com/data/v1/news/?lang=EN";
-        const response = await fetch(PROXY_BASE_URL + encodeURIComponent(targetUrl));
+        // اتصال مستقیم به سرور پایتون شما بدون نیاز به پروکسی کلودفلر
+        const targetUrl = `${BACKEND_URL}/api/farsi-news`;
+        
+        const response = await fetch(targetUrl);
         const result = await response.json();
 
-        if (result && result.Data && Array.isArray(result.Data)) {
-            const mappedArticles = result.Data.map(item => ({
-                title: item.title,
-                description: item.body || "متن خبر در دسترس نیست.", 
-                image: item.imageurl || "https://img.icons8.com/clouds/100/000000/bitcoin.png",
-                source: item.source_info?.name || item.source || "MarketNews",
-                time_ago: typeof formatTimeAgo === 'function' ? formatTimeAgo(item.published_on) : "اخیراً",
-                categories: (item.categories || "").toLowerCase(),
-                tags: (item.tags || "").toLowerCase()
-            }));
-
-            AppCache.set("premium_news", mappedArticles, 300); 
-            if (typeof renderPremiumNewsDOM === 'function') renderPremiumNewsDOM(mappedArticles);
+        // بررسی ساختار پاسخ خروجی FastAPI شما
+        if (result && result.status === "success" && Array.isArray(result.data)) {
+            
+            // دیتا در بک‌اند پایتون شما قبلاً ترجمه و مپ شده است، پس مستقیم ذخیره و رندر می‌کنیم
+            AppCache.set("premium_news", result.data, 300); 
+            
+            if (typeof renderPremiumNewsDOM === 'function') {
+                renderPremiumNewsDOM(result.data);
+            }
         }
     } catch (error) {
-        console.error("خطا در دریافت اخبار:", error);
+        console.error("خطا در دریافت اخبار از بک‌اند پایتون:", error);
         const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
         if (newsListEl) {
-            newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red); font-size:13px; margin-top:20px;">❌ دریافت اخبار با خطا مواجه شد.</div>`;
+            newsListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--red); font-size:13px; margin-top:20px;">❌ دریافت اخبار از سرور مخدوش شد.</div>`;
         }
     }
 }
@@ -392,3 +390,157 @@ window.addEventListener("DOMContentLoaded", () => {
     // آپدیت اخبار هر ۵ دقیقه
     setInterval(fetchCryptoNews, 300000);   
 });
+
+// ==========================================
+// ۱۳. توابع رندر (نمایش دیتا در HTML)
+// ==========================================
+
+// رندر کردن لیست قیمت‌ها در داشبورد و صفحه مارکت
+function renderMarketStates() {
+    const marketList = document.getElementById("market-list");
+    const dashMiniMarket = document.getElementById("dash-mini-market");
+    const dashBtcPrice = document.getElementById("dash-btc-price");
+
+    if (!allMarketCoins || allMarketCoins.length === 0) return;
+
+    // آپدیت قیمت بیت‌کوین در هدر داشبورد
+    let btcData = allMarketCoins.find(c => c.symbol === "BTC");
+    if (btcData && dashBtcPrice) {
+        dashBtcPrice.innerText = `BTC $${parseFloat(btcData.priceUsd).toLocaleString()}`;
+    }
+
+    let listHtml = '';
+    let miniHtml = '';
+
+    allMarketCoins.forEach((coin, index) => {
+        const price = parseFloat(coin.priceUsd);
+        const change = parseFloat(coin.changePercent24Hr);
+        const isPositive = change >= 0;
+        const changeColor = isPositive ? 'var(--green)' : 'var(--red)';
+        const changeSign = isPositive ? '+' : '';
+        const formattedPrice = price > 1 ? price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : price.toFixed(6);
+        
+        const rowHtml = `
+            <div class="coin-row" onclick="openChart('${coin.symbol}')">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <img src="https://assets.coincap.io/assets/icons/${coin.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" style="width: 32px; height: 32px; border-radius: 50%; background: #fff;">
+                    <div style="display: flex; flex-direction: column;">
+                        <span style="font-weight: bold; font-size: 15px;">${coin.symbol}</span>
+                        <span style="font-size: 11px; color: var(--text-sub);">${coin.name}</span>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                    <span style="font-weight: bold; font-family: monospace; font-size: 15px;">$${formattedPrice}</span>
+                    <span style="font-size: 12px; color: ${changeColor}; font-weight: bold; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; margin-top: 4px;">${changeSign}${change.toFixed(2)}%</span>
+                </div>
+            </div>
+        `;
+        listHtml += rowHtml;
+        if (index < 3) miniHtml += rowHtml; // ۳ ارز اول برای داشبورد
+    });
+
+    if (marketList) marketList.innerHTML = listHtml;
+    if (dashMiniMarket) dashMiniMarket.innerHTML = miniHtml;
+}
+
+// رندر کردن اخبار در صفحه اخبار و داشبورد
+function renderPremiumNewsDOM(articles) {
+    const newsList = document.getElementById("news-list");
+    const dashTopNews = document.getElementById("dash-top-news");
+    
+    if (!articles || articles.length === 0) return;
+
+    let newsHtml = '';
+    let miniNewsHtml = '';
+
+    articles.forEach((article, index) => {
+        // جلوگیری از تداخل کاراکترهای رشته در توابع onclick
+        const escapedTitle = article.title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const escapedDesc = article.description.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        
+        const cardHtml = `
+            <div class="news-card" onclick="openArticleDetails('${escapedTitle}', '${escapedDesc}', '${article.image}', '${article.source}', '${article.time_ago}')">
+                <div style="display: flex; gap: 12px;">
+                    <div style="flex: 1;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px; color: var(--primary);">
+                            <span style="background: rgba(247,147,26,0.1); padding: 2px 6px; border-radius: 4px;">${article.source}</span>
+                            <span style="color: var(--text-sub);">${article.time_ago}</span>
+                        </div>
+                        <h3>${article.title}</h3>
+                    </div>
+                    <img src="${article.image}" style="width: 75px; height: 75px; border-radius: 12px; object-fit: cover; border: 1px solid var(--glass-border);">
+                </div>
+            </div>
+        `;
+        newsHtml += cardHtml;
+        if (index < 2) miniNewsHtml += cardHtml; // ۲ خبر اول برای داشبورد
+    });
+
+    if (newsList) newsList.innerHTML = newsHtml;
+    if (dashTopNews) dashTopNews.innerHTML = miniNewsHtml;
+}
+
+// آپدیت شاخص ترس و طمع
+function applyMetrics(val, status) {
+    const fgValueEl = document.getElementById("fg-value");
+    const fgStatusEl = document.getElementById("fg-status");
+    
+    if(fgValueEl) {
+        fgValueEl.innerText = val;
+        // تغییر رنگ بر اساس عدد
+        if (val < 40) fgValueEl.style.color = "var(--red)";
+        else if (val > 60) fgValueEl.style.color = "var(--green)";
+        else fgValueEl.style.color = "var(--primary)";
+    }
+    
+    if(fgStatusEl) {
+        // ترجمه وضعیت به فارسی
+        const statusMap = {
+            "Extreme Fear": "ترس شدید",
+            "Fear": "ترس",
+            "Neutral": "خنثی",
+            "Greed": "طمع",
+            "Extreme Greed": "طمع شدید"
+        };
+        fgStatusEl.innerText = statusMap[status] || status;
+    }
+}
+
+// ==========================================
+// ۱۴. توابع کمکی (Helpers)
+// ==========================================
+
+// تبدیل اسم اختصاری به اسم کامل
+function getCoinFullName(sym) {
+    const names = { 
+        BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", BNB: "BNB", 
+        XRP: "Ripple", ADA: "Cardano", DOGE: "Dogecoin", AVAX: "Avalanche", 
+        SHIB: "Shiba Inu", DOT: "Polkadot", LINK: "Chainlink", MATIC: "Polygon", 
+        TRX: "TRON", UNI: "Uniswap", LTC: "Litecoin" 
+    };
+    return names[sym] || sym;
+}
+
+// تبدیل تایم‌ستمپ به زمان گذشته (مثلاً "۲ ساعت پیش")
+function formatTimeAgo(ts) {
+    const now = Math.floor(Date.now() / 1000);
+    const diff = now - ts;
+    if (diff < 3600) return Math.floor(diff / 60) + " دقیقه پیش";
+    if (diff < 86400) return Math.floor(diff / 3600) + " ساعت پیش";
+    return Math.floor(diff / 86400) + " روز پیش";
+}
+
+// فیلتر کردن جستجو در مارکت
+function filterMarket(e) {
+    const term = e.target.value.toLowerCase();
+    const rows = document.querySelectorAll('#market-list .coin-row');
+    rows.forEach(row => {
+        // جستجو در نام و نماد
+        const text = row.innerText.toLowerCase();
+        if (text.includes(term)) {
+            row.style.display = 'flex';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
