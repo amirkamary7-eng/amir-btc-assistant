@@ -432,3 +432,39 @@ window.addEventListener("DOMContentLoaded", () => {
     setInterval(loadMarketAndPrices, 15000); 
     setInterval(loadPersianNews, 180000);   
 });
+const BACKEND_URL = "http://127.0.0.1:8000"; 
+
+async function fetchCryptoNews() {
+    const container = document.getElementById('news-container');
+    if (!container) return;
+
+    try {
+        const response = await fetch(`${BACKEND_URL}/api/farsi-news`);
+        const result = await response.json();
+
+        if (result.status === "success") {
+            container.innerHTML = ""; 
+            
+            result.data.forEach(article => {
+                const card = document.createElement('a');
+                card.href = article.url;
+                card.target = "_blank";
+                card.style = "display: flex; align-items: center; padding: 12px; margin-bottom: 12px; background: #12161a; border: 1px solid #1e2329; border-radius: 12px; text-decoration: none; color: #eaecef; gap: 12px;";
+
+                card.innerHTML = `
+                    <img src="${article.image}" style="w: 80px; h: 80px; border-radius: 8px; object-fit: cover;" onerror="this.src='https://images.cryptocompare.com/news/default/bitcoin.png'">
+                    <div>
+                        <h3 style="font-size: 14px; margin: 0 0 4px 0; color: #eaecef;">${article.title}</h3>
+                        <p style="font-size: 12px; margin: 0 0 6px 0; color: #848e9c;">${article.description || ''}</p>
+                        <div style="font-size: 10px; color: #909294;">⏱️ ${article.time_ago} | 📢 ${article.source}</div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+    } catch (error) {
+        console.error("خطا در لود اخبار:", error);
+    }
+}
+
+document.addEventListener("DOMContentLoaded", fetchCryptoNews);
