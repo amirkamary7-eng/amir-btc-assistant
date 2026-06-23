@@ -301,9 +301,10 @@ function loadLiquidationData() {
 // =========================================================================
 async function fetchDashboardNews() {
     try {
-        const response = await fetch(`${BACKEND_URL}/api/news`);
-        const articles = await response.json();
-        if (articles && articles.length > 0) {
+        const response = await fetch(`${BACKEND_URL}/api/farsi-news`);
+        const payload = await response.json();
+        const articles = payload?.data || payload || [];
+        if (Array.isArray(articles) && articles.length > 0) {
             cachedNewsArticles = articles;
             initNewsSlider(articles.slice(0, 5));
         }
@@ -369,8 +370,9 @@ async function switchNewsTab(tabId) {
 
     if (cachedNewsArticles.length === 0) {
         try {
-            const response = await fetch(`${BACKEND_URL}/api/news`);
-            cachedNewsArticles = await response.json();
+            const response = await fetch(`${BACKEND_URL}/api/farsi-news`);
+            const payload = await response.json();
+            cachedNewsArticles = payload?.data || payload || [];
         } catch (e) {
             container.innerHTML = `<div style="text-align:center; color:#e17055; padding:20px;">ارتباط با سرور برقرار نشد.</div>`;
             return;
