@@ -292,57 +292,49 @@ async function fetchCryptoNews() {
     }
 
     try {
-        const response = await fetch("https://api.coingecko.com/api/v3/news");
+        // اتصال به دیتابیس فوق‌العاده معتبر و جهانی CryptoCompare با سرور پرسرعت تصاویر کلاینت
+        const response = await fetch("https://min-api.cryptocompare.com/data/v1/news/?lang=EN");
         const result = await response.json();
 
-        if (result && result.data && Array.isArray(result.data)) {
-            const mappedArticles = result.data.map(item => ({
+        if (result && result.Data && Array.isArray(result.Data)) {
+            const mappedArticles = result.Data.map(item => ({
                 title: item.title,
-                description: item.description ? item.description.substring(0, 200) + '...' : 'جهت مطالعه کامل خبر کلیک کنید.',
-                image: item.thumb_2x || "https://images.cryptocompare.com/news/default/bitcoin.png",
-                source: item.author || "CoinGecko",
-                time_ago: "اخیراً"
+                description: item.body ? item.body.substring(0, 160) + '...' : 'جهت مطالعه کامل خبر کلیک کنید.',
+                image: item.imageurl || "https://img.icons8.com/clouds/100/000000/bitcoin.png",
+                source: item.source_info?.name || item.source || "MarketNews",
+                time_ago: formatTimeAgo(item.published_on),
+                categories: (item.categories || "").toLowerCase(),
+                tags: (item.tags || "").toLowerCase()
             }));
 
-            AppCache.set("premium_news", mappedArticles, 600);
+            AppCache.set("premium_news", mappedArticles, 300); // ۵ دقیقه کش مداوم
             renderPremiumNewsDOM(mappedArticles);
             return;
         }
     } catch (error) {
-        console.error("خطا در لود زنده اخبار. فعالسازی سیستم اخبار پشتیبان...");
+        console.error("خطا در ارتباط با سرور فیدهای زنده؛ بارگذاری فید پشتیبان...");
     }
 
-    // سیستم اخبار پشتیبان (برای زمان قطعی اینترنت یا محدودیت API)
     const fallbackNews = [
-        {
-            title: "بیت‌کوین در حال آماده‌سازی برای شکستن سقف تاریخی جدید است",
-            description: "تحلیل‌گران بازار معتقدند کاهش مداوم ذخایر بیت‌کوین در صرافی‌ها و ورود سرمایه سنگین به ETFها نشانه‌ای جدی برای آغاز موج صعودی جدید است.",
-            image: "https://images.cryptocompare.com/news/default/bitcoin.png",
-            source: "تحلیل بازار",
-            time_ago: "۱۰ دقیقه پیش"
-        },
-        {
-            title: "رشد چشمگیر شبکه سولانا و افزایش حجم تراکنش‌های غیرمتمرکز",
-            description: "حجم معاملات در صرافی‌های غیرمتمرکز (DEX) شبکه سولانا مجدداً از اتریوم پیشی گرفت. این موضوع توجه نهنگ‌ها را به سمت SOL جلب کرده است.",
-            image: "https://images.cryptocompare.com/news/default/solana.png",
-            source: "گزارش بلاک‌چین",
-            time_ago: "۳۵ دقیقه پیش"
-        },
-        {
-            title: "افزایش ورود سرمایه‌گذاران سازمانی به صندوق‌های اتریوم",
-            description: "بر اساس آخرین داده‌های کمیسیون بورس، تمایل هولدینگ‌های بزرگ برای خرید اتریوم در پله‌های حمایتی فعلی به شدت افزایش یافته است.",
-            image: "https://images.cryptocompare.com/news/default/ethereum.png",
-            source: "اخبار سازمانی",
-            time_ago: "۱ ساعت پیش"
-        }
+        { title: "بیت‌کوین در حال آماده‌سازی برای شکستن سقف تاریخی جدید است", description: "تحلیل‌گران بازار معتقدند کاهش مداوم ذخایر بیت‌کوین در صرافی‌ها و ورود سرمایه سنگین به ETFها نشانه‌ای جدی برای صعود است.", image: "https://img.icons8.com/clouds/100/000000/bitcoin.png", source: "تحلیل بازار", time_ago: "۱۰ دقیقه پیش", categories: "btc", tags: "" },
+        { title: "رشد چشمگیر شبکه سولانا و افزایش حجم تراکنش‌های غیرمتمرکز", description: "حجم معاملات در صرافی‌های غیرمتمرکز شبکه سولانا مجدداً افزایش یافته و توجه نهنگ‌ها را جلب کرده است.", image: "https://img.icons8.com/clouds/100/000000/ethereum.png", source: "گزارش بلاک‌چین", time_ago: "۳۵ دقیقه پیش", categories: "solana", tags: "" }
     ];
     renderPremiumNewsDOM(fallbackNews);
+}
+
+function formatTimeAgo(unixTimestamp) {
+    const diff = Math.floor(Date.now() / 1000) - unixTimestamp;
+    if (diff < 60) return "اخیراً";
+    const mins = Math.floor(diff / 60);
+    if (mins < 60) return `${mins} دقیقه پیش`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} ساعت پیش`;
+    return `${Math.floor(hours / 24)} روز پیش`;
 }
 
 function renderPremiumNewsDOM(articles) {
     window.currentNewsArticles = articles;
 
-    // ۱. آپدیت بخش داشبورد 
     const dashNewsEl = document.getElementById("dash-top-news");
     const dashAnalysisEl = document.getElementById("dash-last-analysis-title");
 
@@ -364,7 +356,6 @@ function renderPremiumNewsDOM(articles) {
         }
     });
 
-    // ۲. رندر کردن تب‌بندی‌ها در صفحه اصلی اخبار
     const newsListEl = document.getElementById("news-list") || document.getElementById('news-container');
     if (!newsListEl) return;
 
@@ -391,13 +382,17 @@ function displayNewsItems(articles) {
         return;
     }
 
-    articles.forEach(article => {
+    // فیلتر هوشمند برای نمایش ۵ تا ۱۰ خبر برتر جهت تمیز ماندن لایه‌ها
+    const limitedArticles = articles.slice(0, 10);
+
+    limitedArticles.forEach(article => {
         const card = document.createElement('div');
         card.className = "news-card";
         card.style = "display: flex; align-items: center; padding: 12px; margin-bottom: 12px; background: #12161a; border: 1px solid #1e2329; border-radius: 12px; cursor: pointer; color: #eaecef; gap: 12px; text-align: right; direction: rtl;";
         
+        // این بخش با ریست کردن رویداد onerror لوپ تصویر و مشکل چشمک زدن سیاه فیدها را کاملا رفع میکند
         card.innerHTML = `
-            <img src="${article.image}" style="width: 75px; height: 75px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.src='https://images.cryptocompare.com/news/default/bitcoin.png'">
+            <img src="${article.image}" style="width: 75px; height: 75px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: #1a1f26;" onerror="this.onerror=null; this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png';">
             <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
                 <h3 style="font-size: 14px; font-weight: bold; margin: 0 0 4px 0; color: #eaecef; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${article.title}</h3>
                 <p style="font-size: 12px; margin: 0 0 6px 0; color: #848e9c; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5;">${article.description}</p>
@@ -422,17 +417,19 @@ function filterNewsView(category, btn) {
     btn.style.color = '#000';
     btn.style.fontWeight = 'bold';
     
-    const area = document.getElementById("news-content-area");
-    
     if (category === 'calendar') {
-        area.innerHTML = renderEconomicCalendar();
+        renderEconomicCalendar();
         return;
     }
 
     const filtered = window.currentNewsArticles.filter(a => {
-        const t = (a.title + " " + a.description).toLowerCase();
-        if (category === 'crypto') return t.includes('bitcoin') || t.includes('crypto') || t.includes('solana') || t.includes('eth');
-        if (category === 'economic') return t.includes('fed') || t.includes('rate') || t.includes('economy') || t.includes('inflation') || t.includes('bank');
+        const text = (a.title + " " + a.description + " " + a.categories + " " + a.tags).toLowerCase();
+        if (category === 'crypto') {
+            return text.includes('bitcoin') || text.includes('crypto') || text.includes('solana') || text.includes('eth') || text.includes('btc') || text.includes('blockchain');
+        }
+        if (category === 'economic') {
+            return text.includes('fed') || text.includes('rate') || text.includes('economy') || text.includes('inflation') || text.includes('bank') || text.includes('fiat') || text.includes('macro');
+        }
         return true; 
     });
     
@@ -440,23 +437,33 @@ function filterNewsView(category, btn) {
 }
 
 function renderEconomicCalendar() {
-    return `
-        <div style="background:#12161a; padding:15px; border-radius:16px; border:1px solid #1e2329; color:#fff; margin-top:10px; text-align:right; direction:rtl;">
-            <h4 style="margin:0 0 15px 0; border-bottom:1px solid #333; padding-bottom:10px; font-size:15px;">تقویم اقتصادی این هفته 🗓️</h4>
-            <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:1px solid #222; font-size:14px;">
-                <span>نرخ بهره فدرال رزرو (FED)</span>
-                <span style="color:#ff4d4d; font-weight:bold; background:rgba(255,77,77,0.1); padding:2px 8px; border-radius:6px;">🔴 بالا</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:1px solid #222; font-size:14px;">
-                <span>شاخص تورم آمریکا (CPI)</span>
-                <span style="color:#ffcc00; font-weight:bold; background:rgba(255,204,0,0.1); padding:2px 8px; border-radius:6px;">🟡 متوسط</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; padding:12px 0; font-size:14px;">
-                <span>گزارش تراز تجاری</span>
-                <span style="color:#00ff99; font-weight:bold; background:rgba(0,255,153,0.1); padding:2px 8px; border-radius:6px;">🟢 پایین</span>
+    const area = document.getElementById("news-content-area");
+    if (!area) return;
+    
+    // رندر تقویم فوق‌پیشرفته و هوشمند معاملاتی TradingView به صورت Real-time
+    area.innerHTML = `
+        <div id="tradingview-calendar-box" style="width:100%; height:460px; margin-top:10px; border-radius:12px; overflow:hidden; border:1px solid #1e2329;">
+            <div class="tradingview-widget-container" id="tv-calendar-widget" style="width:100%; height:100%;">
+                <div class="tradingview-widget-container__widget" style="width:100%; height:100%;"></div>
             </div>
         </div>
     `;
+
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-events.js";
+    script.async = true;
+    script.innerHTML = JSON.stringify({
+        "colorTheme": "dark",
+        "isMarket": false,
+        "width": "100%",
+        "height": "100%",
+        "locale": "en",
+        "importanceFilter": "-1,0,1",
+        "currencyFilter": "USD,EUR,GBP,JPY,CNY"
+    });
+    
+    document.getElementById("tv-calendar-widget").appendChild(script);
 }
 
 // ==========================================
