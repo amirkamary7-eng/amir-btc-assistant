@@ -282,7 +282,7 @@ function loadTelegramUser() {
 }
 
 // ==========================================
-// ۸. سیستم مدیریت پیشرفته اخبار و تقویم اقتصادی
+// ۸. سیستم مدیریت پیشرفته اخبار
 // ==========================================
 async function fetchCryptoNews() {
     const cachedNews = AppCache.get("premium_news");
@@ -292,14 +292,15 @@ async function fetchCryptoNews() {
     }
 
     try {
-        // اتصال به دیتابیس فوق‌العاده معتبر و جهانی CryptoCompare با سرور پرسرعت تصاویر کلاینت
+        // دریافت ۵۰ خبر آخر از منبع زنده
         const response = await fetch("https://min-api.cryptocompare.com/data/v1/news/?lang=EN");
         const result = await response.json();
 
         if (result && result.Data && Array.isArray(result.Data)) {
             const mappedArticles = result.Data.map(item => ({
                 title: item.title,
-                description: item.body ? item.body.substring(0, 160) + '...' : 'جهت مطالعه کامل خبر کلیک کنید.',
+                // حذف محدودیت کاراکتر برای نمایش کاملترین متن ارائه‌شده توسط API
+                description: item.body || "متن خبر در دسترس نیست.", 
                 image: item.imageurl || "https://img.icons8.com/clouds/100/000000/bitcoin.png",
                 source: item.source_info?.name || item.source || "MarketNews",
                 time_ago: formatTimeAgo(item.published_on),
@@ -307,19 +308,13 @@ async function fetchCryptoNews() {
                 tags: (item.tags || "").toLowerCase()
             }));
 
-            AppCache.set("premium_news", mappedArticles, 300); // ۵ دقیقه کش مداوم
+            AppCache.set("premium_news", mappedArticles, 300); // ۵ دقیقه کش
             renderPremiumNewsDOM(mappedArticles);
             return;
         }
     } catch (error) {
-        console.error("خطا در ارتباط با سرور فیدهای زنده؛ بارگذاری فید پشتیبان...");
+        console.error("خطا در ارتباط با سرور فیدهای زنده...");
     }
-
-    const fallbackNews = [
-        { title: "بیت‌کوین در حال آماده‌سازی برای شکستن سقف تاریخی جدید است", description: "تحلیل‌گران بازار معتقدند کاهش مداوم ذخایر بیت‌کوین در صرافی‌ها و ورود سرمایه سنگین به ETFها نشانه‌ای جدی برای صعود است.", image: "https://img.icons8.com/clouds/100/000000/bitcoin.png", source: "تحلیل بازار", time_ago: "۱۰ دقیقه پیش", categories: "btc", tags: "" },
-        { title: "رشد چشمگیر شبکه سولانا و افزایش حجم تراکنش‌های غیرمتمرکز", description: "حجم معاملات در صرافی‌های غیرمتمرکز شبکه سولانا مجدداً افزایش یافته و توجه نهنگ‌ها را جلب کرده است.", image: "https://img.icons8.com/clouds/100/000000/ethereum.png", source: "گزارش بلاک‌چین", time_ago: "۳۵ دقیقه پیش", categories: "solana", tags: "" }
-    ];
-    renderPremiumNewsDOM(fallbackNews);
 }
 
 function formatTimeAgo(unixTimestamp) {
@@ -382,15 +377,14 @@ function displayNewsItems(articles) {
         return;
     }
 
-    // فیلتر هوشمند برای نمایش ۵ تا ۱۰ خبر برتر جهت تمیز ماندن لایه‌ها
-    const limitedArticles = articles.slice(0, 10);
+    // افزایش تعداد اخبار نمایشی به حداقل ۱۵ خبر تازه
+    const limitedArticles = articles.slice(0, 15);
 
     limitedArticles.forEach(article => {
         const card = document.createElement('div');
         card.className = "news-card";
         card.style = "display: flex; align-items: center; padding: 12px; margin-bottom: 12px; background: #12161a; border: 1px solid #1e2329; border-radius: 12px; cursor: pointer; color: #eaecef; gap: 12px; text-align: right; direction: rtl;";
         
-        // این بخش با ریست کردن رویداد onerror لوپ تصویر و مشکل چشمک زدن سیاه فیدها را کاملا رفع میکند
         card.innerHTML = `
             <img src="${article.image}" style="width: 75px; height: 75px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: #1a1f26;" onerror="this.onerror=null; this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png';">
             <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
@@ -423,100 +417,77 @@ function filterNewsView(category, btn) {
     }
 
     const filtered = window.currentNewsArticles.filter(a => {
+        if (category === 'all') return true;
         const text = (a.title + " " + a.description + " " + a.categories + " " + a.tags).toLowerCase();
         if (category === 'crypto') {
-            return text.includes('bitcoin') || text.includes('crypto') || text.includes('solana') || text.includes('eth') || text.includes('btc') || text.includes('blockchain');
+            return text.includes('bitcoin') || text.includes('crypto') || text.includes('solana') || text.includes('eth') || text.includes('btc') || text.includes('market');
         }
         if (category === 'economic') {
-            return text.includes('fed') || text.includes('rate') || text.includes('economy') || text.includes('inflation') || text.includes('bank') || text.includes('fiat') || text.includes('macro');
+            return text.includes('fed') || text.includes('rate') || text.includes('economy') || text.includes('inflation') || text.includes('bank') || text.includes('macro');
         }
         return true; 
     });
     
-    displayNewsItems(filtered);
+    // در صورت کم بودن نتایج، برای خالی نماندن صفحه همیشه حداقل ۱۰ خبر کلی نمایش داده می‌شود
+    displayNewsItems(filtered.length > 0 ? filtered : window.currentNewsArticles.slice(0, 10));
 }
 
-function renderEconomicCalendar() {
+// ==========================================
+// ۹. تقویم اقتصادی فوق‌سریع و بومی (Native)
+// ==========================================
+async function renderEconomicCalendar() {
     const area = document.getElementById("news-content-area");
     if (!area) return;
     
-    // رندر تقویم فوق‌پیشرفته و هوشمند معاملاتی TradingView به صورت Real-time
-    area.innerHTML = `
-        <div id="tradingview-calendar-box" style="width:100%; height:460px; margin-top:10px; border-radius:12px; overflow:hidden; border:1px solid #1e2329;">
-            <div class="tradingview-widget-container" id="tv-calendar-widget" style="width:100%; height:100%;">
-                <div class="tradingview-widget-container__widget" style="width:100%; height:100%;"></div>
-            </div>
-        </div>
-    `;
-
-    const script = document.createElement("script");
-    script.type = "text/javascript";
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-events.js";
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-        "colorTheme": "dark",
-        "isMarket": false,
-        "width": "100%",
-        "height": "100%",
-        "locale": "en",
-        "importanceFilter": "-1,0,1",
-        "currencyFilter": "USD,EUR,GBP,JPY,CNY"
-    });
+    area.innerHTML = `<div style="text-align:center; padding:20px; color:var(--primary);">⏳ در حال دریافت تقویم اقتصادی جهان...</div>`;
     
-    document.getElementById("tv-calendar-widget").appendChild(script);
-}
+    try {
+        // اتصال به دیتابیس خام تقویم با پروکسی برای دور زدن محدودیت‌های کلاینت
+        const url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json";
+        const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
+        
+        const response = await fetch(proxyUrl);
+        const proxyData = await response.json();
+        const events = JSON.parse(proxyData.contents);
 
-// ==========================================
-// ۹. مدیریت سیستم پاپ‌آ‌پ (Modal Engine)
-// ==========================================
-function openArticleDetails(title, text, image, source, time_ago) {
-    const modal = document.getElementById('details-modal');
-    if(!modal) { showNewsModal(title, text); return; } 
+        if (!events || events.length === 0) throw new Error("No data");
 
-    const mTitle = document.getElementById('modal-title');
-    const mImage = document.getElementById('modal-image');
-    const mSource = document.getElementById('modal-source');
-    const mTime = document.getElementById('modal-time');
-    const mContent = document.getElementById('modal-content');
+        // استخراج رویدادهای امروز با اهمیت بالا و متوسط
+        const todayStr = new Date().toISOString().split('T')[0];
+        const importantEvents = events.filter(e => 
+            (e.impact === 'High' || e.impact === 'Medium') && 
+            e.date.includes(todayStr)
+        );
 
-    if(mTitle) mTitle.innerText = title;
-    if(mSource) mSource.innerText = source || "اخبار بازار";
-    if(mTime) mTime.innerText = time_ago ? `⏱️ ${time_ago}` : "اخیراً";
-    
-    if (mImage) {
-        if (image && image.trim() !== "" && !image.includes("default")) {
-            mImage.src = image;
-            mImage.classList.remove('hidden');
-        } else {
-            mImage.classList.add('hidden');
+        if (importantEvents.length === 0) {
+            area.innerHTML = `<div style="text-align:center; padding:20px; color:#848e9c;">امروز رویداد مهم اقتصادی در تقویم وجود ندارد.</div>`;
+            return;
         }
+
+        let html = `<div style="display:flex; flex-direction:column; gap:10px; margin-top:10px; direction:rtl; text-align:right;">`;
+        importantEvents.forEach(ev => {
+            const impactColor = ev.impact === 'High' ? '#f6465d' : '#f0b90b';
+            const impactText = ev.impact === 'High' ? '🔥 مهم' : '⚡ متوسط';
+            const time = new Date(ev.date).toLocaleTimeString('fa-IR', {hour: '2-digit', minute:'2-digit'});
+            
+            html += `
+            <div style="background:#12161a; border:1px solid #1e2329; border-radius:12px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                    <span style="color:#eaecef; font-weight:bold; font-size:14px;">${ev.title}</span>
+                    <span style="color:#848e9c; font-size:11px;">ارز درگیر: <b>${ev.country}</b> | قبلی: <span style="direction:ltr; display:inline-block;">${ev.previous || '-'}</span> | پیش‌بینی: <span style="direction:ltr; display:inline-block;">${ev.forecast || '-'}</span></span>
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                    <span style="color:${impactColor}; font-size:11px; font-weight:bold; background:rgba(255,255,255,0.05); padding:2px 6px; border-radius:4px;">${impactText}</span>
+                    <span style="color:#848e9c; font-size:12px; font-family:monospace;">⏱️ ${time}</span>
+                </div>
+            </div>`;
+        });
+        html += `</div>`;
+        area.innerHTML = html;
+
+    } catch (error) {
+        area.innerHTML = `<div style="text-align:center; padding:20px; color:#f6465d;">❌ دریافت تقویم موقتاً در دسترس نیست.</div>`;
     }
-
-    if(mContent) {
-        let formattedText = text || "محتوایی برای نمایش وجود ندارد.";
-        formattedText = formattedText.replace(/•/g, '<span class="text-[#f0b90b] text-base font-bold ml-1">•</span>');
-        mContent.innerHTML = formattedText;
-    }
-    
-    modal.classList.remove('hidden');
-    document.body.style.overflow = 'hidden'; 
-}
-
-function closeModal() {
-    const modal = document.getElementById('details-modal');
-    if(modal) modal.classList.add('hidden');
-    document.body.style.overflow = ''; 
-}
-
-function showNewsModal(title, content) {
-    const modal = document.getElementById("news-modal");
-    if (!modal) return;
-    modal.style.display = "flex";
-    if(document.getElementById("news-title-modal")) document.getElementById("news-title-modal").innerText = title;
-    if(document.getElementById("news-content-modal")) document.getElementById("news-content-modal").innerHTML = content;
-}
-function closeNewsModal() {
-    if(document.getElementById("news-modal")) document.getElementById("news-modal").style.display = "none";
 }
 
 // ==========================================
@@ -558,17 +529,21 @@ function loadAnalysisData() {
 }
 
 // ==========================================
-// ۱۲. لود اولیه برنامه
+// ۱۲. لود اولیه و تایمرهای ۵ دقیقه‌ای
 // ==========================================
 window.addEventListener("DOMContentLoaded", () => {
-    loadTelegramUser();
-    loadMarketAndPrices();
-    loadExtraMetrics();
+    if(typeof loadTelegramUser === 'function') loadTelegramUser();
+    if(typeof loadMarketAndPrices === 'function') loadMarketAndPrices();
+    if(typeof loadExtraMetrics === 'function') loadExtraMetrics();
     
     setTimeout(fetchCryptoNews, 400);
 
-    document.getElementById("market-search")?.addEventListener("input", filterMarket);
+    const searchInput = document.getElementById("market-search");
+    if(searchInput) searchInput.addEventListener("input", filterMarket);
     
-    setInterval(loadMarketAndPrices, 15000); 
-    setInterval(fetchCryptoNews, 180000);   
+    // آپدیت قیمت‌ها هر ۱۵ ثانیه
+    setInterval(() => { if(typeof loadMarketAndPrices === 'function') loadMarketAndPrices(); }, 15000); 
+    
+    // آپدیت خودکار فید اخبار دقیقاً هر ۵ دقیقه (۳۰۰,۰۰۰ میلی‌ثانیه)
+    setInterval(fetchCryptoNews, 300000);   
 });
