@@ -75,37 +75,59 @@
 
     <div id="market-page" class="page">
         <input type="text" id="market-search" class="search-box" placeholder="جستجو بین ۱۰۰ ارز برتر بازار...">
-        
-        <!-- در بخش market-page، کارت لیکوئیدیشن را با این کد جایگزین کنید -->
-<div class="card" style="margin: 15px; padding:20px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 18px;">
-    <div class="card-title" style="text-align:center; font-size:14px; margin-bottom:10px;">Total Liquidations (24h)</div>
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <div style="display:flex; align-items:center; gap:8px; color:var(--green);">
-            <span>Long</span>
-            <span id="liq-long-per" style="font-weight:bold; font-family:monospace;">50%</span>
+       <div id="market-page" class="page">
+    <!-- کارت بالایی با اطلاعات بازار -->
+    <div class="card" style="margin: 15px; padding:16px; background: linear-gradient(135deg, rgba(247,147,26,0.08), rgba(255,51,85,0.04)); border: 1px solid rgba(255,255,255,0.06); border-radius: 18px;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; text-align:center;">
+            <div>
+                <div style="font-size:11px; color:var(--text-dim);">Market Cap</div>
+                <div style="font-size:15px; font-weight:bold; color:#fff;" id="global-market-cap">--</div>
+            </div>
+            <div>
+                <div style="font-size:11px; color:var(--text-dim);">CMC20</div>
+                <div style="font-size:15px; font-weight:bold; color:#fff;" id="global-cmc20">--</div>
+            </div>
+            <div>
+                <div style="font-size:11px; color:var(--text-dim);">Fear & Greed</div>
+                <div style="font-size:15px; font-weight:bold; color:#fff;">
+                    <span class="fg-value-el" style="font-size:15px;">50</span>
+                    <span style="font-size:11px; color:var(--text-dim);" class="fg-status-el">Neutral</span>
+                </div>
+            </div>
         </div>
-        <div style="display:flex; align-items:center; gap:8px; color:var(--red);">
-            <span>Short</span>
-            <span id="liq-short-per" style="font-weight:bold; font-family:monospace;">50%</span>
-        </div>
     </div>
-    <div class="compare-bar-container" style="height:12px; border-radius:6px; background: rgba(255,255,255,0.06); overflow:hidden; display:flex; margin:0;">
-        <div id="liq-long-bar" style="width:50%; background: linear-gradient(90deg, #00b894, #00e676); height:100%; transition: width 0.6s ease;"></div>
-        <div id="liq-short-bar" style="width:50%; background: linear-gradient(90deg, #ff2366, #e17055); height:100%; transition: width 0.6s ease;"></div>
-    </div>
-    <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:12px; color:var(--text-dim);">
-        <span>Long: <span id="long-liq-val" class="long-liq-val">$0.0M</span></span>
-        <span>Short: <span id="short-liq-val" class="short-liq-val">$0.0M</span></span>
-    </div>
-</div>
 
-        <div class="market-trend-selector">
-            <button class="trend-tab-btn active" onclick="filterMarketCategory('all', this)" data-filter="all">All Coins</button>
-            <button class="trend-tab-btn" onclick="filterMarketCategory('bullish', this)" data-filter="bullish">Bullish</button>
-            <button class="trend-tab-btn" onclick="filterMarketCategory('bearish', this)" data-filter="bearish">Bearish</button>
+    <!-- بخش لیکوئیدیشن -->
+    <div class="card" style="margin: 15px; padding:16px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:6px; color:var(--green);">
+                <span style="font-size:12px;">Long</span>
+                <span id="liq-long-per" style="font-weight:bold; font-family:monospace;">50%</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; color:var(--red);">
+                <span style="font-size:12px;">Short</span>
+                <span id="liq-short-per" style="font-weight:bold; font-family:monospace;">50%</span>
+            </div>
         </div>
-        <div id="market-coin-list"></div>
+        <div class="compare-bar-container" style="height:8px; border-radius:4px; background: rgba(255,255,255,0.06); overflow:hidden; display:flex; margin:0 0 6px 0;">
+            <div id="liq-long-bar" style="width:50%; background: linear-gradient(90deg, #00b894, #00e676); height:100%; transition: width 0.6s ease;"></div>
+            <div id="liq-short-bar" style="width:50%; background: linear-gradient(90deg, #ff2366, #e17055); height:100%; transition: width 0.6s ease;"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim);">
+            <span>Long: <span id="long-liq-val" class="long-liq-val">$0.0M</span></span>
+            <span>Short: <span id="short-liq-val" class="short-liq-val">$0.0M</span></span>
+        </div>
     </div>
+
+    <input type="text" id="market-search" class="search-box" placeholder="جستجو بین ۱۰۰ ارز برتر بازار...">
+
+    <div class="market-trend-selector">
+        <button class="trend-tab-btn active" onclick="filterMarketCategory('all', this)" data-filter="all">All Coins</button>
+        <button class="trend-tab-btn" onclick="filterMarketCategory('bullish', this)" data-filter="bullish">Bullish</button>
+        <button class="trend-tab-btn" onclick="filterMarketCategory('bearish', this)" data-filter="bearish">Bearish</button>
+    </div>
+    <div id="market-coin-list"></div>
+</div>
 
     <div id="news-page" class="page">
         <div class="market-trend-selector" style="margin-bottom:10px;">
