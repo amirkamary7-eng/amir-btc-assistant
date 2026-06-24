@@ -159,7 +159,10 @@ async def get_optimized_farsi_news():
 ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "831704732")
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
+REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")
 TICKETS_FILE = Path(__file__).parent / "data" / "tickets.json"
+
+JOINED_STATUSES = {"creator", "administrator", "member", "restricted"}
 
 class TicketCreate(BaseModel):
     user_id: str
@@ -213,6 +216,41 @@ async def _send_telegram(chat_id: str, text: str) -> bool:
         except Exception as e:
             print(f"⚠️ Telegram SDK error: {e}")
     return _send_telegram_http(chat_id, text)
+
+def _check_channel_membership(user_id: str) -> dict:
+    if str(user_id).startswith("guest_"):
+        return {"joined": False, "reason": "guest_user"}
+    if str(user_id) == str(ADMIN_TELEGRAM_ID):
+        return {"joined": True, "admin": True}
+    if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
+        return {"joined": False, "reason": "bot_not_configured"}
+    try:
+        res = requests.get(
+            f"https://api.telegram.org/bot{TOKEN}/getChatMember",
+            params={"chat_id": f"@{REQUIRED_CHANNEL}", "user_id": int(user_id)},
+            timeout=10,
+        )
+        data = res.json()
+        if not data.get("ok"):
+            desc = data.get("description", "")
+            print(f"⚠️ getChatMember failed: {desc}")
+            if "user not found" in desc.lower() or "not found" in desc.lower():
+                return {"joined": False, "reason": "not_member"}
+            return {"joined": False, "reason": "api_error", "detail": desc}
+        status = data.get("result", {}).get("status", "")
+        return {"joined": status in JOINED_STATUSES, "status": status}
+    except Exception as e:
+        print(f"⚠️ Channel check error: {e}")
+        return {"joined": False, "reason": "api_error"}
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "bot_configured": bool(TOKEN and TOKEN != "REPLACE_WITH_TOKEN")}
+
+@app.get("/api/check-join")
+async def check_join(user_id: str = Query(...)):
+    result = _check_channel_membership(user_id)
+    return {"status": "success", **result}
 
 @app.post("/api/tickets")
 async def create_ticket(ticket: TicketCreate):

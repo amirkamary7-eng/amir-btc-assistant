@@ -158,6 +158,19 @@
                 <div class="soon-badge-row">
                     <span class="soon-badge" data-i18n="coming_soon">بزودی</span>
                 </div>
+                <div class="wheel-preview-wrap">
+                    <div class="wheel-preview" aria-hidden="true">
+                        <div class="wheel-preview-ring"></div>
+                        <div class="wheel-preview-segments">
+                            <span></span><span></span><span></span><span></span>
+                            <span></span><span></span><span></span><span></span>
+                        </div>
+                        <div class="wheel-preview-center">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L9.09 8.26 2 9.27l5.18 5.11L6 21.02 12 17.77l6 3.25-1.18-6.64L22 9.27l-7.09-1.01L12 2z"/></svg>
+                        </div>
+                        <div class="wheel-preview-pointer"></div>
+                    </div>
+                </div>
                 <h5 data-i18n="ref_wheel">گردونه شانس و جوایز نقدی</h5>
                 <p data-i18n="ref_wheel_desc">سیستم پاداش‌دهی بر اساس امتیاز رفرال‌ها در آپدیت بعدی فعال می‌شود.</p>
             </div>
@@ -200,8 +213,9 @@
             <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 20px; line-height: 1.6;" data-i18n="join_vip_desc">
                 برای دسترسی به چارت‌های لحظه‌ای، تحلیل‌های اختصاصی و 100 ارز برتر، ابتدا در کانال رسمی ما عضو شوید.
             </p>
-            <button class="submit-btn" style="margin-bottom: 10px; font-size: 15px;" onclick="window.open('https://t.me/amir_btc_2024', '_blank'); setTimeout(verifyJoin, 3000);" data-i18n="join_vip_btn">عضویت در کانال</button>
-            <p style="font-size: 11px; color: var(--text-sub);" data-i18n="join_vip_hint">بعد از عضویت، دسترسی شما باز خواهد شد.</p>
+            <button class="submit-btn" style="margin-bottom: 10px; font-size: 15px;" onclick="openJoinAndVerify()" data-i18n="join_vip_btn">عضویت در کانال</button>
+            <button id="join-verify-btn" class="cancel-btn" style="width:100%; margin-bottom: 10px;" onclick="verifyJoin()" data-i18n="join_verify_btn">بررسی عضویت</button>
+            <p style="font-size: 11px; color: var(--text-sub);" data-i18n="join_vip_hint">بعد از عضویت، دکمه «بررسی عضویت» را بزنید.</p>
         </div>
     </div>
 
@@ -217,11 +231,11 @@
         </div>
     </div>
 
-    <!-- مودال افزودن تحلیل -->
+    <!-- مودال افزودن/ویرایش تحلیل -->
     <div id="add-analysis-modal" class="modal" onclick="if(event.target===this) closeAddAnalysisModal()">
         <div class="modal-box">
             <div class="modal-header">
-                <h3>تحلیل جدید</h3>
+                <h3 id="analysis-modal-title">تحلیل جدید</h3>
                 <button class="modal-close-btn" onclick="closeAddAnalysisModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <input type="text" id="analysis-coin" placeholder="نماد ارز (مثلاً BTC)" class="input-field">
@@ -229,9 +243,23 @@
             <input type="text" id="analysis-image" placeholder="لینک تصویر کاور" class="input-field">
             <textarea id="analysis-text" placeholder="متن تحلیل..." class="input-field" rows="4"></textarea>
             <div class="modal-actions">
-                <button class="submit-btn" onclick="submitAnalysis()">انتشار تحلیل</button>
+                <button id="analysis-submit-btn" class="submit-btn" onclick="submitAnalysis()">انتشار تحلیل</button>
                 <button class="cancel-btn" onclick="closeAddAnalysisModal()">انصراف</button>
             </div>
+        </div>
+    </div>
+
+    <!-- مودال نمایش تحلیل -->
+    <div id="analysis-detail-modal" class="modal full-modal" onclick="if(event.target===this) closeAnalysisDetail()">
+        <div class="modal-box modal-box-wide analysis-detail-box">
+            <div class="modal-header">
+                <h3 id="analysis-detail-title">تحلیل</h3>
+                <button class="modal-close-btn" onclick="closeAnalysisDetail()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <img id="analysis-detail-image" src="" alt="" class="analysis-detail-img">
+            <div id="analysis-detail-meta" class="analysis-meta"></div>
+            <p id="analysis-detail-text" class="analysis-detail-text"></p>
+            <button class="submit-btn" onclick="closeAnalysisDetail()" data-i18n="close">بستن</button>
         </div>
     </div>
 

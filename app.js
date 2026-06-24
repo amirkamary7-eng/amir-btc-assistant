@@ -41,6 +41,8 @@ let currentMarketTab = 'overview';
 let searchTerm = '';
 let sliderInterval = null;
 let currentSlide = 0;
+let editingAnalysisId = null;
+let hasChannelAccess = false;
 
 // ---------- ترجمه‌ها ----------
 const i18n = {
@@ -65,8 +67,11 @@ const i18n = {
         no_notif: 'هیچ اعلانی وجود ندارد.', confirm_clear_notif: 'آیا از پاک کردن تمامی اعلانات مطمئن هستید؟',
         join_vip_title: 'عضویت در کانال VIP',
         join_vip_desc: 'برای دسترسی به چارت‌های لحظه‌ای، تحلیل‌های اختصاصی و 100 ارز برتر، ابتدا در کانال رسمی ما عضو شوید.',
-        join_vip_btn: 'عضویت در کانال', join_vip_hint: 'بعد از عضویت، دسترسی شما باز خواهد شد.',
+        join_vip_btn: 'عضویت در کانال', join_vip_hint: 'بعد از عضویت، دکمه «بررسی عضویت» را بزنید.',
+        join_verify_btn: 'بررسی عضویت', join_not_verified: 'هنوز عضو کانال نشده‌اید. ابتدا در کانال عضو شوید.',
         join_verified: 'عضویت تایید شد', join_welcome: 'به اپلیکیشن امیر BTC خوش آمدید!',
+        join_guest_hint: 'لطفاً اپ را از داخل تلگرام باز کنید.',
+        edit_analysis: 'ویرایش تحلیل', update_analysis: 'ذخیره تغییرات',
         share_ref_text: 'به Amir BTC Assistant بپیوندید و از تحلیل‌های حرفه‌ای بازار استفاده کنید!',
         chart_unavailable: 'نمودار در دسترس نیست', close: 'بستن',
         ref_title: 'دعوت دوستان و دریافت پاداش', ref_desc: 'لینک دعوت خود را به اشتراک بگذارید.',
@@ -107,8 +112,11 @@ const i18n = {
         clear_all_notif: 'Clear all notifications', no_notif: 'No notifications yet.',
         confirm_clear_notif: 'Clear all notifications?', join_vip_title: 'Join VIP Channel',
         join_vip_desc: 'To access live charts, exclusive analysis and top 100 coins, join our official channel first.',
-        join_vip_btn: 'Join Channel', join_vip_hint: 'Access will unlock after you join.',
+        join_vip_btn: 'Join Channel', join_vip_hint: 'After joining, tap "Verify Membership".',
+        join_verify_btn: 'Verify Membership', join_not_verified: 'You are not a channel member yet. Please join first.',
         join_verified: 'Membership verified', join_welcome: 'Welcome to Amir BTC Assistant!',
+        join_guest_hint: 'Please open the app from inside Telegram.',
+        edit_analysis: 'Edit Analysis', update_analysis: 'Save Changes',
         share_ref_text: 'Join Amir BTC Assistant and get professional market analysis!',
         chart_unavailable: 'Chart unavailable', close: 'Close',
         ref_title: 'Invite Friends & Earn Rewards', ref_desc: 'Share your referral link with friends.',
@@ -148,8 +156,24 @@ function getUserName() {
 async function apiFetch(path, options = {}) {
     if (!API_BASE) throw new Error('API_BASE not configured');
     const res = await fetch(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json', ...options.headers }, ...options });
-    if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+    if (!res.ok) {
+        let detail = '';
+        try { detail = await res.text(); } catch (_) {}
+        throw new Error(detail || `HTTP ${res.status}`);
+    }
     return res.json();
+}
+
+async function checkBackendHealth() {
+    if (!API_BASE) return false;
+    try {
+        const res = await fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(8000) });
+        return res.ok;
+    } catch (_) { return false; }
+}
+
+function setAppLocked(locked) {
+    document.body.classList.toggle('app-locked', locked);
 }
 function updateLangChecks() {
     const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
@@ -671,13 +695,16 @@ function renderAnalysisList() {
     }
     const isAdminUser = isAdmin();
     grid.innerHTML = analyses.map(a => `
-        <div class="analysis-card">
+        <div class="analysis-card" onclick="openAnalysisDetail('${a.id}')">
             <img src="${a.image || 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop'}" class="analysis-cover" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Ctext x=%224%22 y=%2214%22 fill=%22%2364748b%22 font-size=%228%22%3ENo Image%3C/text%3E%3C/svg%3E'">
             <div class="analysis-body">
                 <h4>${a.coin} <span class="tf-badge">${a.timeframe}</span></h4>
                 <p>${a.text.substring(0, 100)}...</p>
                 <div class="analysis-meta">${a.author} • ${a.date}</div>
-                ${isAdminUser ? `<button class="delete-analysis-btn" onclick="deleteAnalysis('${a.id}', event)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> ${t('delete')}</button>` : ''}
+                ${isAdminUser ? `<div class="analysis-admin-actions" onclick="event.stopPropagation()">
+                    <button class="edit-analysis-btn" onclick="openEditAnalysisModal('${a.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> ${t('edit_analysis')}</button>
+                    <button class="delete-analysis-btn" onclick="deleteAnalysis('${a.id}', event)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> ${t('delete')}</button>
+                </div>` : ''}
             </div>
         </div>
     `).join('');
@@ -685,11 +712,14 @@ function renderAnalysisList() {
 function openAnalysisDetail(id) {
     const a = analyses.find(x => x.id === id);
     if (!a) return;
-    tg?.showPopup?.({
-        title: `${t('analysis')} ${a.coin} (${a.timeframe})`,
-        message: `${a.text}\n\n${a.author} • ${a.date}`,
-        buttons: [{ type: 'close', text: t('close') }]
-    }) || alert(`${a.coin}:\n${a.text}`);
+    document.getElementById('analysis-detail-title').innerText = `${a.coin} (${a.timeframe})`;
+    document.getElementById('analysis-detail-image').src = a.image || 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop';
+    document.getElementById('analysis-detail-meta').innerText = `${a.author} • ${a.date}`;
+    document.getElementById('analysis-detail-text').innerText = a.text;
+    document.getElementById('analysis-detail-modal').style.display = 'flex';
+}
+function closeAnalysisDetail() {
+    document.getElementById('analysis-detail-modal').style.display = 'none';
 }
 
 // ---------- مدیریت تحلیل (مدیر) ----------
@@ -699,10 +729,31 @@ function isAdmin() {
 }
 function openAddAnalysisModal() {
     if (!isAdmin()) { alert('فقط مدیران مجاز به افزودن تحلیل هستند.'); return; }
+    editingAnalysisId = null;
+    document.getElementById('analysis-modal-title').innerText = t('new_analysis');
+    document.getElementById('analysis-submit-btn').innerText = t('new_analysis');
+    ['analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    document.getElementById('add-analysis-modal').style.display = 'flex';
+}
+function openEditAnalysisModal(id) {
+    if (!isAdmin()) return;
+    const a = analyses.find(x => x.id === id);
+    if (!a) return;
+    editingAnalysisId = id;
+    document.getElementById('analysis-modal-title').innerText = t('edit_analysis');
+    document.getElementById('analysis-submit-btn').innerText = t('update_analysis');
+    document.getElementById('analysis-coin').value = a.coin;
+    document.getElementById('analysis-timeframe').value = a.timeframe;
+    document.getElementById('analysis-image').value = a.image || '';
+    document.getElementById('analysis-text').value = a.text;
     document.getElementById('add-analysis-modal').style.display = 'flex';
 }
 function closeAddAnalysisModal() {
     document.getElementById('add-analysis-modal').style.display = 'none';
+    editingAnalysisId = null;
 }
 function submitAnalysis() {
     const coin = document.getElementById('analysis-coin').value.trim().toUpperCase();
@@ -712,22 +763,30 @@ function submitAnalysis() {
     if (!coin || !text) { alert('نام ارز و متن تحلیل الزامی است.'); return; }
     if (!image) image = 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop';
 
-    const newAnalysis = {
-        id: Date.now().toString(),
-        coin,
-        timeframe,
-        image,
-        text,
-        date: new Date().toLocaleDateString('fa-IR'),
-        author: tg?.initDataUnsafe?.user?.first_name || 'مدیر'
-    };
-    analyses.unshift(newAnalysis);
+    if (editingAnalysisId) {
+        const idx = analyses.findIndex(a => a.id === editingAnalysisId);
+        if (idx >= 0) {
+            analyses[idx] = { ...analyses[idx], coin, timeframe, image, text, date: new Date().toLocaleDateString('fa-IR') };
+        }
+        addNotification(t('edit_analysis'), `${coin} (${timeframe})`, true);
+    } else {
+        const newAnalysis = {
+            id: Date.now().toString(),
+            coin,
+            timeframe,
+            image,
+            text,
+            date: new Date().toLocaleDateString('fa-IR'),
+            author: tg?.initDataUnsafe?.user?.first_name || 'مدیر'
+        };
+        analyses.unshift(newAnalysis);
+        addNotification('تحلیل جدید', `تحلیل ${coin} منتشر شد.`, true);
+    }
     localStorage.setItem('analyses', JSON.stringify(analyses));
     renderAnalysisSlider();
     renderAnalysisList();
     closeAddAnalysisModal();
     ['analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text'].forEach(id => document.getElementById(id).value = '');
-    addNotification('تحلیل جدید', `تحلیل ${coin} منتشر شد.`);
 }
 function deleteAnalysis(id, event) {
     if (event) event.stopPropagation();
@@ -907,7 +966,7 @@ async function triggerAlert(alert, currentPrice) {
         : `🔔 Price Alert!\n${alert.symbol} reached $${currentPrice.toFixed(4)}\nTarget: $${alert.price}`;
     playAlertSound();
     tg?.HapticFeedback?.notificationOccurred('warning');
-    addNotification(t('price_alert'), msg.replace(/\n/g, ' '));
+    addNotification(t('price_alert'), msg.replace(/\n/g, ' '), false);
     tg?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
     await notifyTelegram(msg);
     const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
@@ -926,12 +985,18 @@ async function checkAlerts() {
 }
 
 // ---------- نوتیفیکیشن ----------
-function addNotification(title, body) {
+function addNotification(title, body, sendToTelegram = true) {
     const notif = { id: Date.now().toString(), title, body, read: false, date: new Date().toISOString() };
     notifications.unshift(notif);
     if (notifications.length > 50) notifications = notifications.slice(0, 50);
     localStorage.setItem('notifications', JSON.stringify(notifications));
     updateNotifBadge();
+    if (sendToTelegram) {
+        const userId = getUserId();
+        if (!String(userId).startsWith('guest_')) {
+            notifyTelegram(`🔔 ${title}\n${body}`).catch(e => console.warn('notifyTelegram:', e));
+        }
+    }
 }
 function updateNotifBadge() {
     const unread = notifications.filter(n => !n.read).length;
@@ -1145,7 +1210,11 @@ async function submitTicket() {
         alert(t('ticket_error'));
         return;
     }
+    const btn = document.querySelector('#tickets-modal .submit-btn');
+    if (btn) { btn.disabled = true; btn.innerText = '...'; }
     try {
+        const healthy = await checkBackendHealth();
+        if (!healthy) throw new Error('Backend unavailable');
         await apiFetch('/api/tickets', {
             method: 'POST',
             body: JSON.stringify({ user_id: getUserId(), user_name: getUserName(), title, body })
@@ -1154,11 +1223,13 @@ async function submitTicket() {
         document.getElementById('ticket-body').value = '';
         await fetchTickets();
         renderTickets();
-        addNotification(t('support'), t('ticket_sent'));
+        addNotification(t('support'), t('ticket_sent'), false);
         tg?.showPopup?.({ title: t('ticket_sent'), message: title, buttons: [{ type: 'ok' }] });
     } catch (e) {
         alert(t('ticket_error'));
-        console.error(e);
+        console.error('submitTicket:', e);
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = t('ticket_send'); }
     }
 }
 
@@ -1200,24 +1271,92 @@ function joinChannel() {
     else window.open(`https://t.me/${CHANNEL}`, '_blank');
 }
 
+function openJoinAndVerify() {
+    joinChannel();
+    setTimeout(() => verifyJoin(), 4000);
+}
+
 // ---------- پاپ‌آپ جوین اجباری ----------
-function checkMandatoryJoin() {
-    const hasJoined = localStorage.getItem('has_joined_channel');
+async function checkMandatoryJoin() {
     const modal = document.getElementById('mandatory-join-modal');
     if (!modal) return;
-    
-    if (hasJoined === 'true') {
+
+    if (isAdmin()) {
+        hasChannelAccess = true;
         modal.style.display = 'none';
-    } else {
+        setAppLocked(false);
+        return;
+    }
+
+    const userId = getUserId();
+    if (String(userId).startsWith('guest_')) {
+        hasChannelAccess = false;
         modal.style.display = 'flex';
+        setAppLocked(true);
+        return;
+    }
+
+    if (!API_BASE) {
+        hasChannelAccess = localStorage.getItem('has_joined_channel') === 'true';
+        modal.style.display = hasChannelAccess ? 'none' : 'flex';
+        setAppLocked(!hasChannelAccess);
+        return;
+    }
+
+    try {
+        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}`);
+        hasChannelAccess = !!data.joined;
+        if (hasChannelAccess) {
+            localStorage.setItem('has_joined_channel', 'true');
+            modal.style.display = 'none';
+            setAppLocked(false);
+        } else {
+            localStorage.removeItem('has_joined_channel');
+            modal.style.display = 'flex';
+            setAppLocked(true);
+        }
+    } catch (e) {
+        console.warn('checkMandatoryJoin:', e);
+        hasChannelAccess = localStorage.getItem('has_joined_channel') === 'true';
+        modal.style.display = hasChannelAccess ? 'none' : 'flex';
+        setAppLocked(!hasChannelAccess);
     }
 }
 
-function verifyJoin() {
-    localStorage.setItem('has_joined_channel', 'true');
-    const modal = document.getElementById('mandatory-join-modal');
-    if (modal) modal.style.display = 'none';
-    addNotification(t('join_verified'), t('join_welcome'));
+async function verifyJoin() {
+    const userId = getUserId();
+    if (String(userId).startsWith('guest_')) {
+        alert(t('join_guest_hint'));
+        return;
+    }
+    const verifyBtn = document.getElementById('join-verify-btn');
+    if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.innerText = '...'; }
+    try {
+        if (API_BASE) {
+            const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}`);
+            if (data.joined) {
+                hasChannelAccess = true;
+                localStorage.setItem('has_joined_channel', 'true');
+                document.getElementById('mandatory-join-modal').style.display = 'none';
+                setAppLocked(false);
+                addNotification(t('join_verified'), t('join_welcome'), false);
+                tg?.showPopup?.({ title: t('join_verified'), message: t('join_welcome'), buttons: [{ type: 'ok' }] });
+                return;
+            }
+            alert(t('join_not_verified'));
+            return;
+        }
+        localStorage.setItem('has_joined_channel', 'true');
+        hasChannelAccess = true;
+        document.getElementById('mandatory-join-modal').style.display = 'none';
+        setAppLocked(false);
+        addNotification(t('join_verified'), t('join_welcome'), false);
+    } catch (e) {
+        console.warn('verifyJoin:', e);
+        alert(t('join_not_verified'));
+    } finally {
+        if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerText = t('join_verify_btn'); }
+    }
 }
 
 // ---------- نویگیشن و بارگذاری اخبار مهم ----------
@@ -1291,6 +1430,7 @@ function startPolling() {
         }
     }, 30000);
     setInterval(checkAlerts, 15000);
+    setInterval(() => checkMandatoryJoin(), 120000);
 }
 
 // ---------- راه‌اندازی ----------
@@ -1325,8 +1465,11 @@ window.closeAddCoinModal = closeAddCoinModal;
 window.filterCoinList = filterCoinList;
 window.filterAddCoinModal = filterCoinList;
 window.openAddAnalysisModal = openAddAnalysisModal;
+window.openEditAnalysisModal = openEditAnalysisModal;
 window.closeAddAnalysisModal = closeAddAnalysisModal;
 window.submitAnalysis = submitAnalysis;
+window.openAnalysisDetail = openAnalysisDetail;
+window.closeAnalysisDetail = closeAnalysisDetail;
 window.deleteAnalysis = deleteAnalysis;
 window.openCoinDetail = openCoinDetail;
 window.closeCoinDetail = closeCoinDetail;
@@ -1359,3 +1502,4 @@ window.changeLang = changeLang;
 window.openNewsModal = openNewsModal;
 window.closeNewsModal = closeNewsModal;
 window.verifyJoin = verifyJoin;
+window.openJoinAndVerify = openJoinAndVerify;
