@@ -860,15 +860,20 @@ function joinChannel() {
 // ---------- پاپ‌آپ جوین اجباری ----------
 function checkMandatoryJoin() {
     const hasJoined = localStorage.getItem('has_joined_channel');
+    const modal = document.getElementById('mandatory-join-modal');
+    if (!modal) return;
+    
     if (hasJoined === 'true') {
-        document.getElementById('mandatory-join-modal').style.display = 'none';
+        modal.style.display = 'none';
     } else {
-        document.getElementById('mandatory-join-modal').style.display = 'flex';
+        modal.style.display = 'flex';
     }
 }
+
 function verifyJoin() {
     localStorage.setItem('has_joined_channel', 'true');
-    document.getElementById('mandatory-join-modal').style.display = 'none';
+    const modal = document.getElementById('mandatory-join-modal');
+    if (modal) modal.style.display = 'none';
     addNotification('عضویت تایید شد', 'به اپلیکیشن امیر BTC خوش آمدید!');
 }
 

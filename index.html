@@ -29,7 +29,6 @@
 
     <!-- ===== صفحه داشبورد ===== -->
     <section id="dashboard-page" class="page active">
-        <!-- Hero Banner -->
         <div class="hero-banner" onclick="joinChannel()">
             <div class="hero-content">
                 <span class="hero-badge">کانال تحلیلی</span>
@@ -40,7 +39,6 @@
             <div class="hero-glow"></div>
         </div>
 
-        <!-- اسلایدر تحلیل‌ها -->
         <div class="section-header">
             <span class="section-title">📊 تحلیل‌های جدید</span>
             <span class="section-more" onclick="switchTab('analysis-page')">مشاهده همه</span>
@@ -50,7 +48,6 @@
             <div class="slider-dots" id="slider-dots"></div>
         </div>
 
-        <!-- واچ‌لیست -->
         <div class="section-header">
             <span class="section-title">⭐ واچ‌لیست من</span>
             <button class="add-watch-btn" onclick="openAddCoinModal()">
@@ -59,7 +56,6 @@
         </div>
         <div class="watchlist-grid" id="watchlist-grid"></div>
 
-        <!-- بخش اخبار مهم (جایگزین خلاصه بازار) -->
         <div class="section-header">
             <span class="section-title">📰 اخبار مهم و فوری</span>
         </div>
@@ -195,7 +191,7 @@
         </div>
     </section>
 
-    <!-- ===== منوی پایینی (با SVG) ===== -->
+    <!-- ===== منوی پایینی ===== -->
     <nav class="bottom-nav">
         <button class="nav-item active" data-page="dashboard-page" onclick="switchTab('dashboard-page', this)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -220,8 +216,9 @@
     </nav>
 
     <!-- ===== مودال‌ها ===== -->
-    <!-- پاپ‌آپ جوین اجباری -->
-    <div id="mandatory-join-modal" class="modal" style="display:flex; z-index: 10000; backdrop-filter: blur(15px);">
+
+    <!-- پاپ‌آپ جوین اجباری (اصلاح شده) -->
+    <div id="mandatory-join-modal" class="modal" style="display:none; z-index: 10000; backdrop-filter: blur(15px);">
         <div class="modal-box join-box" style="text-align: center; padding: 30px 20px;">
             <div class="join-icon" style="font-size: 50px; margin-bottom: 15px;">💎</div>
             <h3 style="font-size: 18px; margin-bottom: 10px; color: var(--accent);">عضویت در کانال VIP</h3>
@@ -276,7 +273,7 @@
         </div>
     </div>
 
-    <!-- مودال جزئیات کوین (هشدار قیمت) -->
+    <!-- مودال جزئیات کوین -->
     <div id="coin-detail-modal" class="modal" onclick="if(event.target===this) closeCoinDetail()">
         <div class="modal-box">
             <div class="modal-header">
@@ -296,18 +293,17 @@
         </div>
     </div>
 
-    <!-- مودال نوتیفیکیشن‌ها (با دکمه‌های کوچک و پاک کردن همه) -->
+    <!-- مودال نوتیفیکیشن -->
     <div id="notif-modal" class="modal" onclick="if(event.target===this) closeNotifModal()">
         <div class="modal-box">
-            <div class="modal-header" style="margin-bottom: 10px;">
-                <h3 style="display: flex; align-items: center; gap: 6px;">🔔 مرکز اعلانات</h3>
+            <div class="modal-header">
+                <h3>🔔 مرکز اعلانات</h3>
                 <div style="display:flex; gap:8px; align-items:center;">
                     <button class="mark-all-read-btn" onclick="markAllRead()">✓ همه خوانده شد</button>
-                    <button onclick="closeNotifModal()" style="font-size: 20px;">✕</button>
+                    <button onclick="closeNotifModal()">✕</button>
                 </div>
             </div>
             <div id="notif-list" class="notif-list" style="margin-bottom: 15px;"></div>
-            <!-- دکمه پاک کردن کل نوتیف‌ها -->
             <button class="clear-notif-btn" onclick="clearAllNotifications()">🗑 پاک کردن همه اعلانات</button>
         </div>
     </div>
