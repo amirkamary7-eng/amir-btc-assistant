@@ -1006,3 +1006,19 @@ body {
     .market-summary { grid-template-columns: 1fr 1fr; }
     .ref-stats { grid-template-columns: 1fr 1fr; }
 }
+/* دکمه حذف تحلیل (فقط مدیر) */
+.delete-analysis-btn {
+    background: rgba(255,77,77,0.12);
+    border: 1px solid rgba(255,77,77,0.2);
+    color: var(--red);
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 6px;
+    align-self: flex-start;
+    transition: 0.2s;
+}
+.delete-analysis-btn:hover {
+    background: rgba(255,77,77,0.2);
+}

@@ -108,91 +108,90 @@
         </div>
         <div class="news-list" id="news-list"></div>
     </section>
-
-    <!-- ===== صفحه پروفایل ===== -->
-    <section id="profile-page" class="page">
-        <!-- کارت کاربر -->
-        <div class="profile-card">
-            <div class="profile-settings" onclick="toggleSettings()">⚙️</div>
-            <div class="profile-avatar">
-                <img id="profile-avatar" src="https://ui-avatars.com/api/?name=Guest&background=f7931a&color=fff&bold=true" alt="">
-            </div>
-            <h3 class="profile-name" id="profile-name">کاربر میهمان</h3>
-            <span class="profile-username" id="profile-username">@guest</span>
-            <span class="profile-id">ID: <span id="profile-id-num">000000</span></span>
+<!-- ===== صفحه پروفایل ===== -->
+<section id="profile-page" class="page">
+    <!-- کارت کاربر -->
+    <div class="profile-card">
+        <div class="profile-settings" onclick="toggleSettings()">⚙️</div>
+        <div class="profile-avatar">
+            <img id="profile-avatar" src="https://ui-avatars.com/api/?name=Guest&background=f7931a&color=fff&bold=true" alt="">
         </div>
+        <h3 class="profile-name" id="profile-name">کاربر میهمان</h3>
+        <span class="profile-username" id="profile-username">@guest</span>
+        <span class="profile-id">ID: <span id="profile-id-num">000000</span></span>
+    </div>
 
-        <!-- رفرال -->
-        <div class="referral-card">
-            <div class="ref-header">
-                <span class="ref-icon">🎁</span>
-                <div>
-                    <h4>Invite Friends & Earn Rewards</h4>
-                    <p>Share your referral link and invite your friends to join BTC Assistant.</p>
-                </div>
-            </div>
-            <div class="ref-input">
-                <input type="text" id="ref-link" readonly>
-                <button onclick="copyRefLink()">کپی</button>
-            </div>
-            <button class="ref-share-btn" onclick="shareRefLink()">📤 اشتراک‌گذاری مستقیم</button>
-            <div class="ref-stats">
-                <div><span>کل دعوت‌ها</span><strong id="ref-total">0</strong></div>
-                <div><span>فعال</span><strong id="ref-active">0</strong></div>
-                <div><span>پاداش</span><strong id="ref-reward">0 SAT</strong></div>
-            </div>
-            <div class="ref-rewards-soon">
-                <span class="soon-badge">بزودی</span>
-                <h5>🏆 گردونه شانس و جوایز نقدی</h5>
-                <p>سیستم پاداش‌دهی بر اساس امتیاز رفرال‌ها در آپدیت بعدی فعال می‌شود.</p>
+    <!-- رفرال -->
+    <div class="referral-card">
+        <div class="ref-header">
+            <span class="ref-icon">🎁</span>
+            <div>
+                <h4>Invite Friends & Earn Rewards</h4>
+                <p>Share your referral link and invite your friends to join BTC Assistant.</p>
             </div>
         </div>
+        <div class="ref-input">
+            <input type="text" id="ref-link" readonly>
+            <button onclick="copyRefLink()">کپی</button>
+        </div>
+        <button class="ref-share-btn" onclick="shareRefLink()">📤 اشتراک‌گذاری مستقیم</button>
+        <div class="ref-stats">
+            <div><span>کل دعوت‌ها</span><strong id="ref-total">0</strong></div>
+            <div><span>فعال</span><strong id="ref-active">0</strong></div>
+            <div><span>پاداش</span><strong id="ref-reward">0 SAT</strong></div>
+        </div>
+        <div class="ref-rewards-soon">
+            <span class="soon-badge">بزودی</span>
+            <h5>🏆 گردونه شانس و جوایز نقدی</h5>
+            <p>سیستم پاداش‌دهی بر اساس امتیاز رفرال‌ها در آپدیت بعدی فعال می‌شود.</p>
+        </div>
+    </div>
 
-        <!-- تنظیمات (زیر مجموعه پروفایل) -->
-        <div class="settings-panel" id="settings-panel" style="display:none;">
-            <div class="settings-header" onclick="toggleSettings()">➔ بازگشت</div>
-            <div class="settings-list">
-                <div class="setting-item" onclick="changeLang('fa')">
-                    <span>🇮🇷 فارسی</span>
-                    <span id="lang-fa-check" class="lang-check">✓</span>
-                </div>
-                <div class="setting-item" onclick="changeLang('en')">
-                    <span>🇬🇧 English</span>
-                    <span id="lang-en-check" class="lang-check"></span>
-                </div>
-                <div class="setting-item" onclick="openTickets()">
-                    <span>🎫 پشتیبانی و تیکت</span>
-                    <span>➔</span>
-                </div>
-                <div class="setting-item" onclick="openAbout()">
-                    <span>ℹ️ درباره ما</span>
-                    <span>➔</span>
-                </div>
+    <!-- تنظیمات (زیر مجموعه پروفایل) -->
+    <div class="settings-panel" id="settings-panel" style="display:none;">
+        <div class="settings-header" onclick="toggleSettings()">➔ بازگشت</div>
+        <div class="settings-list">
+            <div class="setting-item" onclick="changeLang('fa')">
+                <span>🇮🇷 فارسی</span>
+                <span id="lang-fa-check" class="lang-check">✓</span>
+            </div>
+            <div class="setting-item" onclick="changeLang('en')">
+                <span>🇬🇧 English</span>
+                <span id="lang-en-check" class="lang-check"></span>
+            </div>
+            <div class="setting-item" onclick="openTickets()">
+                <span>🎫 پشتیبانی و تیکت</span>
+                <span>➔</span>
+            </div>
+            <div class="setting-item" onclick="openAbout()">
+                <span>ℹ️ درباره ما</span>
+                <span>➔</span>
             </div>
         </div>
+    </div>
 
-        <!-- صفحه تیکت -->
-        <div id="tickets-page" style="display:none;" class="sub-page">
-            <div class="back-btn" onclick="closeTickets()">➔ بازگشت</div>
-            <h3>ارسال تیکت</h3>
-            <input type="text" id="ticket-title" placeholder="عنوان..." class="input-field">
-            <textarea id="ticket-body" placeholder="متن..." class="input-field" rows="4"></textarea>
-            <button class="submit-btn" onclick="submitTicket()">ارسال</button>
-            <div id="ticket-list" class="ticket-list"></div>
-        </div>
+    <!-- صفحه تیکت -->
+    <div id="tickets-page" style="display:none;" class="sub-page">
+        <div class="back-btn" onclick="closeTickets()">➔ بازگشت</div>
+        <h3>ارسال تیکت</h3>
+        <input type="text" id="ticket-title" placeholder="عنوان..." class="input-field">
+        <textarea id="ticket-body" placeholder="متن..." class="input-field" rows="4"></textarea>
+        <button class="submit-btn" onclick="submitTicket()">ارسال</button>
+        <div id="ticket-list" class="ticket-list"></div>
+    </div>
 
-        <!-- صفحه درباره ما -->
-        <div id="about-page" style="display:none;" class="sub-page">
-            <div class="back-btn" onclick="closeAbout()">➔ بازگشت</div>
-            <div class="about-content">
-                <h3>درباره Amir BTC Assistant</h3>
-                <p>نسخه 3.0.0</p>
-                <p>دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر جهانی.</p>
-                <p>کانال رسمی: <a href="#" onclick="joinChannel()">@amir_btc_2024</a></p>
-                <p>ساخته شده با ❤️ روی Cloudflare Workers</p>
-            </div>
+    <!-- صفحه درباره ما -->
+    <div id="about-page" style="display:none;" class="sub-page">
+        <div class="back-btn" onclick="closeAbout()">➔ بازگشت</div>
+        <div class="about-content">
+            <h3>درباره Amir BTC Assistant</h3>
+            <p>نسخه 3.0.0</p>
+            <p>دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر جهانی.</p>
+            <p>کانال رسمی: <a href="#" onclick="joinChannel()">@amir_btc_2024</a></p>
+            <p>ساخته شده با ❤️ روی Cloudflare Workers</p>
         </div>
-    </section>
+    </div>
+</section>
 
     <!-- ===== منوی پایینی (با آیکون SVG) ===== -->
     <nav class="bottom-nav">
