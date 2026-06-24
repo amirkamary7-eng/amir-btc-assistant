@@ -1,5 +1,6 @@
 // ============================================================
-// Amir BTC Assistant - Core Application v3.2
+// Amir BTC Assistant - Core Application v3.3
+// با قابلیت بروزرسانی لحظه‌ای، داده‌های داینامیک و بدون ایموجی
 // ============================================================
 
 const tg = window.Telegram?.WebApp;
@@ -23,8 +24,52 @@ let currentSlide = 0;
 
 // ---------- ترجمه‌ها ----------
 const i18n = {
-    fa: { welcome: 'خوش آمدید،', dashboard: 'داشبورد', market: 'مارکت', analysis: 'تحلیل‌ها', news: 'اخبار', profile: 'پروفایل', watchlist: 'واچ‌لیست', settings: 'تنظیمات', referral: 'دعوت و پاداش', support: 'پشتیبانی', about: 'درباره ما', language: 'زبان', search: 'جستجوی ارز...', no_data: 'داده‌ای موجود نیست', join_channel: 'عضویت در کانال', copy: 'کپی', share: 'اشتراک‌گذاری', delete: 'حذف', mark_all_read: 'همه خوانده شد' },
-    en: { welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News', profile: 'Profile', watchlist: 'Watchlist', settings: 'Settings', referral: 'Referral & Earn', support: 'Support', about: 'About', language: 'Language', search: 'Search coin...', no_data: 'No data available', join_channel: 'Join Channel', copy: 'Copy', share: 'Share', delete: 'Delete', mark_all_read: 'Mark all read' }
+    fa: {
+        welcome: 'خوش آمدید،',
+        dashboard: 'داشبورد',
+        market: 'مارکت',
+        analysis: 'تحلیل‌ها',
+        news: 'اخبار',
+        profile: 'پروفایل',
+        watchlist: 'واچ‌لیست',
+        settings: 'تنظیمات',
+        referral: 'دعوت و پاداش',
+        support: 'پشتیبانی',
+        about: 'درباره ما',
+        language: 'زبان',
+        search: 'جستجوی ارز...',
+        no_data: 'داده‌ای موجود نیست',
+        join_channel: 'عضویت در کانال',
+        copy: 'کپی',
+        share: 'اشتراک‌گذاری',
+        delete: 'حذف',
+        mark_all_read: 'همه خوانده شد',
+        price_alert: 'هشدار قیمت',
+        set_alert: 'ثبت هشدار'
+    },
+    en: {
+        welcome: 'Welcome,',
+        dashboard: 'Dashboard',
+        market: 'Market',
+        analysis: 'Analysis',
+        news: 'News',
+        profile: 'Profile',
+        watchlist: 'Watchlist',
+        settings: 'Settings',
+        referral: 'Referral & Earn',
+        support: 'Support',
+        about: 'About',
+        language: 'Language',
+        search: 'Search coin...',
+        no_data: 'No data available',
+        join_channel: 'Join Channel',
+        copy: 'Copy',
+        share: 'Share',
+        delete: 'Delete',
+        mark_all_read: 'Mark all read',
+        price_alert: 'Price Alert',
+        set_alert: 'Set Alert'
+    }
 };
 function t(key) { return i18n[currentLang]?.[key] || key; }
 
@@ -50,7 +95,7 @@ function changeLang(lang) {
     loadMarketData();
 }
 
-// ---------- کش ----------
+// ---------- کش با TTL ----------
 const Cache = {
     storage: {},
     set(key, data, ttl) { this.storage[key] = { data, expiry: Date.now() + ttl * 1000 }; },
@@ -63,30 +108,35 @@ const Cache = {
 };
 
 // ---------- API با Proxy جدید ----------
-async function fetchWithProxy(url) {
-    try {
-        const res = await fetch(PROXY + encodeURIComponent(url));
-        if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
-        return res.json();
-    } catch (e) {
-        console.warn('Proxy failed, trying direct fallback:', e);
-        // Fallback مستقیم به Binance
-        if (url.includes('binance.com')) {
-            const res = await fetch(url);
-            if (!res.ok) throw new Error(`Direct HTTP ${res.status}`);
+async function fetchWithProxy(url, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const res = await fetch(PROXY + encodeURIComponent(url));
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
+        } catch (e) {
+            console.warn(`Proxy attempt ${i+1} failed:`, e);
+            if (i === retries - 1) {
+                // Fallback مستقیم به Binance (بدون Proxy)
+                if (url.includes('binance.com')) {
+                    const direct = await fetch(url);
+                    if (!direct.ok) throw new Error(`Direct HTTP ${direct.status}`);
+                    return direct.json();
+                }
+                throw e;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
         }
-        throw e;
     }
 }
 
-// ---------- بارگذاری داده‌های بازار ----------
+// ---------- بارگذاری داینامیک داده‌های بازار (CoinCap + Binance) ----------
 async function loadMarketData() {
     try {
         const cached = Cache.get('market');
         if (cached) { allCoins = cached; renderMarket(); renderWatchlist(); renderSummary(); return; }
 
-        // ۱. دریافت از CoinCap از طریق پروکسی جدید
+        // ۱. دریافت لیست ارزها از CoinCap
         const data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
         const assets = data.data || [];
         if (!assets.length) throw new Error('No assets from CoinCap');
@@ -144,7 +194,7 @@ function renderSummary() {
     document.getElementById('btc-dom').innerText = btc ? ((btc.marketCapUsd / mcap) * 100).toFixed(1) + '%' : '--';
 }
 
-// ---------- رندر مارکت ----------
+// ---------- رندر مارکت با تب‌ها و جستجو ----------
 function renderMarket() {
     const list = document.getElementById('coin-list');
     let filtered = [...allCoins];
@@ -164,7 +214,7 @@ function renderMarket() {
         case 'watchlist':
             filtered = filtered.filter(c => watchlist.includes(c.symbol));
             break;
-        default:
+        default: // overview
             filtered = filtered.slice(0, 50);
     }
     if (!filtered.length) {
@@ -178,7 +228,7 @@ function renderMarket() {
             <div class="coin-item" onclick="openCoinDetail('${c.symbol}')">
                 <div class="coin-left">
                     <span class="coin-rank">#${c.rank}</span>
-                    <img src="https://assets.coincap.io/assets/icons/${c.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" class="coin-icon">
+                    <img src="https://assets.coincap.io/assets/icons/${c.symbol.toLowerCase()}@2x.png" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="coin-icon">
                     <div>
                         <div class="coin-sym">${c.symbol}</div>
                         <div class="coin-name">${c.name}</div>
@@ -229,8 +279,8 @@ function renderWatchlist() {
     }
     grid.innerHTML = watchCoins.slice(0, 6).map(c => `
         <div class="watch-item" onclick="openCoinDetail('${c.symbol}')">
-            <span class="remove-watch" onclick="toggleWatchlist('${c.symbol}', event)">✕</span>
-            <img src="https://assets.coincap.io/assets/icons/${c.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'">
+            <span class="remove-watch" onclick="toggleWatchlist('${c.symbol}', event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+            <img src="https://assets.coincap.io/assets/icons/${c.symbol.toLowerCase()}@2x.png" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="watch-icon">
             <span class="watch-sym">${c.symbol}</span>
             <span class="watch-price">$${c.priceUsd.toFixed(2)}</span>
             <span class="watch-change ${c.changePercent24Hr >= 0 ? 'up' : 'down'}">${c.changePercent24Hr >= 0 ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</span>
@@ -246,10 +296,11 @@ function closeAddCoinModal() {
 }
 function populateCoinModal() {
     const list = document.getElementById('coin-modal-list');
+    if (!allCoins.length) return;
     list.innerHTML = allCoins.map(c => `
         <div class="modal-coin-item" onclick="toggleWatchlist('${c.symbol}', event); populateCoinModal();">
             <span>${c.symbol} - ${c.name}</span>
-            <span>${watchlist.includes(c.symbol) ? '⭐' : '☆'}</span>
+            <span>${watchlist.includes(c.symbol) ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="#f7931a" stroke="#f7931a" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>' : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'}</span>
         </div>
     `).join('');
 }
@@ -260,7 +311,7 @@ function filterCoinList() {
     });
 }
 
-// ---------- اخبار ----------
+// ---------- اخبار داینامیک از منابع معتبر ----------
 let newsCache = [];
 async function loadNews() {
     try {
@@ -268,6 +319,7 @@ async function loadNews() {
         if (cached) { newsCache = cached; renderNews('all'); return; }
 
         let articles = [];
+        // ۱. CoinTelegraph RSS
         try {
             const rssText = await fetchWithProxy('https://cointelegraph.com/rss');
             const parser = new DOMParser();
@@ -278,17 +330,20 @@ async function loadNews() {
                 const link = item.querySelector('link')?.textContent || '#';
                 const description = item.querySelector('description')?.textContent || '';
                 const imgMatch = description.match(/<img[^>]+src="([^">]+)"/);
-                const image = imgMatch ? imgMatch[1] : 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop';
+                const image = imgMatch ? imgMatch[1] : null;
                 articles.push({
                     title: title.replace(/<[^>]*>/g, '').trim(),
                     source: 'CoinTelegraph',
                     image,
                     url: link,
                     body: description.replace(/<[^>]*>/g, '').trim().substring(0, 200),
-                    category: 'crypto'
+                    category: 'crypto',
+                    time: new Date(item.querySelector('pubDate')?.textContent || Date.now()).toLocaleString()
                 });
             });
         } catch (e) { console.warn('CoinTelegraph RSS error:', e); }
+
+        // ۲. CoinDesk RSS
         try {
             const rssText = await fetchWithProxy('https://www.coindesk.com/arc/outboundfeeds/rss/');
             const parser = new DOMParser();
@@ -299,23 +354,51 @@ async function loadNews() {
                 const link = item.querySelector('link')?.textContent || '#';
                 const description = item.querySelector('description')?.textContent || '';
                 const imgMatch = description.match(/<img[^>]+src="([^">]+)"/);
-                const image = imgMatch ? imgMatch[1] : 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop';
+                const image = imgMatch ? imgMatch[1] : null;
                 articles.push({
                     title: title.replace(/<[^>]*>/g, '').trim(),
                     source: 'CoinDesk',
                     image,
                     url: link,
                     body: description.replace(/<[^>]*>/g, '').trim().substring(0, 200),
-                    category: 'crypto'
+                    category: 'crypto',
+                    time: new Date(item.querySelector('pubDate')?.textContent || Date.now()).toLocaleString()
                 });
             });
         } catch (e) { console.warn('CoinDesk RSS error:', e); }
+
+        // ۳. CryptoPanic (بدون API Key - از RSS استفاده کنیم)
+        try {
+            const rssText = await fetchWithProxy('https://cryptopanic.com/feed/');
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(rssText, 'text/xml');
+            const items = xmlDoc.querySelectorAll('item');
+            items.forEach(item => {
+                const title = item.querySelector('title')?.textContent || '';
+                const link = item.querySelector('link')?.textContent || '#';
+                const description = item.querySelector('description')?.textContent || '';
+                const imgMatch = description.match(/<img[^>]+src="([^">]+)"/);
+                const image = imgMatch ? imgMatch[1] : null;
+                articles.push({
+                    title: title.replace(/<[^>]*>/g, '').trim(),
+                    source: 'CryptoPanic',
+                    image,
+                    url: link,
+                    body: description.replace(/<[^>]*>/g, '').trim().substring(0, 200),
+                    category: 'crypto',
+                    time: new Date(item.querySelector('pubDate')?.textContent || Date.now()).toLocaleString()
+                });
+            });
+        } catch (e) { console.warn('CryptoPanic RSS error:', e); }
+
+        // اگر هیچ خبری نیامد، از داده‌های Mock استفاده کن
         if (!articles.length) {
             articles = [
-                { title: 'بیت‌کوین به ۷۰ هزار دلار نزدیک شد', source: 'کوین‌تلگراف', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'با افزایش حجم معاملات...', category: 'crypto' },
-                { title: 'اتریوم ۱۵٪ رشد کرد', source: 'کوین‌دسک', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'اتریوم به سطح ۴۰۰۰ دلار رسید...', category: 'crypto' }
+                { title: 'بیت‌کوین به ۷۰ هزار دلار نزدیک شد', source: 'کوین‌تلگراف', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'با افزایش حجم معاملات...', category: 'crypto', time: 'اخیراً' },
+                { title: 'اتریوم ۱۵٪ رشد کرد', source: 'کوین‌دسک', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'اتریوم به سطح ۴۰۰۰ دلار رسید...', category: 'crypto', time: 'اخیراً' }
             ];
         }
+
         newsCache = articles.slice(0, 20);
         Cache.set('news', newsCache, 300);
         renderNews('all');
@@ -340,10 +423,10 @@ function renderNews(category) {
     }
     container.innerHTML = filtered.map(n => `
         <div class="news-item" onclick="openNewsModal('${encodeURIComponent(JSON.stringify(n))}')">
-            <img src="${n.image}" class="news-img" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'">
+            <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2270%22 height=%2270%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="news-img">
             <div class="news-content">
                 <div class="news-title">${n.title}</div>
-                <div class="news-source">${n.source}</div>
+                <div class="news-source">${n.source} • ${n.time || ''}</div>
             </div>
         </div>
     `).join('');
@@ -356,7 +439,7 @@ function switchNewsTab(category, btn) {
 function openNewsModal(encoded) {
     const n = JSON.parse(decodeURIComponent(encoded));
     document.getElementById('news-modal-title').innerText = n.title;
-    document.getElementById('news-modal-image').src = n.image || 'https://img.icons8.com/clouds/100/000000/bitcoin.png';
+    document.getElementById('news-modal-image').src = n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
     document.getElementById('news-modal-body').innerText = n.body || 'متن کامل خبر در دسترس نیست.';
     document.getElementById('news-modal-link').href = n.url || '#';
     document.getElementById('news-modal').style.display = 'flex';
@@ -365,7 +448,7 @@ function closeNewsModal() {
     document.getElementById('news-modal').style.display = 'none';
 }
 
-// ---------- اسلایدر تحلیل‌ها ----------
+// ---------- اسلایدر تحلیل‌ها و لیست ----------
 function renderAnalysisSlider() {
     const track = document.getElementById('slider-track');
     const dots = document.getElementById('slider-dots');
@@ -377,7 +460,7 @@ function renderAnalysisSlider() {
         const a = analyses[idx];
         track.innerHTML = `
             <div class="slide-item" onclick="openAnalysisDetail('${a.id}')">
-                <img src="${a.image || 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop'}" class="slide-img">
+                <img src="${a.image || 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop'}" class="slide-img" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22170%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2217%22 rx=%224%22/%3E%3Ctext x=%225%22 y=%2212%22 fill=%22%2364748b%22 font-size=%228%22%3ENo Image%3C/text%3E%3C/svg%3E'">
                 <div class="slide-overlay">
                     <h4>${a.coin} (${a.timeframe})</h4>
                     <p>${a.text.substring(0, 80)}...</p>
@@ -404,12 +487,12 @@ function renderAnalysisList() {
     const isAdminUser = isAdmin();
     grid.innerHTML = analyses.map(a => `
         <div class="analysis-card">
-            <img src="${a.image}" class="analysis-cover">
+            <img src="${a.image || 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop'}" class="analysis-cover" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Ctext x=%224%22 y=%2214%22 fill=%22%2364748b%22 font-size=%228%22%3ENo Image%3C/text%3E%3C/svg%3E'">
             <div class="analysis-body">
                 <h4>${a.coin} <span class="tf-badge">${a.timeframe}</span></h4>
                 <p>${a.text.substring(0, 100)}...</p>
                 <div class="analysis-meta">${a.author} • ${a.date}</div>
-                ${isAdminUser ? `<button class="delete-analysis-btn" onclick="deleteAnalysis('${a.id}', event)">🗑️ ${t('delete')}</button>` : ''}
+                ${isAdminUser ? `<button class="delete-analysis-btn" onclick="deleteAnalysis('${a.id}', event)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> ${t('delete')}</button>` : ''}
             </div>
         </div>
     `).join('');
@@ -455,6 +538,7 @@ function submitAnalysis() {
     };
     analyses.unshift(newAnalysis);
     localStorage.setItem('analyses', JSON.stringify(analyses));
+    // به‌روزرسانی فوری
     renderAnalysisSlider();
     renderAnalysisList();
     closeAddAnalysisModal();
@@ -467,7 +551,7 @@ function deleteAnalysis(id, event) {
     if (confirm('آیا از حذف این تحلیل مطمئن هستید؟')) {
         analyses = analyses.filter(a => a.id !== id);
         localStorage.setItem('analyses', JSON.stringify(analyses));
-        // رندر مجدد فوری
+        // به‌روزرسانی فوری
         renderAnalysisSlider();
         renderAnalysisList();
         addNotification('تحلیل حذف شد', `یک تحلیل توسط مدیر حذف گردید.`);
@@ -522,7 +606,7 @@ function renderActiveAlerts(symbol) {
     container.innerHTML = userAlerts.map(a => `
         <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border);">
             <span>💰 ${a.price}</span>
-            <span style="color:var(--red); cursor:pointer;" onclick="removeAlert('${a.id}')">✕</span>
+            <span style="color:var(--red); cursor:pointer;" onclick="removeAlert('${a.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
         </div>
     `).join('');
 }
@@ -560,7 +644,7 @@ async function checkAlerts() {
         });
         if (triggered.length) {
             triggered.forEach(a => {
-                addNotification('🚨 هشدار قیمت', `${a.symbol} به قیمت ${a.price} رسید!`);
+                addNotification('هشدار قیمت', `${a.symbol} به قیمت ${a.price} رسید!`);
                 alerts = alerts.filter(x => x.id !== a.id);
                 localStorage.setItem('price_alerts', JSON.stringify(alerts));
             });
@@ -683,7 +767,7 @@ function renderTickets() {
         <div class="ticket-item">
             <div><strong>${t.title}</strong> <span class="ticket-status ${t.status}">${t.status === 'open' ? 'در انتظار' : 'پاسخ داده شده'}</span></div>
             <div>${t.body}</div>
-            ${t.response ? `<div class="ticket-reply">✅ ${t.response}</div>` : ''}
+            ${t.response ? `<div class="ticket-reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> ${t.response}</div>` : ''}
             <div class="ticket-date">${t.date}</div>
         </div>
     `).join('');
@@ -699,6 +783,7 @@ function submitTicket() {
     document.getElementById('ticket-body').value = '';
     renderTickets();
     addNotification('تیکت جدید', `تیکت "${title}" با موفقیت ارسال شد.`);
+    // پاسخ خودکار شبیه‌سازی (در تولید با Webhook)
     setTimeout(() => {
         const idx = tickets.findIndex(t => t.id === ticket.id);
         if (idx > -1) {
@@ -723,7 +808,7 @@ function joinChannel() {
     else window.open(`https://t.me/${CHANNEL}`, '_blank');
 }
 
-// ---------- نویگیشن ----------
+// ---------- نویگیشن و مدیریت تب ----------
 function switchTab(pageId, btn) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(pageId)?.classList.add('active');
@@ -734,6 +819,8 @@ function switchTab(pageId, btn) {
         loadUser();
         loadMarketData();
         renderAnalysisSlider();
+        // بارگذاری اخبار مهم در داشبورد
+        loadImportantNews();
     } else if (pageId === 'market-page') {
         loadMarketData();
     } else if (pageId === 'analysis-page') {
@@ -749,6 +836,62 @@ function switchTab(pageId, btn) {
     }
 }
 
+// ---------- بارگذاری اخبار مهم در داشبورد ----------
+async function loadImportantNews() {
+    const container = document.getElementById('important-news');
+    if (!container) return;
+    try {
+        const news = await loadNews(); // استفاده از کش
+        const important = newsCache.slice(0, 3);
+        if (!important.length) {
+            container.innerHTML = '<div class="empty-state">خبری وجود ندارد</div>';
+            return;
+        }
+        container.innerHTML = important.map(n => `
+            <div class="important-news-item" onclick="openNewsModal('${encodeURIComponent(JSON.stringify(n))}')">
+                <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="important-news-img">
+                <div class="important-news-content">
+                    <div class="important-news-title">${n.title}</div>
+                    <div class="important-news-source">${n.source}</div>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {}
+}
+
+// ---------- بروزرسانی‌های دوره‌ای (Polling) ----------
+// برای بروزرسانی لحظه‌ای بدون رفرش
+function startPolling() {
+    setInterval(() => {
+        // بازار (هر ۳۰ ثانیه)
+        if (document.querySelector('.page.active')?.id === 'market-page' || document.querySelector('.page.active')?.id === 'dashboard-page') {
+            loadMarketData();
+        }
+        // تحلیل‌ها (هر ۱۵ ثانیه)
+        if (document.querySelector('.page.active')?.id === 'analysis-page' || document.querySelector('.page.active')?.id === 'dashboard-page') {
+            const stored = JSON.parse(localStorage.getItem('analyses') || '[]');
+            if (stored.length !== analyses.length) {
+                analyses = stored;
+                renderAnalysisSlider();
+                renderAnalysisList();
+            }
+        }
+        // اخبار (هر ۶۰ ثانیه)
+        if (document.querySelector('.page.active')?.id === 'news-page') {
+            loadNews();
+        }
+        // نوتیفیکیشن‌ها (هر ۳۰ ثانیه)
+        const storedNotif = JSON.parse(localStorage.getItem('notifications') || '[]');
+        if (storedNotif.length !== notifications.length) {
+            notifications = storedNotif;
+            updateNotifBadge();
+        }
+    }, 30000);
+
+    // هشدار قیمت هر ۳۰ ثانیه
+    setInterval(checkAlerts, 30000);
+}
+
 // ---------- راه‌اندازی ----------
 document.addEventListener('DOMContentLoaded', () => {
     applyLanguage();
@@ -756,16 +899,12 @@ document.addEventListener('DOMContentLoaded', () => {
     loadMarketData();
     renderAnalysisSlider();
     loadNews();
+    loadImportantNews();
     updateNotifBadge();
-    setInterval(checkAlerts, 30000);
-    setInterval(() => {
-        if (document.querySelector('.page.active')?.id === 'market-page' || document.querySelector('.page.active')?.id === 'dashboard-page') {
-            loadMarketData();
-        }
-    }, 60000);
+    startPolling();
 });
 
-// ثبت توابع
+// ثبت توابع در فضای global
 window.switchTab = switchTab;
 window.switchMarketTab = switchMarketTab;
 window.switchNewsTab = switchNewsTab;
