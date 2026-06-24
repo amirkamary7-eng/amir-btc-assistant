@@ -1,5 +1,5 @@
 // ============================================================
-// Amir BTC Assistant - Core Application v3.1
+// Amir BTC Assistant - Core Application v3.2
 // ============================================================
 
 const tg = window.Telegram?.WebApp;
@@ -7,7 +7,7 @@ if (tg) { tg.ready(); tg.expand(); }
 
 const ADMIN_ID = '831704732';
 const CHANNEL = 'amir_btc_2024';
-const PROXY = 'https://amir-btc-assistant9.amirkamary7.workers.dev/?url=';
+const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 
 let currentLang = localStorage.getItem('app_lang') || 'fa';
 let watchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
@@ -21,10 +21,10 @@ let searchTerm = '';
 let sliderInterval = null;
 let currentSlide = 0;
 
-// ---------- ترجمه‌ها (فقط کلیدی‌ها) ----------
+// ---------- ترجمه‌ها ----------
 const i18n = {
-    fa: { welcome: 'خوش آمدید،', dashboard: 'داشبورد', market: 'مارکت', analysis: 'تحلیل‌ها', news: 'اخبار', profile: 'پروفایل', watchlist: 'واچ‌لیست', settings: 'تنظیمات', referral: 'دعوت و پاداش', support: 'پشتیبانی', about: 'درباره ما', language: 'زبان', search: 'جستجوی ارز...', no_data: 'داده‌ای موجود نیست', join_channel: 'عضویت در کانال', copy: 'کپی', share: 'اشتراک‌گذاری', delete: 'حذف' },
-    en: { welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News', profile: 'Profile', watchlist: 'Watchlist', settings: 'Settings', referral: 'Referral & Earn', support: 'Support', about: 'About', language: 'Language', search: 'Search coin...', no_data: 'No data available', join_channel: 'Join Channel', copy: 'Copy', share: 'Share', delete: 'Delete' }
+    fa: { welcome: 'خوش آمدید،', dashboard: 'داشبورد', market: 'مارکت', analysis: 'تحلیل‌ها', news: 'اخبار', profile: 'پروفایل', watchlist: 'واچ‌لیست', settings: 'تنظیمات', referral: 'دعوت و پاداش', support: 'پشتیبانی', about: 'درباره ما', language: 'زبان', search: 'جستجوی ارز...', no_data: 'داده‌ای موجود نیست', join_channel: 'عضویت در کانال', copy: 'کپی', share: 'اشتراک‌گذاری', delete: 'حذف', mark_all_read: 'همه خوانده شد' },
+    en: { welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News', profile: 'Profile', watchlist: 'Watchlist', settings: 'Settings', referral: 'Referral & Earn', support: 'Support', about: 'About', language: 'Language', search: 'Search coin...', no_data: 'No data available', join_channel: 'Join Channel', copy: 'Copy', share: 'Share', delete: 'Delete', mark_all_read: 'Mark all read' }
 };
 function t(key) { return i18n[currentLang]?.[key] || key; }
 
@@ -62,33 +62,36 @@ const Cache = {
     }
 };
 
-// ---------- API با Proxy ----------
+// ---------- API با Proxy جدید ----------
 async function fetchWithProxy(url) {
     try {
         const res = await fetch(PROXY + encodeURIComponent(url));
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
         return res.json();
     } catch (e) {
-        console.warn('Proxy fetch failed, trying direct:', e);
-        // Fallback مستقیم (اگر CORS اجازه بده)
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`Direct HTTP ${res.status}`);
-        return res.json();
+        console.warn('Proxy failed, trying direct fallback:', e);
+        // Fallback مستقیم به Binance
+        if (url.includes('binance.com')) {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`Direct HTTP ${res.status}`);
+            return res.json();
+        }
+        throw e;
     }
 }
 
-// ---------- بارگذاری داده‌های بازار (CoinCap + Binance) ----------
+// ---------- بارگذاری داده‌های بازار ----------
 async function loadMarketData() {
     try {
         const cached = Cache.get('market');
         if (cached) { allCoins = cached; renderMarket(); renderWatchlist(); renderSummary(); return; }
 
-        // ۱. دریافت لیست ۱۰۰ ارز از CoinCap
+        // ۱. دریافت از CoinCap از طریق پروکسی جدید
         const data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
         const assets = data.data || [];
         if (!assets.length) throw new Error('No assets from CoinCap');
 
-        // ۲. دریافت قیمت‌های لحظه‌ای از Binance برای دقت بالا
+        // ۲. دریافت قیمت‌های لحظه‌ای از Binance
         const symbols = assets.slice(0, 50).map(a => a.symbol + 'USDT');
         let binancePrices = {};
         try {
@@ -126,8 +129,7 @@ async function loadMarketData() {
         renderSummary();
     } catch (e) {
         console.error('Market load error:', e);
-        // نمایش پیام خطا به کاربر
-        document.getElementById('coin-list').innerHTML = `<div class="empty-state">⚠️ خطا در دریافت داده‌های بازار. لطفاً بعداً تلاش کنید.</div>`;
+        document.getElementById('coin-list').innerHTML = `<div class="empty-state">⚠️ خطا در دریافت داده‌های بازار</div>`;
     }
 }
 
@@ -185,7 +187,11 @@ function renderMarket() {
                 <div class="coin-right">
                     <div class="coin-price">$${c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6)}</div>
                     <div class="coin-change ${isPos ? 'up' : 'down'}">${isPos ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</div>
-                    <span class="watch-star ${inWatch ? 'active' : ''}" onclick="toggleWatchlist('${c.symbol}', event)">${inWatch ? '⭐' : '☆'}</span>
+                    <span class="watch-star ${inWatch ? 'active' : ''}" onclick="toggleWatchlist('${c.symbol}', event)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="${inWatch ? '#f7931a' : 'none'}" stroke="${inWatch ? '#f7931a' : '#555'}" stroke-width="2">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                        </svg>
+                    </span>
                 </div>
             </div>
         `;
@@ -254,7 +260,7 @@ function filterCoinList() {
     });
 }
 
-// ---------- اخبار واقعی از منابع رایگان ----------
+// ---------- اخبار ----------
 let newsCache = [];
 async function loadNews() {
     try {
@@ -262,7 +268,6 @@ async function loadNews() {
         if (cached) { newsCache = cached; renderNews('all'); return; }
 
         let articles = [];
-        // ۱. از CoinTelegraph RSS (از طریق Proxy)
         try {
             const rssText = await fetchWithProxy('https://cointelegraph.com/rss');
             const parser = new DOMParser();
@@ -284,8 +289,6 @@ async function loadNews() {
                 });
             });
         } catch (e) { console.warn('CoinTelegraph RSS error:', e); }
-
-        // ۲. از CoinDesk RSS
         try {
             const rssText = await fetchWithProxy('https://www.coindesk.com/arc/outboundfeeds/rss/');
             const parser = new DOMParser();
@@ -307,15 +310,12 @@ async function loadNews() {
                 });
             });
         } catch (e) { console.warn('CoinDesk RSS error:', e); }
-
-        // ۳. در صورت عدم موفقیت، از داده‌های Mock استفاده کن
         if (!articles.length) {
             articles = [
                 { title: 'بیت‌کوین به ۷۰ هزار دلار نزدیک شد', source: 'کوین‌تلگراف', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'با افزایش حجم معاملات...', category: 'crypto' },
                 { title: 'اتریوم ۱۵٪ رشد کرد', source: 'کوین‌دسک', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'اتریوم به سطح ۴۰۰۰ دلار رسید...', category: 'crypto' }
             ];
         }
-
         newsCache = articles.slice(0, 20);
         Cache.set('news', newsCache, 300);
         renderNews('all');
@@ -467,6 +467,7 @@ function deleteAnalysis(id, event) {
     if (confirm('آیا از حذف این تحلیل مطمئن هستید؟')) {
         analyses = analyses.filter(a => a.id !== id);
         localStorage.setItem('analyses', JSON.stringify(analyses));
+        // رندر مجدد فوری
         renderAnalysisSlider();
         renderAnalysisList();
         addNotification('تحلیل حذف شد', `یک تحلیل توسط مدیر حذف گردید.`);
@@ -589,6 +590,12 @@ function toggleNotificationPanel() {
 function closeNotifModal() {
     document.getElementById('notif-modal').style.display = 'none';
 }
+function markAllRead() {
+    notifications.forEach(n => n.read = true);
+    localStorage.setItem('notifications', JSON.stringify(notifications));
+    updateNotifBadge();
+    renderNotifications();
+}
 function renderNotifications() {
     const container = document.getElementById('notif-list');
     if (!notifications.length) {
@@ -646,12 +653,13 @@ function shareRefLink() {
 // ---------- تنظیمات و پشتیبانی ----------
 function toggleSettings() {
     const panel = document.getElementById('settings-panel');
+    if (!panel) return;
     const ticketsPage = document.getElementById('tickets-page');
     const aboutPage = document.getElementById('about-page');
     if (panel.style.display === 'none' || panel.style.display === '') {
         panel.style.display = 'block';
-        ticketsPage.style.display = 'none';
-        aboutPage.style.display = 'none';
+        if (ticketsPage) ticketsPage.style.display = 'none';
+        if (aboutPage) aboutPage.style.display = 'none';
     } else {
         panel.style.display = 'none';
     }
@@ -775,6 +783,7 @@ window.setPriceAlert = setPriceAlert;
 window.removeAlert = removeAlert;
 window.toggleNotificationPanel = toggleNotificationPanel;
 window.closeNotifModal = closeNotifModal;
+window.markAllRead = markAllRead;
 window.markNotifRead = markNotifRead;
 window.copyRefLink = copyRefLink;
 window.shareRefLink = shareRefLink;

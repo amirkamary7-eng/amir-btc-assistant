@@ -33,7 +33,7 @@
         <div class="hero-banner" onclick="joinChannel()">
             <div class="hero-content">
                 <span class="hero-badge">🔥 کانال تحلیلی</span>
-                <h2>@amir_btc_2024</h2>
+                <h2>AMIRBTC</h2>
                 <p>سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار</p>
                 <button class="hero-cta">عضویت رایگان</button>
             </div>
@@ -281,16 +281,19 @@
         </div>
     </div>
 
-    <!-- مودال نوتیفیکیشن‌ها -->
-    <div id="notif-modal" class="modal" onclick="if(event.target===this) closeNotifModal()">
-        <div class="modal-box">
-            <div class="modal-header">
-                <h3>🔔 مرکز اعلانات</h3>
+    <!-- مودال نوتیفیکیشن‌ها (فقط این بخش تغییر کرده) -->
+<div id="notif-modal" class="modal" onclick="if(event.target===this) closeNotifModal()">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3>مرکز اعلانات</h3>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button class="mark-all-read-btn" onclick="markAllRead()">همه خوانده شد</button>
                 <button onclick="closeNotifModal()">✕</button>
             </div>
-            <div id="notif-list" class="notif-list"></div>
         </div>
+        <div id="notif-list" class="notif-list"></div>
     </div>
+</div>
 
     <script src="watchlist.js"></script>
     <script src="app.js"></script>

@@ -1022,3 +1022,18 @@ body {
 .delete-analysis-btn:hover {
     background: rgba(255,77,77,0.2);
 }
+/* دکمه خواندن همه */
+.mark-all-read-btn {
+    background: rgba(0,200,150,0.1);
+    border: 1px solid rgba(0,200,150,0.2);
+    color: var(--green);
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: 0.2s;
+}
+.mark-all-read-btn:hover {
+    background: rgba(0,200,150,0.2);
+}
