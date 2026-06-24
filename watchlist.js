@@ -12,8 +12,8 @@
     }
     if (typeof window.filterAddCoinModal === 'undefined') {
         window.filterAddCoinModal = function() {
-            const q = document.getElementById('coin-search-input')?.value?.toLowerCase();
-            document.querySelectorAll('.coin-select-item').forEach(el => {
+            const q = document.getElementById('coin-search-modal')?.value?.toLowerCase();
+            document.querySelectorAll('.modal-coin-item').forEach(el => {
                 el.style.display = el.innerText.toLowerCase().includes(q) ? 'flex' : 'none';
             });
         };

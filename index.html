@@ -10,271 +10,286 @@
 </head>
 <body>
 
-    <!-- ========== هدر اصلی برنامه ========== -->
-    <div class="app-header-container">
-        <div class="header-brand">
-            <span class="brand-glow"></span>
-            <div class="header-title" id="app-title">AMIR BTC ASSISTANT</div>
+    <!-- ===== هدر اصلی ===== -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="brand-dot"></div>
+            <span class="brand-name">AMIR BTC</span>
         </div>
-        <div class="header-actions">
-            <button class="noti-btn" onclick="openNotificationCenter()" aria-label="Notifications">
-                <svg class="noti-icon" viewBox="0 0 24 24" fill="none">
-                    <path d="M15 17H9a3 3 0 0 1-3-3V10a6 6 0 1 1 12 0v4a3 3 0 0 1-3 3z" stroke="currentColor" stroke-width="1.6"/>
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="currentColor" stroke-width="1.6" fill="currentColor"/>
+        <div class="header-right">
+            <button class="notif-btn" onclick="toggleNotificationPanel()">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                 </svg>
-                <span id="noti-badge" class="noti-badge" style="display: none;"></span>
+                <span id="notif-badge" class="notif-badge" style="display:none;">0</span>
             </button>
         </div>
-    </div>
+    </header>
 
-    <!-- ========== صفحه داشبورد ========== -->
-    <div id="dashboard-page" class="page active">
-        <div class="welcome-bar">
-            <span class="welcome-text" data-i18n="welcome">خوش آمدید،</span>
-            <h2 class="user-full-name">کاربر میهمان</h2>
-        </div>
-
-        <!-- اسلایدر هوشمند تحلیل‌های ادمین (جایگزین ترس و طمع) -->
-        <div class="card-title-wrapper">
-            <div class="card-title" data-i18n="analysis_slider">✨ تحلیل‌های برتر روز</div>
-        </div>
-        <div id="analysis-slider-container" class="analysis-slider-container">
-            <div id="analysis-slider-content"></div>
-            <div class="slider-dots" id="analysis-slider-dots"></div>
-        </div>
-
-        <!-- بخش واچ‌لیست سریع داشبورد -->
-        <div class="card-title-wrapper">
-            <div class="card-title" data-i18n="watchlist">⭐ واچ‌لیست شخصی شما</div>
-        </div>
-        <div id="watchlist-container" class="watchlist-grid"></div>
-    </div>
-
-    <!-- ========== صفحه مارکت (نسخه ۳ بخشی و فیلتر پیشرفته) ========== -->
-    <div id="market-page" class="page">
-        <!-- جستجو و فیلتر حرفه‌ای بالا -->
-        <div class="market-search-wrapper">
-            <div class="search-box-inner">
-                <span class="search-icon">🔍</span>
-                <input type="text" id="market-search" class="market-search-input" placeholder="جستجوی ارز یا نماد..." data-i18n-placeholder="search_placeholder">
+    <!-- ===== صفحه داشبورد ===== -->
+    <section id="dashboard-page" class="page active">
+        <!-- Hero Banner -->
+        <div class="hero-banner" onclick="joinChannel()">
+            <div class="hero-content">
+                <span class="hero-badge">🔥 کانال تحلیلی</span>
+                <h2>@amir_btc_2024</h2>
+                <p>سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار</p>
+                <button class="hero-cta">عضویت رایگان</button>
             </div>
-            <button class="search-filter-btn" onclick="toggleFilterMenu()">⚡ فیلتر دقیق</button>
-        </div>
-        
-        <div id="filter-menu" class="filter-menu-panel" style="display:none;">
-            <button class="filter-chip active" data-filter="all" onclick="filterMarketCategory('all', this)">همه بازار</button>
-            <button class="filter-chip" data-filter="top" onclick="filterMarketCategory('top', this)">TOP 100</button>
-            <button class="filter-chip" data-filter="watchlist" onclick="filterMarketCategory('watchlist', this)">واچ‌لیست</button>
-            <button class="filter-chip" data-filter="trending" onclick="filterMarketCategory('trending', this)">ترند (حجم بالا)</button>
-            <button class="filter-chip" data-filter="gainers" onclick="filterMarketCategory('gainers', this)">بیشترین رشد</button>
-            <button class="filter-chip" data-filter="losers" onclick="filterMarketCategory('losers', this)">بیشترین ریزش</button>
+            <div class="hero-glow"></div>
         </div>
 
-        <!-- سه بخش مجزا مارکت بر اساس منابع معتبر -->
-        <div id="market-sections" class="market-sections-container">
-            <!-- ۱. بخش ارزهای برتر -->
-            <div class="market-section-box">
-                <div class="section-header-premium">
-                    <span class="section-title-text" data-i18n="top_coins">🔝 ارزهای برتر بازار</span>
-                    <span class="section-badge-premium">CMC & Exchanges</span>
-                </div>
-                <div id="market-top-list" class="market-coin-list"></div>
-            </div>
-
-            <!-- ۲. بخش واچ‌لیست با دکمه افزودن شیک -->
-            <div class="market-section-box">
-                <div class="section-header-premium">
-                    <span class="section-title-text" data-i18n="watchlist">⭐ واچ‌لیست تعاملی</span>
-                    <button class="add-watchlist-premium-btn" onclick="openAddCoinModal()">➕ افزودن کوین</button>
-                </div>
-                <div id="market-watchlist-list" class="market-coin-list"></div>
-            </div>
-
-            <!-- ۳. بخش ارزهای ترند و حجم‌خورده جدید -->
-            <div class="market-section-box">
-                <div class="section-header-premium">
-                    <span class="section-title-text" data-i18n="trending">🔥 ارزهای ترند و مستعد</span>
-                    <span class="section-badge-trending">High Volume</span>
-                </div>
-                <div id="market-trending-list" class="market-coin-list"></div>
-            </div>
+        <!-- اسلایدر تحلیل‌ها -->
+        <div class="section-header">
+            <span class="section-title">📊 تحلیل‌های جدید</span>
+            <span class="section-more" onclick="switchTab('analysis-page')">مشاهده همه</span>
         </div>
-    </div>
-
-    <!-- ========== صفحه تحلیل (کاملاً دستی - ویژه ادمین) ========== -->
-    <div id="analysis-page" class="page">
-        <div class="analysis-header-box">
-            <h3 class="page-main-title" data-i18n="analysis_title">📊 تحلیل‌های تخصصی بازار</h3>
-            <button id="add-analysis-btn" class="add-analysis-premium-btn" style="display:none;" onclick="openAddAnalysisModal()">✍️ تحلیل جدید</button>
+        <div class="slider-container" id="analysis-slider">
+            <div class="slider-track" id="slider-track"></div>
+            <div class="slider-dots" id="slider-dots"></div>
         </div>
-        <div id="analysis-list-container" class="analysis-list-grid"></div>
-    </div>
 
-    <!-- ========== صفحه پروفایل پیشرفته ========== -->
-    <div id="profile-page" class="page">
-        <div id="profile-main-view">
-            <!-- کارت کاربری شیک با دکمه تنظیمات در گوشه بالا -->
-            <div class="profile-card-premium">
-                <div class="profile-settings-anchor" onclick="openSettingsPage()">⚙️</div>
-                <div class="avatar-wrapper">
-                    <img id="profile-avatar-img" src="https://ui-avatars.com/api/?name=Guest&background=f7931a&color=fff&bold=true" class="profile-avatar-fluid">
-                </div>
-                <h3 class="user-full-name profile-display-name">کاربر میهمان</h3>
-                <span id="user-username-val" class="profile-display-username">loading...</span>
-                <div class="profile-display-id">شناسه عددی: <span id="user-id-val">000000</span></div>
+        <!-- واچ‌لیست -->
+        <div class="section-header">
+            <span class="section-title">⭐ واچ‌لیست</span>
+            <button class="add-watch-btn" onclick="openAddCoinModal()">➕</button>
+        </div>
+        <div class="watchlist-grid" id="watchlist-grid"></div>
+
+        <!-- خلاصه بازار -->
+        <div class="section-header">
+            <span class="section-title">📈 خلاصه بازار</span>
+        </div>
+        <div class="market-summary" id="market-summary">
+            <div class="summary-item"><span>مارکت‌کپ</span><span id="global-mcap">--</span></div>
+            <div class="summary-item"><span>حجم ۲۴h</span><span id="global-volume">--</span></div>
+            <div class="summary-item"><span>BTC Dominance</span><span id="btc-dom">--</span></div>
+        </div>
+    </section>
+
+    <!-- ===== صفحه مارکت ===== -->
+    <section id="market-page" class="page">
+        <!-- سرچ -->
+        <div class="search-bar">
+            <input type="text" id="market-search" placeholder="جستجوی ارز..." class="search-input">
+        </div>
+
+        <!-- تب‌های افقی -->
+        <div class="market-tabs" id="market-tabs">
+            <button class="tab-btn active" data-tab="overview" onclick="switchMarketTab('overview', this)">Overview</button>
+            <button class="tab-btn" data-tab="trending" onclick="switchMarketTab('trending', this)">Trending</button>
+            <button class="tab-btn" data-tab="gainers" onclick="switchMarketTab('gainers', this)">Gainers</button>
+            <button class="tab-btn" data-tab="losers" onclick="switchMarketTab('losers', this)">Losers</button>
+            <button class="tab-btn" data-tab="watchlist" onclick="switchMarketTab('watchlist', this)">Watchlist</button>
+        </div>
+
+        <!-- لیست کوین‌ها -->
+        <div class="coin-list" id="coin-list"></div>
+    </section>
+
+    <!-- ===== صفحه تحلیل ===== -->
+    <section id="analysis-page" class="page">
+        <div class="analysis-header">
+            <h2>📊 تحلیل‌های بازار</h2>
+            <button id="admin-add-btn" class="admin-btn" style="display:none;" onclick="openAddAnalysisModal()">➕ تحلیل جدید</button>
+        </div>
+        <div class="analysis-grid" id="analysis-grid"></div>
+    </section>
+
+    <!-- ===== صفحه اخبار ===== -->
+    <section id="news-page" class="page">
+        <div class="news-tabs">
+            <button class="news-tab active" data-news="all" onclick="switchNewsTab('all', this)">همه</button>
+            <button class="news-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)">کریپتو</button>
+            <button class="news-tab" data-news="economy" onclick="switchNewsTab('economy', this)">اقتصادی</button>
+            <button class="news-tab" data-news="forex" onclick="switchNewsTab('forex', this)">فارکس</button>
+            <button class="news-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)">تقویم</button>
+        </div>
+        <div class="news-list" id="news-list"></div>
+    </section>
+
+    <!-- ===== صفحه پروفایل ===== -->
+    <section id="profile-page" class="page">
+        <!-- کارت کاربر -->
+        <div class="profile-card">
+            <div class="profile-settings" onclick="toggleSettings()">⚙️</div>
+            <div class="profile-avatar">
+                <img id="profile-avatar" src="https://ui-avatars.com/api/?name=Guest&background=f7931a&color=fff&bold=true" alt="">
             </div>
+            <h3 class="profile-name" id="profile-name">کاربر میهمان</h3>
+            <span class="profile-username" id="profile-username">@guest</span>
+            <span class="profile-id">ID: <span id="profile-id-num">000000</span></span>
+        </div>
 
-            <!-- بخش دعوت و رفرال هوشمند -->
-            <div class="referral-box-premium">
-                <div class="ref-header">
-                    <span class="ref-icon">🎁</span>
-                    <div class="ref-title-details">
-                        <h4 data-i18n="referral_title">سیستم کسب درآمد و دعوت</h4>
-                        <p data-i18n="referral_desc">دوستان خود را دعوت کنید و پاداش‌های VIP بگیرید.</p>
-                    </div>
+        <!-- رفرال -->
+        <div class="referral-card">
+            <div class="ref-header">
+                <span class="ref-icon">🎁</span>
+                <div>
+                    <h4>Invite Friends & Earn Rewards</h4>
+                    <p>Share your referral link and invite your friends to join BTC Assistant.</p>
                 </div>
-                <div class="ref-input-premium-group">
-                    <input type="text" id="ref-link-input" readonly value="در حال دریافت لینک...">
-                    <button class="ref-copy-premium-btn" onclick="copyReferralLink()">کپی لینک</button>
-                </div>
-                <button class="ref-share-btn-full" onclick="shareReferralLink()">📢 اشتراک‌گذاری سریع در تلگرام</button>
-                
-                <div class="ref-stats-grid">
-                    <div class="stat-card">
-                        <span data-i18n="total_refs">کل دعوت‌ها</span>
-                        <span id="total-ref-count" class="stat-num">0</span>
-                    </div>
-                    <div class="stat-card">
-                        <span data-i18n="active_refs">کاربران فعال</span>
-                        <span id="active-ref-count" class="stat-num">0</span>
-                    </div>
-                </div>
-
-                <!-- بخش رویدادها و جوایز (زیر رفرال همراه با Badge بزودی) -->
-                <div class="events-rewards-teaser">
-                    <div class="teaser-badge">بزودی ...</div>
-                    <div class="teaser-content">
-                        <h5>🏆 گردونه شانس و جوایز نقدی</h5>
-                        <p>سیستم پاداش‌دهی بر اساس امتیاز رفرال‌ها در آپدیت بعدی فعال می‌شود.</p>
-                    </div>
-                </div>
+            </div>
+            <div class="ref-input">
+                <input type="text" id="ref-link" readonly>
+                <button onclick="copyRefLink()">کپی</button>
+            </div>
+            <button class="ref-share-btn" onclick="shareRefLink()">📤 اشتراک‌گذاری مستقیم</button>
+            <div class="ref-stats">
+                <div><span>کل دعوت‌ها</span><strong id="ref-total">0</strong></div>
+                <div><span>فعال</span><strong id="ref-active">0</strong></div>
+                <div><span>پاداش</span><strong id="ref-reward">0 SAT</strong></div>
+            </div>
+            <div class="ref-rewards-soon">
+                <span class="soon-badge">بزودی</span>
+                <h5>🏆 گردونه شانس و جوایز نقدی</h5>
+                <p>سیستم پاداش‌دهی بر اساس امتیاز رفرال‌ها در آپدیت بعدی فعال می‌شود.</p>
             </div>
         </div>
 
-        <!-- صفحه داخلی تنظیمات -->
-        <div id="settings-page-view" class="sub-profile-view" style="display:none;">
-            <div class="back-action-bar" onclick="closeSettingsPage()">✨ بازگشت به پروفایل ➔</div>
-            <div class="settings-premium-list">
-                <h3 class="section-sub-title" data-i18n="settings_title">تنظیمات اپلیکیشن</h3>
-                
-                <div class="settings-premium-item" onclick="changeLanguage('fa')">
-                    <span class="setting-label">🇮🇷 زبان برنامه (فارسی)</span>
-                    <span id="lang-indicator" class="lang-check">✓</span>
+        <!-- تنظیمات (زیر مجموعه پروفایل) -->
+        <div class="settings-panel" id="settings-panel" style="display:none;">
+            <div class="settings-header" onclick="toggleSettings()">➔ بازگشت</div>
+            <div class="settings-list">
+                <div class="setting-item" onclick="changeLang('fa')">
+                    <span>🇮🇷 فارسی</span>
+                    <span id="lang-fa-check" class="lang-check">✓</span>
                 </div>
-                <div class="settings-premium-item" onclick="changeLanguage('en')">
-                    <span class="setting-label">🇬🇧 Language (English)</span>
-                    <span id="lang-indicator-en" class="lang-check"></span>
+                <div class="setting-item" onclick="changeLang('en')">
+                    <span>🇬🇧 English</span>
+                    <span id="lang-en-check" class="lang-check"></span>
                 </div>
-                <div class="settings-premium-item" onclick="openSupportPage()">
-                    <span class="setting-label">📧 مرکز پشتیبانی و تیکت</span>
-                    <span class="arrow-indicator">➔</span>
+                <div class="setting-item" onclick="openTickets()">
+                    <span>🎫 پشتیبانی و تیکت</span>
+                    <span>➔</span>
                 </div>
-                <div class="settings-premium-item" onclick="openAboutPage()">
-                    <span class="setting-label">ℹ️ درباره دستیار هوشمند</span>
-                    <span class="arrow-indicator">➔</span>
+                <div class="setting-item" onclick="openAbout()">
+                    <span>ℹ️ درباره ما</span>
+                    <span>➔</span>
                 </div>
             </div>
         </div>
 
-        <!-- صفحه داخلی پشتیبانی و ارسال تیکت -->
-        <div id="support-page-view" class="sub-profile-view" style="display:none;">
-            <div class="back-action-bar" onclick="closeSupportPage()">➔ بازگشت به تنظیمات</div>
-            <div class="support-premium-box">
-                <h3 data-i18n="support_title">🎫 ارسال تیکت به پشتیبانی</h3>
-                <input type="text" id="ticket-title" placeholder="عنوان تیکت خود را وارد کنید..." class="premium-field">
-                <textarea id="ticket-body" placeholder="متن پیام و مشکل خود را دقیق بنویسید..." class="premium-field" rows="5"></textarea>
-                <button class="submit-ticket-btn" onclick="submitTicket()">ارسال تیکت رسمی</button>
-                
-                <div class="my-tickets-section-title">🗂️ تیکت‌های من</div>
-                <div id="my-tickets-list" class="tickets-historical-list"></div>
-            </div>
+        <!-- صفحه تیکت -->
+        <div id="tickets-page" style="display:none;" class="sub-page">
+            <div class="back-btn" onclick="closeTickets()">➔ بازگشت</div>
+            <h3>ارسال تیکت</h3>
+            <input type="text" id="ticket-title" placeholder="عنوان..." class="input-field">
+            <textarea id="ticket-body" placeholder="متن..." class="input-field" rows="4"></textarea>
+            <button class="submit-btn" onclick="submitTicket()">ارسال</button>
+            <div id="ticket-list" class="ticket-list"></div>
         </div>
 
-        <!-- صفحه داخلی درباره ما -->
-        <div id="about-page-view" class="sub-profile-view" style="display:none;">
-            <div class="back-action-bar" onclick="closeAboutPage()">➔ بازگشت به تنظیمات</div>
-            <div class="about-premium-content">
-                <h3 data-i18n="about_title">درباره Amir BTC Assistant</h3>
-                <div class="about-card-info">
-                    <p class="about-version">نسخه پایدار پرمیوم 3.5.0</p>
-                    <p class="about-desc">این ربات یک دستیار هوشمند معاملاتی متصل به API چهار صرافی معتبر جهانی (Binance, KuCoin, OKX, Bybit) و مرجع CoinMarketCap است تا دقیق‌ترین دیتا را بدون تأخیر در اختیار شما قرار دهد.</p>
-                    <div class="channel-promo">
-                        <span>عضویت در کانال رسمی تحلیلی:</span>
-                        <a href="https://t.me/amir_btc_2024" target="_blank" class="promo-link">@amir_btc_2024</a>
-                    </div>
-                </div>
+        <!-- صفحه درباره ما -->
+        <div id="about-page" style="display:none;" class="sub-page">
+            <div class="back-btn" onclick="closeAbout()">➔ بازگشت</div>
+            <div class="about-content">
+                <h3>درباره Amir BTC Assistant</h3>
+                <p>نسخه 3.0.0</p>
+                <p>دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر جهانی.</p>
+                <p>کانال رسمی: <a href="#" onclick="joinChannel()">@amir_btc_2024</a></p>
+                <p>ساخته شده با ❤️ روی Cloudflare Workers</p>
             </div>
         </div>
-    </div>
+    </section>
 
-    <!-- ========== منوی پایینی نویگیشن بار شیک ========== -->
-    <div class="bottom-nav">
-        <button id="nav-dashboard" class="nav-item active" onclick="switchTab('dashboard-page', this)">
-            <div class="nav-icon">🏠</div>
-            <div class="nav-label" data-i18n="nav_dashboard">داشبورد</div>
+    <!-- ===== منوی پایینی (با آیکون SVG) ===== -->
+    <nav class="bottom-nav">
+        <button class="nav-item active" data-page="dashboard-page" onclick="switchTab('dashboard-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>داشبورد</span>
         </button>
-        <button id="nav-market" class="nav-item" onclick="switchTab('market-page', this)">
-            <div class="nav-icon">📊</div>
-            <div class="nav-label" data-i18n="nav_market">مارکت</div>
+        <button class="nav-item" data-page="market-page" onclick="switchTab('market-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+            <span>مارکت</span>
         </button>
-        <button id="nav-analysis" class="nav-item" onclick="switchTab('analysis-page', this)">
-            <div class="nav-icon">🧠</div>
-            <div class="nav-label" data-i18n="nav_analysis">تحلیل‌ها</div>
+        <button class="nav-item" data-page="analysis-page" onclick="switchTab('analysis-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            <span>تحلیل</span>
         </button>
-        <button id="nav-profile" class="nav-item" onclick="switchTab('profile-page', this)">
-            <div class="nav-icon">👤</div>
-            <div class="nav-label" data-i18n="nav_profile">پروفایل</div>
+        <button class="nav-item" data-page="news-page" onclick="switchTab('news-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+            <span>اخبار</span>
         </button>
-    </div>
+        <button class="nav-item" data-page="profile-page" onclick="switchTab('profile-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>پروفایل</span>
+        </button>
+    </nav>
 
-    <!-- ========== مودال‌های بهینه‌سازی شده سیستم ========== -->
-    <!-- مودال مدیریت واچ‌لیست (افزودن کوین) -->
+    <!-- ===== مودال‌ها ===== -->
+    <!-- مودال افزودن واچ‌لیست -->
     <div id="add-coin-modal" class="modal" onclick="if(event.target===this) closeAddCoinModal()">
-        <div class="modal-card-premium">
-            <div class="modal-header-premium">
-                <h3>🔍 جستجو و اضافه کردن به واچ‌لیست</h3>
-                <button class="close-modal-btn" onclick="closeAddCoinModal()">✕</button>
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>افزودن به واچ‌لیست</h3>
+                <button onclick="closeAddCoinModal()">✕</button>
             </div>
-            <input type="text" id="coin-search-input" placeholder="نام اختصاری یا کامل کوین..." oninput="filterAddCoinModal()" class="premium-field">
-            <div id="coin-list-modal" class="modal-scroll-list"></div>
+            <input type="text" id="coin-search-modal" placeholder="جستجو..." class="input-field" oninput="filterCoinList()">
+            <div id="coin-modal-list" class="modal-list"></div>
         </div>
     </div>
 
-    <!-- مودال تخصصی افزودن تحلیل (ویژه مدیران و ادمین‌ها) -->
+    <!-- مودال افزودن تحلیل (فقط مدیر) -->
     <div id="add-analysis-modal" class="modal" onclick="if(event.target===this) closeAddAnalysisModal()">
-        <div class="modal-card-premium">
-            <div class="modal-header-premium">
-                <h3>✍️ بارگذاری تحلیل دستی مدیریت</h3>
-                <button class="close-modal-btn" onclick="closeAddAnalysisModal()">✕</button>
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>تحلیل جدید</h3>
+                <button onclick="closeAddAnalysisModal()">✕</button>
             </div>
-            <div class="modal-form-grid">
-                <input type="text" id="analysis-coin" placeholder="مثال: BTC یا ETH" class="premium-field">
-                <input type="text" id="analysis-timeframe" placeholder="تایم‌فریم (مثال: 4h , 1d)" class="premium-field">
-                <input type="text" id="analysis-image" placeholder="لینک آدرس تصویر تحلیل (URL)..." class="premium-field">
-                <textarea id="analysis-text" placeholder="خلاصه و شرح سیگنال/تحلیل مارکت..." class="premium-field" rows="4"></textarea>
-                <button class="submit-analysis-btn-full" onclick="submitAnalysis()">🚀 انتشار رسمی روی داشبورد و اپ</button>
+            <input type="text" id="analysis-coin" placeholder="نماد ارز (مثلاً BTC)" class="input-field">
+            <input type="text" id="analysis-timeframe" placeholder="تایم‌فریم (مثلاً 4h)" class="input-field">
+            <input type="text" id="analysis-image" placeholder="لینک تصویر کاور" class="input-field">
+            <textarea id="analysis-text" placeholder="متن تحلیل..." class="input-field" rows="4"></textarea>
+            <div class="modal-actions">
+                <button class="submit-btn" onclick="submitAnalysis()">انتشار تحلیل</button>
+                <button class="cancel-btn" onclick="closeAddAnalysisModal()">انصراف</button>
             </div>
         </div>
     </div>
 
-    <!-- مودال چارت پیشرفته TradingView -->
-    <div id="chart-modal" class="modal" onclick="if(event.target===this) closeChart()">
-        <div class="modal-card-premium tradingview-modal-size">
-            <div class="modal-header-premium">
-                <h3 id="modal-coin-title">BTC / USDT Pro Chart</h3>
-                <button class="close-modal-btn" onclick="closeChart()">✕</button>
+    <!-- مودال جزئیات خبر -->
+    <div id="news-modal" class="modal" onclick="if(event.target===this) closeNewsModal()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 id="news-modal-title">عنوان خبر</h3>
+                <button onclick="closeNewsModal()">✕</button>
             </div>
-            <div id="tradingview-widget-container" class="tradingview-container-fluid"></div>
+            <img id="news-modal-image" src="" alt="" style="width:100%; border-radius:12px; margin:10px 0; max-height:200px; object-fit:cover;">
+            <p id="news-modal-body" style="color:var(--text-dim); line-height:1.6;"></p>
+            <a id="news-modal-link" href="#" target="_blank" class="news-source-link">مشاهده منبع</a>
+        </div>
+    </div>
+
+    <!-- مودال جزئیات کوین (برای هشدار قیمت) -->
+    <div id="coin-detail-modal" class="modal" onclick="if(event.target===this) closeCoinDetail()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 id="detail-coin-title">BTC / USDT</h3>
+                <button onclick="closeCoinDetail()">✕</button>
+            </div>
+            <div id="detail-chart" style="height:200px; border-radius:12px; overflow:hidden; margin-bottom:12px;"></div>
+            <div class="detail-stats" id="detail-stats"></div>
+            <div class="alert-section">
+                <h4>⏰ تنظیم هشدار قیمت</h4>
+                <div style="display:flex; gap:8px;">
+                    <input type="number" id="alert-price" placeholder="قیمت هدف" class="input-field" style="flex:1;">
+                    <button class="submit-btn" onclick="setPriceAlert()">ثبت هشدار</button>
+                </div>
+                <div id="active-alerts" style="margin-top:8px; font-size:12px; color:var(--text-dim);"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال نوتیفیکیشن‌ها -->
+    <div id="notif-modal" class="modal" onclick="if(event.target===this) closeNotifModal()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>🔔 مرکز اعلانات</h3>
+                <button onclick="closeNotifModal()">✕</button>
+            </div>
+            <div id="notif-list" class="notif-list"></div>
         </div>
     </div>
 
