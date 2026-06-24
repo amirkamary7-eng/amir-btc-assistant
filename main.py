@@ -2,10 +2,15 @@ import os
 import re
 import time
 import html
+import json
+import uuid
+from pathlib import Path
 from datetime import datetime, timezone
+from typing import Optional
 import requests
 import xml.etree.ElementTree as ET
-from fastapi import FastAPI
+from pydantic import BaseModel
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from deep_translator import GoogleTranslator
@@ -146,6 +151,129 @@ async def get_optimized_farsi_news():
         print(f"Unexpected error: {e}")
 
     return JSONResponse(content={"status": "success", "source": "mock_fallback", "data": MOCK_NEWS})
+
+# ==========================================
+# ۳.۵ سیستم تیکت و نوتیفیکیشن تلگرام
+# ==========================================
+ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "831704732")
+TICKETS_FILE = Path(__file__).parent / "data" / "tickets.json"
+
+class TicketCreate(BaseModel):
+    user_id: str
+    user_name: str
+    title: str
+    body: str
+
+class TicketReply(BaseModel):
+    admin_id: str
+    message: str
+
+class NotifyRequest(BaseModel):
+    user_id: str
+    message: str
+
+def _ensure_tickets_file():
+    TICKETS_FILE.parent.mkdir(exist_ok=True)
+    if not TICKETS_FILE.exists():
+        TICKETS_FILE.write_text("[]", encoding="utf-8")
+
+def _read_tickets():
+    _ensure_tickets_file()
+    return json.loads(TICKETS_FILE.read_text(encoding="utf-8"))
+
+def _write_tickets(tickets):
+    _ensure_tickets_file()
+    TICKETS_FILE.write_text(json.dumps(tickets, ensure_ascii=False, indent=2), encoding="utf-8")
+
+async def _send_telegram(chat_id: str, text: str) -> bool:
+    global telegram_app
+    if not telegram_app or not telegram_app.bot:
+        print(f"ℹ️ Telegram bot not ready; skip message to {chat_id}")
+        return False
+    try:
+        await telegram_app.bot.send_message(chat_id=int(chat_id), text=text)
+        return True
+    except Exception as e:
+        print(f"⚠️ Telegram send error: {e}")
+        return False
+
+@app.post("/api/tickets")
+async def create_ticket(ticket: TicketCreate):
+    tickets = _read_tickets()
+    new_ticket = {
+        "id": str(uuid.uuid4())[:8],
+        "user_id": ticket.user_id,
+        "user_name": ticket.user_name,
+        "title": ticket.title,
+        "body": ticket.body,
+        "status": "open",
+        "replies": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    tickets.insert(0, new_ticket)
+    _write_tickets(tickets)
+    await _send_telegram(
+        ADMIN_TELEGRAM_ID,
+        f"🎫 تیکت جدید\nاز: {ticket.user_name} ({ticket.user_id})\n{ticket.title}\n{ticket.body}"
+    )
+    return {"status": "success", "ticket": new_ticket}
+
+@app.get("/api/tickets")
+async def get_user_tickets(user_id: str = Query(...)):
+    user_tickets = [t for t in _read_tickets() if t["user_id"] == user_id]
+    return {"status": "success", "tickets": user_tickets}
+
+@app.get("/api/tickets/all")
+async def get_all_tickets(admin_id: str = Query(...)):
+    if str(admin_id) != str(ADMIN_TELEGRAM_ID):
+        return JSONResponse(status_code=403, content={"status": "error", "message": "Unauthorized"})
+    return {"status": "success", "tickets": _read_tickets()}
+
+@app.post("/api/tickets/{ticket_id}/reply")
+async def reply_ticket(ticket_id: str, reply: TicketReply):
+    if str(reply.admin_id) != str(ADMIN_TELEGRAM_ID):
+        return JSONResponse(status_code=403, content={"status": "error", "message": "Unauthorized"})
+    tickets = _read_tickets()
+    found = None
+    for t in tickets:
+        if t["id"] == ticket_id:
+            found = t
+            t.setdefault("replies", []).append({
+                "message": reply.message,
+                "from": "admin",
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
+            t["status"] = "answered"
+            break
+    if not found:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
+    _write_tickets(tickets)
+    await _send_telegram(
+        found["user_id"],
+        f"💬 پاسخ تیکت: {found['title']}\n\n{reply.message}"
+    )
+    return {"status": "success", "ticket": found}
+
+@app.delete("/api/tickets/{ticket_id}")
+async def delete_ticket(
+    ticket_id: str,
+    user_id: Optional[str] = Query(None),
+    admin_id: Optional[str] = Query(None),
+):
+    is_admin = admin_id and str(admin_id) == str(ADMIN_TELEGRAM_ID)
+    tickets = _read_tickets()
+    ticket = next((t for t in tickets if t["id"] == ticket_id), None)
+    if not ticket:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
+    if not is_admin and ticket["user_id"] != user_id:
+        return JSONResponse(status_code=403, content={"status": "error", "message": "Forbidden"})
+    _write_tickets([t for t in tickets if t["id"] != ticket_id])
+    return {"status": "success"}
+
+@app.post("/api/notify")
+async def notify_user(req: NotifyRequest):
+    sent = await _send_telegram(req.user_id, req.message)
+    return {"status": "success" if sent else "skipped", "sent": sent}
 
 # ==========================================
 # ۴. تنظیمات و توابع ربات تلگرام (در صورت نیاز)

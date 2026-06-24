@@ -9,6 +9,7 @@ if (tg) { tg.ready(); tg.expand(); }
 const ADMIN_ID = '831704732';
 const CHANNEL = 'amir_btc_2024';
 const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
+const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
 
 // لیست ارزهای محبوب برای Fallback
 const POPULAR_SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT", "LINK", "MATIC", "TRX", "UNI", "LTC", "NEAR", "APT", "SUI", "FET", "ICP", "FIL", "RNDR", "HBAR", "ATOM", "STX", "IMX", "GRT", "LDO", "TAO", "INJ"];
@@ -27,7 +28,7 @@ function getCoinFullName(sym) { return COIN_NAMES[sym] || sym; }
 let currentLang = localStorage.getItem('app_lang') || 'fa';
 let watchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
 let analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
-let tickets = JSON.parse(localStorage.getItem('tickets') || '[]');
+let tickets = [];
 let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
 let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
 let allCoins = [];
@@ -39,75 +40,109 @@ let currentSlide = 0;
 // ---------- ترجمه‌ها ----------
 const i18n = {
     fa: {
-        welcome: 'خوش آمدید،',
-        dashboard: 'داشبورد',
-        market: 'مارکت',
-        analysis: 'تحلیل‌ها',
-        news: 'اخبار',
-        profile: 'پروفایل',
-        watchlist: 'واچ‌لیست',
-        settings: 'تنظیمات',
-        referral: 'دعوت و پاداش',
-        support: 'پشتیبانی',
-        about: 'درباره ما',
-        language: 'زبان',
-        search: 'جستجوی ارز...',
-        no_data: 'داده‌ای موجود نیست',
-        join_channel: 'عضویت در کانال',
-        copy: 'کپی',
-        share: 'اشتراک‌گذاری',
-        delete: 'حذف',
-        mark_all_read: 'همه خوانده شد',
-        price_alert: 'هشدار قیمت',
-        set_alert: 'ثبت هشدار'
+        welcome: 'خوش آمدید،', dashboard: 'داشبورد', market: 'مارکت', analysis: 'تحلیل', news: 'اخبار',
+        profile: 'پروفایل', watchlist: 'واچ‌لیست', settings: 'تنظیمات', referral: 'دعوت و پاداش',
+        support: 'پشتیبانی و تیکت', about: 'درباره ما', language: 'زبان', search: 'جستجوی ارز...',
+        no_data: 'داده‌ای موجود نیست', join_channel: 'عضویت در کانال', copy: 'کپی', share: 'اشتراک‌گذاری',
+        share_direct: 'اشتراک‌گذاری مستقیم', delete: 'حذف', mark_all_read: 'همه خوانده شد',
+        price_alert: 'هشدار قیمت', set_alert: 'ثبت هشدار', alert_target: 'قیمت هدف (USD)',
+        alert_bot_hint: 'اعلان در اپ + پیام تلگرام', alert_empty: 'هیچ هشدار فعالی نیست',
+        tab_overview: 'برترین‌ها', tab_trending: 'پرحجم', tab_gainers: 'رشد', tab_losers: 'ریزش',
+        analysis_title: '📊 تحلیل‌های بازار', new_analysis: 'تحلیل جدید',
+        news_all: 'همه', news_crypto: 'کریپتو', news_economy: 'اقتصادی', news_forex: 'فارکس', news_calendar: 'تقویم',
+        ref_title: 'دعوت دوستان و دریافت پاداش', ref_desc: 'لینک دعوت خود را به اشتراک بگذارید.',
+        ref_total: 'کل دعوت‌ها', ref_active: 'فعال', ref_reward: 'پاداش', coming_soon: 'بزودی',
+        ref_wheel: 'گردونه شانس و جوایز', ref_wheel_desc: 'سیستم پاداش در آپدیت بعدی فعال می‌شود.',
+        ticket_title: 'عنوان تیکت', ticket_body: 'متن پیام...', ticket_send: 'ارسال تیکت', my_tickets: 'تیکت‌های من',
+        ticket_empty: 'تیکتی ثبت نشده است', ticket_pending: 'در انتظار', ticket_answered: 'پاسخ داده شده',
+        ticket_reply_btn: 'ارسال پاسخ', ticket_delete: 'حذف تیکت', admin_tickets: 'مدیریت تیکت‌ها',
+        about_version: 'نسخه 3.5.0', about_desc: 'دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر.',
+        official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
+        price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h',
+        view_source: 'مشاهده منبع', guest: 'کاربر میهمان', required_fields: 'فیلدهای الزامی را پر کنید',
+        invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.'
     },
     en: {
-        welcome: 'Welcome,',
-        dashboard: 'Dashboard',
-        market: 'Market',
-        analysis: 'Analysis',
-        news: 'News',
-        profile: 'Profile',
-        watchlist: 'Watchlist',
-        settings: 'Settings',
-        referral: 'Referral & Earn',
-        support: 'Support',
-        about: 'About',
-        language: 'Language',
-        search: 'Search coin...',
-        no_data: 'No data available',
-        join_channel: 'Join Channel',
-        copy: 'Copy',
-        share: 'Share',
-        delete: 'Delete',
-        mark_all_read: 'Mark all read',
-        price_alert: 'Price Alert',
-        set_alert: 'Set Alert'
+        welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
+        profile: 'Profile', watchlist: 'Watchlist', settings: 'Settings', referral: 'Referral & Earn',
+        support: 'Support & Tickets', about: 'About', language: 'Language', search: 'Search coin...',
+        no_data: 'No data available', join_channel: 'Join Channel', copy: 'Copy', share: 'Share',
+        share_direct: 'Share Link', delete: 'Delete', mark_all_read: 'Mark all read',
+        price_alert: 'Price Alert', set_alert: 'Set Alert', alert_target: 'Target price (USD)',
+        alert_bot_hint: 'In-app + Telegram message', alert_empty: 'No active alerts',
+        tab_overview: 'Overview', tab_trending: 'Trending', tab_gainers: 'Gainers', tab_losers: 'Losers',
+        analysis_title: '📊 Market Analysis', new_analysis: 'New Analysis',
+        news_all: 'All', news_crypto: 'Crypto', news_economy: 'Economy', news_forex: 'Forex', news_calendar: 'Calendar',
+        ref_title: 'Invite Friends & Earn Rewards', ref_desc: 'Share your referral link with friends.',
+        ref_total: 'Total Invites', ref_active: 'Active', ref_reward: 'Reward', coming_soon: 'Coming Soon',
+        ref_wheel: 'Spin Wheel & Prizes', ref_wheel_desc: 'Reward system coming in next update.',
+        ticket_title: 'Ticket subject', ticket_body: 'Your message...', ticket_send: 'Submit Ticket',
+        my_tickets: 'My Tickets', ticket_empty: 'No tickets yet', ticket_pending: 'Pending',
+        ticket_answered: 'Answered', ticket_reply_btn: 'Send Reply', ticket_delete: 'Delete ticket',
+        admin_tickets: 'Manage Tickets', about_version: 'Version 3.5.0',
+        about_desc: 'Smart trading assistant connected to global exchange APIs.',
+        official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
+        price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume',
+        view_source: 'View source', guest: 'Guest User', required_fields: 'Please fill required fields',
+        invalid_price: 'Enter a valid price', copied: 'Copied!', copy_ref_msg: 'Referral link copied.'
     }
 };
-function t(key) { return i18n[currentLang]?.[key] || key; }
+function t(key) { return i18n[currentLang]?.[key] || i18n.fa[key] || key; }
+
+function getUserId() {
+    const uid = tg?.initDataUnsafe?.user?.id;
+    if (uid) return String(uid);
+    let guestId = localStorage.getItem('guest_id');
+    if (!guestId) { guestId = 'guest_' + Date.now(); localStorage.setItem('guest_id', guestId); }
+    return guestId;
+}
+function getUserName() {
+    const u = tg?.initDataUnsafe?.user;
+    if (!u) return t('guest');
+    return `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || t('guest');
+}
+async function apiFetch(path, options = {}) {
+    if (!API_BASE) throw new Error('API_BASE not configured');
+    const res = await fetch(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json', ...options.headers }, ...options });
+    if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+    return res.json();
+}
+function updateLangChecks() {
+    const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+    const fa = document.getElementById('lang-fa-check');
+    const en = document.getElementById('lang-en-check');
+    if (fa) fa.innerHTML = currentLang === 'fa' ? svg : '';
+    if (en) en.innerHTML = currentLang === 'en' ? svg : '';
+}
 
 function applyLanguage() {
-    document.querySelectorAll('[data-i18n]').forEach(el => {
-        const key = el.dataset.i18n;
-        if (key) el.innerText = t(key);
-    });
-    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
-        const key = el.dataset.i18nPlaceholder;
-        if (key) el.placeholder = t(key);
-    });
+    document.querySelectorAll('[data-i18n]').forEach(el => { const key = el.dataset.i18n; if (key) el.innerText = t(key); });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { const key = el.dataset.i18nPlaceholder; if (key) el.placeholder = t(key); });
     document.documentElement.lang = currentLang;
     document.documentElement.dir = currentLang === 'fa' ? 'rtl' : 'ltr';
     localStorage.setItem('app_lang', currentLang);
+    updateLangChecks();
 }
-function changeLang(lang) {
-    if (lang === currentLang) return;
-    currentLang = lang;
+function refreshUI() {
     applyLanguage();
-    document.getElementById('lang-fa-check').style.display = lang === 'fa' ? 'inline' : 'none';
-    document.getElementById('lang-en-check').style.display = lang === 'en' ? 'inline' : 'none';
-    loadMarketData();
+    renderMarket();
+    renderWatchlist();
+    renderSummary();
+    renderAnalysisSlider();
+    renderAnalysisList();
+    if (newsCache.length) renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
+    renderTickets();
+    renderActiveAlerts(document.getElementById('detail-coin-title')?.innerText?.split(' ')[0] || '');
 }
+function selectLang(lang) {
+    if (lang === currentLang) { closeLangModal(); return; }
+    currentLang = lang;
+    delete Cache.storage['news'];
+    refreshUI();
+    loadNews(true);
+    closeLangModal();
+}
+function changeLang(lang) { selectLang(lang); }
 
 // ---------- کش ----------
 const Cache = {
@@ -158,7 +193,7 @@ async function fetchWithProxy(url, options = {}) {
 
 // تابع دریافت داده از CoinGecko (بدون نیاز به Proxy)
 async function fetchCoinGecko() {
-    const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false');
+    const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=200&page=1&sparkline=false');
     if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
     const data = await res.json();
     return data.map((item, index) => ({
@@ -169,63 +204,53 @@ async function fetchCoinGecko() {
         changePercent24Hr: item.price_change_percentage_24h || 0,
         volumeUsd24Hr: item.total_volume || 0,
         marketCapUsd: item.market_cap || 0,
-        supply: item.circulating_supply || 0
+        supply: item.circulating_supply || 0,
+        image: item.image || ''
     }));
 }
 
 // ---------- بارگذاری داده‌های بازار ----------
-async function loadMarketData() {
+async function loadMarketData(force = false) {
+    const listEl = document.getElementById('coin-list');
     try {
-        const cached = Cache.get('market');
-        if (cached) {
-            allCoins = cached;
-            renderMarket();
-            renderWatchlist();
-            renderSummary();
-            return;
+        if (!force) {
+            const cached = Cache.get('market');
+            if (cached?.length) {
+                allCoins = cached;
+                renderMarket();
+                renderWatchlist();
+                renderSummary();
+                return;
+            }
         }
-
-        let data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
-        let assets = data.data || data;
-        if (Array.isArray(data) && data.length > 0 && data[0].symbol) {
-            // داده از CoinGecko است
-            allCoins = data;
-        } else if (assets.length) {
-            allCoins = assets.map((item, i) => ({
-                symbol: item.symbol,
-                name: item.name,
-                rank: i + 1,
-                priceUsd: parseFloat(item.priceUsd) || 0,
-                changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
-                volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
-                marketCapUsd: parseFloat(item.marketCapUsd) || 0,
-                supply: parseFloat(item.supply) || 0
-            }));
-        } else {
-            throw new Error('No data received');
+        try {
+            allCoins = await fetchCoinGecko();
+        } catch (e1) {
+            console.warn('CoinGecko direct failed:', e1);
+            const data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
+            const assets = data.data || data;
+            if (Array.isArray(data) && data[0]?.symbol) {
+                allCoins = data;
+            } else if (assets?.length) {
+                allCoins = assets.map((item, i) => ({
+                    symbol: item.symbol, name: item.name, rank: i + 1,
+                    priceUsd: parseFloat(item.priceUsd) || 0,
+                    changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
+                    volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
+                    marketCapUsd: parseFloat(item.marketCapUsd) || 0,
+                    supply: parseFloat(item.supply) || 0, image: ''
+                }));
+            } else throw new Error('No market data');
         }
-
         Cache.set('market', allCoins, 60);
         renderMarket();
         renderWatchlist();
         renderSummary();
     } catch (e) {
         console.error('❌ Market load error:', e);
-        // Fallback به Mock
-        const mockCoins = POPULAR_SYMBOLS.slice(0, 30).map((sym, i) => ({
-            symbol: sym,
-            name: getCoinFullName(sym),
-            rank: i + 1,
-            priceUsd: parseFloat((Math.random() * 50000 + 1000).toFixed(2)),
-            changePercent24Hr: parseFloat((Math.random() * 10 - 5).toFixed(2)),
-            volumeUsd24Hr: Math.random() * 1e9,
-            marketCapUsd: Math.random() * 1e11
-        }));
-        allCoins = mockCoins;
-        renderMarket();
-        renderWatchlist();
-        renderSummary();
-        document.getElementById('coin-list').innerHTML = `<div class="empty-state">⚠️ خطا در دریافت داده‌ها. داده‌های نمایشی موقت.</div>`;
+        if (listEl && !allCoins.length) {
+            listEl.innerHTML = `<div class="empty-state">⚠️ ${t('market_error')}</div>`;
+        }
     }
 }
 
@@ -243,25 +268,30 @@ function renderSummary() {
 // ---------- رندر مارکت (نمایش ۱۰۰ ارز) ----------
 function renderMarket() {
     const list = document.getElementById('coin-list');
+    if (!list) return;
     let filtered = [...allCoins];
     if (searchTerm) {
-        filtered = filtered.filter(c => c.symbol.toLowerCase().includes(searchTerm) || c.name.toLowerCase().includes(searchTerm));
-    }
-    switch (currentMarketTab) {
-        case 'trending':
-            filtered = filtered.sort((a, b) => b.volumeUsd24Hr - a.volumeUsd24Hr).slice(0, 30);
-            break;
-        case 'gainers':
-            filtered = filtered.filter(c => c.changePercent24Hr > 0).sort((a, b) => b.changePercent24Hr - a.changePercent24Hr).slice(0, 30);
-            break;
-        case 'losers':
-            filtered = filtered.filter(c => c.changePercent24Hr < 0).sort((a, b) => a.changePercent24Hr - b.changePercent24Hr).slice(0, 30);
-            break;
-        case 'watchlist':
-            filtered = filtered.filter(c => watchlist.includes(c.symbol));
-            break;
-        default: // overview
-            filtered = filtered.slice(0, 100); // ۱۰۰ ارز برتر
+        filtered = filtered.filter(c =>
+            c.symbol.toLowerCase().includes(searchTerm) ||
+            c.name.toLowerCase().includes(searchTerm)
+        ).slice(0, 50);
+    } else {
+        switch (currentMarketTab) {
+            case 'trending':
+                filtered = filtered.sort((a, b) => b.volumeUsd24Hr - a.volumeUsd24Hr).slice(0, 30);
+                break;
+            case 'gainers':
+                filtered = filtered.filter(c => c.changePercent24Hr > 0).sort((a, b) => b.changePercent24Hr - a.changePercent24Hr).slice(0, 30);
+                break;
+            case 'losers':
+                filtered = filtered.filter(c => c.changePercent24Hr < 0).sort((a, b) => a.changePercent24Hr - b.changePercent24Hr).slice(0, 30);
+                break;
+            case 'watchlist':
+                filtered = filtered.filter(c => watchlist.includes(c.symbol));
+                break;
+            default:
+                filtered = filtered.slice(0, 100);
+        }
     }
     if (!filtered.length) {
         list.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
@@ -270,11 +300,12 @@ function renderMarket() {
     list.innerHTML = filtered.map(c => {
         const isPos = c.changePercent24Hr >= 0;
         const inWatch = watchlist.includes(c.symbol);
+        const icon = c.image || `https://assets.coincap.io/assets/icons/${c.symbol.toLowerCase()}@2x.png`;
         return `
             <div class="coin-item" onclick="openCoinDetail('${c.symbol}')">
                 <div class="coin-left">
                     <span class="coin-rank">#${c.rank}</span>
-                    <img src="https://assets.coincap.io/assets/icons/${c.symbol.toLowerCase()}@2x.png" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="coin-icon">
+                    <img src="${icon}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="coin-icon">
                     <div>
                         <div class="coin-sym">${c.symbol}</div>
                         <div class="coin-name">${c.name}</div>
@@ -360,13 +391,28 @@ function filterCoinList() {
 // ---------- اخبار و تقویم اقتصادی ----------
 let newsCache = [];
 let displayedNews = [];
-async function loadNews() {
+async function loadNews(force = false) {
     try {
-        const cached = Cache.get('news');
-        if (cached) { newsCache = cached; renderNews('all'); return; }
-
+        if (!force) {
+            const cached = Cache.get('news');
+            if (cached) { newsCache = cached; renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all'); return; }
+        }
         let articles = [];
-        // CoinTelegraph RSS
+
+        if (currentLang === 'fa' && API_BASE) {
+            try {
+                const res = await fetch(`${API_BASE}/api/farsi-news`);
+                const json = await res.json();
+                if (json.data?.length) {
+                    articles = json.data.map(a => ({
+                        title: a.title, body: a.description, source: a.source,
+                        image: a.image, url: a.url, time: a.time_ago, category: 'crypto'
+                    }));
+                }
+            } catch (e) { console.warn('Farsi news API error:', e); }
+        }
+
+        if (!articles.length) {
         try {
             const rssText = await fetchWithProxy('https://cointelegraph.com/rss', { asText: true });
             const parser = new DOMParser();
@@ -437,17 +483,21 @@ async function loadNews() {
                 });
             });
         } catch (e) { console.warn('CryptoPanic RSS error:', e); }
+        }
 
         if (!articles.length) {
-            articles = [
+            articles = currentLang === 'fa' ? [
                 { title: 'بیت‌کوین به ۷۰ هزار دلار نزدیک شد', source: 'کوین‌تلگراف', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'با افزایش حجم معاملات...', category: 'crypto', time: 'اخیراً' },
                 { title: 'اتریوم ۱۵٪ رشد کرد', source: 'کوین‌دسک', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'اتریوم به سطح ۴۰۰۰ دلار رسید...', category: 'crypto', time: 'اخیراً' }
+            ] : [
+                { title: 'Bitcoin approaches $70K', source: 'CoinTelegraph', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'Trading volume surged...', category: 'crypto', time: 'Recently' },
+                { title: 'Ethereum up 15%', source: 'CoinDesk', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'ETH reached $4000...', category: 'crypto', time: 'Recently' }
             ];
         }
 
         newsCache = articles.slice(0, 20);
         Cache.set('news', newsCache, 300);
-        renderNews('all');
+        renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
     } catch (e) {
         console.error('News error:', e);
         document.getElementById('news-list').innerHTML = `<div class="empty-state">⚠️ خطا در دریافت اخبار</div>`;
@@ -507,6 +557,7 @@ function openNewsModal(idx) {
     document.getElementById('news-modal-image').src = n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
     document.getElementById('news-modal-body').innerText = n.body || 'متن کامل خبر در دسترس نیست.';
     document.getElementById('news-modal-link').href = n.url || '#';
+    document.getElementById('news-modal-link').innerText = t('view_source');
     document.getElementById('news-modal').style.display = 'flex';
 }
 function closeNewsModal() {
@@ -649,10 +700,10 @@ async function openCoinDetail(symbol) {
     }
 
     document.getElementById('detail-stats').innerHTML = `
-        <div><span>قیمت</span><strong>$${coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6)}</strong></div>
-        <div><span>تغییر ۲۴h</span><strong class="${coin.changePercent24Hr >= 0 ? 'up' : 'down'}">${coin.changePercent24Hr >= 0 ? '+' : ''}${coin.changePercent24Hr.toFixed(2)}%</strong></div>
-        <div><span>مارکت‌کپ</span><strong>$${(coin.marketCapUsd / 1e9).toFixed(2)}B</strong></div>
-        <div><span>حجم ۲۴h</span><strong>$${(coin.volumeUsd24Hr / 1e6).toFixed(2)}M</strong></div>
+        <div><span>${t('price')}</span><strong>$${coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6)}</strong></div>
+        <div><span>${t('change_24h')}</span><strong class="${coin.changePercent24Hr >= 0 ? 'up' : 'down'}">${coin.changePercent24Hr >= 0 ? '+' : ''}${coin.changePercent24Hr.toFixed(2)}%</strong></div>
+        <div><span>${t('mcap')}</span><strong>$${(coin.marketCapUsd / 1e9).toFixed(2)}B</strong></div>
+        <div><span>${t('volume_24h')}</span><strong>$${(coin.volumeUsd24Hr / 1e6).toFixed(2)}M</strong></div>
     `;
     renderActiveAlerts(symbol);
 }
@@ -661,15 +712,21 @@ function closeCoinDetail() {
 }
 function renderActiveAlerts(symbol) {
     const container = document.getElementById('active-alerts');
+    if (!container || !symbol) return;
     const userAlerts = alerts.filter(a => a.symbol === symbol);
     if (!userAlerts.length) {
-        container.innerHTML = 'هیچ هشدار قیمتی فعالی ندارید.';
+        container.innerHTML = `<div class="alert-empty">${t('alert_empty')}</div>`;
         return;
     }
     container.innerHTML = userAlerts.map(a => `
-        <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border);">
-            <span>💰 ${a.price}</span>
-            <span style="color:var(--red); cursor:pointer;" onclick="removeAlert('${a.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+        <div class="alert-item">
+            <div class="alert-item-info">
+                <span class="alert-item-symbol">${a.symbol}</span>
+                <span class="alert-item-target">≥ $${a.price}</span>
+            </div>
+            <button class="alert-remove-btn" onclick="removeAlert('${a.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
         </div>
     `).join('');
 }
@@ -677,14 +734,15 @@ function setPriceAlert() {
     const input = document.getElementById('alert-price');
     const price = parseFloat(input.value);
     const symbol = document.getElementById('detail-coin-title').innerText.split(' ')[0];
-    if (!price || price <= 0) { alert('لطفاً قیمت هدف معتبر وارد کنید.'); return; }
-    const newAlert = { id: Date.now().toString(), symbol, price, createdAt: new Date().toISOString() };
+    if (!price || price <= 0) { alert(t('invalid_price')); return; }
+    const userId = getUserId();
+    const newAlert = { id: Date.now().toString(), symbol, price, userId, createdAt: new Date().toISOString() };
     alerts.push(newAlert);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     input.value = '';
     renderActiveAlerts(symbol);
-    addNotification('هشدار قیمت ثبت شد', `برای ${symbol} در قیمت ${price} ثبت گردید.`);
-    checkAlerts();
+    addNotification(t('price_alert'), `${symbol} ≥ $${price}`);
+    tg?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${price}`, buttons: [{ type: 'ok' }] });
 }
 function removeAlert(id) {
     alerts = alerts.filter(a => a.id !== id);
@@ -692,27 +750,27 @@ function removeAlert(id) {
     const symbol = document.getElementById('detail-coin-title').innerText.split(' ')[0];
     renderActiveAlerts(symbol);
 }
+async function triggerAlert(alert, currentPrice) {
+    alerts = alerts.filter(a => a.id !== alert.id);
+    localStorage.setItem('price_alerts', JSON.stringify(alerts));
+    const msg = currentLang === 'fa'
+        ? `🔔 هشدار قیمت!\n${alert.symbol} به $${currentPrice.toFixed(2)} رسید (هدف: $${alert.price})`
+        : `🔔 Price Alert!\n${alert.symbol} reached $${currentPrice.toFixed(2)} (target: $${alert.price})`;
+    addNotification(t('price_alert'), msg);
+    if (API_BASE && alert.userId && !String(alert.userId).startsWith('guest_')) {
+        try { await apiFetch('/api/notify', { method: 'POST', body: JSON.stringify({ user_id: alert.userId, message: msg }) }); } catch (e) { console.warn('Telegram notify failed:', e); }
+    }
+    const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
+    if (symbol === alert.symbol) renderActiveAlerts(symbol);
+}
 async function checkAlerts() {
-    if (!alerts.length) return;
-    const symbols = [...new Set(alerts.map(a => a.symbol))];
-    try {
-        const data = await fetchWithProxy(`https://api.coincap.io/v2/assets?ids=${symbols.join(',')}`);
-        const assets = data.data || [];
-        const priceMap = {};
-        assets.forEach(a => { priceMap[a.symbol] = parseFloat(a.priceUsd); });
-        let triggered = [];
-        alerts.forEach(a => {
-            const currentPrice = priceMap[a.symbol];
-            if (currentPrice && currentPrice >= a.price) triggered.push(a);
-        });
-        if (triggered.length) {
-            triggered.forEach(a => {
-                addNotification('هشدار قیمت', `${a.symbol} به قیمت ${a.price} رسید!`);
-                alerts = alerts.filter(x => x.id !== a.id);
-                localStorage.setItem('price_alerts', JSON.stringify(alerts));
-            });
-        }
-    } catch (e) {}
+    if (!alerts.length || !allCoins.length) return;
+    const priceMap = {};
+    allCoins.forEach(c => { priceMap[c.symbol] = c.priceUsd; });
+    for (const alert of [...alerts]) {
+        const current = priceMap[alert.symbol];
+        if (current && current >= alert.price) await triggerAlert(alert, current);
+    }
 }
 
 // ---------- نوتیفیکیشن ----------
@@ -797,7 +855,7 @@ function copyRefLink() {
     const input = document.getElementById('ref-link');
     input.select();
     try { navigator.clipboard.writeText(input.value); } catch(e) { document.execCommand('copy'); }
-    tg?.showPopup?.({ title: 'کپی شد!', message: 'لینک دعوت کپی شد.', buttons: [{type:'ok'}] });
+    tg?.showPopup?.({ title: t('copied'), message: t('copy_ref_msg'), buttons: [{type:'ok'}] });
 }
 function shareRefLink() {
     const link = document.getElementById('ref-link').value;
@@ -806,73 +864,184 @@ function shareRefLink() {
     window.open(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`, '_blank');
 }
 
-// ---------- تنظیمات و پشتیبانی ----------
-function toggleSettings() {
-    const panel = document.getElementById('settings-panel');
-    if (!panel) return;
-    const isHidden = window.getComputedStyle(panel).display === 'none';
-    if (isHidden) {
-        panel.style.display = 'block';
-        document.getElementById('tickets-page').style.display = 'none';
-        document.getElementById('about-page').style.display = 'none';
-    } else {
-        panel.style.display = 'none';
-    }
+// ---------- تنظیمات و پشتیبانی (مودال) ----------
+function openSettingsModal() {
+    document.getElementById('settings-modal').style.display = 'flex';
+    const adminItem = document.getElementById('admin-tickets-item');
+    if (adminItem) adminItem.style.display = isAdmin() ? 'flex' : 'none';
 }
-function openTickets() {
-    document.getElementById('settings-panel').style.display = 'none';
-    document.getElementById('tickets-page').style.display = 'block';
-    renderTickets();
+function closeSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
+function openLangModal() {
+    closeSettingsModal();
+    updateLangChecks();
+    document.getElementById('lang-modal').style.display = 'flex';
 }
-function closeTickets() {
-    document.getElementById('tickets-page').style.display = 'none';
-    document.getElementById('settings-panel').style.display = 'block';
+function closeLangModal() { document.getElementById('lang-modal').style.display = 'none'; openSettingsModal(); }
+function openTicketsModal() {
+    closeSettingsModal();
+    document.getElementById('tickets-modal').style.display = 'flex';
+    fetchTickets().then(renderTickets);
 }
+function closeTicketsModal() { document.getElementById('tickets-modal').style.display = 'none'; }
+function openAboutModal() {
+    closeSettingsModal();
+    document.getElementById('about-modal').style.display = 'flex';
+}
+function closeAboutModal() { document.getElementById('about-modal').style.display = 'none'; }
+function openAdminTicketsModal() {
+    closeSettingsModal();
+    document.getElementById('admin-tickets-modal').style.display = 'flex';
+    fetchAdminTickets().then(renderAdminTickets);
+}
+function closeAdminTicketsModal() { document.getElementById('admin-tickets-modal').style.display = 'none'; }
+
+async function fetchTickets() {
+    if (!API_BASE) { tickets = JSON.parse(localStorage.getItem('tickets') || '[]'); return; }
+    try {
+        const data = await apiFetch(`/api/tickets?user_id=${encodeURIComponent(getUserId())}`);
+        tickets = data.tickets || [];
+    } catch (e) { console.warn('fetchTickets:', e); tickets = []; }
+}
+
+async function fetchAdminTickets() {
+    if (!API_BASE || !isAdmin()) return;
+    try {
+        const data = await apiFetch(`/api/tickets/all?admin_id=${encodeURIComponent(getUserId())}`);
+        tickets = data.tickets || [];
+    } catch (e) { console.warn('fetchAdminTickets:', e); }
+}
+
+function formatTicketDate(iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString(currentLang === 'fa' ? 'fa-IR' : 'en-US'); } catch { return iso; }
+}
+
+function renderTicketThread(replies) {
+    if (!replies?.length) return '';
+    return `<div class="ticket-thread">${replies.map(r => `
+        <div class="ticket-reply ${r.from === 'admin' ? 'admin' : ''}">
+            ${r.message}
+            <div class="ticket-reply-meta">${r.from === 'admin' ? '👤 Admin' : '👤 You'} • ${formatTicketDate(r.at)}</div>
+        </div>
+    `).join('')}</div>`;
+}
+
 function renderTickets() {
     const container = document.getElementById('ticket-list');
+    if (!container) return;
     if (!tickets.length) {
-        container.innerHTML = '<div class="empty-state">تیکتی ثبت نشده است.</div>';
+        container.innerHTML = `<div class="empty-state">${t('ticket_empty')}</div>`;
         return;
     }
-    container.innerHTML = tickets.map(t => `
+    container.innerHTML = tickets.map(tk => `
         <div class="ticket-item">
-            <div><strong>${t.title}</strong> <span class="ticket-status ${t.status}">${t.status === 'open' ? 'در انتظار' : 'پاسخ داده شده'}</span></div>
-            <div>${t.body}</div>
-            ${t.response ? `<div class="ticket-reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> ${t.response}</div>` : ''}
-            <div class="ticket-date">${t.date}</div>
+            <div class="ticket-item-header">
+                <strong>${escapeHtml(tk.title)}</strong>
+                <span class="ticket-status ${tk.status}">${tk.status === 'open' ? t('ticket_pending') : t('ticket_answered')}</span>
+            </div>
+            <div class="ticket-body-text">${escapeHtml(tk.body)}</div>
+            ${renderTicketThread(tk.replies)}
+            <div class="ticket-date">${formatTicketDate(tk.created_at)}</div>
+            <div class="ticket-actions">
+                <button class="ticket-delete-btn" onclick="deleteTicket('${tk.id}')">${t('ticket_delete')}</button>
+            </div>
         </div>
     `).join('');
 }
-function submitTicket() {
+
+function renderAdminTickets() {
+    const container = document.getElementById('admin-ticket-list');
+    if (!container) return;
+    if (!tickets.length) {
+        container.innerHTML = `<div class="empty-state">${t('ticket_empty')}</div>`;
+        return;
+    }
+    container.innerHTML = tickets.map(tk => `
+        <div class="ticket-item">
+            <div class="ticket-item-header">
+                <strong>${escapeHtml(tk.title)}</strong>
+                <span class="ticket-status ${tk.status}">${tk.status === 'open' ? t('ticket_pending') : t('ticket_answered')}</span>
+            </div>
+            <div class="ticket-user">${escapeHtml(tk.user_name)} • ID: ${tk.user_id}</div>
+            <div class="ticket-body-text">${escapeHtml(tk.body)}</div>
+            ${renderTicketThread(tk.replies)}
+            <div class="ticket-date">${formatTicketDate(tk.created_at)}</div>
+            <div class="ticket-reply-form">
+                <textarea id="reply-${tk.id}" class="input-field ticket-reply-input" placeholder="${t('ticket_body')}"></textarea>
+                <button class="submit-btn ticket-reply-btn" onclick="replyToTicket('${tk.id}')">${t('ticket_reply_btn')}</button>
+            </div>
+            <div class="ticket-actions">
+                <button class="ticket-delete-btn" onclick="deleteTicket('${tk.id}', true)">${t('ticket_delete')}</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function submitTicket() {
     const title = document.getElementById('ticket-title').value.trim();
     const body = document.getElementById('ticket-body').value.trim();
-    if (!title || !body) { alert('عنوان و متن تیکت الزامی است.'); return; }
-    const ticket = { id: Date.now().toString(), title, body, date: new Date().toLocaleDateString('fa-IR'), status: 'open', response: null };
-    tickets.unshift(ticket);
-    localStorage.setItem('tickets', JSON.stringify(tickets));
-    document.getElementById('ticket-title').value = '';
-    document.getElementById('ticket-body').value = '';
-    renderTickets();
-    addNotification('تیکت جدید', `تیکت "${title}" با موفقیت ارسال شد.`);
-    setTimeout(() => {
-        const idx = tickets.findIndex(t => t.id === ticket.id);
-        if (idx > -1) {
-            tickets[idx].status = 'answered';
-            tickets[idx].response = 'سلام، درخواست شما دریافت شد. به زودی بررسی می‌شود.';
-            localStorage.setItem('tickets', JSON.stringify(tickets));
-            renderTickets();
-            addNotification('پاسخ تیکت', `پاسخ به تیکت "${ticket.title}" دریافت شد.`);
+    if (!title || !body) { alert(t('required_fields')); return; }
+    try {
+        if (API_BASE) {
+            await apiFetch('/api/tickets', {
+                method: 'POST',
+                body: JSON.stringify({ user_id: getUserId(), user_name: getUserName(), title, body })
+            });
+        } else {
+            const ticket = { id: Date.now().toString(), user_id: getUserId(), title, body, status: 'open', replies: [], created_at: new Date().toISOString() };
+            const local = JSON.parse(localStorage.getItem('tickets') || '[]');
+            local.unshift(ticket);
+            localStorage.setItem('tickets', JSON.stringify(local));
         }
-    }, 5000);
+        document.getElementById('ticket-title').value = '';
+        document.getElementById('ticket-body').value = '';
+        await fetchTickets();
+        renderTickets();
+        addNotification(t('support'), `"${title}"`);
+    } catch (e) {
+        alert(t('market_error'));
+        console.error(e);
+    }
 }
-function openAbout() {
-    document.getElementById('settings-panel').style.display = 'none';
-    document.getElementById('about-page').style.display = 'block';
+
+async function replyToTicket(ticketId) {
+    if (!isAdmin()) return;
+    const textarea = document.getElementById(`reply-${ticketId}`);
+    const message = textarea?.value?.trim();
+    if (!message) { alert(t('required_fields')); return; }
+    try {
+        await apiFetch(`/api/tickets/${ticketId}/reply`, {
+            method: 'POST',
+            body: JSON.stringify({ admin_id: getUserId(), message })
+        });
+        textarea.value = '';
+        await fetchAdminTickets();
+        renderAdminTickets();
+    } catch (e) { alert(t('market_error')); console.error(e); }
 }
-function closeAbout() {
-    document.getElementById('about-page').style.display = 'none';
-    document.getElementById('settings-panel').style.display = 'block';
+
+async function deleteTicket(ticketId, isAdminView = false) {
+    if (!confirm(t('ticket_delete') + '?')) return;
+    try {
+        if (API_BASE) {
+            const params = isAdminView
+                ? `admin_id=${encodeURIComponent(getUserId())}`
+                : `user_id=${encodeURIComponent(getUserId())}`;
+            await apiFetch(`/api/tickets/${ticketId}?${params}`, { method: 'DELETE' });
+        } else {
+            const local = JSON.parse(localStorage.getItem('tickets') || '[]').filter(t => t.id !== ticketId);
+            localStorage.setItem('tickets', JSON.stringify(local));
+        }
+        if (isAdminView) { await fetchAdminTickets(); renderAdminTickets(); }
+        else { await fetchTickets(); renderTickets(); }
+    } catch (e) { console.error(e); }
 }
+
 function joinChannel() {
     if (tg?.openTelegramLink) tg.openTelegramLink(`https://t.me/${CHANNEL}`);
     else window.open(`https://t.me/${CHANNEL}`, '_blank');
@@ -919,9 +1088,6 @@ function switchTab(pageId, btn) {
         loadNews();
     } else if (pageId === 'profile-page') {
         loadUser();
-        document.getElementById('settings-panel').style.display = 'none';
-        document.getElementById('tickets-page').style.display = 'none';
-        document.getElementById('about-page').style.display = 'none';
     }
 }
 
@@ -976,15 +1142,21 @@ function startPolling() {
 
 // ---------- راه‌اندازی ----------
 document.addEventListener('DOMContentLoaded', () => {
+    alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
+    localStorage.setItem('price_alerts', JSON.stringify(alerts));
     applyLanguage();
     loadUser();
-    loadMarketData();
+    loadMarketData(true);
     renderAnalysisSlider();
     loadNews();
     loadImportantNews();
     updateNotifBadge();
-    checkMandatoryJoin(); // نمایش پاپ‌آپ جوین اجباری
+    checkMandatoryJoin();
     startPolling();
+    setInterval(() => {
+        if (document.getElementById('tickets-modal')?.style.display === 'flex') fetchTickets().then(renderTickets);
+        if (document.getElementById('admin-tickets-modal')?.style.display === 'flex') fetchAdminTickets().then(renderAdminTickets);
+    }, 15000);
 });
 
 // ثبت توابع در فضای global
@@ -1011,12 +1183,21 @@ window.clearAllNotifications = clearAllNotifications;
 window.markNotifRead = markNotifRead;
 window.copyRefLink = copyRefLink;
 window.shareRefLink = shareRefLink;
-window.toggleSettings = toggleSettings;
-window.openTickets = openTickets;
-window.closeTickets = closeTickets;
+window.toggleSettings = openSettingsModal;
+window.openSettingsModal = openSettingsModal;
+window.closeSettingsModal = closeSettingsModal;
+window.openLangModal = openLangModal;
+window.closeLangModal = closeLangModal;
+window.selectLang = selectLang;
+window.openTicketsModal = openTicketsModal;
+window.closeTicketsModal = closeTicketsModal;
+window.openAboutModal = openAboutModal;
+window.closeAboutModal = closeAboutModal;
+window.openAdminTicketsModal = openAdminTicketsModal;
+window.closeAdminTicketsModal = closeAdminTicketsModal;
+window.replyToTicket = replyToTicket;
+window.deleteTicket = deleteTicket;
 window.submitTicket = submitTicket;
-window.openAbout = openAbout;
-window.closeAbout = closeAbout;
 window.joinChannel = joinChannel;
 window.changeLang = changeLang;
 window.openNewsModal = openNewsModal;
