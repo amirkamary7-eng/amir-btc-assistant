@@ -32,18 +32,26 @@
     <!-- ===== صفحه داشبورد ===== -->
     <section id="dashboard-page" class="page active">
         <div class="hero-banner" onclick="joinChannel()">
-            <div class="hero-content">
-                <span class="hero-badge">کانال تحلیلی</span>
-                <h2>AMIRBTC</h2>
-                <p>سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار</p>
-                <button class="hero-cta">عضویت رایگان</button>
+            <div class="hero-inner">
+                <div class="hero-content">
+                    <span class="hero-badge" data-i18n="hero_badge">کانال تحلیلی</span>
+                    <h2>AMIRBTC</h2>
+                    <p data-i18n="hero_desc">سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار</p>
+                    <button class="hero-cta" data-i18n="hero_cta">عضویت رایگان</button>
+                </div>
+                <div class="hero-art">
+                    <img src="assets/amirbtc-logo.png" alt="AMIRBTC" class="hero-logo">
+                </div>
             </div>
             <div class="hero-glow"></div>
         </div>
 
         <div class="section-header">
-            <span class="section-title">📊 تحلیل‌های جدید</span>
-            <span class="section-more" onclick="switchTab('analysis-page')">مشاهده همه</span>
+            <span class="section-title">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
+                <span data-i18n="section_analysis">تحلیل‌های جدید</span>
+            </span>
+            <span class="section-more" data-i18n="view_all" onclick="switchTab('analysis-page')">مشاهده همه</span>
         </div>
         <div class="slider-container" id="analysis-slider">
             <div class="slider-track" id="slider-track"></div>
@@ -51,7 +59,10 @@
         </div>
 
         <div class="section-header">
-            <span class="section-title">⭐ واچ‌لیست من</span>
+            <span class="section-title">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                <span data-i18n="section_watchlist">واچ‌لیست من</span>
+            </span>
             <button class="add-watch-btn" onclick="openAddCoinModal()">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
@@ -59,7 +70,10 @@
         <div class="watchlist-grid" id="watchlist-grid"></div>
 
         <div class="section-header">
-            <span class="section-title">📰 اخبار مهم و فوری</span>
+            <span class="section-title">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+                <span data-i18n="section_news">اخبار مهم و فوری</span>
+            </span>
         </div>
         <div id="important-news" class="important-news-list"></div>
     </section>
@@ -82,7 +96,10 @@
     <!-- ===== صفحه تحلیل ===== -->
     <section id="analysis-page" class="page">
         <div class="analysis-header">
-            <h2 data-i18n="analysis_title">📊 تحلیل‌های بازار</h2>
+            <h2 class="page-title-with-icon">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
+                <span data-i18n="analysis_title">تحلیل‌های بازار</span>
+            </h2>
             <button id="admin-add-btn" class="admin-btn" style="display:none;" onclick="openAddAnalysisModal()">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> <span data-i18n="new_analysis">تحلیل جدید</span>
             </button>
@@ -114,7 +131,7 @@
             <div class="profile-avatar">
                 <img id="profile-avatar" src="https://ui-avatars.com/api/?name=Guest&background=f7931a&color=fff&bold=true" alt="">
             </div>
-            <h3 class="profile-name" id="profile-name">کاربر میهمان</h3>
+            <h3 class="profile-name" id="profile-name" data-i18n="guest">کاربر میهمان</h3>
             <span class="profile-username" id="profile-username">@guest</span>
             <span class="profile-id">ID: <span id="profile-id-num">000000</span></span>
         </div>
@@ -138,7 +155,9 @@
                 <div><span data-i18n="ref_reward">پاداش</span><strong id="ref-reward">0 SAT</strong></div>
             </div>
             <div class="ref-rewards-soon">
-                <span class="soon-badge" data-i18n="coming_soon">بزودی</span>
+                <div class="soon-badge-row">
+                    <span class="soon-badge" data-i18n="coming_soon">بزودی</span>
+                </div>
                 <h5 data-i18n="ref_wheel">گردونه شانس و جوایز نقدی</h5>
                 <p data-i18n="ref_wheel_desc">سیستم پاداش‌دهی بر اساس امتیاز رفرال‌ها در آپدیت بعدی فعال می‌شود.</p>
             </div>
@@ -174,13 +193,15 @@
     <!-- پاپ‌آپ جوین اجباری (اصلاح شده) -->
     <div id="mandatory-join-modal" class="modal" style="display:none; z-index: 10000; backdrop-filter: blur(15px);">
         <div class="modal-box join-box" style="text-align: center; padding: 30px 20px;">
-            <div class="join-icon" style="font-size: 50px; margin-bottom: 15px;">💎</div>
-            <h3 style="font-size: 18px; margin-bottom: 10px; color: var(--accent);">عضویت در کانال VIP</h3>
-            <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 20px; line-height: 1.6;">
+            <div class="join-icon-wrap">
+                <img src="assets/amirbtc-logo.png" alt="AMIRBTC" class="join-logo">
+            </div>
+            <h3 style="font-size: 18px; margin-bottom: 10px; color: var(--accent);" data-i18n="join_vip_title">عضویت در کانال VIP</h3>
+            <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 20px; line-height: 1.6;" data-i18n="join_vip_desc">
                 برای دسترسی به چارت‌های لحظه‌ای، تحلیل‌های اختصاصی و 100 ارز برتر، ابتدا در کانال رسمی ما عضو شوید.
             </p>
-            <button class="submit-btn" style="margin-bottom: 10px; font-size: 15px;" onclick="window.open('https://t.me/amir_btc_2024', '_blank'); setTimeout(verifyJoin, 3000);">عضویت در کانال</button>
-            <p style="font-size: 11px; color: var(--text-sub);">بعد از عضویت، دسترسی شما باز خواهد شد.</p>
+            <button class="submit-btn" style="margin-bottom: 10px; font-size: 15px;" onclick="window.open('https://t.me/amir_btc_2024', '_blank'); setTimeout(verifyJoin, 3000);" data-i18n="join_vip_btn">عضویت در کانال</button>
+            <p style="font-size: 11px; color: var(--text-sub);" data-i18n="join_vip_hint">بعد از عضویت، دسترسی شما باز خواهد شد.</p>
         </div>
     </div>
 
@@ -189,7 +210,7 @@
         <div class="modal-box">
             <div class="modal-header">
                 <h3>افزودن به واچ‌لیست</h3>
-                <button onclick="closeAddCoinModal()">✕</button>
+                <button class="modal-close-btn" onclick="closeAddCoinModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <input type="text" id="coin-search-modal" placeholder="جستجو..." class="input-field" oninput="filterCoinList()">
             <div id="coin-modal-list" class="modal-list"></div>
@@ -201,7 +222,7 @@
         <div class="modal-box">
             <div class="modal-header">
                 <h3>تحلیل جدید</h3>
-                <button onclick="closeAddAnalysisModal()">✕</button>
+                <button class="modal-close-btn" onclick="closeAddAnalysisModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <input type="text" id="analysis-coin" placeholder="نماد ارز (مثلاً BTC)" class="input-field">
             <input type="text" id="analysis-timeframe" placeholder="تایم‌فریم (مثلاً 4h)" class="input-field">
@@ -219,7 +240,7 @@
         <div class="modal-box">
             <div class="modal-header">
                 <h3 id="news-modal-title">عنوان خبر</h3>
-                <button onclick="closeNewsModal()">✕</button>
+                <button class="modal-close-btn" onclick="closeNewsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <img id="news-modal-image" src="" alt="" style="width:100%; border-radius:12px; margin:10px 0; max-height:200px; object-fit:cover;">
             <p id="news-modal-body" style="color:var(--text-dim); line-height:1.6;"></p>
@@ -232,7 +253,7 @@
         <div class="modal-box">
             <div class="modal-header">
                 <h3 id="detail-coin-title">BTC / USDT</h3>
-                <button onclick="closeCoinDetail()">✕</button>
+                <button class="modal-close-btn" onclick="closeCoinDetail()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div id="detail-chart" style="height:200px; border-radius:12px; overflow:hidden; margin-bottom:12px;"></div>
             <div class="detail-stats" id="detail-stats"></div>
@@ -254,14 +275,20 @@
     <div id="notif-modal" class="modal" onclick="if(event.target===this) closeNotifModal()">
         <div class="modal-box">
             <div class="modal-header">
-                <h3>🔔 مرکز اعلانات</h3>
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span data-i18n="notif_center">مرکز اعلانات</span>
+                </h3>
                 <div style="display:flex; gap:8px; align-items:center;">
-                    <button class="mark-all-read-btn" onclick="markAllRead()">✓ همه خوانده شد</button>
-                    <button onclick="closeNotifModal()">✕</button>
+                    <button class="mark-all-read-btn" onclick="markAllRead()" data-i18n="mark_all_read">همه خوانده شد</button>
+                    <button class="modal-close-btn" onclick="closeNotifModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
             </div>
             <div id="notif-list" class="notif-list" style="margin-bottom: 15px;"></div>
-            <button class="clear-notif-btn" onclick="clearAllNotifications()">🗑 پاک کردن همه اعلانات</button>
+            <button class="clear-notif-btn" onclick="clearAllNotifications()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span data-i18n="clear_all_notif">پاک کردن همه اعلانات</span>
+            </button>
         </div>
     </div>
 
@@ -269,8 +296,11 @@
     <div id="settings-modal" class="modal" onclick="if(event.target===this) closeSettingsModal()">
         <div class="modal-box settings-modal-box">
             <div class="modal-header">
-                <h3 data-i18n="settings">⚙️ تنظیمات</h3>
-                <button onclick="closeSettingsModal()">✕</button>
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span data-i18n="settings">تنظیمات</span>
+                </h3>
+                <button class="modal-close-btn" onclick="closeSettingsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="settings-menu">
                 <div class="setting-item" onclick="openLangModal()">
@@ -297,16 +327,19 @@
     <div id="lang-modal" class="modal" onclick="if(event.target===this) closeLangModal()">
         <div class="modal-box">
             <div class="modal-header">
-                <h3 data-i18n="language">🌐 زبان</h3>
-                <button onclick="closeLangModal()">✕</button>
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    <span data-i18n="language">زبان</span>
+                </h3>
+                <button class="modal-close-btn" onclick="closeLangModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="lang-options">
                 <div class="lang-option" onclick="selectLang('fa')">
-                    <span>🇮🇷 فارسی</span>
+                    <span class="lang-label"><span class="lang-flag lang-flag-fa">FA</span> فارسی</span>
                     <span id="lang-fa-check" class="lang-check"></span>
                 </div>
                 <div class="lang-option" onclick="selectLang('en')">
-                    <span>🇺🇸 English</span>
+                    <span class="lang-label"><span class="lang-flag lang-flag-en">EN</span> English</span>
                     <span id="lang-en-check" class="lang-check"></span>
                 </div>
             </div>
@@ -317,8 +350,11 @@
     <div id="tickets-modal" class="modal full-modal" onclick="if(event.target===this) closeTicketsModal()">
         <div class="modal-box modal-box-wide">
             <div class="modal-header">
-                <h3 data-i18n="support">💬 پشتیبانی</h3>
-                <button onclick="closeTicketsModal()">✕</button>
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span data-i18n="support">پشتیبانی</span>
+                </h3>
+                <button class="modal-close-btn" onclick="closeTicketsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="ticket-form">
                 <input type="text" id="ticket-title" class="input-field" data-i18n-placeholder="ticket_title" placeholder="عنوان تیکت">
@@ -334,8 +370,11 @@
     <div id="admin-tickets-modal" class="modal full-modal" onclick="if(event.target===this) closeAdminTicketsModal()">
         <div class="modal-box modal-box-wide">
             <div class="modal-header">
-                <h3 data-i18n="admin_tickets">🛡 مدیریت تیکت‌ها</h3>
-                <button onclick="closeAdminTicketsModal()">✕</button>
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    <span data-i18n="admin_tickets">مدیریت تیکت‌ها</span>
+                </h3>
+                <button class="modal-close-btn" onclick="closeAdminTicketsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div id="admin-ticket-list" class="ticket-list"></div>
         </div>
@@ -346,7 +385,7 @@
         <div class="modal-box">
             <div class="modal-header">
                 <h3 data-i18n="about">درباره ما</h3>
-                <button onclick="closeAboutModal()">✕</button>
+                <button class="modal-close-btn" onclick="closeAboutModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="about-content">
                 <h3>Amir BTC Assistant</h3>

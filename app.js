@@ -47,15 +47,33 @@ const i18n = {
         share_direct: 'اشتراک‌گذاری مستقیم', delete: 'حذف', mark_all_read: 'همه خوانده شد',
         price_alert: 'هشدار قیمت', set_alert: 'ثبت هشدار', alert_target: 'قیمت هدف (USD)',
         alert_bot_hint: 'اعلان در اپ + پیام تلگرام', alert_empty: 'هیچ هشدار فعالی نیست',
+        alert_registered: 'هشدار ثبت شد',
         tab_overview: 'برترین‌ها', tab_trending: 'پرحجم', tab_gainers: 'رشد', tab_losers: 'ریزش',
-        analysis_title: '📊 تحلیل‌های بازار', new_analysis: 'تحلیل جدید',
+        analysis_title: 'تحلیل‌های بازار', new_analysis: 'تحلیل جدید',
         news_all: 'همه', news_crypto: 'کریپتو', news_economy: 'اقتصادی', news_forex: 'فارکس', news_calendar: 'تقویم',
+        hero_badge: 'کانال تحلیلی', hero_desc: 'سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار', hero_cta: 'عضویت رایگان',
+        section_analysis: 'تحلیل‌های جدید', section_watchlist: 'واچ‌لیست من', section_news: 'اخبار مهم و فوری',
+        view_all: 'مشاهده همه', watchlist_empty: 'واچ‌لیست خالی است', no_analysis: 'تحلیلی موجود نیست',
+        no_analysis_list: 'هیچ تحلیلی ثبت نشده است.', no_news: 'خبری وجود ندارد', news_error: 'خطا در دریافت اخبار',
+        news_unavailable: 'متن کامل خبر در دسترس نیست.', notif_center: 'مرکز اعلانات', clear_all_notif: 'پاک کردن همه اعلانات',
+        no_notif: 'هیچ اعلانی وجود ندارد.', confirm_clear_notif: 'آیا از پاک کردن تمامی اعلانات مطمئن هستید؟',
+        join_vip_title: 'عضویت در کانال VIP',
+        join_vip_desc: 'برای دسترسی به چارت‌های لحظه‌ای، تحلیل‌های اختصاصی و 100 ارز برتر، ابتدا در کانال رسمی ما عضو شوید.',
+        join_vip_btn: 'عضویت در کانال', join_vip_hint: 'بعد از عضویت، دسترسی شما باز خواهد شد.',
+        join_verified: 'عضویت تایید شد', join_welcome: 'به اپلیکیشن امیر BTC خوش آمدید!',
+        share_ref_text: 'به Amir BTC Assistant بپیوندید و از تحلیل‌های حرفه‌ای بازار استفاده کنید!',
+        chart_unavailable: 'نمودار در دسترس نیست', close: 'بستن',
         ref_title: 'دعوت دوستان و دریافت پاداش', ref_desc: 'لینک دعوت خود را به اشتراک بگذارید.',
         ref_total: 'کل دعوت‌ها', ref_active: 'فعال', ref_reward: 'پاداش', coming_soon: 'بزودی',
         ref_wheel: 'گردونه شانس و جوایز', ref_wheel_desc: 'سیستم پاداش در آپدیت بعدی فعال می‌شود.',
         ticket_title: 'عنوان تیکت', ticket_body: 'متن پیام...', ticket_send: 'ارسال تیکت', my_tickets: 'تیکت‌های من',
         ticket_empty: 'تیکتی ثبت نشده است', ticket_pending: 'در انتظار', ticket_answered: 'پاسخ داده شده',
         ticket_reply_btn: 'ارسال پاسخ', ticket_delete: 'حذف تیکت', admin_tickets: 'مدیریت تیکت‌ها',
+        ticket_error: 'خطا در ارسال تیکت. لطفاً دوباره تلاش کنید.',
+        ticket_reply_error: 'خطا در ارسال پاسخ. لطفاً دوباره تلاش کنید.',
+        ticket_sent: 'تیکت با موفقیت ارسال شد', ticket_admin: 'ادمین', ticket_you: 'شما',
+        cal_today: 'امروز', cal_tomorrow: 'فردا', cal_impact_high: 'بالا', cal_impact_med: 'متوسط',
+        cal_cpi: 'نرخ تورم (CPI)', cal_fed: 'سخنرانی رئیس فدرال رزرو', cal_pmi: 'شاخص مدیران خرید (PMI)',
         about_version: 'نسخه 3.5.0', about_desc: 'دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر.',
         official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
         price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h',
@@ -70,16 +88,35 @@ const i18n = {
         share_direct: 'Share Link', delete: 'Delete', mark_all_read: 'Mark all read',
         price_alert: 'Price Alert', set_alert: 'Set Alert', alert_target: 'Target price (USD)',
         alert_bot_hint: 'In-app + Telegram message', alert_empty: 'No active alerts',
+        alert_registered: 'Alert registered',
         tab_overview: 'Overview', tab_trending: 'Trending', tab_gainers: 'Gainers', tab_losers: 'Losers',
-        analysis_title: '📊 Market Analysis', new_analysis: 'New Analysis',
+        analysis_title: 'Market Analysis', new_analysis: 'New Analysis',
         news_all: 'All', news_crypto: 'Crypto', news_economy: 'Economy', news_forex: 'Forex', news_calendar: 'Calendar',
+        hero_badge: 'Analysis Channel', hero_desc: 'Daily signals, analysis & market education', hero_cta: 'Join Free',
+        section_analysis: 'Latest Analysis', section_watchlist: 'My Watchlist', section_news: 'Breaking News',
+        view_all: 'View all', watchlist_empty: 'Watchlist is empty', no_analysis: 'No analysis available',
+        no_analysis_list: 'No analysis posted yet.', no_news: 'No news available', news_error: 'Failed to load news',
+        news_unavailable: 'Full article text is not available.', notif_center: 'Notification Center',
+        clear_all_notif: 'Clear all notifications', no_notif: 'No notifications yet.',
+        confirm_clear_notif: 'Clear all notifications?', join_vip_title: 'Join VIP Channel',
+        join_vip_desc: 'To access live charts, exclusive analysis and top 100 coins, join our official channel first.',
+        join_vip_btn: 'Join Channel', join_vip_hint: 'Access will unlock after you join.',
+        join_verified: 'Membership verified', join_welcome: 'Welcome to Amir BTC Assistant!',
+        share_ref_text: 'Join Amir BTC Assistant and get professional market analysis!',
+        chart_unavailable: 'Chart unavailable', close: 'Close',
         ref_title: 'Invite Friends & Earn Rewards', ref_desc: 'Share your referral link with friends.',
         ref_total: 'Total Invites', ref_active: 'Active', ref_reward: 'Reward', coming_soon: 'Coming Soon',
         ref_wheel: 'Spin Wheel & Prizes', ref_wheel_desc: 'Reward system coming in next update.',
         ticket_title: 'Ticket subject', ticket_body: 'Your message...', ticket_send: 'Submit Ticket',
         my_tickets: 'My Tickets', ticket_empty: 'No tickets yet', ticket_pending: 'Pending',
         ticket_answered: 'Answered', ticket_reply_btn: 'Send Reply', ticket_delete: 'Delete ticket',
-        admin_tickets: 'Manage Tickets', about_version: 'Version 3.5.0',
+        admin_tickets: 'Manage Tickets',
+        ticket_error: 'Failed to submit ticket. Please try again.',
+        ticket_reply_error: 'Failed to send reply. Please try again.',
+        ticket_sent: 'Ticket submitted successfully', ticket_admin: 'Admin', ticket_you: 'You',
+        cal_today: 'Today', cal_tomorrow: 'Tomorrow', cal_impact_high: 'High', cal_impact_med: 'Medium',
+        cal_cpi: 'Inflation Rate (CPI)', cal_fed: 'Fed Chair Speech', cal_pmi: 'Purchasing Managers Index (PMI)',
+        about_version: 'Version 3.5.0',
         about_desc: 'Smart trading assistant connected to global exchange APIs.',
         official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
         price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume',
@@ -125,12 +162,14 @@ function applyLanguage() {
 }
 function refreshUI() {
     applyLanguage();
+    loadUser();
     renderMarket();
     renderWatchlist();
     renderSummary();
     renderAnalysisSlider();
     renderAnalysisList();
     if (newsCache.length) renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
+    loadImportantNews();
     renderTickets();
     renderActiveAlerts(document.getElementById('detail-coin-title')?.innerText?.split(' ')[0] || '');
 }
@@ -249,7 +288,7 @@ async function loadMarketData(force = false) {
     } catch (e) {
         console.error('❌ Market load error:', e);
         if (listEl && !allCoins.length) {
-            listEl.innerHTML = `<div class="empty-state">⚠️ ${t('market_error')}</div>`;
+            listEl.innerHTML = `<div class="empty-state">${t('market_error')}</div>`;
         }
     }
 }
@@ -257,10 +296,12 @@ async function loadMarketData(force = false) {
 // ---------- رندر خلاصه بازار ----------
 function renderSummary() {
     if (!allCoins.length) return;
+    const mcapEl = document.getElementById('global-mcap');
+    if (!mcapEl) return;
     const mcap = allCoins.reduce((s, c) => s + c.marketCapUsd, 0);
     const volume = allCoins.reduce((s, c) => s + c.volumeUsd24Hr, 0);
     const btc = allCoins.find(c => c.symbol === 'BTC');
-    document.getElementById('global-mcap').innerText = '$' + (mcap / 1e12).toFixed(2) + 'T';
+    mcapEl.innerText = '$' + (mcap / 1e12).toFixed(2) + 'T';
     document.getElementById('global-volume').innerText = '$' + (volume / 1e9).toFixed(2) + 'B';
     document.getElementById('btc-dom').innerText = btc ? ((btc.marketCapUsd / mcap) * 100).toFixed(1) + '%' : '--';
 }
@@ -351,7 +392,7 @@ function renderWatchlist() {
     const grid = document.getElementById('watchlist-grid');
     const watchCoins = allCoins.filter(c => watchlist.includes(c.symbol));
     if (!watchCoins.length) {
-        grid.innerHTML = `<div class="empty-state">واچ‌لیست خالی است</div>`;
+        grid.innerHTML = `<div class="empty-state">${t('watchlist_empty')}</div>`;
         return;
     }
     grid.innerHTML = watchCoins.slice(0, 6).map(c => `
@@ -390,6 +431,77 @@ function filterCoinList() {
 
 // ---------- اخبار و تقویم اقتصادی ----------
 let newsCache = [];
+
+async function translateText(text, targetLang) {
+    if (!text?.trim()) return text;
+    const tl = targetLang || (currentLang === 'fa' ? 'fa' : 'en');
+    try {
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${tl}&dt=t&q=${encodeURIComponent(text.substring(0, 500))}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        return data[0]?.map(x => x[0]).join('') || text;
+    } catch { return text; }
+}
+
+async function translateArticles(articles) {
+    if (currentLang !== 'fa') return articles;
+    const translated = [];
+    for (const a of articles.slice(0, 12)) {
+        const title = await translateText(a.title, 'fa');
+        const body = a.body ? await translateText(a.body, 'fa') : a.body;
+        translated.push({ ...a, title, body });
+    }
+    return translated;
+}
+
+function detectNewsCategory(title, body) {
+    const text = `${title} ${body}`.toLowerCase();
+    if (/forex|dollar|eur\/usd|fed rate|interest rate|central bank|fx /.test(text)) return 'forex';
+    if (/economy|gdp|inflation|cpi|pmi|employment|recession|stock market|wall street/.test(text)) return 'economy';
+    return 'crypto';
+}
+
+function parseRssItems(rssText, sourceName) {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(rssText, 'text/xml');
+    const items = xmlDoc.querySelectorAll('item');
+    const articles = [];
+    items.forEach(item => {
+        const title = item.querySelector('title')?.textContent || '';
+        const link = item.querySelector('link')?.textContent || '#';
+        const description = item.querySelector('description')?.textContent || '';
+        const imgMatch = description.match(/<img[^>]+src="([^">]+)"/);
+        const image = imgMatch ? imgMatch[1] : null;
+        const body = description.replace(/<[^>]*>/g, '').trim().substring(0, 200);
+        articles.push({
+            title: title.replace(/<[^>]*>/g, '').trim(),
+            source: sourceName,
+            image,
+            url: link,
+            body,
+            category: detectNewsCategory(title, body),
+            time: new Date(item.querySelector('pubDate')?.textContent || Date.now()).toLocaleString(currentLang === 'fa' ? 'fa-IR' : 'en-US')
+        });
+    });
+    return articles;
+}
+
+async function fetchRssArticles() {
+    const articles = [];
+    const sources = [
+        ['https://cointelegraph.com/rss', 'CoinTelegraph'],
+        ['https://www.coindesk.com/arc/outboundfeeds/rss/', 'CoinDesk'],
+        ['https://cryptopanic.com/feed/', 'CryptoPanic']
+    ];
+    for (const [url, name] of sources) {
+        try {
+            const rssText = await fetchWithProxy(url, { asText: true });
+            articles.push(...parseRssItems(rssText, name));
+        } catch (e) { console.warn(`${name} RSS error:`, e); }
+    }
+    return articles;
+}
+
 let displayedNews = [];
 async function loadNews(force = false) {
     try {
@@ -406,83 +518,18 @@ async function loadNews(force = false) {
                 if (json.data?.length) {
                     articles = json.data.map(a => ({
                         title: a.title, body: a.description, source: a.source,
-                        image: a.image, url: a.url, time: a.time_ago, category: 'crypto'
+                        image: a.image, url: a.url, time: a.time_ago,
+                        category: detectNewsCategory(a.title, a.description || '')
                     }));
                 }
             } catch (e) { console.warn('Farsi news API error:', e); }
         }
 
         if (!articles.length) {
-        try {
-            const rssText = await fetchWithProxy('https://cointelegraph.com/rss', { asText: true });
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(rssText, 'text/xml');
-            const items = xmlDoc.querySelectorAll('item');
-            items.forEach(item => {
-                const title = item.querySelector('title')?.textContent || '';
-                const link = item.querySelector('link')?.textContent || '#';
-                const description = item.querySelector('description')?.textContent || '';
-                const imgMatch = description.match(/<img[^>]+src="([^">]+)"/);
-                const image = imgMatch ? imgMatch[1] : null;
-                articles.push({
-                    title: title.replace(/<[^>]*>/g, '').trim(),
-                    source: 'CoinTelegraph',
-                    image,
-                    url: link,
-                    body: description.replace(/<[^>]*>/g, '').trim().substring(0, 200),
-                    category: 'crypto',
-                    time: new Date(item.querySelector('pubDate')?.textContent || Date.now()).toLocaleString()
-                });
-            });
-        } catch (e) { console.warn('CoinTelegraph RSS error:', e); }
-
-        // CoinDesk RSS
-        try {
-            const rssText = await fetchWithProxy('https://www.coindesk.com/arc/outboundfeeds/rss/', { asText: true });
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(rssText, 'text/xml');
-            const items = xmlDoc.querySelectorAll('item');
-            items.forEach(item => {
-                const title = item.querySelector('title')?.textContent || '';
-                const link = item.querySelector('link')?.textContent || '#';
-                const description = item.querySelector('description')?.textContent || '';
-                const imgMatch = description.match(/<img[^>]+src="([^">]+)"/);
-                const image = imgMatch ? imgMatch[1] : null;
-                articles.push({
-                    title: title.replace(/<[^>]*>/g, '').trim(),
-                    source: 'CoinDesk',
-                    image,
-                    url: link,
-                    body: description.replace(/<[^>]*>/g, '').trim().substring(0, 200),
-                    category: 'crypto',
-                    time: new Date(item.querySelector('pubDate')?.textContent || Date.now()).toLocaleString()
-                });
-            });
-        } catch (e) { console.warn('CoinDesk RSS error:', e); }
-
-        // CryptoPanic RSS
-        try {
-            const rssText = await fetchWithProxy('https://cryptopanic.com/feed/', { asText: true });
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(rssText, 'text/xml');
-            const items = xmlDoc.querySelectorAll('item');
-            items.forEach(item => {
-                const title = item.querySelector('title')?.textContent || '';
-                const link = item.querySelector('link')?.textContent || '#';
-                const description = item.querySelector('description')?.textContent || '';
-                const imgMatch = description.match(/<img[^>]+src="([^">]+)"/);
-                const image = imgMatch ? imgMatch[1] : null;
-                articles.push({
-                    title: title.replace(/<[^>]*>/g, '').trim(),
-                    source: 'CryptoPanic',
-                    image,
-                    url: link,
-                    body: description.replace(/<[^>]*>/g, '').trim().substring(0, 200),
-                    category: 'crypto',
-                    time: new Date(item.querySelector('pubDate')?.textContent || Date.now()).toLocaleString()
-                });
-            });
-        } catch (e) { console.warn('CryptoPanic RSS error:', e); }
+            articles = await fetchRssArticles();
+            if (currentLang === 'fa' && articles.length) {
+                articles = await translateArticles(articles);
+            }
         }
 
         if (!articles.length) {
@@ -500,7 +547,7 @@ async function loadNews(force = false) {
         renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
     } catch (e) {
         console.error('News error:', e);
-        document.getElementById('news-list').innerHTML = `<div class="empty-state">⚠️ خطا در دریافت اخبار</div>`;
+        document.getElementById('news-list').innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
     }
 }
 function renderNews(category) {
@@ -510,22 +557,21 @@ function renderNews(category) {
     else if (category === 'economy') filtered = filtered.filter(n => n.category === 'economy');
     else if (category === 'forex') filtered = filtered.filter(n => n.category === 'forex');
     else if (category === 'calendar') {
-        // داده‌های دمو اما زیبا برای تقویم اقتصادی
         const ecoEvents = [
-            { time: '16:00', flag: '🇺🇸', title: 'نرخ تورم (CPI)', impact: 'High', date: 'امروز' },
-            { time: '18:30', flag: '🇺🇸', title: 'سخنرانی رئیس فدرال رزرو', impact: 'High', date: 'امروز' },
-            { time: '12:30', flag: '🇪🇺', title: 'شاخص مدیران خرید (PMI)', impact: 'Medium', date: 'فردا' }
+            { time: '16:00', region: 'US', title: t('cal_cpi'), impact: 'High', date: t('cal_today') },
+            { time: '18:30', region: 'US', title: t('cal_fed'), impact: 'High', date: t('cal_today') },
+            { time: '12:30', region: 'EU', title: t('cal_pmi'), impact: 'Medium', date: t('cal_tomorrow') }
         ];
         container.innerHTML = ecoEvents.map(e => `
-            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-card); padding:12px; margin-bottom:8px; border-radius:12px; border:1px solid var(--border);">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <span style="font-size:24px;">${e.flag}</span>
+            <div class="eco-event-card">
+                <div class="eco-event-left">
+                    <span class="eco-flag eco-flag-${e.region.toLowerCase()}">${e.region}</span>
                     <div>
-                        <div style="font-size:13px; font-weight:700;">${e.title}</div>
-                        <div style="font-size:11px; color:var(--text-dim);">${e.date} • ${e.time}</div>
+                        <div class="eco-event-title">${e.title}</div>
+                        <div class="eco-event-meta">${e.date} • ${e.time}</div>
                     </div>
                 </div>
-                <span style="font-size:11px; font-weight:bold; padding:4px 8px; border-radius:6px; background:${e.impact === 'High' ? 'rgba(255,77,77,0.1)' : 'rgba(247,147,26,0.1)'}; color:${e.impact === 'High' ? 'var(--red)' : 'var(--accent)'};">${e.impact}</span>
+                <span class="eco-impact eco-impact-${e.impact.toLowerCase()}">${e.impact === 'High' ? t('cal_impact_high') : t('cal_impact_med')}</span>
             </div>
         `).join('');
         return;
@@ -555,7 +601,7 @@ function openNewsModal(idx) {
     if (!n) return;
     document.getElementById('news-modal-title').innerText = n.title;
     document.getElementById('news-modal-image').src = n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
-    document.getElementById('news-modal-body').innerText = n.body || 'متن کامل خبر در دسترس نیست.';
+    document.getElementById('news-modal-body').innerText = n.body || t('news_unavailable');
     document.getElementById('news-modal-link').href = n.url || '#';
     document.getElementById('news-modal-link').innerText = t('view_source');
     document.getElementById('news-modal').style.display = 'flex';
@@ -569,7 +615,7 @@ function renderAnalysisSlider() {
     const track = document.getElementById('slider-track');
     const dots = document.getElementById('slider-dots');
     if (!analyses.length) {
-        track.innerHTML = `<div class="slide-empty">تحلیلی موجود نیست</div>`;
+        track.innerHTML = `<div class="slide-empty">${t('no_analysis')}</div>`;
         return;
     }
     const showSlide = (idx) => {
@@ -597,7 +643,7 @@ function renderAnalysisSlider() {
 function renderAnalysisList() {
     const grid = document.getElementById('analysis-grid');
     if (!analyses.length) {
-        grid.innerHTML = '<div class="empty-state">هیچ تحلیلی ثبت نشده است.</div>';
+        grid.innerHTML = `<div class="empty-state">${t('no_analysis_list')}</div>`;
         return;
     }
     const isAdminUser = isAdmin();
@@ -617,9 +663,9 @@ function openAnalysisDetail(id) {
     const a = analyses.find(x => x.id === id);
     if (!a) return;
     tg?.showPopup?.({
-        title: `تحلیل ${a.coin} (${a.timeframe})`,
-        message: `${a.text}\n\n✍️ ${a.author}\n📅 ${a.date}`,
-        buttons: [{ type: 'close', text: 'بستن' }]
+        title: `${t('analysis')} ${a.coin} (${a.timeframe})`,
+        message: `${a.text}\n\n${a.author} • ${a.date}`,
+        buttons: [{ type: 'close', text: t('close') }]
     }) || alert(`${a.coin}:\n${a.text}`);
 }
 
@@ -696,7 +742,7 @@ async function openCoinDetail(symbol) {
             disabled_features: ['header_widget_dom_node']
         });
     } else {
-        chartContainer.innerHTML = '<div class="empty-state">نمودار در دسترس نیست</div>';
+        chartContainer.innerHTML = `<div class="empty-state">${t('chart_unavailable')}</div>`;
     }
 
     document.getElementById('detail-stats').innerHTML = `
@@ -754,8 +800,8 @@ async function triggerAlert(alert, currentPrice) {
     alerts = alerts.filter(a => a.id !== alert.id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     const msg = currentLang === 'fa'
-        ? `🔔 هشدار قیمت!\n${alert.symbol} به $${currentPrice.toFixed(2)} رسید (هدف: $${alert.price})`
-        : `🔔 Price Alert!\n${alert.symbol} reached $${currentPrice.toFixed(2)} (target: $${alert.price})`;
+        ? `هشدار قیمت! ${alert.symbol} به $${currentPrice.toFixed(2)} رسید (هدف: $${alert.price})`
+        : `Price Alert! ${alert.symbol} reached $${currentPrice.toFixed(2)} (target: $${alert.price})`;
     addNotification(t('price_alert'), msg);
     if (API_BASE && alert.userId && !String(alert.userId).startsWith('guest_')) {
         try { await apiFetch('/api/notify', { method: 'POST', body: JSON.stringify({ user_id: alert.userId, message: msg }) }); } catch (e) { console.warn('Telegram notify failed:', e); }
@@ -802,7 +848,7 @@ function markAllRead() {
     renderNotifications();
 }
 function clearAllNotifications() {
-    if(confirm('آیا از پاک کردن تمامی اعلانات مطمئن هستید؟')) {
+    if(confirm(t('confirm_clear_notif'))) {
         notifications = [];
         localStorage.setItem('notifications', JSON.stringify(notifications));
         updateNotifBadge();
@@ -813,7 +859,7 @@ function clearAllNotifications() {
 function renderNotifications() {
     const container = document.getElementById('notif-list');
     if (!notifications.length) {
-        container.innerHTML = '<div class="empty-state">هیچ اعلانی وجود ندارد.</div>';
+        container.innerHTML = `<div class="empty-state">${t('no_notif')}</div>`;
         return;
     }
     container.innerHTML = notifications.slice(0, 20).map(n => `
@@ -833,7 +879,7 @@ function markNotifRead(id) {
 function loadUser() {
     const user = tg?.initDataUnsafe?.user;
     if (user) {
-        document.getElementById('profile-name').innerText = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'کاربر';
+        document.getElementById('profile-name').innerText = `${user.first_name || ''} ${user.last_name || ''}`.trim() || t('guest');
         document.getElementById('profile-username').innerText = user.username ? `@${user.username}` : '@guest';
         document.getElementById('profile-id-num').innerText = user.id || '000000';
         if (user.photo_url) document.getElementById('profile-avatar').src = user.photo_url;
@@ -843,7 +889,7 @@ function loadUser() {
         document.getElementById('ref-active').innerText = refData.active;
         document.getElementById('ref-reward').innerText = refData.reward + ' SAT';
     } else {
-        document.getElementById('profile-name').innerText = 'کاربر میهمان';
+        document.getElementById('profile-name').innerText = t('guest');
         document.getElementById('profile-username').innerText = 'loading...';
         document.getElementById('profile-id-num').innerText = '000000';
         document.getElementById('ref-link').value = 'https://t.me/AmirBtcBot/app?startapp=ref_guest';
@@ -859,7 +905,7 @@ function copyRefLink() {
 }
 function shareRefLink() {
     const link = document.getElementById('ref-link').value;
-    const text = encodeURIComponent('به Amir BTC Assistant بپیوندید و از تحلیل‌های حرفه‌ای بازار استفاده کنید!');
+    const text = encodeURIComponent(t('share_ref_text'));
     tg?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`) ||
     window.open(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`, '_blank');
 }
@@ -896,11 +942,15 @@ function openAdminTicketsModal() {
 function closeAdminTicketsModal() { document.getElementById('admin-tickets-modal').style.display = 'none'; }
 
 async function fetchTickets() {
-    if (!API_BASE) { tickets = JSON.parse(localStorage.getItem('tickets') || '[]'); return; }
+    const local = JSON.parse(localStorage.getItem('tickets') || '[]').filter(t => t.user_id === getUserId());
+    if (!API_BASE) { tickets = local; return; }
     try {
         const data = await apiFetch(`/api/tickets?user_id=${encodeURIComponent(getUserId())}`);
-        tickets = data.tickets || [];
-    } catch (e) { console.warn('fetchTickets:', e); tickets = []; }
+        tickets = data.tickets?.length ? data.tickets : local;
+    } catch (e) {
+        console.warn('fetchTickets:', e);
+        tickets = local;
+    }
 }
 
 async function fetchAdminTickets() {
@@ -921,7 +971,7 @@ function renderTicketThread(replies) {
     return `<div class="ticket-thread">${replies.map(r => `
         <div class="ticket-reply ${r.from === 'admin' ? 'admin' : ''}">
             ${r.message}
-            <div class="ticket-reply-meta">${r.from === 'admin' ? '👤 Admin' : '👤 You'} • ${formatTicketDate(r.at)}</div>
+            <div class="ticket-reply-meta">${r.from === 'admin' ? t('ticket_admin') : t('ticket_you')} • ${formatTicketDate(r.at)}</div>
         </div>
     `).join('')}</div>`;
 }
@@ -982,29 +1032,39 @@ function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function saveTicketLocally(title, body) {
+    const ticket = { id: Date.now().toString(), user_id: getUserId(), title, body, status: 'open', replies: [], created_at: new Date().toISOString() };
+    const local = JSON.parse(localStorage.getItem('tickets') || '[]');
+    local.unshift(ticket);
+    localStorage.setItem('tickets', JSON.stringify(local));
+}
+
 async function submitTicket() {
     const title = document.getElementById('ticket-title').value.trim();
     const body = document.getElementById('ticket-body').value.trim();
     if (!title || !body) { alert(t('required_fields')); return; }
     try {
         if (API_BASE) {
-            await apiFetch('/api/tickets', {
-                method: 'POST',
-                body: JSON.stringify({ user_id: getUserId(), user_name: getUserName(), title, body })
-            });
+            try {
+                await apiFetch('/api/tickets', {
+                    method: 'POST',
+                    body: JSON.stringify({ user_id: getUserId(), user_name: getUserName(), title, body })
+                });
+            } catch (apiErr) {
+                console.warn('API ticket failed, saving locally:', apiErr);
+                saveTicketLocally(title, body);
+            }
         } else {
-            const ticket = { id: Date.now().toString(), user_id: getUserId(), title, body, status: 'open', replies: [], created_at: new Date().toISOString() };
-            const local = JSON.parse(localStorage.getItem('tickets') || '[]');
-            local.unshift(ticket);
-            localStorage.setItem('tickets', JSON.stringify(local));
+            saveTicketLocally(title, body);
         }
         document.getElementById('ticket-title').value = '';
         document.getElementById('ticket-body').value = '';
         await fetchTickets();
         renderTickets();
-        addNotification(t('support'), `"${title}"`);
+        addNotification(t('support'), t('ticket_sent'));
+        tg?.showPopup?.({ title: t('ticket_sent'), message: title, buttons: [{ type: 'ok' }] });
     } catch (e) {
-        alert(t('market_error'));
+        alert(t('ticket_error'));
         console.error(e);
     }
 }
@@ -1022,7 +1082,7 @@ async function replyToTicket(ticketId) {
         textarea.value = '';
         await fetchAdminTickets();
         renderAdminTickets();
-    } catch (e) { alert(t('market_error')); console.error(e); }
+    } catch (e) { alert(t('ticket_reply_error')); console.error(e); }
 }
 
 async function deleteTicket(ticketId, isAdminView = false) {
@@ -1064,7 +1124,7 @@ function verifyJoin() {
     localStorage.setItem('has_joined_channel', 'true');
     const modal = document.getElementById('mandatory-join-modal');
     if (modal) modal.style.display = 'none';
-    addNotification('عضویت تایید شد', 'به اپلیکیشن امیر BTC خوش آمدید!');
+    addNotification(t('join_verified'), t('join_welcome'));
 }
 
 // ---------- نویگیشن و بارگذاری اخبار مهم ----------
@@ -1098,7 +1158,7 @@ async function loadImportantNews() {
         await loadNews(); // اطمینان از دریافت اخبار
         const important = newsCache.slice(0, 3);
         if (!important.length) {
-            container.innerHTML = '<div class="empty-state">خبری وجود ندارد</div>';
+            container.innerHTML = `<div class="empty-state">${t('no_news')}</div>`;
             return;
         }
         displayedNews = important;
