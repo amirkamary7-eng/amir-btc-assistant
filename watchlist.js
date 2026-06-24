@@ -1,6 +1,6 @@
 // Watchlist Management Module
 (function() {
-    // توابع اصلی واچ‌لیست (اگر قبلاً در app.js تعریف شده‌اند، بازنویسی نمی‌کنیم)
+    // اگر توابع قبلاً در app.js تعریف شده‌اند، از آن‌ها استفاده کن
     if (typeof window.getWatchlist === 'undefined') {
         window.getWatchlist = function() {
             const stored = localStorage.getItem('watchlist');
@@ -15,7 +15,10 @@
                 list.push(symbol);
                 localStorage.setItem('watchlist', JSON.stringify(list));
                 if (typeof window.renderWatchlist === 'function') window.renderWatchlist();
-                if (typeof window.renderMarketTabLists === 'function') window.renderMarketTabLists();
+                if (typeof window.renderMarketTabLists === 'function') {
+                    const activeFilter = document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all';
+                    window.renderMarketTabLists(activeFilter);
+                }
             }
         };
     }
@@ -26,7 +29,10 @@
             list = list.filter(s => s !== symbol);
             localStorage.setItem('watchlist', JSON.stringify(list));
             if (typeof window.renderWatchlist === 'function') window.renderWatchlist();
-            if (typeof window.renderMarketTabLists === 'function') window.renderMarketTabLists();
+            if (typeof window.renderMarketTabLists === 'function') {
+                const activeFilter = document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all';
+                window.renderMarketTabLists(activeFilter);
+            }
         };
     }
 

@@ -11,8 +11,8 @@ if (tg) {
 // بخش ۲: متغیرهای ثابت، آدرس‌ها و آرایه‌ها (Constants & States)
 // =========================================================================
 const MY_TELEGRAM_CHANNEL = "amir_btc_2024";
-// ⚠️ این آدرس را به آدرس بک‌اند خودت تغییر بده (بدون اسلش انتهایی)
-const BACKEND_URL = "https://amir-btc-assistant01.amirkamary7.workers.dev/";
+// ⚠️ این آدرس‌ها را با آدرس‌های واقعی خود جایگزین کنید
+const BACKEND_URL = "https://amir-btc-assistant-production.up.railway.app";
 const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
 
 const POPULAR_SYMBOLS = [
@@ -70,7 +70,8 @@ window.addToWatchlist = window.addToWatchlist || function(symbol) {
         list.push(symbol);
         localStorage.setItem('watchlist', JSON.stringify(list));
         if (typeof renderWatchlist === 'function') renderWatchlist();
-        renderMarketTabLists(document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all');
+        const activeFilter = document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all';
+        renderMarketTabLists(activeFilter);
     }
 };
 
@@ -79,7 +80,8 @@ window.removeFromWatchlist = window.removeFromWatchlist || function(symbol) {
     list = list.filter(s => s !== symbol);
     localStorage.setItem('watchlist', JSON.stringify(list));
     if (typeof renderWatchlist === 'function') renderWatchlist();
-    renderMarketTabLists(document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all');
+    const activeFilter = document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all';
+    renderMarketTabLists(activeFilter);
 };
 
 window.isInWatchlist = window.isInWatchlist || function(symbol) {
@@ -99,12 +101,18 @@ window.toggleWatchlist = window.toggleWatchlist || function(symbol, event) {
 // بخش ۵: روتر و سیستم ناوبری
 // =========================================================================
 function switchTab(pageId, element) {
+    console.log(`🔄 Switching to tab: ${pageId}`);
     document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
     closeReferralPage();
     closeSettingsPage();
 
     const activePage = document.getElementById(pageId);
-    if (activePage) activePage.classList.add('active');
+    if (activePage) {
+        activePage.classList.add('active');
+        console.log(`✅ Page ${pageId} activated`);
+    } else {
+        console.warn(`❌ Page element not found: ${pageId}`);
+    }
 
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     if (element) {
@@ -117,7 +125,8 @@ function switchTab(pageId, element) {
             'analysis-page': 'nav-analysis',
             'profile-page': 'nav-profile'
         };
-        document.getElementById(navMap[pageId])?.classList.add('active');
+        const navItem = document.getElementById(navMap[pageId]);
+        if (navItem) navItem.classList.add('active');
     }
 
     clearInterval(newsSliderInterval);
@@ -143,11 +152,16 @@ function switchTab(pageId, element) {
             const mainView = document.getElementById('profile-main-view');
             const referralView = document.getElementById('referral-page-view');
             const settingsView = document.getElementById('settings-page-view');
-            if (mainView) mainView.style.display = 'block';
+            if (mainView) {
+                mainView.style.display = 'block';
+                console.log('✅ Profile main view shown');
+            } else {
+                console.warn('❌ profile-main-view not found');
+            }
             if (referralView) referralView.style.display = 'none';
             if (settingsView) settingsView.style.display = 'none';
         } catch (e) {
-            console.error('Profile page error:', e);
+            console.error('❌ Profile page error:', e);
         }
     }
 }
@@ -183,8 +197,10 @@ function removeSkeletons() {
 // بخش ۶: دریافت قیمت‌ها و دسته‌بندی بازار
 // =========================================================================
 async function loadMarketAndPrices() {
+    console.log('📊 Loading market data...');
     const cachedPrices = AppCache.get("market_prices");
     if (cachedPrices) {
+        console.log('✅ Using cached market data');
         allMarketCoins = cachedPrices;
         renderMarketData();
         return;
@@ -198,7 +214,10 @@ async function loadMarketAndPrices() {
             const chunk = POPULAR_SYMBOLS.slice(i, i + chunkSize);
             const formattedSymbols = JSON.stringify(chunk.map(sym => `${sym}USDT`));
             const targetUrl = `https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(formattedSymbols)}`;
-            const response = await fetch(PROXY_BASE_URL + encodeURIComponent(targetUrl));
+            const proxyUrl = PROXY_BASE_URL + encodeURIComponent(targetUrl);
+            console.log(`🔗 Fetching chunk ${i/chunkSize + 1}: ${proxyUrl}`);
+            const response = await fetch(proxyUrl);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             if (data && Array.isArray(data)) {
                 fetchedTickers = fetchedTickers.concat(data);
@@ -220,13 +239,15 @@ async function loadMarketAndPrices() {
             } : null;
         }).filter(Boolean);
 
+        console.log(`✅ Loaded ${allMarketCoins.length} coins from Binance`);
         AppCache.set("market_prices", allMarketCoins, 15);
         renderMarketData();
         removeSkeletons();
     } catch (err) {
-        console.error("Binance Fetch Error:", err);
-        // Mock data fallback برای نمایش لیست
-        const mockCoins = POPULAR_SYMBOLS.slice(0, 20).map((sym, index) => ({
+        console.error("❌ Binance Fetch Error:", err);
+        // استفاده از Mock Data با کیفیت بهتر
+        console.log('🔄 Using mock data as fallback');
+        const mockCoins = POPULAR_SYMBOLS.slice(0, 30).map((sym, index) => ({
             symbol: sym,
             name: getCoinFullName(sym),
             priceUsd: (Math.random() * 50000 + 1000).toFixed(2),
@@ -241,13 +262,17 @@ async function loadMarketAndPrices() {
 }
 
 function renderMarketData() {
+    console.log('🎨 Rendering market data...');
     renderWatchlist();
     renderMarketTabLists();
 }
 
 function renderWatchlist() {
     const container = document.getElementById("watchlist-container");
-    if (!container) return;
+    if (!container) {
+        console.warn('⚠️ watchlist-container not found');
+        return;
+    }
 
     const watchlistSymbols = window.getWatchlist();
     if (watchlistSymbols.length === 0) {
@@ -282,7 +307,15 @@ function renderWatchlist() {
 
 function renderMarketTabLists(filterType = 'all') {
     const marketList = document.getElementById("market-coin-list");
-    if (!marketList) return;
+    if (!marketList) {
+        console.warn('⚠️ market-coin-list not found');
+        return;
+    }
+
+    if (!allMarketCoins || allMarketCoins.length === 0) {
+        marketList.innerHTML = `<div style="padding: 20px 15px; color: var(--text-sub); text-align: center;">در حال بارگذاری داده‌های بازار...</div>`;
+        return;
+    }
 
     let sortedCoins = [...allMarketCoins];
     if (filterType === 'bullish') {
@@ -291,7 +324,7 @@ function renderMarketTabLists(filterType = 'all') {
         sortedCoins = sortedCoins.filter(c => parseFloat(c.changePercent24Hr) < 0).sort((a,b) => parseFloat(a.changePercent24Hr) - parseFloat(b.changePercent24Hr));
     }
 
-    if (!sortedCoins || sortedCoins.length === 0) {
+    if (sortedCoins.length === 0) {
         marketList.innerHTML = `<div style="padding: 20px 15px; color: var(--text-sub); text-align: center;">هیچ داده‌ای برای نمایش این دسته‌بندی در دسترس نیست.</div>`;
         return;
     }
@@ -318,7 +351,6 @@ function renderMarketTabLists(filterType = 'all') {
                         <span class="coin-price" style="font-weight: bold; font-family: monospace;">$${parseFloat(coin.priceUsd).toLocaleString()}</span>
                         <span class="badge ${badgeClass}">${isPositive ? '+' : ''}${change.toFixed(2)}%</span>
                     </div>
-                    <!-- ستاره واچ‌لیست -->
                     <span class="watchlist-star" onclick="toggleWatchlist('${coin.symbol}', event)" style="font-size:20px; cursor:pointer; color:${inWatchlist ? '#f7931a' : '#555'}; transition: all 0.2s; user-select:none;">
                         ${inWatchlist ? '⭐' : '☆'}
                     </span>
@@ -327,6 +359,7 @@ function renderMarketTabLists(filterType = 'all') {
         `;
     });
     marketList.innerHTML = html;
+    console.log(`✅ Rendered ${sortedCoins.length} coins in market list`);
 }
 
 function filterMarketCategory(category, element) {
@@ -337,7 +370,7 @@ function filterMarketCategory(category, element) {
 }
 
 // =========================================================================
-// بخش ۷: لیکوئیدیشن
+// بخش ۷: لیکوئیدیشن (بدون تغییر)
 // =========================================================================
 function loadLiquidationData() {
     const cachedLiq = AppCache.get("market_liquidations");
@@ -372,7 +405,7 @@ function loadLiquidationData() {
 }
 
 // =========================================================================
-// بخش ۸: اخبار و اسلایدر
+// بخش ۸: اخبار و اسلایدر (بدون تغییر)
 // =========================================================================
 async function fetchDashboardNews() {
     try {
@@ -497,7 +530,7 @@ async function switchNewsTab(tabId) {
 }
 
 // =========================================================================
-// بخش ۹: تقویم اقتصادی
+// بخش ۹: تقویم اقتصادی (بدون تغییر)
 // =========================================================================
 async function renderEconomicCalendarAdvanced(subFilter = 'today') {
     const container = document.getElementById("news-tab-content-area");
@@ -564,7 +597,7 @@ async function renderEconomicCalendarAdvanced(subFilter = 'today') {
 }
 
 // =========================================================================
-// بخش ۱۰: رفرال و تنظیمات
+// بخش ۱۰: رفرال و تنظیمات (بدون تغییر)
 // =========================================================================
 function openReferralPage() {
     const userData = tg?.initDataUnsafe?.user;
@@ -666,15 +699,20 @@ function joinChannelAction() {
 }
 
 function loadTelegramUser() {
-    const userData = tg?.initDataUnsafe?.user;
-    const fullName = userData ? `${userData.first_name || ""} ${userData.last_name || ""}`.trim() : "کاربر میهمان";
-    const userId = userData?.id || "000000";
-    const username = userData?.username ? `@${userData.username}` : "@guest";
-    document.querySelectorAll(".user-full-name").forEach(el => el.innerText = fullName);
-    if (document.getElementById("user-id-val")) document.getElementById("user-id-val").innerText = userId;
-    if (document.getElementById("user-username-val")) document.getElementById("user-username-val").innerText = username;
-    const profileImg = document.getElementById("profile-avatar-img");
-    if (profileImg && userData?.photo_url) profileImg.src = userData.photo_url;
+    try {
+        const userData = tg?.initDataUnsafe?.user;
+        const fullName = userData ? `${userData.first_name || ""} ${userData.last_name || ""}`.trim() : "کاربر میهمان";
+        const userId = userData?.id || "000000";
+        const username = userData?.username ? `@${userData.username}` : "@guest";
+        document.querySelectorAll(".user-full-name").forEach(el => el.innerText = fullName);
+        if (document.getElementById("user-id-val")) document.getElementById("user-id-val").innerText = userId;
+        if (document.getElementById("user-username-val")) document.getElementById("user-username-val").innerText = username;
+        const profileImg = document.getElementById("profile-avatar-img");
+        if (profileImg && userData?.photo_url) profileImg.src = userData.photo_url;
+        console.log('✅ Telegram user loaded:', fullName);
+    } catch (e) {
+        console.error('❌ loadTelegramUser error:', e);
+    }
 }
 
 function openArticleDetailsById(id) {
@@ -803,6 +841,7 @@ function loadAnalysisData() {
 // بخش ۱۴: رویداد شروع (DOMContentLoaded)
 // =========================================================================
 window.addEventListener("DOMContentLoaded", () => {
+    console.log('🚀 App started');
     loadTelegramUser();
     switchTab('dashboard-page');
     setInitialFearGauge();
