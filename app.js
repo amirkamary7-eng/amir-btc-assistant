@@ -12,7 +12,7 @@ if (tg) {
 // =========================================================================
 const MY_TELEGRAM_CHANNEL = "amir_btc_2024";
 // ⚠️ این آدرس‌ها را با آدرس‌های واقعی خود جایگزین کنید
-const BACKEND_URL = "https://amir-btc-assistant-production.up.railway.app";
+const BACKEND_URL = "https://amir-btc-assistant01.amirkamary7.workers.dev/";
 const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
 
 const POPULAR_SYMBOLS = [
@@ -59,36 +59,37 @@ const AppCache = {
 // =========================================================================
 // بخش ۴: توابع واچ‌لیست (برای هماهنگی با watchlist.js)
 // =========================================================================
-window.getWatchlist = window.getWatchlist || function() {
+// این توابع را صریحاً به window متصل می‌کنیم تا همیشه در دسترس باشند
+window.getWatchlist = function() {
     const stored = localStorage.getItem('watchlist');
     return stored ? JSON.parse(stored) : [];
 };
 
-window.addToWatchlist = window.addToWatchlist || function(symbol) {
+window.addToWatchlist = function(symbol) {
     const list = window.getWatchlist();
     if (!list.includes(symbol)) {
         list.push(symbol);
         localStorage.setItem('watchlist', JSON.stringify(list));
-        if (typeof renderWatchlist === 'function') renderWatchlist();
+        if (typeof window.renderWatchlist === 'function') window.renderWatchlist();
         const activeFilter = document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all';
-        renderMarketTabLists(activeFilter);
+        if (typeof window.renderMarketTabLists === 'function') window.renderMarketTabLists(activeFilter);
     }
 };
 
-window.removeFromWatchlist = window.removeFromWatchlist || function(symbol) {
+window.removeFromWatchlist = function(symbol) {
     let list = window.getWatchlist();
     list = list.filter(s => s !== symbol);
     localStorage.setItem('watchlist', JSON.stringify(list));
-    if (typeof renderWatchlist === 'function') renderWatchlist();
+    if (typeof window.renderWatchlist === 'function') window.renderWatchlist();
     const activeFilter = document.querySelector('.trend-tab-btn.active')?.dataset?.filter || 'all';
-    renderMarketTabLists(activeFilter);
+    if (typeof window.renderMarketTabLists === 'function') window.renderMarketTabLists(activeFilter);
 };
 
-window.isInWatchlist = window.isInWatchlist || function(symbol) {
+window.isInWatchlist = function(symbol) {
     return window.getWatchlist().includes(symbol);
 };
 
-window.toggleWatchlist = window.toggleWatchlist || function(symbol, event) {
+window.toggleWatchlist = function(symbol, event) {
     if (event) event.stopPropagation();
     if (window.isInWatchlist(symbol)) {
         window.removeFromWatchlist(symbol);
@@ -112,6 +113,7 @@ function switchTab(pageId, element) {
         console.log(`✅ Page ${pageId} activated`);
     } else {
         console.warn(`❌ Page element not found: ${pageId}`);
+        return;
     }
 
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
@@ -263,11 +265,11 @@ async function loadMarketAndPrices() {
 
 function renderMarketData() {
     console.log('🎨 Rendering market data...');
-    renderWatchlist();
-    renderMarketTabLists();
+    if (typeof window.renderWatchlist === 'function') window.renderWatchlist();
+    if (typeof window.renderMarketTabLists === 'function') window.renderMarketTabLists();
 }
 
-function renderWatchlist() {
+window.renderWatchlist = function() {
     const container = document.getElementById("watchlist-container");
     if (!container) {
         console.warn('⚠️ watchlist-container not found');
@@ -292,7 +294,7 @@ function renderWatchlist() {
         const isPositive = change >= 0;
         const sign = isPositive ? "+" : "";
         html += `
-            <div class="watchlist-card" onclick="openChart('${coin.symbol}')">
+            <div class="watchlist-card" onclick="window.openChart('${coin.symbol}')">
                 <div class="watchlist-card-header">
                     <img src="https://assets.coincap.io/assets/icons/${coin.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" class="coin-icon-mini">
                     <span class="coin-symbol">${coin.symbol}</span>
@@ -303,9 +305,9 @@ function renderWatchlist() {
         `;
     });
     container.innerHTML = html;
-}
+};
 
-function renderMarketTabLists(filterType = 'all') {
+window.renderMarketTabLists = function(filterType = 'all') {
     const marketList = document.getElementById("market-coin-list");
     if (!marketList) {
         console.warn('⚠️ market-coin-list not found');
@@ -337,7 +339,7 @@ function renderMarketTabLists(filterType = 'all') {
         const inWatchlist = window.isInWatchlist(coin.symbol);
 
         html += `
-            <div class="coin-row" onclick="openChart('${coin.symbol}')">
+            <div class="coin-row" onclick="window.openChart('${coin.symbol}')">
                 <div style="display: flex; align-items: center; gap: 12px; flex:1; min-width:0;">
                     <span style="color:var(--text-sub); font-size:11px; font-family:monospace; width:15px;">#${coin.rank}</span>
                     <img src="https://assets.coincap.io/assets/icons/${coin.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" class="coin-icon">
@@ -351,7 +353,7 @@ function renderMarketTabLists(filterType = 'all') {
                         <span class="coin-price" style="font-weight: bold; font-family: monospace;">$${parseFloat(coin.priceUsd).toLocaleString()}</span>
                         <span class="badge ${badgeClass}">${isPositive ? '+' : ''}${change.toFixed(2)}%</span>
                     </div>
-                    <span class="watchlist-star" onclick="toggleWatchlist('${coin.symbol}', event)" style="font-size:20px; cursor:pointer; color:${inWatchlist ? '#f7931a' : '#555'}; transition: all 0.2s; user-select:none;">
+                    <span class="watchlist-star" onclick="window.toggleWatchlist('${coin.symbol}', event)" style="font-size:20px; cursor:pointer; color:${inWatchlist ? '#f7931a' : '#555'}; transition: all 0.2s; user-select:none;">
                         ${inWatchlist ? '⭐' : '☆'}
                     </span>
                 </div>
@@ -360,17 +362,17 @@ function renderMarketTabLists(filterType = 'all') {
     });
     marketList.innerHTML = html;
     console.log(`✅ Rendered ${sortedCoins.length} coins in market list`);
-}
+};
 
 function filterMarketCategory(category, element) {
     document.querySelectorAll('.trend-tab-btn').forEach(btn => btn.classList.remove('active'));
     element.classList.add('active');
     element.dataset.filter = category;
-    renderMarketTabLists(category);
+    if (typeof window.renderMarketTabLists === 'function') window.renderMarketTabLists(category);
 }
 
 // =========================================================================
-// بخش ۷: لیکوئیدیشن (بدون تغییر)
+// بخش ۷: لیکوئیدیشن
 // =========================================================================
 function loadLiquidationData() {
     const cachedLiq = AppCache.get("market_liquidations");
@@ -405,7 +407,7 @@ function loadLiquidationData() {
 }
 
 // =========================================================================
-// بخش ۸: اخبار و اسلایدر (بدون تغییر)
+// بخش ۸: اخبار و اسلایدر
 // =========================================================================
 async function fetchDashboardNews() {
     try {
@@ -444,7 +446,7 @@ function initNewsSlider(articles) {
         window.newsArticlesStorage[artId] = art;
         const fallbackImg = "https://img.icons8.com/clouds/200/000000/bitcoin.png";
         sliderContainer.innerHTML = `
-            <div class="slide-item" onclick="openArticleDetailsById('${artId}')" style="animation: fadeInData 0.5s ease-in-out; cursor: pointer;">
+            <div class="slide-item" onclick="window.openArticleDetailsById('${artId}')" style="animation: fadeInData 0.5s ease-in-out; cursor: pointer;">
                 <img src="${art.image || fallbackImg}" onerror="this.src='${fallbackImg}'" class="slider-bg-img">
                 <div class="slider-overlay">
                     <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
@@ -512,7 +514,7 @@ async function switchNewsTab(tabId) {
         window.newsArticlesStorage[id] = article;
         const fallbackImg = "https://img.icons8.com/clouds/200/000000/bitcoin.png";
         html += `
-            <div class="news-card" onclick="openArticleDetailsById('${id}')" style="cursor: pointer;">
+            <div class="news-card" onclick="window.openArticleDetailsById('${id}')" style="cursor: pointer;">
                 <div class="news-card-text-wrapper">
                     <div style="display: flex; justify-content: space-between; align-items:center;">
                         <span class="badge badge-primary">${article.source || "منبع خبر"}</span>
@@ -530,7 +532,7 @@ async function switchNewsTab(tabId) {
 }
 
 // =========================================================================
-// بخش ۹: تقویم اقتصادی (بدون تغییر)
+// بخش ۹: تقویم اقتصادی
 // =========================================================================
 async function renderEconomicCalendarAdvanced(subFilter = 'today') {
     const container = document.getElementById("news-tab-content-area");
@@ -597,7 +599,7 @@ async function renderEconomicCalendarAdvanced(subFilter = 'today') {
 }
 
 // =========================================================================
-// بخش ۱۰: رفرال و تنظیمات (بدون تغییر)
+// بخش ۱۰: رفرال و تنظیمات
 // =========================================================================
 function openReferralPage() {
     const userData = tg?.initDataUnsafe?.user;
@@ -715,7 +717,7 @@ function loadTelegramUser() {
     }
 }
 
-function openArticleDetailsById(id) {
+window.openArticleDetailsById = function(id) {
     const article = window.newsArticlesStorage[id];
     if (!article) return;
     const modal = document.getElementById('details-modal');
@@ -732,9 +734,9 @@ function openArticleDetailsById(id) {
     }
     document.getElementById('modal-content').innerHTML = article.description || "محتوایی برای نمایش وجود ندارد.";
     modal.style.display = "flex";
-}
+};
 
-function openChart(symbol) {
+window.openChart = function(symbol) {
     const chartModal = document.getElementById("chart-modal");
     if (!chartModal) return;
     chartModal.style.display = "flex";
@@ -759,7 +761,7 @@ function openChart(symbol) {
             container.innerHTML = `<div style="color:var(--text-dim); text-align:center; padding:20px;">ابزار نمودار در دسترس نیست.</div>`;
         }
     }
-}
+};
 
 function closeChart() {
     if (document.getElementById("chart-modal")) document.getElementById("chart-modal").style.display = "none";
@@ -850,7 +852,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setInterval(loadMarketAndPrices, 15000);
 });
 
-// اطمینان از اینکه توابع در سطح global در دسترس باشند
+// اطمینان از اینکه تمام توابع در سطح global در دسترس باشند
 window.switchTab = switchTab;
 window.filterMarketCategory = filterMarketCategory;
 window.filterMarketSearch = filterMarketSearch;
@@ -858,7 +860,7 @@ window.openNotificationCenter = openNotificationCenter;
 window.joinChannelAction = joinChannelAction;
 window.openChart = openChart;
 window.closeChart = closeChart;
-window.openArticleDetailsById = openArticleDetailsById;
+window.openArticleDetailsById = window.openArticleDetailsById;
 window.switchNewsTab = switchNewsTab;
 window.renderEconomicCalendarAdvanced = renderEconomicCalendarAdvanced;
 window.copyReferralLink = copyReferralLink;
@@ -871,4 +873,7 @@ window.loadExtraMetrics = loadExtraMetrics;
 window.loadLiquidationData = loadLiquidationData;
 window.loadAnalysisData = loadAnalysisData;
 window.renderWatchlist = renderWatchlist;
+window.renderMarketTabLists = renderMarketTabLists;
 window.toggleWatchlist = toggleWatchlist;
+
+console.log('✅ All functions registered globally');

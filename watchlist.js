@@ -1,4 +1,4 @@
-// Watchlist Management Module
+// Watchlist Management Module (هماهنگ با app.js)
 (function() {
     // اگر توابع قبلاً در app.js تعریف شده‌اند، از آن‌ها استفاده کن
     if (typeof window.getWatchlist === 'undefined') {
