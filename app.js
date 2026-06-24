@@ -107,82 +107,112 @@ const Cache = {
     }
 };
 
-// ---------- API با Proxy جدید ----------
-async function fetchWithProxy(url, retries = 3) {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const res = await fetch(PROXY + encodeURIComponent(url));
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.json();
-        } catch (e) {
-            console.warn(`Proxy attempt ${i+1} failed:`, e);
-            if (i === retries - 1) {
-                // Fallback مستقیم به Binance (بدون Proxy)
-                if (url.includes('binance.com')) {
-                    const direct = await fetch(url);
-                    if (!direct.ok) throw new Error(`Direct HTTP ${direct.status}`);
-                    return direct.json();
-                }
-                throw e;
-            }
-            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+async function fetchWithProxy(url, retries = 2) {
+  // اگر URL مربوط به Binance باشد و خطا خورد، به CoinGecko برویم
+  const isBinance = url.includes('binance.com');
+  const isCoinCap = url.includes('coincap.io');
+
+  for (let i = 0; i < retries; i++) {
+    try {
+      const proxyUrl = PROXY + encodeURIComponent(url);
+      const res = await fetch(proxyUrl);
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.warn(`⚠️ Proxy HTTP ${res.status}: ${errorText}`);
+        // اگر ۴۰۳ و Binance بود، به CoinGecko برو
+        if (res.status === 403 && isBinance) {
+          console.log('🔄 Switching to CoinGecko fallback...');
+          const geckoData = await fetchCoinGecko();
+          return geckoData;
         }
+        throw new Error(`HTTP ${res.status}`);
+      }
+      return res.json();
+    } catch (e) {
+      console.warn(`Attempt ${i+1} failed:`, e);
+      if (i === retries - 1) {
+        // آخرین تلاش: fallback به CoinGecko مستقیم (بدون Proxy)
+        if (isBinance) {
+          console.log('🔄 Final fallback to CoinGecko...');
+          return await fetchCoinGecko();
+        }
+        throw e;
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
     }
+  }
+}
+
+// تابع دریافت داده از CoinGecko (بدون نیاز به Proxy)
+async function fetchCoinGecko() {
+  const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false');
+  if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
+  const data = await res.json();
+  // تبدیل به فرمت مشابه با CoinCap
+  return data.map((item, index) => ({
+    symbol: item.symbol.toUpperCase(),
+    name: item.name,
+    rank: index + 1,
+    priceUsd: item.current_price || 0,
+    changePercent24Hr: item.price_change_percentage_24h || 0,
+    volumeUsd24Hr: item.total_volume || 0,
+    marketCapUsd: item.market_cap || 0,
+    supply: item.circulating_supply || 0
+  }));
 }
 
 // ---------- بارگذاری داینامیک داده‌های بازار (CoinCap + Binance) ----------
 async function loadMarketData() {
-    try {
-        const cached = Cache.get('market');
-        if (cached) { allCoins = cached; renderMarket(); renderWatchlist(); renderSummary(); return; }
+  try {
+    const cached = Cache.get('market');
+    if (cached) { allCoins = cached; renderMarket(); renderWatchlist(); renderSummary(); return; }
 
-        // ۱. دریافت لیست ارزها از CoinCap
-        const data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
-        const assets = data.data || [];
-        if (!assets.length) throw new Error('No assets from CoinCap');
-
-        // ۲. دریافت قیمت‌های لحظه‌ای از Binance
-        const symbols = assets.slice(0, 50).map(a => a.symbol + 'USDT');
-        let binancePrices = {};
-        try {
-            const binanceData = await fetchWithProxy(`https://api.binance.com/api/v3/ticker/24hr?symbols=${JSON.stringify(symbols)}`);
-            if (Array.isArray(binanceData)) {
-                binanceData.forEach(item => {
-                    const sym = item.symbol.replace('USDT', '');
-                    binancePrices[sym] = {
-                        price: parseFloat(item.lastPrice),
-                        change: parseFloat(item.priceChangePercent),
-                        volume: parseFloat(item.quoteVolume)
-                    };
-                });
-            }
-        } catch (e) { console.warn('Binance data not available, using CoinCap only'); }
-
-        allCoins = assets.map((item, i) => {
-            const sym = item.symbol;
-            const b = binancePrices[sym] || {};
-            return {
-                symbol: sym,
-                name: item.name,
-                rank: i + 1,
-                priceUsd: b.price || parseFloat(item.priceUsd) || 0,
-                changePercent24Hr: b.change || parseFloat(item.changePercent24Hr) || 0,
-                volumeUsd24Hr: b.volume || parseFloat(item.volumeUsd24Hr) || 0,
-                marketCapUsd: parseFloat(item.marketCapUsd) || 0,
-                supply: parseFloat(item.supply) || 0
-            };
-        });
-
-        Cache.set('market', allCoins, 60);
-        renderMarket();
-        renderWatchlist();
-        renderSummary();
-    } catch (e) {
-        console.error('Market load error:', e);
-        document.getElementById('coin-list').innerHTML = `<div class="empty-state">⚠️ خطا در دریافت داده‌های بازار</div>`;
+    // ابتدا از CoinCap استفاده کن
+    const data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
+    // اگر داده از CoinCap برگشت (آرایه باشد)، آن را پردازش کن
+    let assets = data.data || data; // اگر از CoinGecko آمد، data همان آرایه است
+    if (Array.isArray(data) && data.length > 0 && data[0].symbol) {
+      // داده از CoinGecko است
+      allCoins = data;
+    } else if (assets.length) {
+      // داده از CoinCap است
+      allCoins = assets.map((item, i) => ({
+        symbol: item.symbol,
+        name: item.name,
+        rank: i + 1,
+        priceUsd: parseFloat(item.priceUsd) || 0,
+        changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
+        volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
+        marketCapUsd: parseFloat(item.marketCapUsd) || 0,
+        supply: parseFloat(item.supply) || 0
+      }));
+    } else {
+      throw new Error('No data received');
     }
-}
 
+    Cache.set('market', allCoins, 60);
+    renderMarket();
+    renderWatchlist();
+    renderSummary();
+  } catch (e) {
+    console.error('❌ Market load error:', e);
+    // Fallback به Mock
+    const mockCoins = POPULAR_SYMBOLS.slice(0, 30).map((sym, i) => ({
+      symbol: sym,
+      name: getCoinFullName(sym),
+      rank: i + 1,
+      priceUsd: parseFloat((Math.random() * 50000 + 1000).toFixed(2)),
+      changePercent24Hr: parseFloat((Math.random() * 10 - 5).toFixed(2)),
+      volumeUsd24Hr: Math.random() * 1e9,
+      marketCapUsd: Math.random() * 1e11
+    }));
+    allCoins = mockCoins;
+    renderMarket();
+    renderWatchlist();
+    renderSummary();
+    document.getElementById('coin-list').innerHTML = `<div class="empty-state">⚠️ خطا در دریافت داده‌ها. داده‌های نمایشی موقت.</div>`;
+  }
+}
 // ---------- رندر خلاصه بازار ----------
 function renderSummary() {
     if (!allCoins.length) return;
