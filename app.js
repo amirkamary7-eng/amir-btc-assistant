@@ -12,7 +12,7 @@ if (tg) {
 // =========================================================================
 const MY_TELEGRAM_CHANNEL = "amir_btc_2024";
 // ⚠️ این آدرس را به آدرس بک‌اند خودت تغییر بده (بدون اسلش انتهایی)
-const BACKEND_URL = "https://amir-btc-assistant-production.up.railway.app";
+const BACKEND_URL = "https://amir-btc-assistant01.amirkamary7.workers.dev/";
 const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
 
 const POPULAR_SYMBOLS = [
