@@ -1,669 +1,521 @@
 /* =========================================================================
-   ۱. کدهای ریست پایه، انیمیشن‌ها و فونت مینی‌اپ
+   استایل‌های پایه و ریست
    ========================================================================= */
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-tap-highlight-color: transparent;
 }
 
 :root {
     --primary: #f7931a;
-    --primary-gradient: linear-gradient(135deg, #f7931a, #ff3355);
-    --bg-dark: #0b0f19;
-    --card-bg: rgba(22, 28, 45, 0.45);
-    --glass-bg: rgba(255, 255, 255, 0.05);
-    --border-color: rgba(255, 255, 255, 0.1);
-    --text-main: #ffffff;
-    --text-dim: #8f98aa;
-    --text-sub: #6c7a93;
+    --bg: #0b0f19;
+    --card: rgba(22, 28, 45, 0.6);
+    --border: rgba(255,255,255,0.08);
+    --text: #ffffff;
+    --dim: #8f98aa;
+    --sub: #6c7a93;
     --green: #00ffaa;
     --red: #ff3355;
-    --neon-green: #00e676;
-    --neon-red: #ff2366;
-    --neon-amber: #ffb300;
-    --neon-blue: #00e5ff;
-    --neon-yellow: #ffd500;
 }
 
 body {
-    background-color: var(--bg-dark);
-    color: var(--text-main);
-    overflow-x: hidden;
+    background: var(--bg);
+    color: var(--text);
     padding-bottom: 90px;
-}
-
-@keyframes fadeInData {
-    from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes scaleUpFade {
-    from { opacity: 0; transform: scale(0.92); }
-    to { opacity: 1; transform: scale(1); }
+    overflow-x: hidden;
 }
 
 /* =========================================================================
-   ۲. مدیریت سیستم ناوبری صفحات
-   ========================================================================= */
-.page {
-    display: none;
-    width: 100%;
-    padding: 10px 0;
-    animation: fadeInData 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.page.active {
-    display: block;
-}
-
-/* =========================================================================
-   ۳. هدر و منوی ناوبری پایینی
+   هدر و منو
    ========================================================================= */
 .app-header-container {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px;
-    border-bottom: 1px solid var(--border-color);
-    background: rgba(11, 15, 25, 0.7);
+    padding: 16px 20px;
+    background: rgba(11,15,25,0.8);
     backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
     z-index: 100;
 }
 
 .header-title {
-    font-size: 16px;
+    font-size: 17px;
     font-weight: bold;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
 }
 
 .noti-btn {
-    background: var(--glass-bg);
-    border: 1px solid var(--border-color);
-    width: 44px;
-    height: 44px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    width: 40px;
+    height: 40px;
     border-radius: 12px;
-    display: inline-flex;
+    display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-.noti-btn:active {
-    transform: scale(0.96);
-}
-
-.noti-btn .noti-icon { width:18px; height:18px; color: var(--text-main); }
+.noti-icon { width: 20px; height: 20px; color: var(--text); }
 
 /* =========================================================================
-   ۴. اسکلت‌ها (Skeleton)
+   صفحات و ناوبری
    ========================================================================= */
-.tab-skeleton { display:block; width:100%; padding: 12px 15px; }
-.skeleton-row { height: 12px; border-radius: 8px; background: linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.02) 75%); background-size: 200% 100%; animation: loadingSkeleton 1.2s ease-in-out infinite; }
-.skeleton-block { overflow: hidden; }
-.skeleton-card { height: 88px; border-radius: 12px; }
-.skeleton-image { width: 100%; height: 84px; border-radius: 10px; }
+.page { display: none; padding: 10px 0; animation: fade 0.3s ease; }
+.page.active { display: block; }
+@keyframes fade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-@keyframes loadingSkeleton {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-}
-
-/* =========================================================================
-   ۵. منوی پایین
-   ========================================================================= */
 .bottom-nav {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
     height: 75px;
-    background: rgba(18, 22, 34, 0.75);
+    background: rgba(18,22,34,0.85);
     backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border);
     display: flex;
     justify-content: space-around;
     align-items: center;
-    z-index: 1000;
-    padding-bottom: env(safe-area-inset-bottom);
+    z-index: 999;
 }
 
 .nav-item {
-    background: transparent;
+    background: none;
     border: none;
-    cursor: pointer;
-    opacity: 0.75;
-    transition: all 0.18s cubic-bezier(0.2, 0, 0.2, 1);
-    padding: 8px 10px;
-    border-radius: 12px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    min-width: 56px;
-    gap: 6px;
+    gap: 4px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: all 0.2s;
+    padding: 6px 10px;
+    border-radius: 12px;
 }
-
-.nav-item.active {
-    opacity: 1;
-    background: linear-gradient(135deg, rgba(247,147,26,0.12), rgba(255,51,85,0.06));
-    color: var(--primary);
-    transform: translateY(-6px) scale(1.02);
-    box-shadow: 0 8px 22px rgba(247,147,26,0.12);
-}
-
-.nav-item .nav-icon {
-    width: 22px;
-    height: 22px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: rgba(255,255,255,0.9);
-}
-
-.nav-item .nav-icon svg { width: 22px; height: 22px; }
-.nav-item .nav-label { font-size: 11px; color: var(--text-dim); }
-.nav-item.active .nav-label { color: var(--primary); font-weight: 700; }
+.nav-item.active { opacity: 1; transform: translateY(-4px); color: var(--primary); }
+.nav-item .nav-icon { width: 24px; height: 24px; color: currentColor; }
+.nav-item .nav-label { font-size: 10px; }
 
 /* =========================================================================
-   ۶. بنرها و کامپوننت‌ها
+   کارت‌ها و المان‌های عمومی
    ========================================================================= */
-.premium-channel-banner {
-    background: linear-gradient(135deg, rgba(247, 147, 26, 0.15) 0%, rgba(255, 51, 85, 0.05) 100%);
-    border: 1px solid rgba(247, 147, 26, 0.3);
+.glass-card, .card {
+    background: var(--card);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
     border-radius: 20px;
-    padding: 20px;
-    margin: 15px;
-    text-align: right;
-    direction: rtl;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-}
-
-.banner-join-btn {
-    background: var(--primary-gradient);
-    color: white;
-    border: none;
-    padding: 10px 24px;
-    border-radius: 12px;
-    font-weight: bold;
-    font-size: 13px;
-    cursor: pointer;
-    margin-top: 15px;
-    box-shadow: 0 4px 15px rgba(247, 147, 26, 0.3);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.banner-join-btn:active {
-    transform: scale(0.95);
-    box-shadow: 0 2px 8px rgba(247, 147, 26, 0.2);
+    padding: 16px;
+    margin: 12px 15px;
 }
 
 .card-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-dim);
-    margin: 15px 15px 8px 15px;
-}
-
-.glass-card, .card, .liq-card-metric, .watchlist-card, .coin-row, .news-card, .referral-card-box {
-    background: var(--card-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--border-color);
-    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05), 0 4px 16px rgba(0, 0, 0, 0.2);
-    border-radius: 20px;
-}
-
-.glass-card, .card {
-    padding: 15px;
-    margin: 10px 15px;
-}
-
-.liquidation-grid-wrapper {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin: 0 15px;
-}
-
-.liq-card-metric {
-    padding: 16px;
-    text-align: center;
-}
-
-.card-price {
-    font-size: 22px;
-    font-weight: bold;
-    margin: 5px 0;
-    font-family: monospace;
-    text-shadow: 0 0 10px currentColor;
-}
-
-.fg-meter {
-    margin-top: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.fg-meter-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 11px;
-    color: var(--text-dim);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-.fg-value-label {
-    font-weight: 700;
-    color: #fff;
-}
-
-.fg-value-unit {
-    font-size: 10px;
-    color: rgba(255,255,255,0.6);
-}
-
-.fg-gauge-track {
-    position: relative;
-    width: 100%;
-    height: 14px;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.08);
-    overflow: hidden;
-    border: 1px solid rgba(255,255,255,0.14);
-}
-
-.fg-gauge-fill {
-    width: 50%;
-    height: 100%;
-    background: linear-gradient(90deg, #ffb300, #ff3d6d);
-    border-radius: 999px;
-    transition: width 0.8s ease, background 0.6s ease;
-}
-
-.fg-gauge-pointer {
-    position: absolute;
-    top: -8px;
-    left: calc(50% - 2px);
-    width: 4px;
-    height: 30px;
-    background: #fff;
-    border-radius: 999px;
-    box-shadow: 0 0 12px rgba(255,255,255,0.35);
-    transition: left 0.8s ease;
-}
-
-.fg-gauge-scale {
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: var(--text-dim);
-    font-weight: 600;
-}
-
-.coin-name {
-    font-size: 12px;
-    color: var(--text-dim);
-}
-
-/* =========================================================================
-   ۷. واچ‌لیست و اسلایدر
-   ========================================================================= */
-.watchlist-slider {
-    display: flex;
-    gap: 12px;
-    overflow-x: auto;
-    padding: 5px 15px 15px 15px;
-    direction: ltr;
-    scroll-behavior: smooth;
-}
-
-.watchlist-slider::-webkit-scrollbar {
-    display: none;
-}
-
-.watchlist-card {
-    padding: 12px;
-    min-width: 120px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    flex-shrink: 0;
-    transition: transform 0.2s ease;
-}
-
-.watchlist-card:active {
-    transform: scale(0.96);
-}
-
-.coin-icon-mini {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-}
-
-.watchlist-card-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-}
-
-.coin-symbol {
-    font-weight: bold;
-    font-size: 13px;
-}
-
-.coin-price {
     font-size: 14px;
-    font-family: monospace;
     font-weight: 600;
+    color: var(--dim);
+    margin: 12px 15px 6px;
 }
 
 .badge {
-    padding: 4px 8px;
-    border-radius: 8px;
+    padding: 2px 8px;
+    border-radius: 6px;
     font-size: 11px;
     font-weight: bold;
 }
-.badge-success { background: rgba(0, 255, 170, 0.15); color: var(--green); }
-.badge-danger { background: rgba(255, 51, 85, 0.15); color: var(--red); }
-.badge-primary { background: rgba(247, 147, 26, 0.15); color: var(--primary); }
+.badge-success { background: rgba(0,255,170,0.15); color: var(--green); }
+.badge-danger { background: rgba(255,51,85,0.15); color: var(--red); }
+.badge-primary { background: rgba(247,147,26,0.15); color: var(--primary); }
 
-.news-slider-container {
-    margin: 10px 15px 20px 15px;
+/* =========================================================================
+   صفحه داشبورد
+   ========================================================================= */
+.welcome-bar {
+    padding: 0 15px;
+    margin-bottom: 10px;
+}
+.welcome-text { font-size: 12px; color: var(--dim); }
+.user-full-name { font-size: 18px; font-weight: bold; margin: 0; }
+
+/* اسلایدر تحلیل */
+.analysis-slider-container {
+    margin: 10px 15px 20px;
     border-radius: 20px;
     overflow: hidden;
-    height: 160px;
+    height: 180px;
     position: relative;
-    border: 1px solid var(--border-color);
-    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    background: var(--card);
+    border: 1px solid var(--border);
 }
-
-.slide-item {
+.analysis-slide {
     width: 100%;
     height: 100%;
-    position: relative;
-}
-
-.slider-bg-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.slider-overlay {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    background: linear-gradient(0deg, rgba(11,15,25,0.95) 0%, rgba(11,15,25,0.4) 60%, transparent 100%);
-    padding: 15px;
     display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    align-items: flex-start;
-    text-align: right;
-    direction: rtl;
+    cursor: pointer;
 }
-
-.slider-title {
-    font-size: 14px;
-    font-weight: bold;
+.analysis-slide .slide-image { width: 100%; height: 100%; object-fit: cover; }
+.analysis-slide .slide-content {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 15px;
+    background: linear-gradient(0deg, rgba(0,0,0,0.8), transparent);
     color: #fff;
-    margin-top: 6px;
-    line-height: 1.5;
+}
+.slider-dots {
+    position: absolute;
+    bottom: 8px;
+    right: 50%;
+    transform: translateX(50%);
+    display: flex;
+    gap: 6px;
+}
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.3);
+}
+.dot.active { background: var(--primary); }
+
+/* واچ‌لیست گرید */
+.watchlist-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+    padding: 0 15px 10px;
+}
+.watchlist-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: 0.2s;
+    position: relative;
+}
+.watchlist-card:active { transform: scale(0.96); }
+.watchlist-card .coin-icon { width: 32px; height: 32px; border-radius: 50%; }
+.watchlist-card .coin-symbol { display: block; font-weight: bold; font-size: 13px; }
+.watchlist-card .coin-price { font-size: 12px; color: var(--dim); }
+.watchlist-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: rgba(255,0,0,0.2);
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--red);
+    cursor: pointer;
 }
 
 /* =========================================================================
-   ۸. سرچ‌باکس و لیست‌های مارکت
+   صفحه مارکت
    ========================================================================= */
-.search-box {
-    width: calc(100% - 30px);
-    margin: 10px 15px;
-    background: rgba(255,255,255,0.03);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid var(--border-color);
-    padding: 14px 16px;
-    border-radius: 16px;
-    color: white;
-    font-size: 13px;
-    outline: none;
-    text-align: right;
-    direction: rtl;
-    transition: all 0.3s ease;
-}
-
-.search-box:focus {
-    border-color: rgba(247, 147, 26, 0.6);
-    background: rgba(255,255,255,0.06);
-    box-shadow: 0 0 12px rgba(247, 147, 26, 0.15);
-}
-
-.compare-bar-container {
-    height: 8px;
-    border-radius: 4px;
-    overflow: hidden;
-    background: rgba(255,255,255,0.08);
+.market-search-wrapper {
     display: flex;
-    margin-top: 10px;
+    gap: 8px;
+    padding: 0 15px;
+    margin: 10px 0;
 }
-
-.market-trend-selector, .calendar-sub-nav {
-    display: flex;
-    background: rgba(0,0,0,0.2);
-    border: 1px solid var(--border-color);
-    padding: 5px;
-    border-radius: 14px;
-    margin: 10px 15px;
-    gap: 5px;
-}
-
-.trend-tab-btn, .news-tab-btn, .cal-sub-btn {
+.market-search-input {
     flex: 1;
-    background: transparent;
-    border: none;
-    color: var(--text-dim);
-    padding: 10px 0;
-    border-radius: 10px;
+    padding: 12px 16px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+}
+.market-search-input:focus { border-color: var(--primary); }
+
+.search-filter-btn {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: 48px;
     cursor: pointer;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.filter-menu {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 15px;
+}
+.filter-chip {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    color: var(--dim);
     font-size: 12px;
-    font-weight: 600;
-    transition: all 0.25s ease;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.filter-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+.market-section {
+    margin: 10px 15px;
+    background: var(--card);
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+}
+.section-title { font-weight: bold; font-size: 14px; }
+.section-badge { font-size: 10px; color: var(--dim); background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 12px; }
+.add-watchlist-btn {
+    background: var(--primary);
+    border: none;
+    color: #fff;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-size: 18px;
+    cursor: pointer;
 }
 
-.trend-tab-btn.active, .news-tab-btn.active, .cal-sub-btn.active {
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-}
-
+.market-coin-list { padding: 4px 0; }
 .coin-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 14px 16px;
-    margin: 0 15px 10px 15px;
+    padding: 10px 16px;
     cursor: pointer;
-    border-radius: 18px;
-    transition: transform 0.2s ease, background 0.2s ease;
-    position: relative;
+    transition: 0.15s;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
 }
-
-.coin-row:active {
-    transform: scale(0.97);
-    background: rgba(255,255,255,0.08);
-}
-
-.coin-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-}
+.coin-row:active { background: rgba(255,255,255,0.05); }
+.coin-info { display: flex; align-items: center; gap: 10px; flex: 1; }
+.coin-rank { font-size: 11px; color: var(--dim); width: 30px; }
+.coin-icon { width: 28px; height: 28px; border-radius: 50%; }
+.coin-name-wrap { display: flex; flex-direction: column; }
+.coin-symbol { font-weight: bold; font-size: 13px; }
+.coin-fullname { font-size: 11px; color: var(--dim); }
+.coin-price-wrap { display: flex; align-items: center; gap: 12px; }
+.coin-price { font-weight: bold; font-family: monospace; }
+.watchlist-star { font-size: 20px; cursor: pointer; user-select: none; }
 
 /* =========================================================================
-   ۹. ستاره واچ‌لیست
+   صفحه تحلیل
    ========================================================================= */
-.watchlist-star {
-    font-size: 22px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    user-select: none;
-    line-height: 1;
-    display: inline-block;
-}
-
-.watchlist-star:hover {
-    transform: scale(1.2);
-}
-
-/* =========================================================================
-   ۱۰. اخبار و کارت‌ها
-   ========================================================================= */
-.news-card {
-    display: flex;
-    gap: 12px;
-    padding: 12px;
-    margin-bottom: 12px;
-    cursor: pointer;
-    align-items: center;
-    border-radius: 18px;
-    transition: transform 0.2s ease;
-}
-
-.news-card:active {
-    transform: scale(0.97);
-}
-
-.news-card-text-wrapper {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    text-align: right;
-    direction: rtl;
-}
-
-.news-title {
-    font-size: 13px;
-    font-weight: bold;
-    color: white;
-    line-height: 1.5;
-}
-
-.news-img {
-    width: 75px;
-    height: 75px;
-    object-fit: cover;
-    border-radius: 14px;
-}
-
-.skeleton-block {
-    background: linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.02) 75%);
-    background-size: 200% 100%;
-    animation: loadingSkeleton 1.5s ease-in-out infinite;
-}
-
-/* =========================================================================
-   ۱۱. تنظیمات و رفرال
-   ========================================================================= */
-.referral-card-box {
-    padding: 20px;
-    text-align: right;
-    direction: rtl;
-}
-
-.ref-input-group {
-    display: flex;
-    background: rgba(0,0,0,0.3);
-    border: 1px solid var(--border-color);
-    border-radius: 14px;
-    overflow: hidden;
-    margin-top: 15px;
-}
-
-.ref-input-group input {
-    background: transparent;
-    border: none;
-    color: white;
-    padding: 14px;
-    flex: 1;
-    font-size: 13px;
-    outline: none;
-    font-family: monospace;
-}
-
-.ref-copy-btn {
-    background: rgba(255,255,255,0.08);
-    border: none;
-    color: var(--primary);
-    padding: 0 18px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: background 0.2s ease;
-}
-
-.ref-copy-btn:active {
-    background: rgba(255,255,255,0.15);
-}
-
-.settings-list-group {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 15px;
-}
-
-.settings-row-item {
+.analysis-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid var(--border-color);
-    padding: 16px;
-    border-radius: 16px;
-    font-size: 13px;
+    padding: 0 15px;
+    margin-bottom: 10px;
+}
+.add-analysis-btn {
+    background: var(--primary);
+    border: none;
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-weight: bold;
     cursor: pointer;
-    transition: transform 0.2s ease, background 0.2s ease;
 }
-
-.settings-row-item:active {
-    transform: scale(0.98);
-    background: rgba(255,255,255,0.06);
+.analysis-list { padding: 0 15px; }
+.analysis-card {
+    display: flex;
+    gap: 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: 0.2s;
 }
+.analysis-card:active { transform: scale(0.98); }
+.analysis-thumb { width: 70px; height: 70px; border-radius: 12px; object-fit: cover; }
+.analysis-info { flex: 1; }
+.analysis-info h4 { font-size: 14px; }
+.analysis-info p { font-size: 12px; color: var(--dim); }
+.analysis-meta { font-size: 11px; color: var(--sub); }
 
 /* =========================================================================
-   ۱۲. مودال‌ها
+   پروفایل و تنظیمات
+   ========================================================================= */
+.profile-card {
+    text-align: center;
+    position: relative;
+}
+.profile-settings-icon {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    font-size: 22px;
+    cursor: pointer;
+}
+.profile-avatar { width: 80px; height: 80px; border-radius: 50%; margin-bottom: 10px; border: 2px solid var(--primary); }
+.profile-name { font-size: 18px; font-weight: bold; }
+.profile-username { font-size: 13px; color: var(--dim); }
+.profile-id { font-size: 12px; color: var(--sub); margin-top: 4px; }
+
+.referral-btn {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+}
+.ref-input-group { display: flex; margin: 12px 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+.ref-input-group input { flex: 1; padding: 10px; background: transparent; border: none; color: #fff; }
+.ref-copy-btn { background: rgba(255,255,255,0.05); border: none; color: var(--primary); padding: 0 16px; cursor: pointer; }
+.ref-stats { display: flex; justify-content: space-around; margin: 15px 0; }
+.ref-stats div { text-align: center; font-size: 13px; color: var(--dim); }
+.ref-stats span:last-child { display: block; font-weight: bold; color: #fff; font-size: 16px; }
+.coming-soon-card {
+    border: 1px dashed rgba(247,147,26,0.4);
+    border-radius: 16px;
+    padding: 16px;
+    text-align: center;
+    position: relative;
+    background: rgba(247,147,26,0.02);
+}
+.soon-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 9px;
+    padding: 2px 10px;
+    border-radius: 20px;
+}
+
+.back-btn {
+    cursor: pointer;
+    color: var(--primary);
+    padding: 10px 15px;
+    font-weight: bold;
+}
+
+/* تنظیمات */
+.settings-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+}
+.settings-item:last-child { border-bottom: none; }
+
+/* پشتیبانی */
+.support-input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+    color: #fff;
+    margin-bottom: 10px;
+    outline: none;
+}
+.tickets-list { margin-top: 15px; }
+.ticket-item {
+    background: rgba(255,255,255,0.02);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 8px;
+}
+.ticket-header { display: flex; justify-content: space-between; }
+.ticket-status { font-size: 11px; padding: 2px 8px; border-radius: 12px; }
+.ticket-status.open { background: rgba(255,51,85,0.15); color: var(--red); }
+.ticket-status.answered { background: rgba(0,255,170,0.15); color: var(--green); }
+.ticket-body { font-size: 13px; color: var(--dim); margin: 6px 0; }
+.ticket-response { background: rgba(0,255,170,0.05); padding: 8px; border-radius: 8px; color: var(--green); font-size: 13px; }
+.ticket-date { font-size: 10px; color: var(--sub); text-align: left; }
+
+/* =========================================================================
+   مودال‌ها
    ========================================================================= */
 .modal {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(11, 15, 25, 0.85);
+    background: rgba(11,15,25,0.85);
     backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     display: none;
     align-items: center;
     justify-content: center;
     z-index: 2000;
-    padding: 15px;
+    padding: 20px;
+}
+.modal-card {
+    width: 100%;
+    max-width: 500px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 20px;
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+.modal-header button {
+    background: none;
+    border: none;
+    color: #999;
+    font-size: 20px;
+    cursor: pointer;
+}
+.modal-input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+    color: #fff;
+    margin-bottom: 10px;
+    outline: none;
+}
+.coin-select-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
 }
 
-.modal .glass-card {
-    animation: scaleUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
 /* =========================================================================
-   استایل‌های جدید برای کارت بالایی مارکت
+   وضعیت خالی
    ========================================================================= */
-#global-market-cap, #global-cmc20 {
-    transition: all 0.3s ease;
+.empty-state {
+    text-align: center;
+    color: var(--dim);
+    padding: 30px 15px;
+    font-size: 14px;
+}
+.empty-slide {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--dim);
 }
