@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .env.local
 .DS_Store
+.vercel
+.env*
