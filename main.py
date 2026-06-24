@@ -2,7 +2,6 @@ import os
 import re
 import time
 import html
-import asyncio
 from datetime import datetime, timezone
 import requests
 import xml.etree.ElementTree as ET
@@ -184,22 +183,16 @@ async def startup_event():
 
     await telegram_app.initialize()
     await telegram_app.start()
-    asyncio.create_task(run_bot_polling())
+    await telegram_app.updater.start_polling(drop_pending_updates=True)
     print("🚀 ربات تلگرام با موفقیت در پس‌زمینه فعال شد!")
-
-async def run_bot_polling():
-    while True:
-        try:
-            await telegram_app.run_polling()
-        except Exception as e:
-            print(f"⚠️ خطا در polling ربات: {e}. تلاش مجدد در ۵ ثانیه...")
-            await asyncio.sleep(5)
 
 @app.on_event("shutdown")
 async def shutdown_event():
     global telegram_app
     if telegram_app:
         try:
+            if telegram_app.updater.running:
+                await telegram_app.updater.stop()
             await telegram_app.stop()
             await telegram_app.shutdown()
         except Exception:

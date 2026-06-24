@@ -13,6 +13,17 @@ const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 // لیست ارزهای محبوب برای Fallback
 const POPULAR_SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT", "LINK", "MATIC", "TRX", "UNI", "LTC", "NEAR", "APT", "SUI", "FET", "ICP", "FIL", "RNDR", "HBAR", "ATOM", "STX", "IMX", "GRT", "LDO", "TAO", "INJ"];
 
+const COIN_NAMES = {
+    BTC: 'Bitcoin', ETH: 'Ethereum', SOL: 'Solana', BNB: 'BNB', XRP: 'Ripple',
+    ADA: 'Cardano', DOGE: 'Dogecoin', AVAX: 'Avalanche', SHIB: 'Shiba Inu',
+    DOT: 'Polkadot', LINK: 'Chainlink', MATIC: 'Polygon', TRX: 'TRON',
+    UNI: 'Uniswap', LTC: 'Litecoin', NEAR: 'NEAR Protocol', APT: 'Aptos',
+    SUI: 'Sui', FET: 'Fetch.ai', ICP: 'Internet Computer', FIL: 'Filecoin',
+    RNDR: 'Render', HBAR: 'Hedera', ATOM: 'Cosmos', STX: 'Stacks',
+    IMX: 'Immutable X', GRT: 'The Graph', LDO: 'Lido DAO', TAO: 'Bittensor', INJ: 'Injective'
+};
+function getCoinFullName(sym) { return COIN_NAMES[sym] || sym; }
+
 let currentLang = localStorage.getItem('app_lang') || 'fa';
 let watchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
 let analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
@@ -111,8 +122,15 @@ const Cache = {
 };
 
 // ---------- API با Proxy با Fallback به CoinGecko ----------
-async function fetchWithProxy(url, retries = 2) {
-    const isBinance = url.includes('binance.com');
+function isRssUrl(url) {
+    return url.includes('/rss') || url.endsWith('/feed/') || url.includes('outboundfeeds/rss');
+}
+
+async function fetchWithProxy(url, options = {}) {
+    const opts = typeof options === 'number' ? { retries: options } : options;
+    const { asText = isRssUrl(url), retries = 2 } = opts;
+    const isCoinCap = url.includes('coincap.io');
+
     for (let i = 0; i < retries; i++) {
         try {
             const proxyUrl = PROXY + encodeURIComponent(url);
@@ -120,16 +138,16 @@ async function fetchWithProxy(url, retries = 2) {
             if (!res.ok) {
                 const errorText = await res.text();
                 console.warn(`⚠️ Proxy HTTP ${res.status}: ${errorText}`);
-                if (res.status === 403 && isBinance) {
+                if (isCoinCap) {
                     console.log('🔄 Switching to CoinGecko fallback...');
                     return await fetchCoinGecko();
                 }
                 throw new Error(`HTTP ${res.status}`);
             }
-            return res.json();
+            return asText ? await res.text() : await res.json();
         } catch (e) {
             console.warn(`Attempt ${i+1} failed:`, e);
-            if (i === retries - 1 && isBinance) {
+            if (i === retries - 1 && isCoinCap) {
                 console.log('🔄 Final fallback to CoinGecko...');
                 return await fetchCoinGecko();
             }
@@ -341,6 +359,7 @@ function filterCoinList() {
 
 // ---------- اخبار و تقویم اقتصادی ----------
 let newsCache = [];
+let displayedNews = [];
 async function loadNews() {
     try {
         const cached = Cache.get('news');
@@ -349,7 +368,7 @@ async function loadNews() {
         let articles = [];
         // CoinTelegraph RSS
         try {
-            const rssText = await fetchWithProxy('https://cointelegraph.com/rss');
+            const rssText = await fetchWithProxy('https://cointelegraph.com/rss', { asText: true });
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(rssText, 'text/xml');
             const items = xmlDoc.querySelectorAll('item');
@@ -373,7 +392,7 @@ async function loadNews() {
 
         // CoinDesk RSS
         try {
-            const rssText = await fetchWithProxy('https://www.coindesk.com/arc/outboundfeeds/rss/');
+            const rssText = await fetchWithProxy('https://www.coindesk.com/arc/outboundfeeds/rss/', { asText: true });
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(rssText, 'text/xml');
             const items = xmlDoc.querySelectorAll('item');
@@ -397,7 +416,7 @@ async function loadNews() {
 
         // CryptoPanic RSS
         try {
-            const rssText = await fetchWithProxy('https://cryptopanic.com/feed/');
+            const rssText = await fetchWithProxy('https://cryptopanic.com/feed/', { asText: true });
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(rssText, 'text/xml');
             const items = xmlDoc.querySelectorAll('item');
@@ -465,8 +484,9 @@ function renderNews(category) {
         container.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
         return;
     }
-    container.innerHTML = filtered.map(n => `
-        <div class="news-item" onclick="openNewsModal('${encodeURIComponent(JSON.stringify(n))}')">
+    displayedNews = filtered;
+    container.innerHTML = filtered.map((n, i) => `
+        <div class="news-item" onclick="openNewsModal(${i})">
             <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2270%22 height=%2270%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="news-img">
             <div class="news-content">
                 <div class="news-title">${n.title}</div>
@@ -480,8 +500,9 @@ function switchNewsTab(category, btn) {
     if (btn) btn.classList.add('active');
     renderNews(category);
 }
-function openNewsModal(encoded) {
-    const n = JSON.parse(decodeURIComponent(encoded));
+function openNewsModal(idx) {
+    const n = displayedNews[idx];
+    if (!n) return;
     document.getElementById('news-modal-title').innerText = n.title;
     document.getElementById('news-modal-image').src = n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
     document.getElementById('news-modal-body').innerText = n.body || 'متن کامل خبر در دسترس نیست.';
@@ -914,8 +935,9 @@ async function loadImportantNews() {
             container.innerHTML = '<div class="empty-state">خبری وجود ندارد</div>';
             return;
         }
-        container.innerHTML = important.map(n => `
-            <div class="important-news-item" onclick="openNewsModal('${encodeURIComponent(JSON.stringify(n))}')">
+        displayedNews = important;
+        container.innerHTML = important.map((n, i) => `
+            <div class="important-news-item" onclick="openNewsModal(${i})">
                 <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="important-news-img">
                 <div class="important-news-content">
                     <div class="important-news-title">${n.title}</div>
@@ -973,6 +995,7 @@ window.toggleWatchlist = toggleWatchlist;
 window.openAddCoinModal = openAddCoinModal;
 window.closeAddCoinModal = closeAddCoinModal;
 window.filterCoinList = filterCoinList;
+window.filterAddCoinModal = filterCoinList;
 window.openAddAnalysisModal = openAddAnalysisModal;
 window.closeAddAnalysisModal = closeAddAnalysisModal;
 window.submitAnalysis = submitAnalysis;
