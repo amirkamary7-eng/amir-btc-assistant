@@ -11,9 +11,12 @@ if (tg) {
 // بخش ۲: متغیرهای ثابت، آدرس‌ها و آرایه‌ها (Constants & States)
 // =========================================================================
 const MY_TELEGRAM_CHANNEL = "amir_btc_2024";
-// ⚠️ این آدرس‌ها را با آدرس‌های واقعی خود جایگزین کنید
-const BACKEND_URL = "https://amir-btc-assistant01.amirkamary7.workers.dev/";
+
+// 🔽 آدرس‌های نهایی بر اساس تنظیمات شما
+// Worker پروکسی برای تمام درخواست‌های API (Binance, Fear&Greed, Calendar)
 const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
+// برای اخبار، فعلاً از همان Worker پروکسی استفاده می‌کنیم (اگر مسیر نباشد، از Mock استفاده می‌کند)
+const BACKEND_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev";
 
 const POPULAR_SYMBOLS = [
     "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT",
@@ -59,7 +62,6 @@ const AppCache = {
 // =========================================================================
 // بخش ۴: توابع واچ‌لیست (برای هماهنگی با watchlist.js)
 // =========================================================================
-// این توابع را صریحاً به window متصل می‌کنیم تا همیشه در دسترس باشند
 window.getWatchlist = function() {
     const stored = localStorage.getItem('watchlist');
     return stored ? JSON.parse(stored) : [];
@@ -247,7 +249,6 @@ async function loadMarketAndPrices() {
         removeSkeletons();
     } catch (err) {
         console.error("❌ Binance Fetch Error:", err);
-        // استفاده از Mock Data با کیفیت بهتر
         console.log('🔄 Using mock data as fallback');
         const mockCoins = POPULAR_SYMBOLS.slice(0, 30).map((sym, index) => ({
             symbol: sym,
@@ -407,10 +408,11 @@ function loadLiquidationData() {
 }
 
 // =========================================================================
-// بخش ۸: اخبار و اسلایدر
+// بخش ۸: اخبار و اسلایدر (با استفاده از Mock فعلاً)
 // =========================================================================
 async function fetchDashboardNews() {
     try {
+        // تلاش برای دریافت از Worker پروکسی (اگر مسیر وجود نداشته باشد، خطا می‌دهد)
         const response = await fetch(`${BACKEND_URL}/api/farsi-news`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
@@ -421,16 +423,35 @@ async function fetchDashboardNews() {
             return;
         }
     } catch (e) {
-        console.warn("Dashboard News Error:", e);
+        console.warn("Dashboard News Error (using mock):", e);
     }
-    const mockNews = [{
-        title: "فورى: بیت‌کوین سقف مقاومتی جدید را شکست!",
-        description: "بازار ارزهای دیجیتال شاهد رشد است.",
-        time_ago: "۵ دقیقه پیش",
-        source: "کوین‌تلگراف",
-        image: "https://images.cryptocompare.com/news/default/bitcoin.png",
-        url: "https://cointelegraph.com"
-    }];
+    // استفاده از اخبار ساختگی (Mock)
+    const mockNews = [
+        {
+            title: "🔥 بیت‌کوین به مقاومت ۷۰ هزار دلاری نزدیک شد",
+            description: "با افزایش حجم معاملات، بیت‌کوین به سطح ۷۰ هزار دلار نزدیک می‌شود.",
+            time_ago: "۵ دقیقه پیش",
+            source: "اخبار بازار",
+            image: "https://images.cryptocompare.com/news/default/bitcoin.png",
+            url: "#"
+        },
+        {
+            title: "📊 تحلیل: اتریوم آماده شکست مقاومت ۴۰۰۰ دلاری",
+            description: "اتریوم با رشد ۱۵٪ در هفته گذشته، به مرز ۴۰۰۰ دلار رسیده است.",
+            time_ago: "۲۰ دقیقه پیش",
+            source: "تحلیلگران",
+            image: "https://images.cryptocompare.com/news/default/ethereum.png",
+            url: "#"
+        },
+        {
+            title: "🌐 خبر فوری: تصویب قانون جدید ارزهای دیجیتال در اروپا",
+            description: "اتحادیه اروپا قانون جدیدی برای شفافیت تراکنش‌های رمزارزی تصویب کرد.",
+            time_ago: "۱ ساعت پیش",
+            source: "خبرگزاری رویترز",
+            image: "https://images.cryptocompare.com/news/default/global.png",
+            url: "#"
+        }
+    ];
     cachedNewsArticles = mockNews;
     initNewsSlider(mockNews);
 }
@@ -485,14 +506,18 @@ async function switchNewsTab(tabId) {
         return;
     }
 
+    // اگر خبری در کش نبود، از Mock استفاده کن
     if (cachedNewsArticles.length === 0) {
         try {
             const response = await fetch(`${BACKEND_URL}/api/farsi-news`);
             const payload = await response.json();
             cachedNewsArticles = payload?.data || payload || [];
         } catch (e) {
-            container.innerHTML = `<div style="text-align:center; color:#e17055; padding:20px;">ارتباط با سرور برقرار نشد.</div>`;
-            return;
+            // اگر خطا داشت، از Mock استفاده کن
+            cachedNewsArticles = [
+                { title: "اخبار آزمایشی ۱", source: "منبع", time_ago: "۱ دقیقه پیش", image: "" },
+                { title: "اخبار آزمایشی ۲", source: "منبع", time_ago: "۲ دقیقه پیش", image: "" }
+            ];
         }
     }
 
@@ -532,7 +557,7 @@ async function switchNewsTab(tabId) {
 }
 
 // =========================================================================
-// بخش ۹: تقویم اقتصادی
+// بخش ۹: تقویم اقتصادی (از طریق پروکسی)
 // =========================================================================
 async function renderEconomicCalendarAdvanced(subFilter = 'today') {
     const container = document.getElementById("news-tab-content-area");
@@ -858,7 +883,7 @@ window.filterMarketCategory = filterMarketCategory;
 window.filterMarketSearch = filterMarketSearch;
 window.openNotificationCenter = openNotificationCenter;
 window.joinChannelAction = joinChannelAction;
-window.openChart = openChart;
+window.openChart = window.openChart;
 window.closeChart = closeChart;
 window.openArticleDetailsById = window.openArticleDetailsById;
 window.switchNewsTab = switchNewsTab;
@@ -872,8 +897,8 @@ window.closeSettingsPage = closeSettingsPage;
 window.loadExtraMetrics = loadExtraMetrics;
 window.loadLiquidationData = loadLiquidationData;
 window.loadAnalysisData = loadAnalysisData;
-window.renderWatchlist = renderWatchlist;
-window.renderMarketTabLists = renderMarketTabLists;
-window.toggleWatchlist = toggleWatchlist;
+window.renderWatchlist = window.renderWatchlist;
+window.renderMarketTabLists = window.renderMarketTabLists;
+window.toggleWatchlist = window.toggleWatchlist;
 
 console.log('✅ All functions registered globally');
