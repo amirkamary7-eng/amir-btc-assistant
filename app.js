@@ -14,21 +14,9 @@ const MY_TELEGRAM_CHANNEL = "amir_btc_2024";
 const PROXY_BASE_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev/?url=";
 const BACKEND_URL = "https://amir-btc-assistant9.amirkamary7.workers.dev";
 
-let searchTerm = ''; // برای جستجو
+let searchTerm = '';
 
-const POPULAR_SYMBOLS = [
-    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT",
-    "LINK", "MATIC", "TRX", "UNI", "LTC", "NEAR", "APT", "SUI", "FET", "ICP",
-    "FIL", "RNDR", "HBAR", "ATOM", "STX", "IMX", "GRT", "LDO", "TAO", "INJ",
-    "OP", "ARB", "WIF", "PEPE", "FLOKI", "BONK", "JUP", "PYTH", "TIA", "SEI",
-    "MKR", "RUNE", "AAVE", "EGLD", "FLOW", "THETA", "FTM", "SAND", "MANA", "AXS",
-    "GALA", "BEAM", "JTO", "PENDLE", "ENS", "CRV", "COMP", "1INCH", "LRC", "ANKR",
-    "WOO", "STRK", "ZK", "ZK", "IO", "ATH", "NOT", "TON", "PEPE", "MNT",
-    "KAS", "ORDI", "SATS", "ASTR", "MINA", "CORE", "BGB", "GT", "CHZ", "OKB",
-    "ZEX", "OM", "ZRO", "W", "BLUR", "DYDX", "GMX", "BOND", "WAVES", "QTUM",
-    "ALGO", "XLM", "VET", "ICP", "EGLD", "FLOW", "MKR", "AAVE", "RUNE", "LDO"
-];
-
+// لیست ۱۰۰ ارز برتر از CoinCap دریافت می‌شود (دیگر نیازی به لیست ثابت نیست)
 window.newsArticlesStorage = {};
 let allMarketCoins = [];
 let newsSliderInterval = null;
@@ -173,7 +161,7 @@ function removeSkeletons() {
 }
 
 // =========================================================================
-// بخش ۶: دریافت قیمت‌ها و دسته‌بندی بازار (اصلاح شده)
+// بخش ۶: دریافت قیمت‌ها از CoinCap (۱۰۰ ارز برتر بر اساس مارکت‌کپ)
 // =========================================================================
 async function loadMarketAndPrices() {
     const cachedPrices = AppCache.get("market_prices");
@@ -184,47 +172,40 @@ async function loadMarketAndPrices() {
     }
 
     try {
-        const chunkSize = 25;
-        let fetchedTickers = [];
+        // دریافت ۱۰۰ ارز برتر از CoinCap
+        const url = 'https://api.coincap.io/v2/assets?limit=100';
+        const response = await fetch(PROXY_BASE_URL + encodeURIComponent(url));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const assets = data.data || [];
 
-        for (let i = 0; i < POPULAR_SYMBOLS.length; i += chunkSize) {
-            const chunk = POPULAR_SYMBOLS.slice(i, i + chunkSize);
-            const formattedSymbols = JSON.stringify(chunk.map(sym => `${sym}USDT`));
-            const targetUrl = `https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(formattedSymbols)}`;
-            const response = await fetch(PROXY_BASE_URL + encodeURIComponent(targetUrl));
-            const data = await response.json();
-            if (data && Array.isArray(data)) {
-                fetchedTickers = fetchedTickers.concat(data);
-            }
-        }
+        if (!assets || assets.length === 0) throw new Error("No data from CoinCap");
 
-        if (fetchedTickers.length === 0) throw new Error("No tickers");
+        allMarketCoins = assets.map((item, index) => ({
+            symbol: item.symbol,
+            name: item.name,
+            priceUsd: parseFloat(item.priceUsd) || 0,
+            changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
+            rank: index + 1,
+            marketCapUsd: parseFloat(item.marketCapUsd) || 0,
+            volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0
+        }));
 
-        allMarketCoins = POPULAR_SYMBOLS.map((sym, index) => {
-            const ticker = fetchedTickers.find(item => item.symbol === `${sym}USDT`);
-            return ticker ? {
-                symbol: sym,
-                name: getCoinFullName(sym),
-                priceUsd: parseFloat(ticker.lastPrice) || 0,
-                changePercent24Hr: parseFloat(ticker.priceChangePercent) || 0,
-                rank: index + 1
-            } : null;
-        }).filter(Boolean);
-
-        AppCache.set("market_prices", allMarketCoins, 15);
+        AppCache.set("market_prices", allMarketCoins, 5); // کش ۵ ثانیه‌ای
         renderMarketData();
         removeSkeletons();
     } catch (err) {
-        console.error("Binance Fetch Error:", err);
-        const mockCoins = POPULAR_SYMBOLS.slice(0, 30).map((sym, index) => ({
-            symbol: sym,
-            name: getCoinFullName(sym),
-            priceUsd: parseFloat((Math.random() * 50000 + 1000).toFixed(2)),
-            changePercent24Hr: parseFloat((Math.random() * 10 - 5).toFixed(2)),
-            rank: index + 1
-        }));
+        console.error("CoinCap Fetch Error:", err);
+        // استفاده از داده‌های ساختگی در صورت خطا
+        const mockCoins = [
+            { symbol: "BTC", name: "Bitcoin", priceUsd: 65000, changePercent24Hr: 2.5, rank: 1 },
+            { symbol: "ETH", name: "Ethereum", priceUsd: 3500, changePercent24Hr: -1.2, rank: 2 },
+            { symbol: "SOL", name: "Solana", priceUsd: 150, changePercent24Hr: 5.8, rank: 3 },
+            { symbol: "BNB", name: "BNB", priceUsd: 580, changePercent24Hr: 0.8, rank: 4 },
+            { symbol: "XRP", name: "XRP", priceUsd: 0.62, changePercent24Hr: -2.1, rank: 5 }
+        ];
         allMarketCoins = mockCoins;
-        AppCache.set("market_prices", allMarketCoins, 15);
+        AppCache.set("market_prices", allMarketCoins, 5);
         renderMarketData();
         removeSkeletons();
     }
@@ -236,7 +217,7 @@ function renderMarketData() {
 }
 
 // =========================================================================
-// بخش ۷: واچ‌لیست و لیست مارکت (اصلاح شده با سرچ و فیلتر)
+// بخش ۷: واچ‌لیست و لیست مارکت با سرچ و فیلترهای پویا
 // =========================================================================
 window.renderWatchlist = function() {
     const container = document.getElementById("watchlist-container");
@@ -264,8 +245,8 @@ window.renderWatchlist = function() {
                     <img src="https://assets.coincap.io/assets/icons/${coin.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" class="coin-icon-mini">
                     <span class="coin-symbol">${coin.symbol}</span>
                 </div>
-                <div class="coin-price">$${coin.priceUsd.toLocaleString()}</div>
-                <div class="badge ${isPositive ? 'badge-success' : 'badge-danger'}">${isPositive ? '+' : ''}${change.toFixed(2)}%</div>
+                <div class="coin-price">$${coin.priceUsd.toFixed(2)}</div>
+                <div class="badge ${isPositive ? 'badge-success' : 'badge-danger'}">${isPositive ? '▲' : '▼'} ${Math.abs(change).toFixed(2)}%</div>
             </div>
         `;
     });
@@ -305,12 +286,13 @@ window.renderMarketTabLists = function(filterType = 'all') {
         const change = coin.changePercent24Hr || 0;
         const isPositive = change >= 0;
         const badgeClass = isPositive ? 'badge-success' : 'badge-danger';
+        const arrow = isPositive ? '▲' : '▼';
         const inWatchlist = window.isInWatchlist(coin.symbol);
 
         html += `
             <div class="coin-row" onclick="window.openChart('${coin.symbol}')">
                 <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
-                    <span style="color:var(--text-sub);font-size:11px;font-family:monospace;width:15px;">#${coin.rank}</span>
+                    <span style="color:var(--text-sub);font-size:11px;font-family:monospace;width:25px;">#${coin.rank}</span>
                     <img src="https://assets.coincap.io/assets/icons/${coin.symbol.toLowerCase()}@2x.png" onerror="this.src='https://img.icons8.com/clouds/100/000000/bitcoin.png'" class="coin-icon">
                     <div style="display:flex;flex-direction:column;text-align:left;">
                         <span class="coin-symbol">${coin.symbol}</span>
@@ -319,10 +301,12 @@ window.renderMarketTabLists = function(filterType = 'all') {
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
                     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-                        <span style="font-weight:bold;font-family:monospace;">$${coin.priceUsd.toLocaleString()}</span>
-                        <span class="badge ${badgeClass}">${isPositive ? '+' : ''}${change.toFixed(2)}%</span>
+                        <span style="font-weight:bold;font-family:monospace;font-size:15px;">$${coin.priceUsd.toFixed(4)}</span>
+                        <span class="badge ${badgeClass}" style="font-size:11px;font-weight:bold;">
+                            ${arrow} ${Math.abs(change).toFixed(2)}%
+                        </span>
                     </div>
-                    <span class="watchlist-star" onclick="window.toggleWatchlist('${coin.symbol}', event)" style="font-size:20px;cursor:pointer;color:${inWatchlist ? '#f7931a' : '#555'};transition:all 0.2s;user-select:none;">
+                    <span class="watchlist-star" onclick="window.toggleWatchlist('${coin.symbol}', event)" style="font-size:22px;cursor:pointer;color:${inWatchlist ? '#f7931a' : '#555'};transition:all 0.2s;user-select:none;">
                         ${inWatchlist ? '⭐' : '☆'}
                     </span>
                 </div>
@@ -346,7 +330,7 @@ function filterMarketSearch(e) {
 }
 
 // =========================================================================
-// بخش ۸: لیکوئیدیشن (بهبود یافته)
+// بخش ۸: لیکوئیدیشن (ساده و بدون ایموجی)
 // =========================================================================
 function loadLiquidationData() {
     const cachedLiq = AppCache.get("market_liquidations");
@@ -375,7 +359,7 @@ function loadLiquidationData() {
 }
 
 // =========================================================================
-// بخش ۹: اخبار و اسلایدر
+// بخش ۹: اخبار و اسلایدر (بدون تغییر)
 // =========================================================================
 async function fetchDashboardNews() {
     try {
@@ -392,30 +376,9 @@ async function fetchDashboardNews() {
         console.warn("Dashboard News Error (using mock):", e);
     }
     const mockNews = [
-        {
-            title: "🔥 بیت‌کوین به مقاومت ۷۰ هزار دلاری نزدیک شد",
-            description: "با افزایش حجم معاملات، بیت‌کوین به سطح ۷۰ هزار دلار نزدیک می‌شود.",
-            time_ago: "۵ دقیقه پیش",
-            source: "اخبار بازار",
-            image: "https://images.cryptocompare.com/news/default/bitcoin.png",
-            url: "#"
-        },
-        {
-            title: "📊 تحلیل: اتریوم آماده شکست مقاومت ۴۰۰۰ دلاری",
-            description: "اتریوم با رشد ۱۵٪ در هفته گذشته، به مرز ۴۰۰۰ دلار رسیده است.",
-            time_ago: "۲۰ دقیقه پیش",
-            source: "تحلیلگران",
-            image: "https://images.cryptocompare.com/news/default/ethereum.png",
-            url: "#"
-        },
-        {
-            title: "🌐 خبر فوری: تصویب قانون جدید ارزهای دیجیتال در اروپا",
-            description: "اتحادیه اروپا قانون جدیدی برای شفافیت تراکنش‌های رمزارزی تصویب کرد.",
-            time_ago: "۱ ساعت پیش",
-            source: "خبرگزاری رویترز",
-            image: "https://images.cryptocompare.com/news/default/global.png",
-            url: "#"
-        }
+        { title: "🔥 بیت‌کوین به مقاومت ۷۰ هزار دلاری نزدیک شد", description: "با افزایش حجم معاملات، بیت‌کوین به سطح ۷۰ هزار دلار نزدیک می‌شود.", time_ago: "۵ دقیقه پیش", source: "اخبار بازار", image: "https://images.cryptocompare.com/news/default/bitcoin.png", url: "#" },
+        { title: "📊 تحلیل: اتریوم آماده شکست مقاومت ۴۰۰۰ دلاری", description: "اتریوم با رشد ۱۵٪ در هفته گذشته، به مرز ۴۰۰۰ دلار رسیده است.", time_ago: "۲۰ دقیقه پیش", source: "تحلیلگران", image: "https://images.cryptocompare.com/news/default/ethereum.png", url: "#" },
+        { title: "🌐 خبر فوری: تصویب قانون جدید ارزهای دیجیتال در اروپا", description: "اتحادیه اروپا قانون جدیدی برای شفافیت تراکنش‌های رمزارزی تصویب کرد.", time_ago: "۱ ساعت پیش", source: "خبرگزاری رویترز", image: "https://images.cryptocompare.com/news/default/global.png", url: "#" }
     ];
     cachedNewsArticles = mockNews;
     initNewsSlider(mockNews);
@@ -825,7 +788,8 @@ window.addEventListener("DOMContentLoaded", () => {
     switchTab('dashboard-page');
     setInitialFearGauge();
     document.getElementById("market-search")?.addEventListener("input", filterMarketSearch);
-    setInterval(loadMarketAndPrices, 15000);
+    // به‌روزرسانی هر ۵ ثانیه
+    setInterval(loadMarketAndPrices, 5000);
 });
 
 // ثبت توابع در سطح global
