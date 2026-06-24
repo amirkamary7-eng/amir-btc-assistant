@@ -4,6 +4,7 @@ import time
 import html
 import json
 import uuid
+import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
@@ -156,6 +157,8 @@ async def get_optimized_farsi_news():
 # ۳.۵ سیستم تیکت و نوتیفیکیشن تلگرام
 # ==========================================
 ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "831704732")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
 TICKETS_FILE = Path(__file__).parent / "data" / "tickets.json"
 
 class TicketCreate(BaseModel):
@@ -185,17 +188,31 @@ def _write_tickets(tickets):
     _ensure_tickets_file()
     TICKETS_FILE.write_text(json.dumps(tickets, ensure_ascii=False, indent=2), encoding="utf-8")
 
-async def _send_telegram(chat_id: str, text: str) -> bool:
-    global telegram_app
-    if not telegram_app or not telegram_app.bot:
-        print(f"ℹ️ Telegram bot not ready; skip message to {chat_id}")
+def _send_telegram_http(chat_id: str, text: str) -> bool:
+    if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
         return False
     try:
-        await telegram_app.bot.send_message(chat_id=int(chat_id), text=text)
-        return True
+        res = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={"chat_id": int(chat_id), "text": text},
+            timeout=10,
+        )
+        if not res.ok:
+            print(f"⚠️ Telegram HTTP {res.status_code}: {res.text}")
+        return res.ok
     except Exception as e:
-        print(f"⚠️ Telegram send error: {e}")
+        print(f"⚠️ Telegram HTTP error: {e}")
         return False
+
+async def _send_telegram(chat_id: str, text: str) -> bool:
+    global telegram_app
+    if telegram_app and telegram_app.bot:
+        try:
+            await telegram_app.bot.send_message(chat_id=int(chat_id), text=text)
+            return True
+        except Exception as e:
+            print(f"⚠️ Telegram SDK error: {e}")
+    return _send_telegram_http(chat_id, text)
 
 @app.post("/api/tickets")
 async def create_ticket(ticket: TicketCreate):
@@ -214,8 +231,13 @@ async def create_ticket(ticket: TicketCreate):
     _write_tickets(tickets)
     await _send_telegram(
         ADMIN_TELEGRAM_ID,
-        f"🎫 تیکت جدید\nاز: {ticket.user_name} ({ticket.user_id})\n{ticket.title}\n{ticket.body}"
+        f"🎫 تیکت جدید\nاز: {ticket.user_name} ({ticket.user_id})\nعنوان: {ticket.title}\n\n{ticket.body}"
     )
+    if ticket.user_id and not str(ticket.user_id).startswith("guest_"):
+        await _send_telegram(
+            ticket.user_id,
+            f"✅ تیکت شما ثبت شد\nعنوان: {ticket.title}\nبه زودی پاسخ داده می‌شود."
+        )
     return {"status": "success", "ticket": new_ticket}
 
 @app.get("/api/tickets")
@@ -272,15 +294,125 @@ async def delete_ticket(
 
 @app.post("/api/notify")
 async def notify_user(req: NotifyRequest):
+    if str(req.user_id).startswith("guest_"):
+        return {"status": "skipped", "sent": False, "reason": "guest_user"}
     sent = await _send_telegram(req.user_id, req.message)
     return {"status": "success" if sent else "skipped", "sent": sent}
 
 # ==========================================
+# ۳.۶ سیستم هشدار قیمت (سرور + پیام تلگرام)
+# ==========================================
+ALERTS_FILE = Path(__file__).parent / "data" / "alerts.json"
+
+class AlertCreate(BaseModel):
+    user_id: str
+    symbol: str
+    price: float
+    direction: str = "above"
+
+def _ensure_alerts_file():
+    ALERTS_FILE.parent.mkdir(exist_ok=True)
+    if not ALERTS_FILE.exists():
+        ALERTS_FILE.write_text("[]", encoding="utf-8")
+
+def _read_alerts():
+    _ensure_alerts_file()
+    return json.loads(ALERTS_FILE.read_text(encoding="utf-8"))
+
+def _write_alerts(alerts):
+    _ensure_alerts_file()
+    ALERTS_FILE.write_text(json.dumps(alerts, ensure_ascii=False, indent=2), encoding="utf-8")
+
+@app.post("/api/alerts")
+async def create_alert(alert: AlertCreate):
+    alerts = _read_alerts()
+    new_alert = {
+        "id": str(uuid.uuid4())[:8],
+        "user_id": alert.user_id,
+        "symbol": alert.symbol.upper(),
+        "price": alert.price,
+        "direction": alert.direction or "above",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    alerts = [a for a in alerts if not (
+        a["user_id"] == new_alert["user_id"]
+        and a["symbol"] == new_alert["symbol"]
+        and float(a["price"]) == float(new_alert["price"])
+    )]
+    alerts.insert(0, new_alert)
+    _write_alerts(alerts)
+    if alert.user_id and not str(alert.user_id).startswith("guest_"):
+        await _send_telegram(
+            alert.user_id,
+            f"🔔 هشدار قیمت ثبت شد\n{new_alert['symbol']} — هدف: ${new_alert['price']}"
+        )
+    return {"status": "success", "alert": new_alert}
+
+@app.get("/api/alerts")
+async def get_user_alerts(user_id: str = Query(...)):
+    user_alerts = [a for a in _read_alerts() if a["user_id"] == user_id]
+    return {"status": "success", "alerts": user_alerts}
+
+@app.delete("/api/alerts/{alert_id}")
+async def delete_alert(alert_id: str, user_id: str = Query(...)):
+    alerts = _read_alerts()
+    alert = next((a for a in alerts if a["id"] == alert_id), None)
+    if not alert:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
+    if alert["user_id"] != user_id:
+        return JSONResponse(status_code=403, content={"status": "error", "message": "Forbidden"})
+    _write_alerts([a for a in alerts if a["id"] != alert_id])
+    return {"status": "success"}
+
+async def _check_price_alerts_once():
+    alerts = _read_alerts()
+    if not alerts:
+        return
+    try:
+        res = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "page": 1, "sparkline": "false"},
+            timeout=12,
+        )
+        if not res.ok:
+            print(f"⚠️ Alert price fetch failed: HTTP {res.status_code}")
+            return
+        price_map = {item["symbol"].upper(): float(item["current_price"]) for item in res.json()}
+        remaining = []
+        for alert in alerts:
+            sym = alert["symbol"].upper()
+            current = price_map.get(sym)
+            if current is None:
+                remaining.append(alert)
+                continue
+            direction = alert.get("direction", "above")
+            triggered = (direction == "above" and current >= float(alert["price"])) or (
+                direction == "below" and current <= float(alert["price"])
+            )
+            if triggered:
+                uid = alert["user_id"]
+                msg = (
+                    f"🔔 هشدار قیمت!\n{sym} به ${current:.4f} رسید\n"
+                    f"هدف: ${float(alert['price']):.4f}"
+                )
+                if uid and not str(uid).startswith("guest_"):
+                    await _send_telegram(uid, msg)
+                await _send_telegram(ADMIN_TELEGRAM_ID, f"📊 هشدار فعال شد\n{msg}\nکاربر: {uid}")
+            else:
+                remaining.append(alert)
+        _write_alerts(remaining)
+    except Exception as e:
+        print(f"⚠️ Alert check error: {e}")
+
+async def alert_polling_loop():
+    await asyncio.sleep(5)
+    while True:
+        await _check_price_alerts_once()
+        await asyncio.sleep(20)
+
+# ==========================================
 # ۴. تنظیمات و توابع ربات تلگرام (در صورت نیاز)
 # ==========================================
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
-WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
-
 if TOKEN == "REPLACE_WITH_TOKEN":
     print("⚠️ WARNING: TELEGRAM_BOT_TOKEN not set in environment. Telegram bot will not start until configured.")
 
@@ -302,8 +434,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @app.on_event("startup")
 async def startup_event():
     global telegram_app
+    asyncio.create_task(alert_polling_loop())
     if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
-        print("ℹ️ Telegram token not configured; skipping telegram bot startup.")
+        print("ℹ️ Telegram token not configured; alert polling active, bot polling skipped.")
         return
 
     telegram_app = ApplicationBuilder().token(TOKEN).build()

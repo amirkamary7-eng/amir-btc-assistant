@@ -8,6 +8,7 @@ if (tg) { tg.ready(); tg.expand(); }
 
 const ADMIN_ID = '831704732';
 const CHANNEL = 'amir_btc_2024';
+const MAX_WATCHLIST = 7;
 const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
 
@@ -27,6 +28,10 @@ function getCoinFullName(sym) { return COIN_NAMES[sym] || sym; }
 
 let currentLang = localStorage.getItem('app_lang') || 'fa';
 let watchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
+if (watchlist.length > MAX_WATCHLIST) {
+    watchlist = watchlist.slice(0, MAX_WATCHLIST);
+    localStorage.setItem('watchlist', JSON.stringify(watchlist));
+}
 let analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
 let tickets = [];
 let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
@@ -53,7 +58,8 @@ const i18n = {
         news_all: 'همه', news_crypto: 'کریپتو', news_economy: 'اقتصادی', news_forex: 'فارکس', news_calendar: 'تقویم',
         hero_badge: 'کانال تحلیلی', hero_desc: 'سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار', hero_cta: 'عضویت رایگان',
         section_analysis: 'تحلیل‌های جدید', section_watchlist: 'واچ‌لیست من', section_news: 'اخبار مهم و فوری',
-        view_all: 'مشاهده همه', watchlist_empty: 'واچ‌لیست خالی است', no_analysis: 'تحلیلی موجود نیست',
+        view_all: 'مشاهده همه', watchlist_empty: 'واچ‌لیست خالی است',
+        watchlist_limit: 'حداکثر ۷ ارز می‌توانید به واچ‌لیست اضافه کنید.', no_analysis: 'تحلیلی موجود نیست',
         no_analysis_list: 'هیچ تحلیلی ثبت نشده است.', no_news: 'خبری وجود ندارد', news_error: 'خطا در دریافت اخبار',
         news_unavailable: 'متن کامل خبر در دسترس نیست.', notif_center: 'مرکز اعلانات', clear_all_notif: 'پاک کردن همه اعلانات',
         no_notif: 'هیچ اعلانی وجود ندارد.', confirm_clear_notif: 'آیا از پاک کردن تمامی اعلانات مطمئن هستید؟',
@@ -94,7 +100,8 @@ const i18n = {
         news_all: 'All', news_crypto: 'Crypto', news_economy: 'Economy', news_forex: 'Forex', news_calendar: 'Calendar',
         hero_badge: 'Analysis Channel', hero_desc: 'Daily signals, analysis & market education', hero_cta: 'Join Free',
         section_analysis: 'Latest Analysis', section_watchlist: 'My Watchlist', section_news: 'Breaking News',
-        view_all: 'View all', watchlist_empty: 'Watchlist is empty', no_analysis: 'No analysis available',
+        view_all: 'View all', watchlist_empty: 'Watchlist is empty',
+        watchlist_limit: 'You can add up to 7 coins to your watchlist.', no_analysis: 'No analysis available',
         no_analysis_list: 'No analysis posted yet.', no_news: 'No news available', news_error: 'Failed to load news',
         news_unavailable: 'Full article text is not available.', notif_center: 'Notification Center',
         clear_all_notif: 'Clear all notifications', no_notif: 'No notifications yet.',
@@ -259,6 +266,7 @@ async function loadMarketData(force = false) {
                 renderMarket();
                 renderWatchlist();
                 renderSummary();
+                checkAlerts();
                 return;
             }
         }
@@ -285,6 +293,7 @@ async function loadMarketData(force = false) {
         renderMarket();
         renderWatchlist();
         renderSummary();
+        checkAlerts();
     } catch (e) {
         console.error('❌ Market load error:', e);
         if (listEl && !allCoins.length) {
@@ -382,8 +391,19 @@ document.addEventListener('DOMContentLoaded', () => {
 function toggleWatchlist(symbol, event) {
     if (event) event.stopPropagation();
     const idx = watchlist.indexOf(symbol);
-    if (idx > -1) watchlist.splice(idx, 1);
-    else watchlist.push(symbol);
+    if (idx > -1) {
+        watchlist.splice(idx, 1);
+    } else {
+        if (watchlist.length >= MAX_WATCHLIST) {
+            tg?.showPopup?.({
+                title: t('watchlist'),
+                message: t('watchlist_limit'),
+                buttons: [{ type: 'ok' }]
+            }) || alert(t('watchlist_limit'));
+            return;
+        }
+        watchlist.push(symbol);
+    }
     localStorage.setItem('watchlist', JSON.stringify(watchlist));
     renderMarket();
     renderWatchlist();
@@ -395,7 +415,7 @@ function renderWatchlist() {
         grid.innerHTML = `<div class="empty-state">${t('watchlist_empty')}</div>`;
         return;
     }
-    grid.innerHTML = watchCoins.slice(0, 6).map(c => `
+    grid.innerHTML = watchCoins.map(c => `
         <div class="watch-item" onclick="openCoinDetail('${c.symbol}')">
             <span class="remove-watch" onclick="toggleWatchlist('${c.symbol}', event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
             <img src="https://assets.coincap.io/assets/icons/${c.symbol.toLowerCase()}@2x.png" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="watch-icon">
@@ -415,12 +435,15 @@ function closeAddCoinModal() {
 function populateCoinModal() {
     const list = document.getElementById('coin-modal-list');
     if (!allCoins.length) return;
-    list.innerHTML = allCoins.map(c => `
-        <div class="modal-coin-item" onclick="toggleWatchlist('${c.symbol}', event); populateCoinModal();">
+    list.innerHTML = allCoins.map(c => {
+        const inList = watchlist.includes(c.symbol);
+        const atLimit = !inList && watchlist.length >= MAX_WATCHLIST;
+        return `
+        <div class="modal-coin-item ${atLimit ? 'disabled' : ''}" onclick="${atLimit ? '' : `toggleWatchlist('${c.symbol}', event); populateCoinModal();`}">
             <span>${c.symbol} - ${c.name}</span>
-            <span>${watchlist.includes(c.symbol) ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="#f7931a" stroke="#f7931a" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>' : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'}</span>
-        </div>
-    `).join('');
+            <span>${inList ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="#f7931a" stroke="#f7931a" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>' : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'}</span>
+        </div>`;
+    }).join('');
 }
 function filterCoinList() {
     const q = document.getElementById('coin-search-modal').value.toLowerCase();
@@ -776,13 +799,90 @@ function renderActiveAlerts(symbol) {
         </div>
     `).join('');
 }
-function setPriceAlert() {
+function playAlertSound() {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        [880, 1100].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.frequency.value = freq;
+            osc.type = 'sine';
+            const start = ctx.currentTime + i * 0.18;
+            gain.gain.setValueAtTime(0.0001, start);
+            gain.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.35);
+            osc.start(start);
+            osc.stop(start + 0.36);
+        });
+    } catch (e) { console.warn('Alert sound failed:', e); }
+}
+
+async function syncAlertToServer(alert) {
+    if (!API_BASE || String(alert.userId).startsWith('guest_')) return alert;
+    try {
+        const data = await apiFetch('/api/alerts', {
+            method: 'POST',
+            body: JSON.stringify({
+                user_id: alert.userId,
+                symbol: alert.symbol,
+                price: alert.price,
+                direction: 'above'
+            })
+        });
+        if (data.alert?.id) alert.serverId = data.alert.id;
+    } catch (e) { console.warn('syncAlertToServer:', e); }
+    return alert;
+}
+
+async function removeAlertFromServer(alert) {
+    if (!API_BASE || !alert.serverId || String(alert.userId).startsWith('guest_')) return;
+    try {
+        await apiFetch(`/api/alerts/${alert.serverId}?user_id=${encodeURIComponent(alert.userId)}`, { method: 'DELETE' });
+    } catch (e) { console.warn('removeAlertFromServer:', e); }
+}
+
+async function loadAlertsFromServer() {
+    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    try {
+        const data = await apiFetch(`/api/alerts?user_id=${encodeURIComponent(getUserId())}`);
+        alerts = (data.alerts || []).map(a => ({
+            id: a.id,
+            serverId: a.id,
+            symbol: a.symbol,
+            price: a.price,
+            userId: a.user_id,
+            createdAt: a.created_at
+        }));
+        localStorage.setItem('price_alerts', JSON.stringify(alerts));
+    } catch (e) { console.warn('loadAlertsFromServer:', e); }
+}
+
+async function notifyTelegram(message) {
+    const userId = getUserId();
+    if (!API_BASE || String(userId).startsWith('guest_')) return false;
+    try {
+        const res = await apiFetch('/api/notify', {
+            method: 'POST',
+            body: JSON.stringify({ user_id: userId, message })
+        });
+        return !!res.sent;
+    } catch (e) {
+        console.warn('notifyTelegram:', e);
+        return false;
+    }
+}
+async function setPriceAlert() {
     const input = document.getElementById('alert-price');
     const price = parseFloat(input.value);
     const symbol = document.getElementById('detail-coin-title').innerText.split(' ')[0];
     if (!price || price <= 0) { alert(t('invalid_price')); return; }
     const userId = getUserId();
-    const newAlert = { id: Date.now().toString(), symbol, price, userId, createdAt: new Date().toISOString() };
+    let newAlert = { id: Date.now().toString(), symbol, price, userId, createdAt: new Date().toISOString() };
+    newAlert = await syncAlertToServer(newAlert);
     alerts.push(newAlert);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     input.value = '';
@@ -790,32 +890,38 @@ function setPriceAlert() {
     addNotification(t('price_alert'), `${symbol} ≥ $${price}`);
     tg?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${price}`, buttons: [{ type: 'ok' }] });
 }
-function removeAlert(id) {
+async function removeAlert(id) {
+    const removed = alerts.find(a => a.id === id);
+    if (removed) await removeAlertFromServer(removed);
     alerts = alerts.filter(a => a.id !== id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
-    const symbol = document.getElementById('detail-coin-title').innerText.split(' ')[0];
-    renderActiveAlerts(symbol);
+    const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
+    if (symbol) renderActiveAlerts(symbol);
 }
 async function triggerAlert(alert, currentPrice) {
+    await removeAlertFromServer(alert);
     alerts = alerts.filter(a => a.id !== alert.id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     const msg = currentLang === 'fa'
-        ? `هشدار قیمت! ${alert.symbol} به $${currentPrice.toFixed(2)} رسید (هدف: $${alert.price})`
-        : `Price Alert! ${alert.symbol} reached $${currentPrice.toFixed(2)} (target: $${alert.price})`;
-    addNotification(t('price_alert'), msg);
-    if (API_BASE && alert.userId && !String(alert.userId).startsWith('guest_')) {
-        try { await apiFetch('/api/notify', { method: 'POST', body: JSON.stringify({ user_id: alert.userId, message: msg }) }); } catch (e) { console.warn('Telegram notify failed:', e); }
-    }
+        ? `🔔 هشدار قیمت!\n${alert.symbol} به $${currentPrice.toFixed(4)} رسید\nهدف: $${alert.price}`
+        : `🔔 Price Alert!\n${alert.symbol} reached $${currentPrice.toFixed(4)}\nTarget: $${alert.price}`;
+    playAlertSound();
+    tg?.HapticFeedback?.notificationOccurred('warning');
+    addNotification(t('price_alert'), msg.replace(/\n/g, ' '));
+    tg?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
+    await notifyTelegram(msg);
     const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
     if (symbol === alert.symbol) renderActiveAlerts(symbol);
 }
 async function checkAlerts() {
-    if (!alerts.length || !allCoins.length) return;
+    const userId = getUserId();
+    const userAlerts = alerts.filter(a => a.userId === userId);
+    if (!userAlerts.length || !allCoins.length) return;
     const priceMap = {};
     allCoins.forEach(c => { priceMap[c.symbol] = c.priceUsd; });
-    for (const alert of [...alerts]) {
+    for (const alert of userAlerts) {
         const current = priceMap[alert.symbol];
-        if (current && current >= alert.price) await triggerAlert(alert, current);
+        if (current != null && current >= alert.price) await triggerAlert(alert, current);
     }
 }
 
@@ -942,14 +1048,13 @@ function openAdminTicketsModal() {
 function closeAdminTicketsModal() { document.getElementById('admin-tickets-modal').style.display = 'none'; }
 
 async function fetchTickets() {
-    const local = JSON.parse(localStorage.getItem('tickets') || '[]').filter(t => t.user_id === getUserId());
-    if (!API_BASE) { tickets = local; return; }
+    if (!API_BASE) { tickets = []; return; }
     try {
         const data = await apiFetch(`/api/tickets?user_id=${encodeURIComponent(getUserId())}`);
-        tickets = data.tickets?.length ? data.tickets : local;
+        tickets = data.tickets || [];
     } catch (e) {
         console.warn('fetchTickets:', e);
-        tickets = local;
+        tickets = [];
     }
 }
 
@@ -1032,31 +1137,19 @@ function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function saveTicketLocally(title, body) {
-    const ticket = { id: Date.now().toString(), user_id: getUserId(), title, body, status: 'open', replies: [], created_at: new Date().toISOString() };
-    const local = JSON.parse(localStorage.getItem('tickets') || '[]');
-    local.unshift(ticket);
-    localStorage.setItem('tickets', JSON.stringify(local));
-}
-
 async function submitTicket() {
     const title = document.getElementById('ticket-title').value.trim();
     const body = document.getElementById('ticket-body').value.trim();
     if (!title || !body) { alert(t('required_fields')); return; }
+    if (!API_BASE) {
+        alert(t('ticket_error'));
+        return;
+    }
     try {
-        if (API_BASE) {
-            try {
-                await apiFetch('/api/tickets', {
-                    method: 'POST',
-                    body: JSON.stringify({ user_id: getUserId(), user_name: getUserName(), title, body })
-                });
-            } catch (apiErr) {
-                console.warn('API ticket failed, saving locally:', apiErr);
-                saveTicketLocally(title, body);
-            }
-        } else {
-            saveTicketLocally(title, body);
-        }
+        await apiFetch('/api/tickets', {
+            method: 'POST',
+            body: JSON.stringify({ user_id: getUserId(), user_name: getUserName(), title, body })
+        });
         document.getElementById('ticket-title').value = '';
         document.getElementById('ticket-body').value = '';
         await fetchTickets();
@@ -1197,7 +1290,7 @@ function startPolling() {
             updateNotifBadge();
         }
     }, 30000);
-    setInterval(checkAlerts, 30000);
+    setInterval(checkAlerts, 15000);
 }
 
 // ---------- راه‌اندازی ----------
@@ -1206,7 +1299,10 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     applyLanguage();
     loadUser();
-    loadMarketData(true);
+    loadAlertsFromServer().then(() => {
+        loadMarketData(true);
+        checkAlerts();
+    });
     renderAnalysisSlider();
     loadNews();
     loadImportantNews();

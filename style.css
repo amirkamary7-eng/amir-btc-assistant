@@ -109,8 +109,28 @@ body { background: var(--bg-primary); color: var(--text); padding-bottom: 85px; 
 .slide-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); }
 
 /* ---------- واچ‌لیست ---------- */
-.watchlist-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 0 20px 16px; }
-.watch-item { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 8px; text-align: center; position: relative; cursor: pointer; }
+.watchlist-grid {
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    padding: 0 20px 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+}
+.watchlist-grid::-webkit-scrollbar { display: none; }
+.watch-item {
+    flex: 0 0 118px;
+    scroll-snap-align: start;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px 8px;
+    text-align: center;
+    position: relative;
+    cursor: pointer;
+}
 .watch-item .watch-icon { width: 28px; height: 28px; margin-bottom: 4px; border-radius: 50%; }
 .watch-sym { display: block; font-weight: 700; font-size: 12px; }
 .watch-price { font-size: 12px; color: var(--text-dim); }
@@ -308,11 +328,13 @@ body { background: var(--bg-primary); color: var(--text); padding-bottom: 85px; 
 .modal-header .modal-close-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--border); width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: inherit; }
 .modal-list { max-height: 200px; overflow-y: auto; }
 .modal-coin-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.modal-coin-item.disabled { opacity: 0.4; cursor: not-allowed; }
 .modal-actions { display: flex; gap: 10px; margin-top: 10px; }
 .cancel-btn { flex: 1; padding: 12px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--text); border-radius: 12px; cursor: pointer; }
 
 /* جزئیات کوین */
-.detail-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+.detail-chart { height: 200px; border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+.detail-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
 .detail-stats div { background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 8px; }
 .detail-stats span { display: block; font-size: 11px; color: var(--text-sub); }
 .detail-stats strong { font-size: 14px; }
@@ -369,7 +391,6 @@ body { background: var(--bg-primary); color: var(--text); padding-bottom: 85px; 
 
 /* ---------- واکنش‌گرایی ---------- */
 @media (max-width: 400px) {
-    .watchlist-grid { grid-template-columns: repeat(2, 1fr); }
     .ref-stats { grid-template-columns: 1fr 1fr; }
     .hero-art { flex: 0 0 42%; max-width: 130px; }
     .hero-logo { max-height: 110px; }
