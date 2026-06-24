@@ -76,19 +76,35 @@
     <div id="market-page" class="page">
         <input type="text" id="market-search" class="search-box" placeholder="جستجو بین ۱۰۰ ارز برتر بازار...">
         
-        <div class="card" style="margin: 15px; padding:15px;">
-            <div class="card-title" style="text-align:center;">Total Market Liquidations</div>
-            <div style="display:flex; justify-content:space-between; font-size:12px; margin-top:5px; font-family:monospace;">
-                <span style="color:var(--green);" id="liq-long-per">50%</span>
-                <span style="color:var(--red);" id="liq-short-per">50%</span>
+        <!-- بخش بهبودیافته Total Liquidations -->
+        <div class="card" style="margin: 15px; padding:20px; background: linear-gradient(135deg, rgba(0,255,170,0.05), rgba(255,51,85,0.05)); border: 1px solid rgba(255,255,255,0.08); border-radius: 18px;">
+            <div class="card-title" style="text-align:center; font-size:14px; margin-bottom:10px;">📊 Total Liquidations (24h)</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div style="display:flex; align-items:center; gap:8px; color:var(--green);">
+                    <span style="font-size:18px;">📈</span>
+                    <span>Long</span>
+                    <span id="liq-long-per" style="font-weight:bold; font-family:monospace;">50%</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; color:var(--red);">
+                    <span style="font-size:18px;">📉</span>
+                    <span>Short</span>
+                    <span id="liq-short-per" style="font-weight:bold; font-family:monospace;">50%</span>
+                </div>
             </div>
-            <div id="liq-compare-bar" class="compare-bar-container"></div>
+            <div class="compare-bar-container" style="height:12px; border-radius:6px; background: rgba(255,255,255,0.06); overflow:hidden; display:flex; margin:0;">
+                <div id="liq-long-bar" style="width:50%; background: linear-gradient(90deg, #00b894, #00e676); height:100%; transition: width 0.6s ease;"></div>
+                <div id="liq-short-bar" style="width:50%; background: linear-gradient(90deg, #ff2366, #e17055); height:100%; transition: width 0.6s ease;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:12px; color:var(--text-dim);">
+                <span>💰 Long: <span id="long-liq-val" class="long-liq-val">$0.0M</span></span>
+                <span>💰 Short: <span id="short-liq-val" class="short-liq-val">$0.0M</span></span>
+            </div>
         </div>
 
         <div class="market-trend-selector">
-            <button class="trend-tab-btn active" onclick="filterMarketCategory('all', this)">All Coins</button>
-            <button class="trend-tab-btn" onclick="filterMarketCategory('bullish', this)">Bullish</button>
-            <button class="trend-tab-btn" onclick="filterMarketCategory('bearish', this)">Bearish</button>
+            <button class="trend-tab-btn active" onclick="filterMarketCategory('all', this)" data-filter="all">All Coins</button>
+            <button class="trend-tab-btn" onclick="filterMarketCategory('bullish', this)" data-filter="bullish">Bullish</button>
+            <button class="trend-tab-btn" onclick="filterMarketCategory('bearish', this)" data-filter="bearish">Bearish</button>
         </div>
         <div id="market-coin-list"></div>
     </div>
