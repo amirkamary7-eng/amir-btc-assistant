@@ -1,6 +1,6 @@
 // ============================================================
-// Amir BTC Assistant - Core Application v3.3
-// با قابلیت بروزرسانی لحظه‌ای، داده‌های داینامیک و بدون ایموجی
+// Amir BTC Assistant - Core Application v3.4
+// با پاپ‌آپ جوین اجباری، ۱۰۰ ارز، تقویم اقتصادی، حذف همه نوتیف‌ها، و رفع تنظیمات
 // ============================================================
 
 const tg = window.Telegram?.WebApp;
@@ -9,6 +9,9 @@ if (tg) { tg.ready(); tg.expand(); }
 const ADMIN_ID = '831704732';
 const CHANNEL = 'amir_btc_2024';
 const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
+
+// لیست ارزهای محبوب برای Fallback
+const POPULAR_SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT", "LINK", "MATIC", "TRX", "UNI", "LTC", "NEAR", "APT", "SUI", "FET", "ICP", "FIL", "RNDR", "HBAR", "ATOM", "STX", "IMX", "GRT", "LDO", "TAO", "INJ"];
 
 let currentLang = localStorage.getItem('app_lang') || 'fa';
 let watchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
@@ -95,7 +98,7 @@ function changeLang(lang) {
     loadMarketData();
 }
 
-// ---------- کش با TTL ----------
+// ---------- کش ----------
 const Cache = {
     storage: {},
     set(key, data, ttl) { this.storage[key] = { data, expiry: Date.now() + ttl * 1000 }; },
@@ -107,112 +110,107 @@ const Cache = {
     }
 };
 
+// ---------- API با Proxy با Fallback به CoinGecko ----------
 async function fetchWithProxy(url, retries = 2) {
-  // اگر URL مربوط به Binance باشد و خطا خورد، به CoinGecko برویم
-  const isBinance = url.includes('binance.com');
-  const isCoinCap = url.includes('coincap.io');
-
-  for (let i = 0; i < retries; i++) {
-    try {
-      const proxyUrl = PROXY + encodeURIComponent(url);
-      const res = await fetch(proxyUrl);
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.warn(`⚠️ Proxy HTTP ${res.status}: ${errorText}`);
-        // اگر ۴۰۳ و Binance بود، به CoinGecko برو
-        if (res.status === 403 && isBinance) {
-          console.log('🔄 Switching to CoinGecko fallback...');
-          const geckoData = await fetchCoinGecko();
-          return geckoData;
+    const isBinance = url.includes('binance.com');
+    for (let i = 0; i < retries; i++) {
+        try {
+            const proxyUrl = PROXY + encodeURIComponent(url);
+            const res = await fetch(proxyUrl);
+            if (!res.ok) {
+                const errorText = await res.text();
+                console.warn(`⚠️ Proxy HTTP ${res.status}: ${errorText}`);
+                if (res.status === 403 && isBinance) {
+                    console.log('🔄 Switching to CoinGecko fallback...');
+                    return await fetchCoinGecko();
+                }
+                throw new Error(`HTTP ${res.status}`);
+            }
+            return res.json();
+        } catch (e) {
+            console.warn(`Attempt ${i+1} failed:`, e);
+            if (i === retries - 1 && isBinance) {
+                console.log('🔄 Final fallback to CoinGecko...');
+                return await fetchCoinGecko();
+            }
+            await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
         }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      return res.json();
-    } catch (e) {
-      console.warn(`Attempt ${i+1} failed:`, e);
-      if (i === retries - 1) {
-        // آخرین تلاش: fallback به CoinGecko مستقیم (بدون Proxy)
-        if (isBinance) {
-          console.log('🔄 Final fallback to CoinGecko...');
-          return await fetchCoinGecko();
-        }
-        throw e;
-      }
-      await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
     }
-  }
 }
 
 // تابع دریافت داده از CoinGecko (بدون نیاز به Proxy)
 async function fetchCoinGecko() {
-  const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false');
-  if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
-  const data = await res.json();
-  // تبدیل به فرمت مشابه با CoinCap
-  return data.map((item, index) => ({
-    symbol: item.symbol.toUpperCase(),
-    name: item.name,
-    rank: index + 1,
-    priceUsd: item.current_price || 0,
-    changePercent24Hr: item.price_change_percentage_24h || 0,
-    volumeUsd24Hr: item.total_volume || 0,
-    marketCapUsd: item.market_cap || 0,
-    supply: item.circulating_supply || 0
-  }));
-}
-
-// ---------- بارگذاری داینامیک داده‌های بازار (CoinCap + Binance) ----------
-async function loadMarketData() {
-  try {
-    const cached = Cache.get('market');
-    if (cached) { allCoins = cached; renderMarket(); renderWatchlist(); renderSummary(); return; }
-
-    // ابتدا از CoinCap استفاده کن
-    const data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
-    // اگر داده از CoinCap برگشت (آرایه باشد)، آن را پردازش کن
-    let assets = data.data || data; // اگر از CoinGecko آمد، data همان آرایه است
-    if (Array.isArray(data) && data.length > 0 && data[0].symbol) {
-      // داده از CoinGecko است
-      allCoins = data;
-    } else if (assets.length) {
-      // داده از CoinCap است
-      allCoins = assets.map((item, i) => ({
-        symbol: item.symbol,
+    const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false');
+    if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
+    const data = await res.json();
+    return data.map((item, index) => ({
+        symbol: item.symbol.toUpperCase(),
         name: item.name,
-        rank: i + 1,
-        priceUsd: parseFloat(item.priceUsd) || 0,
-        changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
-        volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
-        marketCapUsd: parseFloat(item.marketCapUsd) || 0,
-        supply: parseFloat(item.supply) || 0
-      }));
-    } else {
-      throw new Error('No data received');
-    }
-
-    Cache.set('market', allCoins, 60);
-    renderMarket();
-    renderWatchlist();
-    renderSummary();
-  } catch (e) {
-    console.error('❌ Market load error:', e);
-    // Fallback به Mock
-    const mockCoins = POPULAR_SYMBOLS.slice(0, 30).map((sym, i) => ({
-      symbol: sym,
-      name: getCoinFullName(sym),
-      rank: i + 1,
-      priceUsd: parseFloat((Math.random() * 50000 + 1000).toFixed(2)),
-      changePercent24Hr: parseFloat((Math.random() * 10 - 5).toFixed(2)),
-      volumeUsd24Hr: Math.random() * 1e9,
-      marketCapUsd: Math.random() * 1e11
+        rank: index + 1,
+        priceUsd: item.current_price || 0,
+        changePercent24Hr: item.price_change_percentage_24h || 0,
+        volumeUsd24Hr: item.total_volume || 0,
+        marketCapUsd: item.market_cap || 0,
+        supply: item.circulating_supply || 0
     }));
-    allCoins = mockCoins;
-    renderMarket();
-    renderWatchlist();
-    renderSummary();
-    document.getElementById('coin-list').innerHTML = `<div class="empty-state">⚠️ خطا در دریافت داده‌ها. داده‌های نمایشی موقت.</div>`;
-  }
 }
+
+// ---------- بارگذاری داده‌های بازار ----------
+async function loadMarketData() {
+    try {
+        const cached = Cache.get('market');
+        if (cached) {
+            allCoins = cached;
+            renderMarket();
+            renderWatchlist();
+            renderSummary();
+            return;
+        }
+
+        let data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
+        let assets = data.data || data;
+        if (Array.isArray(data) && data.length > 0 && data[0].symbol) {
+            // داده از CoinGecko است
+            allCoins = data;
+        } else if (assets.length) {
+            allCoins = assets.map((item, i) => ({
+                symbol: item.symbol,
+                name: item.name,
+                rank: i + 1,
+                priceUsd: parseFloat(item.priceUsd) || 0,
+                changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
+                volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
+                marketCapUsd: parseFloat(item.marketCapUsd) || 0,
+                supply: parseFloat(item.supply) || 0
+            }));
+        } else {
+            throw new Error('No data received');
+        }
+
+        Cache.set('market', allCoins, 60);
+        renderMarket();
+        renderWatchlist();
+        renderSummary();
+    } catch (e) {
+        console.error('❌ Market load error:', e);
+        // Fallback به Mock
+        const mockCoins = POPULAR_SYMBOLS.slice(0, 30).map((sym, i) => ({
+            symbol: sym,
+            name: getCoinFullName(sym),
+            rank: i + 1,
+            priceUsd: parseFloat((Math.random() * 50000 + 1000).toFixed(2)),
+            changePercent24Hr: parseFloat((Math.random() * 10 - 5).toFixed(2)),
+            volumeUsd24Hr: Math.random() * 1e9,
+            marketCapUsd: Math.random() * 1e11
+        }));
+        allCoins = mockCoins;
+        renderMarket();
+        renderWatchlist();
+        renderSummary();
+        document.getElementById('coin-list').innerHTML = `<div class="empty-state">⚠️ خطا در دریافت داده‌ها. داده‌های نمایشی موقت.</div>`;
+    }
+}
+
 // ---------- رندر خلاصه بازار ----------
 function renderSummary() {
     if (!allCoins.length) return;
@@ -224,7 +222,7 @@ function renderSummary() {
     document.getElementById('btc-dom').innerText = btc ? ((btc.marketCapUsd / mcap) * 100).toFixed(1) + '%' : '--';
 }
 
-// ---------- رندر مارکت با تب‌ها و جستجو ----------
+// ---------- رندر مارکت (نمایش ۱۰۰ ارز) ----------
 function renderMarket() {
     const list = document.getElementById('coin-list');
     let filtered = [...allCoins];
@@ -245,7 +243,7 @@ function renderMarket() {
             filtered = filtered.filter(c => watchlist.includes(c.symbol));
             break;
         default: // overview
-            filtered = filtered.slice(0, 50);
+            filtered = filtered.slice(0, 100); // ۱۰۰ ارز برتر
     }
     if (!filtered.length) {
         list.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
@@ -341,7 +339,7 @@ function filterCoinList() {
     });
 }
 
-// ---------- اخبار داینامیک از منابع معتبر ----------
+// ---------- اخبار و تقویم اقتصادی ----------
 let newsCache = [];
 async function loadNews() {
     try {
@@ -349,7 +347,7 @@ async function loadNews() {
         if (cached) { newsCache = cached; renderNews('all'); return; }
 
         let articles = [];
-        // ۱. CoinTelegraph RSS
+        // CoinTelegraph RSS
         try {
             const rssText = await fetchWithProxy('https://cointelegraph.com/rss');
             const parser = new DOMParser();
@@ -373,7 +371,7 @@ async function loadNews() {
             });
         } catch (e) { console.warn('CoinTelegraph RSS error:', e); }
 
-        // ۲. CoinDesk RSS
+        // CoinDesk RSS
         try {
             const rssText = await fetchWithProxy('https://www.coindesk.com/arc/outboundfeeds/rss/');
             const parser = new DOMParser();
@@ -397,7 +395,7 @@ async function loadNews() {
             });
         } catch (e) { console.warn('CoinDesk RSS error:', e); }
 
-        // ۳. CryptoPanic (بدون API Key - از RSS استفاده کنیم)
+        // CryptoPanic RSS
         try {
             const rssText = await fetchWithProxy('https://cryptopanic.com/feed/');
             const parser = new DOMParser();
@@ -421,7 +419,6 @@ async function loadNews() {
             });
         } catch (e) { console.warn('CryptoPanic RSS error:', e); }
 
-        // اگر هیچ خبری نیامد، از داده‌های Mock استفاده کن
         if (!articles.length) {
             articles = [
                 { title: 'بیت‌کوین به ۷۰ هزار دلار نزدیک شد', source: 'کوین‌تلگراف', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'با افزایش حجم معاملات...', category: 'crypto', time: 'اخیراً' },
@@ -444,7 +441,24 @@ function renderNews(category) {
     else if (category === 'economy') filtered = filtered.filter(n => n.category === 'economy');
     else if (category === 'forex') filtered = filtered.filter(n => n.category === 'forex');
     else if (category === 'calendar') {
-        container.innerHTML = `<div class="empty-state">تقویم اقتصادی به زودی اضافه می‌شود.</div>`;
+        // داده‌های دمو اما زیبا برای تقویم اقتصادی
+        const ecoEvents = [
+            { time: '16:00', flag: '🇺🇸', title: 'نرخ تورم (CPI)', impact: 'High', date: 'امروز' },
+            { time: '18:30', flag: '🇺🇸', title: 'سخنرانی رئیس فدرال رزرو', impact: 'High', date: 'امروز' },
+            { time: '12:30', flag: '🇪🇺', title: 'شاخص مدیران خرید (PMI)', impact: 'Medium', date: 'فردا' }
+        ];
+        container.innerHTML = ecoEvents.map(e => `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-card); padding:12px; margin-bottom:8px; border-radius:12px; border:1px solid var(--border);">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:24px;">${e.flag}</span>
+                    <div>
+                        <div style="font-size:13px; font-weight:700;">${e.title}</div>
+                        <div style="font-size:11px; color:var(--text-dim);">${e.date} • ${e.time}</div>
+                    </div>
+                </div>
+                <span style="font-size:11px; font-weight:bold; padding:4px 8px; border-radius:6px; background:${e.impact === 'High' ? 'rgba(255,77,77,0.1)' : 'rgba(247,147,26,0.1)'}; color:${e.impact === 'High' ? 'var(--red)' : 'var(--accent)'};">${e.impact}</span>
+            </div>
+        `).join('');
         return;
     }
     if (!filtered.length) {
@@ -478,7 +492,7 @@ function closeNewsModal() {
     document.getElementById('news-modal').style.display = 'none';
 }
 
-// ---------- اسلایدر تحلیل‌ها و لیست ----------
+// ---------- اسلایدر و لیست تحلیل‌ها ----------
 function renderAnalysisSlider() {
     const track = document.getElementById('slider-track');
     const dots = document.getElementById('slider-dots');
@@ -568,7 +582,6 @@ function submitAnalysis() {
     };
     analyses.unshift(newAnalysis);
     localStorage.setItem('analyses', JSON.stringify(analyses));
-    // به‌روزرسانی فوری
     renderAnalysisSlider();
     renderAnalysisList();
     closeAddAnalysisModal();
@@ -581,7 +594,6 @@ function deleteAnalysis(id, event) {
     if (confirm('آیا از حذف این تحلیل مطمئن هستید؟')) {
         analyses = analyses.filter(a => a.id !== id);
         localStorage.setItem('analyses', JSON.stringify(analyses));
-        // به‌روزرسانی فوری
         renderAnalysisSlider();
         renderAnalysisList();
         addNotification('تحلیل حذف شد', `یک تحلیل توسط مدیر حذف گردید.`);
@@ -710,6 +722,15 @@ function markAllRead() {
     updateNotifBadge();
     renderNotifications();
 }
+function clearAllNotifications() {
+    if(confirm('آیا از پاک کردن تمامی اعلانات مطمئن هستید؟')) {
+        notifications = [];
+        localStorage.setItem('notifications', JSON.stringify(notifications));
+        updateNotifBadge();
+        renderNotifications();
+        closeNotifModal();
+    }
+}
 function renderNotifications() {
     const container = document.getElementById('notif-list');
     if (!notifications.length) {
@@ -768,12 +789,11 @@ function shareRefLink() {
 function toggleSettings() {
     const panel = document.getElementById('settings-panel');
     if (!panel) return;
-    const ticketsPage = document.getElementById('tickets-page');
-    const aboutPage = document.getElementById('about-page');
-    if (panel.style.display === 'none' || panel.style.display === '') {
+    const isHidden = window.getComputedStyle(panel).display === 'none';
+    if (isHidden) {
         panel.style.display = 'block';
-        if (ticketsPage) ticketsPage.style.display = 'none';
-        if (aboutPage) aboutPage.style.display = 'none';
+        document.getElementById('tickets-page').style.display = 'none';
+        document.getElementById('about-page').style.display = 'none';
     } else {
         panel.style.display = 'none';
     }
@@ -813,7 +833,6 @@ function submitTicket() {
     document.getElementById('ticket-body').value = '';
     renderTickets();
     addNotification('تیکت جدید', `تیکت "${title}" با موفقیت ارسال شد.`);
-    // پاسخ خودکار شبیه‌سازی (در تولید با Webhook)
     setTimeout(() => {
         const idx = tickets.findIndex(t => t.id === ticket.id);
         if (idx > -1) {
@@ -838,7 +857,22 @@ function joinChannel() {
     else window.open(`https://t.me/${CHANNEL}`, '_blank');
 }
 
-// ---------- نویگیشن و مدیریت تب ----------
+// ---------- پاپ‌آپ جوین اجباری ----------
+function checkMandatoryJoin() {
+    const hasJoined = localStorage.getItem('has_joined_channel');
+    if (hasJoined === 'true') {
+        document.getElementById('mandatory-join-modal').style.display = 'none';
+    } else {
+        document.getElementById('mandatory-join-modal').style.display = 'flex';
+    }
+}
+function verifyJoin() {
+    localStorage.setItem('has_joined_channel', 'true');
+    document.getElementById('mandatory-join-modal').style.display = 'none';
+    addNotification('عضویت تایید شد', 'به اپلیکیشن امیر BTC خوش آمدید!');
+}
+
+// ---------- نویگیشن و بارگذاری اخبار مهم ----------
 function switchTab(pageId, btn) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(pageId)?.classList.add('active');
@@ -849,7 +883,6 @@ function switchTab(pageId, btn) {
         loadUser();
         loadMarketData();
         renderAnalysisSlider();
-        // بارگذاری اخبار مهم در داشبورد
         loadImportantNews();
     } else if (pageId === 'market-page') {
         loadMarketData();
@@ -866,12 +899,11 @@ function switchTab(pageId, btn) {
     }
 }
 
-// ---------- بارگذاری اخبار مهم در داشبورد ----------
 async function loadImportantNews() {
     const container = document.getElementById('important-news');
     if (!container) return;
     try {
-        const news = await loadNews(); // استفاده از کش
+        await loadNews(); // اطمینان از دریافت اخبار
         const important = newsCache.slice(0, 3);
         if (!important.length) {
             container.innerHTML = '<div class="empty-state">خبری وجود ندارد</div>';
@@ -889,15 +921,12 @@ async function loadImportantNews() {
     } catch (e) {}
 }
 
-// ---------- بروزرسانی‌های دوره‌ای (Polling) ----------
-// برای بروزرسانی لحظه‌ای بدون رفرش
+// ---------- Polling برای بروزرسانی لحظه‌ای ----------
 function startPolling() {
     setInterval(() => {
-        // بازار (هر ۳۰ ثانیه)
         if (document.querySelector('.page.active')?.id === 'market-page' || document.querySelector('.page.active')?.id === 'dashboard-page') {
             loadMarketData();
         }
-        // تحلیل‌ها (هر ۱۵ ثانیه)
         if (document.querySelector('.page.active')?.id === 'analysis-page' || document.querySelector('.page.active')?.id === 'dashboard-page') {
             const stored = JSON.parse(localStorage.getItem('analyses') || '[]');
             if (stored.length !== analyses.length) {
@@ -906,19 +935,15 @@ function startPolling() {
                 renderAnalysisList();
             }
         }
-        // اخبار (هر ۶۰ ثانیه)
         if (document.querySelector('.page.active')?.id === 'news-page') {
             loadNews();
         }
-        // نوتیفیکیشن‌ها (هر ۳۰ ثانیه)
         const storedNotif = JSON.parse(localStorage.getItem('notifications') || '[]');
         if (storedNotif.length !== notifications.length) {
             notifications = storedNotif;
             updateNotifBadge();
         }
     }, 30000);
-
-    // هشدار قیمت هر ۳۰ ثانیه
     setInterval(checkAlerts, 30000);
 }
 
@@ -931,6 +956,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadNews();
     loadImportantNews();
     updateNotifBadge();
+    checkMandatoryJoin(); // نمایش پاپ‌آپ جوین اجباری
     startPolling();
 });
 
@@ -953,6 +979,7 @@ window.removeAlert = removeAlert;
 window.toggleNotificationPanel = toggleNotificationPanel;
 window.closeNotifModal = closeNotifModal;
 window.markAllRead = markAllRead;
+window.clearAllNotifications = clearAllNotifications;
 window.markNotifRead = markNotifRead;
 window.copyRefLink = copyRefLink;
 window.shareRefLink = shareRefLink;
@@ -966,3 +993,4 @@ window.joinChannel = joinChannel;
 window.changeLang = changeLang;
 window.openNewsModal = openNewsModal;
 window.closeNewsModal = closeNewsModal;
+window.verifyJoin = verifyJoin;

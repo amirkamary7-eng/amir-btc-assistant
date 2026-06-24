@@ -42,7 +42,7 @@
 
         <!-- اسلایدر تحلیل‌ها -->
         <div class="section-header">
-            <span class="section-title">تحلیل‌های جدید</span>
+            <span class="section-title">📊 تحلیل‌های جدید</span>
             <span class="section-more" onclick="switchTab('analysis-page')">مشاهده همه</span>
         </div>
         <div class="slider-container" id="analysis-slider">
@@ -52,7 +52,7 @@
 
         <!-- واچ‌لیست -->
         <div class="section-header">
-            <span class="section-title">واچ‌لیست</span>
+            <span class="section-title">⭐ واچ‌لیست من</span>
             <button class="add-watch-btn" onclick="openAddCoinModal()">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
@@ -61,7 +61,7 @@
 
         <!-- بخش اخبار مهم (جایگزین خلاصه بازار) -->
         <div class="section-header">
-            <span class="section-title">اخبار مهم</span>
+            <span class="section-title">📰 اخبار مهم و فوری</span>
         </div>
         <div id="important-news" class="important-news-list"></div>
     </section>
@@ -84,7 +84,7 @@
     <!-- ===== صفحه تحلیل ===== -->
     <section id="analysis-page" class="page">
         <div class="analysis-header">
-            <h2>تحلیل‌های بازار</h2>
+            <h2>📊 تحلیل‌های بازار</h2>
             <button id="admin-add-btn" class="admin-btn" style="display:none;" onclick="openAddAnalysisModal()">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> تحلیل جدید
             </button>
@@ -187,7 +187,7 @@
             <div class="back-btn" onclick="closeAbout()">بازگشت</div>
             <div class="about-content">
                 <h3>درباره Amir BTC Assistant</h3>
-                <p>نسخه 3.3.0</p>
+                <p>نسخه 3.4.0</p>
                 <p>دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر جهانی.</p>
                 <p>کانال رسمی: <a href="#" onclick="joinChannel()">@amir_btc_2024</a></p>
                 <p>ساخته شده با ❤️ روی Cloudflare Workers</p>
@@ -220,6 +220,20 @@
     </nav>
 
     <!-- ===== مودال‌ها ===== -->
+    <!-- پاپ‌آپ جوین اجباری -->
+    <div id="mandatory-join-modal" class="modal" style="display:flex; z-index: 10000; backdrop-filter: blur(15px);">
+        <div class="modal-box join-box" style="text-align: center; padding: 30px 20px;">
+            <div class="join-icon" style="font-size: 50px; margin-bottom: 15px;">💎</div>
+            <h3 style="font-size: 18px; margin-bottom: 10px; color: var(--accent);">عضویت در کانال VIP</h3>
+            <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 20px; line-height: 1.6;">
+                برای دسترسی به چارت‌های لحظه‌ای، تحلیل‌های اختصاصی و 100 ارز برتر، ابتدا در کانال رسمی ما عضو شوید.
+            </p>
+            <button class="submit-btn" style="margin-bottom: 10px; font-size: 15px;" onclick="window.open('https://t.me/amir_btc_2024', '_blank'); setTimeout(verifyJoin, 3000);">عضویت در کانال</button>
+            <p style="font-size: 11px; color: var(--text-sub);">بعد از عضویت، دسترسی شما باز خواهد شد.</p>
+        </div>
+    </div>
+
+    <!-- مودال افزودن واچ‌لیست -->
     <div id="add-coin-modal" class="modal" onclick="if(event.target===this) closeAddCoinModal()">
         <div class="modal-box">
             <div class="modal-header">
@@ -231,6 +245,7 @@
         </div>
     </div>
 
+    <!-- مودال افزودن تحلیل -->
     <div id="add-analysis-modal" class="modal" onclick="if(event.target===this) closeAddAnalysisModal()">
         <div class="modal-box">
             <div class="modal-header">
@@ -248,6 +263,7 @@
         </div>
     </div>
 
+    <!-- مودال جزئیات خبر -->
     <div id="news-modal" class="modal" onclick="if(event.target===this) closeNewsModal()">
         <div class="modal-box">
             <div class="modal-header">
@@ -260,6 +276,7 @@
         </div>
     </div>
 
+    <!-- مودال جزئیات کوین (هشدار قیمت) -->
     <div id="coin-detail-modal" class="modal" onclick="if(event.target===this) closeCoinDetail()">
         <div class="modal-box">
             <div class="modal-header">
@@ -279,16 +296,19 @@
         </div>
     </div>
 
+    <!-- مودال نوتیفیکیشن‌ها (با دکمه‌های کوچک و پاک کردن همه) -->
     <div id="notif-modal" class="modal" onclick="if(event.target===this) closeNotifModal()">
         <div class="modal-box">
-            <div class="modal-header">
-                <h3>مرکز اعلانات</h3>
+            <div class="modal-header" style="margin-bottom: 10px;">
+                <h3 style="display: flex; align-items: center; gap: 6px;">🔔 مرکز اعلانات</h3>
                 <div style="display:flex; gap:8px; align-items:center;">
-                    <button class="mark-all-read-btn" onclick="markAllRead()">همه خوانده شد</button>
-                    <button onclick="closeNotifModal()">✕</button>
+                    <button class="mark-all-read-btn" onclick="markAllRead()">✓ همه خوانده شد</button>
+                    <button onclick="closeNotifModal()" style="font-size: 20px;">✕</button>
                 </div>
             </div>
-            <div id="notif-list" class="notif-list"></div>
+            <div id="notif-list" class="notif-list" style="margin-bottom: 15px;"></div>
+            <!-- دکمه پاک کردن کل نوتیف‌ها -->
+            <button class="clear-notif-btn" onclick="clearAllNotifications()">🗑 پاک کردن همه اعلانات</button>
         </div>
     </div>
 
