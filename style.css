@@ -518,26 +518,172 @@ body.app-locked #mandatory-join-modal { pointer-events: auto; opacity: 1; filter
 .chart-exchange-badge { font-size: 10px; color: var(--text-sub); text-align: center; margin-bottom: 6px; }
 
 /* ---------- AI Assistant ---------- */
-.ai-fab {
+.ai-assistant-root {
     position: fixed;
-    bottom: 88px;
-    right: 16px;
-    width: 54px;
-    height: 54px;
+    bottom: 80px;
+    right: 12px;
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.ai-assistant-root > * {
+    pointer-events: auto;
+}
+
+.ai-speech-bubble {
+    position: relative;
+    max-width: min(260px, calc(100vw - 88px));
+    padding: 12px 14px 12px 12px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(168, 85, 247, 0.16));
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow:
+        0 8px 32px rgba(79, 70, 229, 0.25),
+        0 2px 8px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transition: opacity 0.65s ease, transform 0.65s ease;
+    animation: ai-bubble-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.ai-speech-bubble.ai-speech-hidden {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+    pointer-events: none;
+}
+
+.ai-bubble-text {
+    margin: 0;
+    padding: 10px 4px 0 22px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.92);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.ai-bubble-close {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 22px;
+    height: 22px;
+    border: none;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), #e67e00);
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, transform 0.15s;
+    z-index: 2;
+}
+
+.ai-bubble-close:hover {
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+}
+
+.ai-bubble-close:active {
+    transform: scale(0.9);
+}
+
+.ai-bubble-tail {
+    position: absolute;
+    bottom: -6px;
+    right: 22px;
+    width: 14px;
+    height: 14px;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(168, 85, 247, 0.16));
+    border-right: 1px solid rgba(255, 255, 255, 0.12);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    transform: rotate(45deg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.ai-fab {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 45%, #ec4899 100%);
     border: none;
     color: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 20px rgba(247,147,26,0.4);
+    box-shadow:
+        0 6px 24px rgba(99, 102, 241, 0.45),
+        0 2px 8px rgba(236, 72, 153, 0.25);
     cursor: pointer;
-    z-index: 1100;
-    transition: transform 0.2s, opacity 0.2s;
+    transition: transform 0.25s ease, box-shadow 0.25s ease, opacity 0.3s ease;
+    animation: ai-fab-float 4s ease-in-out infinite;
 }
-.ai-fab:active { transform: scale(0.95); }
-.ai-fab-hidden { opacity: 0; pointer-events: none; }
+
+.ai-fab-glow {
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(236, 72, 153, 0.3));
+    filter: blur(8px);
+    opacity: 0.6;
+    z-index: -1;
+    animation: ai-glow-pulse 3s ease-in-out infinite;
+}
+
+.ai-fab-icon {
+    position: relative;
+    z-index: 1;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+}
+
+.ai-fab:hover {
+    transform: translateY(-2px) scale(1.04);
+    box-shadow:
+        0 10px 32px rgba(99, 102, 241, 0.5),
+        0 4px 12px rgba(236, 72, 153, 0.3);
+}
+
+.ai-fab:active {
+    transform: scale(0.94);
+    animation: none;
+}
+
+.ai-fab-hidden {
+    opacity: 0;
+    pointer-events: none;
+    animation: none;
+}
+
+@keyframes ai-fab-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+}
+
+@keyframes ai-glow-pulse {
+    0%, 100% { opacity: 0.5; transform: scale(1); }
+    50% { opacity: 0.75; transform: scale(1.05); }
+}
+
+@keyframes ai-bubble-in {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
 .ai-panel {
     position: fixed;
     bottom: 72px;

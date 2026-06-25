@@ -3,7 +3,9 @@
 // با پاپ‌آپ جوین اجباری، ۱۰۰ ارز، تقویم اقتصادی، حذف همه نوتیف‌ها، و رفع تنظیمات
 // ============================================================
 
-const tg = window.Telegram?.WebApp;
+function getTg() {
+    return window.Telegram?.WebApp ?? null;
+}
 
 let telegramInitDone = false;
 
@@ -20,6 +22,7 @@ function parseInitDataUser(initData) {
 }
 
 function getTelegramUser() {
+    const tg = getTg();
     if (!tg) return null;
     const fromUnsafe = tg.initDataUnsafe?.user;
     if (fromUnsafe?.id) return fromUnsafe;
@@ -27,6 +30,7 @@ function getTelegramUser() {
 }
 
 function isInTelegram() {
+    const tg = getTg();
     if (!tg) return false;
     if (getTelegramUser()?.id) return true;
     if (tg.initData && tg.initData.length > 10) return true;
@@ -40,13 +44,20 @@ function isGuestUserId(userId) {
 }
 
 function getTelegramInitData() {
-    return tg?.initData || '';
+    return getTg()?.initData || '';
 }
 
 async function initTelegramWebApp(maxWaitMs = 5000) {
-    if (!tg || telegramInitDone) return getTelegramUser();
-    tg.ready();
-    tg.expand();
+    if (telegramInitDone) return getTelegramUser();
+    const tg = getTg();
+    if (tg) {
+        try {
+            tg.ready();
+            tg.expand();
+        } catch (e) {
+            console.warn('initTelegramWebApp:', e);
+        }
+    }
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
         const user = getTelegramUser();
@@ -55,10 +66,8 @@ async function initTelegramWebApp(maxWaitMs = 5000) {
             telegramInitDone = true;
             return user;
         }
-        if (!isInTelegram()) {
-            telegramInitDone = true;
-            return null;
-        }
+        const initData = getTelegramInitData();
+        if (!getTg() && !initData) break;
         await new Promise(r => setTimeout(r, 50));
     }
     telegramInitDone = true;
@@ -215,6 +224,7 @@ const i18n = {
 function t(key) { return i18n[currentLang]?.[key] || i18n.fa[key] || key; }
 
 function getReferrerId() {
+    const tg = getTg();
     const startParam = tg?.initDataUnsafe?.start_param || (() => {
         if (!tg?.initData) return '';
         try { return new URLSearchParams(tg.initData).get('start_param') || ''; } catch (_) { return ''; }
@@ -468,12 +478,22 @@ async function resolveChartSymbol(symbol) {
     return fallback;
 }
 
+function appendInitDataToUrl(path) {
+    const initData = getTelegramInitData();
+    if (!initData) return path;
+    const sep = path.includes('?') ? '&' : '?';
+    return `${path}${sep}init_data=${encodeURIComponent(initData)}`;
+}
+
 async function apiFetch(path, options = {}) {
     if (!API_BASE) throw new Error('API_BASE not configured');
     const headers = { 'Content-Type': 'application/json', ...options.headers };
     const initData = getTelegramInitData();
     if (initData) headers['X-Telegram-Init-Data'] = initData;
-    const res = await fetch(`${API_BASE}${path}`, { headers, ...options });
+    const method = (options.method || 'GET').toUpperCase();
+    let url = `${API_BASE}${path}`;
+    if (initData && method === 'GET') url = `${API_BASE}${appendInitDataToUrl(path)}`;
+    const res = await fetch(url, { headers, ...options });
     if (!res.ok) {
         let detail = '';
         try { detail = await res.text(); } catch (_) {}
@@ -739,7 +759,7 @@ function toggleWatchlist(symbol, event) {
         watchlist.splice(idx, 1);
     } else {
         if (watchlist.length >= MAX_WATCHLIST) {
-            tg?.showPopup?.({
+            getTg()?.showPopup?.({
                 title: t('watchlist'),
                 message: t('watchlist_limit'),
                 buttons: [{ type: 'ok' }]
@@ -1300,7 +1320,7 @@ async function setPriceAlert() {
     input.value = '';
     renderActiveAlerts(symbol);
     addNotification(t('price_alert'), `${symbol} ≥ $${price}`);
-    tg?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${price}`, buttons: [{ type: 'ok' }] });
+    getTg()?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${price}`, buttons: [{ type: 'ok' }] });
 }
 async function removeAlert(id) {
     const removed = alerts.find(a => a.id === id);
@@ -1318,9 +1338,9 @@ async function triggerAlert(alert, currentPrice) {
     const msg = currentLang === 'fa'
         ? `🔔 ${alert.symbol} — ${t('price_reached')} $${priceStr}`
         : `🔔 ${alert.symbol} Price reached $${priceStr}`;
-    tg?.HapticFeedback?.notificationOccurred('warning');
+    getTg()?.HapticFeedback?.notificationOccurred('warning');
     addNotification(t('price_alert'), msg.replace('🔔 ', ''), { sendToTelegram: true, playSound: true });
-    tg?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
+    getTg()?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
     await notifyTelegram(msg);
     const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
     if (symbol === alert.symbol) renderActiveAlerts(symbol);
@@ -1438,12 +1458,12 @@ function copyRefLink() {
     const input = document.getElementById('ref-link');
     input.select();
     try { navigator.clipboard.writeText(input.value); } catch(e) { document.execCommand('copy'); }
-    tg?.showPopup?.({ title: t('copied'), message: t('copy_ref_msg'), buttons: [{type:'ok'}] });
+    getTg()?.showPopup?.({ title: t('copied'), message: t('copy_ref_msg'), buttons: [{type:'ok'}] });
 }
 function shareRefLink() {
     const link = document.getElementById('ref-link').value;
     const text = encodeURIComponent(t('share_ref_text'));
-    tg?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`) ||
+    getTg()?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`) ||
     window.open(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`, '_blank');
 }
 
@@ -1590,7 +1610,7 @@ async function submitTicket() {
         await fetchTickets();
         renderTickets();
         addNotification(t('support'), t('ticket_sent'), false);
-        tg?.showPopup?.({ title: t('ticket_sent'), message: title, buttons: [{ type: 'ok' }] });
+        getTg()?.showPopup?.({ title: t('ticket_sent'), message: title, buttons: [{ type: 'ok' }] });
     } catch (e) {
         alert(t('ticket_error'));
         console.error('submitTicket:', e);
@@ -1633,12 +1653,14 @@ async function deleteTicket(ticketId, isAdminView = false) {
 }
 
 function joinChannel() {
+    const tg = getTg();
     if (tg?.openTelegramLink) tg.openTelegramLink(`https://t.me/${CHANNEL}`);
     else window.open(`https://t.me/${CHANNEL}`, '_blank');
 }
 
 function openTelegramBot() {
     const botUrl = 'https://t.me/AmirBtcBot/app';
+    const tg = getTg();
     if (tg?.openTelegramLink) tg.openTelegramLink(botUrl);
     else window.open(botUrl, '_blank');
 }
@@ -1774,7 +1796,7 @@ async function verifyJoin() {
             setAppLocked(false);
             loadUser();
             addNotification(t('join_verified'), t('join_welcome'), false);
-            tg?.showPopup?.({ title: t('join_verified'), message: t('join_welcome'), buttons: [{ type: 'ok' }] });
+            getTg()?.showPopup?.({ title: t('join_verified'), message: t('join_welcome'), buttons: [{ type: 'ok' }] });
             return;
         }
         alert(t('join_not_verified'));
@@ -1971,5 +1993,8 @@ window.verifyJoin = verifyJoin;
 window.openJoinAndVerify = openJoinAndVerify;
 window.openTelegramBot = openTelegramBot;
 window.getUserId = getUserId;
+window.getTg = getTg;
+window.getTelegramUser = getTelegramUser;
+window.getTelegramInitData = getTelegramInitData;
 window.isInTelegram = isInTelegram;
 window.isGuestUserId = isGuestUserId;

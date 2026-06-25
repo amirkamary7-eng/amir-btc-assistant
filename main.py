@@ -327,19 +327,40 @@ async def health_check():
         "redis_ready": redis_ready(),
     }
 
+def _is_untrusted_user_id(user_id: str) -> bool:
+    uid = str(user_id or "")
+    return uid.startswith("guest_") or uid in ("pending_telegram", "")
+
+
 def _resolve_user_id_from_request(user_id: str, init_data: Optional[str]) -> tuple[str, Optional[dict]]:
     """Prefer cryptographically verified Telegram user id when initData is present."""
-    if not init_data:
-        return str(user_id), None
-    if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
-        return str(user_id), None
-    validated = validate_telegram_init_data(init_data, TOKEN)
-    if not validated or not validated.get("id"):
-        return str(user_id), {"status": "error", "joined": False, "reason": "invalid_init_data"}
-    validated_id = str(validated["id"])
-    if str(user_id) != validated_id:
-        return validated_id, {"status": "error", "joined": False, "reason": "user_id_mismatch"}
-    return validated_id, None
+    if init_data:
+        if TOKEN and TOKEN != "REPLACE_WITH_TOKEN":
+            validated = validate_telegram_init_data(init_data, TOKEN)
+            if validated and validated.get("id"):
+                return str(validated["id"]), None
+            if not _is_untrusted_user_id(user_id):
+                print(f"⚠️ initData validation failed for user_id={user_id}")
+            return str(user_id), {
+                "status": "error",
+                "joined": False,
+                "reason": "invalid_init_data",
+            }
+        if _is_untrusted_user_id(user_id):
+            return str(user_id), {
+                "status": "error",
+                "joined": False,
+                "reason": "init_data_unverified",
+            }
+
+    if _is_untrusted_user_id(user_id):
+        return str(user_id), {
+            "status": "error",
+            "joined": False,
+            "reason": "guest_user",
+        }
+
+    return str(user_id), None
 
 
 @app.get("/api/check-join")

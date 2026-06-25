@@ -1,10 +1,12 @@
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from backend.config import get_settings
 from backend.database import database_ready, get_db_session
+from backend.services.telegram_auth import validate_telegram_init_data
 from backend.services.user_service import bootstrap_user, get_watchlist, update_user_settings
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -25,8 +27,21 @@ class SettingsUpdateRequest(BaseModel):
 
 
 @router.post("/bootstrap")
-async def bootstrap_user_endpoint(payload: BootstrapRequest):
-    if str(payload.user_id).startswith("guest_"):
+async def bootstrap_user_endpoint(payload: BootstrapRequest, request: Request):
+    user_id = str(payload.user_id)
+    init_data = request.headers.get("X-Telegram-Init-Data") or request.query_params.get("init_data")
+    settings = get_settings()
+    if init_data and settings.bot_configured:
+        validated = validate_telegram_init_data(init_data, settings.TELEGRAM_BOT_TOKEN)
+        if validated and validated.get("id"):
+            user_id = str(validated["id"])
+        elif user_id.startswith("guest_") or user_id == "pending_telegram":
+            return JSONResponse(
+                status_code=401,
+                content={"status": "error", "message": "Invalid Telegram initData"},
+            )
+
+    if user_id.startswith("guest_") or user_id == "pending_telegram":
         return JSONResponse(
             status_code=400,
             content={"status": "error", "message": "Guest users cannot be bootstrapped"},
@@ -41,7 +56,7 @@ async def bootstrap_user_endpoint(payload: BootstrapRequest):
         lang = payload.lang if payload.lang in ("fa", "en") else None
         user = bootstrap_user(
             db,
-            telegram_id=payload.user_id,
+            telegram_id=user_id,
             username=payload.username,
             first_name=payload.first_name,
             last_name=payload.last_name,

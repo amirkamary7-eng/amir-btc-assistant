@@ -18,11 +18,30 @@ const AssistantUI = {
 
         const root = document.createElement('div');
         root.id = 'ai-assistant-root';
+        root.className = 'ai-assistant-root';
         root.innerHTML = `
+            <div id="ai-speech-bubble" class="ai-speech-bubble" role="status" aria-live="polite">
+                <button id="ai-bubble-close" class="ai-bubble-close" type="button" aria-label="بستن">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+                <p class="ai-bubble-text">چطور می‌تونم کمکتون کنم؟ سوالی دارید بپرسید ✨</p>
+                <span class="ai-bubble-tail"></span>
+            </div>
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1.07A7.001 7.001 0 0 1 5.07 19H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
-                    <circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>
+                <span class="ai-fab-glow"></span>
+                <svg class="ai-fab-icon" width="28" height="28" viewBox="0 0 24 24" fill="none">
+                    <defs>
+                        <linearGradient id="aiFabGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+                            <stop offset="100%" stop-color="#e0e7ff" stop-opacity="0.9"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="M12 2.5c.9 0 1.6.7 1.6 1.6 0 .6-.3 1.1-.8 1.4v1.1h.9c3.5 0 6.3 2.8 6.3 6.3v.5c.6 0 1 .4 1 1v1.5c0 .6-.4 1-1 1h-.5c-.8 2.2-2.8 3.8-5.2 3.8H8.5c-2.4 0-4.4-1.6-5.2-3.8H3c-.6 0-1-.4-1-1V14c0-.6.4-1 1-1v-.5c0-3.5 2.8-6.3 6.3-6.3h.9V5.5c-.5-.3-.8-.8-.8-1.4 0-.9.7-1.6 1.6-1.6z" fill="url(#aiFabGrad)"/>
+                    <circle cx="9" cy="13.5" r="1.1" fill="#6366f1"/>
+                    <circle cx="15" cy="13.5" r="1.1" fill="#a855f7"/>
+                    <path d="M9.5 16.5c.8.6 1.7.9 2.5.9s1.7-.3 2.5-.9" stroke="#c084fc" stroke-width="1.2" stroke-linecap="round"/>
                 </svg>
             </button>
             <div id="ai-panel" class="ai-panel" style="display:none;">
@@ -56,6 +75,26 @@ const AssistantUI = {
             </div>
         `;
         document.body.appendChild(root);
+        this.initSpeechBubble();
+    },
+
+    initSpeechBubble() {
+        const bubble = document.getElementById('ai-speech-bubble');
+        const closeBtn = document.getElementById('ai-bubble-close');
+        if (!bubble) return;
+
+        const dismiss = () => {
+            if (bubble.classList.contains('ai-speech-hidden')) return;
+            bubble.classList.add('ai-speech-hidden');
+        };
+
+        closeBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dismiss();
+        });
+
+        window.setTimeout(dismiss, 5000);
     },
 
     bindEvents() {
@@ -73,8 +112,10 @@ const AssistantUI = {
         this.open = show ?? !this.open;
         const panel = document.getElementById('ai-panel');
         const fab = document.getElementById('ai-fab');
+        const bubble = document.getElementById('ai-speech-bubble');
         if (panel) panel.style.display = this.open ? 'flex' : 'none';
         if (fab) fab.classList.toggle('ai-fab-hidden', this.open);
+        if (bubble && this.open) bubble.classList.add('ai-speech-hidden');
         if (this.open) {
             this.refreshLimits();
             document.getElementById('ai-input')?.focus();

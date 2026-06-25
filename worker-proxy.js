@@ -5,6 +5,16 @@
  */
 export default {
   async fetch(request, env) {
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Telegram-Init-Data',
+    };
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
+
     const backend = (env.BACKEND_URL || '').replace(/\/$/, '');
     if (!backend) {
       return new Response(JSON.stringify({ status: 'error', message: 'BACKEND_URL not configured' }), {
@@ -32,9 +42,7 @@ export default {
         status: res.status,
         headers: {
           'Content-Type': res.headers.get('Content-Type') || 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, X-Telegram-Init-Data',
+          ...corsHeaders,
         },
       });
     } catch (e) {
