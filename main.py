@@ -35,7 +35,8 @@ from backend.routers import calendar as calendar_router
 from backend.routers import referrals as referrals_router
 from backend.routers import sessions as sessions_router
 from backend.routers import assistant as assistant_router
-from backend.services.join_service import resolve_channel_membership
+from backend.services.join_service import resolve_channel_membership, clear_cached_join_status
+from backend.services.telegram_auth import validate_telegram_init_data
 from backend.redis_client import cache_get_json, cache_set_json
 
 # کتابخانه‌های ربات تلگرام
@@ -301,9 +302,14 @@ def _check_channel_membership(user_id: str) -> dict:
         data = res.json()
         if not data.get("ok"):
             desc = data.get("description", "")
-            print(f"⚠️ getChatMember failed: {desc}")
-            if "user not found" in desc.lower() or "not found" in desc.lower():
+            print(f"⚠️ getChatMember failed for user {user_id}: {desc}")
+            desc_lower = desc.lower()
+            if "user not found" in desc_lower or "not a member" in desc_lower:
                 return {"joined": False, "reason": "not_member"}
+            if "chat not found" in desc_lower:
+                return {"joined": False, "reason": "channel_not_found", "detail": desc}
+            if "bot is not a member" in desc_lower or "need administrator" in desc_lower:
+                return {"joined": False, "reason": "bot_not_in_channel", "detail": desc}
             return {"joined": False, "reason": "api_error", "detail": desc}
         status = data.get("result", {}).get("status", "")
         return {"joined": status in JOINED_STATUSES, "status": status}
@@ -321,19 +327,46 @@ async def health_check():
         "redis_ready": redis_ready(),
     }
 
+def _resolve_user_id_from_request(user_id: str, init_data: Optional[str]) -> tuple[str, Optional[dict]]:
+    """Prefer cryptographically verified Telegram user id when initData is present."""
+    if not init_data:
+        return str(user_id), None
+    if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
+        return str(user_id), None
+    validated = validate_telegram_init_data(init_data, TOKEN)
+    if not validated or not validated.get("id"):
+        return str(user_id), {"status": "error", "joined": False, "reason": "invalid_init_data"}
+    validated_id = str(validated["id"])
+    if str(user_id) != validated_id:
+        return validated_id, {"status": "error", "joined": False, "reason": "user_id_mismatch"}
+    return validated_id, None
+
+
 @app.get("/api/check-join")
-async def check_join(user_id: str = Query(...), refresh: bool = Query(False)):
+async def check_join(
+    request: Request,
+    user_id: str = Query(...),
+    refresh: bool = Query(False),
+):
+    init_data = request.headers.get("X-Telegram-Init-Data") or request.query_params.get("init_data")
+    resolved_id, init_error = _resolve_user_id_from_request(user_id, init_data)
+    if init_error:
+        return init_error
+
+    if refresh:
+        clear_cached_join_status(resolved_id)
+
     if database_ready():
         with get_db_session() as db:
             result = resolve_channel_membership(
-                user_id,
+                resolved_id,
                 _check_channel_membership,
                 db=db,
                 force_refresh=refresh,
             )
     else:
         result = resolve_channel_membership(
-            user_id,
+            resolved_id,
             _check_channel_membership,
             db=None,
             force_refresh=refresh,

@@ -83,7 +83,7 @@ const AssistantUI = {
 
     async refreshLimits() {
         const el = document.getElementById('ai-limits');
-        if (!el || !window.API_BASE || String(getUserId()).startsWith('guest_')) {
+        if (!el || !window.API_BASE || (typeof isGuestUserId === 'function' ? isGuestUserId(getUserId()) : String(getUserId()).startsWith('guest_'))) {
             if (el) el.innerText = '';
             return;
         }
@@ -144,7 +144,7 @@ const AssistantUI = {
         const input = document.getElementById('ai-input');
         const message = input?.value?.trim();
         if (!message && !this.pendingImage) return;
-        if (!API_BASE || String(getUserId()).startsWith('guest_')) {
+        if (!API_BASE || (typeof isGuestUserId === 'function' ? isGuestUserId(getUserId()) : String(getUserId()).startsWith('guest_'))) {
             alert(typeof t === 'function' ? t('join_guest_hint') : 'Open from Telegram');
             return;
         }

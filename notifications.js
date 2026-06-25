@@ -72,7 +72,7 @@ const NotificationCenter = {
 
         if (sendToTelegram && typeof notifyTelegram === 'function') {
             const userId = typeof getUserId === 'function' ? getUserId() : null;
-            if (userId && !String(userId).startsWith('guest_')) {
+            if (userId && !(typeof isGuestUserId === 'function' ? isGuestUserId(userId) : String(userId).startsWith('guest_'))) {
                 notifyTelegram(`🔔 ${title}\n${body}`).catch(e => console.warn('notifyTelegram:', e));
             }
         }

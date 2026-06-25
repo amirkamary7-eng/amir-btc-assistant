@@ -4,7 +4,66 @@
 // ============================================================
 
 const tg = window.Telegram?.WebApp;
-if (tg) { tg.ready(); tg.expand(); }
+
+let telegramInitDone = false;
+
+function parseInitDataUser(initData) {
+    if (!initData) return null;
+    try {
+        const params = new URLSearchParams(initData);
+        const userStr = params.get('user');
+        if (userStr) return JSON.parse(userStr);
+    } catch (e) {
+        console.warn('parseInitDataUser:', e);
+    }
+    return null;
+}
+
+function getTelegramUser() {
+    if (!tg) return null;
+    const fromUnsafe = tg.initDataUnsafe?.user;
+    if (fromUnsafe?.id) return fromUnsafe;
+    return parseInitDataUser(tg.initData);
+}
+
+function isInTelegram() {
+    if (!tg) return false;
+    if (getTelegramUser()?.id) return true;
+    if (tg.initData && tg.initData.length > 10) return true;
+    const platform = tg.platform;
+    return !!(platform && platform !== 'unknown');
+}
+
+function isGuestUserId(userId) {
+    const uid = String(userId || '');
+    return uid.startsWith('guest_') || uid === 'pending_telegram';
+}
+
+function getTelegramInitData() {
+    return tg?.initData || '';
+}
+
+async function initTelegramWebApp(maxWaitMs = 5000) {
+    if (!tg || telegramInitDone) return getTelegramUser();
+    tg.ready();
+    tg.expand();
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+        const user = getTelegramUser();
+        if (user?.id) {
+            localStorage.removeItem('guest_id');
+            telegramInitDone = true;
+            return user;
+        }
+        if (!isInTelegram()) {
+            telegramInitDone = true;
+            return null;
+        }
+        await new Promise(r => setTimeout(r, 50));
+    }
+    telegramInitDone = true;
+    return getTelegramUser();
+}
 
 const ADMIN_ID = '831704732';
 const CHANNEL = 'amir_btc_2024';
@@ -73,6 +132,9 @@ const i18n = {
         join_verify_btn: 'بررسی عضویت', join_not_verified: 'هنوز عضو کانال نشده‌اید. ابتدا در کانال عضو شوید.',
         join_verified: 'عضویت تایید شد', join_welcome: 'به اپلیکیشن امیر BTC خوش آمدید!',
         join_guest_hint: 'لطفاً اپ را از داخل تلگرام باز کنید.',
+        join_web_title: 'فقط از تلگرام',
+        join_web_desc: 'این اپلیکیشن فقط از داخل ربات تلگرام قابل استفاده است. روی دکمه زیر بزنید و از منوی ربات وارد شوید.',
+        join_open_bot: 'باز کردن ربات تلگرام',
         edit_analysis: 'ویرایش تحلیل', update_analysis: 'ذخیره تغییرات',
         share_ref_text: 'به Amir BTC Assistant بپیوندید و از تحلیل‌های حرفه‌ای بازار استفاده کنید!',
         chart_unavailable: 'نمودار در دسترس نیست', close: 'بستن',
@@ -121,6 +183,9 @@ const i18n = {
         join_verify_btn: 'Verify Membership', join_not_verified: 'You are not a channel member yet. Please join first.',
         join_verified: 'Membership verified', join_welcome: 'Welcome to Amir BTC Assistant!',
         join_guest_hint: 'Please open the app from inside Telegram.',
+        join_web_title: 'Telegram Only',
+        join_web_desc: 'This app works only inside the Telegram bot. Tap the button below to open the bot and launch the app.',
+        join_open_bot: 'Open Telegram Bot',
         edit_analysis: 'Edit Analysis', update_analysis: 'Save Changes',
         share_ref_text: 'Join Amir BTC Assistant and get professional market analysis!',
         chart_unavailable: 'Chart unavailable', close: 'Close',
@@ -150,19 +215,26 @@ const i18n = {
 function t(key) { return i18n[currentLang]?.[key] || i18n.fa[key] || key; }
 
 function getReferrerId() {
-    const startParam = tg?.initDataUnsafe?.start_param || '';
+    const startParam = tg?.initDataUnsafe?.start_param || (() => {
+        if (!tg?.initData) return '';
+        try { return new URLSearchParams(tg.initData).get('start_param') || ''; } catch (_) { return ''; }
+    })();
     if (startParam.startsWith('ref_')) return startParam.slice(4);
     return null;
 }
 function getUserId() {
-    const uid = tg?.initDataUnsafe?.user?.id;
-    if (uid) return String(uid);
+    const user = getTelegramUser();
+    if (user?.id) {
+        localStorage.removeItem('guest_id');
+        return String(user.id);
+    }
+    if (isInTelegram()) return 'pending_telegram';
     let guestId = localStorage.getItem('guest_id');
     if (!guestId) { guestId = 'guest_' + Date.now(); localStorage.setItem('guest_id', guestId); }
     return guestId;
 }
 function getUserName() {
-    const u = tg?.initDataUnsafe?.user;
+    const u = getTelegramUser();
     if (!u) return t('guest');
     return `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || t('guest');
 }
@@ -211,7 +283,7 @@ function setJoinCache(value) {
 
 async function persistWatchlist() {
     localStorage.setItem(userStorageKey('watchlist'), JSON.stringify(watchlist));
-    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    if (!API_BASE || isGuestUserId(getUserId())) return;
     try {
         await apiFetch('/api/watchlist', {
             method: 'PUT',
@@ -223,7 +295,7 @@ async function persistWatchlist() {
 }
 
 async function saveLangToServer() {
-    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    if (!API_BASE || isGuestUserId(getUserId())) return;
     try {
         await apiFetch('/api/users/me/settings', {
             method: 'PUT',
@@ -238,13 +310,13 @@ async function bootstrapUser() {
     currentLang = loadLangFromStorage();
     loadWatchlistFromStorage();
 
-    if (!API_BASE || String(getUserId()).startsWith('guest_')) {
+    if (!API_BASE || isGuestUserId(getUserId())) {
         applyLanguage();
         return;
     }
 
     try {
-        const u = tg?.initDataUnsafe?.user;
+        const u = getTelegramUser();
         const data = await apiFetch('/api/users/bootstrap', {
             method: 'POST',
             body: JSON.stringify({
@@ -317,7 +389,7 @@ async function saveAnalysisToServer(payload, method, analysisId) {
 }
 
 async function sendSessionHeartbeat() {
-    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    if (!API_BASE || isGuestUserId(getUserId())) return;
     try {
         const params = new URLSearchParams({ user_id: getUserId() });
         if (sessionId) params.set('session_id', sessionId);
@@ -351,7 +423,7 @@ function updateOnlineBadge(count) {
 }
 
 async function loadReferralStats() {
-    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    if (!API_BASE || isGuestUserId(getUserId())) return;
     try {
         const data = await apiFetch(`/api/referrals/stats?user_id=${encodeURIComponent(getUserId())}`);
         document.getElementById('ref-total').innerText = data.total ?? 0;
@@ -398,7 +470,10 @@ async function resolveChartSymbol(symbol) {
 
 async function apiFetch(path, options = {}) {
     if (!API_BASE) throw new Error('API_BASE not configured');
-    const res = await fetch(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json', ...options.headers }, ...options });
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    const initData = getTelegramInitData();
+    if (initData) headers['X-Telegram-Init-Data'] = initData;
+    const res = await fetch(`${API_BASE}${path}`, { headers, ...options });
     if (!res.ok) {
         let detail = '';
         try { detail = await res.text(); } catch (_) {}
@@ -974,7 +1049,7 @@ function closeAnalysisDetail() {
 
 // ---------- مدیریت تحلیل (مدیر) ----------
 function isAdmin() {
-    const user = tg?.initDataUnsafe?.user;
+    const user = getTelegramUser();
     return user && String(user.id) === ADMIN_ID;
 }
 function openAddAnalysisModal() {
@@ -1013,7 +1088,7 @@ function submitAnalysis() {
     if (!coin || !text) { alert('نام ارز و متن تحلیل الزامی است.'); return; }
     if (!image) image = 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop';
 
-    const author = tg?.initDataUnsafe?.user?.first_name || 'مدیر';
+    const author = getTelegramUser()?.first_name || 'مدیر';
     const payload = { coin, timeframe, image, text, author, author_id: getUserId() };
 
     (async () => {
@@ -1159,7 +1234,7 @@ function playAlertSound() {
 }
 
 async function syncAlertToServer(alert) {
-    if (!API_BASE || String(alert.userId).startsWith('guest_')) return alert;
+    if (!API_BASE || isGuestUserId(String(alert.userId))) return alert;
     try {
         const data = await apiFetch('/api/alerts', {
             method: 'POST',
@@ -1176,14 +1251,14 @@ async function syncAlertToServer(alert) {
 }
 
 async function removeAlertFromServer(alert) {
-    if (!API_BASE || !alert.serverId || String(alert.userId).startsWith('guest_')) return;
+    if (!API_BASE || !alert.serverId || isGuestUserId(String(alert.userId))) return;
     try {
         await apiFetch(`/api/alerts/${alert.serverId}?user_id=${encodeURIComponent(alert.userId)}`, { method: 'DELETE' });
     } catch (e) { console.warn('removeAlertFromServer:', e); }
 }
 
 async function loadAlertsFromServer() {
-    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    if (!API_BASE || isGuestUserId(getUserId())) return;
     try {
         const data = await apiFetch(`/api/alerts?user_id=${encodeURIComponent(getUserId())}`);
         alerts = (data.alerts || []).map(a => ({
@@ -1200,7 +1275,7 @@ async function loadAlertsFromServer() {
 
 async function notifyTelegram(message) {
     const userId = getUserId();
-    if (!API_BASE || String(userId).startsWith('guest_')) return false;
+    if (!API_BASE || isGuestUserId(String(userId))) return false;
     try {
         const res = await apiFetch('/api/notify', {
             method: 'POST',
@@ -1337,7 +1412,7 @@ function markNotifRead(id) {
 
 // ---------- پروفایل و رفرال ----------
 function loadUser() {
-    const user = tg?.initDataUnsafe?.user;
+    const user = getTelegramUser();
     if (user) {
         document.getElementById('profile-name').innerText = `${user.first_name || ''} ${user.last_name || ''}`.trim() || t('guest');
         document.getElementById('profile-username').innerText = user.username ? `@${user.username}` : '@guest';
@@ -1345,10 +1420,15 @@ function loadUser() {
         if (user.photo_url) document.getElementById('profile-avatar').src = user.photo_url;
         document.getElementById('ref-link').value = `https://t.me/AmirBtcBot/app?startapp=ref_${user.id}`;
         loadReferralStats();
+    } else if (isInTelegram()) {
+        document.getElementById('profile-name').innerText = t('guest');
+        document.getElementById('profile-username').innerText = '...';
+        document.getElementById('profile-id-num').innerText = '...';
+        document.getElementById('ref-link').value = 'https://t.me/AmirBtcBot/app';
     } else {
         document.getElementById('profile-name').innerText = t('guest');
-        document.getElementById('profile-username').innerText = 'loading...';
-        document.getElementById('profile-id-num').innerText = '000000';
+        document.getElementById('profile-username').innerText = '@guest';
+        document.getElementById('profile-id-num').innerText = getUserId().replace('guest_', '') || '000000';
         document.getElementById('ref-link').value = 'https://t.me/AmirBtcBot/app?startapp=ref_guest';
     }
     const adminBtn = document.getElementById('admin-add-btn');
@@ -1557,9 +1637,22 @@ function joinChannel() {
     else window.open(`https://t.me/${CHANNEL}`, '_blank');
 }
 
+function openTelegramBot() {
+    const botUrl = 'https://t.me/AmirBtcBot/app';
+    if (tg?.openTelegramLink) tg.openTelegramLink(botUrl);
+    else window.open(botUrl, '_blank');
+}
+
+function setJoinModalMode(mode) {
+    const vipBlock = document.getElementById('join-vip-block');
+    const webBlock = document.getElementById('join-web-block');
+    if (vipBlock) vipBlock.style.display = mode === 'vip' ? 'block' : 'none';
+    if (webBlock) webBlock.style.display = mode === 'web' ? 'block' : 'none';
+}
+
 function openJoinAndVerify() {
     joinChannel();
-    setTimeout(() => verifyJoin(), 4000);
+    setTimeout(() => verifyJoin(), 6000);
 }
 
 // ---------- پاپ‌آپ جوین اجباری ----------
@@ -1567,6 +1660,8 @@ async function checkMandatoryJoin(options = {}) {
     const { force = false } = typeof options === 'boolean' ? { force: options } : options;
     const modal = document.getElementById('mandatory-join-modal');
     if (!modal) return;
+
+    if (!telegramInitDone) await initTelegramWebApp();
 
     if (isAdmin()) {
         hasChannelAccess = true;
@@ -1577,13 +1672,31 @@ async function checkMandatoryJoin(options = {}) {
     }
 
     const userId = getUserId();
-    if (String(userId).startsWith('guest_')) {
+
+    if (!isInTelegram() && isGuestUserId(userId)) {
         hasChannelAccess = false;
         joinCheckDone = true;
+        setJoinModalMode('web');
         modal.style.display = 'flex';
         setAppLocked(true);
         return;
     }
+
+    if (isInTelegram() && userId === 'pending_telegram') {
+        await initTelegramWebApp(3000);
+    }
+
+    const resolvedId = getUserId();
+    if (isGuestUserId(resolvedId)) {
+        hasChannelAccess = false;
+        joinCheckDone = true;
+        setJoinModalMode(isInTelegram() ? 'vip' : 'web');
+        modal.style.display = 'flex';
+        setAppLocked(true);
+        return;
+    }
+
+    setJoinModalMode('vip');
 
     if (!force && joinCheckDone && hasChannelAccess) {
         modal.style.display = 'none';
@@ -1600,28 +1713,23 @@ async function checkMandatoryJoin(options = {}) {
     }
 
     if (!API_BASE) {
-        hasChannelAccess = getJoinCache();
+        hasChannelAccess = false;
         joinCheckDone = true;
-        modal.style.display = hasChannelAccess ? 'none' : 'flex';
-        setAppLocked(!hasChannelAccess);
+        modal.style.display = 'flex';
+        setAppLocked(true);
         return;
     }
 
     try {
         const refreshParam = force ? '&refresh=true' : '';
-        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}${refreshParam}`);
+        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(resolvedId)}${refreshParam}`);
         joinCheckDone = true;
         if (data.joined) {
             hasChannelAccess = true;
             setJoinCache(true);
             modal.style.display = 'none';
             setAppLocked(false);
-            return;
-        }
-        if (!force && getJoinCache()) {
-            hasChannelAccess = true;
-            modal.style.display = 'none';
-            setAppLocked(false);
+            loadUser();
             return;
         }
         hasChannelAccess = false;
@@ -1631,47 +1739,45 @@ async function checkMandatoryJoin(options = {}) {
     } catch (e) {
         console.warn('checkMandatoryJoin:', e);
         joinCheckDone = true;
-        if (getJoinCache() || hasChannelAccess) {
-            hasChannelAccess = true;
-            modal.style.display = 'none';
-            setAppLocked(false);
-            return;
-        }
+        hasChannelAccess = false;
         modal.style.display = 'flex';
         setAppLocked(true);
     }
 }
 
 async function verifyJoin() {
+    if (!telegramInitDone) await initTelegramWebApp();
+
     const userId = getUserId();
-    if (String(userId).startsWith('guest_')) {
+    if (!isInTelegram() && isGuestUserId(userId)) {
         alert(t('join_guest_hint'));
         return;
     }
+    if (userId === 'pending_telegram') {
+        alert(t('join_not_verified'));
+        return;
+    }
+
     const verifyBtn = document.getElementById('join-verify-btn');
     if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.innerText = '...'; }
     try {
-        if (API_BASE) {
-            const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}&refresh=true`);
-            if (data.joined) {
-                hasChannelAccess = true;
-                joinCheckDone = true;
-                setJoinCache(true);
-                document.getElementById('mandatory-join-modal').style.display = 'none';
-                setAppLocked(false);
-                addNotification(t('join_verified'), t('join_welcome'), false);
-                tg?.showPopup?.({ title: t('join_verified'), message: t('join_welcome'), buttons: [{ type: 'ok' }] });
-                return;
-            }
+        if (!API_BASE) {
             alert(t('join_not_verified'));
             return;
         }
-        setJoinCache(true);
-        hasChannelAccess = true;
-        joinCheckDone = true;
-        document.getElementById('mandatory-join-modal').style.display = 'none';
-        setAppLocked(false);
-        addNotification(t('join_verified'), t('join_welcome'), false);
+        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}&refresh=true`);
+        if (data.joined) {
+            hasChannelAccess = true;
+            joinCheckDone = true;
+            setJoinCache(true);
+            document.getElementById('mandatory-join-modal').style.display = 'none';
+            setAppLocked(false);
+            loadUser();
+            addNotification(t('join_verified'), t('join_welcome'), false);
+            tg?.showPopup?.({ title: t('join_verified'), message: t('join_welcome'), buttons: [{ type: 'ok' }] });
+            return;
+        }
+        alert(t('join_not_verified'));
     } catch (e) {
         console.warn('verifyJoin:', e);
         alert(t('join_not_verified'));
@@ -1787,12 +1893,13 @@ function startPolling() {
 
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    if (hasChannelAccess || String(getUserId()).startsWith('guest_')) return;
+    if (hasChannelAccess || !isInTelegram()) return;
     checkMandatoryJoin({ force: true });
 });
 
 // ---------- راه‌اندازی ----------
 document.addEventListener('DOMContentLoaded', async () => {
+    await initTelegramWebApp();
     alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     await bootstrapUser();
@@ -1862,4 +1969,7 @@ window.openNewsModal = openNewsModal;
 window.closeNewsModal = closeNewsModal;
 window.verifyJoin = verifyJoin;
 window.openJoinAndVerify = openJoinAndVerify;
+window.openTelegramBot = openTelegramBot;
 window.getUserId = getUserId;
+window.isInTelegram = isInTelegram;
+window.isGuestUserId = isGuestUserId;
