@@ -49,21 +49,32 @@ async def bootstrap_user_endpoint(payload: BootstrapRequest, request: Request):
     if not database_ready():
         return JSONResponse(
             status_code=503,
-            content={"status": "error", "message": "Database not configured"},
+            content={"status": "DB_ERROR", "message": "Database not configured"},
         )
 
-    with get_db_session() as db:
-        lang = payload.lang if payload.lang in ("fa", "en") else None
-        user = bootstrap_user(
-            db,
-            telegram_id=user_id,
-            username=payload.username,
-            first_name=payload.first_name,
-            last_name=payload.last_name,
-            lang=lang,
-            referrer_id=payload.referrer_id,
+    try:
+        with get_db_session() as db:
+            lang = payload.lang if payload.lang in ("fa", "en") else None
+            user = bootstrap_user(
+                db,
+                telegram_id=user_id,
+                username=payload.username,
+                first_name=payload.first_name,
+                last_name=payload.last_name,
+                lang=lang,
+                referrer_id=payload.referrer_id,
+            )
+        return {"status": "success", "user": user, "watchlist": user["watchlist"]}
+    except Exception as exc:
+        print(f"⚠️ bootstrap_user error: {exc}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "DB_ERROR",
+                "message": "Database unavailable",
+                "detail": str(exc),
+            },
         )
-    return {"status": "success", "user": user, "watchlist": user["watchlist"]}
 
 
 @router.get("/me")

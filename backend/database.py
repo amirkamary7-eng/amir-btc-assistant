@@ -54,8 +54,22 @@ def get_db_session():
     try:
         yield session
         session.commit()
-    except Exception:
+    except Exception as exc:
         session.rollback()
+        print(f"⚠️ Database session error: {exc}")
         raise
     finally:
         session.close()
+
+
+def safe_db_session():
+    """Return an active session or None when the database is unavailable."""
+    if not SessionLocal:
+        return None
+    try:
+        session: Session = SessionLocal()
+        session.execute(text("SELECT 1"))
+        return session
+    except Exception as exc:
+        print(f"⚠️ Database unavailable: {exc}")
+        return None

@@ -22,38 +22,64 @@ function parseInitDataUser(initData) {
 }
 
 function getTelegramUser() {
+    if (UserContext.user?.id) return UserContext.user;
     const tg = getTg();
     if (!tg) return null;
     const fromUnsafe = tg.initDataUnsafe?.user;
-    if (fromUnsafe?.id) return fromUnsafe;
-    return parseInitDataUser(tg.initData);
+    if (fromUnsafe?.id) {
+        UserContext.user = fromUnsafe;
+        return fromUnsafe;
+    }
+    const fromInitData = parseInitDataUser(tg.initData);
+    if (fromInitData?.id) {
+        UserContext.user = fromInitData;
+        return fromInitData;
+    }
+    return null;
 }
+
+const TELEGRAM_PLATFORMS = new Set([
+    'ios', 'android', 'android_x', 'tdesktop', 'macos', 'web', 'weba', 'unigram', 'telegram',
+]);
 
 function isInTelegram() {
     const tg = getTg();
     if (!tg) return false;
     if (getTelegramUser()?.id) return true;
-    if (tg.initData && tg.initData.length > 10) return true;
-    const platform = tg.platform;
-    return !!(platform && platform !== 'unknown');
+    const initData = tg.initData || '';
+    if (initData.length > 20) return true;
+    const platform = String(tg.platform || '').toLowerCase();
+    return TELEGRAM_PLATFORMS.has(platform);
 }
 
 function isGuestUserId(userId) {
-    const uid = String(userId || '');
-    return uid.startsWith('guest_') || uid === 'pending_telegram';
+    return String(userId || '').startsWith('guest_');
+}
+
+function isUserLoading() {
+    return isInTelegram() && !getTelegramUser()?.id;
 }
 
 function getTelegramInitData() {
     return getTg()?.initData || '';
 }
 
-async function initTelegramWebApp(maxWaitMs = 5000) {
-    if (telegramInitDone) return getTelegramUser();
+async function initTelegramWebApp(maxWaitMs = 8000) {
+    if (telegramInitDone && getTelegramUser()?.id) return getTelegramUser();
     const tg = getTg();
     if (tg) {
         try {
             tg.ready();
             tg.expand();
+            tg.onEvent?.('viewportChanged', () => {
+                const u = getTelegramUser();
+                if (u?.id) {
+                    UserContext.user = u;
+                    UserContext.loading = false;
+                    UserContext._setLoadingUI(false);
+                    loadUser();
+                }
+            });
         } catch (e) {
             console.warn('initTelegramWebApp:', e);
         }
@@ -64,14 +90,17 @@ async function initTelegramWebApp(maxWaitMs = 5000) {
         if (user?.id) {
             localStorage.removeItem('guest_id');
             telegramInitDone = true;
+            UserContext.user = user;
+            UserContext.loading = false;
             return user;
         }
-        const initData = getTelegramInitData();
-        if (!getTg() && !initData) break;
+        if (!getTg() && !getTelegramInitData()) break;
         await new Promise(r => setTimeout(r, 50));
     }
     telegramInitDone = true;
-    return getTelegramUser();
+    UserContext.loading = false;
+    UserContext.user = getTelegramUser();
+    return UserContext.user;
 }
 
 const ADMIN_ID = '831704732';
@@ -144,6 +173,8 @@ const i18n = {
         join_web_title: 'فقط از تلگرام',
         join_web_desc: 'این اپلیکیشن فقط از داخل ربات تلگرام قابل استفاده است. روی دکمه زیر بزنید و از منوی ربات وارد شوید.',
         join_open_bot: 'باز کردن ربات تلگرام',
+        loading_user: 'در حال بارگذاری...',
+        join_db_error: 'خطا در اتصال به سرور. لطفاً چند لحظه بعد دوباره تلاش کنید.',
         edit_analysis: 'ویرایش تحلیل', update_analysis: 'ذخیره تغییرات',
         share_ref_text: 'به Amir BTC Assistant بپیوندید و از تحلیل‌های حرفه‌ای بازار استفاده کنید!',
         chart_unavailable: 'نمودار در دسترس نیست', close: 'بستن',
@@ -195,6 +226,8 @@ const i18n = {
         join_web_title: 'Telegram Only',
         join_web_desc: 'This app works only inside the Telegram bot. Tap the button below to open the bot and launch the app.',
         join_open_bot: 'Open Telegram Bot',
+        loading_user: 'Loading...',
+        join_db_error: 'Server connection error. Please try again in a moment.',
         edit_analysis: 'Edit Analysis', update_analysis: 'Save Changes',
         share_ref_text: 'Join Amir BTC Assistant and get professional market analysis!',
         chart_unavailable: 'Chart unavailable', close: 'Close',
@@ -243,9 +276,64 @@ function getUserId() {
     if (!guestId) { guestId = 'guest_' + Date.now(); localStorage.setItem('guest_id', guestId); }
     return guestId;
 }
+
+const UserContext = {
+    ready: false,
+    loading: true,
+    user: null,
+    joinCache: { value: null, ts: 0 },
+    JOIN_CACHE_MS: 5 * 60 * 1000,
+
+    async init() {
+        this.loading = true;
+        this._setLoadingUI(true);
+        await initTelegramWebApp();
+        this.user = getTelegramUser();
+        this.ready = true;
+        this.loading = false;
+        this._setLoadingUI(false);
+        return this.user;
+    },
+
+    isAuthenticated() {
+        return !!getTelegramUser()?.id;
+    },
+
+    isGuest() {
+        return !isInTelegram() && isGuestUserId(getUserId());
+    },
+
+    isPending() {
+        return isInTelegram() && !this.isAuthenticated();
+    },
+
+    getCachedJoin() {
+        if (this.joinCache.value !== null && Date.now() - this.joinCache.ts < this.JOIN_CACHE_MS) {
+            return this.joinCache.value;
+        }
+        if (getJoinCache()) {
+            this.joinCache = { value: true, ts: Date.now() };
+            return true;
+        }
+        return null;
+    },
+
+    setCachedJoin(value) {
+        this.joinCache = { value: !!value, ts: Date.now() };
+        setJoinCache(!!value);
+    },
+
+    _setLoadingUI(show) {
+        document.body.classList.toggle('user-loading', show);
+        document.querySelectorAll('.profile-loading-target').forEach(el => {
+            el.classList.toggle('skeleton-text', show);
+        });
+    },
+};
 function getUserName() {
+    if (UserContext.loading || isUserLoading()) return t('loading_user');
     const u = getTelegramUser();
-    if (!u) return t('guest');
+    if (!u) return UserContext.isGuest() ? t('guest') : t('loading_user');
     return `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || t('guest');
 }
 
@@ -320,7 +408,7 @@ async function bootstrapUser() {
     currentLang = loadLangFromStorage();
     loadWatchlistFromStorage();
 
-    if (!API_BASE || isGuestUserId(getUserId())) {
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) {
         applyLanguage();
         return;
     }
@@ -1431,7 +1519,22 @@ function markNotifRead(id) {
 }
 
 // ---------- پروفایل و رفرال ----------
+function showJoinStatus(msg, isError = false) {
+    const el = document.getElementById('join-status-msg');
+    if (!el) return;
+    el.style.display = msg ? 'block' : 'none';
+    el.innerText = msg || '';
+    el.classList.toggle('join-status-error', !!isError);
+}
+
 function loadUser() {
+    if (UserContext.loading || isUserLoading()) {
+        document.getElementById('profile-name').innerText = t('loading_user');
+        document.getElementById('profile-username').innerText = '...';
+        document.getElementById('profile-id-num').innerText = '...';
+        return;
+    }
+
     const user = getTelegramUser();
     if (user) {
         document.getElementById('profile-name').innerText = `${user.first_name || ''} ${user.last_name || ''}`.trim() || t('guest');
@@ -1440,12 +1543,12 @@ function loadUser() {
         if (user.photo_url) document.getElementById('profile-avatar').src = user.photo_url;
         document.getElementById('ref-link').value = `https://t.me/AmirBtcBot/app?startapp=ref_${user.id}`;
         loadReferralStats();
-    } else if (isInTelegram()) {
-        document.getElementById('profile-name').innerText = t('guest');
+    } else if (UserContext.isPending()) {
+        document.getElementById('profile-name').innerText = t('loading_user');
         document.getElementById('profile-username').innerText = '...';
         document.getElementById('profile-id-num').innerText = '...';
         document.getElementById('ref-link').value = 'https://t.me/AmirBtcBot/app';
-    } else {
+    } else if (UserContext.isGuest()) {
         document.getElementById('profile-name').innerText = t('guest');
         document.getElementById('profile-username').innerText = '@guest';
         document.getElementById('profile-id-num').innerText = getUserId().replace('guest_', '') || '000000';
@@ -1683,7 +1786,10 @@ async function checkMandatoryJoin(options = {}) {
     const modal = document.getElementById('mandatory-join-modal');
     if (!modal) return;
 
-    if (!telegramInitDone) await initTelegramWebApp();
+    if (!UserContext.ready) await UserContext.init();
+    else if (!telegramInitDone) await initTelegramWebApp();
+
+    showJoinStatus('');
 
     if (isAdmin()) {
         hasChannelAccess = true;
@@ -1695,7 +1801,7 @@ async function checkMandatoryJoin(options = {}) {
 
     const userId = getUserId();
 
-    if (!isInTelegram() && isGuestUserId(userId)) {
+    if (UserContext.isGuest()) {
         hasChannelAccess = false;
         joinCheckDone = true;
         setJoinModalMode('web');
@@ -1704,15 +1810,15 @@ async function checkMandatoryJoin(options = {}) {
         return;
     }
 
-    if (isInTelegram() && userId === 'pending_telegram') {
+    if (UserContext.isPending()) {
         await initTelegramWebApp(3000);
     }
 
     const resolvedId = getUserId();
-    if (isGuestUserId(resolvedId)) {
-        hasChannelAccess = false;
-        joinCheckDone = true;
-        setJoinModalMode(isInTelegram() ? 'vip' : 'web');
+    if (resolvedId === 'pending_telegram') {
+        joinCheckDone = false;
+        setJoinModalMode('vip');
+        showJoinStatus(t('loading_user'));
         modal.style.display = 'flex';
         setAppLocked(true);
         return;
@@ -1726,12 +1832,15 @@ async function checkMandatoryJoin(options = {}) {
         return;
     }
 
-    if (!force && getJoinCache()) {
-        hasChannelAccess = true;
-        joinCheckDone = true;
-        modal.style.display = 'none';
-        setAppLocked(false);
-        return;
+    if (!force) {
+        const cachedJoin = UserContext.getCachedJoin();
+        if (cachedJoin === true) {
+            hasChannelAccess = true;
+            joinCheckDone = true;
+            modal.style.display = 'none';
+            setAppLocked(false);
+            return;
+        }
     }
 
     if (!API_BASE) {
@@ -1746,37 +1855,49 @@ async function checkMandatoryJoin(options = {}) {
         const refreshParam = force ? '&refresh=true' : '';
         const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(resolvedId)}${refreshParam}`);
         joinCheckDone = true;
+        if (data.status === 'DB_ERROR') {
+            hasChannelAccess = false;
+            showJoinStatus(t('join_db_error'), true);
+            modal.style.display = 'flex';
+            setAppLocked(true);
+            return;
+        }
         if (data.joined) {
             hasChannelAccess = true;
-            setJoinCache(true);
+            UserContext.setCachedJoin(true);
             modal.style.display = 'none';
             setAppLocked(false);
             loadUser();
             return;
         }
         hasChannelAccess = false;
-        setJoinCache(false);
+        UserContext.setCachedJoin(false);
         modal.style.display = 'flex';
         setAppLocked(true);
     } catch (e) {
         console.warn('checkMandatoryJoin:', e);
         joinCheckDone = true;
         hasChannelAccess = false;
+        showJoinStatus(t('join_db_error'), true);
         modal.style.display = 'flex';
         setAppLocked(true);
     }
 }
 
 async function verifyJoin() {
-    if (!telegramInitDone) await initTelegramWebApp();
+    if (!UserContext.ready) await UserContext.init();
+    else if (!telegramInitDone) await initTelegramWebApp();
 
-    const userId = getUserId();
-    if (!isInTelegram() && isGuestUserId(userId)) {
+    if (UserContext.isGuest()) {
         alert(t('join_guest_hint'));
         return;
     }
+    if (UserContext.isPending()) {
+        await initTelegramWebApp(3000);
+    }
+    const userId = getUserId();
     if (userId === 'pending_telegram') {
-        alert(t('join_not_verified'));
+        alert(t('loading_user'));
         return;
     }
 
@@ -1788,10 +1909,15 @@ async function verifyJoin() {
             return;
         }
         const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}&refresh=true`);
+        if (data.status === 'DB_ERROR') {
+            showJoinStatus(t('join_db_error'), true);
+            alert(t('join_db_error'));
+            return;
+        }
         if (data.joined) {
             hasChannelAccess = true;
             joinCheckDone = true;
-            setJoinCache(true);
+            UserContext.setCachedJoin(true);
             document.getElementById('mandatory-join-modal').style.display = 'none';
             setAppLocked(false);
             loadUser();
@@ -1802,7 +1928,8 @@ async function verifyJoin() {
         alert(t('join_not_verified'));
     } catch (e) {
         console.warn('verifyJoin:', e);
-        alert(t('join_not_verified'));
+        showJoinStatus(t('join_db_error'), true);
+        alert(t('join_db_error'));
     } finally {
         if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerText = t('join_verify_btn'); }
     }
@@ -1921,7 +2048,7 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------- راه‌اندازی ----------
 document.addEventListener('DOMContentLoaded', async () => {
-    await initTelegramWebApp();
+    await UserContext.init();
     alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     await bootstrapUser();

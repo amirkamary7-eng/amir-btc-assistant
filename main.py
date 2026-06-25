@@ -377,21 +377,33 @@ async def check_join(
     if refresh:
         clear_cached_join_status(resolved_id)
 
-    if database_ready():
-        with get_db_session() as db:
+    try:
+        if database_ready():
+            with get_db_session() as db:
+                result = resolve_channel_membership(
+                    resolved_id,
+                    _check_channel_membership,
+                    db=db,
+                    force_refresh=refresh,
+                )
+        else:
             result = resolve_channel_membership(
                 resolved_id,
                 _check_channel_membership,
-                db=db,
+                db=None,
                 force_refresh=refresh,
             )
-    else:
-        result = resolve_channel_membership(
-            resolved_id,
-            _check_channel_membership,
-            db=None,
-            force_refresh=refresh,
-        )
+    except Exception as exc:
+        print(f"⚠️ check-join error: {exc}")
+        return {
+            "status": "DB_ERROR",
+            "joined": False,
+            "reason": "database_unavailable",
+            "detail": str(exc),
+        }
+
+    if result.get("status") == "DB_ERROR":
+        return result
     return {"status": "success", **result}
 
 @app.post("/api/tickets")

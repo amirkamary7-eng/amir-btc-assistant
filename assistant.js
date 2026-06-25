@@ -26,7 +26,7 @@ const AssistantUI = {
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
-                <p class="ai-bubble-text">چطور می‌تونم کمکتون کنم؟ سوالی دارید بپرسید ✨</p>
+                <p class="ai-speech-text">چطور می‌تونم کمکتون کنم؟ سوالی دارید بپرسید ✨</p>
                 <span class="ai-bubble-tail"></span>
             </div>
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
@@ -83,9 +83,15 @@ const AssistantUI = {
         const closeBtn = document.getElementById('ai-bubble-close');
         if (!bubble) return;
 
+        if (localStorage.getItem('ai_speech_dismissed') === '1') {
+            bubble.classList.add('ai-speech-hidden');
+            return;
+        }
+
         const dismiss = () => {
             if (bubble.classList.contains('ai-speech-hidden')) return;
             bubble.classList.add('ai-speech-hidden');
+            localStorage.setItem('ai_speech_dismissed', '1');
         };
 
         closeBtn?.addEventListener('click', (e) => {
@@ -94,12 +100,16 @@ const AssistantUI = {
             dismiss();
         });
 
-        window.setTimeout(dismiss, 5000);
+        window.setTimeout(dismiss, 8000);
     },
 
     bindEvents() {
         document.getElementById('ai-fab')?.addEventListener('click', () => this.toggle(true));
-        document.getElementById('ai-close')?.addEventListener('click', () => this.toggle(false));
+        document.getElementById('ai-close')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.toggle(false);
+        });
         document.getElementById('ai-send')?.addEventListener('click', () => this.send());
         document.getElementById('ai-attach')?.addEventListener('click', () => document.getElementById('ai-file')?.click());
         document.getElementById('ai-file')?.addEventListener('change', (e) => this.handleFile(e));
@@ -115,7 +125,10 @@ const AssistantUI = {
         const bubble = document.getElementById('ai-speech-bubble');
         if (panel) panel.style.display = this.open ? 'flex' : 'none';
         if (fab) fab.classList.toggle('ai-fab-hidden', this.open);
-        if (bubble && this.open) bubble.classList.add('ai-speech-hidden');
+        if (bubble && this.open) {
+            bubble.classList.add('ai-speech-hidden');
+            localStorage.setItem('ai_speech_dismissed', '1');
+        }
         if (this.open) {
             this.refreshLimits();
             document.getElementById('ai-input')?.focus();
@@ -147,7 +160,7 @@ const AssistantUI = {
             div.innerHTML = `<img src="${imageUrl}" class="ai-bubble-img" alt="">`;
         }
         const text = document.createElement('div');
-        text.className = 'ai-bubble-text';
+        text.className = 'ai-msg-text';
         text.textContent = content;
         div.appendChild(text);
         box.appendChild(div);

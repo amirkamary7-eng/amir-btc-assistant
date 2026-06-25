@@ -131,9 +131,9 @@
             <div class="profile-avatar">
                 <img id="profile-avatar" src="https://ui-avatars.com/api/?name=Guest&background=f7931a&color=fff&bold=true" alt="">
             </div>
-            <h3 class="profile-name" id="profile-name" data-i18n="guest">کاربر میهمان</h3>
-            <span class="profile-username" id="profile-username">@guest</span>
-            <span class="profile-id">ID: <span id="profile-id-num">000000</span></span>
+            <h3 class="profile-name profile-loading-target" id="profile-name" data-i18n="guest">کاربر میهمان</h3>
+            <span class="profile-username profile-loading-target" id="profile-username">@guest</span>
+            <span class="profile-id">ID: <span class="profile-loading-target" id="profile-id-num">000000</span></span>
             <div class="online-badge" id="online-badge" style="display:none;">
                 <span class="online-dot"></span>
                 <span id="online-count">0</span> <span data-i18n="online_users">کاربر آنلاین</span>
@@ -223,6 +223,7 @@
                 <button class="submit-btn" style="margin-bottom: 10px; font-size: 15px;" onclick="openJoinAndVerify()" data-i18n="join_vip_btn">عضویت در کانال</button>
                 <button id="join-verify-btn" class="cancel-btn" style="width:100%; margin-bottom: 10px;" onclick="verifyJoin()" data-i18n="join_verify_btn">بررسی عضویت</button>
                 <p style="font-size: 11px; color: var(--text-sub);" data-i18n="join_vip_hint">بعد از عضویت، دکمه «بررسی عضویت» را بزنید.</p>
+                <p id="join-status-msg" class="join-status-msg" style="display:none;"></p>
             </div>
 
             <!-- حالت وب (کاربر خارج از تلگرام) -->
