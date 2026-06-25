@@ -8,17 +8,21 @@ import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
+import httpx
 import requests
 import xml.etree.ElementTree as ET
 from pydantic import BaseModel
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from deep_translator import GoogleTranslator
+from dotenv import load_dotenv
 
 # کتابخانه‌های ربات تلگرام
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+load_dotenv()
 
 # ==========================================
 # ۱. تنظیمات و راه‌اندازی FastAPI
@@ -251,6 +255,122 @@ async def health_check():
 async def check_join(user_id: str = Query(...)):
     result = _check_channel_membership(user_id)
     return {"status": "success", **result}
+
+# ==========================================
+# ۳.۴ سیستم Failover برای AI + Rate Limit
+# ==========================================
+GEMINI_MODEL_PRIMARY = os.environ.get("GEMINI_MODEL_PRIMARY", "gemini-2.5-flash")
+OPENROUTER_MODEL_1 = os.environ.get("OPENROUTER_MODEL_1", "meta-llama/llama-3.3-70b-instruct:free")
+OPENROUTER_MODEL_2 = os.environ.get("OPENROUTER_MODEL_2", "deepseek/deepseek-r1:free")
+
+AI_RATE_LIMIT_SECONDS = 4.0
+_ai_last_request_at = {}
+_ai_rate_lock = asyncio.Lock()
+
+
+class ChatRequest(BaseModel):
+    user_id: str
+    prompt: str
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    provider: str
+    model: str
+
+
+def _is_retryable_ai_status(status_code: int) -> bool:
+    return status_code in (408, 409, 425, 429, 500, 502, 503, 504)
+
+
+async def _ai_rate_limit_or_throw(user_id: str) -> None:
+    now = time.time()
+    async with _ai_rate_lock:
+        last = _ai_last_request_at.get(str(user_id))
+        if last is not None and (now - last) < AI_RATE_LIMIT_SECONDS:
+            raise HTTPException(status_code=429, detail="لطفاً کمی صبر کنید و دوباره تلاش کنید")
+        _ai_last_request_at[str(user_id)] = now
+
+
+async def _call_gemini(prompt: str, model: str) -> Optional[str]:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    params = {"key": api_key}
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+
+    timeout = httpx.Timeout(connect=8.0, read=25.0, write=10.0, pool=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            res = await client.post(url, params=params, json=payload)
+        if res.status_code >= 400:
+            return None if _is_retryable_ai_status(res.status_code) else None
+        data = res.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return None
+        content = candidates[0].get("content") or {}
+        parts = content.get("parts") or []
+        if not parts:
+            return None
+        text = parts[0].get("text")
+        return text or None
+    except Exception:
+        return None
+
+
+async def _call_openrouter(prompt: str, model: str) -> Optional[str]:
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        return None
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+
+    timeout = httpx.Timeout(connect=8.0, read=35.0, write=10.0, pool=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            res = await client.post(url, headers=headers, json=payload)
+        if res.status_code >= 400:
+            return None if _is_retryable_ai_status(res.status_code) else None
+        data = res.json()
+        choices = data.get("choices") or []
+        if not choices:
+            return None
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        return content or None
+    except Exception:
+        return None
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
+    await _ai_rate_limit_or_throw(req.user_id)
+
+    prompt = (req.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="متن پیام خالی است")
+
+    text = await _call_gemini(prompt, GEMINI_MODEL_PRIMARY)
+    if text:
+        return ChatResponse(reply=text, provider="gemini", model=GEMINI_MODEL_PRIMARY)
+
+    text2 = await _call_openrouter(prompt, OPENROUTER_MODEL_1)
+    if text2:
+        return ChatResponse(reply=text2, provider="openrouter", model=OPENROUTER_MODEL_1)
+
+    text3 = await _call_openrouter(prompt, OPENROUTER_MODEL_2)
+    if text3:
+        return ChatResponse(reply=text3, provider="openrouter", model=OPENROUTER_MODEL_2)
+
+    raise HTTPException(
+        status_code=503,
+        detail="سرورها موقتاً مشغول هستند، لطفاً چند لحظه دیگر تلاش کنید",
+    )
 
 @app.post("/api/tickets")
 async def create_ticket(ticket: TicketCreate):
