@@ -26,12 +26,8 @@ const COIN_NAMES = {
 };
 function getCoinFullName(sym) { return COIN_NAMES[sym] || sym; }
 
-let currentLang = localStorage.getItem('app_lang') || 'fa';
-let watchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
-if (watchlist.length > MAX_WATCHLIST) {
-    watchlist = watchlist.slice(0, MAX_WATCHLIST);
-    localStorage.setItem('watchlist', JSON.stringify(watchlist));
-}
+let currentLang = 'fa';
+let watchlist = [];
 let analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
 let tickets = [];
 let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
@@ -43,6 +39,7 @@ let sliderInterval = null;
 let currentSlide = 0;
 let editingAnalysisId = null;
 let hasChannelAccess = false;
+let joinCheckDone = false;
 
 // ---------- ترجمه‌ها ----------
 const i18n = {
@@ -153,6 +150,118 @@ function getUserName() {
     if (!u) return t('guest');
     return `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || t('guest');
 }
+
+function userStorageKey(base) {
+    return `${base}_${getUserId()}`;
+}
+
+function loadLangFromStorage() {
+    const scoped = localStorage.getItem(userStorageKey('app_lang'));
+    if (scoped === 'fa' || scoped === 'en') return scoped;
+    const legacy = localStorage.getItem('app_lang');
+    if (legacy === 'fa' || legacy === 'en') return legacy;
+    return 'fa';
+}
+
+function loadWatchlistFromStorage() {
+    const key = userStorageKey('watchlist');
+    let stored = JSON.parse(localStorage.getItem(key) || '[]');
+    if (!stored.length) {
+        const legacy = JSON.parse(localStorage.getItem('watchlist') || '[]');
+        if (legacy.length) {
+            stored = legacy.slice(0, MAX_WATCHLIST);
+            localStorage.setItem(key, JSON.stringify(stored));
+        }
+    }
+    watchlist = stored.slice(0, MAX_WATCHLIST);
+}
+
+function saveLangToStorage() {
+    localStorage.setItem(userStorageKey('app_lang'), currentLang);
+    localStorage.setItem('app_lang', currentLang);
+}
+
+function getJoinCacheKey() {
+    return userStorageKey('has_joined_channel');
+}
+
+function getJoinCache() {
+    return localStorage.getItem(getJoinCacheKey()) === 'true';
+}
+
+function setJoinCache(value) {
+    localStorage.setItem(getJoinCacheKey(), value ? 'true' : 'false');
+}
+
+async function persistWatchlist() {
+    localStorage.setItem(userStorageKey('watchlist'), JSON.stringify(watchlist));
+    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    try {
+        await apiFetch('/api/watchlist', {
+            method: 'PUT',
+            body: JSON.stringify({ user_id: getUserId(), symbols: watchlist })
+        });
+    } catch (e) {
+        console.warn('persistWatchlist:', e);
+    }
+}
+
+async function saveLangToServer() {
+    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    try {
+        await apiFetch('/api/users/me/settings', {
+            method: 'PUT',
+            body: JSON.stringify({ user_id: getUserId(), lang: currentLang })
+        });
+    } catch (e) {
+        console.warn('saveLangToServer:', e);
+    }
+}
+
+async function bootstrapUser() {
+    currentLang = loadLangFromStorage();
+    loadWatchlistFromStorage();
+
+    if (!API_BASE || String(getUserId()).startsWith('guest_')) {
+        applyLanguage();
+        return;
+    }
+
+    try {
+        const u = tg?.initDataUnsafe?.user;
+        const data = await apiFetch('/api/users/bootstrap', {
+            method: 'POST',
+            body: JSON.stringify({
+                user_id: getUserId(),
+                username: u?.username || null,
+                first_name: u?.first_name || null,
+                last_name: u?.last_name || null,
+                lang: currentLang
+            })
+        });
+        if (data.user?.lang === 'fa' || data.user?.lang === 'en') {
+            currentLang = data.user.lang;
+        }
+        if (Array.isArray(data.watchlist)) {
+            if (data.watchlist.length) {
+                watchlist = data.watchlist.slice(0, MAX_WATCHLIST);
+            } else if (watchlist.length) {
+                await persistWatchlist();
+            }
+            localStorage.setItem(userStorageKey('watchlist'), JSON.stringify(watchlist));
+        }
+        if (data.user?.channel_joined) {
+            hasChannelAccess = true;
+            setJoinCache(true);
+        }
+        saveLangToStorage();
+        applyLanguage();
+    } catch (e) {
+        console.warn('bootstrapUser:', e);
+        applyLanguage();
+    }
+}
+
 async function apiFetch(path, options = {}) {
     if (!API_BASE) throw new Error('API_BASE not configured');
     const res = await fetch(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json', ...options.headers }, ...options });
@@ -188,7 +297,7 @@ function applyLanguage() {
     document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { const key = el.dataset.i18nPlaceholder; if (key) el.placeholder = t(key); });
     document.documentElement.lang = currentLang;
     document.documentElement.dir = currentLang === 'fa' ? 'rtl' : 'ltr';
-    localStorage.setItem('app_lang', currentLang);
+    saveLangToStorage();
     updateLangChecks();
 }
 function refreshUI() {
@@ -207,6 +316,8 @@ function refreshUI() {
 function selectLang(lang) {
     if (lang === currentLang) { closeLangModal(); return; }
     currentLang = lang;
+    saveLangToStorage();
+    saveLangToServer();
     delete Cache.storage['news'];
     refreshUI();
     loadNews(true);
@@ -428,7 +539,7 @@ function toggleWatchlist(symbol, event) {
         }
         watchlist.push(symbol);
     }
-    localStorage.setItem('watchlist', JSON.stringify(watchlist));
+    persistWatchlist();
     renderMarket();
     renderWatchlist();
 }
@@ -1277,12 +1388,14 @@ function openJoinAndVerify() {
 }
 
 // ---------- پاپ‌آپ جوین اجباری ----------
-async function checkMandatoryJoin() {
+async function checkMandatoryJoin(options = {}) {
+    const { force = false } = typeof options === 'boolean' ? { force: options } : options;
     const modal = document.getElementById('mandatory-join-modal');
     if (!modal) return;
 
     if (isAdmin()) {
         hasChannelAccess = true;
+        joinCheckDone = true;
         modal.style.display = 'none';
         setAppLocked(false);
         return;
@@ -1291,35 +1404,66 @@ async function checkMandatoryJoin() {
     const userId = getUserId();
     if (String(userId).startsWith('guest_')) {
         hasChannelAccess = false;
+        joinCheckDone = true;
         modal.style.display = 'flex';
         setAppLocked(true);
         return;
     }
 
+    if (!force && joinCheckDone && hasChannelAccess) {
+        modal.style.display = 'none';
+        setAppLocked(false);
+        return;
+    }
+
+    if (!force && getJoinCache()) {
+        hasChannelAccess = true;
+        joinCheckDone = true;
+        modal.style.display = 'none';
+        setAppLocked(false);
+        return;
+    }
+
     if (!API_BASE) {
-        hasChannelAccess = localStorage.getItem('has_joined_channel') === 'true';
+        hasChannelAccess = getJoinCache();
+        joinCheckDone = true;
         modal.style.display = hasChannelAccess ? 'none' : 'flex';
         setAppLocked(!hasChannelAccess);
         return;
     }
 
     try {
-        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}`);
-        hasChannelAccess = !!data.joined;
-        if (hasChannelAccess) {
-            localStorage.setItem('has_joined_channel', 'true');
+        const refreshParam = force ? '&refresh=true' : '';
+        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}${refreshParam}`);
+        joinCheckDone = true;
+        if (data.joined) {
+            hasChannelAccess = true;
+            setJoinCache(true);
             modal.style.display = 'none';
             setAppLocked(false);
-        } else {
-            localStorage.removeItem('has_joined_channel');
-            modal.style.display = 'flex';
-            setAppLocked(true);
+            return;
         }
+        if (!force && getJoinCache()) {
+            hasChannelAccess = true;
+            modal.style.display = 'none';
+            setAppLocked(false);
+            return;
+        }
+        hasChannelAccess = false;
+        setJoinCache(false);
+        modal.style.display = 'flex';
+        setAppLocked(true);
     } catch (e) {
         console.warn('checkMandatoryJoin:', e);
-        hasChannelAccess = localStorage.getItem('has_joined_channel') === 'true';
-        modal.style.display = hasChannelAccess ? 'none' : 'flex';
-        setAppLocked(!hasChannelAccess);
+        joinCheckDone = true;
+        if (getJoinCache() || hasChannelAccess) {
+            hasChannelAccess = true;
+            modal.style.display = 'none';
+            setAppLocked(false);
+            return;
+        }
+        modal.style.display = 'flex';
+        setAppLocked(true);
     }
 }
 
@@ -1333,10 +1477,11 @@ async function verifyJoin() {
     if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.innerText = '...'; }
     try {
         if (API_BASE) {
-            const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}`);
+            const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}&refresh=true`);
             if (data.joined) {
                 hasChannelAccess = true;
-                localStorage.setItem('has_joined_channel', 'true');
+                joinCheckDone = true;
+                setJoinCache(true);
                 document.getElementById('mandatory-join-modal').style.display = 'none';
                 setAppLocked(false);
                 addNotification(t('join_verified'), t('join_welcome'), false);
@@ -1346,8 +1491,9 @@ async function verifyJoin() {
             alert(t('join_not_verified'));
             return;
         }
-        localStorage.setItem('has_joined_channel', 'true');
+        setJoinCache(true);
         hasChannelAccess = true;
+        joinCheckDone = true;
         document.getElementById('mandatory-join-modal').style.display = 'none';
         setAppLocked(false);
         addNotification(t('join_verified'), t('join_welcome'), false);
@@ -1430,14 +1576,19 @@ function startPolling() {
         }
     }, 30000);
     setInterval(checkAlerts, 15000);
-    setInterval(() => checkMandatoryJoin(), 120000);
 }
 
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (hasChannelAccess || String(getUserId()).startsWith('guest_')) return;
+    checkMandatoryJoin({ force: true });
+});
+
 // ---------- راه‌اندازی ----------
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
-    applyLanguage();
+    await bootstrapUser();
     loadUser();
     loadAlertsFromServer().then(() => {
         loadMarketData(true);
@@ -1447,7 +1598,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadNews();
     loadImportantNews();
     updateNotifBadge();
-    checkMandatoryJoin();
+    await checkMandatoryJoin();
     startPolling();
     setInterval(() => {
         if (document.getElementById('tickets-modal')?.style.display === 'flex') fetchTickets().then(renderTickets);
@@ -1503,3 +1654,4 @@ window.openNewsModal = openNewsModal;
 window.closeNewsModal = closeNewsModal;
 window.verifyJoin = verifyJoin;
 window.openJoinAndVerify = openJoinAndVerify;
+window.getUserId = getUserId;

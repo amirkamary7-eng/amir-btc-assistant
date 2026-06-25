@@ -8,6 +8,13 @@ import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import requests
 import xml.etree.ElementTree as ET
 from pydantic import BaseModel
@@ -15,6 +22,13 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from deep_translator import GoogleTranslator
+
+from backend.config import get_settings
+from backend.database import database_ready, get_db_session, init_database
+from backend.redis_client import init_redis, redis_ready
+from backend.routers import users as users_router
+from backend.routers import watchlist as watchlist_router
+from backend.services.join_service import resolve_channel_membership
 
 # کتابخانه‌های ربات تلگرام
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
@@ -32,6 +46,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(users_router.router, prefix="/api")
+app.include_router(watchlist_router.router, prefix="/api")
 
 # کش مرکزی اخبار
 news_cache = {"data": None, "expiry": 0}
@@ -245,11 +262,31 @@ def _check_channel_membership(user_id: str) -> dict:
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "bot_configured": bool(TOKEN and TOKEN != "REPLACE_WITH_TOKEN")}
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "bot_configured": settings.bot_configured,
+        "database_ready": database_ready(),
+        "redis_ready": redis_ready(),
+    }
 
 @app.get("/api/check-join")
-async def check_join(user_id: str = Query(...)):
-    result = _check_channel_membership(user_id)
+async def check_join(user_id: str = Query(...), refresh: bool = Query(False)):
+    if database_ready():
+        with get_db_session() as db:
+            result = resolve_channel_membership(
+                user_id,
+                _check_channel_membership,
+                db=db,
+                force_refresh=refresh,
+            )
+    else:
+        result = resolve_channel_membership(
+            user_id,
+            _check_channel_membership,
+            db=None,
+            force_refresh=refresh,
+        )
     return {"status": "success", **result}
 
 @app.post("/api/tickets")
@@ -472,6 +509,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @app.on_event("startup")
 async def startup_event():
     global telegram_app
+    init_database()
+    init_redis()
     asyncio.create_task(alert_polling_loop())
     if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
         print("ℹ️ Telegram token not configured; alert polling active, bot polling skipped.")
