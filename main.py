@@ -18,9 +18,10 @@ except ImportError:
 import requests
 import xml.etree.ElementTree as ET
 from pydantic import BaseModel
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 from deep_translator import GoogleTranslator
 
 from backend.config import get_settings
@@ -176,6 +177,10 @@ async def get_optimized_farsi_news():
 ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "831704732")
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
+WEBHOOK_URL = os.environ.get(
+    "TELEGRAM_WEBHOOK_URL",
+    "https://amir-btc-assistant.onrender.com/telegram",
+)
 REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")
 TICKETS_FILE = Path(__file__).parent / "data" / "tickets.json"
 
@@ -223,6 +228,34 @@ def _send_telegram_http(chat_id: str, text: str) -> bool:
     except Exception as e:
         print(f"⚠️ Telegram HTTP error: {e}")
         return False
+
+def _normalize_webhook_url(url: str) -> str:
+    from urllib.parse import urlparse, urlunparse
+
+    parsed = urlparse(url.strip())
+    path = re.sub(r"/+", "/", parsed.path or "/")
+    if path != "/telegram":
+        path = "/telegram"
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+
+def _set_telegram_webhook(url: str) -> bool:
+    if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
+        return False
+    clean_url = _normalize_webhook_url(url)
+    try:
+        res = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/setWebhook",
+            json={"url": clean_url, "drop_pending_updates": True},
+            timeout=15,
+        )
+        data = res.json()
+        if data.get("ok"):
+            print(f"✅ Telegram webhook set: {clean_url}")
+            return True
+        print(f"⚠️ setWebhook failed: {data.get('description', res.text)}")
+    except Exception as e:
+        print(f"⚠️ setWebhook error: {e}")
+    return False
 
 async def _send_telegram(chat_id: str, text: str) -> bool:
     global telegram_app
@@ -506,6 +539,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     )
 
+@app.post("/telegram")
+async def telegram_webhook(request: Request):
+    print("update received from telegram")
+    if telegram_app and telegram_app.bot:
+        try:
+            data = await request.json()
+            update = Update.de_json(data, telegram_app.bot)
+            await telegram_app.process_update(update)
+        except Exception as e:
+            print(f"⚠️ Telegram webhook processing error: {e}")
+    return Response(status_code=200)
+
 @app.on_event("startup")
 async def startup_event():
     global telegram_app
@@ -513,7 +558,7 @@ async def startup_event():
     init_redis()
     asyncio.create_task(alert_polling_loop())
     if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
-        print("ℹ️ Telegram token not configured; alert polling active, bot polling skipped.")
+        print("ℹ️ Telegram token not configured; alert polling active, webhook skipped.")
         return
 
     telegram_app = ApplicationBuilder().token(TOKEN).build()
@@ -521,16 +566,14 @@ async def startup_event():
 
     await telegram_app.initialize()
     await telegram_app.start()
-    await telegram_app.updater.start_polling(drop_pending_updates=True)
-    print("🚀 ربات تلگرام با موفقیت در پس‌زمینه فعال شد!")
+    _set_telegram_webhook(WEBHOOK_URL)
+    print("🚀 Telegram bot ready (webhook mode)")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     global telegram_app
     if telegram_app:
         try:
-            if telegram_app.updater.running:
-                await telegram_app.updater.stop()
             await telegram_app.stop()
             await telegram_app.shutdown()
         except Exception:
