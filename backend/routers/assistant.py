@@ -1,10 +1,11 @@
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.services.ai_service import chat, check_rate_limits
+from backend.services.telegram_auth import get_authenticated_telegram_user_id, verify_telegram_auth
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
@@ -22,17 +23,18 @@ class ChatRequest(BaseModel):
 
 
 @router.get("/limits")
-async def get_limits(user_id: str = Query(...)):
-    return {"status": "success", **check_rate_limits(user_id)}
+@verify_telegram_auth
+async def get_limits(request: Request, user_id: Optional[str] = Query(None)):
+    resolved_user_id = get_authenticated_telegram_user_id(request)
+    return {"status": "success", **check_rate_limits(resolved_user_id)}
 
 
 @router.post("/chat")
-async def assistant_chat(payload: ChatRequest):
-    if str(payload.user_id).startswith("guest_"):
-        return JSONResponse(status_code=400, content={"status": "error", "message": "Guest users not supported"})
-
+@verify_telegram_auth
+async def assistant_chat(payload: ChatRequest, request: Request):
+    resolved_user_id = get_authenticated_telegram_user_id(request)
     history = [{"role": m.role, "content": m.content} for m in payload.history]
-    result = await chat(payload.user_id, payload.message, history, payload.image)
+    result = await chat(resolved_user_id, payload.message, history, payload.image)
     if result.get("status") == "error":
         code = 429 if result.get("reason") in ("cooldown", "daily_message_limit", "daily_image_limit") else 503
         return JSONResponse(status_code=code, content=result)

@@ -6,8 +6,13 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Any, Optional
+from functools import wraps
+from typing import Any, Awaitable, Callable, Optional, TypeVar, cast
 from urllib.parse import unquote
+
+from fastapi import HTTPException, Request
+
+Handler = TypeVar("Handler", bound=Callable[..., Awaitable[Any]])
 
 
 def _parse_init_data_pairs(init_data: str) -> list[tuple[str, str]]:
@@ -65,3 +70,73 @@ def validate_telegram_init_data(
         return user if user.get("id") else None
     except Exception:
         return None
+
+
+def _get_init_data(request: Request) -> Optional[str]:
+    return request.headers.get("X-Telegram-Init-Data") or request.query_params.get("init_data")
+
+
+def _extract_request(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Request:
+    request = kwargs.get("request")
+    if isinstance(request, Request):
+        return request
+    for arg in args:
+        if isinstance(arg, Request):
+            return arg
+    raise RuntimeError("verify_telegram_auth requires a FastAPI Request parameter")
+
+
+def get_authenticated_telegram_user(request: Request) -> dict[str, Any]:
+    cached_user = getattr(request.state, "telegram_user", None)
+    if isinstance(cached_user, dict) and cached_user.get("id"):
+        return cached_user
+
+    from backend.config import get_settings
+
+    settings = get_settings()
+    init_data = _get_init_data(request)
+    if not init_data:
+        raise HTTPException(status_code=401, detail="Missing Telegram init data")
+    if not settings.bot_configured:
+        raise HTTPException(status_code=401, detail="Telegram bot token is not configured")
+
+    user = validate_telegram_init_data(init_data, settings.TELEGRAM_BOT_TOKEN)
+    if not user or not user.get("id"):
+        raise HTTPException(status_code=401, detail="Invalid Telegram init data")
+
+    request.state.telegram_user = user
+    request.state.telegram_user_id = str(user["id"])
+    return user
+
+
+def get_authenticated_telegram_user_id(request: Request) -> str:
+    return str(get_authenticated_telegram_user(request)["id"])
+
+
+def is_admin_telegram_id(user_id: str) -> bool:
+    from backend.config import get_settings
+
+    return str(user_id) in get_settings().admin_ids
+
+
+def verify_telegram_auth(func: Handler) -> Handler:
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        request = _extract_request(args, kwargs)
+        get_authenticated_telegram_user(request)
+        return await func(*args, **kwargs)
+
+    return cast(Handler, wrapper)
+
+
+def verify_admin_telegram_auth(func: Handler) -> Handler:
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        request = _extract_request(args, kwargs)
+        user_id = get_authenticated_telegram_user_id(request)
+        if not is_admin_telegram_id(user_id):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        request.state.telegram_is_admin = True
+        return await func(*args, **kwargs)
+
+    return cast(Handler, wrapper)

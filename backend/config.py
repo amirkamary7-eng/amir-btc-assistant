@@ -10,6 +10,7 @@ class Settings:
         self.REDIS_URL = os.environ.get("REDIS_URL", "")
 
         self.ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "831704732")
+        self.ADMIN_IDS = os.environ.get("ADMIN_IDS", self.ADMIN_TELEGRAM_ID)
         self.TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
         self.WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
         self.REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")
@@ -43,6 +44,12 @@ class Settings:
     @property
     def bot_configured(self) -> bool:
         return bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_BOT_TOKEN != "REPLACE_WITH_TOKEN")
+
+    @property
+    def admin_ids(self) -> set[str]:
+        ids = {item.strip() for item in str(self.ADMIN_IDS or "").split(",") if item.strip()}
+        ids.add(str(self.ADMIN_TELEGRAM_ID))
+        return ids
 
 
 @lru_cache

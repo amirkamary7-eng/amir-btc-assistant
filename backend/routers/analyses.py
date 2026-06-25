@@ -1,10 +1,9 @@
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from backend.config import get_settings
 from backend.database import database_ready, get_db_session
 from backend.services.analysis_service import (
     create_analysis,
@@ -13,6 +12,7 @@ from backend.services.analysis_service import (
     list_analyses,
     update_analysis,
 )
+from backend.services.telegram_auth import get_authenticated_telegram_user_id, verify_admin_telegram_auth
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
 
@@ -33,10 +33,6 @@ class AnalysisUpdate(BaseModel):
     text: str = Field(min_length=1)
 
 
-def _is_admin(user_id: str) -> bool:
-    return str(user_id) == str(get_settings().ADMIN_TELEGRAM_ID)
-
-
 @router.get("")
 async def get_analyses(version: Optional[int] = Query(None)):
     if not database_ready():
@@ -52,9 +48,9 @@ async def get_analyses(version: Optional[int] = Query(None)):
 
 
 @router.post("")
-async def post_analysis(payload: AnalysisCreate, admin_id: str = Query(...)):
-    if not _is_admin(admin_id):
-        return JSONResponse(status_code=403, content={"status": "error", "message": "Unauthorized"})
+@verify_admin_telegram_auth
+async def post_analysis(payload: AnalysisCreate, request: Request, admin_id: Optional[str] = Query(None)):
+    resolved_admin_id = get_authenticated_telegram_user_id(request)
     if not database_ready():
         return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
 
@@ -66,15 +62,19 @@ async def post_analysis(payload: AnalysisCreate, admin_id: str = Query(...)):
             image=payload.image,
             text=payload.text,
             author=payload.author,
-            author_id=payload.author_id or admin_id,
+            author_id=resolved_admin_id,
         )
     return {"status": "success", "analysis": item, "version": get_version()}
 
 
 @router.put("/{analysis_id}")
-async def put_analysis(analysis_id: str, payload: AnalysisUpdate, admin_id: str = Query(...)):
-    if not _is_admin(admin_id):
-        return JSONResponse(status_code=403, content={"status": "error", "message": "Unauthorized"})
+@verify_admin_telegram_auth
+async def put_analysis(
+    analysis_id: str,
+    payload: AnalysisUpdate,
+    request: Request,
+    admin_id: Optional[str] = Query(None),
+):
     if not database_ready():
         return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
 
@@ -93,9 +93,8 @@ async def put_analysis(analysis_id: str, payload: AnalysisUpdate, admin_id: str 
 
 
 @router.delete("/{analysis_id}")
-async def remove_analysis(analysis_id: str, admin_id: str = Query(...)):
-    if not _is_admin(admin_id):
-        return JSONResponse(status_code=403, content={"status": "error", "message": "Unauthorized"})
+@verify_admin_telegram_auth
+async def remove_analysis(analysis_id: str, request: Request, admin_id: Optional[str] = Query(None)):
     if not database_ready():
         return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
 

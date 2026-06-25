@@ -36,17 +36,33 @@ from backend.routers import referrals as referrals_router
 from backend.routers import sessions as sessions_router
 from backend.routers import assistant as assistant_router
 from backend.services.join_service import resolve_channel_membership, clear_cached_join_status
-from backend.services.telegram_auth import validate_telegram_init_data
+from backend.services.telegram_auth import (
+    get_authenticated_telegram_user,
+    get_authenticated_telegram_user_id,
+    is_admin_telegram_id,
+    verify_admin_telegram_auth as _verify_admin_telegram_auth,
+    verify_telegram_auth as _verify_telegram_auth,
+)
 from backend.redis_client import cache_get_json, cache_set_json
 
 # کتابخانه‌های ربات تلگرام
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
 # ==========================================
 # ۱. تنظیمات و راه‌اندازی FastAPI
 # ==========================================
-app = FastAPI(title="Crypto Premium News & Bot Engine")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # کدهای استارت‌آپ (init_database و ...)
+    yield
+    # کدهای شات‌داون
+    print("🛑 Shutting down...")
+
+app = FastAPI(title="Crypto Premium News & Bot Engine", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +86,14 @@ news_cache = {"data": None, "expiry": 0}
 CACHE_TTL = 900  # ۱۵ دقیقه
 
 telegram_app = None
+
+
+def verify_telegram_auth(func):
+    return _verify_telegram_auth(func)
+
+
+def verify_admin_telegram_auth(func):
+    return _verify_admin_telegram_auth(func)
 
 # ==========================================
 # ۲. مسیر ریشه برای تست سلامت سرور
@@ -327,52 +351,14 @@ async def health_check():
         "redis_ready": redis_ready(),
     }
 
-def _is_untrusted_user_id(user_id: str) -> bool:
-    uid = str(user_id or "")
-    return uid.startswith("guest_") or uid in ("pending_telegram", "")
-
-
-def _resolve_user_id_from_request(user_id: str, init_data: Optional[str]) -> tuple[str, Optional[dict]]:
-    """Prefer cryptographically verified Telegram user id when initData is present."""
-    if init_data:
-        if TOKEN and TOKEN != "REPLACE_WITH_TOKEN":
-            validated = validate_telegram_init_data(init_data, TOKEN)
-            if validated and validated.get("id"):
-                return str(validated["id"]), None
-            if not _is_untrusted_user_id(user_id):
-                print(f"⚠️ initData validation failed for user_id={user_id}")
-            return str(user_id), {
-                "status": "error",
-                "joined": False,
-                "reason": "invalid_init_data",
-            }
-        if _is_untrusted_user_id(user_id):
-            return str(user_id), {
-                "status": "error",
-                "joined": False,
-                "reason": "init_data_unverified",
-            }
-
-    if _is_untrusted_user_id(user_id):
-        return str(user_id), {
-            "status": "error",
-            "joined": False,
-            "reason": "guest_user",
-        }
-
-    return str(user_id), None
-
-
 @app.get("/api/check-join")
+@verify_telegram_auth
 async def check_join(
     request: Request,
-    user_id: str = Query(...),
+    user_id: Optional[str] = Query(None),
     refresh: bool = Query(False),
 ):
-    init_data = request.headers.get("X-Telegram-Init-Data") or request.query_params.get("init_data")
-    resolved_id, init_error = _resolve_user_id_from_request(user_id, init_data)
-    if init_error:
-        return init_error
+    resolved_id = get_authenticated_telegram_user_id(request)
 
     if refresh:
         clear_cached_join_status(resolved_id)
@@ -407,12 +393,19 @@ async def check_join(
     return {"status": "success", **result}
 
 @app.post("/api/tickets")
-async def create_ticket(ticket: TicketCreate):
+@verify_telegram_auth
+async def create_ticket(ticket: TicketCreate, request: Request):
+    telegram_user = get_authenticated_telegram_user(request)
+    resolved_user_id = str(telegram_user["id"])
+    full_name = " ".join(
+        part for part in [telegram_user.get("first_name"), telegram_user.get("last_name")] if part
+    ).strip()
+    display_name = telegram_user.get("username") or full_name or ticket.user_name or resolved_user_id
     tickets = _read_tickets()
     new_ticket = {
         "id": str(uuid.uuid4())[:8],
-        "user_id": ticket.user_id,
-        "user_name": ticket.user_name,
+        "user_id": resolved_user_id,
+        "user_name": display_name,
         "title": ticket.title,
         "body": ticket.body,
         "status": "open",
@@ -423,30 +416,29 @@ async def create_ticket(ticket: TicketCreate):
     _write_tickets(tickets)
     await _send_telegram(
         ADMIN_TELEGRAM_ID,
-        f"🎫 تیکت جدید\nاز: {ticket.user_name} ({ticket.user_id})\nعنوان: {ticket.title}\n\n{ticket.body}"
+        f"🎫 تیکت جدید\nاز: {display_name} ({resolved_user_id})\nعنوان: {ticket.title}\n\n{ticket.body}"
     )
-    if ticket.user_id and not str(ticket.user_id).startswith("guest_"):
-        await _send_telegram(
-            ticket.user_id,
-            f"✅ تیکت شما ثبت شد\nعنوان: {ticket.title}\nبه زودی پاسخ داده می‌شود."
-        )
+    await _send_telegram(
+        resolved_user_id,
+        f"✅ تیکت شما ثبت شد\nعنوان: {ticket.title}\nبه زودی پاسخ داده می‌شود."
+    )
     return {"status": "success", "ticket": new_ticket}
 
 @app.get("/api/tickets")
-async def get_user_tickets(user_id: str = Query(...)):
-    user_tickets = [t for t in _read_tickets() if t["user_id"] == user_id]
+@verify_telegram_auth
+async def get_user_tickets(request: Request, user_id: Optional[str] = Query(None)):
+    resolved_user_id = get_authenticated_telegram_user_id(request)
+    user_tickets = [t for t in _read_tickets() if t["user_id"] == resolved_user_id]
     return {"status": "success", "tickets": user_tickets}
 
 @app.get("/api/tickets/all")
-async def get_all_tickets(admin_id: str = Query(...)):
-    if str(admin_id) != str(ADMIN_TELEGRAM_ID):
-        return JSONResponse(status_code=403, content={"status": "error", "message": "Unauthorized"})
+@verify_admin_telegram_auth
+async def get_all_tickets(request: Request, admin_id: Optional[str] = Query(None)):
     return {"status": "success", "tickets": _read_tickets()}
 
 @app.post("/api/tickets/{ticket_id}/reply")
-async def reply_ticket(ticket_id: str, reply: TicketReply):
-    if str(reply.admin_id) != str(ADMIN_TELEGRAM_ID):
-        return JSONResponse(status_code=403, content={"status": "error", "message": "Unauthorized"})
+@verify_admin_telegram_auth
+async def reply_ticket(ticket_id: str, reply: TicketReply, request: Request):
     tickets = _read_tickets()
     found = None
     for t in tickets:
@@ -469,26 +461,29 @@ async def reply_ticket(ticket_id: str, reply: TicketReply):
     return {"status": "success", "ticket": found}
 
 @app.delete("/api/tickets/{ticket_id}")
+@verify_telegram_auth
 async def delete_ticket(
+    request: Request,
     ticket_id: str,
     user_id: Optional[str] = Query(None),
     admin_id: Optional[str] = Query(None),
 ):
-    is_admin = admin_id and str(admin_id) == str(ADMIN_TELEGRAM_ID)
+    resolved_user_id = get_authenticated_telegram_user_id(request)
+    is_admin = is_admin_telegram_id(resolved_user_id)
     tickets = _read_tickets()
     ticket = next((t for t in tickets if t["id"] == ticket_id), None)
     if not ticket:
         return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
-    if not is_admin and ticket["user_id"] != user_id:
+    if not is_admin and ticket["user_id"] != resolved_user_id:
         return JSONResponse(status_code=403, content={"status": "error", "message": "Forbidden"})
     _write_tickets([t for t in tickets if t["id"] != ticket_id])
     return {"status": "success"}
 
 @app.post("/api/notify")
-async def notify_user(req: NotifyRequest):
-    if str(req.user_id).startswith("guest_"):
-        return {"status": "skipped", "sent": False, "reason": "guest_user"}
-    sent = await _send_telegram(req.user_id, req.message)
+@verify_telegram_auth
+async def notify_user(req: NotifyRequest, request: Request):
+    resolved_user_id = get_authenticated_telegram_user_id(request)
+    sent = await _send_telegram(resolved_user_id, req.message)
     return {"status": "success" if sent else "skipped", "sent": sent}
 
 # ==========================================
@@ -516,11 +511,13 @@ def _write_alerts(alerts):
     ALERTS_FILE.write_text(json.dumps(alerts, ensure_ascii=False, indent=2), encoding="utf-8")
 
 @app.post("/api/alerts")
-async def create_alert(alert: AlertCreate):
+@verify_telegram_auth
+async def create_alert(alert: AlertCreate, request: Request):
+    resolved_user_id = get_authenticated_telegram_user_id(request)
     alerts = _read_alerts()
     new_alert = {
         "id": str(uuid.uuid4())[:8],
-        "user_id": alert.user_id,
+        "user_id": resolved_user_id,
         "symbol": alert.symbol.upper(),
         "price": alert.price,
         "direction": alert.direction or "above",
@@ -533,25 +530,28 @@ async def create_alert(alert: AlertCreate):
     )]
     alerts.insert(0, new_alert)
     _write_alerts(alerts)
-    if alert.user_id and not str(alert.user_id).startswith("guest_"):
-        await _send_telegram(
-            alert.user_id,
-            f"🔔 هشدار قیمت ثبت شد\n{new_alert['symbol']} — هدف: ${new_alert['price']}"
-        )
+    await _send_telegram(
+        resolved_user_id,
+        f"🔔 هشدار قیمت ثبت شد\n{new_alert['symbol']} — هدف: ${new_alert['price']}"
+    )
     return {"status": "success", "alert": new_alert}
 
 @app.get("/api/alerts")
-async def get_user_alerts(user_id: str = Query(...)):
-    user_alerts = [a for a in _read_alerts() if a["user_id"] == user_id]
+@verify_telegram_auth
+async def get_user_alerts(request: Request, user_id: Optional[str] = Query(None)):
+    resolved_user_id = get_authenticated_telegram_user_id(request)
+    user_alerts = [a for a in _read_alerts() if a["user_id"] == resolved_user_id]
     return {"status": "success", "alerts": user_alerts}
 
 @app.delete("/api/alerts/{alert_id}")
-async def delete_alert(alert_id: str, user_id: str = Query(...)):
+@verify_telegram_auth
+async def delete_alert(request: Request, alert_id: str, user_id: Optional[str] = Query(None)):
+    resolved_user_id = get_authenticated_telegram_user_id(request)
     alerts = _read_alerts()
     alert = next((a for a in alerts if a["id"] == alert_id), None)
     if not alert:
         return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
-    if alert["user_id"] != user_id:
+    if alert["user_id"] != resolved_user_id:
         return JSONResponse(status_code=403, content={"status": "error", "message": "Forbidden"})
     _write_alerts([a for a in alerts if a["id"] != alert_id])
     return {"status": "success"}
@@ -632,34 +632,35 @@ async def telegram_webhook(request: Request):
             print(f"⚠️ Telegram webhook processing error: {e}")
     return Response(status_code=200)
 
-@app.on_event("startup")
-async def startup_event():
-    global telegram_app
-    init_database()
-    init_redis()
-    asyncio.create_task(alert_polling_loop())
-    if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
-        print("ℹ️ Telegram token not configured; alert polling active, webhook skipped.")
-        return
 
-    telegram_app = ApplicationBuilder().token(TOKEN).build()
-    telegram_app.add_handler(CommandHandler("start", start))
-
-    await telegram_app.initialize()
-    await telegram_app.start()
-    _set_telegram_webhook(WEBHOOK_URL)
-    print("🚀 Telegram bot ready (webhook mode)")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    global telegram_app
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- شروع استارت‌آپ ---
+    print("🚀 Starting application...")
+    try:
+        await init_database()
+        await init_redis()
+        asyncio.create_task(alert_polling_loop())
+        
+        # کد تلگرام را از اینجا شروع کن
+        global telegram_app
+        telegram_app = ApplicationBuilder().token(TOKEN).build()
+        telegram_app.add_handler(CommandHandler("start", start))
+        
+        await telegram_app.initialize()
+        await telegram_app.start()
+        await _set_telegram_webhook(WEBHOOK_URL)
+        print("✅ Telegram bot ready (webhook mode)")
+        
+    except Exception as e:
+        print(f"⚠️ Startup failed: {e}")
+    
+    yield # برنامه در حال اجراست
+    
+    # --- شروع خاموشی ---
+    print("🛑 Shutting down...")
     if telegram_app:
-        try:
-            await telegram_app.stop()
-            await telegram_app.shutdown()
-        except Exception:
-            pass
-        print("🔌 ربات تلگرام متوقف شد.")
+        await telegram_app.stop()
 
 # ==========================================
 # ۵. اجرای نهایی سرور
