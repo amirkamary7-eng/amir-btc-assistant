@@ -88,3 +88,45 @@ def cache_get_json(key: str) -> Optional[Any]:
 
 def cache_set_json(key: str, value: Any, ttl_seconds: int) -> None:
     cache_set(key, json.dumps(value, ensure_ascii=False), ttl_seconds)
+
+
+def cache_sadd(key: str, member: str, ttl_seconds: int | None = None) -> None:
+    if _redis_client:
+        try:
+            _redis_client.sadd(key, member)
+            if ttl_seconds:
+                _redis_client.expire(key, ttl_seconds)
+            return
+        except Exception as exc:
+            print(f"⚠️ Redis SADD failed for {key}: {exc}")
+    entry = _memory_cache.setdefault(f"set:{key}", {"members": set(), "expires_at": 0})
+    if ttl_seconds:
+        entry["expires_at"] = time.time() + ttl_seconds
+    entry["members"].add(member)
+
+
+def cache_srem(key: str, member: str) -> None:
+    if _redis_client:
+        try:
+            _redis_client.srem(key, member)
+            return
+        except Exception as exc:
+            print(f"⚠️ Redis SREM failed for {key}: {exc}")
+    entry = _memory_cache.get(f"set:{key}")
+    if entry:
+        entry["members"].discard(member)
+
+
+def cache_smembers(key: str) -> set[str]:
+    if _redis_client:
+        try:
+            return set(_redis_client.smembers(key))
+        except Exception as exc:
+            print(f"⚠️ Redis SMEMBERS failed for {key}: {exc}")
+    entry = _memory_cache.get(f"set:{key}")
+    if not entry:
+        return set()
+    if entry.get("expires_at") and entry["expires_at"] <= time.time():
+        _memory_cache.pop(f"set:{key}", None)
+        return set()
+    return set(entry.get("members", set()))

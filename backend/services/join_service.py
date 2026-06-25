@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.redis_client import cache_delete, cache_get, cache_set
+from backend.models import Referral
+from backend.services.referral_service import process_referral_on_bootstrap
 from backend.services.user_service import get_user, set_user_channel_joined
 
 JOIN_CACHE_PREFIX = "join:"
@@ -66,6 +68,9 @@ def resolve_channel_membership(
         set_cached_join_status(uid, True)
         if db is not None:
             set_user_channel_joined(db, uid, True)
+            referral = db.query(Referral).filter(Referral.invitee_id == uid).first()
+            if referral and not referral.channel_verified:
+                process_referral_on_bootstrap(db, uid, referral.inviter_id, channel_joined=True)
         return result
 
     if reason == "api_error":

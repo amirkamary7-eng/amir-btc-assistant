@@ -29,7 +29,14 @@ from backend.database import database_ready, get_db_session, init_database
 from backend.redis_client import init_redis, redis_ready
 from backend.routers import users as users_router
 from backend.routers import watchlist as watchlist_router
+from backend.routers import charts as charts_router
+from backend.routers import analyses as analyses_router
+from backend.routers import calendar as calendar_router
+from backend.routers import referrals as referrals_router
+from backend.routers import sessions as sessions_router
+from backend.routers import assistant as assistant_router
 from backend.services.join_service import resolve_channel_membership
+from backend.redis_client import cache_get_json, cache_set_json
 
 # کتابخانه‌های ربات تلگرام
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
@@ -50,6 +57,12 @@ app.add_middleware(
 
 app.include_router(users_router.router, prefix="/api")
 app.include_router(watchlist_router.router, prefix="/api")
+app.include_router(charts_router.router, prefix="/api")
+app.include_router(analyses_router.router, prefix="/api")
+app.include_router(calendar_router.router, prefix="/api")
+app.include_router(referrals_router.router, prefix="/api")
+app.include_router(sessions_router.router, prefix="/api")
+app.include_router(assistant_router.router, prefix="/api")
 
 # کش مرکزی اخبار
 news_cache = {"data": None, "expiry": 0}
@@ -116,6 +129,10 @@ def fetch_raw_news_rss():
 @app.get("/api/farsi-news")
 async def get_optimized_farsi_news():
     current_time = time.time()
+    redis_cached = cache_get_json("news:farsi")
+    if redis_cached:
+        return JSONResponse(content={"status": "success", "source": "redis_cache", "data": redis_cached})
+
     if news_cache["data"] and current_time < news_cache["expiry"]:
         return JSONResponse(content={"status": "success", "source": "cache", "data": news_cache["data"]})
 
@@ -163,6 +180,7 @@ async def get_optimized_farsi_news():
         if optimized_articles:
             news_cache["data"] = optimized_articles
             news_cache["expiry"] = current_time + CACHE_TTL
+            cache_set_json("news:farsi", optimized_articles, CACHE_TTL)
             return JSONResponse(content={"status": "success", "source": f"{source_name}_live", "data": optimized_articles})
     except ET.ParseError as e:
         print(f"XML Parse Error: {e}")
@@ -499,10 +517,7 @@ async def _check_price_alerts_once():
             )
             if triggered:
                 uid = alert["user_id"]
-                msg = (
-                    f"🔔 هشدار قیمت!\n{sym} به ${current:.4f} رسید\n"
-                    f"هدف: ${float(alert['price']):.4f}"
-                )
+                msg = f"🔔 {sym} Price reached ${current:.4f}"
                 if uid and not str(uid).startswith("guest_"):
                     await _send_telegram(uid, msg)
                 await _send_telegram(ADMIN_TELEGRAM_ID, f"📊 هشدار فعال شد\n{msg}\nکاربر: {uid}")

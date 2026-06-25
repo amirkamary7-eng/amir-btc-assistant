@@ -38,6 +38,7 @@ def bootstrap_user(
     first_name: Optional[str] = None,
     last_name: Optional[str] = None,
     lang: Optional[str] = None,
+    referrer_id: Optional[str] = None,
 ) -> dict[str, Any]:
     user = get_user(db, telegram_id)
     now = utcnow()
@@ -65,6 +66,16 @@ def bootstrap_user(
         if lang in ("fa", "en"):
             user.lang = lang
         user.updated_at = now
+
+    if referrer_id and referrer_id != telegram_id:
+        from backend.services.referral_service import process_referral_on_bootstrap
+
+        process_referral_on_bootstrap(
+            db,
+            invitee_id=str(telegram_id),
+            referrer_id=str(referrer_id),
+            channel_joined=user.channel_joined,
+        )
 
     db.refresh(user)
     return _user_to_dict(user)

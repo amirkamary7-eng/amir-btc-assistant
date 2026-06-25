@@ -134,6 +134,10 @@
             <h3 class="profile-name" id="profile-name" data-i18n="guest">کاربر میهمان</h3>
             <span class="profile-username" id="profile-username">@guest</span>
             <span class="profile-id">ID: <span id="profile-id-num">000000</span></span>
+            <div class="online-badge" id="online-badge" style="display:none;">
+                <span class="online-dot"></span>
+                <span id="online-count">0</span> <span data-i18n="online_users">کاربر آنلاین</span>
+            </div>
         </div>
 
         <div class="referral-card">
@@ -152,7 +156,7 @@
             <div class="ref-stats">
                 <div><span data-i18n="ref_total">کل دعوت‌ها</span><strong id="ref-total">0</strong></div>
                 <div><span data-i18n="ref_active">فعال</span><strong id="ref-active">0</strong></div>
-                <div><span data-i18n="ref_reward">پاداش</span><strong id="ref-reward">0 SAT</strong></div>
+                <div><span data-i18n="ref_reward">پاداش</span><strong id="ref-reward">0 AB</strong></div>
             </div>
             <div class="ref-rewards-soon">
                 <div class="soon-badge-row">
@@ -425,6 +429,8 @@
     </div>
 
     <script src="watchlist.js"></script>
+    <script src="notifications.js"></script>
+    <script src="assistant.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

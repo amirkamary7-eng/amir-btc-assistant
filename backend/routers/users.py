@@ -16,6 +16,7 @@ class BootstrapRequest(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     lang: Optional[str] = None
+    referrer_id: Optional[str] = None
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -45,6 +46,7 @@ async def bootstrap_user_endpoint(payload: BootstrapRequest):
             first_name=payload.first_name,
             last_name=payload.last_name,
             lang=lang,
+            referrer_id=payload.referrer_id,
         )
     return {"status": "success", "user": user, "watchlist": user["watchlist"]}
 

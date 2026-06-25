@@ -40,6 +40,11 @@ let currentSlide = 0;
 let editingAnalysisId = null;
 let hasChannelAccess = false;
 let joinCheckDone = false;
+let analysisVersion = 0;
+let sessionId = localStorage.getItem('app_session_id') || null;
+const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
+let calendarEvents = [];
+let calendarLoading = false;
 
 // ---------- ترجمه‌ها ----------
 const i18n = {
@@ -86,7 +91,10 @@ const i18n = {
         official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
         price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h',
         view_source: 'مشاهده منبع', guest: 'کاربر میهمان', required_fields: 'فیلدهای الزامی را پر کنید',
-        invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.'
+        invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.',
+        online_users: 'کاربر آنلاین', cal_status_past: 'گذشته', cal_status_live: 'زنده', cal_status_upcoming: 'آینده',
+        price_reached: 'قیمت به', ai_title: 'دستیار هوشمند', ai_messages_today: 'پیام امروز',
+        ai_cooldown: 'لطفاً چند ثانیه صبر کنید', ai_limit: 'محدودیت روزانه', ai_error: 'دستیار در دسترس نیست'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -133,11 +141,19 @@ const i18n = {
         official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
         price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume',
         view_source: 'View source', guest: 'Guest User', required_fields: 'Please fill required fields',
-        invalid_price: 'Enter a valid price', copied: 'Copied!', copy_ref_msg: 'Referral link copied.'
+        invalid_price: 'Enter a valid price', copied: 'Copied!', copy_ref_msg: 'Referral link copied.',
+        online_users: 'users online', cal_status_past: 'Past', cal_status_live: 'Live', cal_status_upcoming: 'Upcoming',
+        price_reached: 'Price reached', ai_title: 'AI Assistant', ai_messages_today: 'messages today',
+        ai_cooldown: 'Please wait a few seconds', ai_limit: 'Daily limit reached', ai_error: 'Assistant unavailable'
     }
 };
 function t(key) { return i18n[currentLang]?.[key] || i18n.fa[key] || key; }
 
+function getReferrerId() {
+    const startParam = tg?.initDataUnsafe?.start_param || '';
+    if (startParam.startsWith('ref_')) return startParam.slice(4);
+    return null;
+}
 function getUserId() {
     const uid = tg?.initDataUnsafe?.user?.id;
     if (uid) return String(uid);
@@ -236,7 +252,8 @@ async function bootstrapUser() {
                 username: u?.username || null,
                 first_name: u?.first_name || null,
                 last_name: u?.last_name || null,
-                lang: currentLang
+                lang: currentLang,
+                referrer_id: getReferrerId()
             })
         });
         if (data.user?.lang === 'fa' || data.user?.lang === 'en') {
@@ -260,6 +277,123 @@ async function bootstrapUser() {
         console.warn('bootstrapUser:', e);
         applyLanguage();
     }
+}
+
+async function fetchAnalyses(force = false) {
+    if (!API_BASE) {
+        analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
+        return false;
+    }
+    try {
+        const versionParam = force ? '' : (analysisVersion ? `?version=${analysisVersion}` : '');
+        const data = await apiFetch(`/api/analyses${versionParam}`);
+        if (data.unchanged) return false;
+        if (Array.isArray(data.analyses)) {
+            analyses = data.analyses;
+            analysisVersion = data.version || 0;
+            localStorage.setItem('analyses', JSON.stringify(analyses));
+            return true;
+        }
+    } catch (e) {
+        console.warn('fetchAnalyses:', e);
+        if (!analyses.length) analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
+    }
+    return false;
+}
+
+async function saveAnalysisToServer(payload, method, analysisId) {
+    if (!API_BASE || !isAdmin()) return null;
+    const adminId = encodeURIComponent(getUserId());
+    if (method === 'POST') {
+        return apiFetch(`/api/analyses?admin_id=${adminId}`, { method: 'POST', body: JSON.stringify(payload) });
+    }
+    if (method === 'PUT') {
+        return apiFetch(`/api/analyses/${analysisId}?admin_id=${adminId}`, { method: 'PUT', body: JSON.stringify(payload) });
+    }
+    if (method === 'DELETE') {
+        return apiFetch(`/api/analyses/${analysisId}?admin_id=${adminId}`, { method: 'DELETE' });
+    }
+    return null;
+}
+
+async function sendSessionHeartbeat() {
+    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    try {
+        const params = new URLSearchParams({ user_id: getUserId() });
+        if (sessionId) params.set('session_id', sessionId);
+        const data = await apiFetch(`/api/sessions/heartbeat?${params}`, { method: 'POST' });
+        if (data.session_id) {
+            sessionId = data.session_id;
+            localStorage.setItem('app_session_id', sessionId);
+        }
+        updateOnlineBadge(data.online_count);
+    } catch (e) { console.warn('heartbeat:', e); }
+}
+
+async function fetchOnlineCount() {
+    if (!API_BASE) return;
+    try {
+        const data = await apiFetch('/api/sessions/online');
+        updateOnlineBadge(data.count);
+    } catch (_) {}
+}
+
+function updateOnlineBadge(count) {
+    const badge = document.getElementById('online-badge');
+    const countEl = document.getElementById('online-count');
+    if (!badge || !countEl) return;
+    if (count > 0) {
+        badge.style.display = 'inline-flex';
+        countEl.innerText = count;
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+async function loadReferralStats() {
+    if (!API_BASE || String(getUserId()).startsWith('guest_')) return;
+    try {
+        const data = await apiFetch(`/api/referrals/stats?user_id=${encodeURIComponent(getUserId())}`);
+        document.getElementById('ref-total').innerText = data.total ?? 0;
+        document.getElementById('ref-active').innerText = data.active ?? 0;
+        document.getElementById('ref-reward').innerText = `${data.tokens ?? 0} AB`;
+    } catch (e) { console.warn('loadReferralStats:', e); }
+}
+
+async function loadCalendarEvents(force = false) {
+    if (calendarEvents.length && !force) return calendarEvents;
+    if (!API_BASE) return [];
+    if (calendarLoading) return calendarEvents;
+    calendarLoading = true;
+    try {
+        const data = await apiFetch('/api/calendar/events');
+        calendarEvents = data.events || [];
+    } catch (e) {
+        console.warn('loadCalendarEvents:', e);
+    } finally {
+        calendarLoading = false;
+    }
+    return calendarEvents;
+}
+
+async function resolveChartSymbol(symbol) {
+    const cacheKey = `chart_${symbol}`;
+    const cached = Cache.get(cacheKey);
+    if (cached) return cached;
+
+    if (API_BASE) {
+        try {
+            const data = await apiFetch(`/api/charts/resolve?symbol=${encodeURIComponent(symbol)}`);
+            if (data.found && data.tv_symbol) {
+                Cache.set(cacheKey, data, 3600);
+                return data;
+            }
+        } catch (e) { console.warn('resolveChartSymbol:', e); }
+    }
+
+    const fallback = { found: true, tv_symbol: `BINANCE:${symbol}USDT`, exchange: 'binance' };
+    Cache.set(cacheKey, fallback, 300);
+    return fallback;
 }
 
 async function apiFetch(path, options = {}) {
@@ -715,23 +849,28 @@ function renderNews(category) {
     else if (category === 'economy') filtered = filtered.filter(n => n.category === 'economy');
     else if (category === 'forex') filtered = filtered.filter(n => n.category === 'forex');
     else if (category === 'calendar') {
-        const ecoEvents = [
-            { time: '16:00', region: 'US', title: t('cal_cpi'), impact: 'High', date: t('cal_today') },
-            { time: '18:30', region: 'US', title: t('cal_fed'), impact: 'High', date: t('cal_today') },
-            { time: '12:30', region: 'EU', title: t('cal_pmi'), impact: 'Medium', date: t('cal_tomorrow') }
-        ];
-        container.innerHTML = ecoEvents.map(e => `
-            <div class="eco-event-card">
-                <div class="eco-event-left">
-                    <span class="eco-flag eco-flag-${e.region.toLowerCase()}">${e.region}</span>
-                    <div>
-                        <div class="eco-event-title">${e.title}</div>
-                        <div class="eco-event-meta">${e.date} • ${e.time}</div>
+        loadCalendarEvents().then(events => {
+            if (!events.length) {
+                container.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
+                return;
+            }
+            const statusLabel = { past: t('cal_status_past'), live: t('cal_status_live'), upcoming: t('cal_status_upcoming') };
+            container.innerHTML = events.map(e => `
+                <div class="eco-event-card ${e.status || 'upcoming'}">
+                    <div class="eco-event-left">
+                        <span class="eco-flag-emoji">${e.flag || '🏳️'}</span>
+                        <div>
+                            <div class="eco-event-title">${e.title}</div>
+                            <div class="eco-event-meta">${e.date || ''} • ${e.time || ''} • ${e.country || ''}</div>
+                        </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                        <span class="eco-impact eco-impact-${e.impact || 'medium'}">${e.impact === 'high' ? t('cal_impact_high') : t('cal_impact_med')}</span>
+                        <span class="eco-status eco-status-${e.status || 'upcoming'}">${statusLabel[e.status] || e.status}</span>
                     </div>
                 </div>
-                <span class="eco-impact eco-impact-${e.impact.toLowerCase()}">${e.impact === 'High' ? t('cal_impact_high') : t('cal_impact_med')}</span>
-            </div>
-        `).join('');
+            `).join('');
+        });
         return;
     }
     if (!filtered.length) {
@@ -874,40 +1013,57 @@ function submitAnalysis() {
     if (!coin || !text) { alert('نام ارز و متن تحلیل الزامی است.'); return; }
     if (!image) image = 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop';
 
-    if (editingAnalysisId) {
-        const idx = analyses.findIndex(a => a.id === editingAnalysisId);
-        if (idx >= 0) {
-            analyses[idx] = { ...analyses[idx], coin, timeframe, image, text, date: new Date().toLocaleDateString('fa-IR') };
+    const author = tg?.initDataUnsafe?.user?.first_name || 'مدیر';
+    const payload = { coin, timeframe, image, text, author, author_id: getUserId() };
+
+    (async () => {
+        try {
+            if (editingAnalysisId) {
+                await saveAnalysisToServer(payload, 'PUT', editingAnalysisId);
+                addNotification(t('edit_analysis'), `${coin} (${timeframe})`, { sendToTelegram: true });
+            } else {
+                await saveAnalysisToServer(payload, 'POST');
+                addNotification('تحلیل جدید', `تحلیل ${coin} منتشر شد.`, { sendToTelegram: true });
+            }
+            await fetchAnalyses(true);
+            renderAnalysisSlider();
+            renderAnalysisList();
+            closeAddAnalysisModal();
+            ['analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+        } catch (e) {
+            console.error('submitAnalysis:', e);
+            if (editingAnalysisId) {
+                const idx = analyses.findIndex(a => a.id === editingAnalysisId);
+                if (idx >= 0) analyses[idx] = { ...analyses[idx], coin, timeframe, image, text, date: new Date().toLocaleDateString('fa-IR') };
+            } else {
+                analyses.unshift({ id: Date.now().toString(), coin, timeframe, image, text, date: new Date().toLocaleDateString('fa-IR'), author });
+            }
+            localStorage.setItem('analyses', JSON.stringify(analyses));
+            renderAnalysisSlider();
+            renderAnalysisList();
+            closeAddAnalysisModal();
         }
-        addNotification(t('edit_analysis'), `${coin} (${timeframe})`, true);
-    } else {
-        const newAnalysis = {
-            id: Date.now().toString(),
-            coin,
-            timeframe,
-            image,
-            text,
-            date: new Date().toLocaleDateString('fa-IR'),
-            author: tg?.initDataUnsafe?.user?.first_name || 'مدیر'
-        };
-        analyses.unshift(newAnalysis);
-        addNotification('تحلیل جدید', `تحلیل ${coin} منتشر شد.`, true);
-    }
-    localStorage.setItem('analyses', JSON.stringify(analyses));
-    renderAnalysisSlider();
-    renderAnalysisList();
-    closeAddAnalysisModal();
-    ['analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text'].forEach(id => document.getElementById(id).value = '');
+    })();
 }
 function deleteAnalysis(id, event) {
     if (event) event.stopPropagation();
     if (!isAdmin()) return;
     if (confirm('آیا از حذف این تحلیل مطمئن هستید؟')) {
-        analyses = analyses.filter(a => a.id !== id);
-        localStorage.setItem('analyses', JSON.stringify(analyses));
-        renderAnalysisSlider();
-        renderAnalysisList();
-        addNotification('تحلیل حذف شد', `یک تحلیل توسط مدیر حذف گردید.`);
+        (async () => {
+            try {
+                await saveAnalysisToServer(null, 'DELETE', id);
+                await fetchAnalyses(true);
+            } catch (e) {
+                analyses = analyses.filter(a => a.id !== id);
+                localStorage.setItem('analyses', JSON.stringify(analyses));
+            }
+            renderAnalysisSlider();
+            renderAnalysisList();
+            addNotification('تحلیل حذف شد', 'یک تحلیل توسط مدیر حذف گردید.', { sendToTelegram: false });
+        })();
     }
 }
 
@@ -920,12 +1076,22 @@ async function openCoinDetail(symbol) {
     modal.style.display = 'flex';
 
     const chartContainer = document.getElementById('detail-chart');
+    document.querySelector('.chart-exchange-badge')?.remove();
+    chartContainer.innerHTML = '<div class="empty-state">Loading chart...</div>';
+
+    const chartInfo = await resolveChartSymbol(symbol);
     chartContainer.innerHTML = '';
-    if (typeof TradingView !== 'undefined') {
+    if (typeof TradingView !== 'undefined' && chartInfo.found) {
+        if (chartInfo.exchange) {
+            const badge = document.createElement('div');
+            badge.className = 'chart-exchange-badge';
+            badge.innerText = chartInfo.exchange.toUpperCase();
+            chartContainer.parentNode.insertBefore(badge, chartContainer);
+        }
         new TradingView.widget({
             width: '100%',
             height: '100%',
-            symbol: `BINANCE:${symbol}USDT`,
+            symbol: chartInfo.tv_symbol,
             interval: '60',
             theme: 'dark',
             style: '1',
@@ -947,6 +1113,7 @@ async function openCoinDetail(symbol) {
     renderActiveAlerts(symbol);
 }
 function closeCoinDetail() {
+    document.querySelector('.chart-exchange-badge')?.remove();
     document.getElementById('coin-detail-modal').style.display = 'none';
 }
 function renderActiveAlerts(symbol) {
@@ -1072,12 +1239,12 @@ async function triggerAlert(alert, currentPrice) {
     await removeAlertFromServer(alert);
     alerts = alerts.filter(a => a.id !== alert.id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
+    const priceStr = currentPrice >= 1 ? currentPrice.toFixed(2) : currentPrice.toFixed(6);
     const msg = currentLang === 'fa'
-        ? `🔔 هشدار قیمت!\n${alert.symbol} به $${currentPrice.toFixed(4)} رسید\nهدف: $${alert.price}`
-        : `🔔 Price Alert!\n${alert.symbol} reached $${currentPrice.toFixed(4)}\nTarget: $${alert.price}`;
-    playAlertSound();
+        ? `🔔 ${alert.symbol} — ${t('price_reached')} $${priceStr}`
+        : `🔔 ${alert.symbol} Price reached $${priceStr}`;
     tg?.HapticFeedback?.notificationOccurred('warning');
-    addNotification(t('price_alert'), msg.replace(/\n/g, ' '), false);
+    addNotification(t('price_alert'), msg.replace('🔔 ', ''), { sendToTelegram: true, playSound: true });
     tg?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
     await notifyTelegram(msg);
     const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
@@ -1096,18 +1263,29 @@ async function checkAlerts() {
 }
 
 // ---------- نوتیفیکیشن ----------
-function addNotification(title, body, sendToTelegram = true) {
+function addNotification(title, body, options = true) {
+    const opts = typeof options === 'boolean'
+        ? { sendToTelegram: options, playSound: true }
+        : { sendToTelegram: true, playSound: true, ...options };
+
+    if (window.NotificationCenter) {
+        const notif = NotificationCenter.add(title, body, opts);
+        if (notif) notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
+        return;
+    }
+
     const notif = { id: Date.now().toString(), title, body, read: false, date: new Date().toISOString() };
     notifications.unshift(notif);
     if (notifications.length > 50) notifications = notifications.slice(0, 50);
     localStorage.setItem('notifications', JSON.stringify(notifications));
     updateNotifBadge();
-    if (sendToTelegram) {
+    if (opts.sendToTelegram) {
         const userId = getUserId();
         if (!String(userId).startsWith('guest_')) {
             notifyTelegram(`🔔 ${title}\n${body}`).catch(e => console.warn('notifyTelegram:', e));
         }
     }
+    if (opts.playSound) playAlertSound();
 }
 function updateNotifBadge() {
     const unread = notifications.filter(n => !n.read).length;
@@ -1166,10 +1344,7 @@ function loadUser() {
         document.getElementById('profile-id-num').innerText = user.id || '000000';
         if (user.photo_url) document.getElementById('profile-avatar').src = user.photo_url;
         document.getElementById('ref-link').value = `https://t.me/AmirBtcBot/app?startapp=ref_${user.id}`;
-        const refData = JSON.parse(localStorage.getItem('ref_stats') || '{"total":0,"active":0,"reward":0}');
-        document.getElementById('ref-total').innerText = refData.total;
-        document.getElementById('ref-active').innerText = refData.active;
-        document.getElementById('ref-reward').innerText = refData.reward + ' SAT';
+        loadReferralStats();
     } else {
         document.getElementById('profile-name').innerText = t('guest');
         document.getElementById('profile-username').innerText = 'loading...';
@@ -1513,19 +1688,41 @@ function switchTab(pageId, btn) {
     if (btn) btn.classList.add('active');
 
     if (pageId === 'dashboard-page') {
-        loadUser();
-        loadMarketData();
-        renderAnalysisSlider();
-        loadImportantNews();
+        if (!tabLoaded.dashboard) {
+            loadUser();
+            loadMarketData();
+            fetchAnalyses().then(() => { renderAnalysisSlider(); });
+            loadImportantNews();
+            tabLoaded.dashboard = true;
+        } else {
+            renderWatchlist();
+            renderAnalysisSlider();
+        }
     } else if (pageId === 'market-page') {
-        loadMarketData();
+        if (!tabLoaded.market) {
+            loadMarketData();
+            tabLoaded.market = true;
+        } else {
+            renderMarket();
+        }
     } else if (pageId === 'analysis-page') {
-        renderAnalysisList();
+        if (!tabLoaded.analysis) {
+            fetchAnalyses(true).then(() => renderAnalysisList());
+            tabLoaded.analysis = true;
+        } else {
+            renderAnalysisList();
+        }
         document.getElementById('admin-add-btn').style.display = isAdmin() ? 'block' : 'none';
     } else if (pageId === 'news-page') {
-        loadNews();
+        if (!tabLoaded.news) {
+            loadNews();
+            tabLoaded.news = true;
+        }
     } else if (pageId === 'profile-page') {
         loadUser();
+        loadReferralStats();
+        fetchOnlineCount();
+        tabLoaded.profile = true;
     }
 }
 
@@ -1555,27 +1752,37 @@ async function loadImportantNews() {
 // ---------- Polling برای بروزرسانی لحظه‌ای ----------
 function startPolling() {
     setInterval(() => {
-        if (document.querySelector('.page.active')?.id === 'market-page' || document.querySelector('.page.active')?.id === 'dashboard-page') {
+        const activePage = document.querySelector('.page.active')?.id;
+        if (activePage === 'market-page' || activePage === 'dashboard-page') {
             loadMarketData();
         }
-        if (document.querySelector('.page.active')?.id === 'analysis-page' || document.querySelector('.page.active')?.id === 'dashboard-page') {
-            const stored = JSON.parse(localStorage.getItem('analyses') || '[]');
-            if (stored.length !== analyses.length) {
-                analyses = stored;
-                renderAnalysisSlider();
-                renderAnalysisList();
-            }
+        if (activePage === 'analysis-page' || activePage === 'dashboard-page') {
+            fetchAnalyses().then(changed => {
+                if (changed) {
+                    renderAnalysisSlider();
+                    if (activePage === 'analysis-page') renderAnalysisList();
+                }
+            });
         }
-        if (document.querySelector('.page.active')?.id === 'news-page') {
+        if (activePage === 'news-page') {
             loadNews();
-        }
-        const storedNotif = JSON.parse(localStorage.getItem('notifications') || '[]');
-        if (storedNotif.length !== notifications.length) {
-            notifications = storedNotif;
-            updateNotifBadge();
         }
     }, 30000);
     setInterval(checkAlerts, 15000);
+    setInterval(sendSessionHeartbeat, 45000);
+    sendSessionHeartbeat();
+    setInterval(fetchOnlineCount, 60000);
+    setInterval(() => {
+        const activePage = document.querySelector('.page.active')?.id;
+        if (activePage === 'analysis-page' || activePage === 'dashboard-page') {
+            fetchAnalyses().then(changed => {
+                if (changed) {
+                    renderAnalysisSlider();
+                    if (activePage === 'analysis-page') renderAnalysisList();
+                }
+            });
+        }
+    }, 10000);
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -1590,16 +1797,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     await bootstrapUser();
     loadUser();
-    loadAlertsFromServer().then(() => {
-        loadMarketData(true);
-        checkAlerts();
-    });
-    renderAnalysisSlider();
-    loadNews();
-    loadImportantNews();
     updateNotifBadge();
     await checkMandatoryJoin();
+
+    tabLoaded.dashboard = true;
+    loadMarketData(true);
+    fetchAnalyses().then(() => renderAnalysisSlider());
+    loadImportantNews();
+
+    loadAlertsFromServer().then(() => checkAlerts());
     startPolling();
+
     setInterval(() => {
         if (document.getElementById('tickets-modal')?.style.display === 'flex') fetchTickets().then(renderTickets);
         if (document.getElementById('admin-tickets-modal')?.style.display === 'flex') fetchAdminTickets().then(renderAdminTickets);
