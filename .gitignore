@@ -13,3 +13,5 @@ data/
 .wrangler
 .dev.vars*
 !.dev.vars.example
+
+/generated/prisma
