@@ -21,10 +21,21 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
 body { background: var(--bg-primary); color: var(--text); padding-bottom: 85px; overflow-x: hidden; font-size: 14px; line-height: 1.5; }
-body.app-locked .page,
-body.app-locked .bottom-nav,
-body.app-locked .app-header { pointer-events: none; user-select: none; opacity: 0.35; filter: blur(2px); }
-body.app-locked #mandatory-join-modal { pointer-events: auto; opacity: 1; filter: none; }
+
+#mandatory-join-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(12px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2147483647;
+    padding: 20px;
+}
 
 body.user-loading .profile-loading-target.skeleton-text {
     color: transparent !important;

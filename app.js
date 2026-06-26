@@ -662,7 +662,43 @@ async function checkBackendHealth() {
 }
 
 function setAppLocked(locked) {
-    document.body.classList.toggle('app-locked', locked);
+    if (locked) showMandatoryJoinOverlay();
+    else hideMandatoryJoinOverlay();
+}
+
+function getMandatoryJoinOverlay() {
+    return document.getElementById('mandatory-join-overlay');
+}
+
+function ensureMandatoryJoinOverlay() {
+    let overlay = getMandatoryJoinOverlay();
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = 'mandatory-join-overlay';
+    overlay.style.display = 'none';
+
+    const legacy = document.getElementById('mandatory-join-modal');
+    if (legacy) {
+        const box = legacy.querySelector('.modal-box');
+        if (box) overlay.appendChild(box);
+        legacy.remove();
+    }
+
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+function showMandatoryJoinOverlay() {
+    const overlay = ensureMandatoryJoinOverlay();
+    if (getJoinCache()) return overlay;
+    overlay.style.display = 'flex';
+    return overlay;
+}
+
+function hideMandatoryJoinOverlay() {
+    const overlay = getMandatoryJoinOverlay();
+    if (overlay) overlay.style.display = 'none';
 }
 
 function isJoinResponsePositive(data) {
@@ -677,13 +713,11 @@ function isJoinResponsePositive(data) {
     );
 }
 
-function unlockAppFromJoin(modal) {
+function unlockAppFromJoin() {
     hasChannelAccess = true;
     joinCheckDone = true;
     UserContext.setCachedJoin(true);
-    if (modal) modal.style.display = 'none';
-    document.body.classList.remove('app-locked');
-    setAppLocked(false);
+    hideMandatoryJoinOverlay();
     stopJoinRecheck();
     try { loadUser(); } catch (_) {}
 }
@@ -1873,6 +1907,7 @@ function stopJoinRecheck() {
 
 function startJoinRecheck() {
     stopJoinRecheck();
+    ensureMandatoryJoinOverlay();
     const startedAt = Date.now();
     const maxMs = 90 * 1000;
 
@@ -1881,8 +1916,8 @@ function startJoinRecheck() {
         if (Date.now() - startedAt > maxMs) { stopJoinRecheck(); return; }
         if (document.visibilityState !== 'visible') return;
 
-        const modal = document.getElementById('mandatory-join-modal');
-        if (!modal || modal.style.display === 'none') { stopJoinRecheck(); return; }
+        const overlay = getMandatoryJoinOverlay();
+        if (!overlay || overlay.style.display === 'none') { stopJoinRecheck(); return; }
         if (hasChannelAccess) { stopJoinRecheck(); return; }
 
         joinRecheckRunning = true;
@@ -1902,8 +1937,7 @@ function openJoinAndVerify() {
 // ---------- پاپ‌آپ جوین اجباری ----------
 async function checkMandatoryJoin(options = {}) {
     const { force = false } = typeof options === 'boolean' ? { force: options } : options;
-    const modal = document.getElementById('mandatory-join-modal');
-    if (!modal) return;
+    ensureMandatoryJoinOverlay();
 
     if (!UserContext.ready) await UserContext.init();
     else if (!telegramInitDone) await initTelegramWebApp();
@@ -1913,8 +1947,7 @@ async function checkMandatoryJoin(options = {}) {
     if (isAdmin()) {
         hasChannelAccess = true;
         joinCheckDone = true;
-        modal.style.display = 'none';
-        setAppLocked(false);
+        hideMandatoryJoinOverlay();
         return;
     }
 
@@ -1924,8 +1957,7 @@ async function checkMandatoryJoin(options = {}) {
         hasChannelAccess = false;
         joinCheckDone = true;
         setJoinModalMode('web');
-        modal.style.display = 'flex';
-        setAppLocked(true);
+        showMandatoryJoinOverlay();
         return;
     }
 
@@ -1938,16 +1970,14 @@ async function checkMandatoryJoin(options = {}) {
         joinCheckDone = false;
         setJoinModalMode('vip');
         showJoinStatus(t('loading_user'));
-        modal.style.display = 'flex';
-        setAppLocked(true);
+        showMandatoryJoinOverlay();
         return;
     }
 
     setJoinModalMode('vip');
 
     if (!force && joinCheckDone && hasChannelAccess) {
-        modal.style.display = 'none';
-        setAppLocked(false);
+        hideMandatoryJoinOverlay();
         return;
     }
 
@@ -1956,8 +1986,7 @@ async function checkMandatoryJoin(options = {}) {
         if (cachedJoin === true) {
             hasChannelAccess = true;
             joinCheckDone = true;
-            modal.style.display = 'none';
-            setAppLocked(false);
+            hideMandatoryJoinOverlay();
             return;
         }
     }
@@ -1965,8 +1994,7 @@ async function checkMandatoryJoin(options = {}) {
     if (!API_BASE) {
         hasChannelAccess = false;
         joinCheckDone = true;
-        modal.style.display = 'flex';
-        setAppLocked(true);
+        showMandatoryJoinOverlay();
         return;
     }
 
@@ -1977,25 +2005,32 @@ async function checkMandatoryJoin(options = {}) {
         if (data.status === 'DB_ERROR') {
             hasChannelAccess = false;
             showJoinStatus(t('join_db_error'), true);
-            modal.style.display = 'flex';
-            setAppLocked(true);
+            showMandatoryJoinOverlay();
             return;
         }
         if (isJoinResponsePositive(data)) {
-            unlockAppFromJoin(modal);
+            unlockAppFromJoin();
             return;
         }
         hasChannelAccess = false;
         UserContext.setCachedJoin(false);
-        modal.style.display = 'flex';
-        setAppLocked(true);
+        showMandatoryJoinOverlay();
     } catch (e) {
         console.warn('checkMandatoryJoin:', e);
+        const msg = String(e?.message || e || '');
+        if (msg.includes('401')) {
+            joinCheckDone = false;
+            hasChannelAccess = false;
+            setJoinModalMode('vip');
+            showJoinStatus(t('loading_user'));
+            showMandatoryJoinOverlay();
+            stopJoinRecheck();
+            return;
+        }
         joinCheckDone = true;
         hasChannelAccess = false;
         showJoinStatus(t('join_db_error'), true);
-        modal.style.display = 'flex';
-        setAppLocked(true);
+        showMandatoryJoinOverlay();
     }
 }
 
@@ -2038,12 +2073,7 @@ async function verifyJoin() {
             } catch (invalidateError) {
                 console.warn('join cache invalidate:', invalidateError);
             }
-            const m = document.getElementById('mandatory-join-modal');
-            if (m) m.style.display = 'none';
-            document.body.classList.remove('app-locked');
-            setAppLocked(false);
-            stopJoinRecheck();
-            try { loadUser(); } catch (_) {}
+            unlockAppFromJoin();
             addNotification(t('join_verified'), t('join_welcome'), false);
             getTg()?.showPopup?.({ title: t('join_verified'), message: t('join_welcome'), buttons: [{ type: 'ok' }] });
             return;
@@ -2051,8 +2081,14 @@ async function verifyJoin() {
         alert(t('join_not_verified'));
     } catch (e) {
         console.warn('verifyJoin:', e);
-        showJoinStatus(t('join_db_error'), true);
-        alert(t('join_db_error'));
+        const msg = String(e?.message || e || '');
+        if (msg.includes('401')) {
+            showJoinStatus(t('loading_user'));
+            showMandatoryJoinOverlay();
+        } else {
+            showJoinStatus(t('join_db_error'), true);
+            alert(t('join_db_error'));
+        }
     } finally {
         if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerText = t('join_verify_btn'); }
     }
@@ -2166,7 +2202,7 @@ function startPolling() {
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (hasChannelAccess || !isInTelegram()) return;
-    checkMandatoryJoin({ force: true });
+    checkMandatoryJoin({ force: true }).catch(() => {});
 });
 
 // ---------- راه‌اندازی ----------
@@ -2177,7 +2213,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await bootstrapUser();
     loadUser();
     updateNotifBadge();
-    await checkMandatoryJoin();
+    ensureMandatoryJoinOverlay();
+    checkMandatoryJoin().catch(() => {});
 
     tabLoaded.dashboard = true;
     loadMarketData(true);
