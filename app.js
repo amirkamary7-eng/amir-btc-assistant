@@ -8,6 +8,7 @@ function getTg() {
 }
 
 let telegramInitDone = false;
+let telegramAuthWaitPromise = null;
 
 function parseInitDataUser(initData) {
     if (!initData) return null;
@@ -56,12 +57,72 @@ function isGuestUserId(userId) {
     return String(userId || '').startsWith('guest_');
 }
 
+function isPendingTelegramUserId(userId) {
+    return String(userId || '') === 'pending_telegram';
+}
+
 function isUserLoading() {
     return isInTelegram() && !getTelegramUser()?.id;
 }
 
 function getTelegramInitData() {
     return getTg()?.initData || '';
+}
+
+function hasTelegramAuthPayload() {
+    const initData = getTelegramInitData();
+    return typeof initData === 'string' && initData.length > 20;
+}
+
+async function waitForTelegramInitData(maxWaitMs = 8000) {
+    if (!isInTelegram()) return '';
+    const tg = getTg();
+    if (tg) {
+        try {
+            tg.ready();
+            tg.expand();
+        } catch (e) {
+            console.warn('waitForTelegramInitData:', e);
+        }
+    }
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+        const initData = getTelegramInitData();
+        const user = getTelegramUser();
+        if (hasTelegramAuthPayload() && user?.id) return initData;
+        await new Promise(r => setTimeout(r, 50));
+    }
+    return '';
+}
+
+async function ensureTelegramAuthReady(maxWaitMs = 8000) {
+    if (!isInTelegram()) return true;
+    if (hasTelegramAuthPayload() && getTelegramUser()?.id) return true;
+    if (!telegramAuthWaitPromise) {
+        telegramAuthWaitPromise = (async () => {
+            await initTelegramWebApp(maxWaitMs);
+            const initData = await waitForTelegramInitData(maxWaitMs);
+            return !!(initData && getTelegramUser()?.id);
+        })().finally(() => {
+            telegramAuthWaitPromise = null;
+        });
+    }
+    return telegramAuthWaitPromise;
+}
+
+function canRunSessionRequests(userId = getUserId()) {
+    if (!API_BASE) return false;
+    if (!hasChannelAccess) return false;
+    if (isGuestUserId(userId) || isPendingTelegramUserId(userId) || UserContext.isPending()) return false;
+    if (isInTelegram() && (!hasTelegramAuthPayload() || !getTelegramUser()?.id)) return false;
+    return true;
+}
+
+async function waitForApiReady(maxWaitMs = 8000) {
+    if (!API_BASE) throw new Error('API_BASE not configured');
+    if (!isInTelegram()) return;
+    const ready = await ensureTelegramAuthReady(maxWaitMs);
+    if (!ready) throw new Error('TELEGRAM_NOT_READY');
 }
 
 async function initTelegramWebApp(maxWaitMs = 8000) {
@@ -487,9 +548,10 @@ async function saveAnalysisToServer(payload, method, analysisId) {
 }
 
 async function sendSessionHeartbeat() {
-    if (!API_BASE || isGuestUserId(getUserId())) return;
+    const uid = getUserId();
+    if (!canRunSessionRequests(uid)) return;
     try {
-        const params = new URLSearchParams({ user_id: getUserId() });
+        const params = new URLSearchParams({ user_id: uid });
         if (sessionId) params.set('session_id', sessionId);
         const data = await apiFetch(`/api/sessions/heartbeat?${params}`, { method: 'POST' });
         if (data.session_id) {
@@ -501,7 +563,7 @@ async function sendSessionHeartbeat() {
 }
 
 async function fetchOnlineCount() {
-    if (!API_BASE) return;
+    if (!canRunSessionRequests()) return;
     try {
         const data = await apiFetch('/api/sessions/online');
         updateOnlineBadge(data.count);
@@ -521,9 +583,10 @@ function updateOnlineBadge(count) {
 }
 
 async function loadReferralStats() {
-    if (!API_BASE || isGuestUserId(getUserId())) return;
+    const uid = getUserId();
+    if (!API_BASE || isGuestUserId(uid) || isPendingTelegramUserId(uid) || UserContext.isPending()) return;
     try {
-        const data = await apiFetch(`/api/referrals/stats?user_id=${encodeURIComponent(getUserId())}`);
+        const data = await apiFetch(`/api/referrals/stats?user_id=${encodeURIComponent(uid)}`);
         document.getElementById('ref-total').innerText = data.total ?? 0;
         document.getElementById('ref-active').innerText = data.active ?? 0;
         document.getElementById('ref-reward').innerText = `${data.tokens ?? 0} AB`;
@@ -574,7 +637,7 @@ function appendInitDataToUrl(path) {
 }
 
 async function apiFetch(path, options = {}) {
-    if (!API_BASE) throw new Error('API_BASE not configured');
+    await waitForApiReady(8000);
     const headers = { 'Content-Type': 'application/json', ...options.headers };
     const initData = getTelegramInitData();
     if (initData) headers['X-Telegram-Init-Data'] = initData;
@@ -1342,7 +1405,7 @@ function playAlertSound() {
 }
 
 async function syncAlertToServer(alert) {
-    if (!API_BASE || isGuestUserId(String(alert.userId))) return alert;
+    if (!API_BASE || isGuestUserId(String(alert.userId)) || isPendingTelegramUserId(String(alert.userId)) || UserContext.isPending()) return alert;
     try {
         const data = await apiFetch('/api/alerts', {
             method: 'POST',
@@ -1359,16 +1422,17 @@ async function syncAlertToServer(alert) {
 }
 
 async function removeAlertFromServer(alert) {
-    if (!API_BASE || !alert.serverId || isGuestUserId(String(alert.userId))) return;
+    if (!API_BASE || !alert.serverId || isGuestUserId(String(alert.userId)) || isPendingTelegramUserId(String(alert.userId)) || UserContext.isPending()) return;
     try {
         await apiFetch(`/api/alerts/${alert.serverId}?user_id=${encodeURIComponent(alert.userId)}`, { method: 'DELETE' });
     } catch (e) { console.warn('removeAlertFromServer:', e); }
 }
 
 async function loadAlertsFromServer() {
-    if (!API_BASE || isGuestUserId(getUserId())) return;
+    const uid = getUserId();
+    if (!API_BASE || isGuestUserId(uid) || isPendingTelegramUserId(uid) || UserContext.isPending()) return;
     try {
-        const data = await apiFetch(`/api/alerts?user_id=${encodeURIComponent(getUserId())}`);
+        const data = await apiFetch(`/api/alerts?user_id=${encodeURIComponent(uid)}`);
         alerts = (data.alerts || []).map(a => ({
             id: a.id,
             serverId: a.id,
@@ -1383,7 +1447,7 @@ async function loadAlertsFromServer() {
 
 async function notifyTelegram(message) {
     const userId = getUserId();
-    if (!API_BASE || isGuestUserId(String(userId))) return false;
+    if (!API_BASE || isGuestUserId(String(userId)) || isPendingTelegramUserId(String(userId)) || UserContext.isPending()) return false;
     try {
         const res = await apiFetch('/api/notify', {
             method: 'POST',
