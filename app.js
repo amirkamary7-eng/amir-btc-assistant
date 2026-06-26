@@ -515,12 +515,12 @@ async function fetchOnlineCount() {
 }
 
 function updateOnlineBadge(count) {
-    const badge = document.getElementById('online-badge');
-    const countEl = document.getElementById('online-count');
+    const badge = document.getElementById('header-online-badge') || document.getElementById('online-badge');
+    const countEl = document.getElementById('header-online-count') || document.getElementById('online-count');
     if (!badge || !countEl) return;
     if (count > 0) {
         badge.style.display = 'inline-flex';
-        countEl.innerText = count;
+        countEl.textContent = count;
     } else {
         badge.style.display = 'none';
     }
