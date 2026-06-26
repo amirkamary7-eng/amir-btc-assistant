@@ -1775,9 +1775,41 @@ function setJoinModalMode(mode) {
     if (webBlock) webBlock.style.display = mode === 'web' ? 'block' : 'none';
 }
 
+let joinRecheckInterval = null;
+let joinRecheckRunning = false;
+
+function stopJoinRecheck() {
+    if (joinRecheckInterval) clearInterval(joinRecheckInterval);
+    joinRecheckInterval = null;
+    joinRecheckRunning = false;
+}
+
+function startJoinRecheck() {
+    stopJoinRecheck();
+    const startedAt = Date.now();
+    const maxMs = 90 * 1000;
+
+    joinRecheckInterval = setInterval(async () => {
+        if (joinRecheckRunning) return;
+        if (Date.now() - startedAt > maxMs) { stopJoinRecheck(); return; }
+        if (document.visibilityState !== 'visible') return;
+
+        const modal = document.getElementById('mandatory-join-modal');
+        if (!modal || modal.style.display === 'none') { stopJoinRecheck(); return; }
+        if (hasChannelAccess) { stopJoinRecheck(); return; }
+
+        joinRecheckRunning = true;
+        try {
+            await checkMandatoryJoin({ force: true });
+        } finally {
+            joinRecheckRunning = false;
+        }
+    }, 3000);
+}
+
 function openJoinAndVerify() {
     joinChannel();
-    setTimeout(() => verifyJoin(), 6000);
+    startJoinRecheck();
 }
 
 // ---------- پاپ‌آپ جوین اجباری ----------

@@ -319,9 +319,26 @@ def _send_telegram_http(chat_id: str, text: str) -> bool:
         return False
 
 
+def _normalize_required_channel(raw: str) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    value = value.split("?", 1)[0].strip()
+    if value.startswith("https://") or value.startswith("http://"):
+        parts = value.split("t.me/", 1)
+        if len(parts) == 2:
+            value = parts[1]
+        else:
+            value = value.rsplit("/", 1)[-1]
+    value = value.strip().lstrip("@").strip()
+    value = value.split("/", 1)[0].strip()
+    return value
+
+
 def _run_get_chat_member_debug(user_id: str) -> dict:
     uid = str(user_id)
-    chat_id = f"@{REQUIRED_CHANNEL}"
+    normalized_channel = _normalize_required_channel(REQUIRED_CHANNEL)
+    chat_id = f"@{normalized_channel}" if normalized_channel else f"@{REQUIRED_CHANNEL}"
     debug_payload = {
         "required_channel": REQUIRED_CHANNEL,
         "chat_id": chat_id,
@@ -331,6 +348,7 @@ def _run_get_chat_member_debug(user_id: str) -> dict:
     }
 
     print(f"🔎 Join Debug | REQUIRED_CHANNEL={REQUIRED_CHANNEL!r}")
+    print(f"🔎 Join Debug | REQUIRED_CHANNEL_NORMALIZED={normalized_channel!r}")
     print(f"🔎 Join Debug | chat_id={chat_id!r}")
     print(f"🔎 Join Debug | user_id={uid!r}")
 
@@ -350,6 +368,12 @@ def _run_get_chat_member_debug(user_id: str) -> dict:
     if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
         debug_payload["telegram_response"] = {"reason": "bot_not_configured"}
         print("🔎 Join Debug | bot token is not configured")
+        print("🔎 Join Debug | final joined=False")
+        return debug_payload
+
+    if not uid.isdigit():
+        debug_payload["telegram_response"] = {"reason": "invalid_user_id", "value": uid}
+        print(f"⚠️ Join Debug | invalid user_id value={uid!r}")
         print("🔎 Join Debug | final joined=False")
         return debug_payload
 
