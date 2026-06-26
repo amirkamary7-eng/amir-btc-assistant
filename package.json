@@ -1,0 +1,32 @@
+{
+  "name": "amir-btc-assistant",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "db:test": "node test_db.js",
+    "prisma:generate": "prisma generate"
+  },
+  "devDependencies": {
+    "prisma": "^7.8.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amirkamary7-eng/amir-btc-assistant.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/amirkamary7-eng/amir-btc-assistant/issues"
+  },
+  "homepage": "https://github.com/amirkamary7-eng/amir-btc-assistant#readme",
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.22.0"
+  }
+}

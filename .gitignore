@@ -1,0 +1,18 @@
+.env
+!.env.example
+__pycache__/
+*.pyc
+.env.local
+.DS_Store
+.vercel
+.env*
+!.env.example
+data/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+
+/generated/prisma
+node_modules/
