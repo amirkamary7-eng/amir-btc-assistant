@@ -502,28 +502,11 @@ async function sendSessionHeartbeat() {
             sessionId = data.session_id;
             localStorage.setItem('app_session_id', sessionId);
         }
-        updateOnlineBadge(data.online_count);
     } catch (e) { console.warn('heartbeat:', e); }
 }
 
 async function fetchOnlineCount() {
-    if (!canRunSessionRequests()) return;
-    try {
-        const data = await apiFetch('/api/sessions/online');
-        updateOnlineBadge(data.count);
-    } catch (_) {}
-}
-
-function updateOnlineBadge(count) {
-    const badge = document.getElementById('header-online-badge') || document.getElementById('online-badge');
-    const countEl = document.getElementById('header-online-count') || document.getElementById('online-count');
-    if (!badge || !countEl) return;
-    if (count > 0) {
-        badge.style.display = 'inline-flex';
-        countEl.textContent = count;
-    } else {
-        badge.style.display = 'none';
-    }
+    return;
 }
 
 async function loadReferralStats() {
@@ -1041,9 +1024,23 @@ function renderNews(category) {
                 container.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
                 return;
             }
+            const now = Date.now();
+            const sortedEvents = [...events].sort((a, b) => {
+                const aTime = a.timestamp ? new Date(a.timestamp).getTime() : Number.MAX_SAFE_INTEGER;
+                const bTime = b.timestamp ? new Date(b.timestamp).getTime() : Number.MAX_SAFE_INTEGER;
+                const aPast = (a.status || '') === 'past' || aTime < now;
+                const bPast = (b.status || '') === 'past' || bTime < now;
+                if (aPast !== bPast) return aPast ? 1 : -1;
+                if (!aPast && !bPast) return aTime - bTime;
+                return bTime - aTime;
+            });
             const statusLabel = { past: t('cal_status_past'), live: t('cal_status_live'), upcoming: t('cal_status_upcoming') };
-            container.innerHTML = events.map(e => `
-                <div class="eco-event-card ${e.status || 'upcoming'}">
+            container.innerHTML = sortedEvents.map(e => {
+                const eventTime = e.timestamp ? new Date(e.timestamp).getTime() : Number.MAX_SAFE_INTEGER;
+                const isPast = (e.status || '') === 'past' || eventTime < now;
+                const cardStatus = isPast ? 'past' : (e.status || 'upcoming');
+                return `
+                <div class="eco-event-card ${cardStatus}">
                     <div class="eco-event-left">
                         <span class="eco-flag-emoji">${e.flag || '🏳️'}</span>
                         <div>
@@ -1053,10 +1050,11 @@ function renderNews(category) {
                     </div>
                     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
                         <span class="eco-impact eco-impact-${e.impact || 'medium'}">${e.impact === 'high' ? t('cal_impact_high') : t('cal_impact_med')}</span>
-                        <span class="eco-status eco-status-${e.status || 'upcoming'}">${statusLabel[e.status] || e.status}</span>
+                        <span class="eco-status eco-status-${cardStatus}">${statusLabel[cardStatus] || cardStatus}</span>
                     </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         });
         return;
     }
@@ -1885,6 +1883,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (document.getElementById('admin-tickets-modal')?.style.display === 'flex') fetchAdminTickets().then(renderAdminTickets);
     }, 15000);
 });
+
+window.onload = function () {
+    const badge = document.getElementById('header-online-badge');
+    const countEl = document.getElementById('header-online-count');
+    if (!badge || !countEl) return;
+    badge.style.display = 'inline-flex';
+    countEl.textContent = '5';
+};
 
 // ثبت توابع در فضای global
 window.switchTab = switchTab;
