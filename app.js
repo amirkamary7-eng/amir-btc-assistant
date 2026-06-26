@@ -506,7 +506,35 @@ async function sendSessionHeartbeat() {
 }
 
 async function fetchOnlineCount() {
-    return;
+    const badge = document.getElementById('header-online-badge');
+    const countEl = document.getElementById('header-online-count');
+    if (!badge || !countEl) return;
+    if (!canRunSessionRequests()) {
+        console.warn('online-count skipped: session requests are not allowed yet');
+        return;
+    }
+    const requestUrl = `${API_BASE}${appendInitDataToUrl('/api/sessions/online')}`;
+    try {
+        const data = await apiFetch('/api/sessions/online');
+        console.log('online-count response:', { url: requestUrl, data });
+        const count = Number(data?.count ?? data?.online_count ?? 0);
+        if (count > 0) {
+            badge.style.display = 'inline-flex';
+            countEl.textContent = String(count);
+        } else {
+            badge.style.display = 'none';
+            countEl.textContent = '0';
+        }
+    } catch (e) {
+        console.error('online-count error:', {
+            url: requestUrl,
+            message: e?.message || String(e),
+            error: e,
+            possibleCause: e instanceof TypeError || /Failed to fetch/i.test(String(e))
+                ? 'possible CORS, network error, or wrong API path'
+                : 'server responded with an application error',
+        });
+    }
 }
 
 async function loadReferralStats() {
@@ -1885,11 +1913,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 window.onload = function () {
-    const badge = document.getElementById('header-online-badge');
-    const countEl = document.getElementById('header-online-count');
-    if (!badge || !countEl) return;
-    badge.style.display = 'inline-flex';
-    countEl.textContent = '5';
+    fetchOnlineCount();
 };
 
 // ثبت توابع در فضای global
