@@ -77,6 +77,7 @@ async def lifespan(app: FastAPI):
             telegram_app = ApplicationBuilder().token(TOKEN).build()
             telegram_app.add_handler(CommandHandler("start", start))
             telegram_app.add_handler(CallbackQueryHandler(verify_join_callback, pattern="^verify_join$"))
+            telegram_app.add_handler(CallbackQueryHandler(open_webapp_callback, pattern="^open_webapp$"))
 
             await telegram_app.initialize()
             await telegram_app.start()
@@ -806,13 +807,20 @@ def _resolve_user_join_status(user_id: str, *, force_refresh: bool = False) -> d
         return {"joined": False, "reason": "error", "detail": str(exc)}
 
 
-def _build_start_reply_markup(joined: bool) -> InlineKeyboardMarkup:
+def _build_start_reply_markup(joined: bool, *, webapp_ready: bool = False) -> InlineKeyboardMarkup:
     channel = _required_channel_username()
     if joined:
+        if webapp_ready:
+            return InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    text="🚀 ورود به مینی‌اپ",
+                    web_app=WebAppInfo(url=WEBAPP_URL),
+                )
+            ]])
         return InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                text="🚀 ورود به مینی‌اپ",
-                web_app=WebAppInfo(url=WEBAPP_URL),
+                text="🚀 بررسی و ورود به مینی‌اپ",
+                callback_data="open_webapp",
             )
         ]])
     return InlineKeyboardMarkup([
@@ -847,6 +855,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def open_webapp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+    await query.answer("در حال بررسی عضویت...")
+    result = _resolve_user_join_status(str(query.from_user.id), force_refresh=True)
+    joined = bool(result.get("joined"))
+    if joined:
+        text = "✅ عضویت شما تایید شد!\n\nاکنون می‌توانید وارد مینی‌اپ شوید."
+        reply_markup = _build_start_reply_markup(True, webapp_ready=True)
+    else:
+        channel = _required_channel_username()
+        text = (
+            "❌ ورود به مینی‌اپ مسدود شد.\n\n"
+            f"برای ادامه، ابتدا در کانال @{channel} عضو شوید و سپس دوباره تلاش کنید."
+        )
+        reply_markup = _build_start_reply_markup(False)
+    try:
+        await query.edit_message_text(
+            text,
+            reply_markup=reply_markup,
+        )
+    except Exception as exc:
+        print(f"⚠️ open_webapp edit error: {exc}")
+        await query.message.reply_text(
+            text,
+            reply_markup=reply_markup,
+        )
+
+
 async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not query.from_user:
@@ -865,13 +903,13 @@ async def verify_join_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         await query.edit_message_text(
             text,
-            reply_markup=_build_start_reply_markup(joined),
+            reply_markup=_build_start_reply_markup(joined, webapp_ready=joined),
         )
     except Exception as exc:
         print(f"⚠️ verify_join edit error: {exc}")
         await query.message.reply_text(
             text,
-            reply_markup=_build_start_reply_markup(joined),
+            reply_markup=_build_start_reply_markup(joined, webapp_ready=joined),
         )
 
 @app.post("/telegram")

@@ -41,12 +41,56 @@ body.user-loading .profile-loading-target.skeleton-text {
 ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 4px; }
 
 /* ---------- هدر ---------- */
-.app-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: rgba(11,18,32,0.85); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
-.header-left { display: flex; align-items: center; gap: 10px; }
-.brand-dot { width: 10px; height: 10px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 12px var(--accent); }
-.brand-name { font-weight: 800; font-size: 16px; letter-spacing: 0.5px; }
-.header-right { display: flex; align-items: center; gap: 12px; }
-.notif-btn { background: rgba(255,255,255,0.04); border: 1px solid var(--border); width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: var(--text); cursor: pointer; position: relative; }
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    direction: ltr;
+    background: rgba(11,18,32,0.88);
+    backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.header-side {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+}
+.header-left { justify-content: flex-start; }
+.header-center {
+    flex: 0 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.brand-name {
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: 0.4px;
+    color: #fff;
+    text-align: center;
+    white-space: nowrap;
+}
+.header-right { justify-content: flex-end; }
+.notif-btn {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    cursor: pointer;
+    position: relative;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+}
 .notif-badge { position: absolute; top: -4px; right: -4px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
 
 /* ---------- صفحات ---------- */
@@ -502,15 +546,24 @@ body.user-loading .profile-loading-target.skeleton-text {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
-    color: var(--green);
-    background: rgba(0, 200, 150, 0.08);
-    border: 1px solid rgba(0, 200, 150, 0.2);
-    padding: 4px 10px;
-    border-radius: 20px;
-    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #dffdf4;
+    background: linear-gradient(135deg, rgba(0, 200, 150, 0.14), rgba(15, 23, 42, 0.9));
+    border: 1px solid rgba(0, 200, 150, 0.24);
+    padding: 7px 12px;
+    border-radius: 999px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.16);
 }
-.online-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s infinite; }
+.header-online-badge {
+    margin-top: 0;
+    white-space: nowrap;
+}
+.online-users-icon {
+    color: rgba(255,255,255,0.84);
+    flex-shrink: 0;
+}
+.online-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px rgba(0, 200, 150, 0.7); animation: pulse-dot 2s infinite; }
 @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 /* ---------- Economic calendar enhancements ---------- */
