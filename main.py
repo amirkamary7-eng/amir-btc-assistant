@@ -318,6 +318,75 @@ def _send_telegram_http(chat_id: str, text: str) -> bool:
         print(f"⚠️ Telegram HTTP error: {e}")
         return False
 
+
+def _run_get_chat_member_debug(user_id: str) -> dict:
+    uid = str(user_id)
+    chat_id = f"@{REQUIRED_CHANNEL}"
+    debug_payload = {
+        "required_channel": REQUIRED_CHANNEL,
+        "chat_id": chat_id,
+        "user_id": uid,
+        "telegram_response": None,
+        "joined": False,
+    }
+
+    print(f"🔎 Join Debug | REQUIRED_CHANNEL={REQUIRED_CHANNEL!r}")
+    print(f"🔎 Join Debug | chat_id={chat_id!r}")
+    print(f"🔎 Join Debug | user_id={uid!r}")
+
+    if uid.startswith("guest_"):
+        debug_payload["telegram_response"] = {"reason": "guest_user"}
+        print("🔎 Join Debug | skipped getChatMember for guest user")
+        print("🔎 Join Debug | final joined=False")
+        return debug_payload
+
+    if uid == str(ADMIN_TELEGRAM_ID):
+        debug_payload["telegram_response"] = {"admin": True, "reason": "admin_bypass"}
+        debug_payload["joined"] = True
+        print("🔎 Join Debug | admin bypass applied")
+        print("🔎 Join Debug | final joined=True")
+        return debug_payload
+
+    if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
+        debug_payload["telegram_response"] = {"reason": "bot_not_configured"}
+        print("🔎 Join Debug | bot token is not configured")
+        print("🔎 Join Debug | final joined=False")
+        return debug_payload
+
+    try:
+        response = requests.get(
+            f"https://api.telegram.org/bot{TOKEN}/getChatMember",
+            params={"chat_id": chat_id, "user_id": int(uid)},
+            timeout=10,
+        )
+        response.raise_for_status()
+        telegram_response = response.json()
+        debug_payload["telegram_response"] = telegram_response
+        status = telegram_response.get("result", {}).get("status", "")
+        debug_payload["joined"] = bool(
+            telegram_response.get("ok") and status in JOINED_STATUSES
+        )
+        print(f"🔎 Join Debug | Telegram response={json.dumps(telegram_response, ensure_ascii=False)}")
+        print(f"🔎 Join Debug | final joined={debug_payload['joined']}")
+        return debug_payload
+    except requests.HTTPError as exc:
+        response_text = exc.response.text if exc.response is not None else str(exc)
+        debug_payload["telegram_response"] = {
+            "http_error": str(exc),
+            "response_text": response_text,
+        }
+        print(f"⚠️ Join Debug | HTTPError: {exc}")
+        print(f"⚠️ Join Debug | HTTPError response: {response_text}")
+    except Exception as exc:
+        debug_payload["telegram_response"] = {
+            "exception": exc.__class__.__name__,
+            "message": str(exc),
+        }
+        print(f"⚠️ Join Debug | Exception: {exc.__class__.__name__}: {exc}")
+
+    print("🔎 Join Debug | final joined=False")
+    return debug_payload
+
 def _normalize_webhook_url(url: str) -> str:
     from urllib.parse import urlparse, urlunparse
 
@@ -357,35 +426,33 @@ async def _send_telegram(chat_id: str, text: str) -> bool:
     return _send_telegram_http(chat_id, text)
 
 def _check_channel_membership(user_id: str) -> dict:
-    if str(user_id).startswith("guest_"):
-        return {"joined": False, "reason": "guest_user"}
-    if str(user_id) == str(ADMIN_TELEGRAM_ID):
-        return {"joined": True, "admin": True}
-    if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
-        return {"joined": False, "reason": "bot_not_configured"}
-    try:
-        res = requests.get(
-            f"https://api.telegram.org/bot{TOKEN}/getChatMember",
-            params={"chat_id": f"@{REQUIRED_CHANNEL}", "user_id": int(user_id)},
-            timeout=10,
-        )
-        data = res.json()
-        if not data.get("ok"):
-            desc = data.get("description", "")
-            print(f"⚠️ getChatMember failed for user {user_id}: {desc}")
-            desc_lower = desc.lower()
-            if "user not found" in desc_lower or "not a member" in desc_lower:
-                return {"joined": False, "reason": "not_member"}
-            if "chat not found" in desc_lower:
-                return {"joined": False, "reason": "channel_not_found", "detail": desc}
-            if "bot is not a member" in desc_lower or "need administrator" in desc_lower:
-                return {"joined": False, "reason": "bot_not_in_channel", "detail": desc}
-            return {"joined": False, "reason": "api_error", "detail": desc}
-        status = data.get("result", {}).get("status", "")
-        return {"joined": status in JOINED_STATUSES, "status": status}
-    except Exception as e:
-        print(f"⚠️ Channel check error: {e}")
-        return {"joined": False, "reason": "api_error"}
+    debug_payload = _run_get_chat_member_debug(user_id)
+    telegram_response = debug_payload.get("telegram_response")
+
+    if isinstance(telegram_response, dict):
+        if telegram_response.get("reason") == "guest_user":
+            return {"joined": False, "reason": "guest_user"}
+        if telegram_response.get("reason") == "admin_bypass":
+            return {"joined": True, "admin": True}
+        if telegram_response.get("reason") == "bot_not_configured":
+            return {"joined": False, "reason": "bot_not_configured"}
+        if telegram_response.get("ok"):
+            status = telegram_response.get("result", {}).get("status", "")
+            return {"joined": status in JOINED_STATUSES, "status": status}
+
+        desc = str(telegram_response.get("description", ""))
+        desc_lower = desc.lower()
+        if "user not found" in desc_lower or "not a member" in desc_lower:
+            return {"joined": False, "reason": "not_member", "detail": desc}
+        if "chat not found" in desc_lower:
+            return {"joined": False, "reason": "channel_not_found", "detail": desc}
+        if "bot is not a member" in desc_lower or "need administrator" in desc_lower:
+            return {"joined": False, "reason": "bot_not_in_channel", "detail": desc}
+        if telegram_response.get("http_error") or telegram_response.get("exception"):
+            return {"joined": False, "reason": "api_error", "detail": json.dumps(telegram_response, ensure_ascii=False)}
+        return {"joined": False, "reason": "api_error", "detail": desc}
+
+    return {"joined": False, "reason": "api_error"}
 
 @app.get("/api/health")
 async def health_check():
@@ -405,6 +472,10 @@ async def check_join(
     refresh: bool = Query(False),
 ):
     resolved_id = get_authenticated_telegram_user_id(request)
+    print(
+        f"🔎 Join Debug | /api/check-join request incoming "
+        f"user_id_query={user_id!r} resolved_id={resolved_id!r} refresh={refresh}"
+    )
 
     if refresh:
         invalidate_join_cache_entry(resolved_id)
@@ -435,8 +506,30 @@ async def check_join(
         }
 
     if result.get("status") == "DB_ERROR":
+        print(f"🔎 Join Debug | /api/check-join final result={json.dumps(result, ensure_ascii=False)}")
         return result
-    return {"status": "success", **result}
+    final_result = {"status": "success", **result}
+    print(f"🔎 Join Debug | /api/check-join final result={json.dumps(final_result, ensure_ascii=False)}")
+    return final_result
+
+
+@app.get("/api/debug/check-join")
+@verify_telegram_auth
+async def debug_check_join(request: Request, user_id: Optional[str] = Query(None)):
+    resolved_id = get_authenticated_telegram_user_id(request)
+    print(
+        f"🔎 Join Debug | /api/debug/check-join request incoming "
+        f"user_id_query={user_id!r} resolved_id={resolved_id!r}"
+    )
+    debug_payload = _run_get_chat_member_debug(resolved_id)
+    response = {
+        "required_channel": debug_payload["required_channel"],
+        "user_id": resolved_id,
+        "telegram_response": debug_payload["telegram_response"],
+        "joined": debug_payload["joined"],
+    }
+    print(f"🔎 Join Debug | /api/debug/check-join response={json.dumps(response, ensure_ascii=False)}")
+    return response
 
 
 @app.post("/api/check-join/invalidate")
