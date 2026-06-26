@@ -5,6 +5,7 @@ import html
 import json
 import uuid
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
@@ -35,7 +36,10 @@ from backend.routers import calendar as calendar_router
 from backend.routers import referrals as referrals_router
 from backend.routers import sessions as sessions_router
 from backend.routers import assistant as assistant_router
-from backend.services.join_service import resolve_channel_membership, clear_cached_join_status
+from backend.services.join_service import (
+    invalidate_join_cache as invalidate_join_cache_entry,
+    resolve_channel_membership,
+)
 from backend.services.telegram_auth import (
     get_authenticated_telegram_user,
     get_authenticated_telegram_user_id,
@@ -49,18 +53,62 @@ from backend.redis_client import cache_get_json, cache_set_json
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
+telegram_app = None
+alert_polling_task = None
+
 
 # ==========================================
 # ۱. تنظیمات و راه‌اندازی FastAPI
 # ==========================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # کدهای استارت‌آپ (init_database و ...)
-    yield
-    # کدهای شات‌داون
-    print("🛑 Shutting down...")
+    global telegram_app, alert_polling_task
+
+    print("🚀 Starting application...")
+    try:
+        init_database()
+        init_redis()
+
+        if alert_polling_task is None or alert_polling_task.done():
+            alert_polling_task = asyncio.create_task(alert_polling_loop())
+
+        settings = get_settings()
+        if settings.bot_configured:
+            telegram_app = ApplicationBuilder().token(TOKEN).build()
+            telegram_app.add_handler(CommandHandler("start", start))
+
+            await telegram_app.initialize()
+            await telegram_app.start()
+            _set_telegram_webhook(WEBHOOK_URL)
+            print("✅ Telegram bot ready (webhook mode)")
+        else:
+            print("ℹ️ Telegram bot startup skipped; token is not configured.")
+    except Exception as e:
+        print(f"⚠️ Startup failed: {e}")
+
+    try:
+        yield
+    finally:
+        print("🛑 Shutting down...")
+
+        if alert_polling_task is not None:
+            alert_polling_task.cancel()
+            try:
+                await alert_polling_task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                alert_polling_task = None
+
+        if telegram_app:
+            try:
+                await telegram_app.stop()
+                await telegram_app.shutdown()
+            except Exception as e:
+                print(f"⚠️ Telegram shutdown error: {e}")
+            finally:
+                telegram_app = None
+
 
 app = FastAPI(title="Crypto Premium News & Bot Engine", lifespan=lifespan)
 
@@ -84,8 +132,6 @@ app.include_router(assistant_router.router, prefix="/api")
 # کش مرکزی اخبار
 news_cache = {"data": None, "expiry": 0}
 CACHE_TTL = 900  # ۱۵ دقیقه
-
-telegram_app = None
 
 
 def verify_telegram_auth(func):
@@ -361,7 +407,7 @@ async def check_join(
     resolved_id = get_authenticated_telegram_user_id(request)
 
     if refresh:
-        clear_cached_join_status(resolved_id)
+        invalidate_join_cache_entry(resolved_id)
 
     try:
         if database_ready():
@@ -391,6 +437,14 @@ async def check_join(
     if result.get("status") == "DB_ERROR":
         return result
     return {"status": "success", **result}
+
+
+@app.post("/api/check-join/invalidate")
+@verify_telegram_auth
+async def invalidate_join_cache(request: Request, user_id: Optional[str] = Query(None)):
+    resolved_id = get_authenticated_telegram_user_id(request)
+    invalidated = invalidate_join_cache_entry(resolved_id)
+    return {"status": "success", "invalidated": invalidated, "user_id": resolved_id}
 
 @app.post("/api/tickets")
 @verify_telegram_auth
@@ -632,35 +686,6 @@ async def telegram_webhook(request: Request):
             print(f"⚠️ Telegram webhook processing error: {e}")
     return Response(status_code=200)
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # --- شروع استارت‌آپ ---
-    print("🚀 Starting application...")
-    try:
-        await init_database()
-        await init_redis()
-        asyncio.create_task(alert_polling_loop())
-        
-        # کد تلگرام را از اینجا شروع کن
-        global telegram_app
-        telegram_app = ApplicationBuilder().token(TOKEN).build()
-        telegram_app.add_handler(CommandHandler("start", start))
-        
-        await telegram_app.initialize()
-        await telegram_app.start()
-        await _set_telegram_webhook(WEBHOOK_URL)
-        print("✅ Telegram bot ready (webhook mode)")
-        
-    except Exception as e:
-        print(f"⚠️ Startup failed: {e}")
-    
-    yield # برنامه در حال اجراست
-    
-    # --- شروع خاموشی ---
-    print("🛑 Shutting down...")
-    if telegram_app:
-        await telegram_app.stop()
 
 # ==========================================
 # ۵. اجرای نهایی سرور

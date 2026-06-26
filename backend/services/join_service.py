@@ -43,6 +43,14 @@ def clear_cached_join_status(user_id: str) -> None:
         print(f"⚠️ Join cache clear error: {exc}")
 
 
+def invalidate_join_cache(user_id: str) -> bool:
+    """Force-delete the cached membership resolution for the given user."""
+    uid = str(user_id)
+    had_cached_value = get_cached_join_status(uid) is not None
+    clear_cached_join_status(uid)
+    return had_cached_value
+
+
 def _safe_db_user_joined(db: Session, uid: str) -> Optional[bool]:
     try:
         user = get_user(db, uid)

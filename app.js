@@ -1918,6 +1918,11 @@ async function verifyJoin() {
             hasChannelAccess = true;
             joinCheckDone = true;
             UserContext.setCachedJoin(true);
+            try {
+                await apiFetch(`/api/check-join/invalidate?user_id=${encodeURIComponent(userId)}`, { method: 'POST' });
+            } catch (invalidateError) {
+                console.warn('join cache invalidate:', invalidateError);
+            }
             document.getElementById('mandatory-join-modal').style.display = 'none';
             setAppLocked(false);
             loadUser();
