@@ -664,6 +664,29 @@ async function checkBackendHealth() {
 function setAppLocked(locked) {
     document.body.classList.toggle('app-locked', locked);
 }
+
+function isJoinResponsePositive(data) {
+    if (!data || typeof data !== 'object') return false;
+    return (
+        data.joined === true ||
+        data.is_member === true ||
+        data.isMember === true ||
+        data.member === true ||
+        data.channel_joined === true ||
+        data.channelJoined === true
+    );
+}
+
+function unlockAppFromJoin(modal) {
+    hasChannelAccess = true;
+    joinCheckDone = true;
+    UserContext.setCachedJoin(true);
+    if (modal) modal.style.display = 'none';
+    document.body.classList.remove('app-locked');
+    setAppLocked(false);
+    stopJoinRecheck();
+    try { loadUser(); } catch (_) {}
+}
 function updateLangChecks() {
     const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
     const fa = document.getElementById('lang-fa-check');
@@ -1958,12 +1981,8 @@ async function checkMandatoryJoin(options = {}) {
             setAppLocked(true);
             return;
         }
-        if (data.joined) {
-            hasChannelAccess = true;
-            UserContext.setCachedJoin(true);
-            modal.style.display = 'none';
-            setAppLocked(false);
-            loadUser();
+        if (isJoinResponsePositive(data)) {
+            unlockAppFromJoin(modal);
             return;
         }
         hasChannelAccess = false;
@@ -2010,7 +2029,7 @@ async function verifyJoin() {
             alert(t('join_db_error'));
             return;
         }
-        if (data.joined) {
+        if (isJoinResponsePositive(data)) {
             hasChannelAccess = true;
             joinCheckDone = true;
             UserContext.setCachedJoin(true);
@@ -2019,9 +2038,12 @@ async function verifyJoin() {
             } catch (invalidateError) {
                 console.warn('join cache invalidate:', invalidateError);
             }
-            document.getElementById('mandatory-join-modal').style.display = 'none';
+            const m = document.getElementById('mandatory-join-modal');
+            if (m) m.style.display = 'none';
+            document.body.classList.remove('app-locked');
             setAppLocked(false);
-            loadUser();
+            stopJoinRecheck();
+            try { loadUser(); } catch (_) {}
             addNotification(t('join_verified'), t('join_welcome'), false);
             getTg()?.showPopup?.({ title: t('join_verified'), message: t('join_welcome'), buttons: [{ type: 'ok' }] });
             return;
