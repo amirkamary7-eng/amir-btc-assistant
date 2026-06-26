@@ -15,3 +15,4 @@ data/
 !.dev.vars.example
 
 /generated/prisma
+node_modules/
