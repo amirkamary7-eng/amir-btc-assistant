@@ -17,7 +17,6 @@ TICKET_STATUS_OPEN = "open"
 TICKET_STATUS_ANSWERED = "answered"
 TICKET_STATUS_USER_REPLIED = "user_replied"
 
-
 def _ensure_user(db: Session, *, user_id: str, user_name: Optional[str] = None) -> User:
     user = db.get(User, str(user_id))
     now = utcnow()
@@ -39,7 +38,6 @@ def _ensure_user(db: Session, *, user_id: str, user_name: Optional[str] = None) 
     db.flush()
     return user
 
-
 def _reply_to_dict(reply: TicketReply) -> dict[str, Any]:
     return {
         "id": reply.id,
@@ -50,7 +48,6 @@ def _reply_to_dict(reply: TicketReply) -> dict[str, Any]:
         "at": reply.created_at.isoformat() if reply.created_at else None,
         "created_at": reply.created_at.isoformat() if reply.created_at else None,
     }
-
 
 def _ticket_to_dict(ticket: Ticket) -> dict[str, Any]:
     replies = sorted(ticket.replies, key=lambda item: item.created_at or utcnow())
@@ -66,10 +63,8 @@ def _ticket_to_dict(ticket: Ticket) -> dict[str, Any]:
         "updated_at": ticket.updated_at.isoformat() if ticket.updated_at else None,
     }
 
-
 def _next_status_for_reply(sender_type: str) -> str:
     return TICKET_STATUS_ANSWERED if sender_type == ADMIN_SENDER else TICKET_STATUS_USER_REPLIED
-
 
 def create_ticket(
     db: Session,
@@ -99,7 +94,6 @@ def create_ticket(
     db.flush()
     db.refresh(ticket)
     return _ticket_to_dict(ticket)
-
 
 def add_reply(
     db: Session,
@@ -137,7 +131,6 @@ def add_reply(
     db.refresh(ticket)
     return _ticket_to_dict(ticket)
 
-
 def get_user_tickets(db: Session, user_id: str) -> list[dict[str, Any]]:
     rows = (
         db.query(Ticket)
@@ -147,3 +140,5 @@ def get_user_tickets(db: Session, user_id: str) -> list[dict[str, Any]]:
         .all()
     )
     return [_ticket_to_dict(ticket) for ticket in rows]
+
+# endregion

@@ -3,6 +3,9 @@
  * در Cloudflare Workers متغیر BACKEND_URL را تنظیم کنید.
  * مثال: https://your-app.up.railway.app
  */
+// ============================================================================
+//#region پروکسی Cloudflare Worker
+// ============================================================================
 export default {
   async fetch(request, env) {
     const corsHeaders = {
@@ -53,3 +56,4 @@ export default {
     }
   },
 };
+//#endregion

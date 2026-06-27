@@ -1,3 +1,7 @@
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `main.py` را نگه می‌دارد.
+# ============================================================================
 import os
 import re
 import time
@@ -53,14 +57,20 @@ from backend.redis_client import cache_get_json, cache_set_json
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
 telegram_app = None
 alert_polling_task = None
 
-
-# ==========================================
-# ۱. تنظیمات و راه‌اندازی FastAPI
-# ==========================================
 @asynccontextmanager
+
+# چرخه حیات برنامه FastAPI را برای راه‌اندازی و خاموش‌سازی سرویس‌ها مدیریت می‌کند.
+# ورودی: پارامترهای `app: FastAPI` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 async def lifespan(app: FastAPI):
     global telegram_app, alert_polling_task
 
@@ -109,7 +119,6 @@ async def lifespan(app: FastAPI):
             finally:
                 telegram_app = None
 
-
 app = FastAPI(title="Crypto Premium News & Bot Engine", lifespan=lifespan)
 
 app.add_middleware(
@@ -134,16 +143,27 @@ news_cache = {"data": None, "expiry": 0}
 CACHE_TTL = 900  # ۱۵ دقیقه
 
 
+# دکوراتور احراز هویت تلگرام را روی endpoint هدف اعمال می‌کند.
+# ورودی: پارامترهای `func` را دریافت می‌کند.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def verify_telegram_auth(func):
     return _verify_telegram_auth(func)
 
 
+# دکوراتور احراز هویت مدیر تلگرام را روی endpoint هدف اعمال می‌کند.
+# ورودی: پارامترهای `func` را دریافت می‌کند.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def verify_admin_telegram_auth(func):
     return _verify_admin_telegram_auth(func)
 
 # ==========================================
 # ۲. مسیر ریشه برای تست سلامت سرور
 # ==========================================
+
+# عملیات مربوط به root را انجام می‌دهد.
+# عملیات مربوط به ریشه را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "Amir BTC Assistant Backend is running!"}
@@ -151,6 +171,10 @@ async def root():
 # ==========================================
 # ۳. توابع بخش اخبار و ترجمه
 # ==========================================
+
+# عملیات مربوط به clean html را انجام می‌دهد.
+# ورودی: پارامترهای `raw_html` را دریافت می‌کند.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def clean_html(raw_html):
     if not raw_html: return ""
     clean_text = re.sub(r'<[^>]+>', '', raw_html)
@@ -158,6 +182,9 @@ def clean_html(raw_html):
     clean_text = re.sub(r'\s+', ' ', clean_text).strip()
     return clean_text[:150] + "..." if len(clean_text) > 150 else clean_text
 
+# داده تجزیه relative time را تجزیه و آماده استفاده می‌کند.
+# ورودی: پارامترهای `date_str` را دریافت می‌کند.
+# خروجی: مقدار نهایی یا داده محاسبه‌شده این عملیات را برمی‌گرداند.
 def parse_relative_time(date_str):
     try:
         clean_date = date_str.split(" +")[0].split(" GMT")[0].strip()
@@ -182,6 +209,9 @@ MOCK_NEWS = [{
     "url": "https://cointelegraph.com"
 }]
 
+# دریافت خام اخبار rss را از منبع داده دریافت می‌کند.
+# ورودی: بدون ورودی.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def fetch_raw_news_rss():
     headers = {"User-Agent": "Mozilla/5.0"}
     sources = [
@@ -197,6 +227,11 @@ def fetch_raw_news_rss():
             print(f"⚠️ منبع {name} در دسترس نبود: {e}")
     return None, None
 
+
+# مقدار optimized فارسی اخبار را بازیابی می‌کند.
+# مقدار optimized farsi اخبار را بازیابی می‌کند.
+# ورودی: بدون ورودی.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.get("/api/farsi-news")
 async def get_optimized_farsi_news():
     current_time = time.time()
@@ -275,29 +310,49 @@ TICKETS_FILE = Path(__file__).parent / "data" / "tickets.json"
 
 JOINED_STATUSES = {"creator", "administrator", "member", "restricted"}
 
+
+# TicketCreate ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class TicketCreate(BaseModel):
     user_id: str
     user_name: str
     title: str
     body: str
 
+# TicketReply ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class TicketReply(BaseModel):
     admin_id: str
     message: str
 
+# NotifyRequest ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class NotifyRequest(BaseModel):
     user_id: str
     message: str
 
+
+# عملیات مربوط به ensure تیکت‌ها فایل را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def _ensure_tickets_file():
     TICKETS_FILE.parent.mkdir(exist_ok=True)
     if not TICKETS_FILE.exists():
         TICKETS_FILE.write_text("[]", encoding="utf-8")
 
+# عملیات مربوط به خواندن تیکت‌ها را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def _read_tickets():
     _ensure_tickets_file()
     return json.loads(TICKETS_FILE.read_text(encoding="utf-8"))
 
+# عملیات مربوط به نوشتن تیکت‌ها را انجام می‌دهد.
+# ورودی: پارامترهای `tickets` را دریافت می‌کند.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def _write_tickets(tickets):
     _ensure_tickets_file()
     TICKETS_FILE.write_text(json.dumps(tickets, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -318,7 +373,6 @@ def _send_telegram_http(chat_id: str, text: str) -> bool:
         print(f"⚠️ Telegram HTTP error: {e}")
         return False
 
-
 def _normalize_required_channel(raw: str) -> str:
     value = str(raw or "").strip()
     if not value:
@@ -333,7 +387,6 @@ def _normalize_required_channel(raw: str) -> str:
     value = value.strip().lstrip("@").strip()
     value = value.split("/", 1)[0].strip()
     return value
-
 
 def _run_get_chat_member_debug(user_id: str) -> dict:
     uid = str(user_id)
@@ -478,6 +531,11 @@ def _check_channel_membership(user_id: str) -> dict:
 
     return {"joined": False, "reason": "api_error"}
 
+
+# عملیات مربوط به health check را انجام می‌دهد.
+# عملیات مربوط به سلامت بررسی را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.get("/api/health")
 async def health_check():
     settings = get_settings()
@@ -536,7 +594,9 @@ async def check_join(
     print(f"🔎 Join Debug | /api/check-join final result={json.dumps(final_result, ensure_ascii=False)}")
     return final_result
 
-
+# عملیات مربوط به debug بررسی عضویت را انجام می‌دهد.
+# ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.get("/api/debug/check-join")
 @verify_telegram_auth
 async def debug_check_join(request: Request, user_id: Optional[str] = Query(None)):
@@ -555,7 +615,9 @@ async def debug_check_join(request: Request, user_id: Optional[str] = Query(None
     print(f"🔎 Join Debug | /api/debug/check-join response={json.dumps(response, ensure_ascii=False)}")
     return response
 
-
+# عملیات مربوط به invalidate عضویت کش را انجام می‌دهد.
+# ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.post("/api/check-join/invalidate")
 @verify_telegram_auth
 async def invalidate_join_cache(request: Request, user_id: Optional[str] = Query(None)):
@@ -563,6 +625,10 @@ async def invalidate_join_cache(request: Request, user_id: Optional[str] = Query
     invalidated = invalidate_join_cache_entry(resolved_id)
     return {"status": "success", "invalidated": invalidated, "user_id": resolved_id}
 
+# تیکت را ایجاد می‌کند.
+# ایجاد تیکت را ایجاد می‌کند.
+# ورودی: پارامترهای `ticket: TicketCreate, request: Request` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.post("/api/tickets")
 @verify_telegram_auth
 async def create_ticket(ticket: TicketCreate, request: Request):
@@ -595,6 +661,10 @@ async def create_ticket(ticket: TicketCreate, request: Request):
     )
     return {"status": "success", "ticket": new_ticket}
 
+# مقدار کاربر تیکت‌ها را بازیابی می‌کند.
+# مقدار کاربر تیکت‌ها را بازیابی می‌کند.
+# ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.get("/api/tickets")
 @verify_telegram_auth
 async def get_user_tickets(request: Request, user_id: Optional[str] = Query(None)):
@@ -602,11 +672,19 @@ async def get_user_tickets(request: Request, user_id: Optional[str] = Query(None
     user_tickets = [t for t in _read_tickets() if t["user_id"] == resolved_user_id]
     return {"status": "success", "tickets": user_tickets}
 
+# مقدار all تیکت‌ها را بازیابی می‌کند.
+# مقدار all تیکت‌ها را بازیابی می‌کند.
+# ورودی: پارامترهای `request: Request, admin_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.get("/api/tickets/all")
 @verify_admin_telegram_auth
 async def get_all_tickets(request: Request, admin_id: Optional[str] = Query(None)):
     return {"status": "success", "tickets": _read_tickets()}
 
+# عملیات مربوط به پاسخ تیکت را انجام می‌دهد.
+# عملیات مربوط به reply تیکت را انجام می‌دهد.
+# ورودی: پارامترهای `ticket_id: str, reply: TicketReply, request: Request` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.post("/api/tickets/{ticket_id}/reply")
 @verify_admin_telegram_auth
 async def reply_ticket(ticket_id: str, reply: TicketReply, request: Request):
@@ -650,6 +728,10 @@ async def delete_ticket(
     _write_tickets([t for t in tickets if t["id"] != ticket_id])
     return {"status": "success"}
 
+# عملیات مربوط به اعلان کاربر را انجام می‌دهد.
+# عملیات مربوط به اعلان کاربر را انجام می‌دهد.
+# ورودی: پارامترهای `req: NotifyRequest, request: Request` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.post("/api/notify")
 @verify_telegram_auth
 async def notify_user(req: NotifyRequest, request: Request):
@@ -662,25 +744,44 @@ async def notify_user(req: NotifyRequest, request: Request):
 # ==========================================
 ALERTS_FILE = Path(__file__).parent / "data" / "alerts.json"
 
+
+# AlertCreate ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class AlertCreate(BaseModel):
     user_id: str
     symbol: str
     price: float
     direction: str = "above"
 
+
+# عملیات مربوط به ensure هشدارها فایل را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def _ensure_alerts_file():
     ALERTS_FILE.parent.mkdir(exist_ok=True)
     if not ALERTS_FILE.exists():
         ALERTS_FILE.write_text("[]", encoding="utf-8")
 
+# عملیات مربوط به خواندن هشدارها را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def _read_alerts():
     _ensure_alerts_file()
     return json.loads(ALERTS_FILE.read_text(encoding="utf-8"))
 
+# عملیات مربوط به نوشتن هشدارها را انجام می‌دهد.
+# ورودی: پارامترهای `alerts` را دریافت می‌کند.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def _write_alerts(alerts):
     _ensure_alerts_file()
     ALERTS_FILE.write_text(json.dumps(alerts, ensure_ascii=False, indent=2), encoding="utf-8")
 
+
+# هشدار را ایجاد می‌کند.
+# ایجاد هشدار را ایجاد می‌کند.
+# ورودی: پارامترهای `alert: AlertCreate, request: Request` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.post("/api/alerts")
 @verify_telegram_auth
 async def create_alert(alert: AlertCreate, request: Request):
@@ -707,6 +808,10 @@ async def create_alert(alert: AlertCreate, request: Request):
     )
     return {"status": "success", "alert": new_alert}
 
+# مقدار کاربر هشدارها را بازیابی می‌کند.
+# مقدار کاربر هشدارها را بازیابی می‌کند.
+# ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.get("/api/alerts")
 @verify_telegram_auth
 async def get_user_alerts(request: Request, user_id: Optional[str] = Query(None)):
@@ -714,6 +819,10 @@ async def get_user_alerts(request: Request, user_id: Optional[str] = Query(None)
     user_alerts = [a for a in _read_alerts() if a["user_id"] == resolved_user_id]
     return {"status": "success", "alerts": user_alerts}
 
+# هشدار را حذف می‌کند.
+# حذف هشدار را حذف می‌کند.
+# ورودی: پارامترهای `request: Request, alert_id: str, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.delete("/api/alerts/{alert_id}")
 @verify_telegram_auth
 async def delete_alert(request: Request, alert_id: str, user_id: Optional[str] = Query(None)):
@@ -727,6 +836,10 @@ async def delete_alert(request: Request, alert_id: str, user_id: Optional[str] =
     _write_alerts([a for a in alerts if a["id"] != alert_id])
     return {"status": "success"}
 
+
+# عملیات مربوط به بررسی قیمت هشدارها once را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 async def _check_price_alerts_once():
     alerts = _read_alerts()
     if not alerts:
@@ -764,6 +877,9 @@ async def _check_price_alerts_once():
     except Exception as e:
         print(f"⚠️ Alert check error: {e}")
 
+# عملیات مربوط به هشدار polling loop را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 async def alert_polling_loop():
     await asyncio.sleep(5)
     while True:
@@ -776,6 +892,9 @@ async def alert_polling_loop():
 if TOKEN == "REPLACE_WITH_TOKEN":
     print("⚠️ WARNING: TELEGRAM_BOT_TOKEN not set in environment. Telegram bot will not start until configured.")
 
+# عملیات مربوط به شروع را انجام می‌دهد.
+# ورودی: پارامترهای `update: Update, context: ContextTypes.DEFAULT_TYPE` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[
         KeyboardButton(
@@ -791,6 +910,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     )
 
+
+# عملیات مربوط به تلگرام وبهوک را انجام می‌دهد.
+# عملیات مربوط به تلگرام وبهوک را انجام می‌دهد.
+# ورودی: پارامترهای `request: Request` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
     print("update received from telegram")
@@ -811,3 +935,5 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
+# endregion

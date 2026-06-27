@@ -1,9 +1,19 @@
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `redis_client.py` را نگه می‌دارد.
+# ============================================================================
 import json
 import time
 from typing import Any, Optional
 
 from backend.config import get_settings
 
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
 _redis_client = None
 _redis_ready = False
 _memory_cache: dict[str, dict[str, Any]] = {}
@@ -130,3 +140,5 @@ def cache_smembers(key: str) -> set[str]:
         _memory_cache.pop(f"set:{key}", None)
         return set()
     return set(entry.get("members", set()))
+
+# endregion

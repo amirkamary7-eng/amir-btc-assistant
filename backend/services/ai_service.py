@@ -183,3 +183,5 @@ async def chat(
             continue
 
     return {"status": "error", "reason": "all_providers_failed", "detail": last_error}
+
+# endregion

@@ -1,3 +1,7 @@
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `join_service.py` را نگه می‌دارد.
+# ============================================================================
 from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
@@ -8,6 +12,12 @@ from backend.models import Referral
 from backend.services.referral_service import process_referral_on_bootstrap
 from backend.services.user_service import get_user, set_user_channel_joined
 
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
 JOIN_CACHE_PREFIX = "join:"
 DB_ERROR_STATUS = "DB_ERROR"
 
@@ -41,7 +51,6 @@ def clear_cached_join_status(user_id: str) -> None:
         cache_delete(_join_cache_key(user_id))
     except Exception as exc:
         print(f"⚠️ Join cache clear error: {exc}")
-
 
 def invalidate_join_cache(user_id: str) -> bool:
     """Force-delete the cached membership resolution for the given user."""
@@ -132,3 +141,5 @@ def resolve_channel_membership(
             "reason": "database_unavailable",
             "detail": str(exc),
         }
+
+# endregion

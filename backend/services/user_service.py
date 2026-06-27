@@ -1,3 +1,7 @@
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `user_service.py` را نگه می‌دارد.
+# ============================================================================
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -7,6 +11,12 @@ from backend.config import get_settings
 from backend.models import User, WatchlistItem, utcnow
 
 
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
 def _user_to_dict(user: User, watchlist: Optional[list[str]] = None) -> dict[str, Any]:
     return {
         "user_id": user.telegram_id,
@@ -150,3 +160,5 @@ def replace_watchlist(db: Session, telegram_id: str, symbols: list[str]) -> list
     user.updated_at = now
     db.flush()
     return cleaned
+
+# endregion

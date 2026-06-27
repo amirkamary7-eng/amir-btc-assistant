@@ -39,3 +39,5 @@ def end_session(user_id: str) -> None:
     cache_delete(f"{SESSION_PREFIX}{uid}")
     cache_delete(f"{SESSION_PREFIX}{uid}:seen")
     cache_srem(ONLINE_SET_KEY, uid)
+
+# endregion

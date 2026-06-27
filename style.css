@@ -3,6 +3,10 @@
    با استایل‌های جدید برای سرتیترها، نوتیفیکیشن، پاپ‌آپ جوین و تنظیمات
    ============================================================ */
 
+/* #region پایه و متغیرهای سراسری */
+/* ============================================================================ */
+/* این بخش متغیرهای طراحی، ریست اولیه و رفتارهای عمومی رابط را تعریف می‌کند. */
+/* ============================================================================ */
 :root {
     --bg-primary: #0b1220;
     --bg-secondary: #111827;
@@ -64,7 +68,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 4px; }
 
-/* ---------- هدر ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region هدر */
+/* این بخش استایل‌های مرتبط با "هدر" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .app-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: rgba(11,18,32,0.85); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
 .header-left { display: flex; align-items: center; gap: 10px; }
 .brand-dot { width: 10px; height: 10px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 12px var(--accent); }
@@ -73,12 +82,22 @@ body.user-loading .profile-loading-target.skeleton-text {
 .notif-btn { background: rgba(255,255,255,0.04); border: 1px solid var(--border); width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: var(--text); cursor: pointer; position: relative; }
 .notif-badge { position: absolute; top: -4px; right: -4px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
 
-/* ---------- صفحات ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region صفحات */
+/* این بخش استایل‌های مرتبط با "صفحات" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .page { display: none; padding: 12px 0 20px; animation: fadeSlide 0.3s ease; }
 .page.active { display: block; }
 @keyframes fadeSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-/* ---------- بخش‌ها و سرتیترها (زیباسازی شده) ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region بخش‌ها و سرتیترها (زیباسازی شده) */
+/* این بخش استایل‌های مرتبط با "بخش‌ها و سرتیترها (زیباسازی شده)" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .section-header {
     display: flex;
     justify-content: space-between;
@@ -117,7 +136,12 @@ body.user-loading .profile-loading-target.skeleton-text {
     cursor: pointer;
 }
 
-/* ---------- Hero Banner ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region Hero Banner */
+/* این بخش استایل‌های مرتبط با "Hero Banner" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .hero-banner { margin: 0 20px 16px; padding: 16px; background: linear-gradient(135deg, rgba(247,147,26,0.12), rgba(0,200,150,0.06)); border: 1px solid rgba(247,147,26,0.15); border-radius: var(--radius); position: relative; overflow: hidden; cursor: pointer; min-height: 130px; }
 .hero-inner { display: flex; align-items: center; gap: 10px; position: relative; z-index: 1; }
 .hero-glow { position: absolute; top: -40%; right: -20%; width: 200px; height: 200px; background: radial-gradient(circle, rgba(247,147,26,0.08), transparent 70%); pointer-events: none; }
@@ -132,7 +156,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .join-icon-wrap { margin-bottom: 15px; }
 .join-logo { width: 90px; height: auto; object-fit: contain; filter: drop-shadow(0 4px 16px rgba(247,147,26,0.3)); }
 
-/* ---------- اسلایدر ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region اسلایدر */
+/* این بخش استایل‌های مرتبط با "اسلایدر" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .slider-container { margin: 0 20px 20px; border-radius: var(--radius); overflow: hidden; height: 170px; background: var(--bg-card); border: 1px solid var(--border); position: relative; }
 .slider-track { width: 100%; height: 100%; position: relative; }
 .slide-item { width: 100%; height: 100%; position: relative; cursor: pointer; }
@@ -146,7 +175,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .dot.active { background: var(--accent); width: 18px; border-radius: 4px; }
 .slide-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); }
 
-/* ---------- واچ‌لیست ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region واچ‌لیست */
+/* این بخش استایل‌های مرتبط با "واچ‌لیست" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .watchlist-grid {
     display: flex;
     flex-direction: row;
@@ -177,7 +211,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .watch-change.down { color: var(--red); }
 .remove-watch { position: absolute; top: 4px; right: 6px; color: var(--text-dim); cursor: pointer; }
 
-/* ---------- اخبار مهم ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region اخبار مهم */
+/* این بخش استایل‌های مرتبط با "اخبار مهم" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .important-news-list { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 8px; }
 .important-news-item { display: flex; gap: 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; cursor: pointer; }
 .important-news-img { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
@@ -185,7 +224,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .important-news-title { font-size: 13px; font-weight: 600; line-height: 1.3; }
 .important-news-source { font-size: 11px; color: var(--text-dim); }
 
-/* ---------- صفحه مارکت ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region صفحه مارکت */
+/* این بخش استایل‌های مرتبط با "صفحه مارکت" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .search-bar { padding: 0 20px 12px; }
 .search-input { width: 100%; padding: 12px 16px; border-radius: 14px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text); font-size: 14px; outline: none; }
 .search-input:focus { border-color: var(--accent); }
@@ -209,7 +253,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .watch-star { cursor: pointer; opacity: 0.3; transition: 0.2s; display: inline-flex; }
 .watch-star.active { opacity: 1; }
 
-/* ---------- صفحه تحلیل ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region صفحه تحلیل */
+/* این بخش استایل‌های مرتبط با "صفحه تحلیل" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .analysis-header { display: flex; justify-content: space-between; align-items: center; padding: 0 20px 14px; }
 .analysis-header h2 { font-size: 18px; }
 .admin-btn {
@@ -244,7 +293,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .analysis-detail-text { color: var(--text-dim); line-height: 1.7; font-size: 14px; white-space: pre-wrap; margin-bottom: 16px; }
 .modal-box-wide { max-width: 520px; }
 
-/* ---------- صفحه اخبار ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region صفحه اخبار */
+/* این بخش استایل‌های مرتبط با "صفحه اخبار" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .news-tabs { display: flex; gap: 4px; padding: 0 20px 12px; overflow-x: auto; scrollbar-width: none; }
 .news-tabs::-webkit-scrollbar { display: none; }
 .news-tab { flex-shrink: 0; padding: 6px 14px; border: none; background: transparent; color: var(--text-dim); font-size: 13px; cursor: pointer; border-radius: 20px; }
@@ -256,7 +310,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .news-title { font-weight: 600; font-size: 13px; line-height: 1.4; }
 .news-source { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 
-/* تقویم اقتصادی */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region تقویم اقتصادی */
+/* این بخش استایل‌های کارت‌های رویداد و وضعیت‌های تقویم اقتصادی را تعریف می‌کند. */
+/* ============================================================================ */
 .eco-event-card { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); padding: 12px; margin-bottom: 8px; border-radius: 12px; border: 1px solid var(--border); }
 .eco-event-left { display: flex; align-items: center; gap: 10px; }
 .eco-flag { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 24px; border-radius: 4px; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; color: #fff; flex-shrink: 0; }
@@ -268,7 +327,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .eco-impact-high { background: rgba(255,77,77,0.1); color: var(--red); }
 .eco-impact-medium { background: rgba(247,147,26,0.1); color: var(--accent); }
 
-/* ---------- پروفایل ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region پروفایل */
+/* این بخش استایل‌های مرتبط با "پروفایل" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .profile-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px 20px; margin: 0 20px 16px; text-align: center; position: relative; }
 .profile-settings { position: absolute; top: 16px; right: 16px; cursor: pointer; }
 .profile-avatar { width: 80px; height: 80px; margin: 0 auto 10px; border-radius: 50%; border: 2px solid var(--accent); overflow: hidden; }
@@ -277,7 +341,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .profile-username { display: block; font-size: 13px; color: var(--text-dim); }
 .profile-id { font-size: 12px; color: var(--text-sub); margin-top: 4px; }
 
-/* رفرال */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region رفرال */
+/* این بخش استایل‌های لینک دعوت، آمار ارجاع و پاداش‌ها را مشخص می‌کند. */
+/* ============================================================================ */
 .referral-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 0 20px 16px; }
 .ref-header { display: flex; gap: 12px; margin-bottom: 14px; }
 .ref-header svg { flex-shrink: 0; }
@@ -296,7 +365,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .ref-rewards-soon h5 { font-size: 13px; margin-bottom: 6px; line-height: 1.4; text-align: center; }
 .ref-rewards-soon p { font-size: 11px; color: var(--text-dim); line-height: 1.5; text-align: center; }
 
-/* گردونه غیرفعال (بزودی) */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region گردونه غیرفعال */
+/* این بخش پیش‌نمایش بصری قابلیت آینده‌دار گردونه جوایز را استایل‌دهی می‌کند. */
+/* ============================================================================ */
 .wheel-preview-wrap { display: flex; justify-content: center; margin: 12px 0 14px; }
 .wheel-preview {
     position: relative;
@@ -377,7 +451,12 @@ body.user-loading .profile-loading-target.skeleton-text {
     filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
 }
 
-/* تنظیمات — مودال پاپ‌آپ */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region تنظیمات و زبان */
+/* این بخش استایل‌های مودال تنظیمات، انتخاب زبان و ظرف‌های تمام‌صفحه را تعریف می‌کند. */
+/* ============================================================================ */
 .settings-modal-box { max-width: 400px; }
 .settings-menu { display: flex; flex-direction: column; gap: 4px; }
 .setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 12px; border-radius: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); cursor: pointer; transition: background 0.2s; }
@@ -397,7 +476,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .full-modal .modal-box-wide { max-width: 100%; width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; margin: 0; }
 .modal-box-wide { max-width: 480px; }
 
-/* تیکت‌ها */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region تیکت‌ها */
+/* این بخش استایل‌های فرم تیکت، لیست پیام‌ها و پاسخ‌های پشتیبانی را نگه می‌دارد. */
+/* ============================================================================ */
 .ticket-form { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
 .ticket-section-title { font-size: 13px; font-weight: 700; color: var(--text-dim); margin-bottom: 10px; }
 .ticket-list { max-height: 45vh; overflow-y: auto; }
@@ -420,7 +504,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .ticket-reply-btn { padding: 10px; font-size: 13px; }
 .ticket-date { font-size: 10px; color: var(--text-sub); text-align: left; margin-top: 6px; }
 
-/* هشدار قیمت */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region هشدار قیمت */
+/* این بخش استایل‌های فرم ثبت هشدار و لیست هشدارهای فعال را مشخص می‌کند. */
+/* ============================================================================ */
 .alert-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .alert-section-header h4 { font-size: 14px; margin: 0; }
 .alert-hint { font-size: 10px; color: var(--accent); background: rgba(247,147,26,0.1); padding: 3px 8px; border-radius: 6px; }
@@ -438,13 +527,23 @@ body.user-loading .profile-loading-target.skeleton-text {
 .input-field { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text); margin-bottom: 10px; outline: none; }
 .submit-btn { width: 100%; padding: 12px; background: var(--accent); border: none; color: #000; font-weight: 700; border-radius: 12px; cursor: pointer; }
 
-/* درباره */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region درباره */
+/* این بخش استایل‌های پنجره معرفی برنامه و لینک کانال رسمی را ارائه می‌کند. */
+/* ============================================================================ */
 .about-content { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
 .about-content h3 { margin-bottom: 10px; }
 .about-content p { color: var(--text-dim); margin-bottom: 6px; }
 .about-content a { color: var(--accent); text-decoration: none; }
 
-/* ---------- مودال‌ها ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region مودال‌ها */
+/* این بخش استایل‌های مرتبط با "مودال‌ها" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(12px); display: none; align-items: center; justify-content: center; z-index: 9999; padding: 20px; }
 .modal-box { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); max-width: 420px; width: 100%; max-height: 80vh; overflow-y: auto; padding: 20px; }
 .join-box { max-width: 380px; }
@@ -458,7 +557,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .modal-actions { display: flex; gap: 10px; margin-top: 10px; }
 .cancel-btn { flex: 1; padding: 12px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--text); border-radius: 12px; cursor: pointer; }
 
-/* جزئیات کوین */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region جزئیات کوین */
+/* این بخش استایل‌های نمودار، آمار کوین و ناحیه هشدار قیمت را نگه می‌دارد. */
+/* ============================================================================ */
 .detail-chart { height: 200px; border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
 .detail-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
 .detail-stats div { background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 8px; }
@@ -467,7 +571,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .alert-section { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 10px; }
 .alert-section h4 { font-size: 14px; margin-bottom: 8px; }
 
-/* ---------- نوتیفیکیشن‌ها (دکمه‌های کوچک و شیک) ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region نوتیفیکیشن‌ها (دکمه‌های کوچک و شیک) */
+/* این بخش استایل‌های مرتبط با "نوتیفیکیشن‌ها (دکمه‌های کوچک و شیک)" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .notif-list { max-height: 300px; overflow-y: auto; }
 .notif-item { padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
 .notif-item.unread { background: rgba(247,147,26,0.04); border-left: 3px solid var(--accent); }
@@ -505,17 +614,32 @@ body.user-loading .profile-loading-target.skeleton-text {
 }
 .clear-notif-btn:hover { background: rgba(255, 77, 77, 0.15); }
 
-/* ---------- منوی پایینی ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region منوی پایینی */
+/* این بخش استایل‌های مرتبط با "منوی پایینی" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 72px; background: rgba(11,18,32,0.92); backdrop-filter: blur(20px); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; z-index: 1000; padding-bottom: env(safe-area-inset-bottom); }
 .nav-item { background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text-sub); cursor: pointer; transition: all 0.2s; padding: 4px 12px; }
 .nav-item.active { color: var(--accent); }
 .nav-item svg { width: 24px; height: 24px; }
 .nav-item span { font-size: 10px; font-weight: 500; }
 
-/* ---------- وضعیت خالی ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region وضعیت خالی */
+/* این بخش استایل‌های مرتبط با "وضعیت خالی" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .empty-state { text-align: center; color: var(--text-dim); padding: 24px 10px; font-size: 13px; }
 
-/* ---------- واکنش‌گرایی ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region واکنش‌گرایی */
+/* این بخش استایل‌های مرتبط با "واکنش‌گرایی" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 @media (max-width: 400px) {
     .ref-stats { grid-template-columns: 1fr 1fr; }
     .hero-art { flex: 0 0 42%; max-width: 130px; }
@@ -524,7 +648,12 @@ body.user-loading .profile-loading-target.skeleton-text {
     .hero-content p { font-size: 11px; }
 }
 
-/* ---------- Online users badge ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region Online users badge */
+/* این بخش استایل‌های مرتبط با "Online users badge" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .online-badge {
     display: inline-flex;
     align-items: center;
@@ -540,7 +669,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .online-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s infinite; }
 @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-/* ---------- Economic calendar enhancements ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region Economic calendar enhancements */
+/* این بخش استایل‌های مرتبط با "Economic calendar enhancements" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .eco-event-card.past { opacity: 0.45; }
 .eco-event-card.live { border-color: var(--green); box-shadow: 0 0 12px rgba(0,200,150,0.15); }
 .eco-event-card.upcoming { opacity: 1; }
@@ -551,7 +685,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .eco-flag-emoji { font-size: 20px; margin-left: 8px; }
 .chart-exchange-badge { font-size: 10px; color: var(--text-sub); text-align: center; margin-bottom: 6px; }
 
-/* ---------- AI Assistant ---------- */
+/* #endregion */
+
+/* ============================================================================ */
+/* #region AI Assistant */
+/* این بخش استایل‌های مرتبط با "AI Assistant" را در خود نگه می‌دارد. */
+/* ============================================================================ */
 .ai-assistant-root {
     position: fixed;
     bottom: calc(72px + env(safe-area-inset-bottom, 0px) + 8px);
@@ -809,3 +948,5 @@ body.user-loading .profile-loading-target.skeleton-text {
         height: min(65vh, calc(100vh - 100px));
     }
 }
+
+/* #endregion */

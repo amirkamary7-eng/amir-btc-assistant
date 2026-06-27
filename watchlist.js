@@ -1,4 +1,7 @@
 // Watchlist Module - user-scoped helpers
+// ============================================================================
+//#region سازگاری واچ‌لیست و توابع کمکی
+// ============================================================================
 (function() {
     if (typeof window.getWatchlist === 'undefined') {
         window.getWatchlist = function() {
@@ -15,3 +18,4 @@
         };
     }
 })();
+//#endregion

@@ -115,6 +115,17 @@ CHECKERS = {
 
 def resolve_chart_exchange(symbol: str) -> dict:
     """Return TradingView symbol and exchange for a coin, with fallback chain."""
+
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `chart_service.py` را نگه می‌دارد.
+# ============================================================================
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
     sym = symbol.upper().strip()
     if not sym:
         return {"found": False, "symbol": None, "exchange": None, "tv_symbol": None}
@@ -146,3 +157,5 @@ def resolve_chart_exchange(symbol: str) -> dict:
             }
 
     return {"found": False, "symbol": sym, "exchange": None, "tv_symbol": None, "cached": False}
+
+# endregion

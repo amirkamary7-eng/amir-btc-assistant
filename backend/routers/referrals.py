@@ -1,3 +1,7 @@
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `referrals.py` را نگه می‌دارد.
+# ============================================================================
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
@@ -7,9 +11,20 @@ from backend.database import database_ready, get_db_session
 from backend.services.referral_service import get_referral_stats, get_token_balance, get_token_history
 from backend.services.telegram_auth import get_authenticated_telegram_user_id, verify_telegram_auth
 
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
 router = APIRouter(prefix="/referrals", tags=["referrals"])
 
 
+
+# عملیات مربوط به ارجاع stats را انجام می‌دهد.
+# عملیات مربوط به ارجاع stats را انجام می‌دهد.
+# ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @router.get("/stats")
 @verify_telegram_auth
 async def referral_stats(request: Request, user_id: Optional[str] = Query(None)):
@@ -21,6 +36,10 @@ async def referral_stats(request: Request, user_id: Optional[str] = Query(None))
         return {"status": "success", **get_referral_stats(db, resolved_user_id)}
 
 
+# عملیات مربوط به token info را انجام می‌دهد.
+# عملیات مربوط به token info را انجام می‌دهد.
+# ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @router.get("/tokens")
 @verify_telegram_auth
 async def token_info(request: Request, user_id: Optional[str] = Query(None)):
@@ -32,3 +51,5 @@ async def token_info(request: Request, user_id: Optional[str] = Query(None)):
         balance = get_token_balance(db, resolved_user_id)
         history = get_token_history(db, resolved_user_id)
     return {"status": "success", "balance": balance, "history": history}
+
+# endregion

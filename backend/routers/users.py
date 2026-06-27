@@ -1,3 +1,7 @@
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `users.py` را نگه می‌دارد.
+# ============================================================================
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
@@ -12,9 +16,19 @@ from backend.services.telegram_auth import (
 )
 from backend.services.user_service import bootstrap_user, get_watchlist, update_user_settings
 
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+
+# BootstrapRequest ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class BootstrapRequest(BaseModel):
     user_id: str
     username: Optional[str] = None
@@ -24,11 +38,19 @@ class BootstrapRequest(BaseModel):
     referrer_id: Optional[str] = None
 
 
+# SettingsUpdateRequest ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class SettingsUpdateRequest(BaseModel):
     user_id: str
     lang: str = Field(pattern="^(fa|en)$")
 
 
+
+# عملیات مربوط به راه‌اندازی اولیه کاربر endpoint را انجام می‌دهد.
+# عملیات مربوط به bootstrap کاربر endpoint را انجام می‌دهد.
+# ورودی: پارامترهای `payload: BootstrapRequest, request: Request` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @router.post("/bootstrap")
 @verify_telegram_auth
 async def bootstrap_user_endpoint(payload: BootstrapRequest, request: Request):
@@ -67,6 +89,10 @@ async def bootstrap_user_endpoint(payload: BootstrapRequest, request: Request):
         )
 
 
+# مقدار فعلی کاربر را بازیابی می‌کند.
+# مقدار فعلی کاربر را بازیابی می‌کند.
+# ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @router.get("/me")
 @verify_telegram_auth
 async def get_current_user(request: Request, user_id: Optional[str] = Query(None)):
@@ -95,6 +121,10 @@ async def get_current_user(request: Request, user_id: Optional[str] = Query(None
         }
 
 
+# تنظیمات را به‌روزرسانی می‌کند.
+# به‌روزرسانی تنظیمات را به‌روزرسانی می‌کند.
+# ورودی: پارامترهای `payload: SettingsUpdateRequest, request: Request` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @router.put("/me/settings")
 @verify_telegram_auth
 async def update_settings(payload: SettingsUpdateRequest, request: Request):
@@ -107,3 +137,5 @@ async def update_settings(payload: SettingsUpdateRequest, request: Request):
         if not user:
             return JSONResponse(status_code=404, content={"status": "error", "message": "User not found"})
     return {"status": "success", "user": user}
+
+# endregion

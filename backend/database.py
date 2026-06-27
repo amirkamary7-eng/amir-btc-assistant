@@ -1,3 +1,7 @@
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `database.py` را نگه می‌دارد.
+# ============================================================================
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, text
@@ -6,6 +10,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.config import get_settings
 from backend.models import Base
 
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
 _engine = None
 SessionLocal = None
 _db_ready = False
@@ -47,6 +57,10 @@ def database_ready() -> bool:
 
 
 @contextmanager
+
+# مقدار db سشن را بازیابی می‌کند.
+# ورودی: بدون ورودی.
+# خروجی: مقدار نهایی یا داده محاسبه‌شده این عملیات را برمی‌گرداند.
 def get_db_session():
     if not SessionLocal:
         raise RuntimeError("Database is not configured")
@@ -62,6 +76,9 @@ def get_db_session():
         session.close()
 
 
+# عملیات مربوط به safe db سشن را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def safe_db_session():
     """Return an active session or None when the database is unavailable."""
     if not SessionLocal:
@@ -73,3 +90,5 @@ def safe_db_session():
     except Exception as exc:
         print(f"⚠️ Database unavailable: {exc}")
         return None
+
+# endregion

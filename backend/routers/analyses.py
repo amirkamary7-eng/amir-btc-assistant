@@ -1,3 +1,7 @@
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `analyses.py` را نگه می‌دارد.
+# ============================================================================
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
@@ -14,9 +18,19 @@ from backend.services.analysis_service import (
 )
 from backend.services.telegram_auth import get_authenticated_telegram_user_id, verify_admin_telegram_auth
 
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
 router = APIRouter(prefix="/analyses", tags=["analyses"])
 
 
+
+# AnalysisCreate ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class AnalysisCreate(BaseModel):
     coin: str = Field(min_length=1, max_length=16)
     timeframe: str = Field(default="1d", max_length=16)
@@ -26,6 +40,9 @@ class AnalysisCreate(BaseModel):
     author_id: Optional[str] = None
 
 
+# AnalysisUpdate ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class AnalysisUpdate(BaseModel):
     coin: str = Field(min_length=1, max_length=16)
     timeframe: str = Field(default="1d", max_length=16)
@@ -33,6 +50,11 @@ class AnalysisUpdate(BaseModel):
     text: str = Field(min_length=1)
 
 
+
+# مقدار تحلیل‌ها را بازیابی می‌کند.
+# مقدار analyses را بازیابی می‌کند.
+# ورودی: پارامترهای `version: Optional[int] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @router.get("")
 async def get_analyses(version: Optional[int] = Query(None)):
     if not database_ready():
@@ -47,6 +69,10 @@ async def get_analyses(version: Optional[int] = Query(None)):
     return {"status": "success", "analyses": analyses, "version": current_version}
 
 
+# عملیات مربوط به post تحلیل را انجام می‌دهد.
+# عملیات مربوط به post analysis را انجام می‌دهد.
+# ورودی: پارامترهای `payload: AnalysisCreate, request: Request, admin_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @router.post("")
 @verify_admin_telegram_auth
 async def post_analysis(payload: AnalysisCreate, request: Request, admin_id: Optional[str] = Query(None)):
@@ -67,6 +93,9 @@ async def post_analysis(payload: AnalysisCreate, request: Request, admin_id: Opt
     return {"status": "success", "analysis": item, "version": get_version()}
 
 
+# عملیات مربوط به put analysis را انجام می‌دهد.
+# ورودی: پارامترهای تعریف‌شده در امضای این تابع را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @router.put("/{analysis_id}")
 @verify_admin_telegram_auth
 async def put_analysis(
@@ -92,6 +121,10 @@ async def put_analysis(
     return {"status": "success", "analysis": item, "version": get_version()}
 
 
+# تحلیل را حذف می‌کند.
+# analysis را حذف می‌کند.
+# ورودی: پارامترهای `analysis_id: str, request: Request, admin_id: Optional[str] = Query(None)` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @router.delete("/{analysis_id}")
 @verify_admin_telegram_auth
 async def remove_analysis(analysis_id: str, request: Request, admin_id: Optional[str] = Query(None)):
@@ -103,3 +136,5 @@ async def remove_analysis(analysis_id: str, request: Request, admin_id: Optional
     if not ok:
         return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
     return {"status": "success", "version": get_version()}
+
+# endregion

@@ -88,6 +88,17 @@ def process_referral_on_bootstrap(
     channel_joined: bool,
 ) -> Optional[dict[str, Any]]:
     """Record referral if valid; reward inviter when invitee joins channel."""
+
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `referral_service.py` را نگه می‌دارد.
+# ============================================================================
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
     if not referrer_id or referrer_id == invitee_id:
         return None
 
@@ -136,3 +147,5 @@ def process_referral_on_bootstrap(
         db.flush()
 
     return {"referral_id": referral.id, "rewarded": referral.rewarded}
+
+# endregion

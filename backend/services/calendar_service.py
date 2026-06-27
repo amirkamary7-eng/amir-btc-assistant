@@ -106,3 +106,5 @@ def fetch_calendar_events() -> list[dict[str, Any]]:
 
     cache_set_json(CALENDAR_CACHE_KEY, events, settings.CALENDAR_CACHE_TTL)
     return events
+
+# endregion

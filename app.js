@@ -3,6 +3,15 @@
 // با پاپ‌آپ جوین اجباری، ۱۰۰ ارز، تقویم اقتصادی، حذف همه نوتیف‌ها، و رفع تنظیمات
 // ============================================================
 
+/**
+ * نمونه `Telegram.WebApp` را از شیء `window` بازیابی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
+// ============================================================================
+//#region یکپارچه‌سازی تلگرام و احراز هویت
+// ============================================================================
+
 function getTg() {
     return window.Telegram?.WebApp ?? null;
 }
@@ -10,6 +19,11 @@ function getTg() {
 let telegramInitDone = false;
 let telegramAuthWaitPromise = null;
 
+/**
+ * داده init data کاربر را تجزیه و مقدار قابل استفاده استخراج می‌کند.
+ * ورودی: پارامترهای `initData` را دریافت می‌کند.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function parseInitDataUser(initData) {
     if (!initData) return null;
     try {
@@ -22,6 +36,11 @@ function parseInitDataUser(initData) {
     return null;
 }
 
+/**
+ * مقدار تلگرام کاربر را بازیابی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function getTelegramUser() {
     if (UserContext.user?.id) return UserContext.user;
     const tg = getTg();
@@ -43,6 +62,11 @@ const TELEGRAM_PLATFORMS = new Set([
     'ios', 'android', 'android_x', 'tdesktop', 'macos', 'web', 'weba', 'unigram', 'telegram',
 ]);
 
+/**
+ * بررسی می‌کند که آیا in تلگرام برقرار است یا خیر.
+ * ورودی: بدون ورودی.
+ * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
+ */
 function isInTelegram() {
     const tg = getTg();
     if (!tg) return false;
@@ -53,27 +77,57 @@ function isInTelegram() {
     return TELEGRAM_PLATFORMS.has(platform);
 }
 
+/**
+ * بررسی می‌کند که آیا guest کاربر id برقرار است یا خیر.
+ * ورودی: پارامترهای `userId` را دریافت می‌کند.
+ * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
+ */
 function isGuestUserId(userId) {
     return String(userId || '').startsWith('guest_');
 }
 
+/**
+ * بررسی می‌کند که آیا pending تلگرام کاربر id برقرار است یا خیر.
+ * ورودی: پارامترهای `userId` را دریافت می‌کند.
+ * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
+ */
 function isPendingTelegramUserId(userId) {
     return String(userId || '') === 'pending_telegram';
 }
 
+/**
+ * بررسی می‌کند که آیا کاربر loading برقرار است یا خیر.
+ * ورودی: بدون ورودی.
+ * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
+ */
 function isUserLoading() {
     return isInTelegram() && !getTelegramUser()?.id;
 }
 
+/**
+ * مقدار تلگرام init data را بازیابی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function getTelegramInitData() {
     return getTg()?.initData || '';
 }
 
+/**
+ * بررسی می‌کند که آیا تلگرام احراز هویت payload وجود دارد یا خیر.
+ * ورودی: بدون ورودی.
+ * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
+ */
 function hasTelegramAuthPayload() {
     const initData = getTelegramInitData();
     return typeof initData === 'string' && initData.length > 20;
 }
 
+/**
+ * تا آماده شدن یا در دسترس قرار گرفتن for تلگرام init data منتظر می‌ماند.
+ * ورودی: پارامترهای `maxWaitMs = 8000` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function waitForTelegramInitData(maxWaitMs = 8000) {
     if (!isInTelegram()) return '';
     const tg = getTg();
@@ -95,6 +149,11 @@ async function waitForTelegramInitData(maxWaitMs = 8000) {
     return '';
 }
 
+/**
+ * اطمینان می‌دهد که تلگرام احراز هویت ready در وضعیت صحیح قرار دارد.
+ * ورودی: پارامترهای `maxWaitMs = 8000` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function ensureTelegramAuthReady(maxWaitMs = 8000) {
     if (!isInTelegram()) return true;
     if (hasTelegramAuthPayload() && getTelegramUser()?.id) return true;
@@ -118,6 +177,11 @@ function canRunSessionRequests(userId = getUserId()) {
     return true;
 }
 
+/**
+ * پیش از فراخوانی API، آماده بودن احراز هویت تلگرام را تضمین می‌کند.
+ * ورودی: پارامترهای `maxWaitMs = 8000` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function waitForApiReady(maxWaitMs = 8000) {
     if (!API_BASE) throw new Error('API_BASE not configured');
     if (!isInTelegram()) return;
@@ -125,6 +189,11 @@ async function waitForApiReady(maxWaitMs = 8000) {
     if (!ready) throw new Error('TELEGRAM_NOT_READY');
 }
 
+/**
+ * وب‌اپ تلگرام را آماده می‌کند و کاربر معتبر را پس از آماده شدن در کانتکست ذخیره می‌کند.
+ * ورودی: پارامترهای `maxWaitMs = 8000` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function initTelegramWebApp(maxWaitMs = 8000) {
     if (telegramInitDone && getTelegramUser()?.id) return getTelegramUser();
     const tg = getTg();
@@ -164,6 +233,12 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
     return UserContext.user;
 }
 
+//#endregion
+
+// ============================================================================
+//#region پیکربندی و وضعیت سراسری برنامه
+// ============================================================================
+
 const ADMIN_ID = '831704732';
 const CHANNEL = 'amir_btc_2024';
 const MAX_WATCHLIST = 7;
@@ -182,6 +257,11 @@ const COIN_NAMES = {
     RNDR: 'Render', HBAR: 'Hedera', ATOM: 'Cosmos', STX: 'Stacks',
     IMX: 'Immutable X', GRT: 'The Graph', LDO: 'Lido DAO', TAO: 'Bittensor', INJ: 'Injective'
 };
+/**
+ * مقدار ارز full name را بازیابی می‌کند.
+ * ورودی: پارامترهای `sym` را دریافت می‌کند.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function getCoinFullName(sym) { return COIN_NAMES[sym] || sym; }
 
 let currentLang = 'fa';
@@ -204,7 +284,11 @@ const tabLoaded = { dashboard: false, market: false, analysis: false, news: fals
 let calendarEvents = [];
 let calendarLoading = false;
 
-// ---------- ترجمه‌ها ----------
+//#endregion
+
+// ============================================================================
+//#region ترجمه و محلی‌سازی
+// ============================================================================
 const i18n = {
     fa: {
         welcome: 'خوش آمدید،', dashboard: 'داشبورد', market: 'مارکت', analysis: 'تحلیل', news: 'اخبار',
@@ -315,7 +399,23 @@ const i18n = {
         ai_cooldown: 'Please wait a few seconds', ai_limit: 'Daily limit reached', ai_error: 'Assistant unavailable'
     }
 };
+/**
+ * رشته ترجمه‌شده متناظر با کلید ورودی را از دیکشنری زبان فعال برمی‌گرداند.
+ * ورودی: پارامترهای `key` را دریافت می‌کند.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function t(key) { return i18n[currentLang]?.[key] || i18n.fa[key] || key; }
+
+/**
+ * مقدار referrer id را بازیابی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
+//#endregion
+
+// ============================================================================
+//#region مدیریت کاربر، ذخیره‌سازی و سرویس‌های داخلی
+// ============================================================================
 
 function getReferrerId() {
     const tg = getTg();
@@ -326,6 +426,11 @@ function getReferrerId() {
     if (startParam.startsWith('ref_')) return startParam.slice(4);
     return null;
 }
+/**
+ * مقدار کاربر id را بازیابی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function getUserId() {
     const user = getTelegramUser();
     if (user?.id) {
@@ -338,6 +443,11 @@ function getUserId() {
     return guestId;
 }
 
+/**
+ * وضعیت مرکزی کاربر را برای احراز هویت، لودینگ و کش عضویت نگه‌داری می‌کند.
+ * ورودی: این ساختار به‌صورت شیء سراسری داخلی استفاده می‌شود.
+ * خروجی: مجموعه‌ای از وضعیت‌ها و متدهای کمکی برای مدیریت کاربر فراهم می‌کند.
+ */
 const UserContext = {
     ready: false,
     loading: true,
@@ -391,6 +501,11 @@ const UserContext = {
         });
     },
 };
+/**
+ * مقدار کاربر name را بازیابی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function getUserName() {
     if (UserContext.loading || isUserLoading()) return t('loading_user');
     const u = getTelegramUser();
@@ -398,10 +513,20 @@ function getUserName() {
     return `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || t('guest');
 }
 
+/**
+ * عملیات مربوط به userStorageKey را انجام می‌دهد.
+ * ورودی: پارامترهای `base` را دریافت می‌کند.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function userStorageKey(base) {
     return `${base}_${getUserId()}`;
 }
 
+/**
+ * زبان from ذخیره‌سازی را بارگذاری می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function loadLangFromStorage() {
     const scoped = localStorage.getItem(userStorageKey('app_lang'));
     if (scoped === 'fa' || scoped === 'en') return scoped;
@@ -410,6 +535,11 @@ function loadLangFromStorage() {
     return 'fa';
 }
 
+/**
+ * واچ‌لیست from ذخیره‌سازی را بارگذاری می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function loadWatchlistFromStorage() {
     const key = userStorageKey('watchlist');
     let stored = JSON.parse(localStorage.getItem(key) || '[]');
@@ -423,23 +553,48 @@ function loadWatchlistFromStorage() {
     watchlist = stored.slice(0, MAX_WATCHLIST);
 }
 
+/**
+ * زبان to ذخیره‌سازی را ذخیره می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function saveLangToStorage() {
     localStorage.setItem(userStorageKey('app_lang'), currentLang);
     localStorage.setItem('app_lang', currentLang);
 }
 
+/**
+ * مقدار عضویت کش key را بازیابی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function getJoinCacheKey() {
     return userStorageKey('has_joined_channel');
 }
 
+/**
+ * مقدار عضویت کش را بازیابی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function getJoinCache() {
     return localStorage.getItem(getJoinCacheKey()) === 'true';
 }
 
+/**
+ * عضویت کش را تنظیم می‌کند.
+ * ورودی: پارامترهای `value` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function setJoinCache(value) {
     localStorage.setItem(getJoinCacheKey(), value ? 'true' : 'false');
 }
 
+/**
+ * واچ‌لیست را به‌صورت ماندگار ذخیره می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function persistWatchlist() {
     localStorage.setItem(userStorageKey('watchlist'), JSON.stringify(watchlist));
     if (!API_BASE || isGuestUserId(getUserId())) return;
@@ -453,6 +608,11 @@ async function persistWatchlist() {
     }
 }
 
+/**
+ * زبان to سرور را ذخیره می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function saveLangToServer() {
     if (!API_BASE || isGuestUserId(getUserId())) return;
     try {
@@ -465,6 +625,11 @@ async function saveLangToServer() {
     }
 }
 
+/**
+ * اطلاعات اولیه کاربر، زبان و واچ‌لیست را بین فرانت‌اند و سرور همگام‌سازی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function bootstrapUser() {
     currentLang = loadLangFromStorage();
     loadWatchlistFromStorage();
@@ -510,6 +675,11 @@ async function bootstrapUser() {
     }
 }
 
+/**
+ * تحلیل‌ها را از منبع داده دریافت می‌کند.
+ * ورودی: پارامترهای `force = false` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function fetchAnalyses(force = false) {
     if (!API_BASE) {
         analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
@@ -532,6 +702,11 @@ async function fetchAnalyses(force = false) {
     return false;
 }
 
+/**
+ * تحلیل to سرور را ذخیره می‌کند.
+ * ورودی: پارامترهای `payload, method, analysisId` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function saveAnalysisToServer(payload, method, analysisId) {
     if (!API_BASE || !isAdmin()) return null;
     const adminId = encodeURIComponent(getUserId());
@@ -547,6 +722,11 @@ async function saveAnalysisToServer(payload, method, analysisId) {
     return null;
 }
 
+/**
+ * عملیات مربوط به sendSessionHeartbeat را انجام می‌دهد.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function sendSessionHeartbeat() {
     const uid = getUserId();
     if (!canRunSessionRequests(uid)) return;
@@ -562,6 +742,11 @@ async function sendSessionHeartbeat() {
     } catch (e) { console.warn('heartbeat:', e); }
 }
 
+/**
+ * آنلاین count را از منبع داده دریافت می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function fetchOnlineCount() {
     if (!canRunSessionRequests()) return;
     try {
@@ -570,6 +755,11 @@ async function fetchOnlineCount() {
     } catch (_) {}
 }
 
+/**
+ * آنلاین نشان را به‌روزرسانی می‌کند.
+ * ورودی: پارامترهای `count` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function updateOnlineBadge(count) {
     const badge = document.getElementById('online-badge');
     const countEl = document.getElementById('online-count');
@@ -582,6 +772,11 @@ function updateOnlineBadge(count) {
     }
 }
 
+/**
+ * دعوت آمار را بارگذاری می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function loadReferralStats() {
     const uid = getUserId();
     if (!API_BASE || isGuestUserId(uid) || isPendingTelegramUserId(uid) || UserContext.isPending()) return;
@@ -593,6 +788,11 @@ async function loadReferralStats() {
     } catch (e) { console.warn('loadReferralStats:', e); }
 }
 
+/**
+ * تقویم رویدادها را بارگذاری می‌کند.
+ * ورودی: پارامترهای `force = false` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function loadCalendarEvents(force = false) {
     if (calendarEvents.length && !force) return calendarEvents;
     if (!API_BASE) return [];
@@ -609,6 +809,11 @@ async function loadCalendarEvents(force = false) {
     return calendarEvents;
 }
 
+/**
+ * مقدار نهایی چارت نماد را تعیین می‌کند.
+ * ورودی: پارامترهای `symbol` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function resolveChartSymbol(symbol) {
     const cacheKey = `chart_${symbol}`;
     const cached = Cache.get(cacheKey);
@@ -629,6 +834,11 @@ async function resolveChartSymbol(symbol) {
     return fallback;
 }
 
+/**
+ * init data to URL را به مسیر یا داده موجود اضافه می‌کند.
+ * ورودی: پارامترهای `path` را دریافت می‌کند.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function appendInitDataToUrl(path) {
     const initData = getTelegramInitData();
     if (!initData) return path;
@@ -636,6 +846,11 @@ function appendInitDataToUrl(path) {
     return `${path}${sep}init_data=${encodeURIComponent(initData)}`;
 }
 
+/**
+ * درخواست HTTP داخلی را با هدر احراز هویت تلگرام و مدیریت خطا به API ارسال می‌کند.
+ * ورودی: پارامترهای `path, options = {}` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function apiFetch(path, options = {}) {
     await waitForApiReady(8000);
     const headers = { 'Content-Type': 'application/json', ...options.headers };
@@ -653,6 +868,11 @@ async function apiFetch(path, options = {}) {
     return res.json();
 }
 
+/**
+ * بک‌اند سلامت را بررسی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function checkBackendHealth() {
     if (!API_BASE) return false;
     try {
@@ -661,15 +881,30 @@ async function checkBackendHealth() {
     } catch (_) { return false; }
 }
 
+/**
+ * اپلیکیشن قفل را تنظیم می‌کند.
+ * ورودی: پارامترهای `locked` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function setAppLocked(locked) {
     if (locked) showMandatoryJoinOverlay();
     else hideMandatoryJoinOverlay();
 }
 
+/**
+ * مقدار اجباری عضویت اوورلی را بازیابی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function getMandatoryJoinOverlay() {
     return document.getElementById('mandatory-join-overlay');
 }
 
+/**
+ * اوورلی عضویت اجباری را در DOM پیدا یا در صورت نبود ایجاد می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function ensureMandatoryJoinOverlay() {
     let overlay = getMandatoryJoinOverlay();
     if (overlay) return overlay;
@@ -689,6 +924,11 @@ function ensureMandatoryJoinOverlay() {
     return overlay;
 }
 
+/**
+ * عملیات مربوط به showMandatoryJoinOverlay را انجام می‌دهد.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function showMandatoryJoinOverlay() {
     const overlay = ensureMandatoryJoinOverlay();
     if (getJoinCache()) return overlay;
@@ -696,11 +936,21 @@ function showMandatoryJoinOverlay() {
     return overlay;
 }
 
+/**
+ * عملیات مربوط به hideMandatoryJoinOverlay را انجام می‌دهد.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function hideMandatoryJoinOverlay() {
     const overlay = getMandatoryJoinOverlay();
     if (overlay) overlay.style.display = 'none';
 }
 
+/**
+ * بررسی می‌کند که آیا عضویت پاسخ مثبت برقرار است یا خیر.
+ * ورودی: پارامترهای `data` را دریافت می‌کند.
+ * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
+ */
 function isJoinResponsePositive(data) {
     if (!data || typeof data !== 'object') return false;
     return (
@@ -713,6 +963,11 @@ function isJoinResponsePositive(data) {
     );
 }
 
+/**
+ * پس از تایید عضویت، وضعیت دسترسی کاربر را آزاد و قفل اپ را برطرف می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function unlockAppFromJoin() {
     hasChannelAccess = true;
     joinCheckDone = true;
@@ -721,6 +976,11 @@ function unlockAppFromJoin() {
     stopJoinRecheck();
     try { loadUser(); } catch (_) {}
 }
+/**
+ * زبان وضعیت انتخاب را به‌روزرسانی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function updateLangChecks() {
     const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
     const fa = document.getElementById('lang-fa-check');
@@ -729,6 +989,11 @@ function updateLangChecks() {
     if (en) en.innerHTML = currentLang === 'en' ? svg : '';
 }
 
+/**
+ * تنظیمات مربوط به زبان را اعمال می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function applyLanguage() {
     document.querySelectorAll('[data-i18n]').forEach(el => { const key = el.dataset.i18n; if (key) el.innerText = t(key); });
     document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { const key = el.dataset.i18nPlaceholder; if (key) el.placeholder = t(key); });
@@ -737,6 +1002,11 @@ function applyLanguage() {
     saveLangToStorage();
     updateLangChecks();
 }
+/**
+ * رابط کاربری را نوسازی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function refreshUI() {
     applyLanguage();
     loadUser();
@@ -750,6 +1020,11 @@ function refreshUI() {
     renderTickets();
     renderActiveAlerts(document.getElementById('detail-coin-title')?.innerText?.split(' ')[0] || '');
 }
+/**
+ * زبان را انتخاب و اعمال می‌کند.
+ * ورودی: پارامترهای `lang` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function selectLang(lang) {
     if (lang === currentLang) { closeLangModal(); return; }
     currentLang = lang;
@@ -760,9 +1035,23 @@ function selectLang(lang) {
     loadNews(true);
     closeLangModal();
 }
+/**
+ * زبان را تغییر می‌دهد.
+ * ورودی: پارامترهای `lang` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function changeLang(lang) { selectLang(lang); }
 
-// ---------- کش ----------
+//#endregion
+
+// ============================================================================
+//#region کش درون‌حافظه‌ای
+// ============================================================================
+/**
+ * کش درون‌حافظه‌ای ساده برنامه را برای داده‌های کوتاه‌عمر مدیریت می‌کند.
+ * ورودی: کلید، داده و زمان انقضا را از متدهای داخلی خود دریافت می‌کند.
+ * خروجی: داده کش‌شده را ذخیره یا بازیابی می‌کند.
+ */
 const Cache = {
     storage: {},
     set(key, data, ttl) { this.storage[key] = { data, expiry: Date.now() + ttl * 1000 }; },
@@ -774,11 +1063,25 @@ const Cache = {
     }
 };
 
-// ---------- API با Proxy با Fallback به CoinGecko ----------
+//#endregion
+
+// ============================================================================
+//#region پروکسی و منابع داده بازار
+// ============================================================================
+/**
+ * بررسی می‌کند که آیا RSS URL برقرار است یا خیر.
+ * ورودی: پارامترهای `url` را دریافت می‌کند.
+ * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
+ */
 function isRssUrl(url) {
     return url.includes('/rss') || url.endsWith('/feed/') || url.includes('outboundfeeds/rss');
 }
 
+/**
+ * درخواست داده را از مسیر پروکسی اجرا می‌کند و در صورت نیاز به مسیر جایگزین سوئیچ می‌کند.
+ * ورودی: پارامترهای `url, options = {}` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function fetchWithProxy(url, options = {}) {
     const opts = typeof options === 'number' ? { retries: options } : options;
     const { asText = isRssUrl(url), retries = 2 } = opts;
@@ -810,6 +1113,11 @@ async function fetchWithProxy(url, options = {}) {
 }
 
 // تابع دریافت داده از CoinGecko (بدون نیاز به Proxy)
+/**
+ * داده بازار ارزها را مستقیماً از API سرویس CoinGecko دریافت و نرمال‌سازی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function fetchCoinGecko() {
     const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=200&page=1&sparkline=false');
     if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
@@ -827,7 +1135,16 @@ async function fetchCoinGecko() {
     }));
 }
 
-// ---------- بارگذاری داده‌های بازار ----------
+//#endregion
+
+// ============================================================================
+//#region بارگذاری داده‌های بازار
+// ============================================================================
+/**
+ * داده بازار را از کش یا منبع راه‌دور دریافت می‌کند و اجزای وابسته را به‌روزرسانی می‌کند.
+ * ورودی: پارامترهای `force = false` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function loadMarketData(force = false) {
     const listEl = document.getElementById('coin-list');
     try {
@@ -874,7 +1191,16 @@ async function loadMarketData(force = false) {
     }
 }
 
-// ---------- رندر خلاصه بازار ----------
+//#endregion
+
+// ============================================================================
+//#region خلاصه بازار
+// ============================================================================
+/**
+ * خلاصه را در رابط کاربری رندر می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderSummary() {
     if (!allCoins.length) return;
     const mcapEl = document.getElementById('global-mcap');
@@ -887,7 +1213,16 @@ function renderSummary() {
     document.getElementById('btc-dom').innerText = btc ? ((btc.marketCapUsd / mcap) * 100).toFixed(1) + '%' : '--';
 }
 
-// ---------- رندر مارکت (نمایش ۱۰۰ ارز) ----------
+//#endregion
+
+// ============================================================================
+//#region فهرست و تب‌های بازار
+// ============================================================================
+/**
+ * بازار را در رابط کاربری رندر می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderMarket() {
     const list = document.getElementById('coin-list');
     if (!list) return;
@@ -946,6 +1281,11 @@ function renderMarket() {
         `;
     }).join('');
 }
+/**
+ * نمایش یا وضعیت بازار تب را تعویض می‌کند.
+ * ورودی: پارامترهای `tab, btn` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function switchMarketTab(tab, btn) {
     currentMarketTab = tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -959,7 +1299,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// ---------- واچ‌لیست ----------
+//#endregion
+
+// ============================================================================
+//#region واچ‌لیست
+// ============================================================================
+/**
+ * وضعیت واچ‌لیست را بین دو حالت جابه‌جا می‌کند.
+ * ورودی: پارامترهای `symbol, event` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function toggleWatchlist(symbol, event) {
     if (event) event.stopPropagation();
     const idx = watchlist.indexOf(symbol);
@@ -980,6 +1329,11 @@ function toggleWatchlist(symbol, event) {
     renderMarket();
     renderWatchlist();
 }
+/**
+ * واچ‌لیست را در رابط کاربری رندر می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderWatchlist() {
     const grid = document.getElementById('watchlist-grid');
     const watchCoins = allCoins.filter(c => watchlist.includes(c.symbol));
@@ -997,13 +1351,28 @@ function renderWatchlist() {
         </div>
     `).join('');
 }
+/**
+ * add ارز مودال را باز می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openAddCoinModal() {
     document.getElementById('add-coin-modal').style.display = 'flex';
     populateCoinModal();
 }
+/**
+ * add ارز مودال را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeAddCoinModal() {
     document.getElementById('add-coin-modal').style.display = 'none';
 }
+/**
+ * عملیات مربوط به populateCoinModal را انجام می‌دهد.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function populateCoinModal() {
     const list = document.getElementById('coin-modal-list');
     if (!allCoins.length) return;
@@ -1017,6 +1386,11 @@ function populateCoinModal() {
         </div>`;
     }).join('');
 }
+/**
+ * عملیات مربوط به filterCoinList را انجام می‌دهد.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function filterCoinList() {
     const q = document.getElementById('coin-search-modal').value.toLowerCase();
     document.querySelectorAll('.modal-coin-item').forEach(el => {
@@ -1024,9 +1398,18 @@ function filterCoinList() {
     });
 }
 
-// ---------- اخبار و تقویم اقتصادی ----------
+//#endregion
+
+// ============================================================================
+//#region اخبار و تقویم اقتصادی
+// ============================================================================
 let newsCache = [];
 
+/**
+ * متن را ترجمه می‌کند.
+ * ورودی: پارامترهای `text, targetLang` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function translateText(text, targetLang) {
     if (!text?.trim()) return text;
     const tl = targetLang || (currentLang === 'fa' ? 'fa' : 'en');
@@ -1038,6 +1421,11 @@ async function translateText(text, targetLang) {
     } catch { return text; }
 }
 
+/**
+ * مقاله‌ها را ترجمه می‌کند.
+ * ورودی: پارامترهای `articles` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function translateArticles(articles) {
     if (currentLang !== 'fa') return articles;
     const translated = [];
@@ -1049,6 +1437,11 @@ async function translateArticles(articles) {
     return translated;
 }
 
+/**
+ * اخبار دسته‌بندی را تشخیص می‌دهد.
+ * ورودی: پارامترهای `title, body` را دریافت می‌کند.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function detectNewsCategory(title, body) {
     const text = `${title} ${body}`.toLowerCase();
     if (/forex|dollar|eur\/usd|fed rate|interest rate|central bank|fx /.test(text)) return 'forex';
@@ -1056,6 +1449,11 @@ function detectNewsCategory(title, body) {
     return 'crypto';
 }
 
+/**
+ * داده RSS آیتم‌ها را تجزیه و مقدار قابل استفاده استخراج می‌کند.
+ * ورودی: پارامترهای `rssText, sourceName` را دریافت می‌کند.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function parseRssItems(rssText, sourceName) {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(rssText, 'text/xml');
@@ -1081,6 +1479,11 @@ function parseRssItems(rssText, sourceName) {
     return articles;
 }
 
+/**
+ * RSS مقاله‌ها را از منبع داده دریافت می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function fetchRssArticles() {
     const articles = [];
     const sources = [
@@ -1098,6 +1501,11 @@ async function fetchRssArticles() {
 }
 
 let displayedNews = [];
+/**
+ * اخبار را از کش یا منابع راه‌دور دریافت می‌کند و فهرست خبرها را برای نمایش آماده می‌سازد.
+ * ورودی: پارامترهای `force = false` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function loadNews(force = false) {
     try {
         if (!force) {
@@ -1145,6 +1553,11 @@ async function loadNews(force = false) {
         document.getElementById('news-list').innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
     }
 }
+/**
+ * اخبار را در رابط کاربری رندر می‌کند.
+ * ورودی: پارامترهای `category` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderNews(category) {
     const container = document.getElementById('news-list');
     let filtered = newsCache;
@@ -1191,11 +1604,21 @@ function renderNews(category) {
         </div>
     `).join('');
 }
+/**
+ * نمایش یا وضعیت اخبار تب را تعویض می‌کند.
+ * ورودی: پارامترهای `category, btn` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function switchNewsTab(category, btn) {
     document.querySelectorAll('.news-tab').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
     renderNews(category);
 }
+/**
+ * اخبار مودال را باز می‌کند.
+ * ورودی: پارامترهای `idx` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openNewsModal(idx) {
     const n = displayedNews[idx];
     if (!n) return;
@@ -1206,11 +1629,25 @@ function openNewsModal(idx) {
     document.getElementById('news-modal-link').innerText = t('view_source');
     document.getElementById('news-modal').style.display = 'flex';
 }
+/**
+ * اخبار مودال را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeNewsModal() {
     document.getElementById('news-modal').style.display = 'none';
 }
 
-// ---------- اسلایدر و لیست تحلیل‌ها ----------
+//#endregion
+
+// ============================================================================
+//#region اسلایدر و فهرست تحلیل‌ها
+// ============================================================================
+/**
+ * تحلیل اسلایدر را در رابط کاربری رندر می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderAnalysisSlider() {
     const track = document.getElementById('slider-track');
     const dots = document.getElementById('slider-dots');
@@ -1240,6 +1677,11 @@ function renderAnalysisSlider() {
         showSlide(currentSlide);
     }, 5000);
 }
+/**
+ * تحلیل list را در رابط کاربری رندر می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderAnalysisList() {
     const grid = document.getElementById('analysis-grid');
     if (!analyses.length) {
@@ -1262,6 +1704,11 @@ function renderAnalysisList() {
         </div>
     `).join('');
 }
+/**
+ * تحلیل جزئیات را باز می‌کند.
+ * ورودی: پارامترهای `id` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openAnalysisDetail(id) {
     const a = analyses.find(x => x.id === id);
     if (!a) return;
@@ -1271,15 +1718,34 @@ function openAnalysisDetail(id) {
     document.getElementById('analysis-detail-text').innerText = a.text;
     document.getElementById('analysis-detail-modal').style.display = 'flex';
 }
+/**
+ * تحلیل جزئیات را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeAnalysisDetail() {
     document.getElementById('analysis-detail-modal').style.display = 'none';
 }
 
-// ---------- مدیریت تحلیل (مدیر) ----------
+//#endregion
+
+// ============================================================================
+//#region مدیریت تحلیل مدیر
+// ============================================================================
+/**
+ * بررسی می‌کند که آیا مدیر برقرار است یا خیر.
+ * ورودی: بدون ورودی.
+ * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
+ */
 function isAdmin() {
     const user = getTelegramUser();
     return user && String(user.id) === ADMIN_ID;
 }
+/**
+ * add تحلیل مودال را باز می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openAddAnalysisModal() {
     if (!isAdmin()) { alert('فقط مدیران مجاز به افزودن تحلیل هستند.'); return; }
     editingAnalysisId = null;
@@ -1291,6 +1757,11 @@ function openAddAnalysisModal() {
     });
     document.getElementById('add-analysis-modal').style.display = 'flex';
 }
+/**
+ * edit تحلیل مودال را باز می‌کند.
+ * ورودی: پارامترهای `id` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openEditAnalysisModal(id) {
     if (!isAdmin()) return;
     const a = analyses.find(x => x.id === id);
@@ -1304,10 +1775,20 @@ function openEditAnalysisModal(id) {
     document.getElementById('analysis-text').value = a.text;
     document.getElementById('add-analysis-modal').style.display = 'flex';
 }
+/**
+ * add تحلیل مودال را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeAddAnalysisModal() {
     document.getElementById('add-analysis-modal').style.display = 'none';
     editingAnalysisId = null;
 }
+/**
+ * فرم یا داده تحلیل را ارسال می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function submitAnalysis() {
     const coin = document.getElementById('analysis-coin').value.trim().toUpperCase();
     const timeframe = document.getElementById('analysis-timeframe').value.trim() || '1d';
@@ -1351,6 +1832,11 @@ function submitAnalysis() {
         }
     })();
 }
+/**
+ * تحلیل را حذف می‌کند.
+ * ورودی: پارامترهای `id, event` را دریافت می‌کند.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function deleteAnalysis(id, event) {
     if (event) event.stopPropagation();
     if (!isAdmin()) return;
@@ -1370,7 +1856,16 @@ function deleteAnalysis(id, event) {
     }
 }
 
-// ---------- جزئیات کوین و هشدار قیمت ----------
+//#endregion
+
+// ============================================================================
+//#region جزئیات کوین و هشدار قیمت
+// ============================================================================
+/**
+ * ارز جزئیات را باز می‌کند.
+ * ورودی: پارامترهای `symbol` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function openCoinDetail(symbol) {
     const coin = allCoins.find(c => c.symbol === symbol);
     if (!coin) return;
@@ -1415,10 +1910,20 @@ async function openCoinDetail(symbol) {
     `;
     renderActiveAlerts(symbol);
 }
+/**
+ * ارز جزئیات را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeCoinDetail() {
     document.querySelector('.chart-exchange-badge')?.remove();
     document.getElementById('coin-detail-modal').style.display = 'none';
 }
+/**
+ * فعال هشدارها را در رابط کاربری رندر می‌کند.
+ * ورودی: پارامترهای `symbol` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderActiveAlerts(symbol) {
     const container = document.getElementById('active-alerts');
     if (!container || !symbol) return;
@@ -1439,6 +1944,11 @@ function renderActiveAlerts(symbol) {
         </div>
     `).join('');
 }
+/**
+ * هشدار صدا را پخش می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function playAlertSound() {
     try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -1461,6 +1971,11 @@ function playAlertSound() {
     } catch (e) { console.warn('Alert sound failed:', e); }
 }
 
+/**
+ * عملیات مربوط به syncAlertToServer را انجام می‌دهد.
+ * ورودی: پارامترهای `alert` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function syncAlertToServer(alert) {
     if (!API_BASE || isGuestUserId(String(alert.userId)) || isPendingTelegramUserId(String(alert.userId)) || UserContext.isPending()) return alert;
     try {
@@ -1478,6 +1993,11 @@ async function syncAlertToServer(alert) {
     return alert;
 }
 
+/**
+ * هشدار from سرور را حذف می‌کند.
+ * ورودی: پارامترهای `alert` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function removeAlertFromServer(alert) {
     if (!API_BASE || !alert.serverId || isGuestUserId(String(alert.userId)) || isPendingTelegramUserId(String(alert.userId)) || UserContext.isPending()) return;
     try {
@@ -1485,6 +2005,11 @@ async function removeAlertFromServer(alert) {
     } catch (e) { console.warn('removeAlertFromServer:', e); }
 }
 
+/**
+ * هشدارها from سرور را بارگذاری می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function loadAlertsFromServer() {
     const uid = getUserId();
     if (!API_BASE || isGuestUserId(uid) || isPendingTelegramUserId(uid) || UserContext.isPending()) return;
@@ -1502,6 +2027,11 @@ async function loadAlertsFromServer() {
     } catch (e) { console.warn('loadAlertsFromServer:', e); }
 }
 
+/**
+ * اعلان مربوط به تلگرام را ارسال می‌کند.
+ * ورودی: پارامترهای `message` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function notifyTelegram(message) {
     const userId = getUserId();
     if (!API_BASE || isGuestUserId(String(userId)) || isPendingTelegramUserId(String(userId)) || UserContext.isPending()) return false;
@@ -1516,6 +2046,11 @@ async function notifyTelegram(message) {
         return false;
     }
 }
+/**
+ * قیمت هشدار را تنظیم می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function setPriceAlert() {
     const input = document.getElementById('alert-price');
     const price = parseFloat(input.value);
@@ -1531,6 +2066,11 @@ async function setPriceAlert() {
     addNotification(t('price_alert'), `${symbol} ≥ $${price}`);
     getTg()?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${price}`, buttons: [{ type: 'ok' }] });
 }
+/**
+ * هشدار را حذف می‌کند.
+ * ورودی: پارامترهای `id` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function removeAlert(id) {
     const removed = alerts.find(a => a.id === id);
     if (removed) await removeAlertFromServer(removed);
@@ -1539,6 +2079,11 @@ async function removeAlert(id) {
     const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
     if (symbol) renderActiveAlerts(symbol);
 }
+/**
+ * هشدار را فعال می‌کند.
+ * ورودی: پارامترهای `alert, currentPrice` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function triggerAlert(alert, currentPrice) {
     await removeAlertFromServer(alert);
     alerts = alerts.filter(a => a.id !== alert.id);
@@ -1554,6 +2099,11 @@ async function triggerAlert(alert, currentPrice) {
     const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
     if (symbol === alert.symbol) renderActiveAlerts(symbol);
 }
+/**
+ * هشدارها را بررسی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function checkAlerts() {
     const userId = getUserId();
     const userAlerts = alerts.filter(a => a.userId === userId);
@@ -1566,7 +2116,16 @@ async function checkAlerts() {
     }
 }
 
-// ---------- نوتیفیکیشن ----------
+//#endregion
+
+// ============================================================================
+//#region اعلانات
+// ============================================================================
+/**
+ * عملیات مربوط به addNotification را انجام می‌دهد.
+ * ورودی: پارامترهای `title, body, options = true` را دریافت می‌کند.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function addNotification(title, body, options = true) {
     const opts = typeof options === 'boolean'
         ? { sendToTelegram: options, playSound: true }
@@ -1591,26 +2150,51 @@ function addNotification(title, body, options = true) {
     }
     if (opts.playSound) playAlertSound();
 }
+/**
+ * اعلان نشان را به‌روزرسانی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function updateNotifBadge() {
     const unread = notifications.filter(n => !n.read).length;
     const badge = document.getElementById('notif-badge');
     if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread; }
     else { badge.style.display = 'none'; }
 }
+/**
+ * وضعیت اعلان پنل را بین دو حالت جابه‌جا می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function toggleNotificationPanel() {
     const modal = document.getElementById('notif-modal');
     modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
     renderNotifications();
 }
+/**
+ * اعلان مودال را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeNotifModal() {
     document.getElementById('notif-modal').style.display = 'none';
 }
+/**
+ * وضعیت همه read را علامت‌گذاری می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function markAllRead() {
     notifications.forEach(n => n.read = true);
     localStorage.setItem('notifications', JSON.stringify(notifications));
     updateNotifBadge();
     renderNotifications();
 }
+/**
+ * همه notifications را پاک‌سازی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function clearAllNotifications() {
     if(confirm(t('confirm_clear_notif'))) {
         notifications = [];
@@ -1620,6 +2204,11 @@ function clearAllNotifications() {
         closeNotifModal();
     }
 }
+/**
+ * notifications را در رابط کاربری رندر می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderNotifications() {
     const container = document.getElementById('notif-list');
     if (!notifications.length) {
@@ -1634,12 +2223,26 @@ function renderNotifications() {
         </div>
     `).join('');
 }
+/**
+ * وضعیت اعلان read را علامت‌گذاری می‌کند.
+ * ورودی: پارامترهای `id` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function markNotifRead(id) {
     const n = notifications.find(x => x.id === id);
     if (n) { n.read = true; localStorage.setItem('notifications', JSON.stringify(notifications)); updateNotifBadge(); renderNotifications(); }
 }
 
-// ---------- پروفایل و رفرال ----------
+//#endregion
+
+// ============================================================================
+//#region پروفایل و ارجاع
+// ============================================================================
+/**
+ * عملیات مربوط به showJoinStatus را انجام می‌دهد.
+ * ورودی: پارامترهای `msg, isError = false` را دریافت می‌کند.
+ * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
+ */
 function showJoinStatus(msg, isError = false) {
     const el = document.getElementById('join-status-msg');
     if (!el) return;
@@ -1648,6 +2251,11 @@ function showJoinStatus(msg, isError = false) {
     el.classList.toggle('join-status-error', !!isError);
 }
 
+/**
+ * اطلاعات پروفایل کاربر را بر اساس وضعیت احراز هویت در رابط کاربری نمایش می‌دهد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function loadUser() {
     if (UserContext.loading || isUserLoading()) {
         document.getElementById('profile-name').innerText = t('loading_user');
@@ -1678,12 +2286,22 @@ function loadUser() {
     const adminBtn = document.getElementById('admin-add-btn');
     if (adminBtn) adminBtn.style.display = isAdmin() ? 'block' : 'none';
 }
+/**
+ * ارجاع لینک را کپی می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function copyRefLink() {
     const input = document.getElementById('ref-link');
     input.select();
     try { navigator.clipboard.writeText(input.value); } catch(e) { document.execCommand('copy'); }
     getTg()?.showPopup?.({ title: t('copied'), message: t('copy_ref_msg'), buttons: [{type:'ok'}] });
 }
+/**
+ * ارجاع لینک را به اشتراک می‌گذارد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function shareRefLink() {
     const link = document.getElementById('ref-link').value;
     const text = encodeURIComponent(t('share_ref_text'));
@@ -1691,37 +2309,96 @@ function shareRefLink() {
     window.open(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`, '_blank');
 }
 
-// ---------- تنظیمات و پشتیبانی (مودال) ----------
+//#endregion
+
+// ============================================================================
+//#region تنظیمات و پشتیبانی
+// ============================================================================
+/**
+ * تنظیمات مودال را باز می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openSettingsModal() {
     document.getElementById('settings-modal').style.display = 'flex';
     const adminItem = document.getElementById('admin-tickets-item');
     if (adminItem) adminItem.style.display = isAdmin() ? 'flex' : 'none';
 }
+/**
+ * تنظیمات مودال را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
+/**
+ * زبان مودال را باز می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openLangModal() {
     closeSettingsModal();
     updateLangChecks();
     document.getElementById('lang-modal').style.display = 'flex';
 }
+/**
+ * زبان مودال را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeLangModal() { document.getElementById('lang-modal').style.display = 'none'; openSettingsModal(); }
+/**
+ * تیکت‌ها مودال را باز می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openTicketsModal() {
     closeSettingsModal();
     document.getElementById('tickets-modal').style.display = 'flex';
     fetchTickets().then(renderTickets);
 }
+/**
+ * تیکت‌ها مودال را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeTicketsModal() { document.getElementById('tickets-modal').style.display = 'none'; }
+/**
+ * درباره مودال را باز می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openAboutModal() {
     closeSettingsModal();
     document.getElementById('about-modal').style.display = 'flex';
 }
+/**
+ * درباره مودال را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeAboutModal() { document.getElementById('about-modal').style.display = 'none'; }
+/**
+ * مدیر تیکت‌ها مودال را باز می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openAdminTicketsModal() {
     closeSettingsModal();
     document.getElementById('admin-tickets-modal').style.display = 'flex';
     fetchAdminTickets().then(renderAdminTickets);
 }
+/**
+ * مدیر تیکت‌ها مودال را می‌بندد.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function closeAdminTicketsModal() { document.getElementById('admin-tickets-modal').style.display = 'none'; }
 
+/**
+ * تیکت‌ها را از منبع داده دریافت می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function fetchTickets() {
     if (!API_BASE) { tickets = []; return; }
     try {
@@ -1733,6 +2410,11 @@ async function fetchTickets() {
     }
 }
 
+/**
+ * مدیر تیکت‌ها را از منبع داده دریافت می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function fetchAdminTickets() {
     if (!API_BASE || !isAdmin()) return;
     try {
@@ -1741,11 +2423,21 @@ async function fetchAdminTickets() {
     } catch (e) { console.warn('fetchAdminTickets:', e); }
 }
 
+/**
+ * تیکت date را قالب‌بندی می‌کند.
+ * ورودی: پارامترهای `iso` را دریافت می‌کند.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function formatTicketDate(iso) {
     if (!iso) return '';
     try { return new Date(iso).toLocaleString(currentLang === 'fa' ? 'fa-IR' : 'en-US'); } catch { return iso; }
 }
 
+/**
+ * تیکت رشته را در رابط کاربری رندر می‌کند.
+ * ورودی: پارامترهای `replies` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderTicketThread(replies) {
     if (!replies?.length) return '';
     return `<div class="ticket-thread">${replies.map(r => `
@@ -1756,6 +2448,11 @@ function renderTicketThread(replies) {
     `).join('')}</div>`;
 }
 
+/**
+ * تیکت‌ها را در رابط کاربری رندر می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderTickets() {
     const container = document.getElementById('ticket-list');
     if (!container) return;
@@ -1779,6 +2476,11 @@ function renderTickets() {
     `).join('');
 }
 
+/**
+ * مدیر تیکت‌ها را در رابط کاربری رندر می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function renderAdminTickets() {
     const container = document.getElementById('admin-ticket-list');
     if (!container) return;
@@ -1807,11 +2509,21 @@ function renderAdminTickets() {
     `).join('');
 }
 
+/**
+ * HTML را برای نمایش ایمن‌سازی می‌کند.
+ * ورودی: پارامترهای `str` را دریافت می‌کند.
+ * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ */
 function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+/**
+ * فرم یا داده تیکت را ارسال می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function submitTicket() {
     const title = document.getElementById('ticket-title').value.trim();
     const body = document.getElementById('ticket-body').value.trim();
@@ -1843,6 +2555,11 @@ async function submitTicket() {
     }
 }
 
+/**
+ * پاسخ مربوط به to تیکت را ارسال می‌کند.
+ * ورودی: پارامترهای `ticketId` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function replyToTicket(ticketId) {
     if (!isAdmin()) return;
     const textarea = document.getElementById(`reply-${ticketId}`);
@@ -1859,6 +2576,11 @@ async function replyToTicket(ticketId) {
     } catch (e) { alert(t('ticket_reply_error')); console.error(e); }
 }
 
+/**
+ * تیکت را حذف می‌کند.
+ * ورودی: پارامترهای `ticketId, isAdminView = false` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function deleteTicket(ticketId, isAdminView = false) {
     if (!confirm(t('ticket_delete') + '?')) return;
     try {
@@ -1876,12 +2598,28 @@ async function deleteTicket(ticketId, isAdminView = false) {
     } catch (e) { console.error(e); }
 }
 
+/**
+ * کاربر را برای کانال هدایت می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
+//#endregion
+
+// ============================================================================
+//#region لینک‌های تلگرام و کنترل مودال جوین
+// ============================================================================
+
 function joinChannel() {
     const tg = getTg();
     if (tg?.openTelegramLink) tg.openTelegramLink(`https://t.me/${CHANNEL}`);
     else window.open(`https://t.me/${CHANNEL}`, '_blank');
 }
 
+/**
+ * تلگرام ربات را باز می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openTelegramBot() {
     const botUrl = 'https://t.me/AmirBtcBot/app';
     const tg = getTg();
@@ -1889,6 +2627,11 @@ function openTelegramBot() {
     else window.open(botUrl, '_blank');
 }
 
+/**
+ * عضویت مودال حالت را تنظیم می‌کند.
+ * ورودی: پارامترهای `mode` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function setJoinModalMode(mode) {
     const vipBlock = document.getElementById('join-vip-block');
     const webBlock = document.getElementById('join-web-block');
@@ -1899,12 +2642,22 @@ function setJoinModalMode(mode) {
 let joinRecheckInterval = null;
 let joinRecheckRunning = false;
 
+/**
+ * عضویت بررسی مجدد را متوقف می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function stopJoinRecheck() {
     if (joinRecheckInterval) clearInterval(joinRecheckInterval);
     joinRecheckInterval = null;
     joinRecheckRunning = false;
 }
 
+/**
+ * عضویت بررسی مجدد را شروع می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function startJoinRecheck() {
     stopJoinRecheck();
     ensureMandatoryJoinOverlay();
@@ -1929,12 +2682,26 @@ function startJoinRecheck() {
     }, 3000);
 }
 
+/**
+ * عضویت and اعتبارسنجی را باز می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function openJoinAndVerify() {
     joinChannel();
     startJoinRecheck();
 }
 
-// ---------- پاپ‌آپ جوین اجباری ----------
+//#endregion
+
+// ============================================================================
+//#region جوین اجباری
+// ============================================================================
+/**
+ * وضعیت عضویت اجباری کاربر در کانال را بررسی و قفل بودن یا نبودن اپ را مدیریت می‌کند.
+ * ورودی: پارامترهای `options = {}` را دریافت می‌کند.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function checkMandatoryJoin(options = {}) {
     const { force = false } = typeof options === 'boolean' ? { force: options } : options;
     ensureMandatoryJoinOverlay();
@@ -2034,6 +2801,11 @@ async function checkMandatoryJoin(options = {}) {
     }
 }
 
+/**
+ * پس از اقدام کاربر، عضویت کانال را دوباره اعتبارسنجی می‌کند و در صورت موفقیت اپ را آزاد می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function verifyJoin() {
     if (!UserContext.ready) await UserContext.init();
     else if (!telegramInitDone) await initTelegramWebApp();
@@ -2094,7 +2866,16 @@ async function verifyJoin() {
     }
 }
 
-// ---------- نویگیشن و بارگذاری اخبار مهم ----------
+//#endregion
+
+// ============================================================================
+//#region نویگیشن و محتوای داشبورد
+// ============================================================================
+/**
+ * نمایش یا وضعیت تب را تعویض می‌کند.
+ * ورودی: پارامترهای `pageId, btn` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function switchTab(pageId, btn) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(pageId)?.classList.add('active');
@@ -2140,6 +2921,11 @@ function switchTab(pageId, btn) {
     }
 }
 
+/**
+ * خلاصه اخبار مهم را برای داشبورد بارگذاری و رندر می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ */
 async function loadImportantNews() {
     const container = document.getElementById('important-news');
     if (!container) return;
@@ -2163,7 +2949,16 @@ async function loadImportantNews() {
     } catch (e) {}
 }
 
-// ---------- Polling برای بروزرسانی لحظه‌ای ----------
+//#endregion
+
+// ============================================================================
+//#region پولینگ و بروزرسانی‌های دوره‌ای
+// ============================================================================
+/**
+ * پولینگ‌های دوره‌ای برنامه را برای بازار، تحلیل، اخبار و وضعیت کاربر فعال می‌کند.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
 function startPolling() {
     setInterval(() => {
         const activePage = document.querySelector('.page.active')?.id;
@@ -2205,7 +3000,11 @@ document.addEventListener('visibilitychange', () => {
     checkMandatoryJoin({ force: true }).catch(() => {});
 });
 
-// ---------- راه‌اندازی ----------
+//#endregion
+
+// ============================================================================
+//#region راه‌اندازی برنامه
+// ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
     await UserContext.init();
     alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
@@ -2230,6 +3029,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 15000);
 });
 
+//#endregion
+
+// ============================================================================
+//#region ثبت توابع در فضای global
+// ============================================================================
 // ثبت توابع در فضای global
 window.switchTab = switchTab;
 window.switchMarketTab = switchMarketTab;
@@ -2285,3 +3089,5 @@ window.getTelegramUser = getTelegramUser;
 window.getTelegramInitData = getTelegramInitData;
 window.isInTelegram = isInTelegram;
 window.isGuestUserId = isGuestUserId;
+
+//#endregion

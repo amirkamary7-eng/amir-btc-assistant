@@ -1,15 +1,33 @@
+# ============================================================================
+# region Imports
+# این بخش وابستگی‌ها و importهای فایل `models.py` را نگه می‌دارد.
+# ============================================================================
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 
+# endregion
+
+# ============================================================================
+# region تعاریف و منطق ماژول
+# این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
+# ============================================================================
 Base = declarative_base()
 
 
+
+# عملیات مربوط به utcnow را انجام می‌دهد.
+# ورودی: بدون ورودی.
+# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def utcnow():
     return datetime.now(timezone.utc)
 
 
+
+# User ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class User(Base):
     __tablename__ = "users"
 
@@ -43,6 +61,9 @@ class User(Base):
     )
 
 
+# WatchlistItem ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class WatchlistItem(Base):
     __tablename__ = "watchlist_items"
     __table_args__ = (UniqueConstraint("user_id", "symbol", name="uq_watchlist_user_symbol"),)
@@ -56,6 +77,9 @@ class WatchlistItem(Base):
     user = relationship("User", back_populates="watchlist_items")
 
 
+# Analysis ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class Analysis(Base):
     __tablename__ = "analyses"
 
@@ -69,7 +93,9 @@ class Analysis(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
-
+# Ticket ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class Ticket(Base):
     __tablename__ = "tickets"
 
@@ -90,7 +116,9 @@ class Ticket(Base):
         order_by="TicketReply.created_at",
     )
 
-
+# TicketReply ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class TicketReply(Base):
     __tablename__ = "ticket_replies"
 
@@ -103,7 +131,9 @@ class TicketReply(Base):
 
     ticket = relationship("Ticket", back_populates="replies")
 
-
+# PriceAlert ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class PriceAlert(Base):
     __tablename__ = "price_alerts"
     __table_args__ = (
@@ -122,6 +152,9 @@ class PriceAlert(Base):
     user = relationship("User", back_populates="alerts")
 
 
+# Referral ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class Referral(Base):
     __tablename__ = "referrals"
     __table_args__ = (UniqueConstraint("invitee_id", name="uq_referral_invitee"),)
@@ -134,6 +167,9 @@ class Referral(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+# TokenBalance ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class TokenBalance(Base):
     __tablename__ = "token_balances"
 
@@ -142,6 +178,9 @@ class TokenBalance(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
+# TokenTransaction ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
+# ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
+# خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
 class TokenTransaction(Base):
     __tablename__ = "token_transactions"
 
@@ -152,3 +191,5 @@ class TokenTransaction(Base):
     description = Column(String(256), nullable=True)
     ref_id = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+# endregion
