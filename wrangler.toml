@@ -1,0 +1,3 @@
+name = "amir-btc-assistant"
+main = "worker-proxy.js" 
+compatibility_date = "2026-06-27"
