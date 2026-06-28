@@ -1,0 +1,135 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "amir-btc-assistant-api",
+  "main": "worker-proxy.js",
+  "compatibility_date": "2026-06-27",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "JOIN_CACHE",
+      "id": "00000000000000000000000000000001"
+    },
+    {
+      "binding": "APP_CACHE",
+      "id": "00000000000000000000000000000002"
+    },
+    {
+      "binding": "RATE_LIMITS",
+      "id": "00000000000000000000000000000003"
+    },
+    {
+      "binding": "SESSION_CACHE",
+      "id": "00000000000000000000000000000004"
+    }
+  ],
+  "vars": {
+    "APP_ENV": "development",
+    "ALERTS_CRON_ENABLED": "false",
+    "JOIN_CACHE_TTL": 1800,
+    "MARKET_CACHE_TTL": 60,
+    "NEWS_CACHE_TTL": 300,
+    "CALENDAR_CACHE_TTL": 600,
+    "CHART_EXCHANGE_CACHE_TTL": 86400,
+    "ANALYSIS_CACHE_TTL": 30,
+    "SESSION_TTL": 120,
+    "AI_DAILY_MESSAGE_LIMIT": 50,
+    "AI_DAILY_IMAGE_LIMIT": 3,
+    "AI_COOLDOWN_SECONDS": 4,
+    "REFERRAL_TOKENS_PER_INVITE": 3
+  },
+  "env": {
+    "staging": {
+      "name": "amir-btc-assistant-api-staging",
+      "triggers": {
+        "crons": [
+          "*/5 * * * *"
+        ]
+      },
+      "kv_namespaces": [
+        {
+          "binding": "JOIN_CACHE",
+          "id": "10000000000000000000000000000001"
+        },
+        {
+          "binding": "APP_CACHE",
+          "id": "10000000000000000000000000000002"
+        },
+        {
+          "binding": "RATE_LIMITS",
+          "id": "10000000000000000000000000000003"
+        },
+        {
+          "binding": "SESSION_CACHE",
+          "id": "10000000000000000000000000000004"
+        }
+      ],
+      "vars": {
+        "APP_ENV": "staging",
+        "ALERTS_CRON_ENABLED": "false",
+        "JOIN_CACHE_TTL": 1800,
+        "MARKET_CACHE_TTL": 60,
+        "NEWS_CACHE_TTL": 300,
+        "CALENDAR_CACHE_TTL": 600,
+        "CHART_EXCHANGE_CACHE_TTL": 86400,
+        "ANALYSIS_CACHE_TTL": 30,
+        "SESSION_TTL": 120,
+        "AI_DAILY_MESSAGE_LIMIT": 50,
+        "AI_DAILY_IMAGE_LIMIT": 3,
+        "AI_COOLDOWN_SECONDS": 4,
+        "REFERRAL_TOKENS_PER_INVITE": 3
+      }
+    },
+    "production": {
+      "name": "amir-btc-assistant-api-production",
+      "triggers": {
+        "crons": [
+          "*/5 * * * *"
+        ]
+      },
+      "kv_namespaces": [
+        {
+          "binding": "JOIN_CACHE",
+          "id": "20000000000000000000000000000001"
+        },
+        {
+          "binding": "APP_CACHE",
+          "id": "20000000000000000000000000000002"
+        },
+        {
+          "binding": "RATE_LIMITS",
+          "id": "20000000000000000000000000000003"
+        },
+        {
+          "binding": "SESSION_CACHE",
+          "id": "20000000000000000000000000000004"
+        }
+      ],
+      "vars": {
+        "APP_ENV": "production",
+        "ALERTS_CRON_ENABLED": "false",
+        "JOIN_CACHE_TTL": 1800,
+        "MARKET_CACHE_TTL": 60,
+        "NEWS_CACHE_TTL": 300,
+        "CALENDAR_CACHE_TTL": 600,
+        "CHART_EXCHANGE_CACHE_TTL": 86400,
+        "ANALYSIS_CACHE_TTL": 30,
+        "SESSION_TTL": 120,
+        "AI_DAILY_MESSAGE_LIMIT": 50,
+        "AI_DAILY_IMAGE_LIMIT": 3,
+        "AI_COOLDOWN_SECONDS": 4,
+        "REFERRAL_TOKENS_PER_INVITE": 3
+      }
+    }
+  }
+}

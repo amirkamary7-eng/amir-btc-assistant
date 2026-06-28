@@ -8,6 +8,7 @@ import time
 import html
 import json
 import uuid
+import hmac
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -44,6 +45,7 @@ from backend.services.join_service import (
     invalidate_join_cache as invalidate_join_cache_entry,
     resolve_channel_membership,
 )
+from backend.services.user_service import get_user
 from backend.services.telegram_auth import (
     get_authenticated_telegram_user,
     get_authenticated_telegram_user_id,
@@ -54,7 +56,7 @@ from backend.services.telegram_auth import (
 from backend.redis_client import cache_get_json, cache_set_json
 
 # کتابخانه‌های ربات تلگرام
-from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # endregion
@@ -79,8 +81,11 @@ async def lifespan(app: FastAPI):
         init_database()
         init_redis()
 
-        if alert_polling_task is None or alert_polling_task.done():
-            alert_polling_task = asyncio.create_task(alert_polling_loop())
+        if _is_alert_polling_loop_enabled():
+            if alert_polling_task is None or alert_polling_task.done():
+                alert_polling_task = asyncio.create_task(alert_polling_loop())
+        else:
+            print(f"ℹ️ Alert polling loop skipped; mode={ALERTS_POLLING_MODE}")
 
         settings = get_settings()
         if settings.bot_configured:
@@ -306,9 +311,21 @@ WEBHOOK_URL = os.environ.get(
     "https://amir-btc-assistant.onrender.com/telegram",
 )
 REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")
+ALERTS_POLLING_MODE = os.environ.get("ALERTS_POLLING_MODE", "loop").strip().lower()
+ALERTS_CRON_SHARED_SECRET = os.environ.get("ALERTS_CRON_SHARED_SECRET", "").strip()
 TICKETS_FILE = Path(__file__).parent / "data" / "tickets.json"
 
 JOINED_STATUSES = {"creator", "administrator", "member", "restricted"}
+
+
+def _is_alert_polling_loop_enabled() -> bool:
+    return ALERTS_POLLING_MODE == "loop"
+
+
+def _is_valid_alerts_cron_secret(secret_value: str) -> bool:
+    if not ALERTS_CRON_SHARED_SECRET:
+        return False
+    return hmac.compare_digest(str(secret_value or ""), ALERTS_CRON_SHARED_SECRET)
 
 
 # TicketCreate ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
@@ -837,13 +854,43 @@ async def delete_alert(request: Request, alert_id: str, user_id: Optional[str] =
     return {"status": "success"}
 
 
+# عملیات مربوط به اجرای داخلی هشدارهای زمان‌بندی‌شده را انجام می‌دهد.
+# ورودی: پارامتر `request: Request` را دریافت می‌کند.
+# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
+@app.post("/internal/alerts/run")
+async def run_internal_alerts(request: Request):
+    if not ALERTS_CRON_SHARED_SECRET:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "message": "ALERTS_CRON_SHARED_SECRET is not configured"},
+        )
+
+    provided_secret = request.headers.get("X-Alerts-Cron-Secret", "")
+    if not _is_valid_alerts_cron_secret(provided_secret):
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "message": "Forbidden"},
+        )
+
+    result = await _check_price_alerts_once()
+    status_code = 200 if result.get("status") == "success" else 500
+    return JSONResponse(status_code=status_code, content=result)
+
+
 # عملیات مربوط به بررسی قیمت هشدارها once را انجام می‌دهد.
 # ورودی: بدون ورودی.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 async def _check_price_alerts_once():
     alerts = _read_alerts()
+    summary = {
+        "status": "success",
+        "checked_count": len(alerts),
+        "triggered_count": 0,
+        "remaining_count": len(alerts),
+        "fetched_symbol_count": 0,
+    }
     if not alerts:
-        return
+        return summary
     try:
         res = requests.get(
             "https://api.coingecko.com/api/v3/coins/markets",
@@ -852,8 +899,11 @@ async def _check_price_alerts_once():
         )
         if not res.ok:
             print(f"⚠️ Alert price fetch failed: HTTP {res.status_code}")
-            return
+            summary["status"] = "error"
+            summary["message"] = f"Alert price fetch failed: HTTP {res.status_code}"
+            return summary
         price_map = {item["symbol"].upper(): float(item["current_price"]) for item in res.json()}
+        summary["fetched_symbol_count"] = len(price_map)
         remaining = []
         for alert in alerts:
             sym = alert["symbol"].upper()
@@ -868,14 +918,20 @@ async def _check_price_alerts_once():
             if triggered:
                 uid = alert["user_id"]
                 msg = f"🔔 {sym} Price reached ${current:.4f}"
+                summary["triggered_count"] += 1
                 if uid and not str(uid).startswith("guest_"):
                     await _send_telegram(uid, msg)
                 await _send_telegram(ADMIN_TELEGRAM_ID, f"📊 هشدار فعال شد\n{msg}\nکاربر: {uid}")
             else:
                 remaining.append(alert)
         _write_alerts(remaining)
+        summary["remaining_count"] = len(remaining)
+        return summary
     except Exception as e:
         print(f"⚠️ Alert check error: {e}")
+        summary["status"] = "error"
+        summary["message"] = str(e)
+        return summary
 
 # عملیات مربوط به هشدار polling loop را انجام می‌دهد.
 # ورودی: بدون ورودی.
@@ -892,22 +948,56 @@ async def alert_polling_loop():
 if TOKEN == "REPLACE_WITH_TOKEN":
     print("⚠️ WARNING: TELEGRAM_BOT_TOKEN not set in environment. Telegram bot will not start until configured.")
 
+
+# وضعیت عضویت کاربر را از دیتابیس پروژه که روی Supabase میزبانی می‌شود بررسی می‌کند.
+# ورودی: پارامتر `user_id: int | str` شناسه تلگرام کاربر را دریافت می‌کند.
+# خروجی: مقدار بولی عضویت کاربر در فیلد `channel_joined` را برمی‌گرداند.
+def _get_channel_joined_from_supabase_db(user_id: int | str) -> bool:
+    if not database_ready():
+        print("⚠️ start membership check skipped: database is not ready")
+        return False
+
+    try:
+        with get_db_session() as db:
+            user = get_user(db, str(user_id))
+            return bool(user.channel_joined) if user else False
+    except Exception as exc:
+        print(f"⚠️ start membership DB check error: {exc}")
+        return False
+
 # عملیات مربوط به شروع را انجام می‌دهد.
 # ورودی: پارامترهای `update: Update, context: ContextTypes.DEFAULT_TYPE` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_user:
+        return
+
+    user_id = update.effective_user.id
+    is_member = _get_channel_joined_from_supabase_db(user_id)
+
+    if not is_member:
+        keyboard = [[
+            InlineKeyboardButton(
+                "عضویت در کانال",
+                url=f"https://t.me/{_normalize_required_channel(REQUIRED_CHANNEL)}",
+            )
+        ]]
+        await update.message.reply_text(
+            "⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            disable_web_page_preview=True,
+        )
+        return
+
     keyboard = [[
-        KeyboardButton(
-            text="🚀 Open App",
-            web_app=WebAppInfo(url=WEBAPP_URL)
+        InlineKeyboardButton(
+            "🚀 باز کردن مینی‌اپ",
+            web_app=WebAppInfo(url=WEBAPP_URL),
         )
     ]]
     await update.message.reply_text(
-        "به Amir BTC Assistant خوش آمدی",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True
-        )
+        "خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
 

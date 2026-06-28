@@ -6,10 +6,18 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "db:test": "node test_db.js",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy --env production",
+    "cf:deploy:staging": "wrangler deploy --env staging",
+    "cf:types": "wrangler types",
+    "cf:pages:prepare": "node scripts/prepare-pages.mjs",
+    "cf:pages:dev": "wrangler pages dev ./webapp/pages-dist --config wrangler.pages.jsonc",
+    "cf:pages:deploy": "wrangler pages deploy ./webapp/pages-dist --config wrangler.pages.jsonc"
   },
   "devDependencies": {
-    "prisma": "^7.8.0"
+    "prisma": "^7.8.0",
+    "wrangler": "^4.67.0"
   },
   "repository": {
     "type": "git",

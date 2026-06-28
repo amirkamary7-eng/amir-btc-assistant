@@ -1,0 +1,492 @@
+﻿<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<!-- #region Head -->
+<!-- ==================== تنظیمات و وابستگی‌های صفحه ==================== -->
+<head>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Amir BTC Assistant Pro</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://s3.tradingview.com/tv.js"></script>
+    <!-- آدرس بک‌اند FastAPI — با URL واقعی Railway/Render جایگزین کنید -->
+    <script>window.API_BASE = window.API_BASE || 'https://amir-btc-assistant.onrender.com';</script>
+</head>
+<!-- #endregion -->
+<body>
+    <!-- #region Body -->
+    <!-- ==================== ساختار اصلی رابط کاربری ==================== -->
+
+    <!-- ==================== هدر اصلی برنامه ==================== -->
+    <!-- #region Header -->
+    <!-- این بخش نوار بالای برنامه و دسترسی سریع به اعلان‌ها را نگه می‌دارد. -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="brand-dot"></div>
+            <span class="brand-name">AMIR BTC</span>
+        </div>
+        <div class="header-right">
+            <button class="notif-btn" onclick="toggleNotificationPanel()">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                <span id="notif-badge" class="notif-badge" style="display:none;">0</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- #endregion -->
+
+    <!-- ==================== صفحه داشبورد ==================== -->
+    <!-- #region DashboardPage -->
+    <!-- این بخش ویترین اولیه برنامه شامل بنر، اسلایدر تحلیل، واچ‌لیست و اخبار مهم است. -->
+    <section id="dashboard-page" class="page active">
+        <div class="hero-banner" onclick="joinChannel()">
+            <div class="hero-inner">
+                <div class="hero-content">
+                    <span class="hero-badge" data-i18n="hero_badge">کانال تحلیلی</span>
+                    <h2>AMIRBTC</h2>
+                    <p data-i18n="hero_desc">سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار</p>
+                    <button class="hero-cta" data-i18n="hero_cta">عضویت رایگان</button>
+                </div>
+                <div class="hero-art">
+                    <img src="assets/amirbtc-logo.png" alt="AMIRBTC" class="hero-logo">
+                </div>
+            </div>
+            <div class="hero-glow"></div>
+        </div>
+
+        <div class="section-header">
+            <span class="section-title">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
+                <span data-i18n="section_analysis">تحلیل‌های جدید</span>
+            </span>
+            <span class="section-more" data-i18n="view_all" onclick="switchTab('analysis-page')">مشاهده همه</span>
+        </div>
+        <div class="slider-container" id="analysis-slider">
+            <div class="slider-track" id="slider-track"></div>
+            <div class="slider-dots" id="slider-dots"></div>
+        </div>
+
+        <div class="section-header">
+            <span class="section-title">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                <span data-i18n="section_watchlist">واچ‌لیست من</span>
+            </span>
+            <button class="add-watch-btn" onclick="openAddCoinModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+        </div>
+        <div class="watchlist-grid" id="watchlist-grid"></div>
+
+        <div class="section-header">
+            <span class="section-title">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+                <span data-i18n="section_news">اخبار مهم و فوری</span>
+            </span>
+        </div>
+        <div id="important-news" class="important-news-list"></div>
+    </section>
+
+    <!-- #endregion -->
+
+    <!-- ==================== صفحه مارکت ==================== -->
+    <!-- #region MarketPage -->
+    <!-- این بخش تب‌های بازار، جستجو و فهرست ارزها را نمایش می‌دهد. -->
+    <section id="market-page" class="page">
+        <div class="search-bar">
+            <input type="text" id="market-search" placeholder="جستجوی ارز..." class="search-input" data-i18n-placeholder="search">
+        </div>
+        <div class="market-tabs" id="market-tabs">
+            <button class="tab-btn active" data-tab="overview" onclick="switchMarketTab('overview', this)" data-i18n="tab_overview">Overview</button>
+            <button class="tab-btn" data-tab="trending" onclick="switchMarketTab('trending', this)" data-i18n="tab_trending">Trending</button>
+            <button class="tab-btn" data-tab="gainers" onclick="switchMarketTab('gainers', this)" data-i18n="tab_gainers">Gainers</button>
+            <button class="tab-btn" data-tab="losers" onclick="switchMarketTab('losers', this)" data-i18n="tab_losers">Losers</button>
+            <button class="tab-btn" data-tab="watchlist" onclick="switchMarketTab('watchlist', this)" data-i18n="watchlist">Watchlist</button>
+        </div>
+        <div class="coin-list" id="coin-list"></div>
+    </section>
+
+    <!-- #endregion -->
+
+    <!-- ==================== صفحه تحلیل ==================== -->
+    <!-- #region AnalysisPage -->
+    <!-- این بخش لیست تحلیل‌های بازار و کنترل‌های مدیریتی مربوط به آن را نگه می‌دارد. -->
+    <section id="analysis-page" class="page">
+        <div class="analysis-header">
+            <h2 class="page-title-with-icon">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
+                <span data-i18n="analysis_title">تحلیل‌های بازار</span>
+            </h2>
+            <button id="admin-add-btn" class="admin-btn" style="display:none;" onclick="openAddAnalysisModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> <span data-i18n="new_analysis">تحلیل جدید</span>
+            </button>
+        </div>
+        <div class="analysis-grid" id="analysis-grid"></div>
+    </section>
+
+    <!-- #endregion -->
+
+    <!-- ==================== صفحه اخبار ==================== -->
+    <!-- #region NewsPage -->
+    <!-- این بخش دسته‌بندی خبرها و خروجی تقویم اقتصادی را نمایش می‌دهد. -->
+    <section id="news-page" class="page">
+        <div class="news-tabs">
+            <button class="news-tab active" data-news="all" onclick="switchNewsTab('all', this)" data-i18n="news_all">همه</button>
+            <button class="news-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)" data-i18n="news_crypto">کریپتو</button>
+            <button class="news-tab" data-news="economy" onclick="switchNewsTab('economy', this)" data-i18n="news_economy">اقتصادی</button>
+            <button class="news-tab" data-news="forex" onclick="switchNewsTab('forex', this)" data-i18n="news_forex">فارکس</button>
+            <button class="news-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)" data-i18n="news_calendar">تقویم</button>
+        </div>
+        <div class="news-list" id="news-list"></div>
+    </section>
+
+    <!-- #endregion -->
+
+    <!-- ==================== صفحه پروفایل ==================== -->
+    <!-- #region ProfilePage -->
+    <!-- این بخش اطلاعات کاربر، لینک ارجاع و آمار پاداش را ارائه می‌کند. -->
+    <section id="profile-page" class="page">
+        <div class="profile-card">
+            <div class="profile-settings" onclick="openSettingsModal()" title="Settings">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            </div>
+            <div class="profile-avatar">
+                <img id="profile-avatar" src="https://ui-avatars.com/api/?name=Guest&background=f7931a&color=fff&bold=true" alt="">
+            </div>
+            <h3 class="profile-name profile-loading-target" id="profile-name" data-i18n="guest">کاربر میهمان</h3>
+            <span class="profile-username profile-loading-target" id="profile-username">@guest</span>
+            <span class="profile-id">ID: <span class="profile-loading-target" id="profile-id-num">000000</span></span>
+            <div class="online-badge" id="online-badge" style="display:none;">
+                <span class="online-dot"></span>
+                <span id="online-count">0</span> <span data-i18n="online_users">کاربر آنلاین</span>
+            </div>
+        </div>
+
+        <div class="referral-card">
+            <div class="ref-header">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2L9.09 8.26 2 9.27l5.18 5.11L6 21.02 12 17.77l6 3.25-1.18-6.64L22 9.27l-7.09-1.01L12 2z"/></svg>
+                <div>
+                    <h4 data-i18n="ref_title">Invite Friends & Earn Rewards</h4>
+                    <p data-i18n="ref_desc">Share your referral link and invite your friends to join BTC Assistant.</p>
+                </div>
+            </div>
+            <div class="ref-input">
+                <input type="text" id="ref-link" readonly>
+                <button onclick="copyRefLink()" data-i18n="copy">کپی</button>
+            </div>
+            <button class="ref-share-btn" onclick="shareRefLink()" data-i18n="share_direct">اشتراک‌گذاری مستقیم</button>
+            <div class="ref-stats">
+                <div><span data-i18n="ref_total">کل دعوت‌ها</span><strong id="ref-total">0</strong></div>
+                <div><span data-i18n="ref_active">فعال</span><strong id="ref-active">0</strong></div>
+                <div><span data-i18n="ref_reward">پاداش</span><strong id="ref-reward">0 AB</strong></div>
+            </div>
+            <div class="ref-rewards-soon">
+                <div class="soon-badge-row">
+                    <span class="soon-badge" data-i18n="coming_soon">بزودی</span>
+                </div>
+                <div class="wheel-preview-wrap">
+                    <div class="wheel-preview" aria-hidden="true">
+                        <div class="wheel-preview-ring"></div>
+                        <div class="wheel-preview-segments">
+                            <span></span><span></span><span></span><span></span>
+                            <span></span><span></span><span></span><span></span>
+                        </div>
+                        <div class="wheel-preview-center">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L9.09 8.26 2 9.27l5.18 5.11L6 21.02 12 17.77l6 3.25-1.18-6.64L22 9.27l-7.09-1.01L12 2z"/></svg>
+                        </div>
+                        <div class="wheel-preview-pointer"></div>
+                    </div>
+                </div>
+                <h5 data-i18n="ref_wheel">گردونه شانس و جوایز نقدی</h5>
+                <p data-i18n="ref_wheel_desc">سیستم پاداش‌دهی بر اساس امتیاز رفرال‌ها در آپدیت بعدی فعال می‌شود.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- #endregion -->
+
+    <!-- ==================== منوی پایینی ==================== -->
+    <!-- #region BottomNavigation -->
+    <!-- این بخش ناوبری اصلی بین صفحات اپلیکیشن را مدیریت می‌کند. -->
+    <nav class="bottom-nav">
+        <button class="nav-item active" data-page="dashboard-page" onclick="switchTab('dashboard-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span data-i18n="dashboard">داشبورد</span>
+        </button>
+        <button class="nav-item" data-page="market-page" onclick="switchTab('market-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+            <span data-i18n="market">مارکت</span>
+        </button>
+        <button class="nav-item" data-page="analysis-page" onclick="switchTab('analysis-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            <span data-i18n="analysis">تحلیل</span>
+        </button>
+        <button class="nav-item" data-page="news-page" onclick="switchTab('news-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+            <span data-i18n="news">اخبار</span>
+        </button>
+        <button class="nav-item" data-page="profile-page" onclick="switchTab('profile-page', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span data-i18n="profile">پروفایل</span>
+        </button>
+    </nav>
+
+    <!-- #endregion -->
+
+    <!-- ==================== مودال‌ها و لایه‌های تعاملی ==================== -->
+    <!-- #region Modals -->
+    <!-- این بخش همه پنجره‌های مودال، فرم‌ها و لایه‌های کمکی برنامه را شامل می‌شود. -->
+
+    <!-- پاپ‌آپ جوین اجباری -->
+    <div id="mandatory-join-modal" class="modal" style="display:none; z-index: 10000; backdrop-filter: blur(15px);">
+        <div class="modal-box join-box" style="text-align: center; padding: 30px 20px;">
+            <div class="join-icon-wrap">
+                <img src="assets/amirbtc-logo.png" alt="AMIRBTC" class="join-logo">
+            </div>
+
+            <!-- حالت عضویت VIP (کاربر تلگرام) -->
+            <div id="join-vip-block">
+                <h3 style="font-size: 18px; margin-bottom: 10px; color: var(--accent);" data-i18n="join_vip_title">عضویت در کانال VIP</h3>
+                <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 20px; line-height: 1.6;" data-i18n="join_vip_desc">
+                    برای دسترسی به چارت‌های لحظه‌ای، تحلیل‌های اختصاصی و 100 ارز برتر، ابتدا در کانال رسمی ما عضو شوید.
+                </p>
+                <button class="submit-btn" style="margin-bottom: 10px; font-size: 15px;" onclick="openJoinAndVerify()" data-i18n="join_vip_btn">عضویت در کانال</button>
+                <button id="join-verify-btn" class="cancel-btn" style="width:100%; margin-bottom: 10px;" onclick="verifyJoin()" data-i18n="join_verify_btn">بررسی عضویت</button>
+                <p style="font-size: 11px; color: var(--text-sub);" data-i18n="join_vip_hint">بعد از عضویت، دکمه «بررسی عضویت» را بزنید.</p>
+                <p id="join-status-msg" class="join-status-msg" style="display:none;"></p>
+            </div>
+
+            <!-- حالت وب (کاربر خارج از تلگرام) -->
+            <div id="join-web-block" style="display:none;">
+                <h3 style="font-size: 18px; margin-bottom: 10px; color: var(--accent);" data-i18n="join_web_title">فقط از تلگرام</h3>
+                <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 20px; line-height: 1.6;" data-i18n="join_web_desc">
+                    این اپلیکیشن فقط از داخل ربات تلگرام قابل استفاده است.
+                </p>
+                <button class="submit-btn" style="width:100%; font-size: 15px;" onclick="openTelegramBot()" data-i18n="join_open_bot">باز کردن ربات تلگرام</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال افزودن واچ‌لیست -->
+    <div id="add-coin-modal" class="modal" onclick="if(event.target===this) closeAddCoinModal()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>افزودن به واچ‌لیست</h3>
+                <button class="modal-close-btn" onclick="closeAddCoinModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <input type="text" id="coin-search-modal" placeholder="جستجو..." class="input-field" oninput="filterCoinList()">
+            <div id="coin-modal-list" class="modal-list"></div>
+        </div>
+    </div>
+
+    <!-- مودال افزودن/ویرایش تحلیل -->
+    <div id="add-analysis-modal" class="modal" onclick="if(event.target===this) closeAddAnalysisModal()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 id="analysis-modal-title">تحلیل جدید</h3>
+                <button class="modal-close-btn" onclick="closeAddAnalysisModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <input type="text" id="analysis-coin" placeholder="نماد ارز (مثلاً BTC)" class="input-field">
+            <input type="text" id="analysis-timeframe" placeholder="تایم‌فریم (مثلاً 4h)" class="input-field">
+            <input type="text" id="analysis-image" placeholder="لینک تصویر کاور" class="input-field">
+            <textarea id="analysis-text" placeholder="متن تحلیل..." class="input-field" rows="4"></textarea>
+            <div class="modal-actions">
+                <button id="analysis-submit-btn" class="submit-btn" onclick="submitAnalysis()">انتشار تحلیل</button>
+                <button class="cancel-btn" onclick="closeAddAnalysisModal()">انصراف</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال نمایش تحلیل -->
+    <div id="analysis-detail-modal" class="modal full-modal" onclick="if(event.target===this) closeAnalysisDetail()">
+        <div class="modal-box modal-box-wide analysis-detail-box">
+            <div class="modal-header">
+                <h3 id="analysis-detail-title">تحلیل</h3>
+                <button class="modal-close-btn" onclick="closeAnalysisDetail()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <img id="analysis-detail-image" src="" alt="" class="analysis-detail-img">
+            <div id="analysis-detail-meta" class="analysis-meta"></div>
+            <p id="analysis-detail-text" class="analysis-detail-text"></p>
+            <button class="submit-btn" onclick="closeAnalysisDetail()" data-i18n="close">بستن</button>
+        </div>
+    </div>
+
+    <!-- مودال جزئیات خبر -->
+    <div id="news-modal" class="modal" onclick="if(event.target===this) closeNewsModal()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 id="news-modal-title">عنوان خبر</h3>
+                <button class="modal-close-btn" onclick="closeNewsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <img id="news-modal-image" src="" alt="" style="width:100%; border-radius:12px; margin:10px 0; max-height:200px; object-fit:cover;">
+            <p id="news-modal-body" style="color:var(--text-dim); line-height:1.6;"></p>
+            <a id="news-modal-link" href="#" target="_blank" class="news-source-link" data-i18n="view_source">مشاهده منبع</a>
+        </div>
+    </div>
+
+    <!-- مودال جزئیات کوین -->
+    <div id="coin-detail-modal" class="modal" onclick="if(event.target===this) closeCoinDetail()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 id="detail-coin-title">BTC / USDT</h3>
+                <button class="modal-close-btn" onclick="closeCoinDetail()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <div class="detail-stats" id="detail-stats"></div>
+            <div id="detail-chart" class="detail-chart"></div>
+            <div class="alert-section">
+                <div class="alert-section-header">
+                    <h4 data-i18n="price_alert">تنظیم هشدار قیمت</h4>
+                    <span class="alert-hint" data-i18n="alert_bot_hint">اعلان در اپ + پیام تلگرام</span>
+                </div>
+                <div class="alert-form">
+                    <input type="number" id="alert-price" placeholder="0.00" class="input-field alert-price-input" data-i18n-placeholder="alert_target">
+                    <button class="submit-btn alert-submit-btn" onclick="setPriceAlert()" data-i18n="set_alert">ثبت هشدار</button>
+                </div>
+                <div id="active-alerts" class="alert-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال نوتیفیکیشن -->
+    <div id="notif-modal" class="modal" onclick="if(event.target===this) closeNotifModal()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span data-i18n="notif_center">مرکز اعلانات</span>
+                </h3>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button class="mark-all-read-btn" onclick="markAllRead()" data-i18n="mark_all_read">همه خوانده شد</button>
+                    <button class="modal-close-btn" onclick="closeNotifModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                </div>
+            </div>
+            <div id="notif-list" class="notif-list" style="margin-bottom: 15px;"></div>
+            <button class="clear-notif-btn" onclick="clearAllNotifications()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span data-i18n="clear_all_notif">پاک کردن همه اعلانات</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- مودال تنظیمات -->
+    <div id="settings-modal" class="modal" onclick="if(event.target===this) closeSettingsModal()">
+        <div class="modal-box settings-modal-box">
+            <div class="modal-header">
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span data-i18n="settings">تنظیمات</span>
+                </h3>
+                <button class="modal-close-btn" onclick="closeSettingsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <div class="settings-menu">
+                <div class="setting-item" onclick="openLangModal()">
+                    <span data-i18n="language">زبان</span>
+                    <span class="setting-arrow">›</span>
+                </div>
+                <div class="setting-item" onclick="openTicketsModal()">
+                    <span data-i18n="support">پشتیبانی و تیکت</span>
+                    <span class="setting-arrow">›</span>
+                </div>
+                <div class="setting-item" id="admin-tickets-item" style="display:none;" onclick="openAdminTicketsModal()">
+                    <span data-i18n="admin_tickets">مدیریت تیکت‌ها</span>
+                    <span class="setting-arrow">›</span>
+                </div>
+                <div class="setting-item" onclick="openAboutModal()">
+                    <span data-i18n="about">درباره ما</span>
+                    <span class="setting-arrow">›</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال زبان -->
+    <div id="lang-modal" class="modal" onclick="if(event.target===this) closeLangModal()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    <span data-i18n="language">زبان</span>
+                </h3>
+                <button class="modal-close-btn" onclick="closeLangModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <div class="lang-options">
+                <div class="lang-option" onclick="selectLang('fa')">
+                    <span class="lang-label"><span class="lang-flag lang-flag-fa">FA</span> فارسی</span>
+                    <span id="lang-fa-check" class="lang-check"></span>
+                </div>
+                <div class="lang-option" onclick="selectLang('en')">
+                    <span class="lang-label"><span class="lang-flag lang-flag-en">EN</span> English</span>
+                    <span id="lang-en-check" class="lang-check"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال تیکت پشتیبانی -->
+    <div id="tickets-modal" class="modal full-modal" onclick="if(event.target===this) closeTicketsModal()">
+        <div class="modal-box modal-box-wide">
+            <div class="modal-header">
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span data-i18n="support">پشتیبانی</span>
+                </h3>
+                <button class="modal-close-btn" onclick="closeTicketsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <div class="ticket-form">
+                <input type="text" id="ticket-title" class="input-field" data-i18n-placeholder="ticket_title" placeholder="عنوان تیکت">
+                <textarea id="ticket-body" class="input-field" rows="3" data-i18n-placeholder="ticket_body" placeholder="متن پیام..."></textarea>
+                <button class="submit-btn" onclick="submitTicket()" data-i18n="ticket_send">ارسال تیکت</button>
+            </div>
+            <div class="ticket-section-title" data-i18n="my_tickets">تیکت‌های من</div>
+            <div id="ticket-list" class="ticket-list"></div>
+        </div>
+    </div>
+
+    <!-- مودال مدیریت تیکت (ادمین) -->
+    <div id="admin-tickets-modal" class="modal full-modal" onclick="if(event.target===this) closeAdminTicketsModal()">
+        <div class="modal-box modal-box-wide">
+            <div class="modal-header">
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    <span data-i18n="admin_tickets">مدیریت تیکت‌ها</span>
+                </h3>
+                <button class="modal-close-btn" onclick="closeAdminTicketsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <div id="admin-ticket-list" class="ticket-list"></div>
+        </div>
+    </div>
+
+    <!-- مودال درباره ما -->
+    <div id="about-modal" class="modal" onclick="if(event.target===this) closeAboutModal()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 data-i18n="about">درباره ما</h3>
+                <button class="modal-close-btn" onclick="closeAboutModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <div class="about-content">
+                <h3>Amir BTC Assistant</h3>
+                <p data-i18n="about_version">نسخه 1.0.0</p>
+                <p data-i18n="about_desc">دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر جهانی.</p>
+                <p><span data-i18n="official_channel">کانال رسمی:</span> <a href="#" onclick="joinChannel(); return false;">amir_btc_2024</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- #endregion -->
+
+    <!-- ==================== اسکریپت‌های صفحه ==================== -->
+    <!-- #region Scripts -->
+    <!-- این بخش فایل‌های جاوااسکریپت لازم برای رفتار پویا و منطق برنامه را بارگذاری می‌کند. -->
+    <script src="watchlist.js"></script>
+    <script src="notifications.js"></script>
+    <script src="assistant.js"></script>
+    <script src="app.js"></script>
+    <!-- #endregion -->
+    <!-- #endregion -->
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "amir-btc-assistant-pages",
+  "pages_build_output_dir": "./webapp/pages-dist",
+  "compatibility_date": "2026-06-27",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}
