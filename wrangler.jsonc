@@ -18,19 +18,19 @@
   "kv_namespaces": [
     {
       "binding": "JOIN_CACHE",
-      "id": "b2e1b5728fdc48e6aca23146a7f9feef"
+      "id": "61813c11a2064a67ac994dc62c30a990"
     },
     {
       "binding": "APP_CACHE",
-      "id": "ff329eeb36fb4c64927642534cf8533a"
+      "id": "a37aa8e1368e4a6a92e666273936673b"
     },
     {
       "binding": "RATE_LIMITS",
-      "id": "66b72d9b06454e67a6983f710163b474"
+      "id": "03bfb4851d09452489d631e038f9e791"
     },
     {
       "binding": "SESSION_CACHE",
-      "id": "69dbab7fc62545a7b5e8d118e84fe799"
+      "id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
     }
   ],
   "vars": {
@@ -59,19 +59,19 @@
       "kv_namespaces": [
         {
           "binding": "JOIN_CACHE",
-          "id": "b2e1b5728fdc48e6aca23146a7f9feef"
+          "id": "61813c11a2064a67ac994dc62c30a990"
         },
         {
           "binding": "APP_CACHE",
-          "id": "ff329eeb36fb4c64927642534cf8533a"
+          "id": "a37aa8e1368e4a6a92e666273936673b"
         },
         {
           "binding": "RATE_LIMITS",
-          "id": "66b72d9b06454e67a6983f710163b474"
+          "id": "03bfb4851d09452489d631e038f9e791"
         },
         {
           "binding": "SESSION_CACHE",
-          "id": "69dbab7fc62545a7b5e8d118e84fe799"
+          "id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
         }
       ],
       "vars": {
@@ -100,19 +100,19 @@
       "kv_namespaces": [
         {
           "binding": "JOIN_CACHE",
-          "id": "b2e1b5728fdc48e6aca23146a7f9feef"
+          "id": "61813c11a2064a67ac994dc62c30a990"
         },
         {
           "binding": "APP_CACHE",
-          "id": "ff329eeb36fb4c64927642534cf8533a"
+          "id": "a37aa8e1368e4a6a92e666273936673b"
         },
         {
           "binding": "RATE_LIMITS",
-          "id": "66b72d9b06454e67a6983f710163b474"
+          "id": "03bfb4851d09452489d631e038f9e791"
         },
         {
           "binding": "SESSION_CACHE",
-          "id": "69dbab7fc62545a7b5e8d118e84fe799"
+          "id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
         }
       ],
       "vars": {
