@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-function loadWorker() {
+function loadWorker(overrides = {}) {
   const workerPath = path.join(__dirname, 'worker-proxy.js');
   const source = fs.readFileSync(workerPath, 'utf8');
   const transformed = source
@@ -13,11 +13,30 @@ function loadWorker() {
       "import { createHmac, timingSafeEqual } from 'node:crypto';",
       "const { createHmac, timingSafeEqual } = require('node:crypto');",
     )
+    .replace("import pg from 'pg';", "const pg = require('pg');")
     .replace('export default {', 'module.exports = {');
 
   const module = { exports: {} };
+  const defaultMocks = {
+    pg: {
+      Pool: class Pool {
+        async query() {
+          return { rows: [] };
+        }
+      },
+    },
+  };
+  const localRequire = (id) => {
+    if (Object.prototype.hasOwnProperty.call(overrides, id)) {
+      return overrides[id];
+    }
+    if (Object.prototype.hasOwnProperty.call(defaultMocks, id)) {
+      return defaultMocks[id];
+    }
+    return require(id);
+  };
   const evaluator = new Function('require', 'module', 'exports', transformed);
-  evaluator(require, module, module.exports);
+  evaluator(localRequire, module, module.exports);
   return module.exports;
 }
 
@@ -47,6 +66,8 @@ function createEnv(overrides = {}) {
   return {
     BACKEND_URL: 'https://backend.example',
     TELEGRAM_BOT_TOKEN: 'test-bot-token',
+    REQUIRED_CHANNEL: 'amir_btc_2024',
+    ADMIN_TELEGRAM_ID: '831704732',
     ...overrides,
   };
 }
@@ -64,6 +85,40 @@ function createFetchStub(responseFactory) {
   }
 
   return { stub, calls };
+}
+
+function createMemoryKv(initial = {}) {
+  const store = new Map(Object.entries(initial));
+  return {
+    async get(key) {
+      return store.has(key) ? store.get(key) : null;
+    },
+    async put(key, value) {
+      store.set(key, value);
+    },
+    async delete(key) {
+      store.delete(key);
+    },
+    dump() {
+      return Object.fromEntries(store.entries());
+    },
+  };
+}
+
+function createPgMock(queryHandler = async () => ({ rows: [] })) {
+  const calls = [];
+
+  class Pool {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      return queryHandler(sql, params);
+    }
+  }
+
+  return {
+    module: { Pool },
+    calls,
+  };
 }
 
 test('PUT /api/users/me/settings validates auth before proxying', async () => {
@@ -222,12 +277,52 @@ test('PUT /api/watchlist rewrites body user_id before proxying', async () => {
   }
 });
 
-test('GET /api/check-join rewrites spoofed query user_id before proxying', async () => {
+test('GET /api/check-join returns cached join status for authenticated user', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
+  const joinCache = createMemoryKv({ 'join:12345': '1' });
+  let fetchCalled = false;
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    fetchCalled = true;
+    throw new Error('fetch should not be called when JOIN_CACHE already has a positive value');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/check-join?user_id=spoofed', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        JOIN_CACHE: joinCache,
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(fetchCalled, false);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      joined: true,
+      cached: true,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/check-join refresh=true checks Telegram and persists DB plus KV', async () => {
+  const pgMock = createPgMock(async () => ({ rows: [] }));
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const joinCache = createMemoryKv();
   const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', joined: true, cached: true }), {
+    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }),
@@ -243,21 +338,81 @@ test('GET /api/check-join rewrites spoofed query user_id before proxying', async
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://example.test/db',
+        JOIN_CACHE: joinCache,
+      }),
+    );
     assert.equal(response.status, 200);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/check-join?user_id=12345&refresh=true');
+    assert.match(calls[0].url, /https:\/\/api\.telegram\.org\/bot.*\/getChatMember\?/);
+    assert.match(calls[0].url, /user_id=12345/);
+    assert.equal((await joinCache.get('join:12345')), '1');
+    assert.equal(pgMock.calls.length, 1);
+    assert.match(pgMock.calls[0].sql, /INSERT INTO users/i);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      joined: true,
+    });
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('GET /api/debug/check-join rewrites spoofed query user_id before proxying', async () => {
+test('GET /api/check-join uses users.channel_joined from DB as source of truth', async () => {
+  const pgMock = createPgMock(async (sql) => {
+    if (/SELECT telegram_id, channel_joined FROM users/i.test(sql)) {
+      return {
+        rows: [{ telegram_id: '12345', channel_joined: true }],
+      };
+    }
+    return { rows: [] };
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  let fetchCalled = false;
+  global.fetch = async () => {
+    fetchCalled = true;
+    throw new Error('Telegram API should not be called when DB already confirms join');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/check-join?user_id=spoofed', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://example.test/db',
+        JOIN_CACHE: createMemoryKv(),
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(fetchCalled, false);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      joined: true,
+      from_db: true,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/debug/check-join returns Telegram debug payload for authenticated user', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ user_id: '12345', joined: true }), {
+    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }),
@@ -276,24 +431,23 @@ test('GET /api/debug/check-join rewrites spoofed query user_id before proxying',
     const response = await worker.fetch(request, createEnv());
     assert.equal(response.status, 200);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/debug/check-join?user_id=12345');
+    assert.match(calls[0].url, /user_id=12345/);
+    assert.deepEqual(await response.json(), {
+      required_channel: 'amir_btc_2024',
+      user_id: '12345',
+      telegram_response: { ok: true, result: { status: 'member' } },
+      joined: true,
+    });
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('POST /api/check-join/invalidate rewrites spoofed query user_id before proxying', async () => {
+test('POST /api/check-join/invalidate clears JOIN_CACHE for authenticated user', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', invalidated: true, user_id: '12345' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
-  const originalFetch = global.fetch;
-  global.fetch = stub;
+  const joinCache = createMemoryKv({ 'join:12345': '1' });
 
   try {
     const request = new Request('https://worker.example/api/check-join/invalidate?user_id=spoofed', {
@@ -303,12 +457,19 @@ test('POST /api/check-join/invalidate rewrites spoofed query user_id before prox
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        JOIN_CACHE: joinCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/check-join/invalidate?user_id=12345');
-    assert.equal(calls[0].method, 'POST');
+    assert.equal(await joinCache.get('join:12345'), null);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      invalidated: true,
+      user_id: '12345',
+    });
   } finally {
-    global.fetch = originalFetch;
   }
 });
