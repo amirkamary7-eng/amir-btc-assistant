@@ -1176,6 +1176,54 @@ async function handleWatchlistPut(request, env) {
 
   return proxyToBackend(request, env, JSON.stringify(payload));
 }
+
+async function handleCheckJoin(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const url = new URL(request.url);
+  if (url.searchParams.has('user_id')) {
+    url.searchParams.set('user_id', String(authState.user.id));
+    const nextRequest = new Request(url.toString(), request);
+    return proxyToBackend(nextRequest, env);
+  }
+
+  return proxyToBackend(request, env);
+}
+
+async function handleDebugCheckJoin(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const url = new URL(request.url);
+  if (url.searchParams.has('user_id')) {
+    url.searchParams.set('user_id', String(authState.user.id));
+    const nextRequest = new Request(url.toString(), request);
+    return proxyToBackend(nextRequest, env);
+  }
+
+  return proxyToBackend(request, env);
+}
+
+async function handleCheckJoinInvalidate(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const url = new URL(request.url);
+  if (url.searchParams.has('user_id')) {
+    url.searchParams.set('user_id', String(authState.user.id));
+    const nextRequest = new Request(url.toString(), request);
+    return proxyToBackend(nextRequest, env);
+  }
+
+  return proxyToBackend(request, env);
+}
 //#endregion
 
 // ============================================================================
@@ -1361,6 +1409,18 @@ export default {
 
     if (request.method === 'PUT' && url.pathname === '/api/watchlist') {
       return handleWatchlistPut(request, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/check-join') {
+      return handleCheckJoin(request, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/debug/check-join') {
+      return handleDebugCheckJoin(request, env);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/check-join/invalidate') {
+      return handleCheckJoinInvalidate(request, env);
     }
 
     if (url.pathname === '/telegram' || url.pathname.startsWith('/api/')) {
