@@ -221,3 +221,94 @@ test('PUT /api/watchlist rewrites body user_id before proxying', async () => {
     global.fetch = originalFetch;
   }
 });
+
+test('GET /api/check-join rewrites spoofed query user_id before proxying', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success', joined: true, cached: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/check-join?user_id=spoofed&refresh=true', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/check-join?user_id=12345&refresh=true');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/debug/check-join rewrites spoofed query user_id before proxying', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ user_id: '12345', joined: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/debug/check-join?user_id=spoofed', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/debug/check-join?user_id=12345');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/check-join/invalidate rewrites spoofed query user_id before proxying', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success', invalidated: true, user_id: '12345' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/check-join/invalidate?user_id=spoofed', {
+      method: 'POST',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/check-join/invalidate?user_id=12345');
+    assert.equal(calls[0].method, 'POST');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
