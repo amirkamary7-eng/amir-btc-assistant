@@ -38,7 +38,7 @@
   - `GET /api/users/me` روی Worker (auth validation) ✔
   - `PUT /api/users/me/settings` روی Worker ✔
   - `/api/watchlist` روی Worker ✔
-- Mandatory join migration ✔
+- Mandatory join migration ⏳
 - Webhook و `/start` migration ⏳
 - Cache migration ⏳
 - Tickets migration ⏳
