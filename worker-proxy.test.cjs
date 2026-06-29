@@ -473,3 +473,165 @@ test('POST /api/check-join/invalidate clears JOIN_CACHE for authenticated user',
   } finally {
   }
 });
+
+test('POST /telegram handles /start for non-member user natively in worker', async () => {
+  const pgMock = createPgMock(async (sql) => {
+    if (/SELECT telegram_id, channel_joined FROM users/i.test(sql)) {
+      return {
+        rows: [{ telegram_id: '12345', channel_joined: false }],
+      };
+    }
+    return { rows: [] };
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const { stub, calls } = createFetchStub(async (url) => {
+    if (String(url).includes('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  });
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/telegram', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        update_id: 1,
+        message: {
+          message_id: 10,
+          text: '/start',
+          chat: { id: 12345, type: 'private' },
+          from: { id: 12345, first_name: 'Amir' },
+        },
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://example.test/db',
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
+    assert.deepEqual(JSON.parse(calls[0].body), {
+      chat_id: 12345,
+      text: '⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.',
+      reply_markup: {
+        inline_keyboard: [[{ text: 'عضویت در کانال', url: 'https://t.me/amir_btc_2024' }]],
+      },
+      disable_web_page_preview: true,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /telegram handles /start for joined user and returns web_app button', async () => {
+  const pgMock = createPgMock(async (sql) => {
+    if (/SELECT telegram_id, channel_joined FROM users/i.test(sql)) {
+      return {
+        rows: [{ telegram_id: '12345', channel_joined: true }],
+      };
+    }
+    return { rows: [] };
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const { stub, calls } = createFetchStub(async (url) => {
+    if (String(url).includes('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 2 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  });
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/telegram', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        update_id: 1,
+        message: {
+          message_id: 11,
+          text: '/start ref_payload',
+          chat: { id: 12345, type: 'private' },
+          from: { id: 12345, first_name: 'Amir' },
+        },
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://example.test/db',
+        WEBAPP_URL: 'https://miniapp.example/app',
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
+    assert.deepEqual(JSON.parse(calls[0].body), {
+      chat_id: 12345,
+      text: 'خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
+      reply_markup: {
+        inline_keyboard: [[{ text: '🚀 باز کردن مینی‌اپ', web_app: { url: 'https://miniapp.example/app' } }]],
+      },
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('scheduled worker syncs Telegram webhook to worker /telegram URL', async () => {
+  const worker = loadWorker();
+  const { stub, calls } = createFetchStub(async (url) => {
+    if (String(url).includes('/setWebhook')) {
+      return new Response(JSON.stringify({ ok: true, result: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  });
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const waitUntilCalls = [];
+    await worker.scheduled(
+      { cron: '*/5 * * * *' },
+      createEnv({
+        TELEGRAM_WEBHOOK_URL: 'https://worker.example/custom/path?stale=1',
+      }),
+      {
+        waitUntil(promise) {
+          waitUntilCalls.push(promise);
+        },
+      },
+    );
+    await Promise.all(waitUntilCalls);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://api.telegram.org/bottest-bot-token/setWebhook');
+    assert.deepEqual(JSON.parse(calls[0].body), {
+      url: 'https://worker.example/telegram',
+      drop_pending_updates: true,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

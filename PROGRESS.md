@@ -9,7 +9,7 @@
 - Phase 2 / طراحی مهاجرت مرحله‌ای ⏳
 - Phase 3 / آماده‌سازی زیرساخت Cloudflare ⏳
 - Phase 4 / انتقال APIها ⏳
-- Phase 5 / انتقال webhook ربات ⏳
+- Phase 5 / انتقال webhook ربات ✔
 - Phase 6 / انتقال cache ⏳
 - Phase 7 / انتقال stateهای فایل‌محور ⏳
 - Phase 8 / حذف کامل Render ⏳
@@ -39,7 +39,7 @@
   - `PUT /api/users/me/settings` روی Worker ✔
   - `/api/watchlist` روی Worker ✔
 - Mandatory join migration ⏳
-- Webhook و `/start` migration ⏳
+- Webhook و `/start` migration ✔
 - Cache migration ⏳
 - Tickets migration ⏳
 - Alerts migration ⏳

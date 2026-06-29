@@ -262,6 +262,14 @@ function resolveRequiredChannel(env) {
   return String(env.REQUIRED_CHANNEL || 'amir_btc_2024').trim();
 }
 
+function resolveWebappUrl(env) {
+  return String(env.WEBAPP_URL || '').trim();
+}
+
+function resolveTelegramWebhookUrl(env) {
+  return String(env.TELEGRAM_WEBHOOK_URL || '').trim();
+}
+
 function getJoinCacheKey(userId) {
   return `${JOIN_CACHE_PREFIX}${String(userId)}`;
 }
@@ -333,6 +341,51 @@ function normalizeRequiredChannel(rawValue) {
 function getTelegramChatId(env) {
   const normalizedChannel = normalizeRequiredChannel(resolveRequiredChannel(env));
   return normalizedChannel ? `@${normalizedChannel}` : `@${resolveRequiredChannel(env)}`;
+}
+
+function buildTelegramApiUrl(env, methodName) {
+  return `https://api.telegram.org/bot${String(env.TELEGRAM_BOT_TOKEN || '')}/${methodName}`;
+}
+
+async function callTelegramBotApi(env, methodName, payload) {
+  const response = await fetch(buildTelegramApiUrl(env, methodName), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  return {
+    ok: response.ok && Boolean(body?.ok),
+    status: response.status,
+    body,
+  };
+}
+
+function normalizeWebhookUrl(rawUrl) {
+  const trimmed = String(rawUrl || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const url = new URL(trimmed);
+    url.pathname = '/telegram';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
 }
 
 function parseBooleanQueryParam(value) {
@@ -407,6 +460,149 @@ async function persistDbUserJoinState(env, userId, joined) {
     `,
     [String(userId), Boolean(joined), joined ? new Date().toISOString() : null],
   );
+}
+
+async function getDbUserChannelJoined(env, userId) {
+  if (!isDatabaseConfigured(env)) {
+    return false;
+  }
+
+  try {
+    const dbUser = await getDbUserJoinState(env, userId);
+    return Boolean(dbUser?.channel_joined);
+  } catch (error) {
+    console.warn('DB read failed while checking /start membership:', error);
+    return false;
+  }
+}
+
+async function sendTelegramMessage(env, chatId, text, extraPayload = {}) {
+  if (!isBotConfigured(env)) {
+    return false;
+  }
+
+  try {
+    const result = await callTelegramBotApi(env, 'sendMessage', {
+      chat_id: chatId,
+      text,
+      ...extraPayload,
+    });
+
+    if (!result.ok) {
+      console.warn('sendMessage failed:', result.status, result.body);
+    }
+
+    return result.ok;
+  } catch (error) {
+    console.warn('sendMessage error:', error);
+    return false;
+  }
+}
+
+function isStartCommand(text) {
+  return /^\/start(?:@\w+)?(?:\s|$)/.test(String(text || '').trim());
+}
+
+async function handleTelegramStartCommand(update, env) {
+  const userId = update?.effective_user?.id ?? update?.message?.from?.id;
+  const chatId = update?.message?.chat?.id ?? userId;
+  if (!userId || !chatId) {
+    return;
+  }
+
+  const isMember = await getDbUserChannelJoined(env, String(userId));
+  if (!isMember) {
+    const joinChannel = normalizeRequiredChannel(resolveRequiredChannel(env));
+    await sendTelegramMessage(env, chatId, '⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.', {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'عضویت در کانال',
+              url: `https://t.me/${joinChannel}`,
+            },
+          ],
+        ],
+      },
+      disable_web_page_preview: true,
+    });
+    return;
+  }
+
+  const webappUrl = resolveWebappUrl(env);
+  const extraPayload = webappUrl
+    ? {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '🚀 باز کردن مینی‌اپ',
+                web_app: {
+                  url: webappUrl,
+                },
+              },
+            ],
+          ],
+        },
+      }
+    : {};
+
+  await sendTelegramMessage(env, chatId, 'خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.', extraPayload);
+}
+
+async function processTelegramUpdate(update, env) {
+  const messageText = update?.message?.text;
+  if (!messageText || !isStartCommand(messageText)) {
+    return;
+  }
+
+  await handleTelegramStartCommand(update, env);
+}
+
+async function handleTelegramWebhook(request, env) {
+  try {
+    const payload = await request.json();
+    await processTelegramUpdate(payload, env);
+  } catch (error) {
+    console.warn('Telegram webhook processing error:', error);
+  }
+
+  return new Response(null, {
+    status: 200,
+    headers: withCors(),
+  });
+}
+
+async function syncTelegramWebhook(env) {
+  if (!isBotConfigured(env)) {
+    return { synced: false, reason: 'bot_not_configured' };
+  }
+
+  const webhookUrl = normalizeWebhookUrl(resolveTelegramWebhookUrl(env));
+  if (!webhookUrl) {
+    return { synced: false, reason: 'webhook_url_not_configured' };
+  }
+
+  try {
+    const result = await callTelegramBotApi(env, 'setWebhook', {
+      url: webhookUrl,
+      drop_pending_updates: true,
+    });
+
+    if (!result.ok) {
+      console.warn('setWebhook failed:', result.status, result.body);
+      return { synced: false, reason: 'api_error', detail: result.body };
+    }
+
+    return { synced: true, url: webhookUrl };
+  } catch (error) {
+    console.warn('setWebhook error:', error);
+    return {
+      synced: false,
+      reason: 'request_failed',
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function getChatMemberDebugPayload(userId, env) {
@@ -1619,6 +1815,22 @@ async function runScheduledAlertsBaseline(controller, env) {
 //#endregion
 
 // ============================================================================
+//#region همگام‌سازی webhook تلگرام
+// ============================================================================
+async function runScheduledTelegramWebhookSync(controller, env) {
+  const result = await syncTelegramWebhook(env);
+  console.log(
+    JSON.stringify({
+      status: 'ok',
+      task: 'telegram-webhook-sync',
+      cron: controller.cron || 'manual',
+      ...result,
+    }),
+  );
+}
+//#endregion
+
+// ============================================================================
 //#region پروکسی موقت مسیرهای مهاجرت‌نشده
 // ============================================================================
 async function proxyToBackend(request, env, bodyOverride) {
@@ -1749,6 +1961,10 @@ export default {
       return handleCheckJoinInvalidate(request, env);
     }
 
+    if (request.method === 'POST' && url.pathname === '/telegram') {
+      return handleTelegramWebhook(request, env);
+    }
+
     if (url.pathname === '/telegram' || url.pathname.startsWith('/api/')) {
       return proxyToBackend(request, env);
     }
@@ -1764,6 +1980,7 @@ export default {
 
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(runScheduledAlertsBaseline(controller, env));
+    ctx.waitUntil(runScheduledTelegramWebhookSync(controller, env));
   },
 };
 //#endregion
