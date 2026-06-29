@@ -1053,9 +1053,9 @@ async function handleUsersBootstrap(request, env) {
     );
   }
 
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !normalizeOptionalString(payload.user_id)) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
-      buildBodyFieldValidationError('user_id', 'missing', 'Field required', payload?.user_id ?? null),
+      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
       { status: 422 },
     );
   }
@@ -1073,6 +1073,61 @@ async function handleUsersBootstrap(request, env) {
   // شناسه کاربر را با هویت تاییدشده تلگرام همگام می‌کنیم تا proxy
   // به مقدار stale یا دستکاری‌شده از سمت کلاینت وابسته نباشد.
   payload.user_id = String(authState.user.id);
+
+  return proxyToBackend(request, env, JSON.stringify(payload));
+}
+
+async function handleUsersMe(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const url = new URL(request.url);
+  if (url.searchParams.has('user_id')) {
+    url.searchParams.set('user_id', String(authState.user.id));
+    const nextRequest = new Request(url.toString(), request);
+    return proxyToBackend(nextRequest, env);
+  }
+
+  return proxyToBackend(request, env);
+}
+
+async function handleUsersMeSettings(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const originalBody = await request.text();
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+      { status: 422 },
+    );
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+      { status: 422 },
+    );
+  }
+
+  payload.user_id = String(authState.user.id);
+
+  if (!resolveBackendUrl(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'BACKEND_URL not configured for me/settings proxy',
+      },
+      { status: 503 },
+    );
+  }
 
   return proxyToBackend(request, env, JSON.stringify(payload));
 }
@@ -1164,6 +1219,9 @@ async function proxyToBackend(request, env, bodyOverride) {
   const headers = new Headers(request.headers);
 
   headers.delete('host');
+  // وقتی body را در Worker بازنویسی می‌کنیم، content-length قبلی دیگر معتبر نیست.
+  // حذف آن اجازه می‌دهد runtime طول جدید را خودش محاسبه کند.
+  headers.delete('content-length');
   headers.set('X-Cloudflare-Proxy', 'amir-btc-assistant-shell');
 
   try {
@@ -1238,6 +1296,14 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/api/analyses') {
       return handleAnalyses(request, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/users/me') {
+      return handleUsersMe(request, env);
+    }
+
+    if (request.method === 'PUT' && url.pathname === '/api/users/me/settings') {
+      return handleUsersMeSettings(request, env);
     }
 
     if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
