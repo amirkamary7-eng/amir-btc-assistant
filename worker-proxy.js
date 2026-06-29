@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import pg from 'pg';
 
 /**
  * Cloudflare Worker Shell
@@ -246,6 +247,322 @@ function normalizeOptionalString(value) {
   }
   const normalized = String(value).trim();
   return normalized ? normalized : null;
+}
+
+const { Pool } = pg;
+const JOIN_CACHE_PREFIX = 'join:';
+const JOINED_STATUSES = new Set(['creator', 'administrator', 'member', 'restricted']);
+const joinDbPools = new Map();
+
+function resolveDatabaseUrl(env) {
+  return String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
+}
+
+function resolveRequiredChannel(env) {
+  return String(env.REQUIRED_CHANNEL || 'amir_btc_2024').trim();
+}
+
+function getJoinCacheKey(userId) {
+  return `${JOIN_CACHE_PREFIX}${String(userId)}`;
+}
+
+async function getCachedJoinStatus(env, userId) {
+  if (!env.JOIN_CACHE || typeof env.JOIN_CACHE.get !== 'function') {
+    return null;
+  }
+
+  try {
+    const cached = await env.JOIN_CACHE.get(getJoinCacheKey(userId));
+    if (cached === '1') {
+      return true;
+    }
+    if (cached === '0') {
+      return false;
+    }
+  } catch (error) {
+    console.warn('JOIN_CACHE read failed:', error);
+  }
+
+  return null;
+}
+
+async function setCachedJoinStatus(env, userId, joined) {
+  if (!env.JOIN_CACHE || typeof env.JOIN_CACHE.put !== 'function') {
+    return;
+  }
+
+  try {
+    await env.JOIN_CACHE.put(getJoinCacheKey(userId), joined ? '1' : '0', {
+      expirationTtl: getNumericEnv(env, 'JOIN_CACHE_TTL', 1800),
+    });
+  } catch (error) {
+    console.warn('JOIN_CACHE write failed:', error);
+  }
+}
+
+async function invalidateJoinCache(env, userId) {
+  const hadCachedValue = (await getCachedJoinStatus(env, userId)) !== null;
+
+  if (env.JOIN_CACHE && typeof env.JOIN_CACHE.delete === 'function') {
+    try {
+      await env.JOIN_CACHE.delete(getJoinCacheKey(userId));
+    } catch (error) {
+      console.warn('JOIN_CACHE delete failed:', error);
+    }
+  }
+
+  return hadCachedValue;
+}
+
+function normalizeRequiredChannel(rawValue) {
+  let value = String(rawValue || '').trim();
+  if (!value) {
+    return '';
+  }
+
+  value = value.split('?', 1)[0].trim();
+  if (value.startsWith('https://') || value.startsWith('http://')) {
+    const parts = value.split('t.me/', 2);
+    value = parts.length === 2 ? parts[1] : value.split('/').pop() || '';
+  }
+
+  value = value.replace(/^@+/, '').trim();
+  return value.split('/', 1)[0].trim();
+}
+
+function getTelegramChatId(env) {
+  const normalizedChannel = normalizeRequiredChannel(resolveRequiredChannel(env));
+  return normalizedChannel ? `@${normalizedChannel}` : `@${resolveRequiredChannel(env)}`;
+}
+
+function parseBooleanQueryParam(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function isAdminTelegramId(env, userId) {
+  return String(userId) === String(env.ADMIN_TELEGRAM_ID || '831704732');
+}
+
+function getJoinDbPool(env) {
+  const databaseUrl = resolveDatabaseUrl(env);
+  if (!databaseUrl) {
+    return null;
+  }
+
+  if (!joinDbPools.has(databaseUrl)) {
+    joinDbPools.set(
+      databaseUrl,
+      new Pool({
+        connectionString: databaseUrl,
+        max: 3,
+      }),
+    );
+  }
+
+  return joinDbPools.get(databaseUrl);
+}
+
+async function getDbUserJoinState(env, userId) {
+  const pool = getJoinDbPool(env);
+  if (!pool) {
+    return null;
+  }
+
+  const result = await pool.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [
+    String(userId),
+  ]);
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    telegram_id: String(row.telegram_id),
+    channel_joined: Boolean(row.channel_joined),
+  };
+}
+
+async function persistDbUserJoinState(env, userId, joined) {
+  const pool = getJoinDbPool(env);
+  if (!pool) {
+    return;
+  }
+
+  await pool.query(
+    `
+      INSERT INTO users (
+        telegram_id,
+        lang,
+        channel_joined,
+        channel_verified_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, 'fa', $2, $3, NOW(), NOW())
+      ON CONFLICT (telegram_id) DO UPDATE
+      SET
+        channel_joined = EXCLUDED.channel_joined,
+        channel_verified_at = EXCLUDED.channel_verified_at,
+        updated_at = NOW()
+    `,
+    [String(userId), Boolean(joined), joined ? new Date().toISOString() : null],
+  );
+}
+
+async function getChatMemberDebugPayload(userId, env) {
+  const uid = String(userId);
+  const requiredChannel = resolveRequiredChannel(env);
+  const chatId = getTelegramChatId(env);
+  const payload = {
+    required_channel: requiredChannel,
+    user_id: uid,
+    telegram_response: null,
+    joined: false,
+  };
+
+  if (uid.startsWith('guest_')) {
+    payload.telegram_response = { reason: 'guest_user' };
+    return payload;
+  }
+
+  if (isAdminTelegramId(env, uid)) {
+    payload.telegram_response = { admin: true, reason: 'admin_bypass' };
+    payload.joined = true;
+    return payload;
+  }
+
+  if (!isBotConfigured(env)) {
+    payload.telegram_response = { reason: 'bot_not_configured' };
+    return payload;
+  }
+
+  if (!/^\d+$/.test(uid)) {
+    payload.telegram_response = { reason: 'invalid_user_id', value: uid };
+    return payload;
+  }
+
+  try {
+    const telegramResponse = await fetch(
+      `https://api.telegram.org/bot${String(env.TELEGRAM_BOT_TOKEN || '')}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${encodeURIComponent(uid)}`,
+    );
+    const data = await telegramResponse.json();
+    payload.telegram_response = data;
+    const status = data?.result?.status || '';
+    payload.joined = Boolean(data?.ok && JOINED_STATUSES.has(status));
+    return payload;
+  } catch (error) {
+    payload.telegram_response = {
+      exception: error instanceof Error ? error.name : 'Error',
+      message: error instanceof Error ? error.message : String(error),
+    };
+    return payload;
+  }
+}
+
+async function checkChannelMembership(userId, env) {
+  const debugPayload = await getChatMemberDebugPayload(userId, env);
+  const telegramResponse = debugPayload.telegram_response;
+
+  if (telegramResponse && typeof telegramResponse === 'object') {
+    if (telegramResponse.reason === 'guest_user') {
+      return { joined: false, reason: 'guest_user' };
+    }
+    if (telegramResponse.reason === 'admin_bypass') {
+      return { joined: true, admin: true };
+    }
+    if (telegramResponse.reason === 'bot_not_configured') {
+      return { joined: false, reason: 'bot_not_configured' };
+    }
+    if (telegramResponse.ok) {
+      const status = telegramResponse?.result?.status || '';
+      return { joined: JOINED_STATUSES.has(status) };
+    }
+
+    const description = String(telegramResponse.description || '');
+    const lowerDescription = description.toLowerCase();
+    if (lowerDescription.includes('user not found') || lowerDescription.includes('not a member')) {
+      return { joined: false, reason: 'not_member', detail: description };
+    }
+    if (lowerDescription.includes('chat not found')) {
+      return { joined: false, reason: 'channel_not_found', detail: description };
+    }
+    if (lowerDescription.includes('bot is not a member') || lowerDescription.includes('need administrator')) {
+      return { joined: false, reason: 'bot_not_in_channel', detail: description };
+    }
+    if (telegramResponse.http_error || telegramResponse.exception) {
+      return { joined: false, reason: 'api_error', detail: JSON.stringify(telegramResponse) };
+    }
+    return { joined: false, reason: 'api_error', detail: description };
+  }
+
+  return { joined: false, reason: 'api_error' };
+}
+
+async function resolveChannelMembership(env, userId, { forceRefresh = false } = {}) {
+  const uid = String(userId);
+
+  if (uid.startsWith('guest_')) {
+    return { joined: false, reason: 'guest_user' };
+  }
+
+  if (isAdminTelegramId(env, uid)) {
+    return { joined: true, admin: true };
+  }
+
+  try {
+    if (!forceRefresh) {
+      const cached = await getCachedJoinStatus(env, uid);
+      if (cached === true) {
+        return { joined: true, cached: true };
+      }
+
+      if (isDatabaseConfigured(env)) {
+        const dbUser = await getDbUserJoinState(env, uid);
+        if (dbUser?.channel_joined) {
+          await setCachedJoinStatus(env, uid, true);
+          return { joined: true, from_db: true };
+        }
+      }
+    }
+
+    const result = await checkChannelMembership(uid, env);
+    if (result.joined) {
+      await setCachedJoinStatus(env, uid, true);
+      if (isDatabaseConfigured(env)) {
+        await persistDbUserJoinState(env, uid, true);
+      }
+      return result;
+    }
+
+    if (result.reason === 'api_error') {
+      if (isDatabaseConfigured(env)) {
+        const dbUser = await getDbUserJoinState(env, uid);
+        if (dbUser?.channel_joined) {
+          return { joined: true, from_db_fallback: true, reason: result.reason };
+        }
+      }
+
+      const cached = await getCachedJoinStatus(env, uid);
+      if (cached === true) {
+        return { joined: true, cached_fallback: true, reason: result.reason };
+      }
+
+      return { ...result, joined: false };
+    }
+
+    await setCachedJoinStatus(env, uid, false);
+    if (isDatabaseConfigured(env)) {
+      await persistDbUserJoinState(env, uid, false);
+    }
+    return result;
+  } catch (error) {
+    return {
+      status: 'DB_ERROR',
+      joined: false,
+      reason: 'database_unavailable',
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 const EXCHANGE_ORDER = [
@@ -1184,13 +1501,24 @@ async function handleCheckJoin(request, env) {
   }
 
   const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
+  const forceRefresh = parseBooleanQueryParam(url.searchParams.get('refresh'));
+  const resolvedUserId = String(authState.user.id);
+
+  if (forceRefresh) {
+    await invalidateJoinCache(env, resolvedUserId);
   }
 
-  return proxyToBackend(request, env);
+  const result = await resolveChannelMembership(env, resolvedUserId, {
+    forceRefresh,
+  });
+  if (result.status === 'DB_ERROR') {
+    return jsonResponse(result);
+  }
+
+  return jsonResponse({
+    status: 'success',
+    ...result,
+  });
 }
 
 async function handleDebugCheckJoin(request, env) {
@@ -1199,14 +1527,13 @@ async function handleDebugCheckJoin(request, env) {
     return authState.error;
   }
 
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
-  }
-
-  return proxyToBackend(request, env);
+  const debugPayload = await getChatMemberDebugPayload(String(authState.user.id), env);
+  return jsonResponse({
+    required_channel: debugPayload.required_channel,
+    user_id: String(authState.user.id),
+    telegram_response: debugPayload.telegram_response,
+    joined: debugPayload.joined,
+  });
 }
 
 async function handleCheckJoinInvalidate(request, env) {
@@ -1215,14 +1542,13 @@ async function handleCheckJoinInvalidate(request, env) {
     return authState.error;
   }
 
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
-  }
-
-  return proxyToBackend(request, env);
+  const resolvedUserId = String(authState.user.id);
+  const invalidated = await invalidateJoinCache(env, resolvedUserId);
+  return jsonResponse({
+    status: 'success',
+    invalidated,
+    user_id: resolvedUserId,
+  });
 }
 //#endregion
 
