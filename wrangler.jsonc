@@ -18,19 +18,19 @@
   "kv_namespaces": [
     {
       "binding": "JOIN_CACHE",
-      "id": "00000000000000000000000000000001"
+      "id": "b2e1b5728fdc48e6aca23146a7f9feef"
     },
     {
       "binding": "APP_CACHE",
-      "id": "00000000000000000000000000000002"
+      "id": "ff329eeb36fb4c64927642534cf8533a"
     },
     {
       "binding": "RATE_LIMITS",
-      "id": "00000000000000000000000000000003"
+      "id": "66b72d9b06454e67a6983f710163b474"
     },
     {
       "binding": "SESSION_CACHE",
-      "id": "00000000000000000000000000000004"
+      "id": "69dbab7fc62545a7b5e8d118e84fe799"
     }
   ],
   "vars": {
@@ -59,19 +59,19 @@
       "kv_namespaces": [
         {
           "binding": "JOIN_CACHE",
-          "id": "10000000000000000000000000000001"
+          "id": "b2e1b5728fdc48e6aca23146a7f9feef"
         },
         {
           "binding": "APP_CACHE",
-          "id": "10000000000000000000000000000002"
+          "id": "ff329eeb36fb4c64927642534cf8533a"
         },
         {
           "binding": "RATE_LIMITS",
-          "id": "10000000000000000000000000000003"
+          "id": "66b72d9b06454e67a6983f710163b474"
         },
         {
           "binding": "SESSION_CACHE",
-          "id": "10000000000000000000000000000004"
+          "id": "69dbab7fc62545a7b5e8d118e84fe799"
         }
       ],
       "vars": {
@@ -100,19 +100,19 @@
       "kv_namespaces": [
         {
           "binding": "JOIN_CACHE",
-          "id": "20000000000000000000000000000001"
+          "id": "b2e1b5728fdc48e6aca23146a7f9feef"
         },
         {
           "binding": "APP_CACHE",
-          "id": "20000000000000000000000000000002"
+          "id": "ff329eeb36fb4c64927642534cf8533a"
         },
         {
           "binding": "RATE_LIMITS",
-          "id": "20000000000000000000000000000003"
+          "id": "66b72d9b06454e67a6983f710163b474"
         },
         {
           "binding": "SESSION_CACHE",
-          "id": "20000000000000000000000000000004"
+          "id": "69dbab7fc62545a7b5e8d118e84fe799"
         }
       ],
       "vars": {
