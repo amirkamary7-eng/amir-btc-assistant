@@ -32,12 +32,12 @@
 - `GET /api/calendar/events` روی Worker ✔
 - `GET /api/farsi-news` روی Worker ✔
 - `GET /api/analyses` روی Worker ✔
-- Auth و user flow migration ⏳
+- Auth و user flow migration ✔
   - Telegram initData validation روی Worker ✔
   - `POST /api/users/bootstrap` روی Worker (proxy-safe + auth validation) ✔
   - `GET /api/users/me` روی Worker (auth validation) ✔
-  - `PUT /api/users/me/settings` روی Worker ⏳
-  - `/api/watchlist` روی Worker ⏳
+  - `PUT /api/users/me/settings` روی Worker ✔
+  - `/api/watchlist` روی Worker ✔
 - Mandatory join migration ⏳
 - Webhook و `/start` migration ⏳
 - Cache migration ⏳
