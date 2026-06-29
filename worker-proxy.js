@@ -1131,6 +1131,51 @@ async function handleUsersMeSettings(request, env) {
 
   return proxyToBackend(request, env, JSON.stringify(payload));
 }
+
+async function handleWatchlistGet(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const url = new URL(request.url);
+  if (url.searchParams.has('user_id')) {
+    url.searchParams.set('user_id', String(authState.user.id));
+    const nextRequest = new Request(url.toString(), request);
+    return proxyToBackend(nextRequest, env);
+  }
+
+  return proxyToBackend(request, env);
+}
+
+async function handleWatchlistPut(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const originalBody = await request.text();
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+      { status: 422 },
+    );
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+      { status: 422 },
+    );
+  }
+
+  payload.user_id = String(authState.user.id);
+
+  return proxyToBackend(request, env, JSON.stringify(payload));
+}
 //#endregion
 
 // ============================================================================
@@ -1308,6 +1353,14 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
       return handleUsersBootstrap(request, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/watchlist') {
+      return handleWatchlistGet(request, env);
+    }
+
+    if (request.method === 'PUT' && url.pathname === '/api/watchlist') {
+      return handleWatchlistPut(request, env);
     }
 
     if (url.pathname === '/telegram' || url.pathname.startsWith('/api/')) {
