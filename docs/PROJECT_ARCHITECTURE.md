@@ -280,10 +280,10 @@ fallback فعلی:
 - اتصال از طریق `DATABASE_URL` به PostgreSQL انجام می‌شود.
 - مدل‌های SQLAlchemy schema اصلی را مدیریت می‌کنند.
 
-### Backend ↔ Render
+### Backend ↔ Cloudflare
 
-- `TELEGRAM_WEBHOOK_URL` پیش‌فرض روی Render است.
-- `window.API_BASE` در فرانت‌اند هنوز روی Render تنظیم شده است.
+- `TELEGRAM_WEBHOOK_URL` باید روی route کامل Worker یعنی `/telegram` تنظیم شود.
+- `window.API_BASE` در فرانت‌اند روی `window.location.origin` قرار دارد، نه Render.
 
 ### Bot ↔ Backend
 

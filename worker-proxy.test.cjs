@@ -474,6 +474,50 @@ test('POST /api/check-join/invalidate clears JOIN_CACHE for authenticated user',
   }
 });
 
+test('POST / accepts Telegram webhook payloads as a compatibility alias', async () => {
+  const worker = loadWorker();
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(
+      JSON.stringify(
+        calls.length === 0
+          ? { ok: true, result: { status: 'left' } }
+          : { ok: true, result: { message_id: 1 } },
+      ),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 1,
+        message: {
+          message_id: 10,
+          from: { id: 12345, first_name: 'Amir' },
+          chat: { id: 12345, type: 'private' },
+          date: 1710000000,
+          text: '/start',
+        },
+      }),
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.match(calls[0].url, /getChatMember/);
+    assert.equal(calls[1].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('POST /telegram handles /start for non-member with join button', async () => {
   const worker = loadWorker();
   const { stub, calls } = createFetchStub(async () =>

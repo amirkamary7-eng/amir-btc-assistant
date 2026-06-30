@@ -2212,9 +2212,19 @@ async function handleCheckJoinInvalidate(request, env) {
 }
 
 async function handleTelegramWebhook(request, env) {
+  const requestPath = new URL(request.url).pathname || '/';
   try {
     const updatePayload = await request.json();
     const messageContext = extractTelegramMessageContext(updatePayload);
+    console.log(
+      JSON.stringify({
+        scope: 'telegram-webhook',
+        path: requestPath,
+        update_id: updatePayload?.update_id ?? null,
+        has_message: Boolean(updatePayload?.message),
+        is_start: Boolean(messageContext && isTelegramStartCommand(messageContext.text)),
+      }),
+    );
     if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
       return new Response(null, {
         status: 200,
@@ -2503,7 +2513,7 @@ export default {
       return handleCheckJoinInvalidate(request, env);
     }
 
-    if (request.method === 'POST' && url.pathname === '/telegram') {
+    if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {
       return handleTelegramWebhook(request, env);
     }
 
