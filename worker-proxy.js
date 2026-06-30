@@ -84,6 +84,54 @@ async function writeAppCache(env, key, value, expirationTtl) {
   await env.APP_CACHE.put(key, value, { expirationTtl });
 }
 
+async function readRateLimitCache(env, key) {
+  if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.get !== 'function') {
+    return null;
+  }
+
+  return env.RATE_LIMITS.get(key);
+}
+
+async function writeRateLimitCache(env, key, value, expirationTtl) {
+  if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.put !== 'function') {
+    return;
+  }
+
+  await env.RATE_LIMITS.put(key, value, { expirationTtl });
+}
+
+async function deleteRateLimitCache(env, key) {
+  if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.delete !== 'function') {
+    return;
+  }
+
+  await env.RATE_LIMITS.delete(key);
+}
+
+async function readSessionCache(env, key) {
+  if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.get !== 'function') {
+    return null;
+  }
+
+  return env.SESSION_CACHE.get(key);
+}
+
+async function writeSessionCache(env, key, value, expirationTtl) {
+  if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.put !== 'function') {
+    return;
+  }
+
+  await env.SESSION_CACHE.put(key, value, { expirationTtl });
+}
+
+async function deleteSessionCache(env, key) {
+  if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.delete !== 'function') {
+    return;
+  }
+
+  await env.SESSION_CACHE.delete(key);
+}
+
 function buildFastApiValidationError(type, msg, input, ctx) {
   const detail = {
     type,
@@ -253,6 +301,11 @@ function normalizeOptionalString(value) {
 const { Pool } = pg;
 const JOIN_CACHE_PREFIX = 'join:';
 const JOINED_STATUSES = new Set(['creator', 'administrator', 'member', 'restricted']);
+const SESSION_PREFIX = 'session:';
+const SESSION_PRESENCE_STATE_KEY = 'session:presence_state';
+const RATE_LIMIT_COOLDOWN_PREFIX = 'ai:cooldown:';
+const RATE_LIMIT_MSG_PREFIX = 'ai:msgs:';
+const RATE_LIMIT_IMG_PREFIX = 'ai:imgs:';
 const joinDbPools = new Map();
 
 function resolveDatabaseUrl(env) {
@@ -317,6 +370,99 @@ async function invalidateJoinCache(env, userId) {
   }
 
   return hadCachedValue;
+}
+
+function getTodayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function buildRateLimitKey(prefix, userId, isoDate = null) {
+  const uid = String(userId);
+  if (isoDate) {
+    return `${prefix}${uid}:${isoDate}`;
+  }
+  return `${prefix}${uid}`;
+}
+
+async function checkRateLimits(env, userId) {
+  const cooldownKey = buildRateLimitKey(RATE_LIMIT_COOLDOWN_PREFIX, userId);
+  const cooldown = await readRateLimitCache(env, cooldownKey);
+  const cooldownSeconds = getNumericEnv(env, 'AI_COOLDOWN_SECONDS', 4);
+  if (cooldown) {
+    return { allowed: false, reason: 'cooldown', retry_after: cooldownSeconds };
+  }
+
+  const isoDate = getTodayIsoDate();
+  const msgKey = buildRateLimitKey(RATE_LIMIT_MSG_PREFIX, userId, isoDate);
+  const imgKey = buildRateLimitKey(RATE_LIMIT_IMG_PREFIX, userId, isoDate);
+  const msgLimit = getNumericEnv(env, 'AI_DAILY_MESSAGE_LIMIT', 50);
+  const imgLimit = getNumericEnv(env, 'AI_DAILY_IMAGE_LIMIT', 3);
+
+  const rawMsg = await readRateLimitCache(env, msgKey);
+  const msgCount = rawMsg && /^\d+$/.test(String(rawMsg)) ? Number(rawMsg) : 0;
+  if (msgCount >= msgLimit) {
+    return { allowed: false, reason: 'daily_message_limit', used: msgCount };
+  }
+
+  const rawImg = await readRateLimitCache(env, imgKey);
+  const imgCount = rawImg && /^\d+$/.test(String(rawImg)) ? Number(rawImg) : 0;
+
+  return {
+    allowed: true,
+    messages_used: msgCount,
+    messages_limit: msgLimit,
+    images_used: imgCount,
+    images_limit: imgLimit,
+  };
+}
+
+async function recordRateLimitUsage(env, userId, hasImage) {
+  const uid = String(userId);
+  const cooldownSeconds = getNumericEnv(env, 'AI_COOLDOWN_SECONDS', 4);
+  const isoDate = getTodayIsoDate();
+  const msgKey = buildRateLimitKey(RATE_LIMIT_MSG_PREFIX, uid, isoDate);
+  const imgKey = buildRateLimitKey(RATE_LIMIT_IMG_PREFIX, uid, isoDate);
+
+  await writeRateLimitCache(env, buildRateLimitKey(RATE_LIMIT_COOLDOWN_PREFIX, uid), '1', cooldownSeconds);
+
+  const rawMsg = await readRateLimitCache(env, msgKey);
+  const msgCount = rawMsg && /^\d+$/.test(String(rawMsg)) ? Number(rawMsg) : 0;
+  await writeRateLimitCache(env, msgKey, String(msgCount + 1), 86400);
+
+  if (hasImage) {
+    const rawImg = await readRateLimitCache(env, imgKey);
+    const imgCount = rawImg && /^\d+$/.test(String(rawImg)) ? Number(rawImg) : 0;
+    await writeRateLimitCache(env, imgKey, String(imgCount + 1), 86400);
+  }
+}
+
+async function readPresenceState(env) {
+  const raw = await readSessionCache(env, SESSION_PRESENCE_STATE_KEY);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function prunePresenceState(state, nowMs) {
+  for (const [userId, expiresAt] of Object.entries(state)) {
+    if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) {
+      delete state[userId];
+    }
+  }
+}
+
+async function persistPresenceState(env, state, ttlSeconds) {
+  await writeSessionCache(env, SESSION_PRESENCE_STATE_KEY, JSON.stringify(state), ttlSeconds * 2);
 }
 
 function normalizeRequiredChannel(rawValue) {
@@ -1446,6 +1592,256 @@ async function handleAnalyses(request, env) {
   }
 }
 
+async function handleSessionsHeartbeat(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  if (!env.SESSION_CACHE) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'SESSION_CACHE binding not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  const url = new URL(request.url);
+  const providedSessionId = normalizeOptionalString(url.searchParams.get('session_id'));
+  const sessionId = providedSessionId || String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16);
+  const userId = String(authState.user.id);
+  const ttlSeconds = getNumericEnv(env, 'SESSION_TTL', 120);
+  const now = new Date();
+  const lastSeen = now.toISOString();
+  const nowMs = now.getTime();
+
+  await Promise.all([
+    writeSessionCache(env, `${SESSION_PREFIX}${userId}`, sessionId, ttlSeconds),
+    writeSessionCache(env, `${SESSION_PREFIX}${userId}:seen`, lastSeen, ttlSeconds),
+  ]);
+
+  const state = await readPresenceState(env);
+  prunePresenceState(state, nowMs);
+  state[userId] = nowMs + ttlSeconds * 1000;
+  await persistPresenceState(env, state, ttlSeconds);
+
+  return jsonResponse({
+    status: 'success',
+    session_id: sessionId,
+    last_seen: lastSeen,
+    online_count: Object.keys(state).length,
+  });
+}
+
+async function handleSessionsOnline(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  if (!env.SESSION_CACHE) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'SESSION_CACHE binding not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  const ttlSeconds = getNumericEnv(env, 'SESSION_TTL', 120);
+  const nowMs = Date.now();
+  const state = await readPresenceState(env);
+  prunePresenceState(state, nowMs);
+  await persistPresenceState(env, state, ttlSeconds);
+
+  return jsonResponse({
+    status: 'success',
+    count: Object.keys(state).length,
+  });
+}
+
+async function handleSessionsEnd(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  if (!env.SESSION_CACHE) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'SESSION_CACHE binding not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  const ttlSeconds = getNumericEnv(env, 'SESSION_TTL', 120);
+  const nowMs = Date.now();
+  const userId = String(authState.user.id);
+
+  await Promise.all([
+    deleteSessionCache(env, `${SESSION_PREFIX}${userId}`),
+    deleteSessionCache(env, `${SESSION_PREFIX}${userId}:seen`),
+  ]);
+
+  const state = await readPresenceState(env);
+  prunePresenceState(state, nowMs);
+  delete state[userId];
+  await persistPresenceState(env, state, ttlSeconds);
+
+  return jsonResponse({
+    status: 'success',
+    online_count: Object.keys(state).length,
+  });
+}
+
+async function handleAssistantLimits(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  if (!env.RATE_LIMITS) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'RATE_LIMITS binding not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  const limits = await checkRateLimits(env, authState.user.id);
+  return jsonResponse({ status: 'success', ...limits });
+}
+
+async function handleAssistantChat(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  if (!env.RATE_LIMITS) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'RATE_LIMITS binding not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  const originalBody = await request.text();
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+      { status: 422 },
+    );
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+      { status: 422 },
+    );
+  }
+
+  const message = payload.message;
+  if (typeof message !== 'string') {
+    return jsonResponse(
+      buildBodyFieldValidationError('message', 'string_type', 'Input should be a valid string', message ?? null),
+      { status: 422 },
+    );
+  }
+
+  if (message.length < 1) {
+    return jsonResponse(
+      buildBodyFieldValidationError(
+        'message',
+        'string_too_short',
+        'String should have at least 1 character',
+        message,
+        { min_length: 1 },
+      ),
+      { status: 422 },
+    );
+  }
+
+  if (message.length > 4000) {
+    return jsonResponse(
+      buildBodyFieldValidationError(
+        'message',
+        'string_too_long',
+        'String should have at most 4000 characters',
+        message,
+        { max_length: 4000 },
+      ),
+      { status: 422 },
+    );
+  }
+
+  const userId = String(authState.user.id);
+  const hasImage = Boolean(payload.image);
+
+  const limits = await checkRateLimits(env, userId);
+  if (!limits.allowed) {
+    return jsonResponse({ status: 'error', ...limits }, { status: 429 });
+  }
+
+  if (hasImage && limits.images_used >= limits.images_limit) {
+    return jsonResponse({ status: 'error', reason: 'daily_image_limit', allowed: false }, { status: 429 });
+  }
+
+  if (!resolveBackendUrl(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'BACKEND_URL not configured for assistant/chat proxy',
+      },
+      { status: 503 },
+    );
+  }
+
+  payload.user_id = userId;
+
+  const url = new URL(request.url);
+  const upstreamUrl = `${resolveBackendUrl(env)}${url.pathname}${url.search}`;
+  const headers = new Headers(request.headers);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const upstreamResponse = await fetch(upstreamUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  try {
+    const responseClone = upstreamResponse.clone();
+    const contentType = responseClone.headers.get('Content-Type') || '';
+    if (contentType.includes('application/json')) {
+      const responseBody = await responseClone.json();
+      if (responseBody && responseBody.status === 'success') {
+        await recordRateLimitUsage(env, userId, hasImage);
+      }
+    }
+  } catch {
+  }
+
+  return new Response(upstreamResponse.body, {
+    status: upstreamResponse.status,
+    headers: withCors(upstreamResponse.headers),
+  });
+}
+
 async function handleUsersBootstrap(request, env) {
   const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
@@ -1862,6 +2258,26 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/api/analyses') {
       return handleAnalyses(request, env);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
+      return handleSessionsHeartbeat(request, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/sessions/online') {
+      return handleSessionsOnline(request, env);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/sessions/end') {
+      return handleSessionsEnd(request, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/assistant/limits') {
+      return handleAssistantLimits(request, env);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/assistant/chat') {
+      return handleAssistantChat(request, env);
     }
 
     if (request.method === 'GET' && url.pathname === '/api/users/me') {

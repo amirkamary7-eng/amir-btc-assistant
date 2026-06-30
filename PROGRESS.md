@@ -40,7 +40,7 @@
   - `/api/watchlist` روی Worker ✔
 - Mandatory join migration ✔
 - Webhook و `/start` migration ✔
-- Cache migration ⏳
+- Cache migration ✔
 - Tickets migration ⏳
 - Alerts migration ⏳
 - Render removal ⏳

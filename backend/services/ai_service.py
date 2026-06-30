@@ -6,31 +6,50 @@ from typing import Any, Optional
 import httpx
 
 from backend.config import get_settings
-from backend.redis_client import cache_get, cache_set
+import time
 
 COOLDOWN_PREFIX = "ai:cooldown:"
 MSG_COUNT_PREFIX = "ai:msgs:"
 IMG_COUNT_PREFIX = "ai:imgs:"
+
+_memory_cache: dict[str, dict[str, Any]] = {}
 
 
 def _today_key(prefix: str, user_id: str) -> str:
     return f"{prefix}{user_id}:{date.today().isoformat()}"
 
 
+def _cache_get(key: str) -> Optional[str]:
+    entry = _memory_cache.get(key)
+    if not entry:
+        return None
+    if entry["expires_at"] <= time.time():
+        _memory_cache.pop(key, None)
+        return None
+    return entry["value"]
+
+
+def _cache_set(key: str, value: str, ttl_seconds: int) -> None:
+    _memory_cache[key] = {
+        "value": value,
+        "expires_at": time.time() + ttl_seconds,
+    }
+
+
 def check_rate_limits(user_id: str) -> dict[str, Any]:
     settings = get_settings()
     uid = str(user_id)
 
-    cooldown = cache_get(f"{COOLDOWN_PREFIX}{uid}")
+    cooldown = _cache_get(f"{COOLDOWN_PREFIX}{uid}")
     if cooldown:
         return {"allowed": False, "reason": "cooldown", "retry_after": settings.AI_COOLDOWN_SECONDS}
 
-    msg_raw = cache_get(_today_key(MSG_COUNT_PREFIX, uid))
+    msg_raw = _cache_get(_today_key(MSG_COUNT_PREFIX, uid))
     msg_count = int(msg_raw) if msg_raw and msg_raw.isdigit() else 0
     if msg_count >= settings.AI_DAILY_MESSAGE_LIMIT:
         return {"allowed": False, "reason": "daily_message_limit", "used": msg_count}
 
-    img_raw = cache_get(_today_key(IMG_COUNT_PREFIX, uid))
+    img_raw = _cache_get(_today_key(IMG_COUNT_PREFIX, uid))
     img_count = int(img_raw) if img_raw and img_raw.isdigit() else 0
 
     return {
@@ -46,18 +65,18 @@ def record_usage(user_id: str, has_image: bool = False) -> None:
     settings = get_settings()
     uid = str(user_id)
 
-    cache_set(f"{COOLDOWN_PREFIX}{uid}", "1", settings.AI_COOLDOWN_SECONDS)
+    _cache_set(f"{COOLDOWN_PREFIX}{uid}", "1", settings.AI_COOLDOWN_SECONDS)
 
     msg_key = _today_key(MSG_COUNT_PREFIX, uid)
-    msg_raw = cache_get(msg_key)
+    msg_raw = _cache_get(msg_key)
     msg_count = int(msg_raw) + 1 if msg_raw and msg_raw.isdigit() else 1
-    cache_set(msg_key, str(msg_count), 86400)
+    _cache_set(msg_key, str(msg_count), 86400)
 
     if has_image:
         img_key = _today_key(IMG_COUNT_PREFIX, uid)
-        img_raw = cache_get(img_key)
+        img_raw = _cache_get(img_key)
         img_count = int(img_raw) + 1 if img_raw and img_raw.isdigit() else 1
-        cache_set(img_key, str(img_count), 86400)
+        _cache_set(img_key, str(img_count), 86400)
 
 
 def _build_prompt(message: str, history: list[dict], image_b64: Optional[str]) -> str:
@@ -153,7 +172,7 @@ async def chat(
     settings = get_settings()
     has_image = bool(image_data)
     if has_image:
-        img_raw = cache_get(_today_key(IMG_COUNT_PREFIX, str(user_id)))
+        img_raw = _cache_get(_today_key(IMG_COUNT_PREFIX, str(user_id)))
         img_count = int(img_raw) if img_raw and img_raw.isdigit() else 0
         if img_count >= settings.AI_DAILY_IMAGE_LIMIT:
             return {"status": "error", "reason": "daily_image_limit", "allowed": False}
