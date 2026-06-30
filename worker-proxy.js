@@ -1938,6 +1938,66 @@ async function handleTicketDelete(request, env, ticketId) {
   return proxyToBackend(nextRequest, env);
 }
 
+async function handleAlertsCreate(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const originalBody = await request.text();
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+      { status: 422 },
+    );
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+      { status: 422 },
+    );
+  }
+
+  payload.user_id = String(authState.user.id);
+
+  return proxyToBackend(request, env, JSON.stringify(payload));
+}
+
+async function handleAlertsList(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const url = new URL(request.url);
+  if (url.searchParams.has('user_id')) {
+    url.searchParams.set('user_id', String(authState.user.id));
+    const nextRequest = new Request(url.toString(), request);
+    return proxyToBackend(nextRequest, env);
+  }
+
+  return proxyToBackend(request, env);
+}
+
+async function handleAlertDelete(request, env, alertId) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const url = new URL(request.url);
+  if (url.searchParams.has('user_id')) {
+    url.searchParams.set('user_id', String(authState.user.id));
+  }
+
+  const nextRequest = url.toString() === request.url ? request : new Request(url.toString(), request);
+  return proxyToBackend(nextRequest, env);
+}
+
 async function handleUsersBootstrap(request, env) {
   const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
@@ -2376,6 +2436,19 @@ export default {
     if (request.method === 'DELETE' && /^\/api\/tickets\/[^/]+$/u.test(url.pathname) && url.pathname !== '/api/tickets/all') {
       const ticketId = url.pathname.split('/')[3] || '';
       return handleTicketDelete(request, env, ticketId);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/alerts') {
+      return handleAlertsCreate(request, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/alerts') {
+      return handleAlertsList(request, env);
+    }
+
+    if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
+      const alertId = url.pathname.split('/')[3] || '';
+      return handleAlertDelete(request, env, alertId);
     }
 
     if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {

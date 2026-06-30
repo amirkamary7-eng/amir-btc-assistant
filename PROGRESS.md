@@ -42,5 +42,5 @@
 - Webhook و `/start` migration ✔
 - Cache migration ✔
 - Tickets migration ✔
-- Alerts migration ⏳
+- Alerts migration ✔
 - Render removal ⏳
