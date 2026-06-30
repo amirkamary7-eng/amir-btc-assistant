@@ -691,3 +691,182 @@ test('POST /telegram handles /start for joined member via live Telegram check an
     global.fetch = originalFetch;
   }
 });
+
+test('GET /api/assistant/limits reads cooldown from RATE_LIMITS KV', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv({ 'ai:cooldown:12345': '1' });
+
+  const request = new Request('https://worker.example/api/assistant/limits?user_id=spoofed', {
+    method: 'GET',
+    headers: {
+      'X-Telegram-Init-Data': initData,
+    },
+  });
+
+  const response = await worker.fetch(
+    request,
+    createEnv({
+      RATE_LIMITS: rateLimits,
+    }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    status: 'success',
+    allowed: false,
+    reason: 'cooldown',
+    retry_after: 4,
+  });
+});
+
+test('POST /api/assistant/chat rejects daily message limit without calling backend', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const today = new Date().toISOString().slice(0, 10);
+  const rateLimits = createMemoryKv({ [`ai:msgs:12345:${today}`]: '50' });
+  const originalFetch = global.fetch;
+  let backendCalled = false;
+  global.fetch = async () => {
+    backendCalled = true;
+    return new Response('unexpected');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+      }),
+    );
+
+    assert.equal(response.status, 429);
+    assert.equal(backendCalled, false);
+    assert.deepEqual(await response.json(), {
+      status: 'error',
+      allowed: false,
+      reason: 'daily_message_limit',
+      used: 50,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/assistant/chat rewrites user_id, proxies, and records usage in RATE_LIMITS KV', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success', reply: 'ok', provider: 'test' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/assistant/chat');
+    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', message: 'hi', history: [] });
+
+    const today = new Date().toISOString().slice(0, 10);
+    assert.equal(await rateLimits.get('ai:cooldown:12345'), '1');
+    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), '1');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('SESSION_CACHE heartbeat/online/end flow keeps approximate online count', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const sessionCache = createMemoryKv();
+
+  const heartbeatRequest = new Request('https://worker.example/api/sessions/heartbeat?user_id=spoofed', {
+    method: 'POST',
+    headers: {
+      'X-Telegram-Init-Data': initData,
+    },
+  });
+
+  const env = createEnv({
+    SESSION_CACHE: sessionCache,
+  });
+
+  const heartbeatResponse = await worker.fetch(heartbeatRequest, env);
+  assert.equal(heartbeatResponse.status, 200);
+  const heartbeatBody = await heartbeatResponse.json();
+  assert.equal(heartbeatBody.status, 'success');
+  assert.equal(heartbeatBody.online_count, 1);
+  assert.equal(await sessionCache.get('session:12345'), heartbeatBody.session_id);
+  assert.ok(await sessionCache.get('session:12345:seen'));
+
+  const onlineRequest = new Request('https://worker.example/api/sessions/online', {
+    method: 'GET',
+    headers: {
+      'X-Telegram-Init-Data': initData,
+    },
+  });
+
+  const onlineResponse = await worker.fetch(onlineRequest, env);
+  assert.equal(onlineResponse.status, 200);
+  assert.deepEqual(await onlineResponse.json(), {
+    status: 'success',
+    count: 1,
+  });
+
+  const endRequest = new Request('https://worker.example/api/sessions/end?user_id=spoofed', {
+    method: 'POST',
+    headers: {
+      'X-Telegram-Init-Data': initData,
+    },
+  });
+
+  const endResponse = await worker.fetch(endRequest, env);
+  assert.equal(endResponse.status, 200);
+  assert.deepEqual(await endResponse.json(), {
+    status: 'success',
+    online_count: 0,
+  });
+  assert.equal(await sessionCache.get('session:12345'), null);
+  assert.equal(await sessionCache.get('session:12345:seen'), null);
+
+  const onlineAfterEndResponse = await worker.fetch(onlineRequest, env);
+  assert.equal(onlineAfterEndResponse.status, 200);
+  assert.deepEqual(await onlineAfterEndResponse.json(), {
+    status: 'success',
+    count: 0,
+  });
+});
