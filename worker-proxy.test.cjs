@@ -1076,3 +1076,121 @@ test('DELETE /api/tickets/:id validates auth and rewrites spoofed query params b
     global.fetch = originalFetch;
   }
 });
+
+test('POST /api/alerts validates auth before proxying', async () => {
+  const worker = loadWorker();
+  let backendCalled = false;
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    backendCalled = true;
+    return new Response('unexpected');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/alerts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'spoofed', symbol: 'btc', price: 10, direction: 'above' }),
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 401);
+    assert.equal(backendCalled, false);
+    assert.deepEqual(await response.json(), { detail: 'Missing Telegram init data' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/alerts rewrites user_id and proxies to backend', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/alerts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', symbol: 'btc', price: 10, direction: 'above' }),
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/alerts');
+    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', symbol: 'btc', price: 10, direction: 'above' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/alerts rewrites spoofed query user_id before proxying', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success', alerts: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/alerts?user_id=spoofed', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/alerts?user_id=12345');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('DELETE /api/alerts/:id rewrites spoofed user_id before proxying', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/alerts/a1?user_id=spoofed', {
+      method: 'DELETE',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/alerts/a1?user_id=12345');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
