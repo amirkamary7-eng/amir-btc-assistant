@@ -949,20 +949,21 @@ if TOKEN == "REPLACE_WITH_TOKEN":
     print("⚠️ WARNING: TELEGRAM_BOT_TOKEN not set in environment. Telegram bot will not start until configured.")
 
 
-# وضعیت عضویت کاربر را از دیتابیس پروژه که روی Supabase میزبانی می‌شود بررسی می‌کند.
+# وضعیت عضویت کاربر را برای فلوی `/start` با fallback کامل resolve می‌کند.
 # ورودی: پارامتر `user_id: int | str` شناسه تلگرام کاربر را دریافت می‌کند.
-# خروجی: مقدار بولی عضویت کاربر در فیلد `channel_joined` را برمی‌گرداند.
-def _get_channel_joined_from_supabase_db(user_id: int | str) -> bool:
-    if not database_ready():
-        print("⚠️ start membership check skipped: database is not ready")
-        return False
-
+# خروجی: مقدار بولی نهایی عضویت کاربر را برمی‌گرداند.
+def _resolve_start_membership(user_id: int | str) -> bool:
+    uid = str(user_id)
     try:
-        with get_db_session() as db:
-            user = get_user(db, str(user_id))
-            return bool(user.channel_joined) if user else False
+        if database_ready():
+            with get_db_session() as db:
+                result = resolve_channel_membership(uid, _check_channel_membership, db=db)
+        else:
+            result = resolve_channel_membership(uid, _check_channel_membership, db=None)
+        print(f"🔎 Start Debug | user_id={uid!r} result={json.dumps(result, ensure_ascii=False)}")
+        return bool(result.get("joined"))
     except Exception as exc:
-        print(f"⚠️ start membership DB check error: {exc}")
+        print(f"⚠️ start membership resolve error: {exc}")
         return False
 
 # عملیات مربوط به شروع را انجام می‌دهد.
@@ -973,7 +974,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_id = update.effective_user.id
-    is_member = _get_channel_joined_from_supabase_db(user_id)
+    is_member = _resolve_start_membership(user_id)
 
     if not is_member:
         keyboard = [[

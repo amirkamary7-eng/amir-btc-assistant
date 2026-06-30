@@ -477,10 +477,17 @@ test('POST /api/check-join/invalidate clears JOIN_CACHE for authenticated user',
 test('POST /telegram handles /start for non-member with join button', async () => {
   const worker = loadWorker();
   const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+    new Response(
+      JSON.stringify(
+        calls.length === 0
+          ? { ok: true, result: { status: 'left' } }
+          : { ok: true, result: { message_id: 1 } },
+      ),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ),
   );
   const originalFetch = global.fetch;
   global.fetch = stub;
@@ -503,15 +510,65 @@ test('POST /telegram handles /start for non-member with join button', async () =
 
     const response = await worker.fetch(request, createEnv());
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
-    assert.deepEqual(JSON.parse(calls[0].body), {
+    assert.equal(calls.length, 2);
+    assert.match(calls[0].url, /getChatMember/);
+    assert.equal(calls[1].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
+    assert.deepEqual(JSON.parse(calls[1].body), {
       chat_id: 12345,
       text: '⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.',
       reply_markup: {
         inline_keyboard: [[{ text: 'عضویت در کانال', url: 'https://t.me/amir_btc_2024' }]],
       },
       disable_web_page_preview: true,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/check-join tolerates DB read failure and still confirms joined via Telegram', async () => {
+  const pgMock = createPgMock(async (sql) => {
+    if (/SELECT telegram_id, channel_joined FROM users/i.test(sql)) {
+      throw new Error('db read failed');
+    }
+    return { rows: [] };
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const joinCache = createMemoryKv();
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/check-join?user_id=spoofed&refresh=true', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://example.test/db',
+        JOIN_CACHE: joinCache,
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /getChatMember/);
+    assert.equal(await joinCache.get('join:12345'), '1');
+    assert.equal(pgMock.calls.length, 1);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      joined: true,
     });
   } finally {
     global.fetch = originalFetch;
@@ -565,6 +622,65 @@ test('POST /telegram handles /start for joined member with web_app button', asyn
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
     assert.deepEqual(JSON.parse(calls[0].body), {
+      chat_id: 12345,
+      text: 'خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
+      reply_markup: {
+        inline_keyboard: [[{ text: '🚀 باز کردن مینی‌اپ', web_app: { url: 'https://miniapp.example' } }]],
+      },
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /telegram handles /start for joined member via live Telegram check and persists DB', async () => {
+  const pgMock = createPgMock(async () => ({ rows: [] }));
+  const worker = loadWorker({ pg: pgMock.module });
+  const { stub, calls } = createFetchStub(async (url) => {
+    if (String(url).includes('/getChatMember?')) {
+      return new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 2 } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/telegram', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 3,
+        message: {
+          message_id: 12,
+          from: { id: 12345, first_name: 'Amir' },
+          chat: { id: 12345, type: 'private' },
+          date: 1710000002,
+          text: '/start',
+        },
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://example.test/db',
+        WEBAPP_URL: 'https://miniapp.example',
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.match(calls[0].url, /getChatMember/);
+    assert.equal(calls[1].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
+    assert.equal(pgMock.calls.length, 2);
+    assert.match(pgMock.calls[1].sql, /INSERT INTO users/i);
+    assert.deepEqual(JSON.parse(calls[1].body), {
       chat_id: 12345,
       text: 'خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
       reply_markup: {

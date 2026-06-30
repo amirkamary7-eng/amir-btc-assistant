@@ -452,18 +452,23 @@ async function getDbUserJoinState(env, userId) {
     return null;
   }
 
-  const result = await pool.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [
-    String(userId),
-  ]);
-  const row = result.rows[0];
-  if (!row) {
+  try {
+    const result = await pool.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [
+      String(userId),
+    ]);
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      telegram_id: String(row.telegram_id),
+      channel_joined: Boolean(row.channel_joined),
+    };
+  } catch (error) {
+    console.warn('JOIN DB read failed:', error);
     return null;
   }
-
-  return {
-    telegram_id: String(row.telegram_id),
-    channel_joined: Boolean(row.channel_joined),
-  };
 }
 
 async function persistDbUserJoinState(env, userId, joined) {
@@ -472,25 +477,29 @@ async function persistDbUserJoinState(env, userId, joined) {
     return;
   }
 
-  await pool.query(
-    `
-      INSERT INTO users (
-        telegram_id,
-        lang,
-        channel_joined,
-        channel_verified_at,
-        created_at,
-        updated_at
-      )
-      VALUES ($1, 'fa', $2, $3, NOW(), NOW())
-      ON CONFLICT (telegram_id) DO UPDATE
-      SET
-        channel_joined = EXCLUDED.channel_joined,
-        channel_verified_at = EXCLUDED.channel_verified_at,
-        updated_at = NOW()
-    `,
-    [String(userId), Boolean(joined), joined ? new Date().toISOString() : null],
-  );
+  try {
+    await pool.query(
+      `
+        INSERT INTO users (
+          telegram_id,
+          lang,
+          channel_joined,
+          channel_verified_at,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, 'fa', $2, $3, NOW(), NOW())
+        ON CONFLICT (telegram_id) DO UPDATE
+        SET
+          channel_joined = EXCLUDED.channel_joined,
+          channel_verified_at = EXCLUDED.channel_verified_at,
+          updated_at = NOW()
+      `,
+      [String(userId), Boolean(joined), joined ? new Date().toISOString() : null],
+    );
+  } catch (error) {
+    console.warn('JOIN DB write failed:', error);
+  }
 }
 
 async function getChatMemberDebugPayload(userId, env) {
@@ -1595,6 +1604,14 @@ async function handleCheckJoin(request, env) {
   const result = await resolveChannelMembership(env, resolvedUserId, {
     forceRefresh,
   });
+  console.log(
+    JSON.stringify({
+      scope: 'check-join',
+      user_id: resolvedUserId,
+      force_refresh: forceRefresh,
+      result,
+    }),
+  );
   if (result.status === 'DB_ERROR') {
     return jsonResponse(result);
   }
@@ -1628,6 +1645,13 @@ async function handleCheckJoinInvalidate(request, env) {
 
   const resolvedUserId = String(authState.user.id);
   const invalidated = await invalidateJoinCache(env, resolvedUserId);
+  console.log(
+    JSON.stringify({
+      scope: 'check-join-invalidate',
+      user_id: resolvedUserId,
+      invalidated,
+    }),
+  );
   return jsonResponse({
     status: 'success',
     invalidated,
@@ -1653,8 +1677,15 @@ async function handleTelegramWebhook(request, env) {
       });
     }
 
-    const dbUser = isDatabaseConfigured(env) ? await getDbUserJoinState(env, messageContext.userId) : null;
-    const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(dbUser?.channel_joined));
+    const membership = await resolveChannelMembership(env, messageContext.userId);
+    console.log(
+      JSON.stringify({
+        scope: 'telegram-start',
+        user_id: messageContext.userId,
+        result: membership,
+      }),
+    );
+    const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(membership?.joined));
 
     await sendTelegramMessage(env, replyPayload);
   } catch (error) {
