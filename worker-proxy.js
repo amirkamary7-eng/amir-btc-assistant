@@ -7,7 +7,8 @@ import pg from 'pg';
  * این فایل اولین shell کم‌ریسک مهاجرت را طبق `docs/CLOUDFLARE_PLAN.md` پیاده‌سازی می‌کند.
  * در این مرحله:
  * - `GET /` و `GET /api/health` مستقیماً از Worker پاسخ می‌گیرند.
- * - بقیه‌ی مسیرهای `/api/*` و `/telegram` موقتاً به بک‌اند فعلی proxy می‌شوند.
+ * - `POST /telegram` و منطق `/start` روی Worker اجرا می‌شود.
+ * - بقیه‌ی مسیرهای `/api/*` موقتاً به بک‌اند فعلی proxy می‌شوند.
  */
 
 // ============================================================================
@@ -262,6 +263,10 @@ function resolveRequiredChannel(env) {
   return String(env.REQUIRED_CHANNEL || 'amir_btc_2024').trim();
 }
 
+function resolveWebAppUrl(env) {
+  return String(env.WEBAPP_URL || 'https://amir-btc-assistant.vercel.app').trim();
+}
+
 function getJoinCacheKey(userId) {
   return `${JOIN_CACHE_PREFIX}${String(userId)}`;
 }
@@ -333,6 +338,85 @@ function normalizeRequiredChannel(rawValue) {
 function getTelegramChatId(env) {
   const normalizedChannel = normalizeRequiredChannel(resolveRequiredChannel(env));
   return normalizedChannel ? `@${normalizedChannel}` : `@${resolveRequiredChannel(env)}`;
+}
+
+function buildTelegramApiUrl(env, methodName) {
+  return `https://api.telegram.org/bot${String(env.TELEGRAM_BOT_TOKEN || '')}/${methodName}`;
+}
+
+function isTelegramStartCommand(text) {
+  return /^\/start(?:@\S+)?(?:\s|$)/u.test(String(text || '').trim());
+}
+
+function extractTelegramMessageContext(updatePayload) {
+  const message = updatePayload?.message;
+  const userId = message?.from?.id;
+  const chatId = message?.chat?.id ?? userId;
+  const text = message?.text;
+
+  if (!message || userId === undefined || userId === null || chatId === undefined || chatId === null) {
+    return null;
+  }
+
+  return {
+    userId: String(userId),
+    chatId,
+    text: String(text || ''),
+  };
+}
+
+function buildStartReplyPayload(env, chatId, isMember) {
+  if (!isMember) {
+    return {
+      chat_id: chatId,
+      text: '⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'عضویت در کانال',
+              url: `https://t.me/${normalizeRequiredChannel(resolveRequiredChannel(env))}`,
+            },
+          ],
+        ],
+      },
+      disable_web_page_preview: true,
+    };
+  }
+
+  return {
+    chat_id: chatId,
+    text: 'خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: '🚀 باز کردن مینی‌اپ',
+            web_app: {
+              url: resolveWebAppUrl(env),
+            },
+          },
+        ],
+      ],
+    },
+  };
+}
+
+async function sendTelegramMessage(env, payload) {
+  const response = await fetch(buildTelegramApiUrl(env, 'sendMessage'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    throw new Error(`Telegram sendMessage failed: HTTP ${response.status} ${responseText}`);
+  }
+
+  return response;
 }
 
 function parseBooleanQueryParam(value) {
@@ -1550,6 +1634,38 @@ async function handleCheckJoinInvalidate(request, env) {
     user_id: resolvedUserId,
   });
 }
+
+async function handleTelegramWebhook(request, env) {
+  try {
+    const updatePayload = await request.json();
+    const messageContext = extractTelegramMessageContext(updatePayload);
+    if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
+      return new Response(null, {
+        status: 200,
+        headers: withCors(),
+      });
+    }
+
+    if (!isBotConfigured(env)) {
+      return new Response(null, {
+        status: 200,
+        headers: withCors(),
+      });
+    }
+
+    const dbUser = isDatabaseConfigured(env) ? await getDbUserJoinState(env, messageContext.userId) : null;
+    const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(dbUser?.channel_joined));
+
+    await sendTelegramMessage(env, replyPayload);
+  } catch (error) {
+    console.warn('Telegram webhook processing error:', error);
+  }
+
+  return new Response(null, {
+    status: 200,
+    headers: withCors(),
+  });
+}
 //#endregion
 
 // ============================================================================
@@ -1747,6 +1863,10 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/api/check-join/invalidate') {
       return handleCheckJoinInvalidate(request, env);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/telegram') {
+      return handleTelegramWebhook(request, env);
     }
 
     if (url.pathname === '/telegram' || url.pathname.startsWith('/api/')) {
