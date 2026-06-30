@@ -870,3 +870,209 @@ test('SESSION_CACHE heartbeat/online/end flow keeps approximate online count', a
     count: 0,
   });
 });
+
+test('POST /api/tickets validates auth before proxying', async () => {
+  const worker = loadWorker();
+  let backendCalled = false;
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    backendCalled = true;
+    return new Response('unexpected');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'spoofed', title: 't', body: 'b' }),
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 401);
+    assert.equal(backendCalled, false);
+    assert.deepEqual(await response.json(), { detail: 'Missing Telegram init data' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/tickets rewrites user_id and proxies to backend', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/tickets', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', user_name: 'x', title: 't', body: 'b' }),
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/tickets');
+    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', user_name: 'x', title: 't', body: 'b' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/tickets rewrites spoofed query user_id before proxying', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success', tickets: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/tickets?user_id=spoofed', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/tickets?user_id=12345');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/tickets/all rejects non-admin user before proxying', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  let backendCalled = false;
+  global.fetch = async () => {
+    backendCalled = true;
+    return new Response('unexpected');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/tickets/all?admin_id=spoofed', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 403);
+    assert.equal(backendCalled, false);
+    assert.deepEqual(await response.json(), { detail: 'Admin access required' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/tickets/all allows admin and rewrites admin_id before proxying', async () => {
+  const worker = loadWorker();
+  const adminUser = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', adminUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success', tickets: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/tickets/all?admin_id=spoofed', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/tickets/all?admin_id=831704732');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/tickets/:id/reply rejects non-admin user before proxying', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  let backendCalled = false;
+  global.fetch = async () => {
+    backendCalled = true;
+    return new Response('unexpected');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/tickets/t1/reply', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ message: 'hello' }),
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 403);
+    assert.equal(backendCalled, false);
+    assert.deepEqual(await response.json(), { detail: 'Admin access required' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('DELETE /api/tickets/:id validates auth and rewrites spoofed query params before proxying', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ status: 'success' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/tickets/t1?user_id=spoofed&admin_id=spoofed', {
+      method: 'DELETE',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://backend.example/api/tickets/t1?user_id=12345&admin_id=12345');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

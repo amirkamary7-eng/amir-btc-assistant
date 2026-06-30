@@ -41,6 +41,6 @@
 - Mandatory join migration ✔
 - Webhook و `/start` migration ✔
 - Cache migration ✔
-- Tickets migration ⏳
+- Tickets migration ✔
 - Alerts migration ⏳
 - Render removal ⏳
