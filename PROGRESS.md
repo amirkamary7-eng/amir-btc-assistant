@@ -43,4 +43,4 @@
 - Cache migration ✔
 - Tickets migration ✔
 - Alerts migration ✔
-- Render removal ⏳
+- Render removal ✔

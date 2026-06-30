@@ -308,7 +308,7 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
 WEBHOOK_URL = os.environ.get(
     "TELEGRAM_WEBHOOK_URL",
-    "https://amir-btc-assistant.onrender.com/telegram",
+    "",
 )
 REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")
 ALERTS_POLLING_MODE = os.environ.get("ALERTS_POLLING_MODE", "loop").strip().lower()

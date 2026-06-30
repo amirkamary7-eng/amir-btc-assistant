@@ -1194,3 +1194,17 @@ test('DELETE /api/alerts/:id rewrites spoofed user_id before proxying', async ()
     global.fetch = originalFetch;
   }
 });
+
+test('Render removal: repo no longer hardcodes onrender.com in runtime config files', async () => {
+  const files = [
+    path.join(__dirname, 'index.html'),
+    path.join(__dirname, 'env.example'),
+    path.join(__dirname, 'main.py'),
+    path.join(__dirname, 'webapp', 'pages-dist', 'index.html'),
+  ];
+
+  for (const filePath of files) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    assert.equal(content.includes('onrender.com'), false, `Found onrender.com in ${filePath}`);
+  }
+});
