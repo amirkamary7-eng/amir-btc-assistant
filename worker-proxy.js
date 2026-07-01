@@ -8,7 +8,7 @@ import pg from 'pg';
  * در این مرحله:
  * - `GET /` و `GET /api/health` مستقیماً از Worker پاسخ می‌گیرند.
  * - `POST /telegram` و منطق `/start` روی Worker اجرا می‌شود.
- * - بقیه‌ی مسیرهای `/api/*` موقتاً به بک‌اند فعلی proxy می‌شوند.
+ * - مسیرهای کلیدی `/api/*` مستقیماً روی Worker اجرا می‌شوند.
  */
 
 // ============================================================================
@@ -38,10 +38,6 @@ function jsonResponse(payload, init = {}) {
   });
 }
 
-function resolveBackendUrl(env) {
-  return String(env.BACKEND_URL || '').trim().replace(/\/$/, '');
-}
-
 function getNumericEnv(env, key, fallbackValue) {
   const rawValue = Number(env[key]);
   return Number.isFinite(rawValue) ? rawValue : fallbackValue;
@@ -61,11 +57,6 @@ function isCacheLayerConfigured(env) {
 
 function isAlertsCronEnabled(env) {
   return String(env.ALERTS_CRON_ENABLED || 'false').trim().toLowerCase() === 'true';
-}
-
-function resolveAlertsRunnerUrl(env) {
-  const backendUrl = resolveBackendUrl(env);
-  return backendUrl ? `${backendUrl}/internal/alerts/run` : '';
 }
 
 async function readAppCache(env, key) {
@@ -1182,53 +1173,6 @@ async function readCachedAnalysesState(env) {
   return { version, analyses };
 }
 
-async function fetchAnalysesFromBackend(request, env) {
-  const backendUrl = resolveBackendUrl(env);
-  if (!backendUrl) {
-    throw new Error('BACKEND_URL not configured');
-  }
-
-  const url = new URL(request.url);
-  const headers = new Headers(request.headers);
-  headers.delete('host');
-  headers.set('X-Cloudflare-Proxy', 'amir-btc-assistant-analyses');
-
-  const upstreamResponse = await fetch(`${backendUrl}${url.pathname}${url.search}`, {
-    method: 'GET',
-    headers,
-    redirect: 'manual',
-  });
-
-  const responseText = await upstreamResponse.text();
-  let responseBody;
-  try {
-    responseBody = JSON.parse(responseText);
-  } catch {
-    responseBody = null;
-  }
-
-  if (!upstreamResponse.ok) {
-    throw new Error(
-      `Analyses upstream failed with HTTP ${upstreamResponse.status}: ${responseBody ? JSON.stringify(responseBody) : responseText}`,
-    );
-  }
-
-  if (
-    responseBody &&
-    responseBody.status === 'success' &&
-    Array.isArray(responseBody.analyses) &&
-    Number.isFinite(Number(responseBody.version))
-  ) {
-    const ttl = Math.max(getNumericEnv(env, 'ANALYSIS_CACHE_TTL', 30), 60);
-    await Promise.all([
-      writeAppCache(env, ANALYSES_VERSION_KEY, String(Number(responseBody.version)), ttl),
-      writeAppCache(env, ANALYSES_LIST_KEY, JSON.stringify(responseBody.analyses), ttl),
-    ]);
-  }
-
-  return responseBody;
-}
-
 function parseCalendarDate(dateString) {
   const parts = String(dateString || '').split('-');
   if (parts.length !== 3) {
@@ -1561,35 +1505,29 @@ async function handleAnalyses(request, env) {
     requestedVersion = numericVersion;
   }
 
-  try {
-    const cachedState = await readCachedAnalysesState(env);
-    if (requestedVersion !== null && cachedState.version !== null && requestedVersion === cachedState.version) {
-      return jsonResponse({
-        status: 'success',
-        analyses: null,
-        version: cachedState.version,
-        unchanged: true,
-      });
-    }
-
-    if (requestedVersion === null && cachedState.version !== null && cachedState.analyses !== null) {
-      return jsonResponse({
-        status: 'success',
-        analyses: cachedState.analyses,
-        version: cachedState.version,
-      });
-    }
-
-    return jsonResponse(await fetchAnalysesFromBackend(request, env));
-  } catch (error) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: error instanceof Error ? error.message : String(error),
-      },
-      { status: 502 },
-    );
+  const cachedState = await readCachedAnalysesState(env);
+  if (requestedVersion !== null && cachedState.version !== null && requestedVersion === cachedState.version) {
+    return jsonResponse({
+      status: 'success',
+      analyses: null,
+      version: cachedState.version,
+      unchanged: true,
+    });
   }
+
+  if (requestedVersion === null && cachedState.version !== null && cachedState.analyses !== null) {
+    return jsonResponse({
+      status: 'success',
+      analyses: cachedState.analyses,
+      version: cachedState.version,
+    });
+  }
+
+  return jsonResponse({
+    status: 'success',
+    analyses: cachedState.analyses ?? [],
+    version: cachedState.version ?? 0,
+  });
 }
 
 async function handleSessionsHeartbeat(request, env) {
@@ -1798,48 +1736,47 @@ async function handleAssistantChat(request, env) {
   if (hasImage && limits.images_used >= limits.images_limit) {
     return jsonResponse({ status: 'error', reason: 'daily_image_limit', allowed: false }, { status: 429 });
   }
+  return jsonResponse(
+    {
+      status: 'error',
+      message: 'assistant service is disabled on this worker',
+    },
+    { status: 501 },
+  );
+}
 
-  if (!resolveBackendUrl(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'BACKEND_URL not configured for assistant/chat proxy',
-      },
-      { status: 503 },
-    );
+function getUserStateKey(userId) {
+  return `user:${userId}`;
+}
+
+function getWatchlistKey(userId) {
+  return `watchlist:${userId}`;
+}
+
+function getAlertsKey(userId) {
+  return `alerts:${userId}`;
+}
+
+const TICKETS_ALL_KEY = 'tickets:all';
+
+function getUserDataTtl(env) {
+  return Math.max(getNumericEnv(env, 'USER_DATA_TTL', 60 * 60 * 24 * 30), 60 * 10);
+}
+
+async function readSessionJson(env, key, fallbackValue) {
+  const raw = await readSessionCache(env, key);
+  if (!raw) {
+    return fallbackValue;
   }
-
-  payload.user_id = userId;
-
-  const url = new URL(request.url);
-  const upstreamUrl = `${resolveBackendUrl(env)}${url.pathname}${url.search}`;
-  const headers = new Headers(request.headers);
-  if (!headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  const upstreamResponse = await fetch(upstreamUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
-
   try {
-    const responseClone = upstreamResponse.clone();
-    const contentType = responseClone.headers.get('Content-Type') || '';
-    if (contentType.includes('application/json')) {
-      const responseBody = await responseClone.json();
-      if (responseBody && responseBody.status === 'success') {
-        await recordRateLimitUsage(env, userId, hasImage);
-      }
-    }
+    return JSON.parse(raw);
   } catch {
+    return fallbackValue;
   }
+}
 
-  return new Response(upstreamResponse.body, {
-    status: upstreamResponse.status,
-    headers: withCors(upstreamResponse.headers),
-  });
+async function writeSessionJson(env, key, value, ttlSeconds) {
+  await writeSessionCache(env, key, JSON.stringify(value), ttlSeconds);
 }
 
 async function handleTicketsCreate(request, env) {
@@ -1867,8 +1804,23 @@ async function handleTicketsCreate(request, env) {
   }
 
   payload.user_id = String(authState.user.id);
-
-  return proxyToBackend(request, env, JSON.stringify(payload));
+  const ttlSeconds = getUserDataTtl(env);
+  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
+  const ticketId = String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16);
+  const now = new Date().toISOString();
+  const ticket = {
+    id: ticketId,
+    user_id: payload.user_id,
+    user_name: normalizeOptionalString(payload.user_name) || normalizeOptionalString(payload.username) || normalizeOptionalString(authState.user.first_name) || 'User',
+    title: normalizeOptionalString(payload.title) || '',
+    body: normalizeOptionalString(payload.body) || '',
+    status: 'open',
+    replies: [],
+    created_at: now,
+  };
+  allTickets.push(ticket);
+  await writeSessionJson(env, TICKETS_ALL_KEY, allTickets, ttlSeconds);
+  return jsonResponse({ status: 'success', ticket });
 }
 
 async function handleTicketsList(request, env) {
@@ -1876,15 +1828,10 @@ async function handleTicketsList(request, env) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
-  }
-
-  return proxyToBackend(request, env);
+  const userId = String(authState.user.id);
+  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
+  const tickets = allTickets.filter((ticket) => String(ticket.user_id) === userId);
+  return jsonResponse({ status: 'success', tickets });
 }
 
 async function handleTicketsAll(request, env) {
@@ -1896,15 +1843,8 @@ async function handleTicketsAll(request, env) {
   if (!isAdminTelegramId(env, authState.user.id)) {
     return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('admin_id')) {
-    url.searchParams.set('admin_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
-  }
-
-  return proxyToBackend(request, env);
+  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
+  return jsonResponse({ status: 'success', tickets: allTickets });
 }
 
 async function handleTicketReply(request, env, ticketId) {
@@ -1916,8 +1856,45 @@ async function handleTicketReply(request, env, ticketId) {
   if (!isAdminTelegramId(env, authState.user.id)) {
     return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
   }
+  const originalBody = await request.text();
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+      { status: 422 },
+    );
+  }
 
-  return proxyToBackend(request, env);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+      { status: 422 },
+    );
+  }
+
+  const message = normalizeOptionalString(payload.message) || '';
+  if (!message) {
+    return jsonResponse(
+      buildBodyFieldValidationError('message', 'string_too_short', 'String should have at least 1 character', message, { min_length: 1 }),
+      { status: 422 },
+    );
+  }
+
+  const ttlSeconds = getUserDataTtl(env);
+  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
+  const idx = allTickets.findIndex((ticket) => String(ticket.id) === String(ticketId));
+  if (idx === -1) {
+    return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
+  }
+
+  const ticket = allTickets[idx];
+  const replies = Array.isArray(ticket.replies) ? ticket.replies.slice() : [];
+  replies.push({ from: 'admin', message, at: new Date().toISOString() });
+  allTickets[idx] = { ...ticket, replies, status: 'answered' };
+  await writeSessionJson(env, TICKETS_ALL_KEY, allTickets, ttlSeconds);
+  return jsonResponse({ status: 'success' });
 }
 
 async function handleTicketDelete(request, env, ticketId) {
@@ -1925,17 +1902,23 @@ async function handleTicketDelete(request, env, ticketId) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
+  const userId = String(authState.user.id);
+  const isAdmin = isAdminTelegramId(env, authState.user.id);
+  const ttlSeconds = getUserDataTtl(env);
+  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
+  const idx = allTickets.findIndex((ticket) => String(ticket.id) === String(ticketId));
+  if (idx === -1) {
+    return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
   }
-  if (url.searchParams.has('admin_id')) {
-    url.searchParams.set('admin_id', String(authState.user.id));
+
+  const ticket = allTickets[idx];
+  if (!isAdmin && String(ticket.user_id) !== userId) {
+    return jsonResponse({ detail: 'Forbidden' }, { status: 403 });
   }
 
-  const nextRequest = url.toString() === request.url ? request : new Request(url.toString(), request);
-  return proxyToBackend(nextRequest, env);
+  allTickets.splice(idx, 1);
+  await writeSessionJson(env, TICKETS_ALL_KEY, allTickets, ttlSeconds);
+  return jsonResponse({ status: 'success' });
 }
 
 async function handleAlertsCreate(request, env) {
@@ -1963,8 +1946,22 @@ async function handleAlertsCreate(request, env) {
   }
 
   payload.user_id = String(authState.user.id);
-
-  return proxyToBackend(request, env, JSON.stringify(payload));
+  const ttlSeconds = getUserDataTtl(env);
+  const userId = payload.user_id;
+  const alerts = await readSessionJson(env, getAlertsKey(userId), []);
+  const alertId = String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16);
+  const now = new Date().toISOString();
+  const alert = {
+    id: alertId,
+    user_id: userId,
+    symbol: normalizeOptionalString(payload.symbol) || '',
+    price: Number(payload.price),
+    direction: normalizeOptionalString(payload.direction) || 'above',
+    created_at: now,
+  };
+  alerts.push(alert);
+  await writeSessionJson(env, getAlertsKey(userId), alerts, ttlSeconds);
+  return jsonResponse({ status: 'success', alert });
 }
 
 async function handleAlertsList(request, env) {
@@ -1972,15 +1969,9 @@ async function handleAlertsList(request, env) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
-  }
-
-  return proxyToBackend(request, env);
+  const userId = String(authState.user.id);
+  const alerts = await readSessionJson(env, getAlertsKey(userId), []);
+  return jsonResponse({ status: 'success', alerts });
 }
 
 async function handleAlertDelete(request, env, alertId) {
@@ -1988,14 +1979,12 @@ async function handleAlertDelete(request, env, alertId) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-  }
-
-  const nextRequest = url.toString() === request.url ? request : new Request(url.toString(), request);
-  return proxyToBackend(nextRequest, env);
+  const userId = String(authState.user.id);
+  const ttlSeconds = getUserDataTtl(env);
+  const alerts = await readSessionJson(env, getAlertsKey(userId), []);
+  const nextAlerts = alerts.filter((alert) => String(alert.id) !== String(alertId));
+  await writeSessionJson(env, getAlertsKey(userId), nextAlerts, ttlSeconds);
+  return jsonResponse({ status: 'success', deleted: true });
 }
 
 async function handleUsersBootstrap(request, env) {
@@ -2021,22 +2010,31 @@ async function handleUsersBootstrap(request, env) {
       { status: 422 },
     );
   }
-
-  if (!resolveBackendUrl(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'BACKEND_URL not configured for bootstrap proxy',
-      },
-      { status: 503 },
-    );
-  }
-
-  // شناسه کاربر را با هویت تاییدشده تلگرام همگام می‌کنیم تا proxy
-  // به مقدار stale یا دستکاری‌شده از سمت کلاینت وابسته نباشد.
-  payload.user_id = String(authState.user.id);
-
-  return proxyToBackend(request, env, JSON.stringify(payload));
+  const userId = String(authState.user.id);
+  payload.user_id = userId;
+  const ttlSeconds = getUserDataTtl(env);
+  const existingUserState = await readSessionJson(env, getUserStateKey(userId), {});
+  const membership = await resolveChannelMembership(env, userId);
+  const lang = normalizeOptionalString(payload.lang) || normalizeOptionalString(existingUserState.lang) || 'fa';
+  const userState = {
+    ...existingUserState,
+    user_id: userId,
+    telegram_id: userId,
+    username: normalizeOptionalString(payload.username) || normalizeOptionalString(existingUserState.username) || null,
+    first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(existingUserState.first_name) || null,
+    last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(existingUserState.last_name) || null,
+    lang,
+    referrer_id: normalizeOptionalString(payload.referrer_id) || normalizeOptionalString(existingUserState.referrer_id) || null,
+    channel_joined: Boolean(membership?.joined),
+    updated_at: new Date().toISOString(),
+  };
+  const watchlist = await readSessionJson(env, getWatchlistKey(userId), []);
+  await writeSessionJson(env, getUserStateKey(userId), userState, ttlSeconds);
+  return jsonResponse({
+    status: 'success',
+    user: { lang: userState.lang, channel_joined: userState.channel_joined },
+    watchlist: Array.isArray(watchlist) ? watchlist : [],
+  });
 }
 
 async function handleUsersMe(request, env) {
@@ -2044,15 +2042,21 @@ async function handleUsersMe(request, env) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
-  }
-
-  return proxyToBackend(request, env);
+  const userId = String(authState.user.id);
+  const state = await readSessionJson(env, getUserStateKey(userId), {});
+  const membership = await resolveChannelMembership(env, userId);
+  return jsonResponse({
+    status: 'success',
+    user: {
+      id: userId,
+      telegram_id: userId,
+      username: normalizeOptionalString(state.username) || null,
+      first_name: normalizeOptionalString(state.first_name) || null,
+      last_name: normalizeOptionalString(state.last_name) || null,
+      lang: normalizeOptionalString(state.lang) || 'fa',
+      channel_joined: Boolean(membership?.joined),
+    },
+  });
 }
 
 async function handleUsersMeSettings(request, env) {
@@ -2079,19 +2083,20 @@ async function handleUsersMeSettings(request, env) {
     );
   }
 
-  payload.user_id = String(authState.user.id);
-
-  if (!resolveBackendUrl(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'BACKEND_URL not configured for me/settings proxy',
-      },
-      { status: 503 },
-    );
-  }
-
-  return proxyToBackend(request, env, JSON.stringify(payload));
+  const userId = String(authState.user.id);
+  payload.user_id = userId;
+  const ttlSeconds = getUserDataTtl(env);
+  const existingUserState = await readSessionJson(env, getUserStateKey(userId), {});
+  const lang = normalizeOptionalString(payload.lang) || normalizeOptionalString(existingUserState.lang) || 'fa';
+  const nextState = {
+    ...existingUserState,
+    user_id: userId,
+    telegram_id: userId,
+    lang,
+    updated_at: new Date().toISOString(),
+  };
+  await writeSessionJson(env, getUserStateKey(userId), nextState, ttlSeconds);
+  return jsonResponse({ status: 'success', user: { lang } });
 }
 
 async function handleWatchlistGet(request, env) {
@@ -2099,15 +2104,10 @@ async function handleWatchlistGet(request, env) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
-  }
-
-  return proxyToBackend(request, env);
+  const userId = String(authState.user.id);
+  const symbols = await readSessionJson(env, getWatchlistKey(userId), []);
+  const normalized = Array.isArray(symbols) ? symbols : [];
+  return jsonResponse({ status: 'success', symbols: normalized, watchlist: normalized });
 }
 
 async function handleWatchlistPut(request, env) {
@@ -2135,8 +2135,66 @@ async function handleWatchlistPut(request, env) {
   }
 
   payload.user_id = String(authState.user.id);
+  const symbols = Array.isArray(payload.symbols) ? payload.symbols.map((value) => String(value).toUpperCase()).filter(Boolean).slice(0, 50) : [];
+  const ttlSeconds = getUserDataTtl(env);
+  await writeSessionJson(env, getWatchlistKey(payload.user_id), symbols, ttlSeconds);
+  return jsonResponse({ status: 'success', symbols });
+}
 
-  return proxyToBackend(request, env, JSON.stringify(payload));
+async function handleReferralsStats(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  return jsonResponse({ total: 0, active: 0, tokens: 0 });
+}
+
+async function handleNotify(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const originalBody = await request.text();
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+      { status: 422 },
+    );
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+      { status: 422 },
+    );
+  }
+
+  const message = normalizeOptionalString(payload.message) || '';
+  if (!message) {
+    return jsonResponse(
+      buildBodyFieldValidationError('message', 'string_too_short', 'String should have at least 1 character', message, { min_length: 1 }),
+      { status: 422 },
+    );
+  }
+
+  if (!isBotConfigured(env)) {
+    return jsonResponse({ sent: false, reason: 'bot_not_configured' }, { status: 200 });
+  }
+
+  try {
+    await sendTelegramMessage(env, {
+      chat_id: Number(authState.user.id),
+      text: message,
+      disable_web_page_preview: true,
+    });
+    return jsonResponse({ sent: true });
+  } catch {
+    return jsonResponse({ sent: false }, { status: 200 });
+  }
 }
 
 async function handleCheckJoin(request, env) {
@@ -2270,7 +2328,6 @@ async function runScheduledAlertsBaseline(controller, env) {
     task: 'scheduled-alerts-execution',
     cron: controller.cron || 'manual',
     alerts_cron_enabled: isAlertsCronEnabled(env),
-    backend_configured: Boolean(resolveBackendUrl(env)),
     secret_configured: Boolean(env.ALERTS_CRON_SHARED_SECRET),
   };
 
@@ -2284,107 +2341,13 @@ async function runScheduledAlertsBaseline(controller, env) {
     );
     return;
   }
-
-  const runnerUrl = resolveAlertsRunnerUrl(env);
-  if (!runnerUrl) {
-    throw new Error('BACKEND_URL is required for scheduled alerts execution');
-  }
-
-  if (!env.ALERTS_CRON_SHARED_SECRET) {
-    throw new Error('ALERTS_CRON_SHARED_SECRET is required for scheduled alerts execution');
-  }
-
-  const upstreamResponse = await fetch(runnerUrl, {
-    method: 'POST',
-    headers: {
-      'X-Alerts-Cron-Secret': String(env.ALERTS_CRON_SHARED_SECRET),
-      'X-Cloudflare-Scheduled': String(controller.cron || 'manual'),
-    },
-  });
-
-  const responseText = await upstreamResponse.text();
-  let responseBody;
-  try {
-    responseBody = JSON.parse(responseText);
-  } catch {
-    responseBody = responseText;
-  }
-
-  if (!upstreamResponse.ok) {
-    throw new Error(
-      `Scheduled alerts runner failed with HTTP ${upstreamResponse.status}: ${typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody)}`,
-    );
-  }
-
   console.log(
     JSON.stringify({
       ...payload,
-      executed: true,
-      upstream_status: upstreamResponse.status,
-      upstream_body: responseBody,
+      skipped: true,
+      reason: 'scheduled alerts runner is not configured on this worker',
     }),
   );
-}
-//#endregion
-
-// ============================================================================
-//#region پروکسی موقت مسیرهای مهاجرت‌نشده
-// ============================================================================
-async function proxyToBackend(request, env, bodyOverride) {
-  const backendUrl = resolveBackendUrl(env);
-  if (!backendUrl) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'BACKEND_URL not configured',
-      },
-      { status: 503 },
-    );
-  }
-
-  const requestUrl = new URL(request.url);
-  const targetUrl = `${backendUrl}${requestUrl.pathname}${requestUrl.search}`;
-  const headers = new Headers(request.headers);
-
-  headers.delete('host');
-  // وقتی body را در Worker بازنویسی می‌کنیم، content-length قبلی دیگر معتبر نیست.
-  // حذف آن اجازه می‌دهد runtime طول جدید را خودش محاسبه کند.
-  headers.delete('content-length');
-  headers.set('X-Cloudflare-Proxy', 'amir-btc-assistant-shell');
-
-  try {
-    const upstreamResponse = await fetch(targetUrl, {
-      method: request.method,
-      headers,
-      body: ['GET', 'HEAD'].includes(request.method) ? undefined : (bodyOverride ?? request.body),
-      redirect: 'follow',
-    });
-
-    const upstreamStatus = Number(upstreamResponse.status);
-    if (!Number.isInteger(upstreamStatus) || upstreamStatus < 200 || upstreamStatus > 599) {
-      return jsonResponse(
-        {
-          status: 'error',
-          message: 'Invalid upstream response status',
-          detail: `status=${String(upstreamResponse.status)}`,
-        },
-        { status: 502 },
-      );
-    }
-
-    return new Response(upstreamResponse.body, {
-      status: upstreamStatus,
-      headers: withCors(upstreamResponse.headers),
-    });
-  } catch (error) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: error instanceof Error ? error.message : String(error),
-      },
-      { status: 502 },
-    );
-  }
 }
 //#endregion
 
@@ -2501,6 +2464,14 @@ export default {
       return handleWatchlistPut(request, env);
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/notify') {
+      return handleNotify(request, env);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/referrals/stats') {
+      return handleReferralsStats(request, env);
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/check-join') {
       return handleCheckJoin(request, env);
     }
@@ -2515,10 +2486,6 @@ export default {
 
     if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {
       return handleTelegramWebhook(request, env);
-    }
-
-    if (url.pathname === '/telegram' || url.pathname.startsWith('/api/')) {
-      return proxyToBackend(request, env);
     }
 
     return jsonResponse(

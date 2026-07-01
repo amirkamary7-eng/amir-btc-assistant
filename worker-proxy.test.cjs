@@ -64,7 +64,6 @@ function buildInitData(botToken, user) {
 
 function createEnv(overrides = {}) {
   return {
-    BACKEND_URL: 'https://backend.example',
     TELEGRAM_BOT_TOKEN: 'test-bot-token',
     REQUIRED_CHANNEL: 'amir_btc_2024',
     ADMIN_TELEGRAM_ID: '831704732',
@@ -146,18 +145,15 @@ test('PUT /api/users/me/settings validates auth before proxying', async () => {
   }
 });
 
-test('PUT /api/users/me/settings rewrites user_id and proxies to backend', async () => {
+test('PUT /api/users/me/settings ignores spoofed user_id and stores user settings in SESSION_CACHE', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv();
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/users/me/settings');
+  };
 
   try {
     const request = new Request('https://worker.example/api/users/me/settings', {
@@ -169,60 +165,33 @@ test('PUT /api/users/me/settings rewrites user_id and proxies to backend', async
       body: JSON.stringify({ user_id: 'spoofed', lang: 'en' }),
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/users/me/settings');
-    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', lang: 'en' });
+    assert.deepEqual(await response.json(), { status: 'success', user: { lang: 'en' } });
+    const stored = JSON.parse((await sessionCache.get('user:12345')) || '{}');
+    assert.equal(stored.user_id, '12345');
+    assert.equal(stored.lang, 'en');
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('PUT /api/users/me/settings returns 503 when BACKEND_URL is missing', async () => {
-  const worker = loadWorker();
-  const initData = buildInitData('test-bot-token', { id: 12345, first_name: 'Amir' });
-  let backendCalled = false;
-  const originalFetch = global.fetch;
-  global.fetch = async () => {
-    backendCalled = true;
-    return new Response('unexpected');
-  };
-
-  try {
-    const request = new Request('https://worker.example/api/users/me/settings', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Telegram-Init-Data': initData,
-      },
-      body: JSON.stringify({ user_id: 'spoofed', lang: 'fa' }),
-    });
-
-    const response = await worker.fetch(request, createEnv({ BACKEND_URL: '' }));
-    assert.equal(response.status, 503);
-    assert.equal(backendCalled, false);
-    assert.deepEqual(await response.json(), {
-      status: 'error',
-      message: 'BACKEND_URL not configured for me/settings proxy',
-    });
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
-
-test('GET /api/watchlist rewrites spoofed query user_id before proxying', async () => {
+test('GET /api/watchlist ignores spoofed query user_id and returns stored symbols', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', symbols: ['BTC'] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv({
+    'watchlist:12345': JSON.stringify(['BTC']),
+  });
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/watchlist');
+  };
 
   try {
     const request = new Request('https://worker.example/api/watchlist?user_id=spoofed', {
@@ -232,27 +201,32 @@ test('GET /api/watchlist rewrites spoofed query user_id before proxying', async 
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/watchlist?user_id=12345');
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      symbols: ['BTC'],
+      watchlist: ['BTC'],
+    });
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('PUT /api/watchlist rewrites body user_id before proxying', async () => {
+test('PUT /api/watchlist ignores spoofed body user_id and stores symbols', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', symbols: ['BTC', 'ETH'] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv();
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/watchlist');
+  };
 
   try {
     const request = new Request('https://worker.example/api/watchlist', {
@@ -264,14 +238,15 @@ test('PUT /api/watchlist rewrites body user_id before proxying', async () => {
       body: JSON.stringify({ user_id: 'spoofed', symbols: ['btc', 'eth'] }),
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/watchlist');
-    assert.deepEqual(JSON.parse(calls[0].body), {
-      user_id: '12345',
-      symbols: ['btc', 'eth'],
-    });
+    assert.deepEqual(await response.json(), { status: 'success', symbols: ['BTC', 'ETH'] });
+    assert.equal(await sessionCache.get('watchlist:12345'), JSON.stringify(['BTC', 'ETH']));
   } finally {
     global.fetch = originalFetch;
   }
@@ -808,19 +783,15 @@ test('POST /api/assistant/chat rejects daily message limit without calling backe
   }
 });
 
-test('POST /api/assistant/chat rewrites user_id, proxies, and records usage in RATE_LIMITS KV', async () => {
+test('POST /api/assistant/chat returns 501 without calling backend or recording usage', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const rateLimits = createMemoryKv();
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', reply: 'ok', provider: 'test' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/assistant/chat');
+  };
 
   try {
     const request = new Request('https://worker.example/api/assistant/chat', {
@@ -839,14 +810,14 @@ test('POST /api/assistant/chat rewrites user_id, proxies, and records usage in R
       }),
     );
 
-    assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/assistant/chat');
-    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', message: 'hi', history: [] });
-
+    assert.equal(response.status, 501);
+    assert.deepEqual(await response.json(), {
+      status: 'error',
+      message: 'assistant service is disabled on this worker',
+    });
     const today = new Date().toISOString().slice(0, 10);
-    assert.equal(await rateLimits.get('ai:cooldown:12345'), '1');
-    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), '1');
+    assert.equal(await rateLimits.get('ai:cooldown:12345'), null);
+    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), null);
   } finally {
     global.fetch = originalFetch;
   }
@@ -940,18 +911,15 @@ test('POST /api/tickets validates auth before proxying', async () => {
   }
 });
 
-test('POST /api/tickets rewrites user_id and proxies to backend', async () => {
+test('POST /api/tickets ignores spoofed user_id and stores ticket in SESSION_CACHE', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv();
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/tickets');
+  };
 
   try {
     const request = new Request('https://worker.example/api/tickets', {
@@ -963,28 +931,39 @@ test('POST /api/tickets rewrites user_id and proxies to backend', async () => {
       body: JSON.stringify({ user_id: 'spoofed', user_name: 'x', title: 't', body: 'b' }),
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/tickets');
-    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', user_name: 'x', title: 't', body: 'b' });
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.ticket.user_id, '12345');
+    assert.equal(body.ticket.user_name, 'x');
+    const storedTickets = JSON.parse((await sessionCache.get('tickets:all')) || '[]');
+    assert.equal(storedTickets.length, 1);
+    assert.equal(storedTickets[0].id, body.ticket.id);
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('GET /api/tickets rewrites spoofed query user_id before proxying', async () => {
+test('GET /api/tickets returns only authenticated user tickets', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', tickets: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv({
+    'tickets:all': JSON.stringify([
+      { id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', replies: [], created_at: new Date().toISOString() },
+      { id: 't2', user_id: '999', user_name: 'y', title: 't2', body: 'b2', status: 'open', replies: [], created_at: new Date().toISOString() },
+    ]),
+  });
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/tickets');
+  };
 
   try {
     const request = new Request('https://worker.example/api/tickets?user_id=spoofed', {
@@ -994,10 +973,18 @@ test('GET /api/tickets rewrites spoofed query user_id before proxying', async ()
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/tickets?user_id=12345');
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.tickets.length, 1);
+    assert.equal(body.tickets[0].id, 't1');
+    assert.equal(body.tickets[0].user_id, '12345');
   } finally {
     global.fetch = originalFetch;
   }
@@ -1031,18 +1018,17 @@ test('GET /api/tickets/all rejects non-admin user before proxying', async () => 
   }
 });
 
-test('GET /api/tickets/all allows admin and rewrites admin_id before proxying', async () => {
+test('GET /api/tickets/all allows admin and returns all tickets from SESSION_CACHE', async () => {
   const worker = loadWorker();
   const adminUser = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', adminUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', tickets: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv({
+    'tickets:all': JSON.stringify([{ id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', replies: [], created_at: new Date().toISOString() }]),
+  });
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/tickets/all');
+  };
 
   try {
     const request = new Request('https://worker.example/api/tickets/all?admin_id=spoofed', {
@@ -1052,10 +1038,17 @@ test('GET /api/tickets/all allows admin and rewrites admin_id before proxying', 
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/tickets/all?admin_id=831704732');
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.tickets.length, 1);
+    assert.equal(body.tickets[0].id, 't1');
   } finally {
     global.fetch = originalFetch;
   }
@@ -1091,18 +1084,17 @@ test('POST /api/tickets/:id/reply rejects non-admin user before proxying', async
   }
 });
 
-test('DELETE /api/tickets/:id validates auth and rewrites spoofed query params before proxying', async () => {
+test('DELETE /api/tickets/:id deletes ticket when user owns it', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv({
+    'tickets:all': JSON.stringify([{ id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', replies: [], created_at: new Date().toISOString() }]),
+  });
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/tickets/:id delete');
+  };
 
   try {
     const request = new Request('https://worker.example/api/tickets/t1?user_id=spoofed&admin_id=spoofed', {
@@ -1112,10 +1104,15 @@ test('DELETE /api/tickets/:id validates auth and rewrites spoofed query params b
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/tickets/t1?user_id=12345&admin_id=12345');
+    assert.deepEqual(await response.json(), { status: 'success' });
+    assert.equal(await sessionCache.get('tickets:all'), JSON.stringify([]));
   } finally {
     global.fetch = originalFetch;
   }
@@ -1146,18 +1143,15 @@ test('POST /api/alerts validates auth before proxying', async () => {
   }
 });
 
-test('POST /api/alerts rewrites user_id and proxies to backend', async () => {
+test('POST /api/alerts ignores spoofed user_id and stores alert in SESSION_CACHE', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv();
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/alerts');
+  };
 
   try {
     const request = new Request('https://worker.example/api/alerts', {
@@ -1169,28 +1163,37 @@ test('POST /api/alerts rewrites user_id and proxies to backend', async () => {
       body: JSON.stringify({ user_id: 'spoofed', symbol: 'btc', price: 10, direction: 'above' }),
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/alerts');
-    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', symbol: 'btc', price: 10, direction: 'above' });
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.alert.user_id, '12345');
+    assert.equal(body.alert.symbol, 'btc');
+    assert.ok(body.alert.id);
+    const storedAlerts = JSON.parse((await sessionCache.get('alerts:12345')) || '[]');
+    assert.equal(storedAlerts.length, 1);
+    assert.equal(storedAlerts[0].id, body.alert.id);
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('GET /api/alerts rewrites spoofed query user_id before proxying', async () => {
+test('GET /api/alerts returns stored alerts for authenticated user', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', alerts: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv({
+    'alerts:12345': JSON.stringify([{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: new Date().toISOString() }]),
+  });
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/alerts');
+  };
 
   try {
     const request = new Request('https://worker.example/api/alerts?user_id=spoofed', {
@@ -1200,27 +1203,33 @@ test('GET /api/alerts rewrites spoofed query user_id before proxying', async () 
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/alerts?user_id=12345');
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.alerts.length, 1);
+    assert.equal(body.alerts[0].id, 'a1');
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('DELETE /api/alerts/:id rewrites spoofed user_id before proxying', async () => {
+test('DELETE /api/alerts/:id removes alert for authenticated user', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  const sessionCache = createMemoryKv({
+    'alerts:12345': JSON.stringify([{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: new Date().toISOString() }]),
+  });
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/alerts delete');
+  };
 
   try {
     const request = new Request('https://worker.example/api/alerts/a1?user_id=spoofed', {
@@ -1230,10 +1239,15 @@ test('DELETE /api/alerts/:id rewrites spoofed user_id before proxying', async ()
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        SESSION_CACHE: sessionCache,
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/alerts/a1?user_id=12345');
+    assert.deepEqual(await response.json(), { status: 'success', deleted: true });
+    assert.equal(await sessionCache.get('alerts:12345'), JSON.stringify([]));
   } finally {
     global.fetch = originalFetch;
   }
