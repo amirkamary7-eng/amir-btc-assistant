@@ -9,8 +9,8 @@
 - ربات تلگرام به‌صورت webhook-based داخل همان فرآیند FastAPI راه‌اندازی می‌شود.
 - دیتابیس اصلی PostgreSQL است و از طریق `DATABASE_URL` به Supabase متصل می‌شود.
 - کش فعلی با Redis پیاده‌سازی شده و در نبود Redis به حافظه process fallback می‌کند.
-- بخشی از استقرار فعلی هنوز به Render وابسته است.
-- یک Cloudflare Worker proxy قدیمی در پروژه وجود دارد، اما هنوز backend اصلی را جایگزین نکرده است.
+- یک Cloudflare Worker Shell در `worker-proxy.js` وجود دارد که بخشی از endpointها را مستقیم پاسخ می‌دهد و بقیه‌ی مسیرهای `/api/*` را به upstream (از طریق `BACKEND_URL`) proxy می‌کند.
+- فایل‌های استاتیک Mini App قابلیت استقرار روی Cloudflare Pages را دارند (`webapp/pages-dist`).
 
 ## اجزای اصلی سیستم
 
@@ -35,7 +35,7 @@
 
 نکات مهم:
 
-- `window.API_BASE` در حال حاضر به آدرس Render اشاره می‌کند.
+- `window.API_BASE` به‌صورت پیش‌فرض `window.location.origin` است و می‌تواند از بیرون override شود (بدون hardcode کردن host).
 - Overlay عضویت اجباری با `#mandatory-join-overlay` در فرانت‌اند اعمال می‌شود.
 - منطق `apiFetch` به آماده بودن `Telegram.WebApp` و `initData` وابسته است.
 
@@ -115,14 +115,14 @@ fallback فعلی:
 فایل‌های موجود:
 
 - `worker-proxy.js`
-- `wrangler.toml`
+- `wrangler.jsonc`
+- `wrangler.pages.jsonc`
 - `wrangler.jsonc.bak`
 
 وضعیت واقعی:
 
-- `worker-proxy.js` فقط درخواست‌ها را به backend خارجی پاس می‌دهد.
-- هنوز backend اصلی را روی Cloudflare اجرا نمی‌کند.
-- `wrangler.toml` فعلی برای اجرای production-ready معتبر و کامل نیست.
+- `worker-proxy.js` یک shell مهاجرتی است: بخشی از مسیرها Worker-native هستند و مسیرهای باقی‌مانده به upstream proxy می‌شوند.
+- پیکربندی Wrangler برای Worker و Pages در فایل‌های JSONC موجود است.
 
 ### 7. Node / Prisma Sidecar
 
@@ -164,8 +164,9 @@ fallback فعلی:
 ├── index.html                   # پوسته Mini App
 ├── main.py                      # entrypoint اصلی backend + bot
 ├── bot.py                       # runner غیرفعال bot
-├── worker-proxy.js              # Cloudflare proxy قدیمی
-├── wrangler.toml                # پیکربندی Cloudflare فعلی
+├── worker-proxy.js              # Cloudflare Worker Shell (Worker-native + proxy)
+├── wrangler.jsonc               # پیکربندی Cloudflare Worker
+├── wrangler.pages.jsonc         # پیکربندی Cloudflare Pages
 ├── env.example                  # env نمونه اصلی
 └── requirements.txt             # وابستگی‌های Python
 ```
@@ -176,17 +177,17 @@ fallback فعلی:
 
 1. کاربر از تلگرام Mini App را باز می‌کند.
 2. فرانت‌اند `Telegram.WebApp.initData` را دریافت می‌کند.
-3. درخواست‌ها با هدر `X-Telegram-Init-Data` به backend ارسال می‌شوند.
-4. بک‌اند `initData` را validate می‌کند.
-5. اطلاعات کاربر از Supabase/PostgreSQL خوانده یا ثبت می‌شود.
-6. وضعیت عضویت از cache/DB/Telegram API بررسی می‌شود.
+3. درخواست‌ها با هدر `X-Telegram-Init-Data` به `API_BASE` ارسال می‌شوند (Worker Shell یا upstream).
+4. Worker Shell (یا backend) `initData` را validate می‌کند.
+5. اطلاعات کاربر از Supabase/PostgreSQL خوانده یا ثبت می‌شود (مستقیم یا از طریق upstream).
+6. وضعیت عضویت از KV/Redis/DB/Telegram API بررسی می‌شود.
 7. UI بر اساس نتیجه join-check و داده‌های کاربر نمایش داده می‌شود.
 
 ### جریان ربات تلگرام
 
 1. تلگرام رویداد را به webhook می‌فرستد.
-2. endpoint `/telegram` در `main.py` رویداد را دریافت می‌کند.
-3. `python-telegram-bot` همان رویداد را به handlerها پاس می‌دهد.
+2. webhook می‌تواند روی Worker (`/telegram`) یا روی backend (`main.py`) سرو شود (بسته به cutover).
+3. در backend، `python-telegram-bot` همان رویداد را به handlerها پاس می‌دهد.
 4. `/start` وضعیت عضویت را از DB بررسی می‌کند.
 5. اگر عضو باشد، دکمه `web_app` می‌گیرد.
 6. اگر عضو نباشد، لینک عضویت در کانال می‌گیرد.
@@ -268,7 +269,7 @@ fallback فعلی:
   - `backend.services.ai_service`
   - `backend.services.telegram_auth`
 
-## وابستگی بین Frontend، Backend، Bot، Supabase و Render
+## وابستگی بین Frontend، Backend، Bot، Supabase و Upstream/Cloudflare
 
 ### Frontend ↔ Backend
 
@@ -280,10 +281,10 @@ fallback فعلی:
 - اتصال از طریق `DATABASE_URL` به PostgreSQL انجام می‌شود.
 - مدل‌های SQLAlchemy schema اصلی را مدیریت می‌کنند.
 
-### Backend ↔ Render
+### Backend/Worker ↔ Upstream hosting
 
-- `TELEGRAM_WEBHOOK_URL` پیش‌فرض روی Render است.
-- `window.API_BASE` در فرانت‌اند هنوز روی Render تنظیم شده است.
+- آدرس upstream برای مسیرهای proxy از طریق `BACKEND_URL` تعیین می‌شود و در repo hardcode نشده است.
+- `TELEGRAM_WEBHOOK_URL` نیز env است و می‌تواند به Worker یا هر میزبان دیگری اشاره کند.
 
 ### Bot ↔ Backend
 
@@ -298,8 +299,8 @@ fallback فعلی:
 ## جمع‌بندی معماری فعلی
 
 - معماری فعلی کار می‌کند، اما چندمرکزی و نیمه‌مهاجرتی است.
-- Render هنوز در مسیر runtime و webhook نقش مهم دارد.
+- بخشی از مسیرها روی Worker-native اجرا می‌شوند و بخشی هنوز به upstream وابسته‌اند.
 - Supabase منبع اصلی داده است.
-- Cloudflare هنوز فقط نقش جانبی یا proxy داشته است.
+- Cloudflare اکنون هم نقش Pages (برای استاتیک) و هم Worker Shell (برای بخشی از APIها) را دارد.
 - state پروژه بین DB، Redis و فایل‌های JSON تقسیم شده است.
-- برای مهاجرت به Cloudflare-native، باید runtime backend از FastAPI/Render به Worker-based architecture منتقل شود، بدون شکستن contract فعلی APIها.
+- برای تکمیل مهاجرت Cloudflare-native، باید وابستگی به upstream حذف شود و stateهای file-based به storage پایدار منتقل شوند، بدون شکستن contract فعلی APIها.
