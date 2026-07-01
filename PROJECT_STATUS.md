@@ -3,20 +3,19 @@
 ## Source of Truth
 
 - وضعیت رسمی پروژه: این فایل (`PROJECT_STATUS.md`)
-- جزئیات اجرایی و چک‌لیست: `PROGRESS.md`
+- جزئیات اجرایی: `PROGRESS.md`
 - مرجع نهایی در صورت اختلاف: وضعیت واقعی کد در مخزن
-- اسناد توضیحی: `docs/*` (باید با این دو فایل همگام باشند)
+- اسناد توضیحی: `docs/*` باید با این فایل همگام بمانند
 
-## وضعیت فعلی (خلاصه)
+## وضعیت فعلی
 
-- Cloudflare Worker Shell در [worker-proxy.js](file:///workspace/worker-proxy.js) پیاده‌سازی شده است.
-  - بخشی از endpointها Worker-native هستند.
-  - باقی مسیرهای `/api/*` و `/telegram` در صورت عدم پوشش، به upstream از طریق `BACKEND_URL` proxy می‌شوند.
-- Cloudflare Pages برای استقرار فایل‌های استاتیک آماده است: [wrangler.pages.jsonc](file:///workspace/wrangler.pages.jsonc) + خروجی `webapp/pages-dist`.
-- بک‌اند FastAPI هنوز وجود دارد و برای endpointهای proxy‌شده (و همچنین tickets/alerts file-based) نقش upstream را بازی می‌کند: [main.py](file:///workspace/main.py).
-- آدرس‌های `onrender.com` در repo hardcode نشده‌اند (Render removal در سطح repo انجام شده)، اما حذف کامل نیاز به upstream هنوز انجام نشده است.
+- `worker-proxy.js` اکنون entry point فعال Cloudflare Worker است و routeهای پوشش‌داده‌شده را مستقیماً پاسخ می‌دهد.
+- در runtime فعلی repo دیگر منطق فعال `BACKEND_URL` یا proxy به upstream داخل Worker وجود ندارد؛ mismatchهای باقی‌مانده بیشتر از جنس implementation ناقص یا storage ناسازگار هستند، نه proxy runtime.
+- `main.py` هنوز برای بخش‌های legacy و همچنین `tickets/alerts` file-based وجود دارد.
+- Cloudflare Pages برای فایل‌های استاتیک آماده است: `wrangler.pages.jsonc` + خروجی `webapp/pages-dist`.
+- hardcode مربوط به `onrender.com` از runtime حذف شده است، اما حذف کامل dependencyهای legacy هنوز تمام نشده است.
 
-## وضعیت فازها (done / partial / not started)
+## وضعیت فازها
 
 - Phase 0 / شناخت و تحلیل: done
 - Phase 1 / مستندسازی: done
@@ -25,12 +24,12 @@
 - Phase 4 / انتقال APIها: partial
 - Phase 5 / انتقال webhook ربات: partial
 - Phase 6 / انتقال cache: partial
-- Phase 7 / انتقال stateهای فایل‌محور: not started
-- Phase 8 / حذف کامل Render: partial
+- Phase 7 / انتقال stateهای فایل‌محور: done
+- Phase 8 / حذف کامل legacy backend dependency: partial
 
 ## پوشش API روی Worker
 
-### Worker-native (done)
+### Worker-native کامل
 
 - `GET /`
 - `GET /api/health`
@@ -44,38 +43,50 @@
 - `GET /api/sessions/online`
 - `POST /api/sessions/end`
 - `GET /api/assistant/limits`
-
-### Worker-native با fallback/proxy (partial)
-
-- `GET /api/analyses` (cache + fallback به upstream)
-- `POST /api/assistant/chat` (rate limit روی Worker، اجرای اصلی روی upstream)
-- `POST /api/users/bootstrap` (auth validation + proxy-safe)
-- `GET /api/users/me` (auth validation + proxy)
-- `PUT /api/users/me/settings` (auth validation + proxy)
-- `/api/watchlist` GET/PUT (auth validation + proxy-safe)
-- tickets/alerts (proxy-safe + upstream file-based)
-
-### Proxy-only (not started برای Worker-native)
-
-- `GET /api/referrals/*`
+- `POST /api/users/bootstrap`
+- `GET /api/users/me`
+- `PUT /api/users/me/settings`
+- `GET /api/watchlist`
+- `PUT /api/watchlist`
+- `GET /api/referrals/stats`
+- `GET /api/referrals/tokens`
 - `POST /api/notify`
+- `POST /api/tickets`
+- `GET /api/tickets`
+- `GET /api/tickets/all`
+- `POST /api/tickets/:id/reply`
+- `DELETE /api/tickets/:id`
+- `POST /api/alerts`
+- `GET /api/alerts`
+- `DELETE /api/alerts/:id`
+
+### Worker-native اما ناقص
+
+- `GET /api/analyses`
+  - فقط read path فعال است و به cache داخلی Worker تکیه دارد.
+- `POST /api/assistant/chat`
+  - rate limit روی Worker اعمال می‌شود، اما اجرای سرویس عملاً با `501` غیرفعال است.
+- `POST /telegram`
+  - `/start` روی Worker هندل می‌شود، اما runtime قدیمی bot در backend هنوز وجود دارد.
+
+### هنوز کامل نشده
+
 - `POST|PUT|DELETE /api/analyses` (ادمین)
-- سایر مسیرهای `/api/*` که هنوز فقط به upstream proxy می‌شوند
+- منطق native برای scheduled alerts
+- یکپارچه‌سازی کامل webhook/bot cutover
 
 ## وضعیت Storage/State
 
-- DB (Supabase/Postgres): source of truth برای کاربران/واچ‌لیست/تحلیل‌ها/رفرال‌ها (طبق مدل‌ها)
+- DB (Supabase/Postgres): source of truth برای کاربران، واچ‌لیست، referralها و token state در backend و Worker
 - Cache:
-  - Worker: KV namespaceها (`JOIN_CACHE`, `APP_CACHE`, `RATE_LIMITS`, `SESSION_CACHE`)
-  - Backend: Redis/in-memory fallback هنوز وجود دارد
-- File-based state:
-  - tickets: `data/tickets.json` (هنوز فعال در backend)
-  - alerts: `data/alerts.json` (هنوز فعال در backend)
+  - Worker: `JOIN_CACHE`, `APP_CACHE`, `RATE_LIMITS`, `SESSION_CACHE`
+  - Backend: فقط in-memory cache (بدون وابستگی production به Redis)
+- stateهای حساس:
+  - `tickets/alerts` اکنون بین Worker و backend هم‌راستا هستند و هر دو از persistence مشترک DB استفاده می‌کنند
 
-## کارهای باقی‌مانده (اولویت‌دار)
+## تسک‌های باز با اولویت واقعی کد
 
-- تکمیل انتقال endpointهای proxy-only به Worker-native و حذف وابستگی به `BACKEND_URL`
-- انتقال tickets/alerts به DB-backed flow و حذف وابستگی به فایل‌سیستم
-- نهایی‌سازی webhook روی Worker و انجام cutover بدون downtime
-- تکمیل migration cache در کل سیستم و حذف نیاز به Redis در production
-- اجرای تست end-to-end برای Mini App و Bot بعد از هر مرحله cutover
+- migration cache را تکمیل کن و وابستگی backend به Redis/in-memory fallback را به حداقل برسان
+- endpointهای ناقص `analyses` را کامل کن، مخصوصاً مسیرهای admin write
+- webhook/bot cutover را کامل کن تا runtime قدیمی backend از مسیر بحرانی خارج شود
+- بعد از هر مرحله، تست end-to-end Mini App و Bot را اجرا کن

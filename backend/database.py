@@ -76,19 +76,4 @@ def get_db_session():
         session.close()
 
 
-# عملیات مربوط به safe db سشن را انجام می‌دهد.
-# ورودی: بدون ورودی.
-# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
-def safe_db_session():
-    """Return an active session or None when the database is unavailable."""
-    if not SessionLocal:
-        return None
-    try:
-        session: Session = SessionLocal()
-        session.execute(text("SELECT 1"))
-        return session
-    except Exception as exc:
-        print(f"⚠️ Database unavailable: {exc}")
-        return None
-
 # endregion

@@ -9,7 +9,7 @@
 - ربات تلگرام به‌صورت webhook-based داخل همان فرآیند FastAPI راه‌اندازی می‌شود.
 - دیتابیس اصلی PostgreSQL است و از طریق `DATABASE_URL` به Supabase متصل می‌شود.
 - کش فعلی با Redis پیاده‌سازی شده و در نبود Redis به حافظه process fallback می‌کند.
-- یک Cloudflare Worker Shell در `worker-proxy.js` وجود دارد که بخشی از endpointها را مستقیم پاسخ می‌دهد و بقیه‌ی مسیرهای `/api/*` را به upstream (از طریق `BACKEND_URL`) proxy می‌کند.
+- یک Cloudflare Worker فعال در `worker-proxy.js` وجود دارد که routeهای پوشش‌داده‌شده را مستقیم پاسخ می‌دهد؛ runtime فعلی دیگر به `BACKEND_URL` متکی نیست، اما بعضی implementationها هنوز ناقص یا ناسازگار هستند.
 - فایل‌های استاتیک Mini App قابلیت استقرار روی Cloudflare Pages را دارند (`webapp/pages-dist`).
 
 ## اجزای اصلی سیستم
@@ -117,12 +117,13 @@ fallback فعلی:
 - `worker-proxy.js`
 - `wrangler.jsonc`
 - `wrangler.pages.jsonc`
-- `wrangler.jsonc.bak`
 
 وضعیت واقعی:
 
-- `worker-proxy.js` یک shell مهاجرتی است: بخشی از مسیرها Worker-native هستند و مسیرهای باقی‌مانده به upstream proxy می‌شوند.
-- پیکربندی Wrangler برای Worker و Pages در فایل‌های JSONC موجود است.
+- `worker-proxy.js` entry point اصلی Cloudflare Worker است و routeهای Worker را داخل خود مدیریت می‌کند.
+- بخش عمده‌ای از APIهای public و user-facing روی Worker اجرا می‌شوند.
+- mismatchهای باقی‌مانده فعلی بیشتر مربوط به `tickets/alerts` و بعضی مسیرهای ناقص admin است، نه proxy runtime.
+- `wrangler.jsonc` و `wrangler.pages.jsonc` پیکربندی‌های فعال Worker و Pages هستند.
 
 ### 7. Node / Prisma Sidecar
 
@@ -164,7 +165,7 @@ fallback فعلی:
 ├── index.html                   # پوسته Mini App
 ├── main.py                      # entrypoint اصلی backend + bot
 ├── bot.py                       # runner غیرفعال bot
-├── worker-proxy.js              # Cloudflare Worker Shell (Worker-native + proxy)
+├── worker-proxy.js              # entry point اصلی Cloudflare Worker
 ├── wrangler.jsonc               # پیکربندی Cloudflare Worker
 ├── wrangler.pages.jsonc         # پیکربندی Cloudflare Pages
 ├── env.example                  # env نمونه اصلی
@@ -177,9 +178,9 @@ fallback فعلی:
 
 1. کاربر از تلگرام Mini App را باز می‌کند.
 2. فرانت‌اند `Telegram.WebApp.initData` را دریافت می‌کند.
-3. درخواست‌ها با هدر `X-Telegram-Init-Data` به `API_BASE` ارسال می‌شوند (Worker Shell یا upstream).
-4. Worker Shell (یا backend) `initData` را validate می‌کند.
-5. اطلاعات کاربر از Supabase/PostgreSQL خوانده یا ثبت می‌شود (مستقیم یا از طریق upstream).
+3. درخواست‌ها با هدر `X-Telegram-Init-Data` به `API_BASE` ارسال می‌شوند.
+4. Worker یا backend `initData` را validate می‌کند.
+5. اطلاعات کاربر از Supabase/PostgreSQL خوانده یا ثبت می‌شود.
 6. وضعیت عضویت از KV/Redis/DB/Telegram API بررسی می‌شود.
 7. UI بر اساس نتیجه join-check و داده‌های کاربر نمایش داده می‌شود.
 
@@ -269,7 +270,7 @@ fallback فعلی:
   - `backend.services.ai_service`
   - `backend.services.telegram_auth`
 
-## وابستگی بین Frontend، Backend، Bot، Supabase و Upstream/Cloudflare
+## وابستگی بین Frontend، Backend، Bot، Supabase و Cloudflare
 
 ### Frontend ↔ Backend
 
@@ -281,10 +282,10 @@ fallback فعلی:
 - اتصال از طریق `DATABASE_URL` به PostgreSQL انجام می‌شود.
 - مدل‌های SQLAlchemy schema اصلی را مدیریت می‌کنند.
 
-### Backend/Worker ↔ Upstream hosting
+### Backend ↔ Cloudflare
 
-- آدرس upstream برای مسیرهای proxy از طریق `BACKEND_URL` تعیین می‌شود و در repo hardcode نشده است.
-- `TELEGRAM_WEBHOOK_URL` نیز env است و می‌تواند به Worker یا هر میزبان دیگری اشاره کند.
+- `TELEGRAM_WEBHOOK_URL` باید روی route کامل Worker یعنی `/telegram` تنظیم شود.
+- `window.API_BASE` در فرانت‌اند روی `window.location.origin` قرار دارد، نه Render.
 
 ### Bot ↔ Backend
 
@@ -299,8 +300,8 @@ fallback فعلی:
 ## جمع‌بندی معماری فعلی
 
 - معماری فعلی کار می‌کند، اما چندمرکزی و نیمه‌مهاجرتی است.
-- بخشی از مسیرها روی Worker-native اجرا می‌شوند و بخشی هنوز به upstream وابسته‌اند.
+- بخش مهمی از مسیرها روی Worker-native اجرا می‌شوند، اما بعضی stateها و runtimeهای legacy هنوز باقی مانده‌اند.
 - Supabase منبع اصلی داده است.
 - Cloudflare اکنون هم نقش Pages (برای استاتیک) و هم Worker Shell (برای بخشی از APIها) را دارد.
 - state پروژه بین DB، Redis و فایل‌های JSON تقسیم شده است.
-- برای تکمیل مهاجرت Cloudflare-native، باید وابستگی به upstream حذف شود و stateهای file-based به storage پایدار منتقل شوند، بدون شکستن contract فعلی APIها.
+- برای تکمیل مهاجرت Cloudflare-native، باید stateهای file-based به storage پایدار منتقل شوند و dependencyهای legacy از مسیرهای بحرانی حذف شوند، بدون شکستن contract فعلی APIها.

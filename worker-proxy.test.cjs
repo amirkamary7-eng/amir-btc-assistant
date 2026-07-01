@@ -64,7 +64,6 @@ function buildInitData(botToken, user) {
 
 function createEnv(overrides = {}) {
   return {
-    BACKEND_URL: 'https://backend.example',
     TELEGRAM_BOT_TOKEN: 'test-bot-token',
     REQUIRED_CHANNEL: 'amir_btc_2024',
     ADMIN_TELEGRAM_ID: '831704732',
@@ -146,18 +145,36 @@ test('PUT /api/users/me/settings validates auth before proxying', async () => {
   }
 });
 
-test('PUT /api/users/me/settings rewrites user_id and proxies to backend', async () => {
-  const worker = loadWorker();
+test('PUT /api/users/me/settings ignores spoofed user_id and updates DB-backed user settings', async () => {
+  const now = new Date().toISOString();
+  const userRow = {
+    telegram_id: '12345',
+    username: 'amir',
+    first_name: 'Amir',
+    last_name: null,
+    lang: 'fa',
+    channel_joined: true,
+    channel_verified_at: now,
+    created_at: now,
+    updated_at: now,
+  };
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('UPDATE users')) {
+      assert.equal(params[0], '12345');
+      assert.equal(params[1], 'en');
+      return {
+        rows: [{ ...userRow, lang: 'en', updated_at: now }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/users/me/settings');
+  };
 
   try {
     const request = new Request('https://worker.example/api/users/me/settings', {
@@ -169,60 +186,38 @@ test('PUT /api/users/me/settings rewrites user_id and proxies to backend', async
       body: JSON.stringify({ user_id: 'spoofed', lang: 'en' }),
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/users/me/settings');
-    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', lang: 'en' });
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.user.user_id, '12345');
+    assert.equal(body.user.lang, 'en');
+    assert.equal(body.user.channel_joined, true);
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('PUT /api/users/me/settings returns 503 when BACKEND_URL is missing', async () => {
-  const worker = loadWorker();
-  const initData = buildInitData('test-bot-token', { id: 12345, first_name: 'Amir' });
-  let backendCalled = false;
-  const originalFetch = global.fetch;
-  global.fetch = async () => {
-    backendCalled = true;
-    return new Response('unexpected');
-  };
-
-  try {
-    const request = new Request('https://worker.example/api/users/me/settings', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Telegram-Init-Data': initData,
-      },
-      body: JSON.stringify({ user_id: 'spoofed', lang: 'fa' }),
-    });
-
-    const response = await worker.fetch(request, createEnv({ BACKEND_URL: '' }));
-    assert.equal(response.status, 503);
-    assert.equal(backendCalled, false);
-    assert.deepEqual(await response.json(), {
-      status: 'error',
-      message: 'BACKEND_URL not configured for me/settings proxy',
-    });
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
-
-test('GET /api/watchlist rewrites spoofed query user_id before proxying', async () => {
-  const worker = loadWorker();
+test('GET /api/watchlist ignores spoofed query user_id and returns DB-backed symbols', async () => {
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('SELECT symbol') && sql.includes('FROM watchlist_items')) {
+      assert.equal(params[0], '12345');
+      return { rows: [{ symbol: 'BTC' }] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', symbols: ['BTC'] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/watchlist');
+  };
 
   try {
     const request = new Request('https://worker.example/api/watchlist?user_id=spoofed', {
@@ -232,27 +227,55 @@ test('GET /api/watchlist rewrites spoofed query user_id before proxying', async 
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/watchlist?user_id=12345');
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      symbols: ['BTC'],
+      watchlist: ['BTC'],
+    });
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('PUT /api/watchlist rewrites body user_id before proxying', async () => {
-  const worker = loadWorker();
+test('PUT /api/watchlist ignores spoofed body user_id and stores DB-backed symbols', async () => {
+  const storedSymbols = [];
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('ON CONFLICT (telegram_id) DO NOTHING')) {
+      assert.equal(params[0], '12345');
+      return { rows: [] };
+    }
+    if (sql.includes('DELETE FROM watchlist_items')) {
+      assert.equal(params[0], '12345');
+      storedSymbols.length = 0;
+      return { rows: [] };
+    }
+    if (sql.includes('INSERT INTO watchlist_items')) {
+      storedSymbols[params[2]] = params[1];
+      return { rows: [] };
+    }
+    if (sql.includes('UPDATE users SET updated_at = NOW()')) {
+      assert.equal(params[0], '12345');
+      return { rows: [] };
+    }
+    if (sql.includes('SELECT symbol') && sql.includes('FROM watchlist_items')) {
+      return { rows: storedSymbols.filter(Boolean).map((symbol) => ({ symbol })) };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', symbols: ['BTC', 'ETH'] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/watchlist');
+  };
 
   try {
     const request = new Request('https://worker.example/api/watchlist', {
@@ -264,14 +287,209 @@ test('PUT /api/watchlist rewrites body user_id before proxying', async () => {
       body: JSON.stringify({ user_id: 'spoofed', symbols: ['btc', 'eth'] }),
     });
 
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: 'success', symbols: ['BTC', 'ETH'] });
+    assert.deepEqual(storedSymbols, ['BTC', 'ETH']);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/users/bootstrap writes profile to DB and returns DB-backed watchlist', async () => {
+  const now = new Date().toISOString();
+  const userRow = {
+    telegram_id: '12345',
+    username: 'amir',
+    first_name: 'Amir',
+    last_name: null,
+    lang: 'en',
+    channel_joined: false,
+    channel_verified_at: null,
+    created_at: now,
+    updated_at: now,
+  };
+  let bootstrapCallCount = 0;
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM users') && sql.includes('LIMIT 1')) {
+      if (bootstrapCallCount === 0) {
+        bootstrapCallCount += 1;
+        return { rows: [] };
+      }
+      return { rows: [userRow] };
+    }
+    if (sql.includes('ON CONFLICT (telegram_id) DO UPDATE')) {
+      assert.equal(params[0], '12345');
+      return { rows: [userRow] };
+    }
+    if (sql.includes('SELECT symbol') && sql.includes('FROM watchlist_items')) {
+      return { rows: [{ symbol: 'BTC' }, { symbol: 'ETH' }] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 12345, first_name: 'Amir', username: 'amir', language_code: 'en' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/users/bootstrap');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/users/bootstrap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', first_name: 'Spoofed', referrer_id: null }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.user.user_id, '12345');
+    assert.equal(body.user.lang, 'en');
+    assert.deepEqual(body.watchlist, ['BTC', 'ETH']);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/referrals/stats returns DB-backed referral stats', async () => {
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM referrals')) {
+      assert.equal(params[0], '12345');
+      return {
+        rows: [
+          { channel_verified: true, rewarded: true },
+          { channel_verified: false, rewarded: false },
+        ],
+      };
+    }
+    if (sql.includes('FROM token_balances')) {
+      assert.equal(params[0], '12345');
+      return { rows: [{ balance: 6 }] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/referrals/stats');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/referrals/stats?user_id=spoofed', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        REFERRAL_TOKENS_PER_INVITE: '3',
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      total: 2,
+      active: 1,
+      rewarded: 1,
+      tokens: 6,
+      reward_per_invite: 3,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/referrals/tokens returns DB-backed token history', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM token_balances')) {
+      assert.equal(params[0], '12345');
+      return { rows: [{ balance: 9 }] };
+    }
+    if (sql.includes('FROM token_transactions')) {
+      assert.equal(params[0], '12345');
+      return {
+        rows: [
+          { id: 1, amount: 3, tx_type: 'referral_reward', description: 'Invite reward', ref_id: '7', created_at: now },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/referrals/tokens');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/referrals/tokens?user_id=spoofed', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.balance, 9);
+    assert.equal(body.history.length, 1);
+    assert.equal(body.history[0].type, 'referral_reward');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/notify returns standardized success payload when Telegram send succeeds', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  const { stub, calls } = createFetchStub(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/notify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hello' }),
+    });
     const response = await worker.fetch(request, createEnv());
     assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: 'success', sent: true });
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/watchlist');
-    assert.deepEqual(JSON.parse(calls[0].body), {
-      user_id: '12345',
-      symbols: ['btc', 'eth'],
-    });
   } finally {
     global.fetch = originalFetch;
   }
@@ -471,6 +689,50 @@ test('POST /api/check-join/invalidate clears JOIN_CACHE for authenticated user',
       user_id: '12345',
     });
   } finally {
+  }
+});
+
+test('POST / accepts Telegram webhook payloads as a compatibility alias', async () => {
+  const worker = loadWorker();
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(
+      JSON.stringify(
+        calls.length === 0
+          ? { ok: true, result: { status: 'left' } }
+          : { ok: true, result: { message_id: 1 } },
+      ),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 1,
+        message: {
+          message_id: 10,
+          from: { id: 12345, first_name: 'Amir' },
+          chat: { id: 12345, type: 'private' },
+          date: 1710000000,
+          text: '/start',
+        },
+      }),
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.match(calls[0].url, /getChatMember/);
+    assert.equal(calls[1].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
+  } finally {
+    global.fetch = originalFetch;
   }
 });
 
@@ -764,19 +1026,15 @@ test('POST /api/assistant/chat rejects daily message limit without calling backe
   }
 });
 
-test('POST /api/assistant/chat rewrites user_id, proxies, and records usage in RATE_LIMITS KV', async () => {
+test('POST /api/assistant/chat returns 501 without calling backend or recording usage', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const rateLimits = createMemoryKv();
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', reply: 'ok', provider: 'test' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/assistant/chat');
+  };
 
   try {
     const request = new Request('https://worker.example/api/assistant/chat', {
@@ -795,14 +1053,14 @@ test('POST /api/assistant/chat rewrites user_id, proxies, and records usage in R
       }),
     );
 
-    assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/assistant/chat');
-    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', message: 'hi', history: [] });
-
+    assert.equal(response.status, 501);
+    assert.deepEqual(await response.json(), {
+      status: 'error',
+      message: 'assistant service is disabled on this worker',
+    });
     const today = new Date().toISOString().slice(0, 10);
-    assert.equal(await rateLimits.get('ai:cooldown:12345'), '1');
-    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), '1');
+    assert.equal(await rateLimits.get('ai:cooldown:12345'), null);
+    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), null);
   } finally {
     global.fetch = originalFetch;
   }
@@ -896,18 +1154,41 @@ test('POST /api/tickets validates auth before proxying', async () => {
   }
 });
 
-test('POST /api/tickets rewrites user_id and proxies to backend', async () => {
-  const worker = loadWorker();
+test('POST /api/tickets ignores spoofed user_id and stores ticket in DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('ON CONFLICT (telegram_id) DO NOTHING')) {
+      assert.equal(params[0], '12345');
+      return { rows: [] };
+    }
+    if (sql.includes('INSERT INTO tickets')) {
+      return {
+        rows: [
+          {
+            id: 'ticket-1',
+            user_id: '12345',
+            user_name: 'x',
+            title: 't',
+            body: 'b',
+            status: 'open',
+            created_at: now,
+          },
+        ],
+      };
+    }
+    if (sql.includes('FROM ticket_replies')) {
+      assert.equal(params[0], 'ticket-1');
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/tickets');
+  };
 
   try {
     const request = new Request('https://worker.example/api/tickets', {
@@ -919,28 +1200,46 @@ test('POST /api/tickets rewrites user_id and proxies to backend', async () => {
       body: JSON.stringify({ user_id: 'spoofed', user_name: 'x', title: 't', body: 'b' }),
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/tickets');
-    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', user_name: 'x', title: 't', body: 'b' });
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.ticket.user_id, '12345');
+    assert.equal(body.ticket.user_name, 'x');
+    assert.equal(body.ticket.id, 'ticket-1');
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('GET /api/tickets rewrites spoofed query user_id before proxying', async () => {
-  const worker = loadWorker();
+test('GET /api/tickets returns only authenticated user tickets from DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM tickets') && sql.includes('WHERE user_id = $1')) {
+      assert.equal(params[0], '12345');
+      return {
+        rows: [
+          { id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', created_at: now },
+        ],
+      };
+    }
+    if (sql.includes('FROM ticket_replies')) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', tickets: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/tickets');
+  };
 
   try {
     const request = new Request('https://worker.example/api/tickets?user_id=spoofed', {
@@ -950,10 +1249,18 @@ test('GET /api/tickets rewrites spoofed query user_id before proxying', async ()
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/tickets?user_id=12345');
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.tickets.length, 1);
+    assert.equal(body.tickets[0].id, 't1');
+    assert.equal(body.tickets[0].user_id, '12345');
   } finally {
     global.fetch = originalFetch;
   }
@@ -987,18 +1294,28 @@ test('GET /api/tickets/all rejects non-admin user before proxying', async () => 
   }
 });
 
-test('GET /api/tickets/all allows admin and rewrites admin_id before proxying', async () => {
-  const worker = loadWorker();
+test('GET /api/tickets/all allows admin and returns all tickets from DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM tickets') && !sql.includes('WHERE user_id = $1')) {
+      return {
+        rows: [
+          { id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', created_at: now },
+        ],
+      };
+    }
+    if (sql.includes('FROM ticket_replies')) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const adminUser = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', adminUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', tickets: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/tickets/all');
+  };
 
   try {
     const request = new Request('https://worker.example/api/tickets/all?admin_id=spoofed', {
@@ -1008,10 +1325,17 @@ test('GET /api/tickets/all allows admin and rewrites admin_id before proxying', 
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/tickets/all?admin_id=831704732');
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.tickets.length, 1);
+    assert.equal(body.tickets[0].id, 't1');
   } finally {
     global.fetch = originalFetch;
   }
@@ -1047,18 +1371,31 @@ test('POST /api/tickets/:id/reply rejects non-admin user before proxying', async
   }
 });
 
-test('DELETE /api/tickets/:id validates auth and rewrites spoofed query params before proxying', async () => {
-  const worker = loadWorker();
+test('DELETE /api/tickets/:id deletes ticket when user owns it in DB', async () => {
+  let deletedTicketId = null;
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('DELETE FROM tickets')) {
+      deletedTicketId = params[0];
+      return { rows: [] };
+    }
+    if (sql.includes('FROM tickets') && sql.includes('WHERE id = $1')) {
+      assert.equal(params[0], 't1');
+      return {
+        rows: [
+          { id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', created_at: now },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/tickets/:id delete');
+  };
 
   try {
     const request = new Request('https://worker.example/api/tickets/t1?user_id=spoofed&admin_id=spoofed', {
@@ -1068,10 +1405,15 @@ test('DELETE /api/tickets/:id validates auth and rewrites spoofed query params b
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/tickets/t1?user_id=12345&admin_id=12345');
+    assert.deepEqual(await response.json(), { status: 'success' });
+    assert.equal(deletedTicketId, 't1');
   } finally {
     global.fetch = originalFetch;
   }
@@ -1102,18 +1444,32 @@ test('POST /api/alerts validates auth before proxying', async () => {
   }
 });
 
-test('POST /api/alerts rewrites user_id and proxies to backend', async () => {
-  const worker = loadWorker();
+test('POST /api/alerts ignores spoofed user_id and stores alert in DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('ON CONFLICT (telegram_id) DO NOTHING')) {
+      assert.equal(params[0], '12345');
+      return { rows: [] };
+    }
+    if (sql.includes('FROM price_alerts') && sql.includes('LIMIT 1')) {
+      return { rows: [] };
+    }
+    if (sql.includes('INSERT INTO price_alerts')) {
+      return {
+        rows: [
+          { id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: now },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/alerts');
+  };
 
   try {
     const request = new Request('https://worker.example/api/alerts', {
@@ -1125,28 +1481,41 @@ test('POST /api/alerts rewrites user_id and proxies to backend', async () => {
       body: JSON.stringify({ user_id: 'spoofed', symbol: 'btc', price: 10, direction: 'above' }),
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/alerts');
-    assert.deepEqual(JSON.parse(calls[0].body), { user_id: '12345', symbol: 'btc', price: 10, direction: 'above' });
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.alert.user_id, '12345');
+    assert.equal(body.alert.symbol, 'BTC');
+    assert.equal(body.alert.id, 'a1');
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('GET /api/alerts rewrites spoofed query user_id before proxying', async () => {
-  const worker = loadWorker();
+test('GET /api/alerts returns stored alerts for authenticated user from DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM price_alerts') && sql.includes("status = 'active'")) {
+      assert.equal(params[0], '12345');
+      return {
+        rows: [{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: now }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success', alerts: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/alerts');
+  };
 
   try {
     const request = new Request('https://worker.example/api/alerts?user_id=spoofed', {
@@ -1156,27 +1525,45 @@ test('GET /api/alerts rewrites spoofed query user_id before proxying', async () 
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/alerts?user_id=12345');
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.alerts.length, 1);
+    assert.equal(body.alerts[0].id, 'a1');
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('DELETE /api/alerts/:id rewrites spoofed user_id before proxying', async () => {
-  const worker = loadWorker();
+test('DELETE /api/alerts/:id removes alert for authenticated user in DB', async () => {
+  let deletedAlertId = null;
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('DELETE FROM price_alerts')) {
+      deletedAlertId = params[0];
+      return { rows: [] };
+    }
+    if (sql.includes('FROM price_alerts') && sql.includes('WHERE id = $1')) {
+      assert.equal(params[0], 'a1');
+      return {
+        rows: [{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: now }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ status: 'success' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
   const originalFetch = global.fetch;
-  global.fetch = stub;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/alerts delete');
+  };
 
   try {
     const request = new Request('https://worker.example/api/alerts/a1?user_id=spoofed', {
@@ -1186,10 +1573,15 @@ test('DELETE /api/alerts/:id rewrites spoofed user_id before proxying', async ()
       },
     });
 
-    const response = await worker.fetch(request, createEnv());
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://backend.example/api/alerts/a1?user_id=12345');
+    assert.deepEqual(await response.json(), { status: 'success', deleted: true });
+    assert.equal(deletedAlertId, 'a1');
   } finally {
     global.fetch = originalFetch;
   }
