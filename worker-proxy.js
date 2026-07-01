@@ -297,7 +297,7 @@ const SESSION_PRESENCE_STATE_KEY = 'session:presence_state';
 const RATE_LIMIT_COOLDOWN_PREFIX = 'ai:cooldown:';
 const RATE_LIMIT_MSG_PREFIX = 'ai:msgs:';
 const RATE_LIMIT_IMG_PREFIX = 'ai:imgs:';
-const joinDbPools = new Map();
+const dbPools = new Map();
 
 function resolveDatabaseUrl(env) {
   return String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
@@ -564,14 +564,14 @@ function isAdminTelegramId(env, userId) {
   return String(userId) === String(env.ADMIN_TELEGRAM_ID || '831704732');
 }
 
-function getJoinDbPool(env) {
+function getDbPool(env) {
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) {
     return null;
   }
 
-  if (!joinDbPools.has(databaseUrl)) {
-    joinDbPools.set(
+  if (!dbPools.has(databaseUrl)) {
+    dbPools.set(
       databaseUrl,
       new Pool({
         connectionString: databaseUrl,
@@ -580,11 +580,11 @@ function getJoinDbPool(env) {
     );
   }
 
-  return joinDbPools.get(databaseUrl);
+  return dbPools.get(databaseUrl);
 }
 
 async function getDbUserJoinState(env, userId) {
-  const pool = getJoinDbPool(env);
+  const pool = getDbPool(env);
   if (!pool) {
     return null;
   }
@@ -609,7 +609,7 @@ async function getDbUserJoinState(env, userId) {
 }
 
 async function persistDbUserJoinState(env, userId, joined) {
-  const pool = getJoinDbPool(env);
+  const pool = getDbPool(env);
   if (!pool) {
     return;
   }
@@ -637,6 +637,330 @@ async function persistDbUserJoinState(env, userId, joined) {
   } catch (error) {
     console.warn('JOIN DB write failed:', error);
   }
+}
+
+function getReferralRewardPerInvite(env) {
+  return Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0);
+}
+
+function normalizeLanguage(value, fallbackValue = 'fa') {
+  const normalized = normalizeOptionalString(value);
+  if (normalized === 'fa' || normalized === 'en') {
+    return normalized;
+  }
+  return fallbackValue === 'en' ? 'en' : 'fa';
+}
+
+function normalizeUserRow(row, watchlist = []) {
+  return {
+    user_id: String(row.telegram_id),
+    username: normalizeOptionalString(row.username),
+    first_name: normalizeOptionalString(row.first_name),
+    last_name: normalizeOptionalString(row.last_name),
+    lang: normalizeLanguage(row.lang),
+    channel_joined: Boolean(row.channel_joined),
+    channel_verified_at: row.channel_verified_at ? new Date(row.channel_verified_at).toISOString() : null,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    watchlist,
+  };
+}
+
+async function queryDb(env, sql, params = []) {
+  const pool = getDbPool(env);
+  if (!pool) {
+    throw new Error('Database not configured');
+  }
+  return pool.query(sql, params);
+}
+
+async function ensureUserRow(env, userId) {
+  await queryDb(
+    env,
+    `
+      INSERT INTO users (telegram_id, lang, channel_joined, created_at, updated_at)
+      VALUES ($1, 'fa', FALSE, NOW(), NOW())
+      ON CONFLICT (telegram_id) DO NOTHING
+    `,
+    [String(userId)],
+  );
+}
+
+async function getUserRow(env, userId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT
+        telegram_id,
+        username,
+        first_name,
+        last_name,
+        lang,
+        channel_joined,
+        channel_verified_at,
+        created_at,
+        updated_at
+      FROM users
+      WHERE telegram_id = $1
+      LIMIT 1
+    `,
+    [String(userId)],
+  );
+  return result.rows[0] || null;
+}
+
+async function getWatchlistSymbolsFromDb(env, userId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT symbol
+      FROM watchlist_items
+      WHERE user_id = $1
+      ORDER BY position ASC, id ASC
+    `,
+    [String(userId)],
+  );
+  return result.rows.map((row) => String(row.symbol).toUpperCase());
+}
+
+async function bootstrapUserInDb(env, userId, payload) {
+  const existingUser = await getUserRow(env, userId);
+  const fallbackLang = existingUser?.lang || 'fa';
+  const lang = normalizeLanguage(payload.lang, fallbackLang);
+  const result = await queryDb(
+    env,
+    `
+      INSERT INTO users (
+        telegram_id,
+        username,
+        first_name,
+        last_name,
+        lang,
+        channel_joined,
+        channel_verified_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, COALESCE($6, FALSE), $7, NOW(), NOW())
+      ON CONFLICT (telegram_id) DO UPDATE
+      SET
+        username = COALESCE(EXCLUDED.username, users.username),
+        first_name = COALESCE(EXCLUDED.first_name, users.first_name),
+        last_name = COALESCE(EXCLUDED.last_name, users.last_name),
+        lang = COALESCE(EXCLUDED.lang, users.lang),
+        updated_at = NOW()
+      RETURNING
+        telegram_id,
+        username,
+        first_name,
+        last_name,
+        lang,
+        channel_joined,
+        channel_verified_at,
+        created_at,
+        updated_at
+    `,
+    [
+      String(userId),
+      normalizeOptionalString(payload.username),
+      normalizeOptionalString(payload.first_name),
+      normalizeOptionalString(payload.last_name),
+      lang,
+      existingUser ? Boolean(existingUser.channel_joined) : false,
+      existingUser?.channel_verified_at ? new Date(existingUser.channel_verified_at).toISOString() : null,
+    ],
+  );
+  return result.rows[0] || null;
+}
+
+async function updateUserSettingsInDb(env, userId, payload) {
+  const lang = normalizeLanguage(payload.lang);
+  const result = await queryDb(
+    env,
+    `
+      UPDATE users
+      SET
+        lang = $2,
+        updated_at = NOW()
+      WHERE telegram_id = $1
+      RETURNING
+        telegram_id,
+        username,
+        first_name,
+        last_name,
+        lang,
+        channel_joined,
+        channel_verified_at,
+        created_at,
+        updated_at
+    `,
+    [String(userId), lang],
+  );
+  return result.rows[0] || null;
+}
+
+async function replaceWatchlistInDb(env, userId, symbols) {
+  await ensureUserRow(env, userId);
+  await queryDb(env, 'DELETE FROM watchlist_items WHERE user_id = $1', [String(userId)]);
+  for (let index = 0; index < symbols.length; index += 1) {
+    await queryDb(
+      env,
+      `
+        INSERT INTO watchlist_items (user_id, symbol, position, created_at)
+        VALUES ($1, $2, $3, NOW())
+      `,
+      [String(userId), symbols[index], index],
+    );
+  }
+  await queryDb(env, 'UPDATE users SET updated_at = NOW() WHERE telegram_id = $1', [String(userId)]);
+  return getWatchlistSymbolsFromDb(env, userId);
+}
+
+async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined) {
+  const normalizedReferrerId = normalizeOptionalString(referrerId);
+  if (!normalizedReferrerId || normalizedReferrerId === String(inviteeId)) {
+    return null;
+  }
+
+  const inviterResult = await queryDb(
+    env,
+    'SELECT telegram_id FROM users WHERE telegram_id = $1 LIMIT 1',
+    [normalizedReferrerId],
+  );
+  if (!inviterResult.rows[0]) {
+    return null;
+  }
+
+  const existingResult = await queryDb(
+    env,
+    `
+      SELECT id, inviter_id, channel_verified, rewarded
+      FROM referrals
+      WHERE invitee_id = $1
+      LIMIT 1
+    `,
+    [String(inviteeId)],
+  );
+  const existing = existingResult.rows[0] || null;
+  const rewardAmount = getReferralRewardPerInvite(env);
+
+  if (existing) {
+    if (channelJoined && !existing.channel_verified) {
+      await queryDb(
+        env,
+        'UPDATE referrals SET channel_verified = TRUE WHERE id = $1',
+        [existing.id],
+      );
+      if (!existing.rewarded && rewardAmount > 0) {
+        await creditReferralTokens(env, String(existing.inviter_id), rewardAmount, String(existing.id), inviteeId);
+        await queryDb(
+          env,
+          'UPDATE referrals SET rewarded = TRUE WHERE id = $1',
+          [existing.id],
+        );
+      }
+    }
+    return { referral_id: existing.id, already_exists: true };
+  }
+
+  const insertResult = await queryDb(
+    env,
+    `
+      INSERT INTO referrals (inviter_id, invitee_id, channel_verified, rewarded, created_at)
+      VALUES ($1, $2, $3, FALSE, NOW())
+      RETURNING id, rewarded
+    `,
+    [normalizedReferrerId, String(inviteeId), Boolean(channelJoined)],
+  );
+  const createdReferral = insertResult.rows[0] || null;
+  if (!createdReferral) {
+    return null;
+  }
+
+  if (channelJoined && rewardAmount > 0) {
+    await creditReferralTokens(env, normalizedReferrerId, rewardAmount, String(createdReferral.id), inviteeId);
+    await queryDb(env, 'UPDATE referrals SET rewarded = TRUE WHERE id = $1', [createdReferral.id]);
+  }
+
+  return { referral_id: createdReferral.id, rewarded: Boolean(channelJoined && rewardAmount > 0) };
+}
+
+async function creditReferralTokens(env, userId, amount, refId, inviteeId) {
+  await queryDb(
+    env,
+    `
+      INSERT INTO token_balances (user_id, balance, updated_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (user_id) DO UPDATE
+      SET
+        balance = token_balances.balance + EXCLUDED.balance,
+        updated_at = NOW()
+    `,
+    [String(userId), Number(amount)],
+  );
+  await queryDb(
+    env,
+    `
+      INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
+      VALUES ($1, $2, 'referral_reward', $3, $4, NOW())
+    `,
+    [String(userId), Number(amount), `Invite reward for user ${String(inviteeId)}`, String(refId)],
+  );
+}
+
+async function getReferralStatsFromDb(env, userId) {
+  const referralsResult = await queryDb(
+    env,
+    `
+      SELECT channel_verified, rewarded
+      FROM referrals
+      WHERE inviter_id = $1
+    `,
+    [String(userId)],
+  );
+  const balanceResult = await queryDb(
+    env,
+    'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
+    [String(userId)],
+  );
+  const referrals = referralsResult.rows;
+  return {
+    total: referrals.length,
+    active: referrals.filter((row) => Boolean(row.channel_verified)).length,
+    rewarded: referrals.filter((row) => Boolean(row.rewarded)).length,
+    tokens: Number(balanceResult.rows[0]?.balance || 0),
+    reward_per_invite: getReferralRewardPerInvite(env),
+  };
+}
+
+async function getReferralTokensFromDb(env, userId) {
+  const balanceResult = await queryDb(
+    env,
+    'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
+    [String(userId)],
+  );
+  const historyResult = await queryDb(
+    env,
+    `
+      SELECT id, amount, tx_type, description, ref_id, created_at
+      FROM token_transactions
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 50
+    `,
+    [String(userId)],
+  );
+  return {
+    balance: Number(balanceResult.rows[0]?.balance || 0),
+    history: historyResult.rows.map((row) => ({
+      id: row.id,
+      amount: Number(row.amount),
+      type: row.tx_type,
+      description: row.description,
+      ref_id: row.ref_id,
+      created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+    })),
+  };
 }
 
 async function getChatMemberDebugPayload(userId, env) {
@@ -1993,6 +2317,16 @@ async function handleUsersBootstrap(request, env) {
     return authState.error;
   }
 
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'DB_ERROR',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
   const originalBody = await request.text();
   let payload;
   try {
@@ -2012,29 +2346,37 @@ async function handleUsersBootstrap(request, env) {
   }
   const userId = String(authState.user.id);
   payload.user_id = userId;
-  const ttlSeconds = getUserDataTtl(env);
-  const existingUserState = await readSessionJson(env, getUserStateKey(userId), {});
-  const membership = await resolveChannelMembership(env, userId);
-  const lang = normalizeOptionalString(payload.lang) || normalizeOptionalString(existingUserState.lang) || 'fa';
-  const userState = {
-    ...existingUserState,
-    user_id: userId,
-    telegram_id: userId,
-    username: normalizeOptionalString(payload.username) || normalizeOptionalString(existingUserState.username) || null,
-    first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(existingUserState.first_name) || null,
-    last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(existingUserState.last_name) || null,
-    lang,
-    referrer_id: normalizeOptionalString(payload.referrer_id) || normalizeOptionalString(existingUserState.referrer_id) || null,
-    channel_joined: Boolean(membership?.joined),
-    updated_at: new Date().toISOString(),
-  };
-  const watchlist = await readSessionJson(env, getWatchlistKey(userId), []);
-  await writeSessionJson(env, getUserStateKey(userId), userState, ttlSeconds);
-  return jsonResponse({
-    status: 'success',
-    user: { lang: userState.lang, channel_joined: userState.channel_joined },
-    watchlist: Array.isArray(watchlist) ? watchlist : [],
-  });
+  try {
+    const userRow = await bootstrapUserInDb(env, userId, {
+      username: normalizeOptionalString(payload.username) || normalizeOptionalString(authState.user.username),
+      first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(authState.user.first_name),
+      last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(authState.user.last_name),
+      lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(authState.user.language_code),
+    });
+    await processReferralOnBootstrap(
+      env,
+      userId,
+      normalizeOptionalString(payload.referrer_id),
+      Boolean(userRow?.channel_joined),
+    );
+    const freshUserRow = await getUserRow(env, userId);
+    const watchlist = await getWatchlistSymbolsFromDb(env, userId);
+    return jsonResponse({
+      status: 'success',
+      user: normalizeUserRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
+      watchlist,
+    });
+  } catch (error) {
+    console.warn('bootstrap user failed:', error);
+    return jsonResponse(
+      {
+        status: 'DB_ERROR',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleUsersMe(request, env) {
@@ -2042,21 +2384,44 @@ async function handleUsersMe(request, env) {
   if (authState.error) {
     return authState.error;
   }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
   const userId = String(authState.user.id);
-  const state = await readSessionJson(env, getUserStateKey(userId), {});
-  const membership = await resolveChannelMembership(env, userId);
-  return jsonResponse({
-    status: 'success',
-    user: {
-      id: userId,
-      telegram_id: userId,
-      username: normalizeOptionalString(state.username) || null,
-      first_name: normalizeOptionalString(state.first_name) || null,
-      last_name: normalizeOptionalString(state.last_name) || null,
-      lang: normalizeOptionalString(state.lang) || 'fa',
-      channel_joined: Boolean(membership?.joined),
-    },
-  });
+  try {
+    const userRow = await getUserRow(env, userId);
+    if (!userRow) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'User not found',
+        },
+        { status: 404 },
+      );
+    }
+    const watchlist = await getWatchlistSymbolsFromDb(env, userId);
+    return jsonResponse({
+      status: 'success',
+      user: normalizeUserRow(userRow, watchlist),
+      watchlist,
+    });
+  } catch (error) {
+    console.warn('get current user failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleUsersMeSettings(request, env) {
@@ -2065,6 +2430,16 @@ async function handleUsersMeSettings(request, env) {
     return authState.error;
   }
 
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
   const originalBody = await request.text();
   let payload;
   try {
@@ -2085,18 +2460,29 @@ async function handleUsersMeSettings(request, env) {
 
   const userId = String(authState.user.id);
   payload.user_id = userId;
-  const ttlSeconds = getUserDataTtl(env);
-  const existingUserState = await readSessionJson(env, getUserStateKey(userId), {});
-  const lang = normalizeOptionalString(payload.lang) || normalizeOptionalString(existingUserState.lang) || 'fa';
-  const nextState = {
-    ...existingUserState,
-    user_id: userId,
-    telegram_id: userId,
-    lang,
-    updated_at: new Date().toISOString(),
-  };
-  await writeSessionJson(env, getUserStateKey(userId), nextState, ttlSeconds);
-  return jsonResponse({ status: 'success', user: { lang } });
+  try {
+    const userRow = await updateUserSettingsInDb(env, userId, payload);
+    if (!userRow) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'User not found',
+        },
+        { status: 404 },
+      );
+    }
+    return jsonResponse({ status: 'success', user: normalizeUserRow(userRow) });
+  } catch (error) {
+    console.warn('update user settings failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleWatchlistGet(request, env) {
@@ -2104,16 +2490,46 @@ async function handleWatchlistGet(request, env) {
   if (authState.error) {
     return authState.error;
   }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
   const userId = String(authState.user.id);
-  const symbols = await readSessionJson(env, getWatchlistKey(userId), []);
-  const normalized = Array.isArray(symbols) ? symbols : [];
-  return jsonResponse({ status: 'success', symbols: normalized, watchlist: normalized });
+  try {
+    const symbols = await getWatchlistSymbolsFromDb(env, userId);
+    return jsonResponse({ status: 'success', symbols, watchlist: symbols });
+  } catch (error) {
+    console.warn('get watchlist failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleWatchlistPut(request, env) {
   const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
     return authState.error;
+  }
+
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
 
   const originalBody = await request.text();
@@ -2135,10 +2551,23 @@ async function handleWatchlistPut(request, env) {
   }
 
   payload.user_id = String(authState.user.id);
-  const symbols = Array.isArray(payload.symbols) ? payload.symbols.map((value) => String(value).toUpperCase()).filter(Boolean).slice(0, 50) : [];
-  const ttlSeconds = getUserDataTtl(env);
-  await writeSessionJson(env, getWatchlistKey(payload.user_id), symbols, ttlSeconds);
-  return jsonResponse({ status: 'success', symbols });
+  const symbols = Array.isArray(payload.symbols)
+    ? [...new Set(payload.symbols.map((value) => String(value).toUpperCase().trim()).filter(Boolean))].slice(0, 7)
+    : [];
+  try {
+    const storedSymbols = await replaceWatchlistInDb(env, payload.user_id, symbols);
+    return jsonResponse({ status: 'success', symbols: storedSymbols });
+  } catch (error) {
+    console.warn('update watchlist failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleReferralsStats(request, env) {
@@ -2146,7 +2575,47 @@ async function handleReferralsStats(request, env) {
   if (authState.error) {
     return authState.error;
   }
-  return jsonResponse({ total: 0, active: 0, tokens: 0 });
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse({ status: 'success', total: 0, active: 0, rewarded: 0, tokens: 0 });
+  }
+  try {
+    const stats = await getReferralStatsFromDb(env, authState.user.id);
+    return jsonResponse({ status: 'success', ...stats });
+  } catch (error) {
+    console.warn('get referral stats failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
+}
+
+async function handleReferralTokens(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse({ status: 'success', balance: 0, history: [] });
+  }
+  try {
+    const tokenState = await getReferralTokensFromDb(env, authState.user.id);
+    return jsonResponse({ status: 'success', ...tokenState });
+  } catch (error) {
+    console.warn('get referral tokens failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleNotify(request, env) {
@@ -2182,7 +2651,7 @@ async function handleNotify(request, env) {
   }
 
   if (!isBotConfigured(env)) {
-    return jsonResponse({ sent: false, reason: 'bot_not_configured' }, { status: 200 });
+    return jsonResponse({ status: 'skipped', sent: false, reason: 'bot_not_configured' }, { status: 200 });
   }
 
   try {
@@ -2191,9 +2660,9 @@ async function handleNotify(request, env) {
       text: message,
       disable_web_page_preview: true,
     });
-    return jsonResponse({ sent: true });
+    return jsonResponse({ status: 'success', sent: true });
   } catch {
-    return jsonResponse({ sent: false }, { status: 200 });
+    return jsonResponse({ status: 'skipped', sent: false }, { status: 200 });
   }
 }
 
@@ -2471,6 +2940,10 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/stats') {
         return handleReferralsStats(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/referrals/tokens') {
+        return handleReferralTokens(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/check-join') {
