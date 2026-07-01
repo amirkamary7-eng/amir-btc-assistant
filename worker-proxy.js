@@ -963,6 +963,243 @@ async function getReferralTokensFromDb(env, userId) {
   };
 }
 
+function serializeTicketReplyRow(row) {
+  const senderType = String(row.sender_type || 'user').trim().toLowerCase();
+  return {
+    message: row.message,
+    from: senderType === 'admin' ? 'admin' : 'user',
+    at: row.created_at ? new Date(row.created_at).toISOString() : null,
+  };
+}
+
+function serializeTicketRow(row, replies = []) {
+  return {
+    id: String(row.id),
+    user_id: String(row.user_id),
+    user_name: row.user_name,
+    title: row.title,
+    body: row.body,
+    status: row.status,
+    replies,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+  };
+}
+
+function serializeAlertRow(row) {
+  return {
+    id: String(row.id),
+    user_id: String(row.user_id),
+    symbol: String(row.symbol).toUpperCase(),
+    price: Number(row.price),
+    direction: row.direction,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+  };
+}
+
+async function getTicketRepliesFromDb(env, ticketId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT sender_type, message, created_at
+      FROM ticket_replies
+      WHERE ticket_id = $1
+      ORDER BY created_at ASC, id ASC
+    `,
+    [String(ticketId)],
+  );
+  return result.rows.map((row) => serializeTicketReplyRow(row));
+}
+
+async function hydrateTicketRow(env, row) {
+  const replies = await getTicketRepliesFromDb(env, row.id);
+  return serializeTicketRow(row, replies);
+}
+
+async function createTicketInDb(env, user, payload) {
+  const userId = String(user.id);
+  const displayName =
+    normalizeOptionalString(user.username)
+    || normalizeOptionalString(user.first_name)
+    || normalizeOptionalString(payload.user_name)
+    || userId;
+  await ensureUserRow(env, userId);
+  const result = await queryDb(
+    env,
+    `
+      INSERT INTO tickets (id, user_id, user_name, title, body, status, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, 'open', NOW(), NOW())
+      RETURNING id, user_id, user_name, title, body, status, created_at
+    `,
+    [
+      String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16),
+      userId,
+      displayName,
+      normalizeOptionalString(payload.title) || '',
+      normalizeOptionalString(payload.body) || '',
+    ],
+  );
+  return hydrateTicketRow(env, result.rows[0]);
+}
+
+async function listTicketsFromDb(env, userId = null) {
+  const result = userId
+    ? await queryDb(
+      env,
+      `
+        SELECT id, user_id, user_name, title, body, status, created_at
+        FROM tickets
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+      `,
+      [String(userId)],
+    )
+    : await queryDb(
+      env,
+      `
+        SELECT id, user_id, user_name, title, body, status, created_at
+        FROM tickets
+        ORDER BY created_at DESC
+      `,
+    );
+  const tickets = [];
+  for (const row of result.rows) {
+    tickets.push(await hydrateTicketRow(env, row));
+  }
+  return tickets;
+}
+
+async function getTicketRowById(env, ticketId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT id, user_id, user_name, title, body, status, created_at
+      FROM tickets
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [String(ticketId)],
+  );
+  return result.rows[0] || null;
+}
+
+async function replyToTicketInDb(env, ticketId, adminId, message) {
+  const ticketRow = await getTicketRowById(env, ticketId);
+  if (!ticketRow) {
+    return null;
+  }
+  await queryDb(
+    env,
+    `
+      INSERT INTO ticket_replies (ticket_id, sender_type, sender_id, message, created_at)
+      VALUES ($1, 'admin', $2, $3, NOW())
+    `,
+    [String(ticketId), String(adminId), message],
+  );
+  await queryDb(
+    env,
+    `
+      UPDATE tickets
+      SET status = 'answered', updated_at = NOW()
+      WHERE id = $1
+    `,
+    [String(ticketId)],
+  );
+  const updatedTicketRow = await getTicketRowById(env, ticketId);
+  return hydrateTicketRow(env, updatedTicketRow || ticketRow);
+}
+
+async function deleteTicketInDb(env, ticketId) {
+  await queryDb(env, 'DELETE FROM tickets WHERE id = $1', [String(ticketId)]);
+}
+
+async function createOrReactivateAlertInDb(env, userId, payload) {
+  const normalizedUserId = String(userId);
+  const symbol = (normalizeOptionalString(payload.symbol) || '').toUpperCase();
+  const direction = (normalizeOptionalString(payload.direction) || 'above').toLowerCase();
+  await ensureUserRow(env, normalizedUserId);
+  const existingResult = await queryDb(
+    env,
+    `
+      SELECT id, user_id, symbol, price, direction, created_at
+      FROM price_alerts
+      WHERE user_id = $1 AND symbol = $2 AND price = $3 AND direction = $4
+      LIMIT 1
+    `,
+    [normalizedUserId, symbol, Number(payload.price), direction],
+  );
+  const existingRow = existingResult.rows[0] || null;
+  if (existingRow) {
+    await queryDb(
+      env,
+      `
+        UPDATE price_alerts
+        SET status = 'active', triggered_at = NULL, created_at = NOW()
+        WHERE id = $1
+      `,
+      [String(existingRow.id)],
+    );
+    const refreshedResult = await queryDb(
+      env,
+      `
+        SELECT id, user_id, symbol, price, direction, created_at
+        FROM price_alerts
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [String(existingRow.id)],
+    );
+    return serializeAlertRow(refreshedResult.rows[0] || existingRow);
+  }
+  const insertResult = await queryDb(
+    env,
+    `
+      INSERT INTO price_alerts (id, user_id, symbol, price, direction, status, created_at)
+      VALUES ($1, $2, $3, $4, $5, 'active', NOW())
+      RETURNING id, user_id, symbol, price, direction, created_at
+    `,
+    [
+      String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16),
+      normalizedUserId,
+      symbol,
+      Number(payload.price),
+      direction,
+    ],
+  );
+  return serializeAlertRow(insertResult.rows[0]);
+}
+
+async function listAlertsFromDb(env, userId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT id, user_id, symbol, price, direction, created_at
+      FROM price_alerts
+      WHERE user_id = $1 AND status = 'active'
+      ORDER BY created_at DESC
+    `,
+    [String(userId)],
+  );
+  return result.rows.map((row) => serializeAlertRow(row));
+}
+
+async function getAlertRowById(env, alertId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT id, user_id, symbol, price, direction, created_at
+      FROM price_alerts
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [String(alertId)],
+  );
+  return result.rows[0] || null;
+}
+
+async function deleteAlertInDb(env, alertId) {
+  await queryDb(env, 'DELETE FROM price_alerts WHERE id = $1', [String(alertId)]);
+}
+
 async function getChatMemberDebugPayload(userId, env) {
   const uid = String(userId);
   const requiredChannel = resolveRequiredChannel(env);
@@ -2077,36 +2314,20 @@ function getWatchlistKey(userId) {
   return `watchlist:${userId}`;
 }
 
-function getAlertsKey(userId) {
-  return `alerts:${userId}`;
-}
-
-const TICKETS_ALL_KEY = 'tickets:all';
-
-function getUserDataTtl(env) {
-  return Math.max(getNumericEnv(env, 'USER_DATA_TTL', 60 * 60 * 24 * 30), 60 * 10);
-}
-
-async function readSessionJson(env, key, fallbackValue) {
-  const raw = await readSessionCache(env, key);
-  if (!raw) {
-    return fallbackValue;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return fallbackValue;
-  }
-}
-
-async function writeSessionJson(env, key, value, ttlSeconds) {
-  await writeSessionCache(env, key, JSON.stringify(value), ttlSeconds);
-}
-
 async function handleTicketsCreate(request, env) {
   const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
     return authState.error;
+  }
+
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
 
   const originalBody = await request.text();
@@ -2128,23 +2349,20 @@ async function handleTicketsCreate(request, env) {
   }
 
   payload.user_id = String(authState.user.id);
-  const ttlSeconds = getUserDataTtl(env);
-  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
-  const ticketId = String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16);
-  const now = new Date().toISOString();
-  const ticket = {
-    id: ticketId,
-    user_id: payload.user_id,
-    user_name: normalizeOptionalString(payload.user_name) || normalizeOptionalString(payload.username) || normalizeOptionalString(authState.user.first_name) || 'User',
-    title: normalizeOptionalString(payload.title) || '',
-    body: normalizeOptionalString(payload.body) || '',
-    status: 'open',
-    replies: [],
-    created_at: now,
-  };
-  allTickets.push(ticket);
-  await writeSessionJson(env, TICKETS_ALL_KEY, allTickets, ttlSeconds);
-  return jsonResponse({ status: 'success', ticket });
+  try {
+    const ticket = await createTicketInDb(env, authState.user, payload);
+    return jsonResponse({ status: 'success', ticket });
+  } catch (error) {
+    console.warn('create ticket failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleTicketsList(request, env) {
@@ -2152,10 +2370,30 @@ async function handleTicketsList(request, env) {
   if (authState.error) {
     return authState.error;
   }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
   const userId = String(authState.user.id);
-  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
-  const tickets = allTickets.filter((ticket) => String(ticket.user_id) === userId);
-  return jsonResponse({ status: 'success', tickets });
+  try {
+    const tickets = await listTicketsFromDb(env, userId);
+    return jsonResponse({ status: 'success', tickets });
+  } catch (error) {
+    console.warn('list tickets failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleTicketsAll(request, env) {
@@ -2167,8 +2405,29 @@ async function handleTicketsAll(request, env) {
   if (!isAdminTelegramId(env, authState.user.id)) {
     return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
   }
-  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
-  return jsonResponse({ status: 'success', tickets: allTickets });
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+  try {
+    const tickets = await listTicketsFromDb(env);
+    return jsonResponse({ status: 'success', tickets });
+  } catch (error) {
+    console.warn('list all tickets failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleTicketReply(request, env, ticketId) {
@@ -2179,6 +2438,15 @@ async function handleTicketReply(request, env, ticketId) {
 
   if (!isAdminTelegramId(env, authState.user.id)) {
     return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
   const originalBody = await request.text();
   let payload;
@@ -2205,20 +2473,23 @@ async function handleTicketReply(request, env, ticketId) {
       { status: 422 },
     );
   }
-
-  const ttlSeconds = getUserDataTtl(env);
-  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
-  const idx = allTickets.findIndex((ticket) => String(ticket.id) === String(ticketId));
-  if (idx === -1) {
-    return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
+  try {
+    const ticket = await replyToTicketInDb(env, ticketId, authState.user.id, message);
+    if (!ticket) {
+      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
+    }
+    return jsonResponse({ status: 'success', ticket });
+  } catch (error) {
+    console.warn('reply ticket failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
   }
-
-  const ticket = allTickets[idx];
-  const replies = Array.isArray(ticket.replies) ? ticket.replies.slice() : [];
-  replies.push({ from: 'admin', message, at: new Date().toISOString() });
-  allTickets[idx] = { ...ticket, replies, status: 'answered' };
-  await writeSessionJson(env, TICKETS_ALL_KEY, allTickets, ttlSeconds);
-  return jsonResponse({ status: 'success' });
 }
 
 async function handleTicketDelete(request, env, ticketId) {
@@ -2228,27 +2499,52 @@ async function handleTicketDelete(request, env, ticketId) {
   }
   const userId = String(authState.user.id);
   const isAdmin = isAdminTelegramId(env, authState.user.id);
-  const ttlSeconds = getUserDataTtl(env);
-  const allTickets = await readSessionJson(env, TICKETS_ALL_KEY, []);
-  const idx = allTickets.findIndex((ticket) => String(ticket.id) === String(ticketId));
-  if (idx === -1) {
-    return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
-
-  const ticket = allTickets[idx];
-  if (!isAdmin && String(ticket.user_id) !== userId) {
-    return jsonResponse({ detail: 'Forbidden' }, { status: 403 });
+  try {
+    const ticket = await getTicketRowById(env, ticketId);
+    if (!ticket) {
+      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
+    }
+    if (!isAdmin && String(ticket.user_id) !== userId) {
+      return jsonResponse({ detail: 'Forbidden' }, { status: 403 });
+    }
+    await deleteTicketInDb(env, ticketId);
+    return jsonResponse({ status: 'success' });
+  } catch (error) {
+    console.warn('delete ticket failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
   }
-
-  allTickets.splice(idx, 1);
-  await writeSessionJson(env, TICKETS_ALL_KEY, allTickets, ttlSeconds);
-  return jsonResponse({ status: 'success' });
 }
 
 async function handleAlertsCreate(request, env) {
   const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
     return authState.error;
+  }
+
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
 
   const originalBody = await request.text();
@@ -2270,22 +2566,20 @@ async function handleAlertsCreate(request, env) {
   }
 
   payload.user_id = String(authState.user.id);
-  const ttlSeconds = getUserDataTtl(env);
-  const userId = payload.user_id;
-  const alerts = await readSessionJson(env, getAlertsKey(userId), []);
-  const alertId = String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16);
-  const now = new Date().toISOString();
-  const alert = {
-    id: alertId,
-    user_id: userId,
-    symbol: normalizeOptionalString(payload.symbol) || '',
-    price: Number(payload.price),
-    direction: normalizeOptionalString(payload.direction) || 'above',
-    created_at: now,
-  };
-  alerts.push(alert);
-  await writeSessionJson(env, getAlertsKey(userId), alerts, ttlSeconds);
-  return jsonResponse({ status: 'success', alert });
+  try {
+    const alert = await createOrReactivateAlertInDb(env, payload.user_id, payload);
+    return jsonResponse({ status: 'success', alert });
+  } catch (error) {
+    console.warn('create alert failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleAlertsList(request, env) {
@@ -2293,9 +2587,30 @@ async function handleAlertsList(request, env) {
   if (authState.error) {
     return authState.error;
   }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
   const userId = String(authState.user.id);
-  const alerts = await readSessionJson(env, getAlertsKey(userId), []);
-  return jsonResponse({ status: 'success', alerts });
+  try {
+    const alerts = await listAlertsFromDb(env, userId);
+    return jsonResponse({ status: 'success', alerts });
+  } catch (error) {
+    console.warn('list alerts failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleAlertDelete(request, env, alertId) {
@@ -2303,12 +2618,37 @@ async function handleAlertDelete(request, env, alertId) {
   if (authState.error) {
     return authState.error;
   }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
   const userId = String(authState.user.id);
-  const ttlSeconds = getUserDataTtl(env);
-  const alerts = await readSessionJson(env, getAlertsKey(userId), []);
-  const nextAlerts = alerts.filter((alert) => String(alert.id) !== String(alertId));
-  await writeSessionJson(env, getAlertsKey(userId), nextAlerts, ttlSeconds);
-  return jsonResponse({ status: 'success', deleted: true });
+  try {
+    const alert = await getAlertRowById(env, alertId);
+    if (!alert) {
+      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 });
+    }
+    if (String(alert.user_id) !== userId) {
+      return jsonResponse({ status: 'error', message: 'Forbidden' }, { status: 403 });
+    }
+    await deleteAlertInDb(env, alertId);
+    return jsonResponse({ status: 'success', deleted: true });
+  } catch (error) {
+    console.warn('delete alert failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleUsersBootstrap(request, env) {

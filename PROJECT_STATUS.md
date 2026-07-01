@@ -24,7 +24,7 @@
 - Phase 4 / انتقال APIها: partial
 - Phase 5 / انتقال webhook ربات: partial
 - Phase 6 / انتقال cache: partial
-- Phase 7 / انتقال stateهای فایل‌محور: not started
+- Phase 7 / انتقال stateهای فایل‌محور: done
 - Phase 8 / حذف کامل legacy backend dependency: partial
 
 ## پوشش API روی Worker
@@ -51,6 +51,14 @@
 - `GET /api/referrals/stats`
 - `GET /api/referrals/tokens`
 - `POST /api/notify`
+- `POST /api/tickets`
+- `GET /api/tickets`
+- `GET /api/tickets/all`
+- `POST /api/tickets/:id/reply`
+- `DELETE /api/tickets/:id`
+- `POST /api/alerts`
+- `GET /api/alerts`
+- `DELETE /api/alerts/:id`
 
 ### Worker-native اما ناقص
 
@@ -60,8 +68,6 @@
   - rate limit روی Worker اعمال می‌شود، اما اجرای سرویس عملاً با `501` غیرفعال است.
 - `POST /telegram`
   - `/start` روی Worker هندل می‌شود، اما runtime قدیمی bot در backend هنوز وجود دارد.
-- tickets/alerts
-  - endpointهای Worker فعال‌اند، اما persistence آن‌ها هنوز روی `SESSION_CACHE` است و با backend هم‌خوان نیست.
 
 ### هنوز کامل نشده
 
@@ -75,13 +81,11 @@
 - Cache:
   - Worker: `JOIN_CACHE`, `APP_CACHE`, `RATE_LIMITS`, `SESSION_CACHE`
   - Backend: Redis یا in-memory fallback هنوز فعال است
-- state ناسازگار باقی‌مانده:
-  - Worker `tickets/alerts`: مبتنی بر `SESSION_CACHE`
-  - Backend `tickets/alerts`: مبتنی بر فایل‌های `data/tickets.json` و `data/alerts.json`
+- stateهای حساس:
+  - `tickets/alerts` اکنون بین Worker و backend هم‌راستا هستند و هر دو از persistence مشترک DB استفاده می‌کنند
 
 ## تسک‌های باز با اولویت واقعی کد
 
-- `tickets/alerts` را به DB-backed persistence مشترک منتقل کن و mismatch بین Worker و backend را حذف کن
 - migration cache را تکمیل کن و وابستگی backend به Redis/in-memory fallback را به حداقل برسان
 - endpointهای ناقص `analyses` را کامل کن، مخصوصاً مسیرهای admin write
 - webhook/bot cutover را کامل کن تا runtime قدیمی backend از مسیر بحرانی خارج شود
