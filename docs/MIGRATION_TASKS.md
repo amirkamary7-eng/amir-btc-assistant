@@ -40,13 +40,18 @@ Worker-native کامل:
 - `GET /api/referrals/stats`
 - `GET /api/referrals/tokens`
 - `POST /api/notify`
+- `POST|GET /api/tickets`
+- `GET /api/tickets/all`
+- `POST /api/tickets/:id/reply`
+- `DELETE /api/tickets/:id`
+- `POST|GET /api/alerts`
+- `DELETE /api/alerts/:id`
 
 Worker-native اما ناقص:
 
 - `GET /api/analyses` (read-only بر پایه cache)
 - `POST /api/assistant/chat` (rate limit فعال، سرویس اصلی غیرفعال)
 - `POST /telegram` (مسیر Worker فعال است، اما runtime قدیمی bot هنوز وجود دارد)
-- tickets/alerts (endpoint فعال است، ولی persistence هنوز نهایی و هم‌راستا نیست)
 
 هنوز کامل نشده:
 
@@ -55,10 +60,10 @@ Worker-native اما ناقص:
 
 ### 3) انتقال stateهای پایدار
 
-- `tickets`: not started
-- `alerts`: not started
-- حذف وابستگی runtime به فایل‌سیستم محلی: not started
-- حذف mismatch بین `SESSION_CACHE` در Worker و فایل‌های JSON در backend: not started
+- `tickets`: done
+- `alerts`: done
+- حذف وابستگی runtime به فایل‌سیستم محلی: done
+- حذف mismatch بین `SESSION_CACHE` در Worker و فایل‌های JSON در backend: done
 
 ### 4) cache migration
 

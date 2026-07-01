@@ -1154,11 +1154,37 @@ test('POST /api/tickets validates auth before proxying', async () => {
   }
 });
 
-test('POST /api/tickets ignores spoofed user_id and stores ticket in SESSION_CACHE', async () => {
-  const worker = loadWorker();
+test('POST /api/tickets ignores spoofed user_id and stores ticket in DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('ON CONFLICT (telegram_id) DO NOTHING')) {
+      assert.equal(params[0], '12345');
+      return { rows: [] };
+    }
+    if (sql.includes('INSERT INTO tickets')) {
+      return {
+        rows: [
+          {
+            id: 'ticket-1',
+            user_id: '12345',
+            user_name: 'x',
+            title: 't',
+            body: 'b',
+            status: 'open',
+            created_at: now,
+          },
+        ],
+      };
+    }
+    if (sql.includes('FROM ticket_replies')) {
+      assert.equal(params[0], 'ticket-1');
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const sessionCache = createMemoryKv();
   const originalFetch = global.fetch;
   global.fetch = async () => {
     throw new Error('fetch should not be called for /api/tickets');
@@ -1177,7 +1203,7 @@ test('POST /api/tickets ignores spoofed user_id and stores ticket in SESSION_CAC
     const response = await worker.fetch(
       request,
       createEnv({
-        SESSION_CACHE: sessionCache,
+        DATABASE_URL: 'postgres://db.example/app',
       }),
     );
     assert.equal(response.status, 200);
@@ -1185,24 +1211,31 @@ test('POST /api/tickets ignores spoofed user_id and stores ticket in SESSION_CAC
     assert.equal(body.status, 'success');
     assert.equal(body.ticket.user_id, '12345');
     assert.equal(body.ticket.user_name, 'x');
-    const storedTickets = JSON.parse((await sessionCache.get('tickets:all')) || '[]');
-    assert.equal(storedTickets.length, 1);
-    assert.equal(storedTickets[0].id, body.ticket.id);
+    assert.equal(body.ticket.id, 'ticket-1');
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('GET /api/tickets returns only authenticated user tickets', async () => {
-  const worker = loadWorker();
+test('GET /api/tickets returns only authenticated user tickets from DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM tickets') && sql.includes('WHERE user_id = $1')) {
+      assert.equal(params[0], '12345');
+      return {
+        rows: [
+          { id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', created_at: now },
+        ],
+      };
+    }
+    if (sql.includes('FROM ticket_replies')) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const sessionCache = createMemoryKv({
-    'tickets:all': JSON.stringify([
-      { id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', replies: [], created_at: new Date().toISOString() },
-      { id: 't2', user_id: '999', user_name: 'y', title: 't2', body: 'b2', status: 'open', replies: [], created_at: new Date().toISOString() },
-    ]),
-  });
   const originalFetch = global.fetch;
   global.fetch = async () => {
     throw new Error('fetch should not be called for /api/tickets');
@@ -1219,7 +1252,7 @@ test('GET /api/tickets returns only authenticated user tickets', async () => {
     const response = await worker.fetch(
       request,
       createEnv({
-        SESSION_CACHE: sessionCache,
+        DATABASE_URL: 'postgres://db.example/app',
       }),
     );
     assert.equal(response.status, 200);
@@ -1261,13 +1294,24 @@ test('GET /api/tickets/all rejects non-admin user before proxying', async () => 
   }
 });
 
-test('GET /api/tickets/all allows admin and returns all tickets from SESSION_CACHE', async () => {
-  const worker = loadWorker();
+test('GET /api/tickets/all allows admin and returns all tickets from DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM tickets') && !sql.includes('WHERE user_id = $1')) {
+      return {
+        rows: [
+          { id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', created_at: now },
+        ],
+      };
+    }
+    if (sql.includes('FROM ticket_replies')) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const adminUser = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', adminUser);
-  const sessionCache = createMemoryKv({
-    'tickets:all': JSON.stringify([{ id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', replies: [], created_at: new Date().toISOString() }]),
-  });
   const originalFetch = global.fetch;
   global.fetch = async () => {
     throw new Error('fetch should not be called for /api/tickets/all');
@@ -1284,7 +1328,7 @@ test('GET /api/tickets/all allows admin and returns all tickets from SESSION_CAC
     const response = await worker.fetch(
       request,
       createEnv({
-        SESSION_CACHE: sessionCache,
+        DATABASE_URL: 'postgres://db.example/app',
       }),
     );
     assert.equal(response.status, 200);
@@ -1327,13 +1371,27 @@ test('POST /api/tickets/:id/reply rejects non-admin user before proxying', async
   }
 });
 
-test('DELETE /api/tickets/:id deletes ticket when user owns it', async () => {
-  const worker = loadWorker();
+test('DELETE /api/tickets/:id deletes ticket when user owns it in DB', async () => {
+  let deletedTicketId = null;
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('DELETE FROM tickets')) {
+      deletedTicketId = params[0];
+      return { rows: [] };
+    }
+    if (sql.includes('FROM tickets') && sql.includes('WHERE id = $1')) {
+      assert.equal(params[0], 't1');
+      return {
+        rows: [
+          { id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', created_at: now },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const sessionCache = createMemoryKv({
-    'tickets:all': JSON.stringify([{ id: 't1', user_id: '12345', user_name: 'x', title: 't', body: 'b', status: 'open', replies: [], created_at: new Date().toISOString() }]),
-  });
   const originalFetch = global.fetch;
   global.fetch = async () => {
     throw new Error('fetch should not be called for /api/tickets/:id delete');
@@ -1350,12 +1408,12 @@ test('DELETE /api/tickets/:id deletes ticket when user owns it', async () => {
     const response = await worker.fetch(
       request,
       createEnv({
-        SESSION_CACHE: sessionCache,
+        DATABASE_URL: 'postgres://db.example/app',
       }),
     );
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { status: 'success' });
-    assert.equal(await sessionCache.get('tickets:all'), JSON.stringify([]));
+    assert.equal(deletedTicketId, 't1');
   } finally {
     global.fetch = originalFetch;
   }
@@ -1386,11 +1444,28 @@ test('POST /api/alerts validates auth before proxying', async () => {
   }
 });
 
-test('POST /api/alerts ignores spoofed user_id and stores alert in SESSION_CACHE', async () => {
-  const worker = loadWorker();
+test('POST /api/alerts ignores spoofed user_id and stores alert in DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('ON CONFLICT (telegram_id) DO NOTHING')) {
+      assert.equal(params[0], '12345');
+      return { rows: [] };
+    }
+    if (sql.includes('FROM price_alerts') && sql.includes('LIMIT 1')) {
+      return { rows: [] };
+    }
+    if (sql.includes('INSERT INTO price_alerts')) {
+      return {
+        rows: [
+          { id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: now },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const sessionCache = createMemoryKv();
   const originalFetch = global.fetch;
   global.fetch = async () => {
     throw new Error('fetch should not be called for /api/alerts');
@@ -1409,30 +1484,34 @@ test('POST /api/alerts ignores spoofed user_id and stores alert in SESSION_CACHE
     const response = await worker.fetch(
       request,
       createEnv({
-        SESSION_CACHE: sessionCache,
+        DATABASE_URL: 'postgres://db.example/app',
       }),
     );
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.status, 'success');
     assert.equal(body.alert.user_id, '12345');
-    assert.equal(body.alert.symbol, 'btc');
-    assert.ok(body.alert.id);
-    const storedAlerts = JSON.parse((await sessionCache.get('alerts:12345')) || '[]');
-    assert.equal(storedAlerts.length, 1);
-    assert.equal(storedAlerts[0].id, body.alert.id);
+    assert.equal(body.alert.symbol, 'BTC');
+    assert.equal(body.alert.id, 'a1');
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('GET /api/alerts returns stored alerts for authenticated user', async () => {
-  const worker = loadWorker();
+test('GET /api/alerts returns stored alerts for authenticated user from DB', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM price_alerts') && sql.includes("status = 'active'")) {
+      assert.equal(params[0], '12345');
+      return {
+        rows: [{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: now }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const sessionCache = createMemoryKv({
-    'alerts:12345': JSON.stringify([{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: new Date().toISOString() }]),
-  });
   const originalFetch = global.fetch;
   global.fetch = async () => {
     throw new Error('fetch should not be called for /api/alerts');
@@ -1449,7 +1528,7 @@ test('GET /api/alerts returns stored alerts for authenticated user', async () =>
     const response = await worker.fetch(
       request,
       createEnv({
-        SESSION_CACHE: sessionCache,
+        DATABASE_URL: 'postgres://db.example/app',
       }),
     );
     assert.equal(response.status, 200);
@@ -1462,13 +1541,25 @@ test('GET /api/alerts returns stored alerts for authenticated user', async () =>
   }
 });
 
-test('DELETE /api/alerts/:id removes alert for authenticated user', async () => {
-  const worker = loadWorker();
+test('DELETE /api/alerts/:id removes alert for authenticated user in DB', async () => {
+  let deletedAlertId = null;
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('DELETE FROM price_alerts')) {
+      deletedAlertId = params[0];
+      return { rows: [] };
+    }
+    if (sql.includes('FROM price_alerts') && sql.includes('WHERE id = $1')) {
+      assert.equal(params[0], 'a1');
+      return {
+        rows: [{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: now }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
-  const sessionCache = createMemoryKv({
-    'alerts:12345': JSON.stringify([{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 10, direction: 'above', created_at: new Date().toISOString() }]),
-  });
   const originalFetch = global.fetch;
   global.fetch = async () => {
     throw new Error('fetch should not be called for /api/alerts delete');
@@ -1485,12 +1576,12 @@ test('DELETE /api/alerts/:id removes alert for authenticated user', async () => 
     const response = await worker.fetch(
       request,
       createEnv({
-        SESSION_CACHE: sessionCache,
+        DATABASE_URL: 'postgres://db.example/app',
       }),
     );
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { status: 'success', deleted: true });
-    assert.equal(await sessionCache.get('alerts:12345'), JSON.stringify([]));
+    assert.equal(deletedAlertId, 'a1');
   } finally {
     global.fetch = originalFetch;
   }
