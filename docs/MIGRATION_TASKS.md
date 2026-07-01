@@ -1,143 +1,78 @@
 # ادامه کار مهاجرت
 
-## نقطه‌ای که پروژه در آن متوقف شده بود
+این فایل فقط تسک‌های باز را نگه می‌دارد. وضعیت رسمی پروژه در `PROJECT_STATUS.md` ثبت می‌شود و در صورت اختلاف، کد مخزن اولویت دارد.
 
-بر اساس وضعیت فعلی مخزن و چیزی که در اسکرین‌شات دیده می‌شود، پروژه در انتهای فاز مستندسازی متوقف شده بود:
+## وضعیت فعلی
 
-- منطق `/start` قبلاً بازنویسی و تثبیت شده است.
-- اسناد پایه شامل `docs/API_MAP.md`، `docs/DATABASE_SCHEMA.md`، `docs/MIGRATION_STATUS.md` و `docs/PROJECT_ARCHITECTURE.md` موجود هستند.
-- سند `docs/CLOUDFLARE_PLAN.md` نیز مسیر هدف را تعریف کرده است.
+- Worker برای مسیرهای پوشش‌داده‌شده مستقیم پاسخ می‌دهد و در runtime فعلی repo دیگر منطق فعال `BACKEND_URL` داخل `worker-proxy.js` وجود ندارد.
+- mismatchهای باقی‌مانده بیشتر از جنس storage و implementation ناقص هستند.
+- Cloudflare Pages برای فایل‌های استاتیک آماده است.
 
-پس ادامه‌ی طبیعی پروژه از اینجا، ورود به فاز طراحی اجرایی و سپس ساخت shell مهاجرت است؛ نه تغییرات پراکنده در UI یا دست‌کاری هم‌زمان چند بخش unrelated.
+## تسک‌های باز
 
-## ترتیب پیشنهادی ادامه کار
+### 1) زیرساخت Cloudflare
 
-### 1. تثبیت shell سمت Cloudflare
+- Worker config با `wrangler.jsonc`: done
+- Pages config با `wrangler.pages.jsonc`: done
+- نهایی‌سازی secret management: partial
+- مشخص کردن route نهایی و برنامه cutover: not started
 
-هدف:
+### 2) انتقال endpointها به implementation واقعی روی Worker
 
-- ساخت یک baseline کم‌ریسک برای اجرا و تست
-
-فایل‌ها/بخش‌های درگیر:
-
-- `worker-proxy.js`
-- `wrangler.jsonc`
-- فایل‌های فرانت مثل `index.html` و `app.js`
-
-خروجی مورد انتظار:
-
-- یک Worker اصلی با routing مشخص برای `/api/*` و `/telegram`
-- یک تنظیم مشخص برای Pages یا استقرار فایل‌های استاتیک
-- envها و secretهای لازم به‌صورت شفاف
-
-### 2. انتقال endpointهای public و کم‌ریسک
-
-اولویت:
+Worker-native کامل:
 
 - `GET /api/health`
 - `GET /api/charts/resolve`
 - `GET /api/calendar/events`
 - `GET /api/farsi-news`
-- `GET /api/analyses`
-
-فایل‌های مرجع فعلی:
-
-- `main.py`
-- `backend/routers/charts.py`
-- `backend/routers/calendar.py`
-- `backend/routers/analyses.py`
-- `backend/services/chart_service.py`
-- `backend/services/calendar_service.py`
-
-دلیل شروع از این بخش:
-
-- این endpointها برای شکستن contract ریسک کمتری دارند.
-- وابستگی آن‌ها به state حساس کاربر کمتر است.
-
-### 3. انتقال auth و user flow
-
-اولویت:
-
-- `backend/services/telegram_auth.py`
-- `backend/routers/users.py`
-- `backend/routers/watchlist.py`
-- بخش `apiFetch` در `app.js`
-
-نکات حساس:
-
-- هدر `X-Telegram-Init-Data` باید بدون تغییر حفظ شود.
-- race condition مربوط به آماده شدن `Telegram.WebApp` نباید دوباره ایجاد شود.
-- هیچ تغییری در contract فرانت سمت Mini App نباید اعمال شود.
-
-### 4. انتقال mandatory join
-
-اولویت:
-
 - `GET /api/check-join`
 - `GET /api/debug/check-join`
 - `POST /api/check-join/invalidate`
+- `POST /api/sessions/heartbeat`
+- `GET /api/sessions/online`
+- `POST /api/sessions/end`
+- `GET /api/assistant/limits`
+- `POST /api/users/bootstrap`
+- `GET /api/users/me`
+- `PUT /api/users/me/settings`
+- `GET /api/watchlist`
+- `PUT /api/watchlist`
+- `GET /api/referrals/stats`
+- `GET /api/referrals/tokens`
+- `POST /api/notify`
 
-فایل‌های مرجع:
+Worker-native اما ناقص:
 
-- `backend/services/join_service.py`
-- `backend/services/user_service.py`
-- `main.py`
-- فرانت مربوط به `#mandatory-join-overlay`
+- `GET /api/analyses` (read-only بر پایه cache)
+- `POST /api/assistant/chat` (rate limit فعال، سرویس اصلی غیرفعال)
+- `POST /telegram` (مسیر Worker فعال است، اما runtime قدیمی bot هنوز وجود دارد)
+- tickets/alerts (endpoint فعال است، ولی persistence هنوز نهایی و هم‌راستا نیست)
 
-نکات حساس:
+هنوز کامل نشده:
 
-- `users.channel_joined` باید source of truth باقی بماند.
-- overlay فعلی و رفتار قفل‌کننده‌ی رابط نباید تغییر کند.
+- `POST|PUT|DELETE /api/analyses` (ادمین)
+- scheduled alerts کاملاً native
 
-### 5. انتقال webhook و `/start`
+### 3) انتقال stateهای پایدار
 
-اولویت:
+- `tickets`: not started
+- `alerts`: not started
+- حذف وابستگی runtime به فایل‌سیستم محلی: not started
+- حذف mismatch بین `SESSION_CACHE` در Worker و فایل‌های JSON در backend: not started
 
-- `POST /telegram`
-- handler دستور `/start`
+### 4) cache migration
 
-فایل‌های مرجع:
+- KV namespaceهای Worker: done
+- cache backend روی Redis/in-memory fallback: partial
+- حذف نیاز production به Redis: not started
 
-- `main.py`
-- `bot.py`
+### 5) webhook و bot cutover
 
-نکات حساس:
+- `/start` روی Worker: partial
+- حذف وابستگی runtime بحرانی به backend bot: not started
 
-- رفتار جدید `/start` که بر مبنای `channel_joined` است باید بدون تغییر حفظ شود.
-- دکمه `web_app` فقط برای کاربر عضو نمایش داده شود.
+### 6) حذف dependencyهای legacy
 
-### 6. حذف state فایل‌محور
-
-اولویت:
-
-- حذف وابستگی به `data/alerts.json`
-- حذف وابستگی به `tickets.json` پس از اتصال کامل به DB
-
-فایل‌های مرجع:
-
-- `main.py`
-- `backend/models.py`
-- سرویس‌های مرتبط با تیکت و هشدار
-
-نکات حساس:
-
-- این بخش باید بعد از تثبیت endpointهای اصلی انجام شود.
-- انتقال مستقیم و بدون بررسی داده‌های موجود ریسک‌دار است.
-
-## اولین تسک اجرایی پیشنهادی
-
-اگر بخواهیم دقیقاً از همین‌جا ادامه بدهیم، اولین کار اجرایی کم‌ریسک این است:
-
-1. بازبینی و بازسازی `worker-proxy.js` و تنظیمات `wrangler`
-2. تعریف یک Worker baseline برای `GET /api/health`
-3. جدا کردن configهای لازم برای اتصال فرانت به API جدید بدون شکستن نسخه فعلی
-
-این نقطه بهترین شروع است چون:
-
-- هنوز وارد auth و join و webhook نشده‌ایم
-- امکان تست زودهنگام deployment می‌دهد
-- ریسک کمی برای رفتار فعلی کاربر نهایی دارد
-
-## جمع‌بندی
-
-نقطه توقف پروژه در اسکرین‌شات، انتهای فاز مستندسازی و آغاز فاز تبدیل مستندات به کار اجرایی بوده است. بنابراین ادامه‌ی درست پروژه از اینجا، شروع ساخت shell مهاجرت Cloudflare و انتقال endpointهای کم‌ریسک است.
+- حذف hardcode آدرس Render از repo: done
+- حذف کامل dependencyهای legacy backend از مسیرهای بحرانی: partial
+- خاموش‌سازی backend قدیمی پس از cutover: not started
