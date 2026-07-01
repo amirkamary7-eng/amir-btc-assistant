@@ -916,18 +916,18 @@ const HTML_ENTITY_MAP = {
 };
 
 async function fetchJson(url) {
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    return { ok: false, body: null };
-  }
-
   try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return { ok: false, body: null };
+    }
+
     return {
       ok: true,
       body: await response.json(),
@@ -2363,138 +2363,149 @@ export default {
       });
     }
 
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
 
-    if (request.method === 'GET' && url.pathname === '/') {
-      return handleRoot();
+      if (request.method === 'GET' && url.pathname === '/') {
+        return handleRoot();
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/health') {
+        return handleHealth(env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
+        return await handleChartResolve(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/calendar/events') {
+        return await handleCalendarEvents(env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
+        return await handleFarsiNews(env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/analyses') {
+        return await handleAnalyses(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/tickets') {
+        return await handleTicketsCreate(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/tickets') {
+        return await handleTicketsList(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/tickets/all') {
+        return await handleTicketsAll(request, env);
+      }
+
+      if (request.method === 'POST' && /^\/api\/tickets\/[^/]+\/reply$/u.test(url.pathname)) {
+        const ticketId = url.pathname.split('/')[3] || '';
+        return await handleTicketReply(request, env, ticketId);
+      }
+
+      if (request.method === 'DELETE' && /^\/api\/tickets\/[^/]+$/u.test(url.pathname) && url.pathname !== '/api/tickets/all') {
+        const ticketId = url.pathname.split('/')[3] || '';
+        return await handleTicketDelete(request, env, ticketId);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/alerts') {
+        return await handleAlertsCreate(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/alerts') {
+        return await handleAlertsList(request, env);
+      }
+
+      if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
+        const alertId = url.pathname.split('/')[3] || '';
+        return await handleAlertDelete(request, env, alertId);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
+        return await handleSessionsHeartbeat(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/sessions/online') {
+        return await handleSessionsOnline(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/sessions/end') {
+        return await handleSessionsEnd(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/assistant/limits') {
+        return await handleAssistantLimits(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/assistant/chat') {
+        return await handleAssistantChat(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/users/me') {
+        return await handleUsersMe(request, env);
+      }
+
+      if (request.method === 'PUT' && url.pathname === '/api/users/me/settings') {
+        return await handleUsersMeSettings(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
+        return await handleUsersBootstrap(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/watchlist') {
+        return await handleWatchlistGet(request, env);
+      }
+
+      if (request.method === 'PUT' && url.pathname === '/api/watchlist') {
+        return await handleWatchlistPut(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/notify') {
+        return await handleNotify(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/referrals/stats') {
+        return handleReferralsStats(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/check-join') {
+        return await handleCheckJoin(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/debug/check-join') {
+        return await handleDebugCheckJoin(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/check-join/invalidate') {
+        return await handleCheckJoinInvalidate(request, env);
+      }
+
+      if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {
+        return await handleTelegramWebhook(request, env);
+      }
+
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'Route not found in Cloudflare shell',
+        },
+        { status: 404 },
+      );
+    } catch (error) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'Request failed safely',
+          detail: String(error),
+        },
+        { status: 200 },
+      );
     }
-
-    if (request.method === 'GET' && url.pathname === '/api/health') {
-      return handleHealth(env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
-      return handleChartResolve(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/calendar/events') {
-      return handleCalendarEvents(env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
-      return handleFarsiNews(env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/analyses') {
-      return handleAnalyses(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/tickets') {
-      return handleTicketsCreate(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/tickets') {
-      return handleTicketsList(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/tickets/all') {
-      return handleTicketsAll(request, env);
-    }
-
-    if (request.method === 'POST' && /^\/api\/tickets\/[^/]+\/reply$/u.test(url.pathname)) {
-      const ticketId = url.pathname.split('/')[3] || '';
-      return handleTicketReply(request, env, ticketId);
-    }
-
-    if (request.method === 'DELETE' && /^\/api\/tickets\/[^/]+$/u.test(url.pathname) && url.pathname !== '/api/tickets/all') {
-      const ticketId = url.pathname.split('/')[3] || '';
-      return handleTicketDelete(request, env, ticketId);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/alerts') {
-      return handleAlertsCreate(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/alerts') {
-      return handleAlertsList(request, env);
-    }
-
-    if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
-      const alertId = url.pathname.split('/')[3] || '';
-      return handleAlertDelete(request, env, alertId);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
-      return handleSessionsHeartbeat(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/sessions/online') {
-      return handleSessionsOnline(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/sessions/end') {
-      return handleSessionsEnd(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/assistant/limits') {
-      return handleAssistantLimits(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/assistant/chat') {
-      return handleAssistantChat(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/users/me') {
-      return handleUsersMe(request, env);
-    }
-
-    if (request.method === 'PUT' && url.pathname === '/api/users/me/settings') {
-      return handleUsersMeSettings(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
-      return handleUsersBootstrap(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/watchlist') {
-      return handleWatchlistGet(request, env);
-    }
-
-    if (request.method === 'PUT' && url.pathname === '/api/watchlist') {
-      return handleWatchlistPut(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/notify') {
-      return handleNotify(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/referrals/stats') {
-      return handleReferralsStats(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/check-join') {
-      return handleCheckJoin(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/debug/check-join') {
-      return handleDebugCheckJoin(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/check-join/invalidate') {
-      return handleCheckJoinInvalidate(request, env);
-    }
-
-    if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {
-      return handleTelegramWebhook(request, env);
-    }
-
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Route not found in Cloudflare shell',
-      },
-      { status: 404 },
-    );
   },
 
   async scheduled(controller, env, ctx) {

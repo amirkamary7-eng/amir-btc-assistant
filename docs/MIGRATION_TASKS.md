@@ -21,8 +21,7 @@
 فایل‌ها/بخش‌های درگیر:
 
 - `worker-proxy.js`
-- `wrangler.toml`
-- `wrangler.jsonc.bak`
+- `wrangler.jsonc`
 - فایل‌های فرانت مثل `index.html` و `app.js`
 
 خروجی مورد انتظار:

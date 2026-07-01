@@ -115,14 +115,13 @@ fallback فعلی:
 فایل‌های موجود:
 
 - `worker-proxy.js`
-- `wrangler.toml`
-- `wrangler.jsonc.bak`
+- `wrangler.jsonc`
 
 وضعیت واقعی:
 
-- `worker-proxy.js` فقط درخواست‌ها را به backend خارجی پاس می‌دهد.
-- هنوز backend اصلی را روی Cloudflare اجرا نمی‌کند.
-- `wrangler.toml` فعلی برای اجرای production-ready معتبر و کامل نیست.
+- `worker-proxy.js` entry point اصلی Cloudflare Worker است و routeهای Worker را داخل خود مدیریت می‌کند.
+- منطق اصلی Worker روی Cloudflare اجرا می‌شود و برای routing فعال از backend proxy استفاده نمی‌شود.
+- `wrangler.jsonc` پیکربندی فعال Worker برای اجرا و استقرار است.
 
 ### 7. Node / Prisma Sidecar
 
@@ -164,8 +163,8 @@ fallback فعلی:
 ├── index.html                   # پوسته Mini App
 ├── main.py                      # entrypoint اصلی backend + bot
 ├── bot.py                       # runner غیرفعال bot
-├── worker-proxy.js              # Cloudflare proxy قدیمی
-├── wrangler.toml                # پیکربندی Cloudflare فعلی
+├── worker-proxy.js              # entry point اصلی Cloudflare Worker
+├── wrangler.jsonc               # پیکربندی فعال Cloudflare Worker
 ├── env.example                  # env نمونه اصلی
 └── requirements.txt             # وابستگی‌های Python
 ```

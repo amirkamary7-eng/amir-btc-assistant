@@ -1122,17 +1122,20 @@ async function fetchCoinGecko() {
     const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=200&page=1&sparkline=false');
     if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
     const data = await res.json();
-    return data.map((item, index) => ({
-        symbol: item.symbol.toUpperCase(),
-        name: item.name,
-        rank: index + 1,
-        priceUsd: item.current_price || 0,
-        changePercent24Hr: item.price_change_percentage_24h || 0,
-        volumeUsd24Hr: item.total_volume || 0,
-        marketCapUsd: item.market_cap || 0,
-        supply: item.circulating_supply || 0,
-        image: item.image || ''
-    }));
+    if (!Array.isArray(data)) throw new Error('Invalid CoinGecko response');
+    return data
+        .filter(item => item && typeof item === 'object')
+        .map((item, index) => ({
+            symbol: String(item.symbol || '').toUpperCase(),
+            name: item.name || '',
+            rank: index + 1,
+            priceUsd: item.current_price || 0,
+            changePercent24Hr: item.price_change_percentage_24h || 0,
+            volumeUsd24Hr: item.total_volume || 0,
+            marketCapUsd: item.market_cap || 0,
+            supply: item.circulating_supply || 0,
+            image: item.image || ''
+        }));
 }
 
 //#endregion
