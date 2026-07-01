@@ -68,8 +68,8 @@ Worker-native اما ناقص:
 ### 4) cache migration
 
 - KV namespaceهای Worker: done
-- cache backend روی Redis/in-memory fallback: partial
-- حذف نیاز production به Redis: not started
+- cache backend روی Redis/in-memory fallback: done
+- حذف نیاز production به Redis: done
 
 ### 5) webhook و bot cutover
 

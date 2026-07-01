@@ -80,7 +80,7 @@
 - DB (Supabase/Postgres): source of truth برای کاربران، واچ‌لیست، referralها و token state در backend و Worker
 - Cache:
   - Worker: `JOIN_CACHE`, `APP_CACHE`, `RATE_LIMITS`, `SESSION_CACHE`
-  - Backend: Redis یا in-memory fallback هنوز فعال است
+  - Backend: فقط in-memory cache (بدون وابستگی production به Redis)
 - stateهای حساس:
   - `tickets/alerts` اکنون بین Worker و backend هم‌راستا هستند و هر دو از persistence مشترک DB استفاده می‌کنند
 
