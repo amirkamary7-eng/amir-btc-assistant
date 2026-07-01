@@ -1,25 +1,25 @@
-# ادامه کار مهاجرت (Tasks)
+# ادامه کار مهاجرت
 
-این فایل فهرست کارهای «ادامه مهاجرت» را نگه می‌دارد. وضعیت رسمی و یکپارچه پروژه در `PROJECT_STATUS.md` و جزئیات پیشرفت در `PROGRESS.md` ثبت می‌شود.
+این فایل فقط تسک‌های باز را نگه می‌دارد. وضعیت رسمی پروژه در `PROJECT_STATUS.md` ثبت می‌شود و در صورت اختلاف، کد مخزن اولویت دارد.
 
-## وضعیت فعلی (خلاصه)
+## وضعیت فعلی
 
-- Cloudflare Worker Shell در `worker-proxy.js` فعال است: بخشی از مسیرها Worker-native هستند و مسیرهای باقی‌مانده به upstream از طریق `BACKEND_URL` proxy می‌شوند.
-- Cloudflare Pages برای فایل‌های استاتیک آماده است (`webapp/pages-dist` + `wrangler.pages.jsonc`).
-- hardcode مربوط به `onrender.com` از فایل‌های runtime حذف شده است، اما حذف کامل upstream و backend هنوز انجام نشده است.
+- Worker برای مسیرهای پوشش‌داده‌شده مستقیم پاسخ می‌دهد و در runtime فعلی repo دیگر منطق فعال `BACKEND_URL` داخل `worker-proxy.js` وجود ندارد.
+- mismatchهای باقی‌مانده بیشتر از جنس storage و implementation ناقص هستند.
+- Cloudflare Pages برای فایل‌های استاتیک آماده است.
 
-## تسک‌های باز (done / partial / not started)
+## تسک‌های باز
 
-### 1) تثبیت زیرساخت Cloudflare
+### 1) زیرساخت Cloudflare
 
 - Worker config با `wrangler.jsonc`: done
 - Pages config با `wrangler.pages.jsonc`: done
-- نهایی‌سازی secret management (production/staging): partial
-- مشخص کردن دامنه/route نهایی و برنامه cutover: not started
+- نهایی‌سازی secret management: partial
+- مشخص کردن route نهایی و برنامه cutover: not started
 
-### 2) انتقال endpointها از proxy به Worker-native
+### 2) انتقال endpointها به implementation واقعی روی Worker
 
-Worker-native (done):
+Worker-native کامل:
 
 - `GET /api/health`
 - `GET /api/charts/resolve`
@@ -32,39 +32,52 @@ Worker-native (done):
 - `GET /api/sessions/online`
 - `POST /api/sessions/end`
 - `GET /api/assistant/limits`
-
-Worker-native با fallback/proxy (partial):
-
-- `GET /api/analyses` (cache + fallback به upstream)
-- `POST /api/assistant/chat` (rate limit روی Worker، اجرای اصلی روی upstream)
-- `/api/users/*` و `/api/watchlist` (auth validation روی Worker + proxy-safe به upstream)
-
-Proxy-only (not started برای Worker-native):
-
-- `GET /api/referrals/*`
+- `POST /api/users/bootstrap`
+- `GET /api/users/me`
+- `PUT /api/users/me/settings`
+- `GET /api/watchlist`
+- `PUT /api/watchlist`
+- `GET /api/referrals/stats`
+- `GET /api/referrals/tokens`
 - `POST /api/notify`
+- `POST|GET /api/tickets`
+- `GET /api/tickets/all`
+- `POST /api/tickets/:id/reply`
+- `DELETE /api/tickets/:id`
+- `POST|GET /api/alerts`
+- `DELETE /api/alerts/:id`
+
+Worker-native اما ناقص:
+
+- `GET /api/analyses` (read-only بر پایه cache)
+- `POST /api/assistant/chat` (rate limit فعال، سرویس اصلی غیرفعال)
+- `POST /telegram` (مسیر Worker فعال است، اما runtime قدیمی bot هنوز وجود دارد)
+
+هنوز کامل نشده:
+
 - `POST|PUT|DELETE /api/analyses` (ادمین)
-- تمام مسیرهای دیگر که هنوز فقط از مسیر `/api/*` به upstream proxy می‌شوند
+- scheduled alerts کاملاً native
 
-### 3) انتقال stateهای file-based (tickets/alerts) به DB
+### 3) انتقال stateهای پایدار
 
-- Tickets: not started
-- Alerts: not started
-- حذف وابستگی runtime به فایل‌سیستم محلی: not started
+- `tickets`: done
+- `alerts`: done
+- حذف وابستگی runtime به فایل‌سیستم محلی: done
+- حذف mismatch بین `SESSION_CACHE` در Worker و فایل‌های JSON در backend: done
 
-### 4) زمان‌بندی و هشدارها (Cron)
+### 4) cache migration
 
-- cron trigger روی Worker: done
-- اجرای job هشدارها: partial (در حال حاضر hook به upstream `/internal/alerts/run` دارد و `ALERTS_CRON_ENABLED` پیش‌فرض false است)
-- انتقال کامل منطق alerts به Worker-native (بدون upstream): not started
+- KV namespaceهای Worker: done
+- cache backend روی Redis/in-memory fallback: done
+- حذف نیاز production به Redis: done
 
-### 5) webhook ربات و `/start`
+### 5) webhook و bot cutover
 
-- `POST /telegram` روی Worker برای `/start`: partial
-- قطع وابستگی webhook به backend/upstream: not started
+- `/start` روی Worker: partial
+- حذف وابستگی runtime بحرانی به backend bot: not started
 
-### 6) حذف کامل upstream (از جمله Render)
+### 6) حذف dependencyهای legacy
 
 - حذف hardcode آدرس Render از repo: done
-- حذف نیاز به `BACKEND_URL` (cutover کامل Worker-native): not started
+- حذف کامل dependencyهای legacy backend از مسیرهای بحرانی: partial
 - خاموش‌سازی backend قدیمی پس از cutover: not started

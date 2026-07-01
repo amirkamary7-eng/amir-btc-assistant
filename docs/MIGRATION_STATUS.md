@@ -1,7 +1,5 @@
 # وضعیت مهاجرت پروژه
 
-این سند برای ارائه وضعیت مهاجرت نگه‌داری می‌شود، اما وضعیت رسمی و یکپارچه پروژه در `PROJECT_STATUS.md` و جزئیات اجرایی در `PROGRESS.md` ثبت می‌شود.
-
 ## وضعیت فعلی پروژه
 
 پروژه در حال حاضر عملیاتی است و اجزای اصلی زیر را دارد:
@@ -11,16 +9,15 @@
 - Telegram Mini App
 - PostgreSQL روی Supabase
 - Redis برای cache
-- Cloudflare Pages برای فایل‌های استاتیک (خروجی `webapp/pages-dist`)
-- Cloudflare Worker Shell در `worker-proxy.js` (ترکیبی از مسیرهای Worker-native و proxy به upstream)
-- KV namespaceها و cron trigger برای baseline مهاجرت وجود دارد
+- بخشی از استقرار روی Render
+- آثار و فایل‌های مربوط به Cloudflare Worker proxy
 
 ## وضعیت کلی مهاجرت
 
 - **هدف نهایی:** حذف کامل Render و انتقال به معماری Cloudflare + Supabase
-- **وضعیت فعلی:** مهاجرت عملی شروع شده و یک Worker Shell فعال در مخزن وجود دارد، اما هنوز همه‌ی APIها و stateهای حساس روی Worker-native منتقل نشده‌اند.
-- **فاز فعلی:** انتقال مرحله‌ای (Phase 3/4/5/6 به‌صورت همپوشان و partial)
-- **ریسک فعلی:** متوسط، چون مسیرهای حساس به upstream (`BACKEND_URL`) وابسته‌اند و حذف کامل backend هنوز انجام نشده است.
+- **وضعیت فعلی:** هنوز مهاجرت عملی شروع نشده است
+- **فاز فعلی:** مستندسازی و تحلیل
+- **ریسک فعلی:** متوسط تا بالا، چون runtime اصلی هنوز به Render و FastAPI/Python وابسته است
 
 ## فازهای مهاجرت
 
@@ -57,7 +54,7 @@
 
 وضعیت:
 
-- partial
+- هنوز شروع نشده
 
 خروجی مورد انتظار:
 
@@ -70,7 +67,7 @@
 
 وضعیت:
 
-- partial
+- هنوز شروع نشده
 
 خروجی مورد انتظار:
 
@@ -85,7 +82,7 @@
 
 وضعیت:
 
-- partial
+- هنوز شروع نشده
 
 خروجی مورد انتظار:
 
@@ -97,7 +94,7 @@
 
 وضعیت:
 
-- partial
+- هنوز شروع نشده
 
 خروجی مورد انتظار:
 
@@ -108,7 +105,7 @@
 
 وضعیت:
 
-- partial
+- هنوز شروع نشده
 
 خروجی مورد انتظار:
 
@@ -119,7 +116,7 @@
 
 وضعیت:
 
-- not started
+- هنوز شروع نشده
 
 خروجی مورد انتظار:
 
@@ -131,7 +128,7 @@
 
 وضعیت:
 
-- partial
+- هنوز شروع نشده
 
 خروجی مورد انتظار:
 
@@ -141,7 +138,7 @@
 
 ## فاز فعلی
 
-**فازهای فعال به‌صورت هم‌زمان (با اولویت اجرایی Phase 4)**
+**Phase 2: طراحی برنامه مهاجرت مرحله‌ای و کم‌ریسک**
 
 هدف این فاز:
 
@@ -152,7 +149,7 @@
 
 ## فاز بعدی
 
-**تکمیل Phase 4/6/7 و قطع نیاز به upstream**
+**Phase 3: آماده‌سازی زیرساخت Cloudflare**
 
 تمرکز فاز بعدی:
 
@@ -175,31 +172,32 @@
 - تکمیل `docs/API_MAP.md`
 - تکمیل `docs/DATABASE_SCHEMA.md`
 - تکمیل `docs/CLOUDFLARE_PLAN.md`
-- پیاده‌سازی Cloudflare Worker Shell در `worker-proxy.js`
-- پیاده‌سازی Worker-native برای endpointهای پایه و public (از جمله `/api/health`, `/api/charts/resolve`, `/api/calendar/events`, `/api/farsi-news`)
-- پیاده‌سازی join gate روی Worker (`/api/check-join*`) با KV + Telegram API + DB (در صورت وجود)
-- اضافه شدن پیکربندی‌های Wrangler (`wrangler.jsonc`, `wrangler.pages.jsonc`) و bindingهای KV + cron trigger
-- حذف hardcode آدرس‌های onrender از فایل‌های runtime (API_BASE و config)
 
 ## کارهای باقی‌مانده
 
 ### کارهای تحلیلی/طراحی
 
-- نهایی‌سازی برنامه مهاجرت مرحله‌ای بر اساس وضعیت واقعی کد (کاهش proxy و تعریف cutover)
-- تعیین rollout/rollback plan برای جایگزینی مرحله‌ای upstream
+- نهایی‌سازی برنامه مهاجرت مرحله‌ای
+- تعیین storage strategy برای stateهای موقت
+- تعیین strategy برای online sessions
+- تعیین strategy برای alerts polling
+- شکستن طرح مهاجرت به تسک‌های اجرایی فایل‌به‌فایل
 
 ### کارهای زیرساختی
 
-- نهایی‌سازی secret management و bindingها در محیط‌های staging/production
-- تعیین دامنه/route نهایی برای Pages و Worker و برنامه cutover
+- تعریف Cloudflare Pages target
+- تعریف Worker API target
+- تعریف KV namespaceها
+- تعریف Cron Triggerها
+- تعریف secret management
 
 ### کارهای فنی مهاجرت
 
-- تکمیل انتقال endpointهای باقی‌مانده به Worker-native (حذف proxy در مسیرهای حساس)
-- تکمیل webhook روی Worker برای کل رفتارهای لازم (در حال حاضر تمرکز روی `/start` است)
-- تکمیل مهاجرت cache در کل سیستم (حذف Redis از مسیرهای production)
-- انتقال tickets/alerts از فایل‌های JSON به DB-backed flow
-- قطع وابستگی به upstream (`BACKEND_URL`) پس از تکمیل endpointها
+- انتقال endpointها
+- انتقال webhook
+- انتقال cache
+- انتقال state file-based
+- حذف URLهای Render از frontend/env
 - تست کامل Mini App
 - تست کامل ربات
 
@@ -235,13 +233,14 @@
 - runtime فعلی backend به Python/FastAPI وابسته است
 - Python Workers برای این stack گزینه کم‌ریسکی نیست
 - بخشی از state هنوز file-based است
-- برای بخش‌هایی از API هنوز از proxy به upstream (`BACKEND_URL`) استفاده می‌شود
+- URLهای Render هنوز در frontend و env وجود دارند
+- Cloudflare فعلی در repo هنوز جایگزین backend نشده است
 
 ## معیار تکمیل مهاجرت
 
 مهاجرت زمانی کامل تلقی می‌شود که:
 
-- هیچ endpoint عملیاتی روی upstream قدیمی (از جمله Render) نمانده باشد
+- هیچ endpoint عملیاتی روی Render نمانده باشد
 - webhook تلگرام روی Cloudflare اجرا شود
 - Mini App فقط به Cloudflare API متصل باشد
 - کش روی KV یا معادل Cloudflare منتقل شده باشد

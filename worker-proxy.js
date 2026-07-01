@@ -8,7 +8,7 @@ import pg from 'pg';
  * در این مرحله:
  * - `GET /` و `GET /api/health` مستقیماً از Worker پاسخ می‌گیرند.
  * - `POST /telegram` و منطق `/start` روی Worker اجرا می‌شود.
- * - بقیه‌ی مسیرهای `/api/*` موقتاً به بک‌اند فعلی proxy می‌شوند.
+ * - مسیرهای کلیدی `/api/*` مستقیماً روی Worker اجرا می‌شوند.
  */
 
 // ============================================================================
@@ -38,10 +38,6 @@ function jsonResponse(payload, init = {}) {
   });
 }
 
-function resolveBackendUrl(env) {
-  return String(env.BACKEND_URL || '').trim().replace(/\/$/, '');
-}
-
 function getNumericEnv(env, key, fallbackValue) {
   const rawValue = Number(env[key]);
   return Number.isFinite(rawValue) ? rawValue : fallbackValue;
@@ -61,11 +57,6 @@ function isCacheLayerConfigured(env) {
 
 function isAlertsCronEnabled(env) {
   return String(env.ALERTS_CRON_ENABLED || 'false').trim().toLowerCase() === 'true';
-}
-
-function resolveAlertsRunnerUrl(env) {
-  const backendUrl = resolveBackendUrl(env);
-  return backendUrl ? `${backendUrl}/internal/alerts/run` : '';
 }
 
 async function readAppCache(env, key) {
@@ -306,7 +297,7 @@ const SESSION_PRESENCE_STATE_KEY = 'session:presence_state';
 const RATE_LIMIT_COOLDOWN_PREFIX = 'ai:cooldown:';
 const RATE_LIMIT_MSG_PREFIX = 'ai:msgs:';
 const RATE_LIMIT_IMG_PREFIX = 'ai:imgs:';
-const joinDbPools = new Map();
+const dbPools = new Map();
 
 function resolveDatabaseUrl(env) {
   return String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
@@ -573,14 +564,14 @@ function isAdminTelegramId(env, userId) {
   return String(userId) === String(env.ADMIN_TELEGRAM_ID || '831704732');
 }
 
-function getJoinDbPool(env) {
+function getDbPool(env) {
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) {
     return null;
   }
 
-  if (!joinDbPools.has(databaseUrl)) {
-    joinDbPools.set(
+  if (!dbPools.has(databaseUrl)) {
+    dbPools.set(
       databaseUrl,
       new Pool({
         connectionString: databaseUrl,
@@ -589,11 +580,11 @@ function getJoinDbPool(env) {
     );
   }
 
-  return joinDbPools.get(databaseUrl);
+  return dbPools.get(databaseUrl);
 }
 
 async function getDbUserJoinState(env, userId) {
-  const pool = getJoinDbPool(env);
+  const pool = getDbPool(env);
   if (!pool) {
     return null;
   }
@@ -618,7 +609,7 @@ async function getDbUserJoinState(env, userId) {
 }
 
 async function persistDbUserJoinState(env, userId, joined) {
-  const pool = getJoinDbPool(env);
+  const pool = getDbPool(env);
   if (!pool) {
     return;
   }
@@ -646,6 +637,567 @@ async function persistDbUserJoinState(env, userId, joined) {
   } catch (error) {
     console.warn('JOIN DB write failed:', error);
   }
+}
+
+function getReferralRewardPerInvite(env) {
+  return Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0);
+}
+
+function normalizeLanguage(value, fallbackValue = 'fa') {
+  const normalized = normalizeOptionalString(value);
+  if (normalized === 'fa' || normalized === 'en') {
+    return normalized;
+  }
+  return fallbackValue === 'en' ? 'en' : 'fa';
+}
+
+function normalizeUserRow(row, watchlist = []) {
+  return {
+    user_id: String(row.telegram_id),
+    username: normalizeOptionalString(row.username),
+    first_name: normalizeOptionalString(row.first_name),
+    last_name: normalizeOptionalString(row.last_name),
+    lang: normalizeLanguage(row.lang),
+    channel_joined: Boolean(row.channel_joined),
+    channel_verified_at: row.channel_verified_at ? new Date(row.channel_verified_at).toISOString() : null,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    watchlist,
+  };
+}
+
+async function queryDb(env, sql, params = []) {
+  const pool = getDbPool(env);
+  if (!pool) {
+    throw new Error('Database not configured');
+  }
+  return pool.query(sql, params);
+}
+
+async function ensureUserRow(env, userId) {
+  await queryDb(
+    env,
+    `
+      INSERT INTO users (telegram_id, lang, channel_joined, created_at, updated_at)
+      VALUES ($1, 'fa', FALSE, NOW(), NOW())
+      ON CONFLICT (telegram_id) DO NOTHING
+    `,
+    [String(userId)],
+  );
+}
+
+async function getUserRow(env, userId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT
+        telegram_id,
+        username,
+        first_name,
+        last_name,
+        lang,
+        channel_joined,
+        channel_verified_at,
+        created_at,
+        updated_at
+      FROM users
+      WHERE telegram_id = $1
+      LIMIT 1
+    `,
+    [String(userId)],
+  );
+  return result.rows[0] || null;
+}
+
+async function getWatchlistSymbolsFromDb(env, userId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT symbol
+      FROM watchlist_items
+      WHERE user_id = $1
+      ORDER BY position ASC, id ASC
+    `,
+    [String(userId)],
+  );
+  return result.rows.map((row) => String(row.symbol).toUpperCase());
+}
+
+async function bootstrapUserInDb(env, userId, payload) {
+  const existingUser = await getUserRow(env, userId);
+  const fallbackLang = existingUser?.lang || 'fa';
+  const lang = normalizeLanguage(payload.lang, fallbackLang);
+  const result = await queryDb(
+    env,
+    `
+      INSERT INTO users (
+        telegram_id,
+        username,
+        first_name,
+        last_name,
+        lang,
+        channel_joined,
+        channel_verified_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, COALESCE($6, FALSE), $7, NOW(), NOW())
+      ON CONFLICT (telegram_id) DO UPDATE
+      SET
+        username = COALESCE(EXCLUDED.username, users.username),
+        first_name = COALESCE(EXCLUDED.first_name, users.first_name),
+        last_name = COALESCE(EXCLUDED.last_name, users.last_name),
+        lang = COALESCE(EXCLUDED.lang, users.lang),
+        updated_at = NOW()
+      RETURNING
+        telegram_id,
+        username,
+        first_name,
+        last_name,
+        lang,
+        channel_joined,
+        channel_verified_at,
+        created_at,
+        updated_at
+    `,
+    [
+      String(userId),
+      normalizeOptionalString(payload.username),
+      normalizeOptionalString(payload.first_name),
+      normalizeOptionalString(payload.last_name),
+      lang,
+      existingUser ? Boolean(existingUser.channel_joined) : false,
+      existingUser?.channel_verified_at ? new Date(existingUser.channel_verified_at).toISOString() : null,
+    ],
+  );
+  return result.rows[0] || null;
+}
+
+async function updateUserSettingsInDb(env, userId, payload) {
+  const lang = normalizeLanguage(payload.lang);
+  const result = await queryDb(
+    env,
+    `
+      UPDATE users
+      SET
+        lang = $2,
+        updated_at = NOW()
+      WHERE telegram_id = $1
+      RETURNING
+        telegram_id,
+        username,
+        first_name,
+        last_name,
+        lang,
+        channel_joined,
+        channel_verified_at,
+        created_at,
+        updated_at
+    `,
+    [String(userId), lang],
+  );
+  return result.rows[0] || null;
+}
+
+async function replaceWatchlistInDb(env, userId, symbols) {
+  await ensureUserRow(env, userId);
+  await queryDb(env, 'DELETE FROM watchlist_items WHERE user_id = $1', [String(userId)]);
+  for (let index = 0; index < symbols.length; index += 1) {
+    await queryDb(
+      env,
+      `
+        INSERT INTO watchlist_items (user_id, symbol, position, created_at)
+        VALUES ($1, $2, $3, NOW())
+      `,
+      [String(userId), symbols[index], index],
+    );
+  }
+  await queryDb(env, 'UPDATE users SET updated_at = NOW() WHERE telegram_id = $1', [String(userId)]);
+  return getWatchlistSymbolsFromDb(env, userId);
+}
+
+async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined) {
+  const normalizedReferrerId = normalizeOptionalString(referrerId);
+  if (!normalizedReferrerId || normalizedReferrerId === String(inviteeId)) {
+    return null;
+  }
+
+  const inviterResult = await queryDb(
+    env,
+    'SELECT telegram_id FROM users WHERE telegram_id = $1 LIMIT 1',
+    [normalizedReferrerId],
+  );
+  if (!inviterResult.rows[0]) {
+    return null;
+  }
+
+  const existingResult = await queryDb(
+    env,
+    `
+      SELECT id, inviter_id, channel_verified, rewarded
+      FROM referrals
+      WHERE invitee_id = $1
+      LIMIT 1
+    `,
+    [String(inviteeId)],
+  );
+  const existing = existingResult.rows[0] || null;
+  const rewardAmount = getReferralRewardPerInvite(env);
+
+  if (existing) {
+    if (channelJoined && !existing.channel_verified) {
+      await queryDb(
+        env,
+        'UPDATE referrals SET channel_verified = TRUE WHERE id = $1',
+        [existing.id],
+      );
+      if (!existing.rewarded && rewardAmount > 0) {
+        await creditReferralTokens(env, String(existing.inviter_id), rewardAmount, String(existing.id), inviteeId);
+        await queryDb(
+          env,
+          'UPDATE referrals SET rewarded = TRUE WHERE id = $1',
+          [existing.id],
+        );
+      }
+    }
+    return { referral_id: existing.id, already_exists: true };
+  }
+
+  const insertResult = await queryDb(
+    env,
+    `
+      INSERT INTO referrals (inviter_id, invitee_id, channel_verified, rewarded, created_at)
+      VALUES ($1, $2, $3, FALSE, NOW())
+      RETURNING id, rewarded
+    `,
+    [normalizedReferrerId, String(inviteeId), Boolean(channelJoined)],
+  );
+  const createdReferral = insertResult.rows[0] || null;
+  if (!createdReferral) {
+    return null;
+  }
+
+  if (channelJoined && rewardAmount > 0) {
+    await creditReferralTokens(env, normalizedReferrerId, rewardAmount, String(createdReferral.id), inviteeId);
+    await queryDb(env, 'UPDATE referrals SET rewarded = TRUE WHERE id = $1', [createdReferral.id]);
+  }
+
+  return { referral_id: createdReferral.id, rewarded: Boolean(channelJoined && rewardAmount > 0) };
+}
+
+async function creditReferralTokens(env, userId, amount, refId, inviteeId) {
+  await queryDb(
+    env,
+    `
+      INSERT INTO token_balances (user_id, balance, updated_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (user_id) DO UPDATE
+      SET
+        balance = token_balances.balance + EXCLUDED.balance,
+        updated_at = NOW()
+    `,
+    [String(userId), Number(amount)],
+  );
+  await queryDb(
+    env,
+    `
+      INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
+      VALUES ($1, $2, 'referral_reward', $3, $4, NOW())
+    `,
+    [String(userId), Number(amount), `Invite reward for user ${String(inviteeId)}`, String(refId)],
+  );
+}
+
+async function getReferralStatsFromDb(env, userId) {
+  const referralsResult = await queryDb(
+    env,
+    `
+      SELECT channel_verified, rewarded
+      FROM referrals
+      WHERE inviter_id = $1
+    `,
+    [String(userId)],
+  );
+  const balanceResult = await queryDb(
+    env,
+    'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
+    [String(userId)],
+  );
+  const referrals = referralsResult.rows;
+  return {
+    total: referrals.length,
+    active: referrals.filter((row) => Boolean(row.channel_verified)).length,
+    rewarded: referrals.filter((row) => Boolean(row.rewarded)).length,
+    tokens: Number(balanceResult.rows[0]?.balance || 0),
+    reward_per_invite: getReferralRewardPerInvite(env),
+  };
+}
+
+async function getReferralTokensFromDb(env, userId) {
+  const balanceResult = await queryDb(
+    env,
+    'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
+    [String(userId)],
+  );
+  const historyResult = await queryDb(
+    env,
+    `
+      SELECT id, amount, tx_type, description, ref_id, created_at
+      FROM token_transactions
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 50
+    `,
+    [String(userId)],
+  );
+  return {
+    balance: Number(balanceResult.rows[0]?.balance || 0),
+    history: historyResult.rows.map((row) => ({
+      id: row.id,
+      amount: Number(row.amount),
+      type: row.tx_type,
+      description: row.description,
+      ref_id: row.ref_id,
+      created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+    })),
+  };
+}
+
+function serializeTicketReplyRow(row) {
+  const senderType = String(row.sender_type || 'user').trim().toLowerCase();
+  return {
+    message: row.message,
+    from: senderType === 'admin' ? 'admin' : 'user',
+    at: row.created_at ? new Date(row.created_at).toISOString() : null,
+  };
+}
+
+function serializeTicketRow(row, replies = []) {
+  return {
+    id: String(row.id),
+    user_id: String(row.user_id),
+    user_name: row.user_name,
+    title: row.title,
+    body: row.body,
+    status: row.status,
+    replies,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+  };
+}
+
+function serializeAlertRow(row) {
+  return {
+    id: String(row.id),
+    user_id: String(row.user_id),
+    symbol: String(row.symbol).toUpperCase(),
+    price: Number(row.price),
+    direction: row.direction,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+  };
+}
+
+async function getTicketRepliesFromDb(env, ticketId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT sender_type, message, created_at
+      FROM ticket_replies
+      WHERE ticket_id = $1
+      ORDER BY created_at ASC, id ASC
+    `,
+    [String(ticketId)],
+  );
+  return result.rows.map((row) => serializeTicketReplyRow(row));
+}
+
+async function hydrateTicketRow(env, row) {
+  const replies = await getTicketRepliesFromDb(env, row.id);
+  return serializeTicketRow(row, replies);
+}
+
+async function createTicketInDb(env, user, payload) {
+  const userId = String(user.id);
+  const displayName =
+    normalizeOptionalString(user.username)
+    || normalizeOptionalString(user.first_name)
+    || normalizeOptionalString(payload.user_name)
+    || userId;
+  await ensureUserRow(env, userId);
+  const result = await queryDb(
+    env,
+    `
+      INSERT INTO tickets (id, user_id, user_name, title, body, status, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, 'open', NOW(), NOW())
+      RETURNING id, user_id, user_name, title, body, status, created_at
+    `,
+    [
+      String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16),
+      userId,
+      displayName,
+      normalizeOptionalString(payload.title) || '',
+      normalizeOptionalString(payload.body) || '',
+    ],
+  );
+  return hydrateTicketRow(env, result.rows[0]);
+}
+
+async function listTicketsFromDb(env, userId = null) {
+  const result = userId
+    ? await queryDb(
+      env,
+      `
+        SELECT id, user_id, user_name, title, body, status, created_at
+        FROM tickets
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+      `,
+      [String(userId)],
+    )
+    : await queryDb(
+      env,
+      `
+        SELECT id, user_id, user_name, title, body, status, created_at
+        FROM tickets
+        ORDER BY created_at DESC
+      `,
+    );
+  const tickets = [];
+  for (const row of result.rows) {
+    tickets.push(await hydrateTicketRow(env, row));
+  }
+  return tickets;
+}
+
+async function getTicketRowById(env, ticketId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT id, user_id, user_name, title, body, status, created_at
+      FROM tickets
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [String(ticketId)],
+  );
+  return result.rows[0] || null;
+}
+
+async function replyToTicketInDb(env, ticketId, adminId, message) {
+  const ticketRow = await getTicketRowById(env, ticketId);
+  if (!ticketRow) {
+    return null;
+  }
+  await queryDb(
+    env,
+    `
+      INSERT INTO ticket_replies (ticket_id, sender_type, sender_id, message, created_at)
+      VALUES ($1, 'admin', $2, $3, NOW())
+    `,
+    [String(ticketId), String(adminId), message],
+  );
+  await queryDb(
+    env,
+    `
+      UPDATE tickets
+      SET status = 'answered', updated_at = NOW()
+      WHERE id = $1
+    `,
+    [String(ticketId)],
+  );
+  const updatedTicketRow = await getTicketRowById(env, ticketId);
+  return hydrateTicketRow(env, updatedTicketRow || ticketRow);
+}
+
+async function deleteTicketInDb(env, ticketId) {
+  await queryDb(env, 'DELETE FROM tickets WHERE id = $1', [String(ticketId)]);
+}
+
+async function createOrReactivateAlertInDb(env, userId, payload) {
+  const normalizedUserId = String(userId);
+  const symbol = (normalizeOptionalString(payload.symbol) || '').toUpperCase();
+  const direction = (normalizeOptionalString(payload.direction) || 'above').toLowerCase();
+  await ensureUserRow(env, normalizedUserId);
+  const existingResult = await queryDb(
+    env,
+    `
+      SELECT id, user_id, symbol, price, direction, created_at
+      FROM price_alerts
+      WHERE user_id = $1 AND symbol = $2 AND price = $3 AND direction = $4
+      LIMIT 1
+    `,
+    [normalizedUserId, symbol, Number(payload.price), direction],
+  );
+  const existingRow = existingResult.rows[0] || null;
+  if (existingRow) {
+    await queryDb(
+      env,
+      `
+        UPDATE price_alerts
+        SET status = 'active', triggered_at = NULL, created_at = NOW()
+        WHERE id = $1
+      `,
+      [String(existingRow.id)],
+    );
+    const refreshedResult = await queryDb(
+      env,
+      `
+        SELECT id, user_id, symbol, price, direction, created_at
+        FROM price_alerts
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [String(existingRow.id)],
+    );
+    return serializeAlertRow(refreshedResult.rows[0] || existingRow);
+  }
+  const insertResult = await queryDb(
+    env,
+    `
+      INSERT INTO price_alerts (id, user_id, symbol, price, direction, status, created_at)
+      VALUES ($1, $2, $3, $4, $5, 'active', NOW())
+      RETURNING id, user_id, symbol, price, direction, created_at
+    `,
+    [
+      String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16),
+      normalizedUserId,
+      symbol,
+      Number(payload.price),
+      direction,
+    ],
+  );
+  return serializeAlertRow(insertResult.rows[0]);
+}
+
+async function listAlertsFromDb(env, userId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT id, user_id, symbol, price, direction, created_at
+      FROM price_alerts
+      WHERE user_id = $1 AND status = 'active'
+      ORDER BY created_at DESC
+    `,
+    [String(userId)],
+  );
+  return result.rows.map((row) => serializeAlertRow(row));
+}
+
+async function getAlertRowById(env, alertId) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT id, user_id, symbol, price, direction, created_at
+      FROM price_alerts
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [String(alertId)],
+  );
+  return result.rows[0] || null;
+}
+
+async function deleteAlertInDb(env, alertId) {
+  await queryDb(env, 'DELETE FROM price_alerts WHERE id = $1', [String(alertId)]);
 }
 
 async function getChatMemberDebugPayload(userId, env) {
@@ -925,18 +1477,18 @@ const HTML_ENTITY_MAP = {
 };
 
 async function fetchJson(url) {
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    return { ok: false, body: null };
-  }
-
   try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return { ok: false, body: null };
+    }
+
     return {
       ok: true,
       body: await response.json(),
@@ -1180,53 +1732,6 @@ async function readCachedAnalysesState(env) {
   }
 
   return { version, analyses };
-}
-
-async function fetchAnalysesFromBackend(request, env) {
-  const backendUrl = resolveBackendUrl(env);
-  if (!backendUrl) {
-    throw new Error('BACKEND_URL not configured');
-  }
-
-  const url = new URL(request.url);
-  const headers = new Headers(request.headers);
-  headers.delete('host');
-  headers.set('X-Cloudflare-Proxy', 'amir-btc-assistant-analyses');
-
-  const upstreamResponse = await fetch(`${backendUrl}${url.pathname}${url.search}`, {
-    method: 'GET',
-    headers,
-    redirect: 'manual',
-  });
-
-  const responseText = await upstreamResponse.text();
-  let responseBody;
-  try {
-    responseBody = JSON.parse(responseText);
-  } catch {
-    responseBody = null;
-  }
-
-  if (!upstreamResponse.ok) {
-    throw new Error(
-      `Analyses upstream failed with HTTP ${upstreamResponse.status}: ${responseBody ? JSON.stringify(responseBody) : responseText}`,
-    );
-  }
-
-  if (
-    responseBody &&
-    responseBody.status === 'success' &&
-    Array.isArray(responseBody.analyses) &&
-    Number.isFinite(Number(responseBody.version))
-  ) {
-    const ttl = Math.max(getNumericEnv(env, 'ANALYSIS_CACHE_TTL', 30), 60);
-    await Promise.all([
-      writeAppCache(env, ANALYSES_VERSION_KEY, String(Number(responseBody.version)), ttl),
-      writeAppCache(env, ANALYSES_LIST_KEY, JSON.stringify(responseBody.analyses), ttl),
-    ]);
-  }
-
-  return responseBody;
 }
 
 function parseCalendarDate(dateString) {
@@ -1561,35 +2066,29 @@ async function handleAnalyses(request, env) {
     requestedVersion = numericVersion;
   }
 
-  try {
-    const cachedState = await readCachedAnalysesState(env);
-    if (requestedVersion !== null && cachedState.version !== null && requestedVersion === cachedState.version) {
-      return jsonResponse({
-        status: 'success',
-        analyses: null,
-        version: cachedState.version,
-        unchanged: true,
-      });
-    }
-
-    if (requestedVersion === null && cachedState.version !== null && cachedState.analyses !== null) {
-      return jsonResponse({
-        status: 'success',
-        analyses: cachedState.analyses,
-        version: cachedState.version,
-      });
-    }
-
-    return jsonResponse(await fetchAnalysesFromBackend(request, env));
-  } catch (error) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: error instanceof Error ? error.message : String(error),
-      },
-      { status: 502 },
-    );
+  const cachedState = await readCachedAnalysesState(env);
+  if (requestedVersion !== null && cachedState.version !== null && requestedVersion === cachedState.version) {
+    return jsonResponse({
+      status: 'success',
+      analyses: null,
+      version: cachedState.version,
+      unchanged: true,
+    });
   }
+
+  if (requestedVersion === null && cachedState.version !== null && cachedState.analyses !== null) {
+    return jsonResponse({
+      status: 'success',
+      analyses: cachedState.analyses,
+      version: cachedState.version,
+    });
+  }
+
+  return jsonResponse({
+    status: 'success',
+    analyses: cachedState.analyses ?? [],
+    version: cachedState.version ?? 0,
+  });
 }
 
 async function handleSessionsHeartbeat(request, env) {
@@ -1798,54 +2297,37 @@ async function handleAssistantChat(request, env) {
   if (hasImage && limits.images_used >= limits.images_limit) {
     return jsonResponse({ status: 'error', reason: 'daily_image_limit', allowed: false }, { status: 429 });
   }
+  return jsonResponse(
+    {
+      status: 'error',
+      message: 'assistant service is disabled on this worker',
+    },
+    { status: 501 },
+  );
+}
 
-  if (!resolveBackendUrl(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'BACKEND_URL not configured for assistant/chat proxy',
-      },
-      { status: 503 },
-    );
-  }
+function getUserStateKey(userId) {
+  return `user:${userId}`;
+}
 
-  payload.user_id = userId;
-
-  const url = new URL(request.url);
-  const upstreamUrl = `${resolveBackendUrl(env)}${url.pathname}${url.search}`;
-  const headers = new Headers(request.headers);
-  if (!headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  const upstreamResponse = await fetch(upstreamUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
-
-  try {
-    const responseClone = upstreamResponse.clone();
-    const contentType = responseClone.headers.get('Content-Type') || '';
-    if (contentType.includes('application/json')) {
-      const responseBody = await responseClone.json();
-      if (responseBody && responseBody.status === 'success') {
-        await recordRateLimitUsage(env, userId, hasImage);
-      }
-    }
-  } catch {
-  }
-
-  return new Response(upstreamResponse.body, {
-    status: upstreamResponse.status,
-    headers: withCors(upstreamResponse.headers),
-  });
+function getWatchlistKey(userId) {
+  return `watchlist:${userId}`;
 }
 
 async function handleTicketsCreate(request, env) {
   const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
     return authState.error;
+  }
+
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
 
   const originalBody = await request.text();
@@ -1867,8 +2349,20 @@ async function handleTicketsCreate(request, env) {
   }
 
   payload.user_id = String(authState.user.id);
-
-  return proxyToBackend(request, env, JSON.stringify(payload));
+  try {
+    const ticket = await createTicketInDb(env, authState.user, payload);
+    return jsonResponse({ status: 'success', ticket });
+  } catch (error) {
+    console.warn('create ticket failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleTicketsList(request, env) {
@@ -1876,15 +2370,30 @@ async function handleTicketsList(request, env) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
-
-  return proxyToBackend(request, env);
+  const userId = String(authState.user.id);
+  try {
+    const tickets = await listTicketsFromDb(env, userId);
+    return jsonResponse({ status: 'success', tickets });
+  } catch (error) {
+    console.warn('list tickets failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleTicketsAll(request, env) {
@@ -1896,15 +2405,29 @@ async function handleTicketsAll(request, env) {
   if (!isAdminTelegramId(env, authState.user.id)) {
     return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('admin_id')) {
-    url.searchParams.set('admin_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
-
-  return proxyToBackend(request, env);
+  try {
+    const tickets = await listTicketsFromDb(env);
+    return jsonResponse({ status: 'success', tickets });
+  } catch (error) {
+    console.warn('list all tickets failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleTicketReply(request, env, ticketId) {
@@ -1916,8 +2439,57 @@ async function handleTicketReply(request, env, ticketId) {
   if (!isAdminTelegramId(env, authState.user.id)) {
     return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
   }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+  const originalBody = await request.text();
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+      { status: 422 },
+    );
+  }
 
-  return proxyToBackend(request, env);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+      { status: 422 },
+    );
+  }
+
+  const message = normalizeOptionalString(payload.message) || '';
+  if (!message) {
+    return jsonResponse(
+      buildBodyFieldValidationError('message', 'string_too_short', 'String should have at least 1 character', message, { min_length: 1 }),
+      { status: 422 },
+    );
+  }
+  try {
+    const ticket = await replyToTicketInDb(env, ticketId, authState.user.id, message);
+    if (!ticket) {
+      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
+    }
+    return jsonResponse({ status: 'success', ticket });
+  } catch (error) {
+    console.warn('reply ticket failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleTicketDelete(request, env, ticketId) {
@@ -1925,17 +2497,38 @@ async function handleTicketDelete(request, env, ticketId) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
+  const userId = String(authState.user.id);
+  const isAdmin = isAdminTelegramId(env, authState.user.id);
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
-  if (url.searchParams.has('admin_id')) {
-    url.searchParams.set('admin_id', String(authState.user.id));
+  try {
+    const ticket = await getTicketRowById(env, ticketId);
+    if (!ticket) {
+      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
+    }
+    if (!isAdmin && String(ticket.user_id) !== userId) {
+      return jsonResponse({ detail: 'Forbidden' }, { status: 403 });
+    }
+    await deleteTicketInDb(env, ticketId);
+    return jsonResponse({ status: 'success' });
+  } catch (error) {
+    console.warn('delete ticket failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
   }
-
-  const nextRequest = url.toString() === request.url ? request : new Request(url.toString(), request);
-  return proxyToBackend(nextRequest, env);
 }
 
 async function handleAlertsCreate(request, env) {
@@ -1944,6 +2537,16 @@ async function handleAlertsCreate(request, env) {
     return authState.error;
   }
 
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
   const originalBody = await request.text();
   let payload;
   try {
@@ -1963,8 +2566,20 @@ async function handleAlertsCreate(request, env) {
   }
 
   payload.user_id = String(authState.user.id);
-
-  return proxyToBackend(request, env, JSON.stringify(payload));
+  try {
+    const alert = await createOrReactivateAlertInDb(env, payload.user_id, payload);
+    return jsonResponse({ status: 'success', alert });
+  } catch (error) {
+    console.warn('create alert failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleAlertsList(request, env) {
@@ -1972,15 +2587,30 @@ async function handleAlertsList(request, env) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
-
-  return proxyToBackend(request, env);
+  const userId = String(authState.user.id);
+  try {
+    const alerts = await listAlertsFromDb(env, userId);
+    return jsonResponse({ status: 'success', alerts });
+  } catch (error) {
+    console.warn('list alerts failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleAlertDelete(request, env, alertId) {
@@ -1988,14 +2618,37 @@ async function handleAlertDelete(request, env, alertId) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
-
-  const nextRequest = url.toString() === request.url ? request : new Request(url.toString(), request);
-  return proxyToBackend(nextRequest, env);
+  const userId = String(authState.user.id);
+  try {
+    const alert = await getAlertRowById(env, alertId);
+    if (!alert) {
+      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 });
+    }
+    if (String(alert.user_id) !== userId) {
+      return jsonResponse({ status: 'error', message: 'Forbidden' }, { status: 403 });
+    }
+    await deleteAlertInDb(env, alertId);
+    return jsonResponse({ status: 'success', deleted: true });
+  } catch (error) {
+    console.warn('delete alert failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleUsersBootstrap(request, env) {
@@ -2004,6 +2657,16 @@ async function handleUsersBootstrap(request, env) {
     return authState.error;
   }
 
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'DB_ERROR',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
   const originalBody = await request.text();
   let payload;
   try {
@@ -2021,22 +2684,39 @@ async function handleUsersBootstrap(request, env) {
       { status: 422 },
     );
   }
-
-  if (!resolveBackendUrl(env)) {
+  const userId = String(authState.user.id);
+  payload.user_id = userId;
+  try {
+    const userRow = await bootstrapUserInDb(env, userId, {
+      username: normalizeOptionalString(payload.username) || normalizeOptionalString(authState.user.username),
+      first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(authState.user.first_name),
+      last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(authState.user.last_name),
+      lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(authState.user.language_code),
+    });
+    await processReferralOnBootstrap(
+      env,
+      userId,
+      normalizeOptionalString(payload.referrer_id),
+      Boolean(userRow?.channel_joined),
+    );
+    const freshUserRow = await getUserRow(env, userId);
+    const watchlist = await getWatchlistSymbolsFromDb(env, userId);
+    return jsonResponse({
+      status: 'success',
+      user: normalizeUserRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
+      watchlist,
+    });
+  } catch (error) {
+    console.warn('bootstrap user failed:', error);
     return jsonResponse(
       {
-        status: 'error',
-        message: 'BACKEND_URL not configured for bootstrap proxy',
+        status: 'DB_ERROR',
+        message: 'Database unavailable',
+        detail: String(error),
       },
       { status: 503 },
     );
   }
-
-  // شناسه کاربر را با هویت تاییدشده تلگرام همگام می‌کنیم تا proxy
-  // به مقدار stale یا دستکاری‌شده از سمت کلاینت وابسته نباشد.
-  payload.user_id = String(authState.user.id);
-
-  return proxyToBackend(request, env, JSON.stringify(payload));
 }
 
 async function handleUsersMe(request, env) {
@@ -2044,15 +2724,44 @@ async function handleUsersMe(request, env) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
-
-  return proxyToBackend(request, env);
+  const userId = String(authState.user.id);
+  try {
+    const userRow = await getUserRow(env, userId);
+    if (!userRow) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'User not found',
+        },
+        { status: 404 },
+      );
+    }
+    const watchlist = await getWatchlistSymbolsFromDb(env, userId);
+    return jsonResponse({
+      status: 'success',
+      user: normalizeUserRow(userRow, watchlist),
+      watchlist,
+    });
+  } catch (error) {
+    console.warn('get current user failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleUsersMeSettings(request, env) {
@@ -2061,6 +2770,16 @@ async function handleUsersMeSettings(request, env) {
     return authState.error;
   }
 
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
   const originalBody = await request.text();
   let payload;
   try {
@@ -2079,19 +2798,31 @@ async function handleUsersMeSettings(request, env) {
     );
   }
 
-  payload.user_id = String(authState.user.id);
-
-  if (!resolveBackendUrl(env)) {
+  const userId = String(authState.user.id);
+  payload.user_id = userId;
+  try {
+    const userRow = await updateUserSettingsInDb(env, userId, payload);
+    if (!userRow) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'User not found',
+        },
+        { status: 404 },
+      );
+    }
+    return jsonResponse({ status: 'success', user: normalizeUserRow(userRow) });
+  } catch (error) {
+    console.warn('update user settings failed:', error);
     return jsonResponse(
       {
         status: 'error',
-        message: 'BACKEND_URL not configured for me/settings proxy',
+        message: 'Database unavailable',
+        detail: String(error),
       },
       { status: 503 },
     );
   }
-
-  return proxyToBackend(request, env, JSON.stringify(payload));
 }
 
 async function handleWatchlistGet(request, env) {
@@ -2099,15 +2830,30 @@ async function handleWatchlistGet(request, env) {
   if (authState.error) {
     return authState.error;
   }
-
-  const url = new URL(request.url);
-  if (url.searchParams.has('user_id')) {
-    url.searchParams.set('user_id', String(authState.user.id));
-    const nextRequest = new Request(url.toString(), request);
-    return proxyToBackend(nextRequest, env);
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
   }
-
-  return proxyToBackend(request, env);
+  const userId = String(authState.user.id);
+  try {
+    const symbols = await getWatchlistSymbolsFromDb(env, userId);
+    return jsonResponse({ status: 'success', symbols, watchlist: symbols });
+  } catch (error) {
+    console.warn('get watchlist failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleWatchlistPut(request, env) {
@@ -2116,6 +2862,16 @@ async function handleWatchlistPut(request, env) {
     return authState.error;
   }
 
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
   const originalBody = await request.text();
   let payload;
   try {
@@ -2135,8 +2891,119 @@ async function handleWatchlistPut(request, env) {
   }
 
   payload.user_id = String(authState.user.id);
+  const symbols = Array.isArray(payload.symbols)
+    ? [...new Set(payload.symbols.map((value) => String(value).toUpperCase().trim()).filter(Boolean))].slice(0, 7)
+    : [];
+  try {
+    const storedSymbols = await replaceWatchlistInDb(env, payload.user_id, symbols);
+    return jsonResponse({ status: 'success', symbols: storedSymbols });
+  } catch (error) {
+    console.warn('update watchlist failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
+}
 
-  return proxyToBackend(request, env, JSON.stringify(payload));
+async function handleReferralsStats(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse({ status: 'success', total: 0, active: 0, rewarded: 0, tokens: 0 });
+  }
+  try {
+    const stats = await getReferralStatsFromDb(env, authState.user.id);
+    return jsonResponse({ status: 'success', ...stats });
+  } catch (error) {
+    console.warn('get referral stats failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
+}
+
+async function handleReferralTokens(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse({ status: 'success', balance: 0, history: [] });
+  }
+  try {
+    const tokenState = await getReferralTokensFromDb(env, authState.user.id);
+    return jsonResponse({ status: 'success', ...tokenState });
+  } catch (error) {
+    console.warn('get referral tokens failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
+}
+
+async function handleNotify(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+
+  const originalBody = await request.text();
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+      { status: 422 },
+    );
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return jsonResponse(
+      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+      { status: 422 },
+    );
+  }
+
+  const message = normalizeOptionalString(payload.message) || '';
+  if (!message) {
+    return jsonResponse(
+      buildBodyFieldValidationError('message', 'string_too_short', 'String should have at least 1 character', message, { min_length: 1 }),
+      { status: 422 },
+    );
+  }
+
+  if (!isBotConfigured(env)) {
+    return jsonResponse({ status: 'skipped', sent: false, reason: 'bot_not_configured' }, { status: 200 });
+  }
+
+  try {
+    await sendTelegramMessage(env, {
+      chat_id: Number(authState.user.id),
+      text: message,
+      disable_web_page_preview: true,
+    });
+    return jsonResponse({ status: 'success', sent: true });
+  } catch {
+    return jsonResponse({ status: 'skipped', sent: false }, { status: 200 });
+  }
 }
 
 async function handleCheckJoin(request, env) {
@@ -2212,9 +3079,19 @@ async function handleCheckJoinInvalidate(request, env) {
 }
 
 async function handleTelegramWebhook(request, env) {
+  const requestPath = new URL(request.url).pathname || '/';
   try {
     const updatePayload = await request.json();
     const messageContext = extractTelegramMessageContext(updatePayload);
+    console.log(
+      JSON.stringify({
+        scope: 'telegram-webhook',
+        path: requestPath,
+        update_id: updatePayload?.update_id ?? null,
+        has_message: Boolean(updatePayload?.message),
+        is_start: Boolean(messageContext && isTelegramStartCommand(messageContext.text)),
+      }),
+    );
     if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
       return new Response(null, {
         status: 200,
@@ -2260,7 +3137,6 @@ async function runScheduledAlertsBaseline(controller, env) {
     task: 'scheduled-alerts-execution',
     cron: controller.cron || 'manual',
     alerts_cron_enabled: isAlertsCronEnabled(env),
-    backend_configured: Boolean(resolveBackendUrl(env)),
     secret_configured: Boolean(env.ALERTS_CRON_SHARED_SECRET),
   };
 
@@ -2274,107 +3150,13 @@ async function runScheduledAlertsBaseline(controller, env) {
     );
     return;
   }
-
-  const runnerUrl = resolveAlertsRunnerUrl(env);
-  if (!runnerUrl) {
-    throw new Error('BACKEND_URL is required for scheduled alerts execution');
-  }
-
-  if (!env.ALERTS_CRON_SHARED_SECRET) {
-    throw new Error('ALERTS_CRON_SHARED_SECRET is required for scheduled alerts execution');
-  }
-
-  const upstreamResponse = await fetch(runnerUrl, {
-    method: 'POST',
-    headers: {
-      'X-Alerts-Cron-Secret': String(env.ALERTS_CRON_SHARED_SECRET),
-      'X-Cloudflare-Scheduled': String(controller.cron || 'manual'),
-    },
-  });
-
-  const responseText = await upstreamResponse.text();
-  let responseBody;
-  try {
-    responseBody = JSON.parse(responseText);
-  } catch {
-    responseBody = responseText;
-  }
-
-  if (!upstreamResponse.ok) {
-    throw new Error(
-      `Scheduled alerts runner failed with HTTP ${upstreamResponse.status}: ${typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody)}`,
-    );
-  }
-
   console.log(
     JSON.stringify({
       ...payload,
-      executed: true,
-      upstream_status: upstreamResponse.status,
-      upstream_body: responseBody,
+      skipped: true,
+      reason: 'scheduled alerts runner is not configured on this worker',
     }),
   );
-}
-//#endregion
-
-// ============================================================================
-//#region پروکسی موقت مسیرهای مهاجرت‌نشده
-// ============================================================================
-async function proxyToBackend(request, env, bodyOverride) {
-  const backendUrl = resolveBackendUrl(env);
-  if (!backendUrl) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'BACKEND_URL not configured',
-      },
-      { status: 503 },
-    );
-  }
-
-  const requestUrl = new URL(request.url);
-  const targetUrl = `${backendUrl}${requestUrl.pathname}${requestUrl.search}`;
-  const headers = new Headers(request.headers);
-
-  headers.delete('host');
-  // وقتی body را در Worker بازنویسی می‌کنیم، content-length قبلی دیگر معتبر نیست.
-  // حذف آن اجازه می‌دهد runtime طول جدید را خودش محاسبه کند.
-  headers.delete('content-length');
-  headers.set('X-Cloudflare-Proxy', 'amir-btc-assistant-shell');
-
-  try {
-    const upstreamResponse = await fetch(targetUrl, {
-      method: request.method,
-      headers,
-      body: ['GET', 'HEAD'].includes(request.method) ? undefined : (bodyOverride ?? request.body),
-      redirect: 'follow',
-    });
-
-    const upstreamStatus = Number(upstreamResponse.status);
-    if (!Number.isInteger(upstreamStatus) || upstreamStatus < 200 || upstreamStatus > 599) {
-      return jsonResponse(
-        {
-          status: 'error',
-          message: 'Invalid upstream response status',
-          detail: `status=${String(upstreamResponse.status)}`,
-        },
-        { status: 502 },
-      );
-    }
-
-    return new Response(upstreamResponse.body, {
-      status: upstreamStatus,
-      headers: withCors(upstreamResponse.headers),
-    });
-  } catch (error) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: error instanceof Error ? error.message : String(error),
-      },
-      { status: 502 },
-    );
-  }
 }
 //#endregion
 
@@ -2390,134 +3172,153 @@ export default {
       });
     }
 
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
 
-    if (request.method === 'GET' && url.pathname === '/') {
-      return handleRoot();
+      if (request.method === 'GET' && url.pathname === '/') {
+        return handleRoot();
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/health') {
+        return handleHealth(env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
+        return await handleChartResolve(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/calendar/events') {
+        return await handleCalendarEvents(env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
+        return await handleFarsiNews(env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/analyses') {
+        return await handleAnalyses(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/tickets') {
+        return await handleTicketsCreate(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/tickets') {
+        return await handleTicketsList(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/tickets/all') {
+        return await handleTicketsAll(request, env);
+      }
+
+      if (request.method === 'POST' && /^\/api\/tickets\/[^/]+\/reply$/u.test(url.pathname)) {
+        const ticketId = url.pathname.split('/')[3] || '';
+        return await handleTicketReply(request, env, ticketId);
+      }
+
+      if (request.method === 'DELETE' && /^\/api\/tickets\/[^/]+$/u.test(url.pathname) && url.pathname !== '/api/tickets/all') {
+        const ticketId = url.pathname.split('/')[3] || '';
+        return await handleTicketDelete(request, env, ticketId);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/alerts') {
+        return await handleAlertsCreate(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/alerts') {
+        return await handleAlertsList(request, env);
+      }
+
+      if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
+        const alertId = url.pathname.split('/')[3] || '';
+        return await handleAlertDelete(request, env, alertId);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
+        return await handleSessionsHeartbeat(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/sessions/online') {
+        return await handleSessionsOnline(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/sessions/end') {
+        return await handleSessionsEnd(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/assistant/limits') {
+        return await handleAssistantLimits(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/assistant/chat') {
+        return await handleAssistantChat(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/users/me') {
+        return await handleUsersMe(request, env);
+      }
+
+      if (request.method === 'PUT' && url.pathname === '/api/users/me/settings') {
+        return await handleUsersMeSettings(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
+        return await handleUsersBootstrap(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/watchlist') {
+        return await handleWatchlistGet(request, env);
+      }
+
+      if (request.method === 'PUT' && url.pathname === '/api/watchlist') {
+        return await handleWatchlistPut(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/notify') {
+        return await handleNotify(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/referrals/stats') {
+        return handleReferralsStats(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/referrals/tokens') {
+        return handleReferralTokens(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/check-join') {
+        return await handleCheckJoin(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/debug/check-join') {
+        return await handleDebugCheckJoin(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/check-join/invalidate') {
+        return await handleCheckJoinInvalidate(request, env);
+      }
+
+      if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {
+        return await handleTelegramWebhook(request, env);
+      }
+
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'Route not found in Cloudflare shell',
+        },
+        { status: 404 },
+      );
+    } catch (error) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'Request failed safely',
+          detail: String(error),
+        },
+        { status: 200 },
+      );
     }
-
-    if (request.method === 'GET' && url.pathname === '/api/health') {
-      return handleHealth(env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
-      return handleChartResolve(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/calendar/events') {
-      return handleCalendarEvents(env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
-      return handleFarsiNews(env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/analyses') {
-      return handleAnalyses(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/tickets') {
-      return handleTicketsCreate(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/tickets') {
-      return handleTicketsList(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/tickets/all') {
-      return handleTicketsAll(request, env);
-    }
-
-    if (request.method === 'POST' && /^\/api\/tickets\/[^/]+\/reply$/u.test(url.pathname)) {
-      const ticketId = url.pathname.split('/')[3] || '';
-      return handleTicketReply(request, env, ticketId);
-    }
-
-    if (request.method === 'DELETE' && /^\/api\/tickets\/[^/]+$/u.test(url.pathname) && url.pathname !== '/api/tickets/all') {
-      const ticketId = url.pathname.split('/')[3] || '';
-      return handleTicketDelete(request, env, ticketId);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/alerts') {
-      return handleAlertsCreate(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/alerts') {
-      return handleAlertsList(request, env);
-    }
-
-    if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
-      const alertId = url.pathname.split('/')[3] || '';
-      return handleAlertDelete(request, env, alertId);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
-      return handleSessionsHeartbeat(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/sessions/online') {
-      return handleSessionsOnline(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/sessions/end') {
-      return handleSessionsEnd(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/assistant/limits') {
-      return handleAssistantLimits(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/assistant/chat') {
-      return handleAssistantChat(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/users/me') {
-      return handleUsersMe(request, env);
-    }
-
-    if (request.method === 'PUT' && url.pathname === '/api/users/me/settings') {
-      return handleUsersMeSettings(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
-      return handleUsersBootstrap(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/watchlist') {
-      return handleWatchlistGet(request, env);
-    }
-
-    if (request.method === 'PUT' && url.pathname === '/api/watchlist') {
-      return handleWatchlistPut(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/check-join') {
-      return handleCheckJoin(request, env);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/debug/check-join') {
-      return handleDebugCheckJoin(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/check-join/invalidate') {
-      return handleCheckJoinInvalidate(request, env);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/telegram') {
-      return handleTelegramWebhook(request, env);
-    }
-
-    if (url.pathname === '/telegram' || url.pathname.startsWith('/api/')) {
-      return proxyToBackend(request, env);
-    }
-
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Route not found in Cloudflare shell',
-      },
-      { status: 404 },
-    );
   },
 
   async scheduled(controller, env, ctx) {

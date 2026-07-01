@@ -11,7 +11,6 @@ import uuid
 import hmac
 import asyncio
 from contextlib import asynccontextmanager
-from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -32,6 +31,10 @@ from deep_translator import GoogleTranslator
 
 from backend.config import get_settings
 from backend.database import database_ready, get_db_session, init_database
+from backend.models import PriceAlert as DbPriceAlert
+from backend.models import Ticket as DbTicket
+from backend.models import TicketReply as DbTicketReply
+from backend.models import User as DbUser
 from backend.redis_client import init_redis, redis_ready
 from backend.routers import users as users_router
 from backend.routers import watchlist as watchlist_router
@@ -313,7 +316,6 @@ WEBHOOK_URL = os.environ.get(
 REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")
 ALERTS_POLLING_MODE = os.environ.get("ALERTS_POLLING_MODE", "loop").strip().lower()
 ALERTS_CRON_SHARED_SECRET = os.environ.get("ALERTS_CRON_SHARED_SECRET", "").strip()
-TICKETS_FILE = Path(__file__).parent / "data" / "tickets.json"
 
 JOINED_STATUSES = {"creator", "administrator", "member", "restricted"}
 
@@ -352,27 +354,60 @@ class NotifyRequest(BaseModel):
     message: str
 
 
-# عملیات مربوط به ensure تیکت‌ها فایل را انجام می‌دهد.
-# ورودی: بدون ورودی.
-# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
-def _ensure_tickets_file():
-    TICKETS_FILE.parent.mkdir(exist_ok=True)
-    if not TICKETS_FILE.exists():
-        TICKETS_FILE.write_text("[]", encoding="utf-8")
+def _ensure_db_user(db, user_id: str, user_name: Optional[str] = None):
+    user = db.get(DbUser, str(user_id))
+    if user is None:
+        now = datetime.now(timezone.utc)
+        user = DbUser(
+            telegram_id=str(user_id),
+            first_name=user_name or None,
+            lang="fa",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(user)
+        db.flush()
+    elif user_name and not user.first_name:
+        user.first_name = user_name
+        user.updated_at = datetime.now(timezone.utc)
+        db.flush()
+    return user
 
-# عملیات مربوط به خواندن تیکت‌ها را انجام می‌دهد.
-# ورودی: بدون ورودی.
-# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
-def _read_tickets():
-    _ensure_tickets_file()
-    return json.loads(TICKETS_FILE.read_text(encoding="utf-8"))
 
-# عملیات مربوط به نوشتن تیکت‌ها را انجام می‌دهد.
-# ورودی: پارامترهای `tickets` را دریافت می‌کند.
-# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
-def _write_tickets(tickets):
-    _ensure_tickets_file()
-    TICKETS_FILE.write_text(json.dumps(tickets, ensure_ascii=False, indent=2), encoding="utf-8")
+def _serialize_ticket_reply(reply: DbTicketReply) -> dict:
+    sender_type = str(reply.sender_type or "user").strip().lower()
+    return {
+        "message": reply.message,
+        "from": "admin" if sender_type == "admin" else "user",
+        "at": reply.created_at.isoformat() if reply.created_at else None,
+    }
+
+
+def _serialize_ticket(ticket: DbTicket) -> dict:
+    replies = []
+    if getattr(ticket, "replies", None):
+        replies = [_serialize_ticket_reply(reply) for reply in ticket.replies]
+    return {
+        "id": ticket.id,
+        "user_id": ticket.user_id,
+        "user_name": ticket.user_name,
+        "title": ticket.title,
+        "body": ticket.body,
+        "status": ticket.status,
+        "replies": replies,
+        "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+    }
+
+
+def _serialize_alert(alert: DbPriceAlert) -> dict:
+    return {
+        "id": alert.id,
+        "user_id": alert.user_id,
+        "symbol": alert.symbol,
+        "price": float(alert.price),
+        "direction": alert.direction,
+        "created_at": alert.created_at.isoformat() if alert.created_at else None,
+    }
 
 def _send_telegram_http(chat_id: str, text: str) -> bool:
     if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
@@ -655,19 +690,24 @@ async def create_ticket(ticket: TicketCreate, request: Request):
         part for part in [telegram_user.get("first_name"), telegram_user.get("last_name")] if part
     ).strip()
     display_name = telegram_user.get("username") or full_name or ticket.user_name or resolved_user_id
-    tickets = _read_tickets()
-    new_ticket = {
-        "id": str(uuid.uuid4())[:8],
-        "user_id": resolved_user_id,
-        "user_name": display_name,
-        "title": ticket.title,
-        "body": ticket.body,
-        "status": "open",
-        "replies": [],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    tickets.insert(0, new_ticket)
-    _write_tickets(tickets)
+    if not database_ready():
+        return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
+    with get_db_session() as db:
+        _ensure_db_user(db, resolved_user_id, display_name)
+        new_ticket = DbTicket(
+            id=str(uuid.uuid4())[:8],
+            user_id=resolved_user_id,
+            user_name=display_name,
+            title=ticket.title,
+            body=ticket.body,
+            status="open",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(new_ticket)
+        db.flush()
+        db.refresh(new_ticket)
+        serialized_ticket = _serialize_ticket(new_ticket)
     await _send_telegram(
         ADMIN_TELEGRAM_ID,
         f"🎫 تیکت جدید\nاز: {display_name} ({resolved_user_id})\nعنوان: {ticket.title}\n\n{ticket.body}"
@@ -676,7 +716,7 @@ async def create_ticket(ticket: TicketCreate, request: Request):
         resolved_user_id,
         f"✅ تیکت شما ثبت شد\nعنوان: {ticket.title}\nبه زودی پاسخ داده می‌شود."
     )
-    return {"status": "success", "ticket": new_ticket}
+    return {"status": "success", "ticket": serialized_ticket}
 
 # مقدار کاربر تیکت‌ها را بازیابی می‌کند.
 # مقدار کاربر تیکت‌ها را بازیابی می‌کند.
@@ -686,8 +726,16 @@ async def create_ticket(ticket: TicketCreate, request: Request):
 @verify_telegram_auth
 async def get_user_tickets(request: Request, user_id: Optional[str] = Query(None)):
     resolved_user_id = get_authenticated_telegram_user_id(request)
-    user_tickets = [t for t in _read_tickets() if t["user_id"] == resolved_user_id]
-    return {"status": "success", "tickets": user_tickets}
+    if not database_ready():
+        return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
+    with get_db_session() as db:
+        tickets = (
+            db.query(DbTicket)
+            .filter(DbTicket.user_id == resolved_user_id)
+            .order_by(DbTicket.created_at.desc())
+            .all()
+        )
+        return {"status": "success", "tickets": [_serialize_ticket(ticket) for ticket in tickets]}
 
 # مقدار all تیکت‌ها را بازیابی می‌کند.
 # مقدار all تیکت‌ها را بازیابی می‌کند.
@@ -696,7 +744,11 @@ async def get_user_tickets(request: Request, user_id: Optional[str] = Query(None
 @app.get("/api/tickets/all")
 @verify_admin_telegram_auth
 async def get_all_tickets(request: Request, admin_id: Optional[str] = Query(None)):
-    return {"status": "success", "tickets": _read_tickets()}
+    if not database_ready():
+        return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
+    with get_db_session() as db:
+        tickets = db.query(DbTicket).order_by(DbTicket.created_at.desc()).all()
+        return {"status": "success", "tickets": [_serialize_ticket(ticket) for ticket in tickets]}
 
 # عملیات مربوط به پاسخ تیکت را انجام می‌دهد.
 # عملیات مربوط به reply تیکت را انجام می‌دهد.
@@ -705,26 +757,34 @@ async def get_all_tickets(request: Request, admin_id: Optional[str] = Query(None
 @app.post("/api/tickets/{ticket_id}/reply")
 @verify_admin_telegram_auth
 async def reply_ticket(ticket_id: str, reply: TicketReply, request: Request):
-    tickets = _read_tickets()
-    found = None
-    for t in tickets:
-        if t["id"] == ticket_id:
-            found = t
-            t.setdefault("replies", []).append({
-                "message": reply.message,
-                "from": "admin",
-                "at": datetime.now(timezone.utc).isoformat(),
-            })
-            t["status"] = "answered"
-            break
+    if not database_ready():
+        return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
+    resolved_admin_id = get_authenticated_telegram_user_id(request)
+    with get_db_session() as db:
+        found = db.get(DbTicket, ticket_id)
+        if not found:
+            return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
+        found.status = "answered"
+        found.updated_at = datetime.now(timezone.utc)
+        db.add(
+            DbTicketReply(
+                ticket_id=found.id,
+                sender_type="admin",
+                sender_id=resolved_admin_id,
+                message=reply.message,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db.flush()
+        db.refresh(found)
+        serialized_ticket = _serialize_ticket(found)
     if not found:
         return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
-    _write_tickets(tickets)
     await _send_telegram(
-        found["user_id"],
-        f"💬 پاسخ تیکت: {found['title']}\n\n{reply.message}"
+        found.user_id,
+        f"💬 پاسخ تیکت: {found.title}\n\n{reply.message}"
     )
-    return {"status": "success", "ticket": found}
+    return {"status": "success", "ticket": serialized_ticket}
 
 @app.delete("/api/tickets/{ticket_id}")
 @verify_telegram_auth
@@ -736,13 +796,15 @@ async def delete_ticket(
 ):
     resolved_user_id = get_authenticated_telegram_user_id(request)
     is_admin = is_admin_telegram_id(resolved_user_id)
-    tickets = _read_tickets()
-    ticket = next((t for t in tickets if t["id"] == ticket_id), None)
-    if not ticket:
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
-    if not is_admin and ticket["user_id"] != resolved_user_id:
-        return JSONResponse(status_code=403, content={"status": "error", "message": "Forbidden"})
-    _write_tickets([t for t in tickets if t["id"] != ticket_id])
+    if not database_ready():
+        return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
+    with get_db_session() as db:
+        ticket = db.get(DbTicket, ticket_id)
+        if not ticket:
+            return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
+        if not is_admin and ticket.user_id != resolved_user_id:
+            return JSONResponse(status_code=403, content={"status": "error", "message": "Forbidden"})
+        db.delete(ticket)
     return {"status": "success"}
 
 # عملیات مربوط به اعلان کاربر را انجام می‌دهد.
@@ -759,9 +821,6 @@ async def notify_user(req: NotifyRequest, request: Request):
 # ==========================================
 # ۳.۶ سیستم هشدار قیمت (سرور + پیام تلگرام)
 # ==========================================
-ALERTS_FILE = Path(__file__).parent / "data" / "alerts.json"
-
-
 # AlertCreate ساختار داده یا کلاس اصلی این فایل را تعریف می‌کند.
 # ورودی: در زمان نمونه‌سازی یا ارث‌بری، پارامترها و فیلدهای موردنیاز را دریافت می‌کند.
 # خروجی: یک ساختار داده، مدل یا رفتار شی‌گرا برای استفاده در سایر بخش‌ها فراهم می‌کند.
@@ -771,30 +830,6 @@ class AlertCreate(BaseModel):
     price: float
     direction: str = "above"
 
-
-# عملیات مربوط به ensure هشدارها فایل را انجام می‌دهد.
-# ورودی: بدون ورودی.
-# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
-def _ensure_alerts_file():
-    ALERTS_FILE.parent.mkdir(exist_ok=True)
-    if not ALERTS_FILE.exists():
-        ALERTS_FILE.write_text("[]", encoding="utf-8")
-
-# عملیات مربوط به خواندن هشدارها را انجام می‌دهد.
-# ورودی: بدون ورودی.
-# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
-def _read_alerts():
-    _ensure_alerts_file()
-    return json.loads(ALERTS_FILE.read_text(encoding="utf-8"))
-
-# عملیات مربوط به نوشتن هشدارها را انجام می‌دهد.
-# ورودی: پارامترهای `alerts` را دریافت می‌کند.
-# خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
-def _write_alerts(alerts):
-    _ensure_alerts_file()
-    ALERTS_FILE.write_text(json.dumps(alerts, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
 # هشدار را ایجاد می‌کند.
 # ایجاد هشدار را ایجاد می‌کند.
 # ورودی: پارامترهای `alert: AlertCreate, request: Request` را دریافت می‌کند.
@@ -803,27 +838,48 @@ def _write_alerts(alerts):
 @verify_telegram_auth
 async def create_alert(alert: AlertCreate, request: Request):
     resolved_user_id = get_authenticated_telegram_user_id(request)
-    alerts = _read_alerts()
-    new_alert = {
-        "id": str(uuid.uuid4())[:8],
-        "user_id": resolved_user_id,
-        "symbol": alert.symbol.upper(),
-        "price": alert.price,
-        "direction": alert.direction or "above",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    alerts = [a for a in alerts if not (
-        a["user_id"] == new_alert["user_id"]
-        and a["symbol"] == new_alert["symbol"]
-        and float(a["price"]) == float(new_alert["price"])
-    )]
-    alerts.insert(0, new_alert)
-    _write_alerts(alerts)
+    if not database_ready():
+        return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
+    symbol = alert.symbol.upper()
+    direction = (alert.direction or "above").strip().lower()
+    with get_db_session() as db:
+        _ensure_db_user(db, resolved_user_id)
+        existing_alert = (
+            db.query(DbPriceAlert)
+            .filter(
+                DbPriceAlert.user_id == resolved_user_id,
+                DbPriceAlert.symbol == symbol,
+                DbPriceAlert.price == float(alert.price),
+                DbPriceAlert.direction == direction,
+            )
+            .first()
+        )
+        if existing_alert:
+            existing_alert.status = "active"
+            existing_alert.triggered_at = None
+            existing_alert.created_at = datetime.now(timezone.utc)
+            db.flush()
+            db.refresh(existing_alert)
+            serialized_alert = _serialize_alert(existing_alert)
+        else:
+            new_alert = DbPriceAlert(
+                id=str(uuid.uuid4())[:8],
+                user_id=resolved_user_id,
+                symbol=symbol,
+                price=float(alert.price),
+                direction=direction,
+                status="active",
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(new_alert)
+            db.flush()
+            db.refresh(new_alert)
+            serialized_alert = _serialize_alert(new_alert)
     await _send_telegram(
         resolved_user_id,
-        f"🔔 هشدار قیمت ثبت شد\n{new_alert['symbol']} — هدف: ${new_alert['price']}"
+        f"🔔 هشدار قیمت ثبت شد\n{serialized_alert['symbol']} — هدف: ${serialized_alert['price']}"
     )
-    return {"status": "success", "alert": new_alert}
+    return {"status": "success", "alert": serialized_alert}
 
 # مقدار کاربر هشدارها را بازیابی می‌کند.
 # مقدار کاربر هشدارها را بازیابی می‌کند.
@@ -833,8 +889,19 @@ async def create_alert(alert: AlertCreate, request: Request):
 @verify_telegram_auth
 async def get_user_alerts(request: Request, user_id: Optional[str] = Query(None)):
     resolved_user_id = get_authenticated_telegram_user_id(request)
-    user_alerts = [a for a in _read_alerts() if a["user_id"] == resolved_user_id]
-    return {"status": "success", "alerts": user_alerts}
+    if not database_ready():
+        return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
+    with get_db_session() as db:
+        alerts = (
+            db.query(DbPriceAlert)
+            .filter(
+                DbPriceAlert.user_id == resolved_user_id,
+                DbPriceAlert.status == "active",
+            )
+            .order_by(DbPriceAlert.created_at.desc())
+            .all()
+        )
+        return {"status": "success", "alerts": [_serialize_alert(alert) for alert in alerts]}
 
 # هشدار را حذف می‌کند.
 # حذف هشدار را حذف می‌کند.
@@ -844,13 +911,15 @@ async def get_user_alerts(request: Request, user_id: Optional[str] = Query(None)
 @verify_telegram_auth
 async def delete_alert(request: Request, alert_id: str, user_id: Optional[str] = Query(None)):
     resolved_user_id = get_authenticated_telegram_user_id(request)
-    alerts = _read_alerts()
-    alert = next((a for a in alerts if a["id"] == alert_id), None)
-    if not alert:
-        return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
-    if alert["user_id"] != resolved_user_id:
-        return JSONResponse(status_code=403, content={"status": "error", "message": "Forbidden"})
-    _write_alerts([a for a in alerts if a["id"] != alert_id])
+    if not database_ready():
+        return JSONResponse(status_code=503, content={"status": "error", "message": "Database not configured"})
+    with get_db_session() as db:
+        alert = db.get(DbPriceAlert, alert_id)
+        if not alert:
+            return JSONResponse(status_code=404, content={"status": "error", "message": "Not found"})
+        if alert.user_id != resolved_user_id:
+            return JSONResponse(status_code=403, content={"status": "error", "message": "Forbidden"})
+        db.delete(alert)
     return {"status": "success"}
 
 
@@ -881,7 +950,15 @@ async def run_internal_alerts(request: Request):
 # ورودی: بدون ورودی.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 async def _check_price_alerts_once():
-    alerts = _read_alerts()
+    if not database_ready():
+        return {"status": "error", "message": "Database not configured"}
+    with get_db_session() as db:
+        alerts = (
+            db.query(DbPriceAlert)
+            .filter(DbPriceAlert.status == "active")
+            .order_by(DbPriceAlert.created_at.desc())
+            .all()
+        )
     summary = {
         "status": "success",
         "checked_count": len(alerts),
@@ -904,28 +981,36 @@ async def _check_price_alerts_once():
             return summary
         price_map = {item["symbol"].upper(): float(item["current_price"]) for item in res.json()}
         summary["fetched_symbol_count"] = len(price_map)
-        remaining = []
-        for alert in alerts:
-            sym = alert["symbol"].upper()
-            current = price_map.get(sym)
-            if current is None:
-                remaining.append(alert)
-                continue
-            direction = alert.get("direction", "above")
-            triggered = (direction == "above" and current >= float(alert["price"])) or (
-                direction == "below" and current <= float(alert["price"])
+        remaining_count = 0
+        with get_db_session() as db:
+            active_alerts = (
+                db.query(DbPriceAlert)
+                .filter(DbPriceAlert.status == "active")
+                .order_by(DbPriceAlert.created_at.desc())
+                .all()
             )
-            if triggered:
-                uid = alert["user_id"]
-                msg = f"🔔 {sym} Price reached ${current:.4f}"
-                summary["triggered_count"] += 1
-                if uid and not str(uid).startswith("guest_"):
-                    await _send_telegram(uid, msg)
-                await _send_telegram(ADMIN_TELEGRAM_ID, f"📊 هشدار فعال شد\n{msg}\nکاربر: {uid}")
-            else:
-                remaining.append(alert)
-        _write_alerts(remaining)
-        summary["remaining_count"] = len(remaining)
+            for alert in active_alerts:
+                sym = alert.symbol.upper()
+                current = price_map.get(sym)
+                if current is None:
+                    remaining_count += 1
+                    continue
+                direction = alert.direction or "above"
+                triggered = (direction == "above" and current >= float(alert.price)) or (
+                    direction == "below" and current <= float(alert.price)
+                )
+                if triggered:
+                    uid = alert.user_id
+                    msg = f"🔔 {sym} Price reached ${current:.4f}"
+                    summary["triggered_count"] += 1
+                    alert.status = "triggered"
+                    alert.triggered_at = datetime.now(timezone.utc)
+                    if uid and not str(uid).startswith("guest_"):
+                        await _send_telegram(uid, msg)
+                    await _send_telegram(ADMIN_TELEGRAM_ID, f"📊 هشدار فعال شد\n{msg}\nکاربر: {uid}")
+                else:
+                    remaining_count += 1
+        summary["remaining_count"] = remaining_count
         return summary
     except Exception as e:
         print(f"⚠️ Alert check error: {e}")
