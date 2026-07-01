@@ -20,7 +20,6 @@ interface __BaseEnv_Env {
 	AI_COOLDOWN_SECONDS: 4;
 	REFERRAL_TOKENS_PER_INVITE: 3;
 	TELEGRAM_BOT_TOKEN: string;
-	BACKEND_URL: string;
 	WEBAPP_URL: string;
 	PORT: string;
 	DATABASE_URL: string;
@@ -51,7 +50,6 @@ declare namespace Cloudflare {
 		AI_COOLDOWN_SECONDS: 4;
 		REFERRAL_TOKENS_PER_INVITE: 3;
 		TELEGRAM_BOT_TOKEN: string;
-		BACKEND_URL: string;
 		WEBAPP_URL: string;
 		PORT: string;
 		DATABASE_URL: string;
@@ -78,7 +76,6 @@ declare namespace Cloudflare {
 		AI_COOLDOWN_SECONDS: 4;
 		REFERRAL_TOKENS_PER_INVITE: 3;
 		TELEGRAM_BOT_TOKEN: string;
-		BACKEND_URL: string;
 		WEBAPP_URL: string;
 		PORT: string;
 		DATABASE_URL: string;
@@ -93,7 +90,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "APP_ENV" | "ALERTS_CRON_ENABLED" | "JOIN_CACHE_TTL" | "MARKET_CACHE_TTL" | "NEWS_CACHE_TTL" | "CALENDAR_CACHE_TTL" | "CHART_EXCHANGE_CACHE_TTL" | "ANALYSIS_CACHE_TTL" | "SESSION_TTL" | "AI_DAILY_MESSAGE_LIMIT" | "AI_DAILY_IMAGE_LIMIT" | "AI_COOLDOWN_SECONDS" | "REFERRAL_TOKENS_PER_INVITE" | "TELEGRAM_BOT_TOKEN" | "BACKEND_URL" | "WEBAPP_URL" | "PORT" | "DATABASE_URL" | "DIRECT_URL" | "ADMIN_IDS" | "VERCEL_OIDC_TOKEN">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "APP_ENV" | "ALERTS_CRON_ENABLED" | "JOIN_CACHE_TTL" | "MARKET_CACHE_TTL" | "NEWS_CACHE_TTL" | "CALENDAR_CACHE_TTL" | "CHART_EXCHANGE_CACHE_TTL" | "ANALYSIS_CACHE_TTL" | "SESSION_TTL" | "AI_DAILY_MESSAGE_LIMIT" | "AI_DAILY_IMAGE_LIMIT" | "AI_COOLDOWN_SECONDS" | "REFERRAL_TOKENS_PER_INVITE" | "TELEGRAM_BOT_TOKEN" | "WEBAPP_URL" | "PORT" | "DATABASE_URL" | "DIRECT_URL" | "ADMIN_IDS" | "VERCEL_OIDC_TOKEN">> {}
 }
 
 // Begin runtime types
