@@ -48,6 +48,7 @@ Worker-native کامل:
 - `DELETE /api/tickets/:id`
 - `POST|GET /api/alerts`
 - `DELETE /api/alerts/:id`
+- scheduled alerts runner (cron)
 
 Worker-native اما ناقص:
 
@@ -56,7 +57,7 @@ Worker-native اما ناقص:
 
 هنوز کامل نشده:
 
-- scheduled alerts کاملاً native
+ 
 
 ### 3) انتقال stateهای پایدار
 

@@ -61,6 +61,7 @@
 - `POST /api/alerts`
 - `GET /api/alerts`
 - `DELETE /api/alerts/:id`
+- scheduled alerts runner (cron)
 
 ### Worker-native اما ناقص
 
@@ -71,7 +72,6 @@
 
 ### هنوز کامل نشده
 
-- منطق native برای scheduled alerts
 - یکپارچه‌سازی کامل webhook/bot cutover
 
 ## وضعیت Storage/State

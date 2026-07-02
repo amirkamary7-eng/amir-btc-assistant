@@ -1520,6 +1520,70 @@ const CHART_CHECKERS = {
   },
 };
 
+function parseSpotTickerPrice(exchangeKey, body) {
+  if (exchangeKey === 'binance' || exchangeKey === 'mexc') {
+    const price = Number(body?.price);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'bybit') {
+    const item = Array.isArray(body?.result?.list) ? body.result.list[0] : null;
+    const price = Number(item?.lastPrice ?? item?.last_price);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'okx') {
+    const item = Array.isArray(body?.data) ? body.data[0] : null;
+    const price = Number(item?.last);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'kucoin') {
+    const price = Number(body?.data?.price);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'gateio') {
+    const item = Array.isArray(body) ? body[0] : null;
+    const price = Number(item?.last ?? item?.last_price);
+    return Number.isFinite(price) ? price : null;
+  }
+  return null;
+}
+
+async function fetchSpotTickerPrice(exchangeKey, symbol) {
+  const checker = CHART_CHECKERS[exchangeKey];
+  if (!checker) {
+    return null;
+  }
+  const { ok, body } = await fetchJson(checker.buildUrl(symbol));
+  if (!ok || !checker.isMatch(body)) {
+    return null;
+  }
+  return parseSpotTickerPrice(exchangeKey, body);
+}
+
+async function fetchSpotPriceUsd(env, symbol) {
+  const normalizedSymbol = String(symbol || '').trim().toUpperCase();
+  if (!normalizedSymbol) {
+    return null;
+  }
+  const cacheKey = `chart:exchange:${normalizedSymbol}`;
+  const cachedExchange = await readAppCache(env, cacheKey);
+  if (cachedExchange) {
+    const cachedPrice = await fetchSpotTickerPrice(cachedExchange, normalizedSymbol);
+    if (cachedPrice !== null) {
+      return { price: cachedPrice, exchange: cachedExchange, cached: true };
+    }
+  }
+
+  for (const [, exchangeKey] of EXCHANGE_ORDER) {
+    const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
+    if (price !== null) {
+      await writeAppCache(env, cacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
+      return { price, exchange: exchangeKey, cached: false };
+    }
+  }
+
+  return null;
+}
+
 const CALENDAR_CACHE_KEY = 'calendar:events';
 const FARSI_NEWS_CACHE_KEY = 'news:farsi';
 const ANALYSES_LIST_KEY = 'analyses:list';
@@ -3480,13 +3544,146 @@ async function runScheduledAlertsBaseline(controller, env) {
     );
     return;
   }
-  console.log(
-    JSON.stringify({
-      ...payload,
-      skipped: true,
-      reason: 'scheduled alerts runner is not configured on this worker',
-    }),
-  );
+
+  if (!isDatabaseConfigured(env)) {
+    console.log(
+      JSON.stringify({
+        ...payload,
+        skipped: true,
+        reason: 'Database not configured',
+      }),
+    );
+    return;
+  }
+
+  if (!isBotConfigured(env)) {
+    console.log(
+      JSON.stringify({
+        ...payload,
+        skipped: true,
+        reason: 'Telegram bot token is not configured',
+      }),
+    );
+    return;
+  }
+
+  const maxAlerts = Math.max(getNumericEnv(env, 'ALERTS_CRON_MAX_ALERTS', 200), 0);
+  const resultPayload = {
+    ...payload,
+    checked_count: 0,
+    triggered_count: 0,
+    price_fetch_failures: 0,
+    delivery_failures: 0,
+    skipped_price_missing: 0,
+    skipped_guest_users: 0,
+  };
+
+  try {
+    const alertsResult = await queryDb(
+      env,
+      `
+        SELECT id, user_id, symbol, price, direction
+        FROM price_alerts
+        WHERE status = 'active'
+        ORDER BY created_at DESC
+      `,
+    );
+    const alerts = Array.isArray(alertsResult.rows) ? alertsResult.rows.slice(0, maxAlerts) : [];
+    resultPayload.checked_count = alerts.length;
+
+    if (!alerts.length) {
+      console.log(JSON.stringify({ ...resultPayload, finished: true }));
+      return;
+    }
+
+    const symbolPriceMap = new Map();
+    for (const alert of alerts) {
+      const symbol = String(alert?.symbol || '').trim().toUpperCase();
+      if (!symbol) {
+        resultPayload.skipped_price_missing += 1;
+        continue;
+      }
+      if (!symbolPriceMap.has(symbol)) {
+        const priceInfo = await fetchSpotPriceUsd(env, symbol);
+        if (!priceInfo) {
+          resultPayload.price_fetch_failures += 1;
+          symbolPriceMap.set(symbol, null);
+        } else {
+          symbolPriceMap.set(symbol, priceInfo.price);
+        }
+      }
+    }
+
+    for (const alert of alerts) {
+      const alertId = String(alert?.id || '');
+      const userId = String(alert?.user_id || '');
+      const symbol = String(alert?.symbol || '').trim().toUpperCase();
+      const targetPrice = Number(alert?.price);
+      const direction = String(alert?.direction || 'above').trim().toLowerCase();
+
+      if (!alertId || !userId || userId.startsWith('guest_')) {
+        resultPayload.skipped_guest_users += 1;
+        continue;
+      }
+      if (!symbol || !Number.isFinite(targetPrice)) {
+        resultPayload.skipped_price_missing += 1;
+        continue;
+      }
+
+      const currentPrice = symbolPriceMap.get(symbol);
+      if (!Number.isFinite(currentPrice)) {
+        continue;
+      }
+
+      const shouldTrigger = (direction === 'below' && currentPrice <= targetPrice) || (direction !== 'below' && currentPrice >= targetPrice);
+      if (!shouldTrigger) {
+        continue;
+      }
+
+      try {
+        const chatIdValue = Number(userId);
+        const chatId = Number.isFinite(chatIdValue) ? chatIdValue : userId;
+        const text = `🔔 هشدار قیمت فعال شد\n${symbol} — قیمت فعلی: ${Number(currentPrice).toFixed(6)}\nهدف: ${Number(targetPrice).toFixed(6)}`;
+        await sendTelegramMessage(env, {
+          chat_id: chatId,
+          text,
+          disable_web_page_preview: true,
+        });
+
+        await queryDb(
+          env,
+          `
+            UPDATE price_alerts
+            SET status = 'triggered', triggered_at = NOW()
+            WHERE id = $1
+          `,
+          [alertId],
+        );
+
+        resultPayload.triggered_count += 1;
+      } catch (error) {
+        resultPayload.delivery_failures += 1;
+        console.warn('scheduled alert delivery failed:', {
+          alert_id: alertId,
+          user_id: userId,
+          symbol,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    console.log(JSON.stringify({ ...resultPayload, finished: true }));
+  } catch (error) {
+    console.warn('scheduled alerts runner failed:', error);
+    console.log(
+      JSON.stringify({
+        ...payload,
+        status: 'error',
+        message: 'scheduled alerts runner failed',
+        detail: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
 }
 //#endregion
 
