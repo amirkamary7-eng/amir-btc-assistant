@@ -34,6 +34,7 @@ Worker-native کامل:
 - `GET /api/sessions/online`
 - `POST /api/sessions/end`
 - `GET /api/assistant/limits`
+- `POST /api/assistant/chat`
 - `POST /api/users/bootstrap`
 - `GET /api/users/me`
 - `PUT /api/users/me/settings`
@@ -52,7 +53,6 @@ Worker-native کامل:
 
 Worker-native اما ناقص:
 
-- `POST /api/assistant/chat` (rate limit فعال، سرویس اصلی غیرفعال)
 - `POST /telegram` (مسیر Worker فعال است، اما runtime قدیمی bot هنوز وجود دارد)
 
 هنوز کامل نشده:
