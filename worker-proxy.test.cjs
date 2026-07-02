@@ -1587,6 +1587,322 @@ test('DELETE /api/alerts/:id removes alert for authenticated user in DB', async 
   }
 });
 
+test('GET /api/analyses falls back to DB and hydrates APP_CACHE on cache miss', async () => {
+  const now = new Date().toISOString();
+  const analysesCache = createMemoryKv();
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY created_at DESC')) {
+      return {
+        rows: [
+          {
+            id: 'an1',
+            coin: 'BTC',
+            timeframe: '4h',
+            image: 'https://example.test/a.png',
+            text: 'analysis body',
+            author: 'admin',
+            author_id: '831704732',
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/analyses');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'GET',
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      analyses: [
+        {
+          id: 'an1',
+          coin: 'BTC',
+          timeframe: '4h',
+          image: 'https://example.test/a.png',
+          text: 'analysis body',
+          author: 'admin',
+          author_id: '831704732',
+          date: now.slice(0, 10),
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      version: 1,
+    });
+    assert.equal(await analysesCache.get('analyses:version'), '1');
+    assert.equal(
+      await analysesCache.get('analyses:list'),
+      JSON.stringify([
+        {
+          id: 'an1',
+          coin: 'BTC',
+          timeframe: '4h',
+          image: 'https://example.test/a.png',
+          text: 'analysis body',
+          author: 'admin',
+          author_id: '831704732',
+          date: now.slice(0, 10),
+          created_at: now,
+          updated_at: now,
+        },
+      ]),
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/analyses rejects non-admin user before touching DB', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  let fetchCalled = false;
+  global.fetch = async () => {
+    fetchCalled = true;
+    return new Response('unexpected');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ coin: 'btc', timeframe: '4h', image: '', text: 'body', author: 'spoofed' }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
+    assert.equal(response.status, 403);
+    assert.equal(fetchCalled, false);
+    assert.deepEqual(await response.json(), { detail: 'Admin access required' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/analyses stores analysis in DB, ignores spoofed author_id, and bumps cache version', async () => {
+  const now = new Date().toISOString();
+  const analysesCache = createMemoryKv();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('INSERT INTO analyses')) {
+      assert.equal(params[1], 'BTC');
+      assert.equal(params[2], '4h');
+      assert.equal(params[5], 'Desk');
+      assert.equal(params[6], '831704732');
+      return {
+        rows: [
+          {
+            id: 'an1',
+            coin: 'BTC',
+            timeframe: '4h',
+            image: '',
+            text: 'analysis body',
+            author: 'Desk',
+            author_id: '831704732',
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      };
+    }
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY created_at DESC')) {
+      return {
+        rows: [
+          {
+            id: 'an1',
+            coin: 'BTC',
+            timeframe: '4h',
+            image: '',
+            text: 'analysis body',
+            author: 'Desk',
+            author_id: '831704732',
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/analyses create');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({
+        coin: 'btc',
+        timeframe: '4h',
+        image: '',
+        text: 'analysis body',
+        author: 'Desk',
+        author_id: 'spoofed',
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.analysis.id, 'an1');
+    assert.equal(body.analysis.author_id, '831704732');
+    assert.equal(body.version, 1);
+    assert.equal(await analysesCache.get('analyses:version'), '1');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('PUT and DELETE /api/analyses/:id update DB-backed cache version', async () => {
+  const now = new Date().toISOString();
+  const analysesCache = createMemoryKv({
+    'analyses:version': '4',
+    'analyses:list': JSON.stringify([]),
+  });
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('UPDATE analyses')) {
+      assert.equal(params[0], 'an1');
+      assert.equal(params[1], 'ETH');
+      return {
+        rows: [
+          {
+            id: 'an1',
+            coin: 'ETH',
+            timeframe: '1d',
+            image: '',
+            text: 'updated body',
+            author: 'Desk',
+            author_id: '831704732',
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      };
+    }
+    if (sql.includes('DELETE FROM analyses')) {
+      assert.equal(params[0], 'an1');
+      return { rows: [{ id: 'an1' }] };
+    }
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY created_at DESC')) {
+      const version = await analysesCache.get('analyses:version');
+      if (version === '4') {
+        return {
+          rows: [
+            {
+              id: 'an1',
+              coin: 'ETH',
+              timeframe: '1d',
+              image: '',
+              text: 'updated body',
+              author: 'Desk',
+              author_id: '831704732',
+              created_at: now,
+              updated_at: now,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/analyses update/delete');
+  };
+
+  try {
+    const updateRequest = new Request('https://worker.example/api/analyses/an1', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({
+        coin: 'eth',
+        timeframe: '1d',
+        image: '',
+        text: 'updated body',
+      }),
+    });
+
+    const updateResponse = await worker.fetch(
+      updateRequest,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    assert.equal(updateResponse.status, 200);
+    assert.equal((await updateResponse.json()).version, 5);
+    assert.equal(await analysesCache.get('analyses:version'), '5');
+
+    const deleteRequest = new Request('https://worker.example/api/analyses/an1', {
+      method: 'DELETE',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const deleteResponse = await worker.fetch(
+      deleteRequest,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    assert.equal(deleteResponse.status, 200);
+    assert.deepEqual(await deleteResponse.json(), { status: 'success', version: 6 });
+    assert.equal(await analysesCache.get('analyses:version'), '6');
+    assert.equal(await analysesCache.get('analyses:list'), JSON.stringify([]));
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('Render removal: repo no longer hardcodes onrender.com in runtime config files', async () => {
   const files = [
     path.join(__dirname, 'index.html'),

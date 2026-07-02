@@ -25,6 +25,8 @@ Worker-native کامل:
 - `GET /api/charts/resolve`
 - `GET /api/calendar/events`
 - `GET /api/farsi-news`
+- `GET /api/analyses`
+- `POST|PUT|DELETE /api/analyses` (ادمین)
 - `GET /api/check-join`
 - `GET /api/debug/check-join`
 - `POST /api/check-join/invalidate`
@@ -49,13 +51,11 @@ Worker-native کامل:
 
 Worker-native اما ناقص:
 
-- `GET /api/analyses` (read-only بر پایه cache)
 - `POST /api/assistant/chat` (rate limit فعال، سرویس اصلی غیرفعال)
 - `POST /telegram` (مسیر Worker فعال است، اما runtime قدیمی bot هنوز وجود دارد)
 
 هنوز کامل نشده:
 
-- `POST|PUT|DELETE /api/analyses` (ادمین)
 - scheduled alerts کاملاً native
 
 ### 3) انتقال stateهای پایدار
