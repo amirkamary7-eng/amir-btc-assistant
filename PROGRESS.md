@@ -15,17 +15,17 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 1 |
+| ✅ Done | 2 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 53 |
-| **Progress** | **2%** |
+| ⬜ Todo | 52 |
+| **Progress** | **4%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
-| 1 | Critical Stability | 7 | 1 | 14% |
+| 1 | Critical Stability | 7 | 2 | 29% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 0 | 0% |
 | 4 | Security Hardening | 13 | 0 | 0% |
@@ -33,20 +33,21 @@
 
 ## Current Phase
 
-**Phase 1: Critical Stability** — Task 1.1 ✅ Done.
+**Phase 1: Critical Stability** — Tasks 1.1, 1.2 ✅ Done.
 
 ## Recently Completed
 
 | Task ID | Title |
 |---------|-------|
 | 1.1 | Fix Worker Telegram HMAC — raw URL-encoded values in dataCheckString |
+| 1.2 | Fix buildInitData test helper — align با Telegram spec |
 
 ## Next Executable Tasks (no open dependencies)
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
 | 1.0 | ثبت وضعیت live deployment (manual checklist) | Critical |
-| 1.2 | Fix buildInitData test helper | High |
+| 1.3 | Wire npm test to worker test suite | High |
 | 1.4 | Separate KV namespace IDs | Critical |
 | 1.5 | Inject API_BASE at Pages build time | Critical |
 | 3.3 | Admin join bypass — use full admin set | Medium |
