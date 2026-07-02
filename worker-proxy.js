@@ -427,6 +427,175 @@ async function recordRateLimitUsage(env, userId, hasImage) {
   }
 }
 
+function normalizeAssistantHistory(history) {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+  return history.slice(-6).map((entry) => ({
+    role: typeof entry?.role === 'string' && entry.role.trim() ? entry.role.trim() : 'user',
+    content: typeof entry?.content === 'string' ? entry.content : '',
+  }));
+}
+
+function extractAssistantImageBase64(imageData) {
+  if (typeof imageData !== 'string' || !imageData) {
+    return null;
+  }
+  if (imageData.includes(',')) {
+    return imageData.split(',', 2)[1] || null;
+  }
+  return imageData;
+}
+
+function buildAssistantPrompt(message, history, imageBase64) {
+  const parts = ['You are Amir BTC Assistant, a helpful crypto trading assistant. Answer concisely in the user\'s language (Persian or English).'];
+  for (const item of history) {
+    parts.push(`${item.role}: ${item.content}`);
+  }
+  parts.push(`user: ${message}`);
+  if (imageBase64) {
+    parts.push('[User attached an image]');
+  }
+  return parts.join('\n');
+}
+
+async function readJsonResponseSafe(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function getProviderErrorDetail(prefix, responseText, fallbackMessage = 'Request failed') {
+  const detail = String(responseText || '').trim();
+  return detail ? `${prefix}: ${detail}` : prefix ? `${prefix}: ${fallbackMessage}` : fallbackMessage;
+}
+
+async function callGemini(env, prompt, imageBase64) {
+  const apiKey = normalizeOptionalString(env.GEMINI_API_KEY);
+  if (!apiKey) {
+    throw new Error('Gemini not configured');
+  }
+
+  const parts = [{ text: prompt }];
+  if (imageBase64) {
+    parts.push({
+      inline_data: {
+        mime_type: 'image/jpeg',
+        data: imageBase64,
+      },
+    });
+  }
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts,
+        },
+      ],
+    }),
+  });
+
+  const data = await readJsonResponseSafe(response);
+  if (!response.ok) {
+    throw new Error(getProviderErrorDetail('Gemini failed', data?.error?.message || (await response.text()), `HTTP ${response.status}`));
+  }
+
+  const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
+  const responseParts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+  const reply = responseParts.find((part) => typeof part?.text === 'string' && part.text.trim())?.text || null;
+  if (!reply) {
+    throw new Error('Empty Gemini response');
+  }
+  return reply;
+}
+
+async function callOpenRouter(env, prompt) {
+  const apiKey = normalizeOptionalString(env.OPENROUTER_API_KEY);
+  if (!apiKey) {
+    throw new Error('OpenRouter not configured');
+  }
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'meta-llama/llama-3.3-70b-instruct:free',
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  const data = await readJsonResponseSafe(response);
+  if (!response.ok) {
+    throw new Error(getProviderErrorDetail('OpenRouter failed', data?.error?.message || (await response.text()), `HTTP ${response.status}`));
+  }
+
+  const reply = data?.choices?.[0]?.message?.content;
+  if (typeof reply !== 'string' || !reply.trim()) {
+    throw new Error('Empty OpenRouter response');
+  }
+  return reply;
+}
+
+async function callDeepSeek(env, prompt) {
+  const apiKey = normalizeOptionalString(env.DEEPSEEK_API_KEY);
+  if (!apiKey) {
+    throw new Error('DeepSeek not configured');
+  }
+
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  const data = await readJsonResponseSafe(response);
+  if (!response.ok) {
+    throw new Error(getProviderErrorDetail('DeepSeek failed', data?.error?.message || (await response.text()), `HTTP ${response.status}`));
+  }
+
+  const reply = data?.choices?.[0]?.message?.content;
+  if (typeof reply !== 'string' || !reply.trim()) {
+    throw new Error('Empty DeepSeek response');
+  }
+  return reply;
+}
+
+async function generateAssistantReply(env, prompt, imageBase64) {
+  const providers = [
+    ['gemini', () => callGemini(env, prompt, imageBase64)],
+    ['openrouter', () => callOpenRouter(env, prompt)],
+    ['deepseek', () => callDeepSeek(env, prompt)],
+  ];
+
+  let lastError = 'No AI provider configured';
+  for (const [providerName, providerCall] of providers) {
+    try {
+      const reply = await providerCall();
+      return { provider: providerName, reply };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  throw new Error(lastError);
+}
+
 async function readPresenceState(env) {
   const raw = await readSessionCache(env, SESSION_PRESENCE_STATE_KEY);
   if (!raw) {
@@ -2680,8 +2849,23 @@ async function handleAssistantChat(request, env) {
     );
   }
 
+  if (payload.image !== undefined && payload.image !== null && typeof payload.image !== 'string') {
+    return jsonResponse(
+      buildBodyFieldValidationError('image', 'string_type', 'Input should be a valid string', payload.image),
+      { status: 422 },
+    );
+  }
+
+  if (typeof payload.image === 'string' && payload.image.length > 2000000) {
+    return jsonResponse(
+      buildBodyFieldValidationError('image', 'string_too_long', 'String should have at most 2000000 characters', payload.image, { max_length: 2000000 }),
+      { status: 422 },
+    );
+  }
+
   const userId = String(authState.user.id);
   const hasImage = Boolean(payload.image);
+  const history = normalizeAssistantHistory(payload.history);
 
   const limits = await checkRateLimits(env, userId);
   if (!limits.allowed) {
@@ -2691,13 +2875,27 @@ async function handleAssistantChat(request, env) {
   if (hasImage && limits.images_used >= limits.images_limit) {
     return jsonResponse({ status: 'error', reason: 'daily_image_limit', allowed: false }, { status: 429 });
   }
-  return jsonResponse(
-    {
-      status: 'error',
-      message: 'assistant service is disabled on this worker',
-    },
-    { status: 501 },
-  );
+
+  try {
+    const imageBase64 = extractAssistantImageBase64(payload.image);
+    const prompt = buildAssistantPrompt(message, history, imageBase64);
+    const result = await generateAssistantReply(env, prompt, imageBase64);
+    await recordRateLimitUsage(env, userId, hasImage);
+    return jsonResponse({
+      status: 'success',
+      reply: result.reply,
+      provider: result.provider,
+    });
+  } catch (error) {
+    return jsonResponse(
+      {
+        status: 'error',
+        reason: 'all_providers_failed',
+        detail: error instanceof Error ? error.message : String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 function getUserStateKey(userId) {

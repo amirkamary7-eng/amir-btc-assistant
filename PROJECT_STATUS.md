@@ -45,6 +45,7 @@
 - `GET /api/sessions/online`
 - `POST /api/sessions/end`
 - `GET /api/assistant/limits`
+- `POST /api/assistant/chat`
 - `POST /api/users/bootstrap`
 - `GET /api/users/me`
 - `PUT /api/users/me/settings`
@@ -65,8 +66,6 @@
 
 ### Worker-native اما ناقص
 
-- `POST /api/assistant/chat`
-  - rate limit روی Worker اعمال می‌شود، اما اجرای سرویس عملاً با `501` غیرفعال است.
 - `POST /telegram`
   - `/start` روی Worker هندل می‌شود، اما runtime قدیمی bot در backend هنوز وجود دارد.
 

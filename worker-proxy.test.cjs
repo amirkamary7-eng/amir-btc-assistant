@@ -1026,14 +1026,134 @@ test('POST /api/assistant/chat rejects daily message limit without calling backe
   }
 });
 
-test('POST /api/assistant/chat returns 501 without calling backend or recording usage', async () => {
+test('POST /api/assistant/chat returns AI reply from Gemini and records usage in RATE_LIMITS', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init = {}) => {
+    if (!String(url).includes('generativelanguage.googleapis.com')) {
+      throw new Error(`Unexpected fetch url: ${url}`);
+    }
+    const body = JSON.parse(await new Response(init.body).text());
+    assert.equal(body.contents[0].parts[0].text.includes('user: hi'), true);
+    return new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: 'gemini reply' }],
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+        GEMINI_API_KEY: 'gemini-key',
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      reply: 'gemini reply',
+      provider: 'gemini',
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    assert.equal(await rateLimits.get('ai:cooldown:12345'), '1');
+    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), '1');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/assistant/chat falls back to OpenRouter when Gemini fails', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init = {}) => {
+    if (String(url).includes('generativelanguage.googleapis.com')) {
+      return new Response(JSON.stringify({ error: { message: 'gemini down' } }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (String(url).includes('openrouter.ai')) {
+      const body = JSON.parse(await new Response(init.body).text());
+      assert.equal(body.model, 'meta-llama/llama-3.3-70b-instruct:free');
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'openrouter reply' } }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }
+    throw new Error(`Unexpected fetch url: ${url}`);
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+        GEMINI_API_KEY: 'gemini-key',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      reply: 'openrouter reply',
+      provider: 'openrouter',
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/assistant/chat returns 503 when all AI providers fail and does not record usage', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const rateLimits = createMemoryKv();
   const originalFetch = global.fetch;
   global.fetch = async () => {
-    throw new Error('fetch should not be called for /api/assistant/chat');
+    throw new Error('fetch should not be called when no AI provider is configured');
   };
 
   try {
@@ -1053,10 +1173,11 @@ test('POST /api/assistant/chat returns 501 without calling backend or recording 
       }),
     );
 
-    assert.equal(response.status, 501);
+    assert.equal(response.status, 503);
     assert.deepEqual(await response.json(), {
       status: 'error',
-      message: 'assistant service is disabled on this worker',
+      reason: 'all_providers_failed',
+      detail: 'DeepSeek not configured',
     });
     const today = new Date().toISOString().slice(0, 10);
     assert.equal(await rateLimits.get('ai:cooldown:12345'), null);
