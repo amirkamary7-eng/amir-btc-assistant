@@ -2,12 +2,25 @@
 
 ## Source of Truth
 
+<<<<<<< HEAD
 - وضعیت رسمی پروژه: این فایل (`PROJECT_STATUS.md`)
 - جزئیات اجرایی: `PROGRESS.md`
 - مرجع نهایی در صورت اختلاف: وضعیت واقعی کد در مخزن
 - اسناد توضیحی: `docs/*` باید با این فایل همگام بمانند
 
 ## وضعیت فعلی
+=======
+| نقش | فایل |
+|-----|------|
+| **Backlog تعریف تسک‌ها** | `گزارش 3.txt` |
+| **Task board + وضعیت زنده** | `TASK_BOARD.md` |
+| **خلاصه progress** | `PROGRESS.md` |
+| **وضعیت فنی snapshot** | این فایل (`PROJECT_STATUS.md`) — همگام‌سازی کامل در Task **5.9** |
+
+> مدل قدیمی Phase 0–8 منسوخ شده → `archive/task-management-legacy/`
+
+## وضعیت فعلی (technical snapshot)
+>>>>>>> 8f7b43d (feat(task-1.1): implement <Task Name>)
 
 - `worker-proxy.js` اکنون entry point فعال Cloudflare Worker است و routeهای پوشش‌داده‌شده را مستقیماً پاسخ می‌دهد.
 - در runtime فعلی repo دیگر منطق فعال `BACKEND_URL` یا proxy به upstream داخل Worker وجود ندارد؛ mismatchهای باقی‌مانده بیشتر از جنس implementation ناقص یا storage ناسازگار هستند، نه proxy runtime.
@@ -15,6 +28,7 @@
 - Cloudflare Pages برای فایل‌های استاتیک آماده است: `wrangler.pages.jsonc` + خروجی `webapp/pages-dist`.
 - hardcode مربوط به `onrender.com` از runtime حذف شده است، اما حذف کامل dependencyهای legacy هنوز تمام نشده است.
 
+<<<<<<< HEAD
 ## وضعیت فازها
 
 - Phase 0 / شناخت و تحلیل: done
@@ -26,6 +40,21 @@
 - Phase 6 / انتقال cache: partial
 - Phase 7 / انتقال stateهای فایل‌محور: done
 - Phase 8 / حذف کامل legacy backend dependency: partial
+=======
+## وضعیت فازها (legacy — deprecated)
+
+> **جایگزین:** Phase 1–5 در `TASK_BOARD.md`. بخش زیر فقط snapshot تاریخی است.
+
+- Phase 0 / شناخت و تحلیل: done
+- Phase 1 / مستندسازی: done
+- Phase 2–8 / مدل مهاجرت قدیمی: **deprecated** — see `TASK_BOARD.md`
+
+## Execution backlog (current)
+
+- **54 tasks** across 5 phases — all ⬜ Todo as of 2026-07-02
+- **Progress:** 0% — see `PROGRESS.md`
+- **Start here (Trae):** Task 1.1, 1.5, 1.4, 1.2+1.3, …
+>>>>>>> 8f7b43d (feat(task-1.1): implement <Task Name>)
 
 ## پوشش API روی Worker
 
