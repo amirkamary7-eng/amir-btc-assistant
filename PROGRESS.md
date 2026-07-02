@@ -1,51 +1,3 @@
-<<<<<<< HEAD
-# وضعیت پیشرفت پیاده‌سازی
-
-مبنای کار فقط فایل‌های داخل `docs/` است.
-
-## فازها
-
-- Phase 0 / شناخت و تحلیل ✔
-- Phase 1 / مستندسازی ✔
-- Phase 2 / طراحی مهاجرت مرحله‌ای ⏳
-- Phase 3 / آماده‌سازی زیرساخت Cloudflare ⏳
-- Phase 4 / انتقال APIها ⏳
-- Phase 5 / انتقال webhook ربات ✔
-- Phase 6 / انتقال cache ⏳
-- Phase 7 / انتقال stateهای فایل‌محور ⏳
-- Phase 8 / حذف کامل Render ⏳
-
-## بخش‌های اجرایی
-
-- Cloudflare shell baseline ✔
-- Worker routing برای `/api/*` و `/telegram` ✔
-- `GET /api/health` روی Worker ✔
-- Wrangler JSONC config ✔
-- Cloudflare scripts در `package.json` ✔
-- Worker env baseline در `env.example` ✔
-- Wrangler dry-run validation ✔
-- Pages setup ✔
-- KV namespace bindingها ✔
-- Cron jobs baseline ✔
-- Scheduled alerts execution ✔
-- Public API migration ✔
-- `GET /api/charts/resolve` روی Worker ✔
-- `GET /api/calendar/events` روی Worker ✔
-- `GET /api/farsi-news` روی Worker ✔
-- `GET /api/analyses` روی Worker ✔
-- Auth و user flow migration ✔
-  - Telegram initData validation روی Worker ✔
-  - `POST /api/users/bootstrap` روی Worker (proxy-safe + auth validation) ✔
-  - `GET /api/users/me` روی Worker (auth validation) ✔
-  - `PUT /api/users/me/settings` روی Worker ✔
-  - `/api/watchlist` روی Worker ✔
-- Mandatory join migration ✔
-- Webhook و `/start` migration ✔
-- Cache migration ✔
-- Tickets migration ✔
-- Alerts migration ✔
-- Render removal ✔
-=======
 # Project Progress
 
 > **محاسبه فقط از `TASK_BOARD.md`** — این فایل را دستی ویرایش نکنید؛ پس از تغییر وضعیت تسک‌ها در `TASK_BOARD.md`، بخش Progress در همان فایل مرجع است.
@@ -63,17 +15,17 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 0 |
+| ✅ Done | 1 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 54 |
-| **Progress** | **0%** |
+| ⬜ Todo | 53 |
+| **Progress** | **2%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
-| 1 | Critical Stability | 7 | 0 | 0% |
+| 1 | Critical Stability | 7 | 1 | 14% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 0 | 0% |
 | 4 | Security Hardening | 13 | 0 | 0% |
@@ -81,16 +33,20 @@
 
 ## Current Phase
 
-**Phase 1: Critical Stability** — هیچ تسکی شروع نشده.
+**Phase 1: Critical Stability** — Task 1.1 ✅ Done.
+
+## Recently Completed
+
+| Task ID | Title |
+|---------|-------|
+| 1.1 | Fix Worker Telegram HMAC — raw URL-encoded values in dataCheckString |
 
 ## Next Executable Tasks (no open dependencies)
-
-این تسک‌ها می‌توانند توسط Agent شروع شوند (همه وابستگی‌ها یا None هستند یا به تسک‌های Done وابسته‌اند — فعلاً همه Todo):
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
 | 1.0 | ثبت وضعیت live deployment (manual checklist) | Critical |
-| 1.1 | Fix Worker Telegram HMAC | Critical |
+| 1.2 | Fix buildInitData test helper | High |
 | 1.4 | Separate KV namespace IDs | Critical |
 | 1.5 | Inject API_BASE at Pages build time | Critical |
 | 3.3 | Admin join bypass — use full admin set | Medium |
@@ -116,4 +72,3 @@
 5. اگر dependency باز مانده → ⛔ Blocked و Task دیگری انتخاب نکن مگر از لیست «Next Executable».
 
 جزئیات کامل: `TASK_BOARD.md` → بخش Agent Execution Rules.
->>>>>>> 8f7b43d (feat(task-1.1): implement <Task Name>)

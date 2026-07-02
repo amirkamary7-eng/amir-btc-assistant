@@ -214,9 +214,9 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
       const decodedValue = decodeTelegramValue(rawValue);
       decoded[key] = decodedValue;
       if (key === 'hash') {
-        receivedHash = decodedValue;
+        receivedHash = rawValue;
       } else {
-        checkPairs.push([key, decodedValue]);
+        checkPairs.push([key, rawValue]);
       }
     }
 
