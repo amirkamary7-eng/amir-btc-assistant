@@ -816,6 +816,110 @@ async function replaceWatchlistInDb(env, userId, symbols) {
   return getWatchlistSymbolsFromDb(env, userId);
 }
 
+function serializeAnalysisRow(row) {
+  const createdAt = row?.created_at ? new Date(row.created_at) : null;
+  const updatedAt = row?.updated_at ? new Date(row.updated_at) : null;
+  return {
+    id: String(row?.id || ''),
+    coin: String(row?.coin || '').toUpperCase(),
+    timeframe: normalizeOptionalString(row?.timeframe) || '1d',
+    image: normalizeOptionalString(row?.image) || '',
+    text: String(row?.text || ''),
+    author: normalizeOptionalString(row?.author) || '',
+    author_id: normalizeOptionalString(row?.author_id),
+    date: createdAt ? createdAt.toISOString().slice(0, 10) : '',
+    created_at: createdAt ? createdAt.toISOString() : null,
+    updated_at: updatedAt ? updatedAt.toISOString() : null,
+  };
+}
+
+async function listAnalysesFromDb(env) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT id, coin, timeframe, image, text, author, author_id, created_at, updated_at
+      FROM analyses
+      ORDER BY created_at DESC
+    `,
+  );
+  return result.rows.map((row) => serializeAnalysisRow(row));
+}
+
+async function updateAnalysesCache(env, analyses, version) {
+  const cacheTtlSeconds = 86400 * 7;
+  await Promise.all([
+    writeAppCache(env, ANALYSES_VERSION_KEY, String(version), cacheTtlSeconds),
+    writeAppCache(env, ANALYSES_LIST_KEY, JSON.stringify(analyses), cacheTtlSeconds),
+  ]);
+}
+
+async function readCurrentAnalysesVersion(env) {
+  const cachedState = await readCachedAnalysesState(env);
+  return Number.isInteger(cachedState.version) ? cachedState.version : null;
+}
+
+async function createAnalysisInDb(env, adminUserId, payload) {
+  const result = await queryDb(
+    env,
+    `
+      INSERT INTO analyses (id, coin, timeframe, image, text, author, author_id, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      RETURNING id, coin, timeframe, image, text, author, author_id, created_at, updated_at
+    `,
+    [
+      String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 12),
+      (normalizeOptionalString(payload.coin) || '').toUpperCase(),
+      normalizeOptionalString(payload.timeframe) || '1d',
+      normalizeOptionalString(payload.image) || '',
+      String(payload.text),
+      normalizeOptionalString(payload.author) || '',
+      String(adminUserId),
+    ],
+  );
+  return serializeAnalysisRow(result.rows[0]);
+}
+
+async function updateAnalysisInDb(env, analysisId, payload) {
+  const result = await queryDb(
+    env,
+    `
+      UPDATE analyses
+      SET
+        coin = $2,
+        timeframe = $3,
+        image = $4,
+        text = $5,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, coin, timeframe, image, text, author, author_id, created_at, updated_at
+    `,
+    [
+      String(analysisId),
+      (normalizeOptionalString(payload.coin) || '').toUpperCase(),
+      normalizeOptionalString(payload.timeframe) || '1d',
+      normalizeOptionalString(payload.image) || '',
+      String(payload.text),
+    ],
+  );
+  if (!result.rows[0]) {
+    return null;
+  }
+  return serializeAnalysisRow(result.rows[0]);
+}
+
+async function deleteAnalysisInDb(env, analysisId) {
+  const result = await queryDb(
+    env,
+    `
+      DELETE FROM analyses
+      WHERE id = $1
+      RETURNING id
+    `,
+    [String(analysisId)],
+  );
+  return Boolean(result.rows[0]);
+}
+
 async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined) {
   const normalizedReferrerId = normalizeOptionalString(referrerId);
   if (!normalizedReferrerId || normalizedReferrerId === String(inviteeId)) {
@@ -2084,11 +2188,237 @@ async function handleAnalyses(request, env) {
     });
   }
 
+  if (isDatabaseConfigured(env)) {
+    try {
+      const analyses = await listAnalysesFromDb(env);
+      const version = cachedState.version !== null ? cachedState.version : (analyses.length > 0 ? 1 : 0);
+      await updateAnalysesCache(env, analyses, version);
+      return jsonResponse({
+        status: 'success',
+        analyses,
+        version,
+      });
+    } catch (error) {
+      console.warn('list analyses failed:', error);
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'Database unavailable',
+          detail: String(error),
+        },
+        { status: 503 },
+      );
+    }
+  }
+
   return jsonResponse({
     status: 'success',
     analyses: cachedState.analyses ?? [],
     version: cachedState.version ?? 0,
   });
+}
+
+function parseAnalysisPayload(originalBody, options = {}) {
+  const { requireAuthor = false } = options;
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return {
+      error: jsonResponse(
+        buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+        { status: 422 },
+      ),
+    };
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return {
+      error: jsonResponse(
+        buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+        { status: 422 },
+      ),
+    };
+  }
+
+  const validated = {};
+  const fieldSpecs = [
+    { name: 'coin', required: true, minLength: 1, maxLength: 16 },
+    { name: 'timeframe', required: false, defaultValue: '1d', maxLength: 16 },
+    { name: 'image', required: false, defaultValue: '', maxLength: 512 },
+    { name: 'text', required: true, minLength: 1 },
+    ...(requireAuthor ? [{ name: 'author', required: true, minLength: 1, maxLength: 128 }] : []),
+  ];
+
+  for (const spec of fieldSpecs) {
+    const rawValue = Object.prototype.hasOwnProperty.call(payload, spec.name) ? payload[spec.name] : spec.defaultValue;
+    if (typeof rawValue !== 'string') {
+      return {
+        error: jsonResponse(
+          buildBodyFieldValidationError(spec.name, 'string_type', 'Input should be a valid string', rawValue ?? null),
+          { status: 422 },
+        ),
+      };
+    }
+    if (spec.minLength && rawValue.length < spec.minLength) {
+      return {
+        error: jsonResponse(
+          buildBodyFieldValidationError(
+            spec.name,
+            'string_too_short',
+            `String should have at least ${spec.minLength} character${spec.minLength === 1 ? '' : 's'}`,
+            rawValue,
+            { min_length: spec.minLength },
+          ),
+          { status: 422 },
+        ),
+      };
+    }
+    if (spec.maxLength && rawValue.length > spec.maxLength) {
+      return {
+        error: jsonResponse(
+          buildBodyFieldValidationError(
+            spec.name,
+            'string_too_long',
+            `String should have at most ${spec.maxLength} characters`,
+            rawValue,
+            { max_length: spec.maxLength },
+          ),
+          { status: 422 },
+        ),
+      };
+    }
+    validated[spec.name] = rawValue;
+  }
+
+  return { payload: validated };
+}
+
+async function handleAnalysesCreate(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  if (!isAdminTelegramId(env, authState.user.id)) {
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: true });
+  if (parsed.error) {
+    return parsed.error;
+  }
+
+  try {
+    const analysis = await createAnalysisInDb(env, authState.user.id, parsed.payload);
+    const analyses = await listAnalysesFromDb(env);
+    const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
+    await updateAnalysesCache(env, analyses, version);
+    return jsonResponse({ status: 'success', analysis, version });
+  } catch (error) {
+    console.warn('create analysis failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
+}
+
+async function handleAnalysesUpdate(request, env, analysisId) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  if (!isAdminTelegramId(env, authState.user.id)) {
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: false });
+  if (parsed.error) {
+    return parsed.error;
+  }
+
+  try {
+    const analysis = await updateAnalysisInDb(env, analysisId, parsed.payload);
+    if (!analysis) {
+      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 });
+    }
+    const analyses = await listAnalysesFromDb(env);
+    const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
+    await updateAnalysesCache(env, analyses, version);
+    return jsonResponse({ status: 'success', analysis, version });
+  } catch (error) {
+    console.warn('update analysis failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
+}
+
+async function handleAnalysesDelete(request, env, analysisId) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  if (!isAdminTelegramId(env, authState.user.id)) {
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  try {
+    const deleted = await deleteAnalysisInDb(env, analysisId);
+    if (!deleted) {
+      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 });
+    }
+    const analyses = await listAnalysesFromDb(env);
+    const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
+    await updateAnalysesCache(env, analyses, version);
+    return jsonResponse({ status: 'success', version });
+  } catch (error) {
+    console.warn('delete analysis failed:', error);
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database unavailable',
+        detail: String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function handleSessionsHeartbeat(request, env) {
@@ -3197,6 +3527,20 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
         return await handleAnalyses(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/analyses') {
+        return await handleAnalysesCreate(request, env);
+      }
+
+      if (request.method === 'PUT' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
+        const analysisId = url.pathname.split('/')[3] || '';
+        return await handleAnalysesUpdate(request, env, analysisId);
+      }
+
+      if (request.method === 'DELETE' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
+        const analysisId = url.pathname.split('/')[3] || '';
+        return await handleAnalysesDelete(request, env, analysisId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/tickets') {

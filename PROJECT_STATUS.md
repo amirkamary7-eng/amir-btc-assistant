@@ -36,6 +36,8 @@
 - `GET /api/charts/resolve`
 - `GET /api/calendar/events`
 - `GET /api/farsi-news`
+- `GET /api/analyses`
+- `POST|PUT|DELETE /api/analyses` (ادمین)
 - `GET /api/check-join`
 - `GET /api/debug/check-join`
 - `POST /api/check-join/invalidate`
@@ -62,8 +64,6 @@
 
 ### Worker-native اما ناقص
 
-- `GET /api/analyses`
-  - فقط read path فعال است و به cache داخلی Worker تکیه دارد.
 - `POST /api/assistant/chat`
   - rate limit روی Worker اعمال می‌شود، اما اجرای سرویس عملاً با `501` غیرفعال است.
 - `POST /telegram`
@@ -71,7 +71,6 @@
 
 ### هنوز کامل نشده
 
-- `POST|PUT|DELETE /api/analyses` (ادمین)
 - منطق native برای scheduled alerts
 - یکپارچه‌سازی کامل webhook/bot cutover
 
@@ -87,6 +86,5 @@
 ## تسک‌های باز با اولویت واقعی کد
 
 - migration cache را تکمیل کن و وابستگی backend به Redis/in-memory fallback را به حداقل برسان
-- endpointهای ناقص `analyses` را کامل کن، مخصوصاً مسیرهای admin write
 - webhook/bot cutover را کامل کن تا runtime قدیمی backend از مسیر بحرانی خارج شود
 - بعد از هر مرحله، تست end-to-end Mini App و Bot را اجرا کن
