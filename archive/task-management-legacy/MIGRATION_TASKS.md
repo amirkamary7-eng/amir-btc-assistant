@@ -1,5 +1,6 @@
-<<<<<<< HEAD
 # ادامه کار مهاجرت
+
+> **ARCHIVED** — See `TASK_BOARD.md`. Original archived 2026-07-02.
 
 این فایل فقط تسک‌های باز را نگه می‌دارد. وضعیت رسمی پروژه در `PROJECT_STATUS.md` ثبت می‌شود و در صورت اختلاف، کد مخزن اولویت دارد.
 
@@ -82,21 +83,3 @@ Worker-native اما ناقص:
 - حذف hardcode آدرس Render از repo: done
 - حذف کامل dependencyهای legacy backend از مسیرهای بحرانی: partial
 - خاموش‌سازی backend قدیمی پس از cutover: not started
-=======
-# MIGRATION_TASKS (Deprecated)
-
-> **این فایل منسوخ شده است.**  
-> **Single Source of Truth:** `گزارش 3.txt` + `TASK_BOARD.md`
-
-## جایگزین
-
-| نیاز | فایل |
-|------|------|
-| تعریف تسک‌ها، فازها، acceptance criteria | `گزارش 3.txt` |
-| وضعیت زنده، ترتیب اجرا، progress | `TASK_BOARD.md` |
-| خلاصه progress | `PROGRESS.md` |
-
-## آرشیو
-
-نسخه قبلی (مدل Phase 0–8) در `archive/task-management-legacy/MIGRATION_TASKS.md` نگهداری می‌شود.
->>>>>>> 8f7b43d (feat(task-1.1): implement <Task Name>)

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # وضعیت مهاجرت پروژه
 
 ## وضعیت فعلی پروژه
@@ -247,3 +248,21 @@
 - stateهای موقتی روی storage پایدار باشند
 - رفتار ربات و Mini App نسبت به قبل تغییر نکند
 - API contract موجود حفظ شده باشد
+=======
+# MIGRATION_STATUS (Deprecated)
+
+> **این فایل منسوخ شده است.**  
+> **Single Source of Truth:** `گزارش 3.txt` + `TASK_BOARD.md`
+
+## جایگزین
+
+- **وضعیت اجرایی و فازها:** `TASK_BOARD.md` (Phase 1–5)
+- **تعریف backlog:** `گزارش 3.txt`
+- **درصد پیشرفت:** `PROGRESS.md` (محاسبه از `TASK_BOARD.md`)
+
+## آرشیو
+
+نسخه قبلی (مدل Phase 0–8، وضعیت «مهاجرت شروع نشده») در `archive/task-management-legacy/MIGRATION_STATUS.md` نگهداری می‌شود.
+
+**نکته:** Task **5.9** مسئول همگام‌سازی `PROJECT_STATUS.md` با واقعیت کد است.
+>>>>>>> 8f7b43d (feat(task-1.1): implement <Task Name>)
