@@ -58,17 +58,12 @@ from backend.services.telegram_auth import (
 )
 from backend.redis_client import cache_get_json, cache_set_json
 
-# کتابخانه‌های ربات تلگرام
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-
 # endregion
 
 # ============================================================================
 # region تعاریف و منطق ماژول
 # این بخش ثابت‌ها، مدل‌ها و منطق اصلی فایل را در خود نگه می‌دارد.
 # ============================================================================
-telegram_app = None
 alert_polling_task = None
 
 @asynccontextmanager
@@ -77,7 +72,7 @@ alert_polling_task = None
 # ورودی: پارامترهای `app: FastAPI` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 async def lifespan(app: FastAPI):
-    global telegram_app, alert_polling_task
+    global alert_polling_task
 
     print("🚀 Starting application...")
     try:
@@ -92,15 +87,9 @@ async def lifespan(app: FastAPI):
 
         settings = get_settings()
         if settings.bot_configured:
-            telegram_app = ApplicationBuilder().token(TOKEN).build()
-            telegram_app.add_handler(CommandHandler("start", start))
-
-            await telegram_app.initialize()
-            await telegram_app.start()
-            _set_telegram_webhook(WEBHOOK_URL)
-            print("✅ Telegram bot ready (webhook mode)")
+            print("ℹ️ Telegram webhook runtime is handled by Worker; backend bot startup is disabled.")
         else:
-            print("ℹ️ Telegram bot startup skipped; token is not configured.")
+            print("ℹ️ Telegram outgoing notifications are skipped; token is not configured.")
     except Exception as e:
         print(f"⚠️ Startup failed: {e}")
 
@@ -117,15 +106,6 @@ async def lifespan(app: FastAPI):
                 pass
             finally:
                 alert_polling_task = None
-
-        if telegram_app:
-            try:
-                await telegram_app.stop()
-                await telegram_app.shutdown()
-            except Exception as e:
-                print(f"⚠️ Telegram shutdown error: {e}")
-            finally:
-                telegram_app = None
 
 app = FastAPI(title="Crypto Premium News & Bot Engine", lifespan=lifespan)
 
@@ -309,10 +289,6 @@ async def get_optimized_farsi_news():
 ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "831704732")
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
-WEBHOOK_URL = os.environ.get(
-    "TELEGRAM_WEBHOOK_URL",
-    "",
-)
 REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")
 ALERTS_POLLING_MODE = os.environ.get("ALERTS_POLLING_MODE", "loop").strip().lower()
 ALERTS_CRON_SHARED_SECRET = os.environ.get("ALERTS_CRON_SHARED_SECRET", "").strip()
@@ -516,42 +492,7 @@ def _run_get_chat_member_debug(user_id: str) -> dict:
     print("🔎 Join Debug | final joined=False")
     return debug_payload
 
-def _normalize_webhook_url(url: str) -> str:
-    from urllib.parse import urlparse, urlunparse
-
-    parsed = urlparse(url.strip())
-    path = re.sub(r"/+", "/", parsed.path or "/")
-    if path != "/telegram":
-        path = "/telegram"
-    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
-
-def _set_telegram_webhook(url: str) -> bool:
-    if not TOKEN or TOKEN == "REPLACE_WITH_TOKEN":
-        return False
-    clean_url = _normalize_webhook_url(url)
-    try:
-        res = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/setWebhook",
-            json={"url": clean_url, "drop_pending_updates": True},
-            timeout=15,
-        )
-        data = res.json()
-        if data.get("ok"):
-            print(f"✅ Telegram webhook set: {clean_url}")
-            return True
-        print(f"⚠️ setWebhook failed: {data.get('description', res.text)}")
-    except Exception as e:
-        print(f"⚠️ setWebhook error: {e}")
-    return False
-
 async def _send_telegram(chat_id: str, text: str) -> bool:
-    global telegram_app
-    if telegram_app and telegram_app.bot:
-        try:
-            await telegram_app.bot.send_message(chat_id=int(chat_id), text=text)
-            return True
-        except Exception as e:
-            print(f"⚠️ Telegram SDK error: {e}")
     return _send_telegram_http(chat_id, text)
 
 def _check_channel_membership(user_id: str) -> dict:
@@ -1034,73 +975,13 @@ if TOKEN == "REPLACE_WITH_TOKEN":
     print("⚠️ WARNING: TELEGRAM_BOT_TOKEN not set in environment. Telegram bot will not start until configured.")
 
 
-# وضعیت عضویت کاربر را برای فلوی `/start` با fallback کامل resolve می‌کند.
-# ورودی: پارامتر `user_id: int | str` شناسه تلگرام کاربر را دریافت می‌کند.
-# خروجی: مقدار بولی نهایی عضویت کاربر را برمی‌گرداند.
-def _resolve_start_membership(user_id: int | str) -> bool:
-    uid = str(user_id)
-    try:
-        if database_ready():
-            with get_db_session() as db:
-                result = resolve_channel_membership(uid, _check_channel_membership, db=db)
-        else:
-            result = resolve_channel_membership(uid, _check_channel_membership, db=None)
-        print(f"🔎 Start Debug | user_id={uid!r} result={json.dumps(result, ensure_ascii=False)}")
-        return bool(result.get("joined"))
-    except Exception as exc:
-        print(f"⚠️ start membership resolve error: {exc}")
-        return False
-
-# عملیات مربوط به شروع را انجام می‌دهد.
-# ورودی: پارامترهای `update: Update, context: ContextTypes.DEFAULT_TYPE` را دریافت می‌کند.
-# خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.effective_user:
-        return
-
-    user_id = update.effective_user.id
-    is_member = _resolve_start_membership(user_id)
-
-    if not is_member:
-        keyboard = [[
-            InlineKeyboardButton(
-                "عضویت در کانال",
-                url=f"https://t.me/{_normalize_required_channel(REQUIRED_CHANNEL)}",
-            )
-        ]]
-        await update.message.reply_text(
-            "⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            disable_web_page_preview=True,
-        )
-        return
-
-    keyboard = [[
-        InlineKeyboardButton(
-            "🚀 باز کردن مینی‌اپ",
-            web_app=WebAppInfo(url=WEBAPP_URL),
-        )
-    ]]
-    await update.message.reply_text(
-        "خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
-
 # عملیات مربوط به تلگرام وبهوک را انجام می‌دهد.
 # عملیات مربوط به تلگرام وبهوک را انجام می‌دهد.
 # ورودی: پارامترهای `request: Request` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
-    print("update received from telegram")
-    if telegram_app and telegram_app.bot:
-        try:
-            data = await request.json()
-            update = Update.de_json(data, telegram_app.bot)
-            await telegram_app.process_update(update)
-        except Exception as e:
-            print(f"⚠️ Telegram webhook processing error: {e}")
+    print("ℹ️ backend /telegram received a compatibility request; Worker owns the active webhook runtime.")
     return Response(status_code=200)
 
 
