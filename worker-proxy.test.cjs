@@ -1903,6 +1903,134 @@ test('PUT and DELETE /api/analyses/:id update DB-backed cache version', async ()
   }
 });
 
+test('scheduled alerts runner triggers active price alerts and marks them triggered in DB', async () => {
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM price_alerts') && sql.includes("status = 'active'")) {
+      return {
+        rows: [
+          { id: 'a1', user_id: '12345', symbol: 'BTC', price: 100, direction: 'above' },
+          { id: 'a2', user_id: '12345', symbol: 'ETH', price: 999999, direction: 'above' },
+        ],
+      };
+    }
+    if (sql.includes('UPDATE price_alerts') && sql.includes("status = 'triggered'")) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method || 'GET', body: init.body ? await new Response(init.body).text() : null });
+    if (String(url).includes('api.binance.com/api/v3/ticker/price')) {
+      return new Response(JSON.stringify({ symbol: 'BTCUSDT', price: '101' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (String(url).includes('api.mexc.com/api/v3/ticker/price')) {
+      return new Response(JSON.stringify({ symbol: 'ETHUSDT', price: '2000' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (String(url).includes('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  try {
+    const pending = [];
+    const ctx = {
+      waitUntil(promise) {
+        pending.push(promise);
+      },
+    };
+    await worker.scheduled(
+      { cron: '*/10 * * * *' },
+      createEnv({
+        ALERTS_CRON_ENABLED: 'true',
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+      ctx,
+    );
+    await Promise.all(pending);
+
+    const updateCalls = pgMock.calls.filter((call) => String(call.sql).includes('UPDATE price_alerts'));
+    assert.equal(updateCalls.length, 1);
+    assert.equal(updateCalls[0].params[0], 'a1');
+
+    const sendCalls = calls.filter((call) => call.url.includes('/sendMessage'));
+    assert.equal(sendCalls.length, 1);
+    assert.deepEqual(JSON.parse(sendCalls[0].body), {
+      chat_id: 12345,
+      text: '🔔 هشدار قیمت فعال شد\nBTC — قیمت فعلی: 101.000000\nهدف: 100.000000',
+      disable_web_page_preview: true,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('scheduled alerts runner does not mark alert triggered when Telegram delivery fails', async () => {
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM price_alerts') && sql.includes("status = 'active'")) {
+      return {
+        rows: [{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 100, direction: 'above' }],
+      };
+    }
+    if (sql.includes('UPDATE price_alerts') && sql.includes("status = 'triggered'")) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes('api.binance.com/api/v3/ticker/price')) {
+      return new Response(JSON.stringify({ symbol: 'BTCUSDT', price: '101' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (String(url).includes('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: false, description: 'forbidden' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  try {
+    const pending = [];
+    const ctx = {
+      waitUntil(promise) {
+        pending.push(promise);
+      },
+    };
+    await worker.scheduled(
+      { cron: '*/10 * * * *' },
+      createEnv({
+        ALERTS_CRON_ENABLED: 'true',
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+      ctx,
+    );
+    await Promise.all(pending);
+
+    const updateCalls = pgMock.calls.filter((call) => String(call.sql).includes('UPDATE price_alerts'));
+    assert.equal(updateCalls.length, 0);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('Render removal: repo no longer hardcodes onrender.com in runtime config files', async () => {
   const files = [
     path.join(__dirname, 'index.html'),
