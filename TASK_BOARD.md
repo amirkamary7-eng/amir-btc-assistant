@@ -44,17 +44,17 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 1 |
+| ✅ Done | 2 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 53 |
-| **Overall** | **2%** |
+| ⬜ Todo | 52 |
+| **Overall** | **4%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
-| 1 | Critical Stability | 7 | 1 | 14% |
+| 1 | Critical Stability | 7 | 2 | 29% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 0 | 0% |
 | 4 | Security Hardening | 13 | 0 | 0% |
@@ -96,7 +96,7 @@ Phase 4 ─► Phase 5:
 |------:|---------|-------|-------|----------|--------|--------------|----------|
 | 1 | 1.0 | 1 | ثبت وضعیت live deployment | Critical | ⬜ | None | 1.6, 3.1 |
 | 2 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical | ✅ | None | 1.2, 2.9, auth tasks |
-| 3 | 1.2 | 1 | Fix buildInitData test helper | High | ⬜ | 1.1 | 1.3 |
+| 3 | 1.2 | 1 | Fix buildInitData test helper | High | ✅ | 1.1 | 1.3 |
 | 4 | 1.3 | 1 | Wire npm test | High | ⬜ | 1.2 | 5.4 |
 | 5 | 1.4 | 1 | Separate KV namespace IDs | Critical | ⬜ | None | 2.3, 2.10, 4.3 |
 | 6 | 1.5 | 1 | Inject API_BASE at Pages build | Critical | ⬜ | None | E2E, Mini App |
@@ -158,7 +158,7 @@ Phase 4 ─► Phase 5:
 | Task ID | Title | Priority |
 |---------|-------|----------|
 | 1.0 | ثبت وضعیت live deployment | Critical |
-| 1.2 | Fix buildInitData test helper | High |
+| 1.3 | Wire npm test | High |
 | 1.4 | Separate KV namespace IDs | Critical |
 | 1.5 | Inject API_BASE at Pages build | Critical |
 | 3.3 | Admin join bypass | Medium |
@@ -268,7 +268,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.2
 
-**Status:** ⬜ Todo  
+**Status:** ✅ Done  
 **Phase:** 1  
 **Task ID:** 1.2
 

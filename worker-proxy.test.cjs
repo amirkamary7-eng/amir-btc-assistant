@@ -47,19 +47,39 @@ function buildInitData(botToken, user) {
     ['user', JSON.stringify(user)],
   ];
 
-  const dataCheckString = entries
+  const encodedEntries = entries.map(([key, value]) => [key, encodeURIComponent(value)]);
+
+  const dataCheckString = encodedEntries
     .slice()
     .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-    .map(([key, value]) => `${key}=${value}`)
+    .map(([key, encodedValue]) => `${key}=${encodedValue}`)
     .join('\n');
 
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
   const hash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
-  return entries
+  return encodedEntries
     .concat([['hash', hash]])
-    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .map(([key, value]) => `${key}=${value}`)
     .join('&');
+}
+
+function loadValidateTelegramInitData() {
+  const workerPath = path.join(__dirname, 'worker-proxy.js');
+  const source = fs.readFileSync(workerPath, 'utf8');
+  const helperStart = source.indexOf('function parseTelegramInitDataPairs');
+  const helperEnd = source.indexOf('function authenticateTelegramRequest');
+  const helperSrc = source.slice(helperStart, helperEnd);
+  const exportsObj = {};
+  const evaluator = new Function(
+    'createHmac',
+    'timingSafeEqual',
+    'Buffer',
+    'exports',
+    `${helperSrc}; exports.validateTelegramInitData = validateTelegramInitData;`,
+  );
+  evaluator(crypto.createHmac, crypto.timingSafeEqual, Buffer, exportsObj);
+  return exportsObj.validateTelegramInitData;
 }
 
 function createEnv(overrides = {}) {
@@ -119,6 +139,16 @@ function createPgMock(queryHandler = async () => ({ rows: [] })) {
     calls,
   };
 }
+
+test('buildInitData round-trip passes validateTelegramInitData', () => {
+  const validateTelegramInitData = loadValidateTelegramInitData();
+  const botToken = 'test-bot-token';
+  const user = { id: 98765, first_name: 'RoundTrip', username: 'rt_user' };
+  const initData = buildInitData(botToken, user);
+  const parsed = validateTelegramInitData(initData, botToken);
+  assert.ok(parsed);
+  assert.equal(parsed.id, user.id);
+});
 
 test('PUT /api/users/me/settings validates auth before proxying', async () => {
   const worker = loadWorker();
