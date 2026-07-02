@@ -254,9 +254,26 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
   }
 }
 
-function authenticateTelegramRequest(request, env) {
+function isDevModeEnabled() {
+  try {
+    return typeof process !== 'undefined' && process?.env?.DEV_MODE === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function authenticateTelegramRequest(request, env, allowDevBypass = false) {
   const initData = getTelegramInitData(request);
   if (!initData) {
+    if (allowDevBypass && isDevModeEnabled()) {
+      return {
+        error: null,
+        user: {
+          id: 12345,
+          first_name: 'Dev',
+        },
+      };
+    }
     return {
       error: jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }),
       user: null,
@@ -2782,7 +2799,7 @@ async function handleAssistantLimits(request, env) {
 }
 
 async function handleAssistantChat(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
+  const authState = authenticateTelegramRequest(request, env, true);
   if (authState.error) {
     return authState.error;
   }

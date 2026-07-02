@@ -1026,6 +1026,106 @@ test('POST /api/assistant/chat rejects daily message limit without calling backe
   }
 });
 
+test('POST /api/assistant/chat without Telegram init data is rejected when DEV_MODE is not enabled', async () => {
+  const prevDevMode = process.env.DEV_MODE;
+  delete process.env.DEV_MODE;
+
+  const worker = loadWorker();
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called when auth fails');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: createMemoryKv(),
+      }),
+    );
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { detail: 'Missing Telegram init data' });
+  } finally {
+    global.fetch = originalFetch;
+    if (prevDevMode === undefined) {
+      delete process.env.DEV_MODE;
+    } else {
+      process.env.DEV_MODE = prevDevMode;
+    }
+  }
+});
+
+test('POST /api/assistant/chat in DEV_MODE bypasses Telegram init data and uses mocked user id', async () => {
+  const prevDevMode = process.env.DEV_MODE;
+  process.env.DEV_MODE = 'true';
+
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init = {}) => {
+    if (!String(url).includes('generativelanguage.googleapis.com')) {
+      throw new Error(`Unexpected fetch url: ${url}`);
+    }
+    const body = JSON.parse(await new Response(init.body).text());
+    assert.equal(body.contents[0].parts[0].text.includes('user: hi'), true);
+    return new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: 'gemini reply' }],
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+        GEMINI_API_KEY: 'gemini-key',
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      reply: 'gemini reply',
+      provider: 'gemini',
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    assert.equal(await rateLimits.get('ai:cooldown:12345'), '1');
+    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), '1');
+  } finally {
+    global.fetch = originalFetch;
+    process.env.DEV_MODE = prevDevMode;
+  }
+});
+
 test('POST /api/assistant/chat returns AI reply from Gemini and records usage in RATE_LIMITS', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
