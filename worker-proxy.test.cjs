@@ -1104,6 +1104,8 @@ test('POST /api/assistant/chat in DEV_MODE bypasses Telegram init data and uses 
     if (!String(url).includes('generativelanguage.googleapis.com')) {
       throw new Error(`Unexpected fetch url: ${url}`);
     }
+    assert.equal(String(url).includes('?key='), false);
+    assert.equal(init.headers['x-goog-api-key'], 'gemini-key');
     const body = JSON.parse(await new Response(init.body).text());
     assert.equal(body.contents[0].parts[0].text.includes('user: hi'), true);
     return new Response(
@@ -1166,6 +1168,8 @@ test('POST /api/assistant/chat returns AI reply from Gemini and records usage in
     if (!String(url).includes('generativelanguage.googleapis.com')) {
       throw new Error(`Unexpected fetch url: ${url}`);
     }
+    assert.equal(String(url).includes('?key='), false);
+    assert.equal(init.headers['x-goog-api-key'], 'gemini-key');
     const body = JSON.parse(await new Response(init.body).text());
     assert.equal(body.contents[0].parts[0].text.includes('user: hi'), true);
     return new Response(
@@ -1225,6 +1229,8 @@ test('POST /api/assistant/chat falls back to OpenRouter when Gemini fails', asyn
   const originalFetch = global.fetch;
   global.fetch = async (url, init = {}) => {
     if (String(url).includes('generativelanguage.googleapis.com')) {
+      assert.equal(String(url).includes('?key='), false);
+      assert.equal(init.headers['x-goog-api-key'], 'gemini-key');
       return new Response(JSON.stringify({ error: { message: 'gemini down' } }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
