@@ -397,6 +397,51 @@ test('POST /api/users/bootstrap writes profile to DB and returns DB-backed watch
   }
 });
 
+test('POST /api/users/bootstrap returns generic DB_ERROR without leaking SQL details', async () => {
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM users') && sql.includes('LIMIT 1')) {
+      throw new Error('duplicate key value violates unique constraint "users_pkey"');
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 12345, first_name: 'Amir', username: 'amir', language_code: 'en' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/users/bootstrap');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/users/bootstrap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ first_name: 'Amir' }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.deepEqual(body, {
+      status: 'DB_ERROR',
+      message: 'Database unavailable',
+    });
+    assert.equal(String(JSON.stringify(body)).includes('unique constraint'), false);
+    assert.equal('detail' in body, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('GET /api/referrals/stats returns DB-backed referral stats', async () => {
   const pgMock = createPgMock(async (sql, params) => {
     if (sql.includes('FROM referrals')) {
@@ -1922,6 +1967,47 @@ test('GET /api/analyses falls back to DB and hydrates APP_CACHE on cache miss', 
         },
       ]),
     );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/analyses returns generic 503 without leaking SQL details on DB error', async () => {
+  const analysesCache = createMemoryKv();
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY created_at DESC')) {
+      throw new Error('relation "analyses" does not exist near SELECT * FROM analyses');
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/analyses');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'GET',
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.deepEqual(body, {
+      status: 'error',
+      message: 'Database unavailable',
+    });
+    assert.equal(String(JSON.stringify(body)).includes('SELECT * FROM analyses'), false);
+    assert.equal(String(JSON.stringify(body)).includes('relation "analyses"'), false);
+    assert.equal('detail' in body, false);
   } finally {
     global.fetch = originalFetch;
   }
