@@ -38,6 +38,21 @@ function jsonResponse(payload, init = {}) {
   });
 }
 
+function safeDbErrorResponse(error, options = {}) {
+  const {
+    statusValue = 'error',
+    message = 'Database unavailable',
+  } = options;
+
+  return jsonResponse(
+    {
+      status: statusValue,
+      message,
+    },
+    { status: 503 },
+  );
+}
+
 function getNumericEnv(env, key, fallbackValue) {
   const rawValue = Number(env[key]);
   return Number.isFinite(rawValue) ? rawValue : fallbackValue;
@@ -2451,14 +2466,7 @@ async function handleAnalyses(request, env) {
       });
     } catch (error) {
       console.warn('list analyses failed:', error);
-      return jsonResponse(
-        {
-          status: 'error',
-          message: 'Database unavailable',
-          detail: String(error),
-        },
-        { status: 503 },
-      );
+      return safeDbErrorResponse(error);
     }
   }
 
@@ -2576,14 +2584,7 @@ async function handleAnalysesCreate(request, env) {
     return jsonResponse({ status: 'success', analysis, version });
   } catch (error) {
     console.warn('create analysis failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2621,14 +2622,7 @@ async function handleAnalysesUpdate(request, env, analysisId) {
     return jsonResponse({ status: 'success', analysis, version });
   } catch (error) {
     console.warn('update analysis failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2661,14 +2655,7 @@ async function handleAnalysesDelete(request, env, analysisId) {
     return jsonResponse({ status: 'success', version });
   } catch (error) {
     console.warn('delete analysis failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2964,14 +2951,7 @@ async function handleTicketsCreate(request, env) {
     return jsonResponse({ status: 'success', ticket });
   } catch (error) {
     console.warn('create ticket failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2995,14 +2975,7 @@ async function handleTicketsList(request, env) {
     return jsonResponse({ status: 'success', tickets });
   } catch (error) {
     console.warn('list tickets failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3029,14 +3002,7 @@ async function handleTicketsAll(request, env) {
     return jsonResponse({ status: 'success', tickets });
   } catch (error) {
     console.warn('list all tickets failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3091,14 +3057,7 @@ async function handleTicketReply(request, env, ticketId) {
     return jsonResponse({ status: 'success', ticket });
   } catch (error) {
     console.warn('reply ticket failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3130,14 +3089,7 @@ async function handleTicketDelete(request, env, ticketId) {
     return jsonResponse({ status: 'success' });
   } catch (error) {
     console.warn('delete ticket failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3181,14 +3133,7 @@ async function handleAlertsCreate(request, env) {
     return jsonResponse({ status: 'success', alert });
   } catch (error) {
     console.warn('create alert failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3212,14 +3157,7 @@ async function handleAlertsList(request, env) {
     return jsonResponse({ status: 'success', alerts });
   } catch (error) {
     console.warn('list alerts failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3250,14 +3188,7 @@ async function handleAlertDelete(request, env, alertId) {
     return jsonResponse({ status: 'success', deleted: true });
   } catch (error) {
     console.warn('delete alert failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3318,14 +3249,7 @@ async function handleUsersBootstrap(request, env) {
     });
   } catch (error) {
     console.warn('bootstrap user failed:', error);
-    return jsonResponse(
-      {
-        status: 'DB_ERROR',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' });
   }
 }
 
@@ -3363,14 +3287,7 @@ async function handleUsersMe(request, env) {
     });
   } catch (error) {
     console.warn('get current user failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3424,14 +3341,7 @@ async function handleUsersMeSettings(request, env) {
     return jsonResponse({ status: 'success', user: normalizeUserRow(userRow) });
   } catch (error) {
     console.warn('update user settings failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3455,14 +3365,7 @@ async function handleWatchlistGet(request, env) {
     return jsonResponse({ status: 'success', symbols, watchlist: symbols });
   } catch (error) {
     console.warn('get watchlist failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3509,14 +3412,7 @@ async function handleWatchlistPut(request, env) {
     return jsonResponse({ status: 'success', symbols: storedSymbols });
   } catch (error) {
     console.warn('update watchlist failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3533,14 +3429,7 @@ async function handleReferralsStats(request, env) {
     return jsonResponse({ status: 'success', ...stats });
   } catch (error) {
     console.warn('get referral stats failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3557,14 +3446,7 @@ async function handleReferralTokens(request, env) {
     return jsonResponse({ status: 'success', ...tokenState });
   } catch (error) {
     console.warn('get referral tokens failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 

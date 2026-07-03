@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 11 |
+| ✅ Done | 12 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 43 |
-| **Overall** | **20%** |
+| ⬜ Todo | 42 |
+| **Overall** | **22%** |
 
 ### By Phase
 
@@ -56,7 +56,7 @@
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
-| 3 | Architecture Cleanup | 8 | 2 | 25% |
+| 3 | Architecture Cleanup | 8 | 3 | 38% |
 | 4 | Security Hardening | 13 | 2 | 15% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
@@ -119,7 +119,7 @@ Phase 4 ─► Phase 5:
 | 23 | 3.2 | 3 | Multi-admin support on Worker | Medium | ⬜ | 2.2 | 3.3, 4.8, 4.9 |
 | 24 | 3.3 | 3 | Admin join bypass — full admin set | Medium | ✅ | None | — |
 | 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ✅ | None | — |
-| 26 | 3.5 | 3 | Generic DB error responses | Medium | ⬜ | None | 4.5 |
+| 26 | 3.5 | 3 | Generic DB error responses | Medium | ✅ | None | 4.5 |
 | 27 | 3.6 | 3 | Remove unused Worker functions | Low | ⬜ | 1.3 | — |
 | 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ⬜ | None | — |
 | 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ⬜ | 1.6 | — |
@@ -157,7 +157,6 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 3.5 | Generic DB error responses | Medium |
 | 3.6 | Remove unused Worker functions | Low |
 | 3.7 | Delete ticket_service.py | Low |
 | 3.8 | Remove bot.py disabled stub | Low |

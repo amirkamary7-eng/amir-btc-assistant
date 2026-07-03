@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 11 |
+| ✅ Done | 12 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 43 |
-| **Progress** | **20%** |
+| ⬜ Todo | 42 |
+| **Progress** | **22%** |
 
 ## By Phase
 
@@ -27,13 +27,13 @@
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
-| 3 | Architecture Cleanup | 8 | 2 | 25% |
+| 3 | Architecture Cleanup | 8 | 3 | 38% |
 | 4 | Security Hardening | 13 | 2 | 15% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
 ## Current Phase
 
-**Phase 3: Architecture Cleanup** — تسک‌های 3.3 و 3.4 ✅ Done شده‌اند و این فاز در حال پیشروی است.
+**Phase 3: Architecture Cleanup** — تسک‌های 3.3، 3.4 و 3.5 ✅ Done شده‌اند و این فاز به 38٪ رسیده است.
 
 ## Recently Completed
 
@@ -48,6 +48,7 @@
 | 1.6 | Runbook — single webhook target |
 | 3.3 | Admin join bypass — full admin set |
 | 3.4 | Global error handler — 5xx not 200 |
+| 3.5 | Generic DB error responses on Worker |
 | 4.2 | AI history sanitization — FastAPI |
 | 4.6 | Gemini API key — header not URL |
 
@@ -55,7 +56,6 @@
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 3.5 | Generic DB error responses on Worker | Medium |
 | 3.6 | Remove unused Worker functions | Low |
 | 3.7 | Delete unused ticket_service.py | Low |
 | 3.8 | Remove bot.py disabled stub | Low |
