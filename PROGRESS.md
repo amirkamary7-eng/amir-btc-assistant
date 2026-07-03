@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 9 |
+| ✅ Done | 10 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 45 |
-| **Progress** | **17%** |
+| ⬜ Todo | 44 |
+| **Progress** | **19%** |
 
 ## By Phase
 
@@ -27,13 +27,13 @@
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
-| 3 | Architecture Cleanup | 8 | 0 | 0% |
+| 3 | Architecture Cleanup | 8 | 1 | 13% |
 | 4 | Security Hardening | 13 | 2 | 15% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
 ## Current Phase
 
-**Phase 4: Security Hardening** — Taskهای 4.2 و 4.6 ✅ Done شده‌اند؛ سایر Taskهای این فاز هنوز ⬜ هستند.
+**Phase 3: Architecture Cleanup** — تسک 3.3 ✅ Done شده و این فاز شروع شده است.
 
 ## Recently Completed
 
@@ -46,6 +46,7 @@
 | 1.4 | Separate KV namespace IDs — staging vs production |
 | 1.5 | Inject API_BASE at Pages build time |
 | 1.6 | Runbook — single webhook target |
+| 3.3 | Admin join bypass — full admin set |
 | 4.2 | AI history sanitization — FastAPI |
 | 4.6 | Gemini API key — header not URL |
 
@@ -53,7 +54,6 @@
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 3.3 | Admin join bypass — use full admin set | Medium |
 | 3.4 | Global error handler — return 5xx not 200 | Medium |
 | 3.5 | Generic DB error responses on Worker | Medium |
 | 3.6 | Remove unused Worker functions | Low |
