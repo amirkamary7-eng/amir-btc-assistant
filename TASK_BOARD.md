@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 7 |
+| ✅ Done | 9 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 47 |
-| **Overall** | **13%** |
+| ⬜ Todo | 45 |
+| **Overall** | **17%** |
 
 ### By Phase
 
@@ -57,7 +57,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 0 | 0% |
-| 4 | Security Hardening | 13 | 0 | 0% |
+| 4 | Security Hardening | 13 | 2 | 15% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
 ---
@@ -124,11 +124,11 @@ Phase 4 ─► Phase 5:
 | 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ⬜ | None | — |
 | 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ⬜ | 1.6 | — |
 | 30 | 4.1 | 4 | AI history role allowlist — Worker | High | ⬜ | 2.9 | 4.2 |
-| 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ⬜ | None | — |
+| 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ✅ | None | — |
 | 32 | 4.3 | 4 | Remove initData from GET query | High | ⬜ | 1.1 | 4.6 |
 | 33 | 4.4 | 4 | FastAPI AI rate limits — KV migration doc | High | ⬜ | 1.0, 3.1 | — |
 | 34 | 4.5 | 4 | Generic provider error to client | High | ⬜ | 2.9, 3.5 | — |
-| 35 | 4.6 | 4 | Gemini API key — header not URL | High | ⬜ | None | — |
+| 35 | 4.6 | 4 | Gemini API key — header not URL | High | ✅ | None | — |
 | 36 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | ⬜ | 1.5 | — |
 | 37 | 4.8 | 4 | Debug join endpoint — admin only | Medium | ⬜ | 3.2 | — |
 | 38 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | ⬜ | 3.2 | — |
@@ -163,8 +163,6 @@ Phase 4 ─► Phase 5:
 | 3.6 | Remove unused Worker functions | Low |
 | 3.7 | Delete ticket_service.py | Low |
 | 3.8 | Remove bot.py disabled stub | Low |
-| 4.2 | AI history sanitization — FastAPI | High |
-| 4.6 | Gemini API key header | High |
 | 4.10 | Referrer validation | Medium |
 | 4.12 | Sanitize env.example | Medium |
 | 5.1 | Remove mock news fallback | Low |
