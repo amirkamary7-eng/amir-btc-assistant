@@ -15,17 +15,17 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 4 |
+| ✅ Done | 7 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 50 |
-| **Progress** | **7%** |
+| ⬜ Todo | 47 |
+| **Progress** | **13%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
-| 1 | Critical Stability | 7 | 4 | 57% |
+| 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 0 | 0% |
 | 4 | Security Hardening | 13 | 0 | 0% |
@@ -33,27 +33,30 @@
 
 ## Current Phase
 
-**Phase 1: Critical Stability** — Tasks 1.1, 1.2, 1.4, 1.5 ✅ Done.
+**Phase 1: Critical Stability** — Tasks 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6 ✅ Done.
 
 ## Recently Completed
 
 | Task ID | Title |
 |---------|-------|
+| 1.0 | ثبت وضعیت live deployment (manual checklist) |
 | 1.1 | Fix Worker Telegram HMAC — raw URL-encoded values in dataCheckString |
 | 1.2 | Fix buildInitData test helper — align با Telegram spec |
+| 1.3 | Wire `npm test` to worker test suite |
 | 1.4 | Separate KV namespace IDs — staging vs production |
 | 1.5 | Inject API_BASE at Pages build time |
+| 1.6 | Runbook — single webhook target |
 
 ## Next Executable Tasks (no open dependencies)
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 1.0 | ثبت وضعیت live deployment (manual checklist) | Critical |
-| 1.3 | Wire npm test to worker test suite | High |
 | 3.3 | Admin join bypass — use full admin set | Medium |
 | 3.4 | Global error handler — return 5xx not 200 | Medium |
 | 3.5 | Generic DB error responses on Worker | Medium |
+| 3.6 | Remove unused Worker functions | Low |
 | 3.7 | Delete unused ticket_service.py | Low |
+| 3.8 | Remove bot.py disabled stub | Low |
 | 4.2 | AI history sanitization — FastAPI | High |
 | 4.6 | Gemini API key — header not URL | High |
 | 4.10 | Referrer validation | Medium |

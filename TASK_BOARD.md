@@ -44,17 +44,17 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 4 |
+| ✅ Done | 7 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 50 |
-| **Overall** | **7%** |
+| ⬜ Todo | 47 |
+| **Overall** | **13%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
-| 1 | Critical Stability | 7 | 4 | 57% |
+| 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 0 | 0% |
 | 4 | Security Hardening | 13 | 0 | 0% |
@@ -94,13 +94,13 @@ Phase 4 ─► Phase 5:
 
 | Exec# | Task ID | Phase | Title | Priority | Status | Dependencies | Unblocks |
 |------:|---------|-------|-------|----------|--------|--------------|----------|
-| 1 | 1.0 | 1 | ثبت وضعیت live deployment | Critical | ⬜ | None | 1.6, 3.1 |
+| 1 | 1.0 | 1 | ثبت وضعیت live deployment | Critical | ✅ | None | 1.6, 3.1 |
 | 2 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical | ✅ | None | 1.2, 2.9, auth tasks |
 | 3 | 1.2 | 1 | Fix buildInitData test helper | High | ✅ | 1.1 | 1.3 |
-| 4 | 1.3 | 1 | Wire npm test | High | ⬜ | 1.2 | 5.4 |
+| 4 | 1.3 | 1 | Wire npm test | High | ✅ | 1.2 | 5.4 |
 | 5 | 1.4 | 1 | Separate KV namespace IDs | Critical | ✅ | None | 2.3, 2.10, 4.3 |
 | 6 | 1.5 | 1 | Inject API_BASE at Pages build | Critical | ✅ | None | E2E, Mini App |
-| 7 | 1.6 | 1 | Runbook — single webhook target | High | ⬜ | 1.0 | 2.11, 3.1 |
+| 7 | 1.6 | 1 | Runbook — single webhook target | High | ✅ | 1.0 | 2.11, 3.1 |
 | 8 | 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical | ⬜ | 1.1 | 2.2, 2.3 |
 | 9 | 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | ⬜ | 1.1, 2.1 | 2.3 |
 | 10 | 2.3 | 2 | Analyses KV cache invalidation | High | ⬜ | 2.2 | 3.1 |
@@ -153,16 +153,16 @@ Phase 4 ─► Phase 5:
 
 ## Next Executable Tasks (dependencies satisfied)
 
-> با وضعیت فعلی (همه ⬜ Todo)، این Taskها **Dependencies: None** دارند و می‌توانند شروع شوند:
+> با وضعیت فعلی، این Taskها dependency باز ندارند و می‌توانند شروع شوند:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 1.0 | ثبت وضعیت live deployment | Critical |
-| 1.3 | Wire npm test | High |
 | 3.3 | Admin join bypass | Medium |
 | 3.4 | Global error handler | Medium |
 | 3.5 | Generic DB error responses | Medium |
+| 3.6 | Remove unused Worker functions | Low |
 | 3.7 | Delete ticket_service.py | Low |
+| 3.8 | Remove bot.py disabled stub | Low |
 | 4.2 | AI history sanitization — FastAPI | High |
 | 4.6 | Gemini API key header | High |
 | 4.10 | Referrer validation | Medium |
@@ -187,7 +187,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.0
 
-**Status:** ⬜ Todo  
+**Status:** ✅ Done  
 **Phase:** 1  
 **Task ID:** 1.0
 
@@ -303,7 +303,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.3
 
-**Status:** ⬜ Todo  
+**Status:** ✅ Done  
 **Phase:** 1  
 **Task ID:** 1.3
 
@@ -417,7 +417,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.6
 
-**Status:** ⬜ Todo  
+**Status:** ✅ Done  
 **Phase:** 1  
 **Task ID:** 1.6
 
