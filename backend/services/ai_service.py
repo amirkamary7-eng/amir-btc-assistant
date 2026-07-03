@@ -11,6 +11,9 @@ import time
 COOLDOWN_PREFIX = "ai:cooldown:"
 MSG_COUNT_PREFIX = "ai:msgs:"
 IMG_COUNT_PREFIX = "ai:imgs:"
+ALLOWED_HISTORY_ROLES = {"user", "assistant"}
+MAX_HISTORY_ITEMS = 6
+MAX_HISTORY_CONTENT_LENGTH = 4000
 
 _memory_cache: dict[str, dict[str, Any]] = {}
 
@@ -79,12 +82,38 @@ def record_usage(user_id: str, has_image: bool = False) -> None:
         _cache_set(img_key, str(img_count), 86400)
 
 
+def sanitize_history(history: list[dict] | None) -> list[dict[str, str]]:
+    if not isinstance(history, list):
+        return []
+
+    sanitized: list[dict[str, str]] = []
+    for entry in history[-MAX_HISTORY_ITEMS:]:
+        if not isinstance(entry, dict):
+            continue
+
+        raw_role = entry.get("role", "user")
+        role = raw_role.strip().lower() if isinstance(raw_role, str) and raw_role.strip() else "user"
+        if role not in ALLOWED_HISTORY_ROLES:
+            role = "user"
+
+        raw_content = entry.get("content", "")
+        content = raw_content if isinstance(raw_content, str) else ""
+        content = content.replace("\x00", "").strip()
+        if len(content) > MAX_HISTORY_CONTENT_LENGTH:
+            content = content[:MAX_HISTORY_CONTENT_LENGTH]
+
+        sanitized.append({"role": role, "content": content})
+
+    return sanitized
+
+
 def _build_prompt(message: str, history: list[dict], image_b64: Optional[str]) -> str:
+    sanitized_history = sanitize_history(history)
     parts = [
         "You are Amir BTC Assistant, a helpful crypto trading assistant. "
         "Answer concisely in the user's language (Persian or English).",
     ]
-    for h in history[-6:]:
+    for h in sanitized_history:
         role = h.get("role", "user")
         content = h.get("content", "")
         parts.append(f"{role}: {content}")
@@ -99,14 +128,21 @@ async def _call_gemini(prompt: str, image_b64: Optional[str]) -> str:
     if not settings.GEMINI_API_KEY:
         raise RuntimeError("Gemini not configured")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     parts: list[dict] = [{"text": prompt}]
     if image_b64:
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": image_b64}})
 
     payload = {"contents": [{"parts": parts}]}
     async with httpx.AsyncClient(timeout=30) as client:
-        res = await client.post(url, json=payload)
+        res = await client.post(
+            url,
+            headers={
+                "x-goog-api-key": settings.GEMINI_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
         res.raise_for_status()
         data = res.json()
         candidates = data.get("candidates", [])
