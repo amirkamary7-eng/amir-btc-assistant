@@ -4067,13 +4067,13 @@ export default {
         { status: 404 },
       );
     } catch (error) {
+      console.error('Unhandled worker request error:', error);
       return jsonResponse(
         {
           status: 'error',
-          message: 'Request failed safely',
-          detail: String(error),
+          message: 'Internal server error',
         },
-        { status: 200 },
+        { status: 500 },
       );
     }
   },
