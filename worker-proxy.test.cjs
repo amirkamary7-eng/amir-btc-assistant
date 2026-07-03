@@ -2301,3 +2301,28 @@ test('Render removal: repo no longer hardcodes onrender.com in runtime config fi
     assert.equal(content.includes('onrender.com'), false, `Found onrender.com in ${filePath}`);
   }
 });
+
+test('Worker global catch returns 500 without leaking stack details on unhandled errors', async () => {
+  const worker = loadWorker();
+  const originalConsoleError = console.error;
+  const consoleCalls = [];
+  console.error = (...args) => {
+    consoleCalls.push(args);
+  };
+
+  try {
+    const response = await worker.fetch({ method: 'GET', url: 'not a valid url' }, createEnv());
+    const body = await response.json();
+
+    assert.equal(response.status, 500);
+    assert.deepEqual(body, {
+      status: 'error',
+      message: 'Internal server error',
+    });
+    assert.equal(consoleCalls.length > 0, true);
+    assert.equal(String(JSON.stringify(body)).includes('TypeError'), false);
+    assert.equal('detail' in body, false);
+  } finally {
+    console.error = originalConsoleError;
+  }
+});

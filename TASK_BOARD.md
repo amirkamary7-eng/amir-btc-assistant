@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 10 |
+| ✅ Done | 11 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 44 |
-| **Overall** | **19%** |
+| ⬜ Todo | 43 |
+| **Overall** | **20%** |
 
 ### By Phase
 
@@ -56,7 +56,7 @@
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
-| 3 | Architecture Cleanup | 8 | 1 | 13% |
+| 3 | Architecture Cleanup | 8 | 2 | 25% |
 | 4 | Security Hardening | 13 | 2 | 15% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
@@ -118,7 +118,7 @@ Phase 4 ─► Phase 5:
 | 22 | 3.1 | 3 | Disable FastAPI duplicate routes | High | ⬜ | 2.3, 2.5, 2.9, 2.11, 1.0 | 3.2 |
 | 23 | 3.2 | 3 | Multi-admin support on Worker | Medium | ⬜ | 2.2 | 3.3, 4.8, 4.9 |
 | 24 | 3.3 | 3 | Admin join bypass — full admin set | Medium | ✅ | None | — |
-| 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ⬜ | None | — |
+| 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ✅ | None | — |
 | 26 | 3.5 | 3 | Generic DB error responses | Medium | ⬜ | None | 4.5 |
 | 27 | 3.6 | 3 | Remove unused Worker functions | Low | ⬜ | 1.3 | — |
 | 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ⬜ | None | — |
@@ -157,7 +157,6 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 3.4 | Global error handler | Medium |
 | 3.5 | Generic DB error responses | Medium |
 | 3.6 | Remove unused Worker functions | Low |
 | 3.7 | Delete ticket_service.py | Low |
