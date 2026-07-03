@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 7 |
+| ✅ Done | 9 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 47 |
-| **Progress** | **13%** |
+| ⬜ Todo | 45 |
+| **Progress** | **17%** |
 
 ## By Phase
 
@@ -28,12 +28,12 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 0 | 0% |
-| 4 | Security Hardening | 13 | 0 | 0% |
+| 4 | Security Hardening | 13 | 2 | 15% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
 ## Current Phase
 
-**Phase 1: Critical Stability** — Tasks 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6 ✅ Done.
+**Phase 4: Security Hardening** — Taskهای 4.2 و 4.6 ✅ Done شده‌اند؛ سایر Taskهای این فاز هنوز ⬜ هستند.
 
 ## Recently Completed
 
@@ -46,6 +46,8 @@
 | 1.4 | Separate KV namespace IDs — staging vs production |
 | 1.5 | Inject API_BASE at Pages build time |
 | 1.6 | Runbook — single webhook target |
+| 4.2 | AI history sanitization — FastAPI |
+| 4.6 | Gemini API key — header not URL |
 
 ## Next Executable Tasks (no open dependencies)
 
@@ -57,8 +59,6 @@
 | 3.6 | Remove unused Worker functions | Low |
 | 3.7 | Delete unused ticket_service.py | Low |
 | 3.8 | Remove bot.py disabled stub | Low |
-| 4.2 | AI history sanitization — FastAPI | High |
-| 4.6 | Gemini API key — header not URL | High |
 | 4.10 | Referrer validation | Medium |
 | 4.12 | Sanitize env.example | Medium |
 | 5.1 | Remove mock news fallback | Low |
