@@ -979,6 +979,7 @@ if TOKEN == "REPLACE_WITH_TOKEN":
 # عملیات مربوط به تلگرام وبهوک را انجام می‌دهد.
 # ورودی: پارامترهای `request: Request` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
+# DEPRECATED — use Worker webhook only
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
     print("ℹ️ backend /telegram received a compatibility request; Worker owns the active webhook runtime.")
