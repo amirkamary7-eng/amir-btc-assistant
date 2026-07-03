@@ -10,22 +10,22 @@
 | `TASK_BOARD.md` | وضعیت زنده تسک‌ها + ترتیب اجرا |
 | `PROGRESS.md` | خلاصه progress (این فایل) |
 
-## Snapshot — 2026-07-02
+## Snapshot — 2026-07-03
 
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 2 |
+| ✅ Done | 3 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
 | ⬜ Todo | 52 |
-| **Progress** | **4%** |
+| **Progress** | **6%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
-| 1 | Critical Stability | 7 | 2 | 29% |
+| 1 | Critical Stability | 7 | 3 | 43% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 0 | 0% |
 | 4 | Security Hardening | 13 | 0 | 0% |
@@ -33,7 +33,7 @@
 
 ## Current Phase
 
-**Phase 1: Critical Stability** — Tasks 1.1, 1.2 ✅ Done.
+**Phase 1: Critical Stability** — Tasks 1.1, 1.2, 1.5 ✅ Done.
 
 ## Recently Completed
 
@@ -41,6 +41,7 @@
 |---------|-------|
 | 1.1 | Fix Worker Telegram HMAC — raw URL-encoded values in dataCheckString |
 | 1.2 | Fix buildInitData test helper — align با Telegram spec |
+| 1.5 | Inject API_BASE at Pages build time |
 
 ## Next Executable Tasks (no open dependencies)
 
@@ -49,7 +50,6 @@
 | 1.0 | ثبت وضعیت live deployment (manual checklist) | Critical |
 | 1.3 | Wire npm test to worker test suite | High |
 | 1.4 | Separate KV namespace IDs | Critical |
-| 1.5 | Inject API_BASE at Pages build time | Critical |
 | 3.3 | Admin join bypass — use full admin set | Medium |
 | 3.4 | Global error handler — return 5xx not 200 | Medium |
 | 3.5 | Generic DB error responses on Worker | Medium |
