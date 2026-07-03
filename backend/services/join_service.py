@@ -95,7 +95,7 @@ def resolve_channel_membership(
         return {"joined": False, "reason": "guest_user"}
 
     settings = get_settings()
-    if uid == str(settings.ADMIN_TELEGRAM_ID):
+    if uid in settings.admin_ids:
         return {"joined": True, "admin": True}
 
     try:

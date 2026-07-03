@@ -397,6 +397,51 @@ test('POST /api/users/bootstrap writes profile to DB and returns DB-backed watch
   }
 });
 
+test('POST /api/users/bootstrap returns generic DB_ERROR without leaking SQL details', async () => {
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM users') && sql.includes('LIMIT 1')) {
+      throw new Error('duplicate key value violates unique constraint "users_pkey"');
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 12345, first_name: 'Amir', username: 'amir', language_code: 'en' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/users/bootstrap');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/users/bootstrap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ first_name: 'Amir' }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.deepEqual(body, {
+      status: 'DB_ERROR',
+      message: 'Database unavailable',
+    });
+    assert.equal(String(JSON.stringify(body)).includes('unique constraint'), false);
+    assert.equal('detail' in body, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('GET /api/referrals/stats returns DB-backed referral stats', async () => {
   const pgMock = createPgMock(async (sql, params) => {
     if (sql.includes('FROM referrals')) {
@@ -1056,14 +1101,240 @@ test('POST /api/assistant/chat rejects daily message limit without calling backe
   }
 });
 
-test('POST /api/assistant/chat returns 501 without calling backend or recording usage', async () => {
+test('POST /api/assistant/chat without Telegram init data is rejected when DEV_MODE is not enabled', async () => {
+  const prevDevMode = process.env.DEV_MODE;
+  delete process.env.DEV_MODE;
+
+  const worker = loadWorker();
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called when auth fails');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: createMemoryKv(),
+      }),
+    );
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { detail: 'Missing Telegram init data' });
+  } finally {
+    global.fetch = originalFetch;
+    if (prevDevMode === undefined) {
+      delete process.env.DEV_MODE;
+    } else {
+      process.env.DEV_MODE = prevDevMode;
+    }
+  }
+});
+
+test('POST /api/assistant/chat in DEV_MODE bypasses Telegram init data and uses mocked user id', async () => {
+  const prevDevMode = process.env.DEV_MODE;
+  process.env.DEV_MODE = 'true';
+
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init = {}) => {
+    if (!String(url).includes('generativelanguage.googleapis.com')) {
+      throw new Error(`Unexpected fetch url: ${url}`);
+    }
+    assert.equal(String(url).includes('?key='), false);
+    assert.equal(init.headers['x-goog-api-key'], 'gemini-key');
+    const body = JSON.parse(await new Response(init.body).text());
+    assert.equal(body.contents[0].parts[0].text.includes('user: hi'), true);
+    return new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: 'gemini reply' }],
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+        GEMINI_API_KEY: 'gemini-key',
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      reply: 'gemini reply',
+      provider: 'gemini',
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    assert.equal(await rateLimits.get('ai:cooldown:12345'), '1');
+    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), '1');
+  } finally {
+    global.fetch = originalFetch;
+    process.env.DEV_MODE = prevDevMode;
+  }
+});
+
+test('POST /api/assistant/chat returns AI reply from Gemini and records usage in RATE_LIMITS', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init = {}) => {
+    if (!String(url).includes('generativelanguage.googleapis.com')) {
+      throw new Error(`Unexpected fetch url: ${url}`);
+    }
+    assert.equal(String(url).includes('?key='), false);
+    assert.equal(init.headers['x-goog-api-key'], 'gemini-key');
+    const body = JSON.parse(await new Response(init.body).text());
+    assert.equal(body.contents[0].parts[0].text.includes('user: hi'), true);
+    return new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: 'gemini reply' }],
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+        GEMINI_API_KEY: 'gemini-key',
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      reply: 'gemini reply',
+      provider: 'gemini',
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    assert.equal(await rateLimits.get('ai:cooldown:12345'), '1');
+    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), '1');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/assistant/chat falls back to OpenRouter when Gemini fails', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init = {}) => {
+    if (String(url).includes('generativelanguage.googleapis.com')) {
+      assert.equal(String(url).includes('?key='), false);
+      assert.equal(init.headers['x-goog-api-key'], 'gemini-key');
+      return new Response(JSON.stringify({ error: { message: 'gemini down' } }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (String(url).includes('openrouter.ai')) {
+      const body = JSON.parse(await new Response(init.body).text());
+      assert.equal(body.model, 'meta-llama/llama-3.3-70b-instruct:free');
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'openrouter reply' } }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }
+    throw new Error(`Unexpected fetch url: ${url}`);
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+        GEMINI_API_KEY: 'gemini-key',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      reply: 'openrouter reply',
+      provider: 'openrouter',
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/assistant/chat returns 503 when all AI providers fail and does not record usage', async () => {
   const worker = loadWorker();
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const rateLimits = createMemoryKv();
   const originalFetch = global.fetch;
   global.fetch = async () => {
-    throw new Error('fetch should not be called for /api/assistant/chat');
+    throw new Error('fetch should not be called when no AI provider is configured');
   };
 
   try {
@@ -1083,10 +1354,11 @@ test('POST /api/assistant/chat returns 501 without calling backend or recording 
       }),
     );
 
-    assert.equal(response.status, 501);
+    assert.equal(response.status, 503);
     assert.deepEqual(await response.json(), {
       status: 'error',
-      message: 'assistant service is disabled on this worker',
+      reason: 'all_providers_failed',
+      detail: 'DeepSeek not configured',
     });
     const today = new Date().toISOString().slice(0, 10);
     assert.equal(await rateLimits.get('ai:cooldown:12345'), null);
@@ -1617,6 +1889,491 @@ test('DELETE /api/alerts/:id removes alert for authenticated user in DB', async 
   }
 });
 
+test('GET /api/analyses falls back to DB and hydrates APP_CACHE on cache miss', async () => {
+  const now = new Date().toISOString();
+  const analysesCache = createMemoryKv();
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY created_at DESC')) {
+      return {
+        rows: [
+          {
+            id: 'an1',
+            coin: 'BTC',
+            timeframe: '4h',
+            image: 'https://example.test/a.png',
+            text: 'analysis body',
+            author: 'admin',
+            author_id: '831704732',
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/analyses');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'GET',
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: 'success',
+      analyses: [
+        {
+          id: 'an1',
+          coin: 'BTC',
+          timeframe: '4h',
+          image: 'https://example.test/a.png',
+          text: 'analysis body',
+          author: 'admin',
+          author_id: '831704732',
+          date: now.slice(0, 10),
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      version: 1,
+    });
+    assert.equal(await analysesCache.get('analyses:version'), '1');
+    assert.equal(
+      await analysesCache.get('analyses:list'),
+      JSON.stringify([
+        {
+          id: 'an1',
+          coin: 'BTC',
+          timeframe: '4h',
+          image: 'https://example.test/a.png',
+          text: 'analysis body',
+          author: 'admin',
+          author_id: '831704732',
+          date: now.slice(0, 10),
+          created_at: now,
+          updated_at: now,
+        },
+      ]),
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('GET /api/analyses returns generic 503 without leaking SQL details on DB error', async () => {
+  const analysesCache = createMemoryKv();
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY created_at DESC')) {
+      throw new Error('relation "analyses" does not exist near SELECT * FROM analyses');
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/analyses');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'GET',
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.deepEqual(body, {
+      status: 'error',
+      message: 'Database unavailable',
+    });
+    assert.equal(String(JSON.stringify(body)).includes('SELECT * FROM analyses'), false);
+    assert.equal(String(JSON.stringify(body)).includes('relation "analyses"'), false);
+    assert.equal('detail' in body, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/analyses rejects non-admin user before touching DB', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  let fetchCalled = false;
+  global.fetch = async () => {
+    fetchCalled = true;
+    return new Response('unexpected');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ coin: 'btc', timeframe: '4h', image: '', text: 'body', author: 'spoofed' }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+    );
+    assert.equal(response.status, 403);
+    assert.equal(fetchCalled, false);
+    assert.deepEqual(await response.json(), { detail: 'Admin access required' });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/analyses stores analysis in DB, ignores spoofed author_id, and bumps cache version', async () => {
+  const now = new Date().toISOString();
+  const analysesCache = createMemoryKv();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('INSERT INTO analyses')) {
+      assert.equal(params[1], 'BTC');
+      assert.equal(params[2], '4h');
+      assert.equal(params[5], 'Desk');
+      assert.equal(params[6], '831704732');
+      return {
+        rows: [
+          {
+            id: 'an1',
+            coin: 'BTC',
+            timeframe: '4h',
+            image: '',
+            text: 'analysis body',
+            author: 'Desk',
+            author_id: '831704732',
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      };
+    }
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY created_at DESC')) {
+      return {
+        rows: [
+          {
+            id: 'an1',
+            coin: 'BTC',
+            timeframe: '4h',
+            image: '',
+            text: 'analysis body',
+            author: 'Desk',
+            author_id: '831704732',
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/analyses create');
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({
+        coin: 'btc',
+        timeframe: '4h',
+        image: '',
+        text: 'analysis body',
+        author: 'Desk',
+        author_id: 'spoofed',
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.analysis.id, 'an1');
+    assert.equal(body.analysis.author_id, '831704732');
+    assert.equal(body.version, 1);
+    assert.equal(await analysesCache.get('analyses:version'), '1');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('PUT and DELETE /api/analyses/:id update DB-backed cache version', async () => {
+  const now = new Date().toISOString();
+  const analysesCache = createMemoryKv({
+    'analyses:version': '4',
+    'analyses:list': JSON.stringify([]),
+  });
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('UPDATE analyses')) {
+      assert.equal(params[0], 'an1');
+      assert.equal(params[1], 'ETH');
+      return {
+        rows: [
+          {
+            id: 'an1',
+            coin: 'ETH',
+            timeframe: '1d',
+            image: '',
+            text: 'updated body',
+            author: 'Desk',
+            author_id: '831704732',
+            created_at: now,
+            updated_at: now,
+          },
+        ],
+      };
+    }
+    if (sql.includes('DELETE FROM analyses')) {
+      assert.equal(params[0], 'an1');
+      return { rows: [{ id: 'an1' }] };
+    }
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY created_at DESC')) {
+      const version = await analysesCache.get('analyses:version');
+      if (version === '4') {
+        return {
+          rows: [
+            {
+              id: 'an1',
+              coin: 'ETH',
+              timeframe: '1d',
+              image: '',
+              text: 'updated body',
+              author: 'Desk',
+              author_id: '831704732',
+              created_at: now,
+              updated_at: now,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called for /api/analyses update/delete');
+  };
+
+  try {
+    const updateRequest = new Request('https://worker.example/api/analyses/an1', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({
+        coin: 'eth',
+        timeframe: '1d',
+        image: '',
+        text: 'updated body',
+      }),
+    });
+
+    const updateResponse = await worker.fetch(
+      updateRequest,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    assert.equal(updateResponse.status, 200);
+    assert.equal((await updateResponse.json()).version, 5);
+    assert.equal(await analysesCache.get('analyses:version'), '5');
+
+    const deleteRequest = new Request('https://worker.example/api/analyses/an1', {
+      method: 'DELETE',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const deleteResponse = await worker.fetch(
+      deleteRequest,
+      createEnv({
+        DATABASE_URL: 'postgres://db.example/app',
+        APP_CACHE: analysesCache,
+      }),
+    );
+    assert.equal(deleteResponse.status, 200);
+    assert.deepEqual(await deleteResponse.json(), { status: 'success', version: 6 });
+    assert.equal(await analysesCache.get('analyses:version'), '6');
+    assert.equal(await analysesCache.get('analyses:list'), JSON.stringify([]));
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('scheduled alerts runner triggers active price alerts and marks them triggered in DB', async () => {
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM price_alerts') && sql.includes("status = 'active'")) {
+      return {
+        rows: [
+          { id: 'a1', user_id: '12345', symbol: 'BTC', price: 100, direction: 'above' },
+          { id: 'a2', user_id: '12345', symbol: 'ETH', price: 999999, direction: 'above' },
+        ],
+      };
+    }
+    if (sql.includes('UPDATE price_alerts') && sql.includes("status = 'triggered'")) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method || 'GET', body: init.body ? await new Response(init.body).text() : null });
+    if (String(url).includes('api.binance.com/api/v3/ticker/price')) {
+      return new Response(JSON.stringify({ symbol: 'BTCUSDT', price: '101' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (String(url).includes('api.mexc.com/api/v3/ticker/price')) {
+      return new Response(JSON.stringify({ symbol: 'ETHUSDT', price: '2000' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (String(url).includes('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  try {
+    const pending = [];
+    const ctx = {
+      waitUntil(promise) {
+        pending.push(promise);
+      },
+    };
+    await worker.scheduled(
+      { cron: '*/10 * * * *' },
+      createEnv({
+        ALERTS_CRON_ENABLED: 'true',
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+      ctx,
+    );
+    await Promise.all(pending);
+
+    const updateCalls = pgMock.calls.filter((call) => String(call.sql).includes('UPDATE price_alerts'));
+    assert.equal(updateCalls.length, 1);
+    assert.equal(updateCalls[0].params[0], 'a1');
+
+    const sendCalls = calls.filter((call) => call.url.includes('/sendMessage'));
+    assert.equal(sendCalls.length, 1);
+    assert.deepEqual(JSON.parse(sendCalls[0].body), {
+      chat_id: 12345,
+      text: '🔔 هشدار قیمت فعال شد\nBTC — قیمت فعلی: 101.000000\nهدف: 100.000000',
+      disable_web_page_preview: true,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('scheduled alerts runner does not mark alert triggered when Telegram delivery fails', async () => {
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('FROM price_alerts') && sql.includes("status = 'active'")) {
+      return {
+        rows: [{ id: 'a1', user_id: '12345', symbol: 'BTC', price: 100, direction: 'above' }],
+      };
+    }
+    if (sql.includes('UPDATE price_alerts') && sql.includes("status = 'triggered'")) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes('api.binance.com/api/v3/ticker/price')) {
+      return new Response(JSON.stringify({ symbol: 'BTCUSDT', price: '101' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (String(url).includes('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: false, description: 'forbidden' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  try {
+    const pending = [];
+    const ctx = {
+      waitUntil(promise) {
+        pending.push(promise);
+      },
+    };
+    await worker.scheduled(
+      { cron: '*/10 * * * *' },
+      createEnv({
+        ALERTS_CRON_ENABLED: 'true',
+        DATABASE_URL: 'postgres://db.example/app',
+      }),
+      ctx,
+    );
+    await Promise.all(pending);
+
+    const updateCalls = pgMock.calls.filter((call) => String(call.sql).includes('UPDATE price_alerts'));
+    assert.equal(updateCalls.length, 0);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('Render removal: repo no longer hardcodes onrender.com in runtime config files', async () => {
   const files = [
     path.join(__dirname, 'index.html'),
@@ -1628,5 +2385,30 @@ test('Render removal: repo no longer hardcodes onrender.com in runtime config fi
   for (const filePath of files) {
     const content = fs.readFileSync(filePath, 'utf8');
     assert.equal(content.includes('onrender.com'), false, `Found onrender.com in ${filePath}`);
+  }
+});
+
+test('Worker global catch returns 500 without leaking stack details on unhandled errors', async () => {
+  const worker = loadWorker();
+  const originalConsoleError = console.error;
+  const consoleCalls = [];
+  console.error = (...args) => {
+    consoleCalls.push(args);
+  };
+
+  try {
+    const response = await worker.fetch({ method: 'GET', url: 'not a valid url' }, createEnv());
+    const body = await response.json();
+
+    assert.equal(response.status, 500);
+    assert.deepEqual(body, {
+      status: 'error',
+      message: 'Internal server error',
+    });
+    assert.equal(consoleCalls.length > 0, true);
+    assert.equal(String(JSON.stringify(body)).includes('TypeError'), false);
+    assert.equal('detail' in body, false);
+  } finally {
+    console.error = originalConsoleError;
   }
 });

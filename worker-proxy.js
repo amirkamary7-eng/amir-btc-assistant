@@ -38,6 +38,21 @@ function jsonResponse(payload, init = {}) {
   });
 }
 
+function safeDbErrorResponse(error, options = {}) {
+  const {
+    statusValue = 'error',
+    message = 'Database unavailable',
+  } = options;
+
+  return jsonResponse(
+    {
+      status: statusValue,
+      message,
+    },
+    { status: 503 },
+  );
+}
+
 function getNumericEnv(env, key, fallbackValue) {
   const rawValue = Number(env[key]);
   return Number.isFinite(rawValue) ? rawValue : fallbackValue;
@@ -254,9 +269,26 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
   }
 }
 
-function authenticateTelegramRequest(request, env) {
+function isDevModeEnabled() {
+  try {
+    return typeof process !== 'undefined' && process?.env?.DEV_MODE === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function authenticateTelegramRequest(request, env, allowDevBypass = false) {
   const initData = getTelegramInitData(request);
   if (!initData) {
+    if (allowDevBypass && isDevModeEnabled()) {
+      return {
+        error: null,
+        user: {
+          id: 12345,
+          first_name: 'Dev',
+        },
+      };
+    }
     return {
       error: jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }),
       user: null,
@@ -425,6 +457,176 @@ async function recordRateLimitUsage(env, userId, hasImage) {
     const imgCount = rawImg && /^\d+$/.test(String(rawImg)) ? Number(rawImg) : 0;
     await writeRateLimitCache(env, imgKey, String(imgCount + 1), 86400);
   }
+}
+
+function normalizeAssistantHistory(history) {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+  return history.slice(-6).map((entry) => ({
+    role: typeof entry?.role === 'string' && entry.role.trim() ? entry.role.trim() : 'user',
+    content: typeof entry?.content === 'string' ? entry.content : '',
+  }));
+}
+
+function extractAssistantImageBase64(imageData) {
+  if (typeof imageData !== 'string' || !imageData) {
+    return null;
+  }
+  if (imageData.includes(',')) {
+    return imageData.split(',', 2)[1] || null;
+  }
+  return imageData;
+}
+
+function buildAssistantPrompt(message, history, imageBase64) {
+  const parts = ['You are Amir BTC Assistant, a helpful crypto trading assistant. Answer concisely in the user\'s language (Persian or English).'];
+  for (const item of history) {
+    parts.push(`${item.role}: ${item.content}`);
+  }
+  parts.push(`user: ${message}`);
+  if (imageBase64) {
+    parts.push('[User attached an image]');
+  }
+  return parts.join('\n');
+}
+
+async function readJsonResponseSafe(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function getProviderErrorDetail(prefix, responseText, fallbackMessage = 'Request failed') {
+  const detail = String(responseText || '').trim();
+  return detail ? `${prefix}: ${detail}` : prefix ? `${prefix}: ${fallbackMessage}` : fallbackMessage;
+}
+
+async function callGemini(env, prompt, imageBase64) {
+  const apiKey = normalizeOptionalString(env.GEMINI_API_KEY);
+  if (!apiKey) {
+    throw new Error('Gemini not configured');
+  }
+
+  const parts = [{ text: prompt }];
+  if (imageBase64) {
+    parts.push({
+      inline_data: {
+        mime_type: 'image/jpeg',
+        data: imageBase64,
+      },
+    });
+  }
+
+  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': apiKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts,
+        },
+      ],
+    }),
+  });
+
+  const data = await readJsonResponseSafe(response);
+  if (!response.ok) {
+    throw new Error(getProviderErrorDetail('Gemini failed', data?.error?.message || (await response.text()), `HTTP ${response.status}`));
+  }
+
+  const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
+  const responseParts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+  const reply = responseParts.find((part) => typeof part?.text === 'string' && part.text.trim())?.text || null;
+  if (!reply) {
+    throw new Error('Empty Gemini response');
+  }
+  return reply;
+}
+
+async function callOpenRouter(env, prompt) {
+  const apiKey = normalizeOptionalString(env.OPENROUTER_API_KEY);
+  if (!apiKey) {
+    throw new Error('OpenRouter not configured');
+  }
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'meta-llama/llama-3.3-70b-instruct:free',
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  const data = await readJsonResponseSafe(response);
+  if (!response.ok) {
+    throw new Error(getProviderErrorDetail('OpenRouter failed', data?.error?.message || (await response.text()), `HTTP ${response.status}`));
+  }
+
+  const reply = data?.choices?.[0]?.message?.content;
+  if (typeof reply !== 'string' || !reply.trim()) {
+    throw new Error('Empty OpenRouter response');
+  }
+  return reply;
+}
+
+async function callDeepSeek(env, prompt) {
+  const apiKey = normalizeOptionalString(env.DEEPSEEK_API_KEY);
+  if (!apiKey) {
+    throw new Error('DeepSeek not configured');
+  }
+
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  const data = await readJsonResponseSafe(response);
+  if (!response.ok) {
+    throw new Error(getProviderErrorDetail('DeepSeek failed', data?.error?.message || (await response.text()), `HTTP ${response.status}`));
+  }
+
+  const reply = data?.choices?.[0]?.message?.content;
+  if (typeof reply !== 'string' || !reply.trim()) {
+    throw new Error('Empty DeepSeek response');
+  }
+  return reply;
+}
+
+async function generateAssistantReply(env, prompt, imageBase64) {
+  const providers = [
+    ['gemini', () => callGemini(env, prompt, imageBase64)],
+    ['openrouter', () => callOpenRouter(env, prompt)],
+    ['deepseek', () => callDeepSeek(env, prompt)],
+  ];
+
+  let lastError = 'No AI provider configured';
+  for (const [providerName, providerCall] of providers) {
+    try {
+      const reply = await providerCall();
+      return { provider: providerName, reply };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  throw new Error(lastError);
 }
 
 async function readPresenceState(env) {
@@ -814,6 +1016,110 @@ async function replaceWatchlistInDb(env, userId, symbols) {
   }
   await queryDb(env, 'UPDATE users SET updated_at = NOW() WHERE telegram_id = $1', [String(userId)]);
   return getWatchlistSymbolsFromDb(env, userId);
+}
+
+function serializeAnalysisRow(row) {
+  const createdAt = row?.created_at ? new Date(row.created_at) : null;
+  const updatedAt = row?.updated_at ? new Date(row.updated_at) : null;
+  return {
+    id: String(row?.id || ''),
+    coin: String(row?.coin || '').toUpperCase(),
+    timeframe: normalizeOptionalString(row?.timeframe) || '1d',
+    image: normalizeOptionalString(row?.image) || '',
+    text: String(row?.text || ''),
+    author: normalizeOptionalString(row?.author) || '',
+    author_id: normalizeOptionalString(row?.author_id),
+    date: createdAt ? createdAt.toISOString().slice(0, 10) : '',
+    created_at: createdAt ? createdAt.toISOString() : null,
+    updated_at: updatedAt ? updatedAt.toISOString() : null,
+  };
+}
+
+async function listAnalysesFromDb(env) {
+  const result = await queryDb(
+    env,
+    `
+      SELECT id, coin, timeframe, image, text, author, author_id, created_at, updated_at
+      FROM analyses
+      ORDER BY created_at DESC
+    `,
+  );
+  return result.rows.map((row) => serializeAnalysisRow(row));
+}
+
+async function updateAnalysesCache(env, analyses, version) {
+  const cacheTtlSeconds = 86400 * 7;
+  await Promise.all([
+    writeAppCache(env, ANALYSES_VERSION_KEY, String(version), cacheTtlSeconds),
+    writeAppCache(env, ANALYSES_LIST_KEY, JSON.stringify(analyses), cacheTtlSeconds),
+  ]);
+}
+
+async function readCurrentAnalysesVersion(env) {
+  const cachedState = await readCachedAnalysesState(env);
+  return Number.isInteger(cachedState.version) ? cachedState.version : null;
+}
+
+async function createAnalysisInDb(env, adminUserId, payload) {
+  const result = await queryDb(
+    env,
+    `
+      INSERT INTO analyses (id, coin, timeframe, image, text, author, author_id, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      RETURNING id, coin, timeframe, image, text, author, author_id, created_at, updated_at
+    `,
+    [
+      String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 12),
+      (normalizeOptionalString(payload.coin) || '').toUpperCase(),
+      normalizeOptionalString(payload.timeframe) || '1d',
+      normalizeOptionalString(payload.image) || '',
+      String(payload.text),
+      normalizeOptionalString(payload.author) || '',
+      String(adminUserId),
+    ],
+  );
+  return serializeAnalysisRow(result.rows[0]);
+}
+
+async function updateAnalysisInDb(env, analysisId, payload) {
+  const result = await queryDb(
+    env,
+    `
+      UPDATE analyses
+      SET
+        coin = $2,
+        timeframe = $3,
+        image = $4,
+        text = $5,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, coin, timeframe, image, text, author, author_id, created_at, updated_at
+    `,
+    [
+      String(analysisId),
+      (normalizeOptionalString(payload.coin) || '').toUpperCase(),
+      normalizeOptionalString(payload.timeframe) || '1d',
+      normalizeOptionalString(payload.image) || '',
+      String(payload.text),
+    ],
+  );
+  if (!result.rows[0]) {
+    return null;
+  }
+  return serializeAnalysisRow(result.rows[0]);
+}
+
+async function deleteAnalysisInDb(env, analysisId) {
+  const result = await queryDb(
+    env,
+    `
+      DELETE FROM analyses
+      WHERE id = $1
+      RETURNING id
+    `,
+    [String(analysisId)],
+  );
+  return Boolean(result.rows[0]);
 }
 
 async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined) {
@@ -1415,6 +1721,70 @@ const CHART_CHECKERS = {
     },
   },
 };
+
+function parseSpotTickerPrice(exchangeKey, body) {
+  if (exchangeKey === 'binance' || exchangeKey === 'mexc') {
+    const price = Number(body?.price);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'bybit') {
+    const item = Array.isArray(body?.result?.list) ? body.result.list[0] : null;
+    const price = Number(item?.lastPrice ?? item?.last_price);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'okx') {
+    const item = Array.isArray(body?.data) ? body.data[0] : null;
+    const price = Number(item?.last);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'kucoin') {
+    const price = Number(body?.data?.price);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'gateio') {
+    const item = Array.isArray(body) ? body[0] : null;
+    const price = Number(item?.last ?? item?.last_price);
+    return Number.isFinite(price) ? price : null;
+  }
+  return null;
+}
+
+async function fetchSpotTickerPrice(exchangeKey, symbol) {
+  const checker = CHART_CHECKERS[exchangeKey];
+  if (!checker) {
+    return null;
+  }
+  const { ok, body } = await fetchJson(checker.buildUrl(symbol));
+  if (!ok || !checker.isMatch(body)) {
+    return null;
+  }
+  return parseSpotTickerPrice(exchangeKey, body);
+}
+
+async function fetchSpotPriceUsd(env, symbol) {
+  const normalizedSymbol = String(symbol || '').trim().toUpperCase();
+  if (!normalizedSymbol) {
+    return null;
+  }
+  const cacheKey = `chart:exchange:${normalizedSymbol}`;
+  const cachedExchange = await readAppCache(env, cacheKey);
+  if (cachedExchange) {
+    const cachedPrice = await fetchSpotTickerPrice(cachedExchange, normalizedSymbol);
+    if (cachedPrice !== null) {
+      return { price: cachedPrice, exchange: cachedExchange, cached: true };
+    }
+  }
+
+  for (const [, exchangeKey] of EXCHANGE_ORDER) {
+    const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
+    if (price !== null) {
+      await writeAppCache(env, cacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
+      return { price, exchange: exchangeKey, cached: false };
+    }
+  }
+
+  return null;
+}
 
 const CALENDAR_CACHE_KEY = 'calendar:events';
 const FARSI_NEWS_CACHE_KEY = 'news:farsi';
@@ -2084,11 +2454,209 @@ async function handleAnalyses(request, env) {
     });
   }
 
+  if (isDatabaseConfigured(env)) {
+    try {
+      const analyses = await listAnalysesFromDb(env);
+      const version = cachedState.version !== null ? cachedState.version : (analyses.length > 0 ? 1 : 0);
+      await updateAnalysesCache(env, analyses, version);
+      return jsonResponse({
+        status: 'success',
+        analyses,
+        version,
+      });
+    } catch (error) {
+      console.warn('list analyses failed:', error);
+      return safeDbErrorResponse(error);
+    }
+  }
+
   return jsonResponse({
     status: 'success',
     analyses: cachedState.analyses ?? [],
     version: cachedState.version ?? 0,
   });
+}
+
+function parseAnalysisPayload(originalBody, options = {}) {
+  const { requireAuthor = false } = options;
+  let payload;
+  try {
+    payload = JSON.parse(originalBody);
+  } catch {
+    return {
+      error: jsonResponse(
+        buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
+        { status: 422 },
+      ),
+    };
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return {
+      error: jsonResponse(
+        buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
+        { status: 422 },
+      ),
+    };
+  }
+
+  const validated = {};
+  const fieldSpecs = [
+    { name: 'coin', required: true, minLength: 1, maxLength: 16 },
+    { name: 'timeframe', required: false, defaultValue: '1d', maxLength: 16 },
+    { name: 'image', required: false, defaultValue: '', maxLength: 512 },
+    { name: 'text', required: true, minLength: 1 },
+    ...(requireAuthor ? [{ name: 'author', required: true, minLength: 1, maxLength: 128 }] : []),
+  ];
+
+  for (const spec of fieldSpecs) {
+    const rawValue = Object.prototype.hasOwnProperty.call(payload, spec.name) ? payload[spec.name] : spec.defaultValue;
+    if (typeof rawValue !== 'string') {
+      return {
+        error: jsonResponse(
+          buildBodyFieldValidationError(spec.name, 'string_type', 'Input should be a valid string', rawValue ?? null),
+          { status: 422 },
+        ),
+      };
+    }
+    if (spec.minLength && rawValue.length < spec.minLength) {
+      return {
+        error: jsonResponse(
+          buildBodyFieldValidationError(
+            spec.name,
+            'string_too_short',
+            `String should have at least ${spec.minLength} character${spec.minLength === 1 ? '' : 's'}`,
+            rawValue,
+            { min_length: spec.minLength },
+          ),
+          { status: 422 },
+        ),
+      };
+    }
+    if (spec.maxLength && rawValue.length > spec.maxLength) {
+      return {
+        error: jsonResponse(
+          buildBodyFieldValidationError(
+            spec.name,
+            'string_too_long',
+            `String should have at most ${spec.maxLength} characters`,
+            rawValue,
+            { max_length: spec.maxLength },
+          ),
+          { status: 422 },
+        ),
+      };
+    }
+    validated[spec.name] = rawValue;
+  }
+
+  return { payload: validated };
+}
+
+async function handleAnalysesCreate(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  if (!isAdminTelegramId(env, authState.user.id)) {
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: true });
+  if (parsed.error) {
+    return parsed.error;
+  }
+
+  try {
+    const analysis = await createAnalysisInDb(env, authState.user.id, parsed.payload);
+    const analyses = await listAnalysesFromDb(env);
+    const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
+    await updateAnalysesCache(env, analyses, version);
+    return jsonResponse({ status: 'success', analysis, version });
+  } catch (error) {
+    console.warn('create analysis failed:', error);
+    return safeDbErrorResponse(error);
+  }
+}
+
+async function handleAnalysesUpdate(request, env, analysisId) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  if (!isAdminTelegramId(env, authState.user.id)) {
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: false });
+  if (parsed.error) {
+    return parsed.error;
+  }
+
+  try {
+    const analysis = await updateAnalysisInDb(env, analysisId, parsed.payload);
+    if (!analysis) {
+      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 });
+    }
+    const analyses = await listAnalysesFromDb(env);
+    const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
+    await updateAnalysesCache(env, analyses, version);
+    return jsonResponse({ status: 'success', analysis, version });
+  } catch (error) {
+    console.warn('update analysis failed:', error);
+    return safeDbErrorResponse(error);
+  }
+}
+
+async function handleAnalysesDelete(request, env, analysisId) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.error) {
+    return authState.error;
+  }
+  if (!isAdminTelegramId(env, authState.user.id)) {
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+  }
+  if (!isDatabaseConfigured(env)) {
+    return jsonResponse(
+      {
+        status: 'error',
+        message: 'Database not configured',
+      },
+      { status: 503 },
+    );
+  }
+
+  try {
+    const deleted = await deleteAnalysisInDb(env, analysisId);
+    if (!deleted) {
+      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 });
+    }
+    const analyses = await listAnalysesFromDb(env);
+    const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
+    await updateAnalysesCache(env, analyses, version);
+    return jsonResponse({ status: 'success', version });
+  } catch (error) {
+    console.warn('delete analysis failed:', error);
+    return safeDbErrorResponse(error);
+  }
 }
 
 async function handleSessionsHeartbeat(request, env) {
@@ -2219,7 +2787,7 @@ async function handleAssistantLimits(request, env) {
 }
 
 async function handleAssistantChat(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
+  const authState = authenticateTelegramRequest(request, env, true);
   if (authState.error) {
     return authState.error;
   }
@@ -2286,8 +2854,23 @@ async function handleAssistantChat(request, env) {
     );
   }
 
+  if (payload.image !== undefined && payload.image !== null && typeof payload.image !== 'string') {
+    return jsonResponse(
+      buildBodyFieldValidationError('image', 'string_type', 'Input should be a valid string', payload.image),
+      { status: 422 },
+    );
+  }
+
+  if (typeof payload.image === 'string' && payload.image.length > 2000000) {
+    return jsonResponse(
+      buildBodyFieldValidationError('image', 'string_too_long', 'String should have at most 2000000 characters', payload.image, { max_length: 2000000 }),
+      { status: 422 },
+    );
+  }
+
   const userId = String(authState.user.id);
   const hasImage = Boolean(payload.image);
+  const history = normalizeAssistantHistory(payload.history);
 
   const limits = await checkRateLimits(env, userId);
   if (!limits.allowed) {
@@ -2297,13 +2880,27 @@ async function handleAssistantChat(request, env) {
   if (hasImage && limits.images_used >= limits.images_limit) {
     return jsonResponse({ status: 'error', reason: 'daily_image_limit', allowed: false }, { status: 429 });
   }
-  return jsonResponse(
-    {
-      status: 'error',
-      message: 'assistant service is disabled on this worker',
-    },
-    { status: 501 },
-  );
+
+  try {
+    const imageBase64 = extractAssistantImageBase64(payload.image);
+    const prompt = buildAssistantPrompt(message, history, imageBase64);
+    const result = await generateAssistantReply(env, prompt, imageBase64);
+    await recordRateLimitUsage(env, userId, hasImage);
+    return jsonResponse({
+      status: 'success',
+      reply: result.reply,
+      provider: result.provider,
+    });
+  } catch (error) {
+    return jsonResponse(
+      {
+        status: 'error',
+        reason: 'all_providers_failed',
+        detail: error instanceof Error ? error.message : String(error),
+      },
+      { status: 503 },
+    );
+  }
 }
 
 function getUserStateKey(userId) {
@@ -2354,14 +2951,7 @@ async function handleTicketsCreate(request, env) {
     return jsonResponse({ status: 'success', ticket });
   } catch (error) {
     console.warn('create ticket failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2385,14 +2975,7 @@ async function handleTicketsList(request, env) {
     return jsonResponse({ status: 'success', tickets });
   } catch (error) {
     console.warn('list tickets failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2419,14 +3002,7 @@ async function handleTicketsAll(request, env) {
     return jsonResponse({ status: 'success', tickets });
   } catch (error) {
     console.warn('list all tickets failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2481,14 +3057,7 @@ async function handleTicketReply(request, env, ticketId) {
     return jsonResponse({ status: 'success', ticket });
   } catch (error) {
     console.warn('reply ticket failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2520,14 +3089,7 @@ async function handleTicketDelete(request, env, ticketId) {
     return jsonResponse({ status: 'success' });
   } catch (error) {
     console.warn('delete ticket failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2571,14 +3133,7 @@ async function handleAlertsCreate(request, env) {
     return jsonResponse({ status: 'success', alert });
   } catch (error) {
     console.warn('create alert failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2602,14 +3157,7 @@ async function handleAlertsList(request, env) {
     return jsonResponse({ status: 'success', alerts });
   } catch (error) {
     console.warn('list alerts failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2640,14 +3188,7 @@ async function handleAlertDelete(request, env, alertId) {
     return jsonResponse({ status: 'success', deleted: true });
   } catch (error) {
     console.warn('delete alert failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2708,14 +3249,7 @@ async function handleUsersBootstrap(request, env) {
     });
   } catch (error) {
     console.warn('bootstrap user failed:', error);
-    return jsonResponse(
-      {
-        status: 'DB_ERROR',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' });
   }
 }
 
@@ -2753,14 +3287,7 @@ async function handleUsersMe(request, env) {
     });
   } catch (error) {
     console.warn('get current user failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2814,14 +3341,7 @@ async function handleUsersMeSettings(request, env) {
     return jsonResponse({ status: 'success', user: normalizeUserRow(userRow) });
   } catch (error) {
     console.warn('update user settings failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2845,14 +3365,7 @@ async function handleWatchlistGet(request, env) {
     return jsonResponse({ status: 'success', symbols, watchlist: symbols });
   } catch (error) {
     console.warn('get watchlist failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2899,14 +3412,7 @@ async function handleWatchlistPut(request, env) {
     return jsonResponse({ status: 'success', symbols: storedSymbols });
   } catch (error) {
     console.warn('update watchlist failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2923,14 +3429,7 @@ async function handleReferralsStats(request, env) {
     return jsonResponse({ status: 'success', ...stats });
   } catch (error) {
     console.warn('get referral stats failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -2947,14 +3446,7 @@ async function handleReferralTokens(request, env) {
     return jsonResponse({ status: 'success', ...tokenState });
   } catch (error) {
     console.warn('get referral tokens failed:', error);
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database unavailable',
-        detail: String(error),
-      },
-      { status: 503 },
-    );
+    return safeDbErrorResponse(error);
   }
 }
 
@@ -3150,13 +3642,146 @@ async function runScheduledAlertsBaseline(controller, env) {
     );
     return;
   }
-  console.log(
-    JSON.stringify({
-      ...payload,
-      skipped: true,
-      reason: 'scheduled alerts runner is not configured on this worker',
-    }),
-  );
+
+  if (!isDatabaseConfigured(env)) {
+    console.log(
+      JSON.stringify({
+        ...payload,
+        skipped: true,
+        reason: 'Database not configured',
+      }),
+    );
+    return;
+  }
+
+  if (!isBotConfigured(env)) {
+    console.log(
+      JSON.stringify({
+        ...payload,
+        skipped: true,
+        reason: 'Telegram bot token is not configured',
+      }),
+    );
+    return;
+  }
+
+  const maxAlerts = Math.max(getNumericEnv(env, 'ALERTS_CRON_MAX_ALERTS', 200), 0);
+  const resultPayload = {
+    ...payload,
+    checked_count: 0,
+    triggered_count: 0,
+    price_fetch_failures: 0,
+    delivery_failures: 0,
+    skipped_price_missing: 0,
+    skipped_guest_users: 0,
+  };
+
+  try {
+    const alertsResult = await queryDb(
+      env,
+      `
+        SELECT id, user_id, symbol, price, direction
+        FROM price_alerts
+        WHERE status = 'active'
+        ORDER BY created_at DESC
+      `,
+    );
+    const alerts = Array.isArray(alertsResult.rows) ? alertsResult.rows.slice(0, maxAlerts) : [];
+    resultPayload.checked_count = alerts.length;
+
+    if (!alerts.length) {
+      console.log(JSON.stringify({ ...resultPayload, finished: true }));
+      return;
+    }
+
+    const symbolPriceMap = new Map();
+    for (const alert of alerts) {
+      const symbol = String(alert?.symbol || '').trim().toUpperCase();
+      if (!symbol) {
+        resultPayload.skipped_price_missing += 1;
+        continue;
+      }
+      if (!symbolPriceMap.has(symbol)) {
+        const priceInfo = await fetchSpotPriceUsd(env, symbol);
+        if (!priceInfo) {
+          resultPayload.price_fetch_failures += 1;
+          symbolPriceMap.set(symbol, null);
+        } else {
+          symbolPriceMap.set(symbol, priceInfo.price);
+        }
+      }
+    }
+
+    for (const alert of alerts) {
+      const alertId = String(alert?.id || '');
+      const userId = String(alert?.user_id || '');
+      const symbol = String(alert?.symbol || '').trim().toUpperCase();
+      const targetPrice = Number(alert?.price);
+      const direction = String(alert?.direction || 'above').trim().toLowerCase();
+
+      if (!alertId || !userId || userId.startsWith('guest_')) {
+        resultPayload.skipped_guest_users += 1;
+        continue;
+      }
+      if (!symbol || !Number.isFinite(targetPrice)) {
+        resultPayload.skipped_price_missing += 1;
+        continue;
+      }
+
+      const currentPrice = symbolPriceMap.get(symbol);
+      if (!Number.isFinite(currentPrice)) {
+        continue;
+      }
+
+      const shouldTrigger = (direction === 'below' && currentPrice <= targetPrice) || (direction !== 'below' && currentPrice >= targetPrice);
+      if (!shouldTrigger) {
+        continue;
+      }
+
+      try {
+        const chatIdValue = Number(userId);
+        const chatId = Number.isFinite(chatIdValue) ? chatIdValue : userId;
+        const text = `🔔 هشدار قیمت فعال شد\n${symbol} — قیمت فعلی: ${Number(currentPrice).toFixed(6)}\nهدف: ${Number(targetPrice).toFixed(6)}`;
+        await sendTelegramMessage(env, {
+          chat_id: chatId,
+          text,
+          disable_web_page_preview: true,
+        });
+
+        await queryDb(
+          env,
+          `
+            UPDATE price_alerts
+            SET status = 'triggered', triggered_at = NOW()
+            WHERE id = $1
+          `,
+          [alertId],
+        );
+
+        resultPayload.triggered_count += 1;
+      } catch (error) {
+        resultPayload.delivery_failures += 1;
+        console.warn('scheduled alert delivery failed:', {
+          alert_id: alertId,
+          user_id: userId,
+          symbol,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    console.log(JSON.stringify({ ...resultPayload, finished: true }));
+  } catch (error) {
+    console.warn('scheduled alerts runner failed:', error);
+    console.log(
+      JSON.stringify({
+        ...payload,
+        status: 'error',
+        message: 'scheduled alerts runner failed',
+        detail: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
 }
 //#endregion
 
@@ -3197,6 +3822,20 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
         return await handleAnalyses(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/analyses') {
+        return await handleAnalysesCreate(request, env);
+      }
+
+      if (request.method === 'PUT' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
+        const analysisId = url.pathname.split('/')[3] || '';
+        return await handleAnalysesUpdate(request, env, analysisId);
+      }
+
+      if (request.method === 'DELETE' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
+        const analysisId = url.pathname.split('/')[3] || '';
+        return await handleAnalysesDelete(request, env, analysisId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/tickets') {
@@ -3310,13 +3949,13 @@ export default {
         { status: 404 },
       );
     } catch (error) {
+      console.error('Unhandled worker request error:', error);
       return jsonResponse(
         {
           status: 'error',
-          message: 'Request failed safely',
-          detail: String(error),
+          message: 'Internal server error',
         },
-        { status: 200 },
+        { status: 500 },
       );
     }
   },
