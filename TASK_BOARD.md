@@ -44,20 +44,20 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 2 |
+| ✅ Done | 12 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 52 |
-| **Overall** | **4%** |
+| ⬜ Todo | 42 |
+| **Overall** | **22%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
-| 1 | Critical Stability | 7 | 2 | 29% |
+| 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
-| 3 | Architecture Cleanup | 8 | 0 | 0% |
-| 4 | Security Hardening | 13 | 0 | 0% |
+| 3 | Architecture Cleanup | 8 | 3 | 38% |
+| 4 | Security Hardening | 13 | 2 | 15% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
 ---
@@ -94,13 +94,13 @@ Phase 4 ─► Phase 5:
 
 | Exec# | Task ID | Phase | Title | Priority | Status | Dependencies | Unblocks |
 |------:|---------|-------|-------|----------|--------|--------------|----------|
-| 1 | 1.0 | 1 | ثبت وضعیت live deployment | Critical | ⬜ | None | 1.6, 3.1 |
+| 1 | 1.0 | 1 | ثبت وضعیت live deployment | Critical | ✅ | None | 1.6, 3.1 |
 | 2 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical | ✅ | None | 1.2, 2.9, auth tasks |
 | 3 | 1.2 | 1 | Fix buildInitData test helper | High | ✅ | 1.1 | 1.3 |
-| 4 | 1.3 | 1 | Wire npm test | High | ⬜ | 1.2 | 5.4 |
-| 5 | 1.4 | 1 | Separate KV namespace IDs | Critical | ⬜ | None | 2.3, 2.10, 4.3 |
-| 6 | 1.5 | 1 | Inject API_BASE at Pages build | Critical | ⬜ | None | E2E, Mini App |
-| 7 | 1.6 | 1 | Runbook — single webhook target | High | ⬜ | 1.0 | 2.11, 3.1 |
+| 4 | 1.3 | 1 | Wire npm test | High | ✅ | 1.2 | 5.4 |
+| 5 | 1.4 | 1 | Separate KV namespace IDs | Critical | ✅ | None | 2.3, 2.10, 4.3 |
+| 6 | 1.5 | 1 | Inject API_BASE at Pages build | Critical | ✅ | None | E2E, Mini App |
+| 7 | 1.6 | 1 | Runbook — single webhook target | High | ✅ | 1.0 | 2.11, 3.1 |
 | 8 | 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical | ⬜ | 1.1 | 2.2, 2.3 |
 | 9 | 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | ⬜ | 1.1, 2.1 | 2.3 |
 | 10 | 2.3 | 2 | Analyses KV cache invalidation | High | ⬜ | 2.2 | 3.1 |
@@ -117,18 +117,18 @@ Phase 4 ─► Phase 5:
 | 21 | 2.14 | 2 | Ticket reply — Telegram notify | High | ⬜ | 2.13 | — |
 | 22 | 3.1 | 3 | Disable FastAPI duplicate routes | High | ⬜ | 2.3, 2.5, 2.9, 2.11, 1.0 | 3.2 |
 | 23 | 3.2 | 3 | Multi-admin support on Worker | Medium | ⬜ | 2.2 | 3.3, 4.8, 4.9 |
-| 24 | 3.3 | 3 | Admin join bypass — full admin set | Medium | ⬜ | None | — |
-| 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ⬜ | None | — |
-| 26 | 3.5 | 3 | Generic DB error responses | Medium | ⬜ | None | 4.5 |
+| 24 | 3.3 | 3 | Admin join bypass — full admin set | Medium | ✅ | None | — |
+| 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ✅ | None | — |
+| 26 | 3.5 | 3 | Generic DB error responses | Medium | ✅ | None | 4.5 |
 | 27 | 3.6 | 3 | Remove unused Worker functions | Low | ⬜ | 1.3 | — |
 | 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ⬜ | None | — |
 | 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ⬜ | 1.6 | — |
 | 30 | 4.1 | 4 | AI history role allowlist — Worker | High | ⬜ | 2.9 | 4.2 |
-| 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ⬜ | None | — |
+| 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ✅ | None | — |
 | 32 | 4.3 | 4 | Remove initData from GET query | High | ⬜ | 1.1 | 4.6 |
 | 33 | 4.4 | 4 | FastAPI AI rate limits — KV migration doc | High | ⬜ | 1.0, 3.1 | — |
 | 34 | 4.5 | 4 | Generic provider error to client | High | ⬜ | 2.9, 3.5 | — |
-| 35 | 4.6 | 4 | Gemini API key — header not URL | High | ⬜ | None | — |
+| 35 | 4.6 | 4 | Gemini API key — header not URL | High | ✅ | None | — |
 | 36 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | ⬜ | 1.5 | — |
 | 37 | 4.8 | 4 | Debug join endpoint — admin only | Medium | ⬜ | 3.2 | — |
 | 38 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | ⬜ | 3.2 | — |
@@ -153,20 +153,13 @@ Phase 4 ─► Phase 5:
 
 ## Next Executable Tasks (dependencies satisfied)
 
-> با وضعیت فعلی (همه ⬜ Todo)، این Taskها **Dependencies: None** دارند و می‌توانند شروع شوند:
+> با وضعیت فعلی، این Taskها dependency باز ندارند و می‌توانند شروع شوند:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 1.0 | ثبت وضعیت live deployment | Critical |
-| 1.3 | Wire npm test | High |
-| 1.4 | Separate KV namespace IDs | Critical |
-| 1.5 | Inject API_BASE at Pages build | Critical |
-| 3.3 | Admin join bypass | Medium |
-| 3.4 | Global error handler | Medium |
-| 3.5 | Generic DB error responses | Medium |
+| 3.6 | Remove unused Worker functions | Low |
 | 3.7 | Delete ticket_service.py | Low |
-| 4.2 | AI history sanitization — FastAPI | High |
-| 4.6 | Gemini API key header | High |
+| 3.8 | Remove bot.py disabled stub | Low |
 | 4.10 | Referrer validation | Medium |
 | 4.12 | Sanitize env.example | Medium |
 | 5.1 | Remove mock news fallback | Low |
@@ -189,7 +182,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.0
 
-**Status:** ⬜ Todo  
+**Status:** ✅ Done  
 **Phase:** 1  
 **Task ID:** 1.0
 
@@ -305,7 +298,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.3
 
-**Status:** ⬜ Todo  
+**Status:** ✅ Done  
 **Phase:** 1  
 **Task ID:** 1.3
 
@@ -341,7 +334,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.4
 
-**Status:** ⬜ Todo  
+**Status:** ✅ Done  
 **Phase:** 1  
 **Task ID:** 1.4
 
@@ -378,7 +371,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.5
 
-**Status:** ⬜ Todo  
+**Status:** ✅ Done  
 **Phase:** 1  
 **Task ID:** 1.5
 
@@ -419,7 +412,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.6
 
-**Status:** ⬜ Todo  
+**Status:** ✅ Done  
 **Phase:** 1  
 **Task ID:** 1.6
 
