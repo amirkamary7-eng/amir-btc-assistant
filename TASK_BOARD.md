@@ -44,18 +44,18 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 26 |
+| ✅ Done | 27 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 29 |
-| **Overall** | **48%** |
+| ⬜ Todo | 27 |
+| **Overall** | **50%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 6 | 86% |
-| 2 | Core System Fix | 14 | 6 | 43% |
+| 2 | Core System Fix | 14 | 7 | 50% |
 | 3 | Architecture Cleanup | 8 | 3 | 38% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -107,7 +107,7 @@ Phase 4 ─► Phase 5:
 | 11 | 2.4 | 2 | Port price alert checker to Worker | Critical | ⬜ | 1.1 | 2.5 |
 | 12 | 2.5 | 2 | Wire alert runner into scheduled() | Critical | ✅ | 2.4 | 3.1 |
 | 13 | 2.6 | 2 | AI chat — provider fetch helpers | Critical | ✅ | 1.1 | 2.7, 2.8, 2.9 |
-| 14 | 2.7 | 2 | AI chat — port prompt assembly | High | ⬜ | 2.6 | 2.9 |
+| 14 | 2.7 | 2 | AI chat — port prompt assembly | High | ✅ | 2.6 | 2.9 |
 | 15 | 2.8 | 2 | AI chat — safe response parsing | High | ✅ | 2.6 | 2.9 |
 | 16 | 2.9 | 2 | Replace assistant 501 with live AI | Critical | ✅ | 2.6, 2.7, 2.8, 1.1 | 2.10, 4.1, 4.2, 5.6 |
 | 17 | 2.10 | 2 | Call recordRateLimitUsage after chat | High | ✅ | 2.9, 1.4 | 4.3 |
@@ -160,7 +160,6 @@ Phase 4 ─► Phase 5:
 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical | unverified — نیاز به real initData |
 | 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | unverified — نیاز به real DB |
 | 2.3 | 2 | Analyses KV cache invalidation | High | unverified — نیاز به real DB+KV |
-| 2.7 | 2 | AI chat — port prompt assembly | High | unverified — indirect only |
 | 2.13 | 2 | Ticket create — Telegram notify | High | — |
 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | unverified — all paths caught |
 | 3.7 | 3 | Delete unused ticket_service.py | Low | — |

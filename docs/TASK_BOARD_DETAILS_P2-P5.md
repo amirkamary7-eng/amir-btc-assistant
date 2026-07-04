@@ -168,7 +168,7 @@
 
 ### TASK 2.7
 
-**Status:** ⬜ Todo | **Phase:** 2 | **Task ID:** 2.7
+**Status:** ✅ Done | **Phase:** 2 | **Task ID:** 2.7
 
 **Title:** AI chat — port prompt assembly from FastAPI  
 **Type:** feature | **Priority:** High
