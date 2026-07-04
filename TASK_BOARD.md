@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 20 |
+| ✅ Done | 21 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 35 |
-| **Overall** | **37%** |
+| ⬜ Todo | 34 |
+| **Overall** | **39%** |
 
 ### By Phase
 
@@ -58,7 +58,7 @@
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
-| 5 | Optimization & Cleanup | 12 | 4 | 33% |
+| 5 | Optimization & Cleanup | 12 | 5 | 42% |
 
 ---
 
@@ -146,7 +146,7 @@ Phase 4 ─► Phase 5:
 | 50 | 5.8 | 5 | Alembic migrations baseline | Medium | ✅ | None | — |
 | 51 | 5.9 | 5 | Sync status docs with code reality | Low | ⬜ | Phase 2 complete | — |
 | 52 | 5.10 | 5 | Remove legacy query params | Low | ⬜ | 3.1 | — |
-| 53 | 5.11 | 5 | Remove dead imports in main.py | Low | ⬜ | None | — |
+| 53 | 5.11 | 5 | Remove dead imports in main.py | Low | ✅ | None | — |
 | 54 | 5.12 | 5 | Update index.html outdated comment | Low | ⬜ | 1.5 | — |
 
 ---
@@ -157,7 +157,7 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 5.11 | Remove dead imports in main.py | Low |
+| 5.12 | Update index.html outdated comment | Low |
 
 **توصیه Trae (Top priority):** 1.1 → 1.5 → 1.4 → 1.2+1.3 → … (see `گزارش 3.txt` Top 10)
 
