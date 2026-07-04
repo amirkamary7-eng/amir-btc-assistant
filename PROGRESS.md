@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 19 |
+| ✅ Done | 20 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 35 |
-| **Progress** | **35%** |
+| ⬜ Todo | 34 |
+| **Progress** | **37%** |
 
 ## By Phase
 
@@ -29,7 +29,7 @@
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
-| 5 | Optimization & Cleanup | 12 | 3 | 25% |
+| 5 | Optimization & Cleanup | 12 | 4 | 33% |
 
 ## Current Phase
 
@@ -57,12 +57,12 @@
 | 4.6 | Gemini API key — header not URL |
 | 5.3 | Remove unused wrangler vars |
 | 5.1 | Remove mock news fallback |
+| 5.8 | Alembic migrations baseline |
 
 ## Next Executable Tasks (no open dependencies)
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 5.8 | Alembic migrations baseline | Medium |
 | 5.11 | Remove dead imports/code in main.py | Low |
 
 ## Agent Rules (summary)

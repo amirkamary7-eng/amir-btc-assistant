@@ -38,6 +38,11 @@ def init_database() -> bool:
             max_overflow=10,
         )
         SessionLocal = sessionmaker(bind=_engine, autocommit=False, autoflush=False)
+        # NOTE: Schema changes should be managed via Alembic migrations.
+        # This create_all is kept as a safety net for fresh databases
+        # where migrations haven't been run yet.
+        # To generate a new migration:  alembic revision --autogenerate -m "description"
+        # To apply migrations:          alembic upgrade head
         Base.metadata.create_all(bind=_engine)
         with _engine.connect() as conn:
             conn.execute(text("SELECT 1"))
