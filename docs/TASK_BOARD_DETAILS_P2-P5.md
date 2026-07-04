@@ -498,7 +498,7 @@
 
 ### TASK 3.7
 
-**Status:** ✅ Done | **Phase:** 3 | **Task ID:** 3.7
+**Status:** ⬜ Todo | **Phase:** 3 | **Task ID:** 3.7
 
 **Title:** Delete unused `ticket_service.py`  
 **Type:** cleanup | **Priority:** Low
@@ -518,7 +518,7 @@
 
 ### TASK 3.8
 
-**Status:** ⬜ Todo | **Phase:** 3 | **Task ID:** 3.8
+**Status:** ✅ Done | **Phase:** 3 | **Task ID:** 3.8
 
 **Title:** Remove `bot.py` disabled stub  
 **Type:** cleanup | **Priority:** Low

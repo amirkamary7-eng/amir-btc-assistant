@@ -121,8 +121,8 @@ Phase 4 ─► Phase 5:
 | 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ✅ | None | — |
 | 26 | 3.5 | 3 | Generic DB error responses | Medium | ✅ | None | 4.5 |
 | 27 | 3.6 | 3 | Remove unused Worker functions | Low | ✅ | 1.3 | — |
-| 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ✅ | None | — |
-| 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ⬜ | 1.6 | — |
+| 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ⬜ | None | — |
+| 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ✅ | 1.6 | — |
 | 30 | 4.1 | 4 | AI history role allowlist — Worker | High | ⬜ | 2.9 | 4.2 |
 | 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ✅ | None | — |
 | 32 | 4.3 | 4 | Remove initData from GET query | High | ⬜ | 1.1 | 4.6 |
@@ -157,7 +157,6 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 3.8 | Remove bot.py disabled stub | Low |
 | 4.10 | Referrer validation | Medium |
 | 4.12 | Sanitize env.example | Medium |
 | 5.1 | Remove mock news fallback | Low |
