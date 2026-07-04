@@ -44,19 +44,19 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 13 |
+| ✅ Done | 15 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 41 |
-| **Overall** | **24%** |
+| ⬜ Todo | 39 |
+| **Overall** | **28%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
-| 1 | Critical Stability | 7 | 5 | 71% |
+| 1 | Critical Stability | 7 | 6 | 86% |
 | 2 | Core System Fix | 14 | 0 | 0% |
-| 3 | Architecture Cleanup | 8 | 1 | 13% |
+| 3 | Architecture Cleanup | 8 | 2 | 25% |
 | 4 | Security Hardening | 13 | 1 | 8% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
@@ -98,7 +98,7 @@ Phase 4 ─► Phase 5:
 | 2 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical | ⬜ | None | 1.2, 2.9, auth tasks |
 | 3 | 1.2 | 1 | Fix buildInitData test helper | High | ✅ | 1.1 | 1.3 |
 | 4 | 1.3 | 1 | Wire npm test | High | ✅ | 1.2 | 5.4 |
-| 5 | 1.4 | 1 | Separate KV namespace IDs | Critical | ⬜ | None | 2.3, 2.10, 4.3 |
+| 5 | 1.4 | 1 | Separate KV namespace IDs | Critical | ✅ | None | 2.3, 2.10, 4.3 |
 | 6 | 1.5 | 1 | Inject API_BASE at Pages build | Critical | ✅ | None | E2E, Mini App |
 | 7 | 1.6 | 1 | Runbook — single webhook target | High | ✅ | 1.0 | 2.11, 3.1 |
 | 8 | 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical | ⬜ | 1.1 | 2.2, 2.3 |
@@ -120,7 +120,7 @@ Phase 4 ─► Phase 5:
 | 24 | 3.3 | 3 | Admin join bypass — full admin set | Medium | ⬜ | None | — |
 | 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ⬜ | None | — |
 | 26 | 3.5 | 3 | Generic DB error responses | Medium | ⬜ | None | 4.5 |
-| 27 | 3.6 | 3 | Remove unused Worker functions | Low | ⬜ | 1.3 | — |
+| 27 | 3.6 | 3 | Remove unused Worker functions | Low | ✅ | 1.3 | — |
 | 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ⬜ | None | — |
 | 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ✅ | 1.6 | — |
 | 30 | 4.1 | 4 | AI history role allowlist — Worker | High | ⬜ | 2.9 | 4.2 |
@@ -158,19 +158,17 @@ Phase 4 ─► Phase 5:
 | Task ID | Phase | Title | Priority |
 |---------|-------|-------|----------|
 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical |
-| 1.4 | 1 | Separate KV namespace IDs | Critical |
 | 2.11 | 2 | Webhook secret validation — Worker | High |
 | 3.3 | 3 | Admin join bypass — full admin set | Medium |
 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium |
 | 3.5 | 3 | Generic DB error responses | Medium |
-| 3.6 | 3 | Remove unused Worker functions | Low |
 | 3.7 | 3 | Delete unused ticket_service.py | Low |
 | 4.2 | 4 | AI history sanitization — FastAPI | High |
 | 4.6 | 4 | Gemini API key — header not URL | High |
 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium |
 | 4.10 | 4 | Referrer validation | Medium |
 
-**توصیه Trae (Top priority):** 1.1 → 1.4 → 3.4 → 3.5 → 4.2 → …
+**توصیه (Top priority):** 1.1 → 3.4 → 3.5 → 4.2 → …
 
 ---
 
