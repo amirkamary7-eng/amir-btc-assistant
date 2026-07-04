@@ -2903,14 +2903,6 @@ async function handleAssistantChat(request, env) {
   }
 }
 
-function getUserStateKey(userId) {
-  return `user:${userId}`;
-}
-
-function getWatchlistKey(userId) {
-  return `watchlist:${userId}`;
-}
-
 async function handleTicketsCreate(request, env) {
   const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
