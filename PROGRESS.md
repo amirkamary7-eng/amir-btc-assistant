@@ -15,17 +15,17 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 29 |
+| ✅ Done | 30 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 25 |
-| **Progress** | **54%** |
+| ⬜ Todo | 24 |
+| **Progress** | **56%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
-| 1 | Critical Stability | 7 | 6 | 86% |
+| 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 8 | 57% |
 | 3 | Architecture Cleanup | 8 | 4 | 50% |
 | 4 | Security Hardening | 13 | 4 | 31% |
@@ -74,11 +74,36 @@ unit test به تنهایی کافی نیست
 
 **Conclusion:** Task 3.3 was already correctly implemented in commit `ccd1d77`. The audit agent's bug report was wrong.
 
-### ⬜ Unverified (3 tasks)
+### ✅ Task 1.1 — FALSE POSITIVE BUG, verified correct (2026-07-05)
+
+**Original claim (C2):** Worker `validateTelegramInitData` decodes values before hashing; Python/Telegram spec uses raw/encoded values → auth 401 for real users.
+
+**Reality:** Worker line 234: `checkPairs.push([key, rawValue])` — uses the **raw/URL-encoded** value, NOT `decodedValue`. This is identical to Python `telegram_auth.py` line 64: `check_pairs.append((key, value))`.
+
+**Side-by-side proof:**
+```
+Worker (L228-236):   for (const [key, rawValue] of pairs) { ... checkPairs.push([key, rawValue]); }
+Python (L59-64):     for key, value in pairs: ... check_pairs.append((key, value))
+```
+
+**Runtime evidence (8 tests, zero external deps):**
+1. Simple ASCII name → PASS (user returned)
+2. Name with space (`%20`) → PASS (user returned)
+3. Persian name (`امیر`, multi-byte encoded) → PASS (user returned)
+4. Special chars in username → PASS (user returned)
+5. **WRONG hash over decoded + space** → CORRECTLY FAILS (null)
+6. **WRONG hash over decoded + Persian** → CORRECTLY FAILS (null)
+7. Expired auth_date → correctly rejected
+8. Wrong bot token → correctly rejected
+
+Tests 5-6 are the smoking gun: if Worker used decoded values for hashing, they would PASS. They fail → Worker uses encoded values → code is correct.
+
+**Conclusion:** Task 1.1 was already correctly implemented. The audit agent's bug report was wrong. `node --test worker-proxy.test.cjs` → 52/52 pass.
+
+### ⬜ Unverified (2 tasks)
 
 | Task | Reason |
 |------|--------|
-| 1.1 | HMAC works with test data but no real Telegram Mini App initData available |
 | 2.3 | KV invalidation needs successful DB write (2.2 verified, but no real DB) |
 | 2.4 | Cron works but exchange APIs are external dependency |
 
@@ -86,8 +111,7 @@ unit test به تنهایی کافی نیست
 
 | Task ID | Phase | Title | Priority | Note |
 |---------|-------|-------|----------|------|
-| 1.1 | 1 | Fix Worker Telegram HMAC | Critical | unverified |
-| 2.3 | 2 | Analyses KV cache invalidation | High | unverified |
+| 2.3 | 2 | Analyses KV cache invalidation | High | unverified — نیاز به real DB |
 | 2.13 | 2 | Ticket create — Telegram notify | High | — |
 | 3.7 | 3 | Delete unused ticket_service.py | Low | — |
 | 4.5 | 4 | Generic provider error to client | High | — |

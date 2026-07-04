@@ -44,17 +44,17 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 29 |
+| ✅ Done | 30 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 25 |
-| **Overall** | **54%** |
+| ⬜ Todo | 24 |
+| **Overall** | **56%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
-| 1 | Critical Stability | 7 | 6 | 86% |
+| 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 8 | 57% |
 | 3 | Architecture Cleanup | 8 | 4 | 50% |
 | 4 | Security Hardening | 13 | 4 | 31% |
@@ -95,7 +95,7 @@ Phase 4 ─► Phase 5:
 | Exec# | Task ID | Phase | Title | Priority | Status | Dependencies | Unblocks |
 |------:|---------|-------|-------|----------|--------|--------------|----------|
 | 1 | 1.0 | 1 | ثبت وضعیت live deployment | Critical | ✅ | None | 1.6, 3.1 |
-| 2 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical | ⬜ | None | 1.2, 2.9, auth tasks |
+| 2 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical | ✅ | None | 1.2, 2.9, auth tasks |
 | 3 | 1.2 | 1 | Fix buildInitData test helper | High | ✅ | 1.1 | 1.3 |
 | 4 | 1.3 | 1 | Wire npm test | High | ✅ | 1.2 | 5.4 |
 | 5 | 1.4 | 1 | Separate KV namespace IDs | Critical | ✅ | None | 2.3, 2.10, 4.3 |
@@ -157,7 +157,7 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Phase | Title | Priority | Note |
 |---------|-------|-------|----------|------|
-| 1.1 | 1 | Fix Worker Telegram HMAC | Critical | unverified — نیاز به real initData |
+| ~~1.1~~ | ~~1~~ | ~~Fix Worker Telegram HMAC~~ | ~~Critical~~ | ✅ false positive |
 | 2.3 | 2 | Analyses KV cache invalidation | High | unverified — نیاز به real DB |
 | 2.13 | 2 | Ticket create — Telegram notify | High | — |
 | 3.7 | 3 | Delete unused ticket_service.py | Low | — |
@@ -219,7 +219,7 @@ Phase 4 ─► Phase 5:
 
 ### TASK 1.1
 
-**Status:** ⬜ Todo
+**Status:** ✅ Done (false positive — code already correct)
 **Phase:** 1
 **Task ID:** 1.1
 
