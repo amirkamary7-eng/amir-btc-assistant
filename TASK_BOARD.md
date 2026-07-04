@@ -44,18 +44,18 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 30 |
+| ✅ Done | 31 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 24 |
-| **Overall** | **56%** |
+| ⬜ Todo | 23 |
+| **Overall** | **57%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 8 | 57% |
+| 2 | Core System Fix | 14 | 9 | 64% |
 | 3 | Architecture Cleanup | 8 | 4 | 50% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -103,7 +103,7 @@ Phase 4 ─► Phase 5:
 | 7 | 1.6 | 1 | Runbook — single webhook target | High | ✅ | 1.0 | 2.11, 3.1 |
 | 8 | 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical | ✅ | 1.1 | 2.2, 2.3 |
 | 9 | 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | ✅ | 1.1, 2.1 | 2.3 |
-| 10 | 2.3 | 2 | Analyses KV cache invalidation | High | ⬜ | 2.2 | 3.1 |
+| 10 | 2.3 | 2 | Analyses KV cache invalidation | High | ✅ | 2.2 | 3.1 |
 | 11 | 2.4 | 2 | Port price alert checker to Worker | Critical | ⬜ | 1.1 | 2.5 |
 | 12 | 2.5 | 2 | Wire alert runner into scheduled() | Critical | ✅ | 2.4 | 3.1 |
 | 13 | 2.6 | 2 | AI chat — provider fetch helpers | Critical | ✅ | 1.1 | 2.7, 2.8, 2.9 |
@@ -158,7 +158,7 @@ Phase 4 ─► Phase 5:
 | Task ID | Phase | Title | Priority | Note |
 |---------|-------|-------|----------|------|
 | ~~1.1~~ | ~~1~~ | ~~Fix Worker Telegram HMAC~~ | ~~Critical~~ | ✅ false positive |
-| 2.3 | 2 | Analyses KV cache invalidation | High | unverified — نیاز به real DB |
+| ~~2.3~~ | ~~2~~ | ~~Analyses KV cache invalidation~~ | ~~High~~ | ✅ verified |
 | 2.13 | 2 | Ticket create — Telegram notify | High | — |
 | 3.7 | 3 | Delete unused ticket_service.py | Low | — |
 | 4.5 | 4 | Generic provider error to client | High | — |
