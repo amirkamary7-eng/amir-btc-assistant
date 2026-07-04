@@ -59,12 +59,22 @@
 | 5.1 | Remove mock news fallback |
 | 5.8 | Alembic migrations baseline |
 | 5.11 | Remove dead imports in main.py |
+| 5.12 | Update index.html outdated comment |
 
 ## Next Executable Tasks (no open dependencies)
 
-| Task ID | Title | Priority |
-|---------|-------|----------|
-| 5.12 | Update index.html outdated comment | Low |
+| Task ID | Phase | Title | Priority |
+|---------|-------|-------|----------|
+| 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical |
+| 2.4 | 2 | Port price alert checker to Worker | Critical |
+| 2.6 | 2 | AI chat — provider fetch helpers | Critical |
+| 2.11 | 2 | Webhook secret validation — Worker | High |
+| 2.13 | 2 | Ticket create — Telegram notify | High |
+| 3.7 | 3 | Delete unused ticket_service.py | Low |
+| 4.3 | 4 | Remove initData from GET query | High |
+| 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium |
+| 4.11 | 4 | Shorten initData max_age | Medium |
+| 5.5 | 5 | Add minimal Python auth pytest | Medium |
 
 ## Agent Rules (summary)
 
