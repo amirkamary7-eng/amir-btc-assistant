@@ -31,8 +31,6 @@ class Settings:
         self.JOIN_CACHE_TTL = int(os.environ.get("JOIN_CACHE_TTL", "1800"))
         self.MAX_WATCHLIST = int(os.environ.get("MAX_WATCHLIST", "7"))
 
-        self.MARKET_CACHE_TTL = int(os.environ.get("MARKET_CACHE_TTL", "60"))
-        self.NEWS_CACHE_TTL = int(os.environ.get("NEWS_CACHE_TTL", "300"))
         self.CALENDAR_CACHE_TTL = int(os.environ.get("CALENDAR_CACHE_TTL", "600"))
         self.CHART_EXCHANGE_CACHE_TTL = int(os.environ.get("CHART_EXCHANGE_CACHE_TTL", "86400"))
         self.ANALYSIS_CACHE_TTL = int(os.environ.get("ANALYSIS_CACHE_TTL", "30"))
