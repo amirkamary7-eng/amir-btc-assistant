@@ -1830,18 +1830,6 @@ const FARSI_NEWS_CACHE_KEY = 'news:farsi';
 const ANALYSES_LIST_KEY = 'analyses:list';
 const ANALYSES_VERSION_KEY = 'analyses:version';
 
-const MOCK_NEWS = [
-  {
-    title: 'فورى: بیت‌کوین سقف مقاومتی جدید را شکست!',
-    description:
-      'بازار ارزهای دیجیتال پس از ورود سرمایه‌گذاران سازمانی شاهد رشد شارپ فوق‌العاده‌ای در قیمت بیت‌کوین و اتریوم بوده است.',
-    time_ago: '۵ دقیقه پیش',
-    source: 'کوین‌تلگراف',
-    image: 'https://images.cryptocompare.com/news/default/bitcoin.png',
-    url: 'https://cointelegraph.com',
-  },
-];
-
 const NEWS_RSS_SOURCES = [
   ['https://cointelegraph.com/rss', 'کوین‌تلگراف'],
   ['https://www.coindesk.com/arc/outboundfeeds/rss/', 'کوین‌دسک'],
@@ -2081,8 +2069,8 @@ async function fetchFarsiNews(env) {
   if (!rssText || !sourceName) {
     return {
       status: 'success',
-      source: 'mock_fallback',
-      data: MOCK_NEWS,
+      source: 'rss_unavailable',
+      data: [],
     };
   }
 
@@ -2108,8 +2096,8 @@ async function fetchFarsiNews(env) {
 
   return {
     status: 'success',
-    source: 'mock_fallback',
-    data: MOCK_NEWS,
+    source: 'rss_unavailable',
+    data: [],
   };
 }
 
