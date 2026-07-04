@@ -410,7 +410,7 @@
 
 ### TASK 3.3
 
-**Status:** ⬜ Todo | **Phase:** 3 | **Task ID:** 3.3
+**Status:** ✅ Done | **Phase:** 3 | **Task ID:** 3.3
 
 **Title:** Admin join bypass — use full admin set  
 **Type:** bugfix | **Priority:** Medium

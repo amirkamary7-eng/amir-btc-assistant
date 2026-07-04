@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 25 |
+| ✅ Done | 26 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 29 |
-| **Progress** | **46%** |
+| ⬜ Todo | 28 |
+| **Progress** | **48%** |
 
 ## By Phase
 
@@ -27,7 +27,7 @@
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 6 | 86% |
 | 2 | Core System Fix | 14 | 6 | 43% |
-| 3 | Architecture Cleanup | 8 | 2 | 25% |
+| 3 | Architecture Cleanup | 8 | 3 | 38% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
@@ -61,9 +61,15 @@ unit test به تنهایی کافی نیست
 | 4.6 | Code: `'x-goog-api-key': apiKey` in headers, URL has no `?key=` param |
 | 4.10 | Production: Origin match→200, mismatch→403, no origin→200 |
 
-### ⚠️ BUG FOUND
+### ✅ Task 3.3 — FALSE POSITIVE BUG, verified correct (2026-07-05)
 
-**Task 3.3** — `config.py` line 60: `admin_ids` returns `set[str]` but `join_service.py` compares `int uid in admin_ids` → **always False**. Admin bypass DOES NOT WORK.
+**Original claim:** `config.py` line 60: `admin_ids` returns `set[str]` but `join_service.py` compares `int uid in admin_ids` → always False.
+
+**Reality:** `join_service.py` line 92 does `uid = str(user_id)` BEFORE the check at line 98. So `uid` is always `str`, and `str in set[str]` works correctly.
+
+**Runtime evidence:** 6 tests passed (primary admin, 2 secondary admins, non-admin flow, int input, guest user). `pytest tests/test_join_service_admin_bypass.py` → 1 passed.
+
+**Conclusion:** Task 3.3 was already correctly implemented in commit `ccd1d77`. The audit agent's bug report was wrong.
 
 ### ⬜ Unverified (6 tasks)
 
@@ -80,7 +86,6 @@ unit test به تنهایی کافی نیست
 
 | Task ID | Phase | Title | Priority | Note |
 |---------|-------|-------|----------|------|
-| 3.3 | 3 | Admin join bypass — full admin set | Medium | ⚠️ BUG: fix type mismatch |
 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical | unverified |
 | 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | unverified |
 | 2.3 | 2 | Analyses KV cache invalidation | High | unverified |
