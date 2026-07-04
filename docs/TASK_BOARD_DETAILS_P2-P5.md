@@ -432,7 +432,7 @@
 
 ### TASK 3.4
 
-**Status:** ⬜ Todo | **Phase:** 3 | **Task ID:** 3.4
+**Status:** ✅ Done | **Phase:** 3 | **Task ID:** 3.4
 
 **Title:** Global error handler — return 5xx not 200  
 **Type:** bugfix | **Priority:** Medium

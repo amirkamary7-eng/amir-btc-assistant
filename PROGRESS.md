@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 27 |
+| ✅ Done | 28 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 27 |
-| **Progress** | **50%** |
+| ⬜ Todo | 26 |
+| **Progress** | **52%** |
 
 ## By Phase
 
@@ -27,7 +27,7 @@
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 6 | 86% |
 | 2 | Core System Fix | 14 | 7 | 50% |
-| 3 | Architecture Cleanup | 8 | 3 | 38% |
+| 3 | Architecture Cleanup | 8 | 4 | 50% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
@@ -61,6 +61,7 @@ unit test به تنهایی کافی نیست
 | 4.6 | Code: `'x-goog-api-key': apiKey` in headers, URL has no `?key=` param |
 | 4.10 | Production: Origin match→200, mismatch→403, no origin→200 |
 | 2.7 | Node.js runtime: 13 tests (history, empty, image, truncation, bad data, parity with Python `ai_service.py._build_prompt`). `npm test` 52/52 pass. |
+| 3.4 | Direct Worker invocation: malformed URL → 500 `{"status":"error","message":"Internal server error"}`, no TypeError/detail/stack in body. Normal paths (health=200, unknown=404) unaffected. |
 
 ### ✅ Task 3.3 — FALSE POSITIVE BUG, verified correct (2026-07-05)
 
@@ -72,14 +73,13 @@ unit test به تنهایی کافی نیست
 
 **Conclusion:** Task 3.3 was already correctly implemented in commit `ccd1d77`. The audit agent's bug report was wrong.
 
-### ⬜ Unverified (5 tasks)
+### ⬜ Unverified (4 tasks)
 
 | Task | Reason |
 |------|--------|
 | 1.1 | HMAC works with test data but no real Telegram Mini App initData available |
 | 2.2 | Auth passes but full CRUD needs real DB (invalid DB → can't write) |
 | 2.3 | Same — KV invalidation needs successful DB write first |
-| 3.4 | All error paths caught internally; could NOT trigger unhandled exception |
 | 2.4 | Cron works but exchange APIs are external dependency |
 
 ## Next Executable Tasks
