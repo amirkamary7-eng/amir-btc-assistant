@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 15 |
+| ✅ Done | 16 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 39 |
-| **Progress** | **28%** |
+| ⬜ Todo | 38 |
+| **Progress** | **30%** |
 
 ## By Phase
 
@@ -28,7 +28,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
-| 4 | Security Hardening | 13 | 3 | 23% |
+| 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
 ## Current Phase
@@ -52,6 +52,7 @@
 | 3.6 | Remove unused Worker functions |
 | 3.8 | Remove bot.py disabled stub |
 | 4.10 | Referrer validation |
+| 4.12 | Sanitize env.example |
 | 4.2 | AI history sanitization — FastAPI |
 | 4.6 | Gemini API key — header not URL |
 
@@ -59,7 +60,6 @@
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 4.12 | Sanitize env.example | Medium |
 | 5.1 | Remove mock news fallback | Low |
 | 5.2 | Remove unused config keys — Python | Low |
 | 5.3 | Remove unused wrangler vars | Low |
