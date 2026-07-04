@@ -15,18 +15,18 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 25 |
+| ✅ Done | 32 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 30 |
-| **Progress** | **46%** |
+| ⬜ Todo | 23 |
+| **Progress** | **59%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 3 | 21% |
+| 2 | Core System Fix | 14 | 10 | 71% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -60,23 +60,32 @@
 | 5.8 | Alembic migrations baseline |
 | 5.11 | Remove dead imports in main.py |
 | 5.12 | Update index.html outdated comment |
-| 2.1 | Analyses GET — read from PostgreSQL |
-| 2.2 | Analyses admin POST/PUT/DELETE |
 | 2.3 | Analyses KV cache invalidation |
+| 2.4 | Port price alert checker to Worker |
+| 2.5 | Wire alert runner into scheduled() |
+| 2.6 | AI chat — provider fetch helpers |
+| 2.7 | AI chat — port prompt assembly |
+| 2.8 | AI chat — safe response parsing |
+| 2.9 | Replace assistant 501 with live AI |
+| 2.10 | Call recordRateLimitUsage after chat |
 
 ## Next Executable Tasks (no open dependencies)
 
 | Task ID | Phase | Title | Priority |
 |---------|-------|-------|----------|
-| 2.4 | 2 | Port price alert checker to Worker | Critical |
-| 2.6 | 2 | AI chat — provider fetch helpers | Critical |
 | 2.11 | 2 | Webhook secret validation — Worker | High |
 | 2.13 | 2 | Ticket create — Telegram notify | High |
+| 3.2 | 3 | Multi-admin support on Worker | Medium |
 | 3.7 | 3 | Delete unused ticket_service.py | Low |
+| 4.1 | 4 | AI history role allowlist — Worker | High |
 | 4.3 | 4 | Remove initData from GET query | High |
+| 4.5 | 4 | Generic provider error to client | High |
 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium |
 | 4.11 | 4 | Shorten initData max_age | Medium |
+| 4.13 | 4 | Image failover — explicit warning | Medium |
+| 5.4 | 5 | Add GitHub Actions CI | Medium |
 | 5.5 | 5 | Add minimal Python auth pytest | Medium |
+| 5.6 | 5 | Integration test — analyses CRUD + KV | Medium |
 
 ## Agent Rules (summary)
 
