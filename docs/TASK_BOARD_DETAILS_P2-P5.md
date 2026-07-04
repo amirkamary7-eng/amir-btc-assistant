@@ -66,7 +66,7 @@
 
 ### TASK 2.3
 
-**Status:** ⬜ Todo | **Phase:** 2 | **Task ID:** 2.3
+**Status:** ✅ Done | **Phase:** 2 | **Task ID:** 2.3
 
 **Title:** Analyses KV cache invalidation after write  
 **Type:** bugfix | **Priority:** High

@@ -15,18 +15,18 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 30 |
+| ✅ Done | 31 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 24 |
-| **Progress** | **56%** |
+| ⬜ Todo | 23 |
+| **Progress** | **57%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 8 | 57% |
+| 2 | Core System Fix | 14 | 9 | 64% |
 | 3 | Architecture Cleanup | 8 | 4 | 50% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -100,11 +100,38 @@ Tests 5-6 are the smoking gun: if Worker used decoded values for hashing, they w
 
 **Conclusion:** Task 1.1 was already correctly implemented. The audit agent's bug report was wrong. `node --test worker-proxy.test.cjs` → 52/52 pass.
 
-### ⬜ Unverified (2 tasks)
+### ✅ Task 2.3 — KV cache invalidation verified (2026-07-05)
+
+**Method:** In-memory KV (real `Map`-based store, not stubbed) + mock DB (to satisfy write path). KV state changes observable in both HTTP response and KV store directly.
+
+**Code flow verified (all three write handlers):**
+```
+handleAnalysesCreate (L2606-2611):
+  createAnalysisInDb → listAnalysesFromDb → readCurrentAnalysesVersion → version+1 → updateAnalysesCache
+handleAnalysesUpdate (L2641-2648):
+  updateAnalysisInDb → listAnalysesFromDb → readCurrentAnalysesVersion → version+1 → updateAnalysesCache
+handleAnalysesDelete (L2674-2681):
+  deleteAnalysisInDb → listAnalysesFromDb → readCurrentAnalysesVersion → version+1 → updateAnalysesCache
+```
+
+**Runtime evidence (21 checks, 5 scenarios):**
+
+| Scenario | Checks | Result |
+|----------|--------|--------|
+| S1: POST → KV version 0→1 | 5 | ✅ response.version=1, KV version="1", KV list=[BTC] |
+| S2: PUT → KV version 4→5 | 5 | ✅ response.version=5, KV version="5", list=[ETH] |
+| S3: DELETE → version 4→5, list emptied | 4 | ✅ response.version=5, KV list=[] |
+| S4: POST→PUT→DELETE sequential | 4 | ✅ versions 1→2→3 monotonic, final KV="3" |
+| S5: GET after POST → cache HIT | 3 | ✅ version=1 from KV, no DB re-query |
+
+**Smoking gun (S5):** After POST populates KV, a subsequent GET serves from KV cache without any DB query — proving the cache is correctly invalidated and refreshed after writes.
+
+**`node --test worker-proxy.test.cjs` → 52/52 pass**
+
+### ⬜ Unverified (1 task)
 
 | Task | Reason |
 |------|--------|
-| 2.3 | KV invalidation needs successful DB write (2.2 verified, but no real DB) |
 | 2.4 | Cron works but exchange APIs are external dependency |
 
 ## Next Executable Tasks
