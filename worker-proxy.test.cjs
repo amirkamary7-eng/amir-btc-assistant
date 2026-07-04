@@ -2428,4 +2428,56 @@ test('Worker global catch returns 500 without leaking stack details on unhandled
   }
 });
 
+test('Referrer validation: matching Origin in production env passes through', async () => {
+  const pgMock = createPgMock(async () => ({ rows: [] }));
+  const worker = loadWorker({ pg: pgMock.module });
+
+  const initData = buildInitData('test-bot-token', { id: 831704732, first_name: 'A', last_name: 'B' });
+  const request = new Request('https://worker.example/api/health', {
+    headers: {
+      'Origin': 'https://amir-btc-assistant.vercel.app',
+    },
+  });
+
+  const response = await worker.fetch(request, createEnv({ DATABASE_URL: 'postgres://x/db' }));
+  // /api/health has no auth, so a 200 means referrer check passed
+  assert.equal(response.status, 200);
+});
+
+test('Referrer validation: mismatched Origin in production env returns 403', async () => {
+  const worker = loadWorker();
+
+  const request = new Request('https://worker.example/api/health', {
+    headers: {
+      'Origin': 'https://evil-site.com',
+    },
+  });
+
+  const response = await worker.fetch(request, createEnv());
+  assert.equal(response.status, 403);
+  const body = await response.json();
+  assert.equal(body.message, 'Forbidden: invalid origin');
+});
+
+test('Referrer validation: missing Origin passes through (server-to-server)', async () => {
+  const worker = loadWorker();
+
+  const request = new Request('https://worker.example/api/health');
+  const response = await worker.fetch(request, createEnv());
+  assert.equal(response.status, 200);
+});
+
+test('Referrer validation: skipped in development APP_ENV', async () => {
+  const worker = loadWorker();
+
+  const request = new Request('https://worker.example/api/health', {
+    headers: {
+      'Origin': 'https://totally-wrong-origin.com',
+    },
+  });
+
+  const response = await worker.fetch(request, createEnv({ APP_ENV: 'development' }));
+  assert.equal(response.status, 200);
+});
+
 

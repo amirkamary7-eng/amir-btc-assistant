@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 14 |
+| ✅ Done | 15 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 40 |
-| **Overall** | **26%** |
+| ⬜ Todo | 39 |
+| **Overall** | **28%** |
 
 ### By Phase
 
@@ -57,7 +57,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
-| 4 | Security Hardening | 13 | 2 | 15% |
+| 4 | Security Hardening | 13 | 3 | 23% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
 ---
@@ -132,7 +132,7 @@ Phase 4 ─► Phase 5:
 | 36 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | ⬜ | 1.5 | — |
 | 37 | 4.8 | 4 | Debug join endpoint — admin only | Medium | ⬜ | 3.2 | — |
 | 38 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | ⬜ | 3.2 | — |
-| 39 | 4.10 | 4 | Referrer validation | Medium | ⬜ | None | — |
+| 39 | 4.10 | 4 | Referrer validation | Medium | ✅ | None | — |
 | 40 | 4.11 | 4 | Shorten initData max_age | Medium | ⬜ | 1.1 | — |
 | 41 | 4.12 | 4 | Sanitize env.example | Medium | ⬜ | None | — |
 | 42 | 4.13 | 4 | Image failover — explicit warning | Medium | ⬜ | 2.9 | — |
@@ -157,7 +157,6 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 4.10 | Referrer validation | Medium |
 | 4.12 | Sanitize env.example | Medium |
 | 5.1 | Remove mock news fallback | Low |
 | 5.2 | Remove unused config keys | Low |

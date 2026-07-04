@@ -343,6 +343,45 @@ function resolveWebAppUrl(env) {
   return String(env.WEBAPP_URL || 'https://amir-btc-assistant.vercel.app').trim();
 }
 
+/**
+ * Validate Origin header against WEBAPP_URL for browser-sourced requests.
+ * - If Origin is absent (server-to-server, cURL, Telegram webhook) → allow.
+ * - If Origin is present and matches WEBAPP_URL origin → allow.
+ * - If Origin is present and does NOT match → 403.
+ * Skipped entirely when APP_ENV is "development".
+ */
+function validateReferrer(request, env) {
+  if (String(env.APP_ENV || '') === 'development') {
+    return null;
+  }
+
+  const origin = request.headers.get('Origin');
+  if (!origin) {
+    return null;
+  }
+
+  let allowedOrigin;
+  try {
+    allowedOrigin = new URL(resolveWebAppUrl(env)).origin;
+  } catch {
+    return null;
+  }
+
+  try {
+    const requestOrigin = new URL(origin).origin;
+    if (requestOrigin === allowedOrigin) {
+      return null;
+    }
+  } catch {
+    // malformed Origin header → reject
+  }
+
+  return jsonResponse(
+    { status: 'error', message: 'Forbidden: invalid origin' },
+    { status: 403 },
+  );
+}
+
 function getJoinCacheKey(userId) {
   return `${JOIN_CACHE_PREFIX}${String(userId)}`;
 }
@@ -3791,6 +3830,10 @@ export default {
 
     try {
       const url = new URL(request.url);
+
+      // Referrer/Origin validation for browser-sourced requests (Task 4.10)
+      const referrerCheck = validateReferrer(request, env);
+      if (referrerCheck) return referrerCheck;
 
       if (request.method === 'GET' && url.pathname === '/') {
         return handleRoot();
