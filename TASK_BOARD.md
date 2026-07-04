@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 21 |
+| ✅ Done | 22 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 34 |
-| **Overall** | **39%** |
+| ⬜ Todo | 33 |
+| **Overall** | **41%** |
 
 ### By Phase
 
@@ -58,7 +58,7 @@
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
-| 5 | Optimization & Cleanup | 12 | 5 | 42% |
+| 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ---
 
@@ -147,7 +147,7 @@ Phase 4 ─► Phase 5:
 | 51 | 5.9 | 5 | Sync status docs with code reality | Low | ⬜ | Phase 2 complete | — |
 | 52 | 5.10 | 5 | Remove legacy query params | Low | ⬜ | 3.1 | — |
 | 53 | 5.11 | 5 | Remove dead imports in main.py | Low | ✅ | None | — |
-| 54 | 5.12 | 5 | Update index.html outdated comment | Low | ⬜ | 1.5 | — |
+| 54 | 5.12 | 5 | Update index.html outdated comment | Low | ✅ | 1.5 | — |
 
 ---
 
@@ -155,9 +155,18 @@ Phase 4 ─► Phase 5:
 
 > با وضعیت فعلی، این Taskها dependency باز ندارند و می‌توانند شروع شوند:
 
-| Task ID | Title | Priority |
-|---------|-------|----------|
-| 5.12 | Update index.html outdated comment | Low |
+| Task ID | Phase | Title | Priority |
+|---------|-------|-------|----------|
+| 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical |
+| 2.4 | 2 | Port price alert checker to Worker | Critical |
+| 2.6 | 2 | AI chat — provider fetch helpers | Critical |
+| 2.11 | 2 | Webhook secret validation — Worker | High |
+| 2.13 | 2 | Ticket create — Telegram notify | High |
+| 3.7 | 3 | Delete unused ticket_service.py | Low |
+| 4.3 | 4 | Remove initData from GET query | High |
+| 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium |
+| 4.11 | 4 | Shorten initData max_age | Medium |
+| 5.5 | 5 | Add minimal Python auth pytest | Medium |
 
 **توصیه Trae (Top priority):** 1.1 → 1.5 → 1.4 → 1.2+1.3 → … (see `گزارش 3.txt` Top 10)
 
