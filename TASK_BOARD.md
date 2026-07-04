@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 19 |
+| ✅ Done | 20 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
 | ⬜ Todo | 35 |
-| **Overall** | **35%** |
+| **Overall** | **37%** |
 
 ### By Phase
 
@@ -58,7 +58,7 @@
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
-| 5 | Optimization & Cleanup | 12 | 3 | 25% |
+| 5 | Optimization & Cleanup | 12 | 4 | 33% |
 
 ---
 
@@ -143,7 +143,7 @@ Phase 4 ─► Phase 5:
 | 47 | 5.5 | 5 | Add minimal Python auth pytest | Medium | ⬜ | 1.1 | — |
 | 48 | 5.6 | 5 | Integration test — analyses CRUD + KV | Medium | ⬜ | 2.3 | — |
 | 49 | 5.7 | 5 | Integration test — webhook secret | Medium | ⬜ | 2.11 | — |
-| 50 | 5.8 | 5 | Alembic migrations baseline | Medium | ⬜ | None | — |
+| 50 | 5.8 | 5 | Alembic migrations baseline | Medium | ✅ | None | — |
 | 51 | 5.9 | 5 | Sync status docs with code reality | Low | ⬜ | Phase 2 complete | — |
 | 52 | 5.10 | 5 | Remove legacy query params | Low | ⬜ | 3.1 | — |
 | 53 | 5.11 | 5 | Remove dead imports in main.py | Low | ⬜ | None | — |
@@ -157,7 +157,6 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 5.8 | Alembic migrations baseline | Medium |
 | 5.11 | Remove dead imports in main.py | Low |
 
 **توصیه Trae (Top priority):** 1.1 → 1.5 → 1.4 → 1.2+1.3 → … (see `گزارش 3.txt` Top 10)
