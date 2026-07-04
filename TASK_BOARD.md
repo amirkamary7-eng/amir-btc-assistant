@@ -44,20 +44,20 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 15 |
+| ✅ Done | 25 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 39 |
-| **Overall** | **28%** |
+| ⬜ Todo | 29 |
+| **Overall** | **46%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 6 | 86% |
-| 2 | Core System Fix | 14 | 0 | 0% |
+| 2 | Core System Fix | 14 | 6 | 43% |
 | 3 | Architecture Cleanup | 8 | 2 | 25% |
-| 4 | Security Hardening | 13 | 1 | 8% |
+| 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ---
@@ -101,16 +101,16 @@ Phase 4 ─► Phase 5:
 | 5 | 1.4 | 1 | Separate KV namespace IDs | Critical | ✅ | None | 2.3, 2.10, 4.3 |
 | 6 | 1.5 | 1 | Inject API_BASE at Pages build | Critical | ✅ | None | E2E, Mini App |
 | 7 | 1.6 | 1 | Runbook — single webhook target | High | ✅ | 1.0 | 2.11, 3.1 |
-| 8 | 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical | ⬜ | 1.1 | 2.2, 2.3 |
+| 8 | 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical | ✅ | 1.1 | 2.2, 2.3 |
 | 9 | 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | ⬜ | 1.1, 2.1 | 2.3 |
 | 10 | 2.3 | 2 | Analyses KV cache invalidation | High | ⬜ | 2.2 | 3.1 |
 | 11 | 2.4 | 2 | Port price alert checker to Worker | Critical | ⬜ | 1.1 | 2.5 |
-| 12 | 2.5 | 2 | Wire alert runner into scheduled() | Critical | ⬜ | 2.4 | 3.1 |
-| 13 | 2.6 | 2 | AI chat — provider fetch helpers | Critical | ⬜ | 1.1 | 2.7, 2.8, 2.9 |
+| 12 | 2.5 | 2 | Wire alert runner into scheduled() | Critical | ✅ | 2.4 | 3.1 |
+| 13 | 2.6 | 2 | AI chat — provider fetch helpers | Critical | ✅ | 1.1 | 2.7, 2.8, 2.9 |
 | 14 | 2.7 | 2 | AI chat — port prompt assembly | High | ⬜ | 2.6 | 2.9 |
-| 15 | 2.8 | 2 | AI chat — safe response parsing | High | ⬜ | 2.6 | 2.9 |
-| 16 | 2.9 | 2 | Replace assistant 501 with live AI | Critical | ⬜ | 2.6, 2.7, 2.8, 1.1 | 2.10, 4.1, 4.2, 5.6 |
-| 17 | 2.10 | 2 | Call recordRateLimitUsage after chat | High | ⬜ | 2.9, 1.4 | 4.3 |
+| 15 | 2.8 | 2 | AI chat — safe response parsing | High | ✅ | 2.6 | 2.9 |
+| 16 | 2.9 | 2 | Replace assistant 501 with live AI | Critical | ✅ | 2.6, 2.7, 2.8, 1.1 | 2.10, 4.1, 4.2, 5.6 |
+| 17 | 2.10 | 2 | Call recordRateLimitUsage after chat | High | ✅ | 2.9, 1.4 | 4.3 |
 | 18 | 2.11 | 2 | Webhook secret validation — Worker | High | ⬜ | 1.6 | 2.12, 5.7 |
 | 19 | 2.12 | 2 | Webhook secret validation — FastAPI | High | ⬜ | 2.11 | 3.1 |
 | 20 | 2.13 | 2 | Ticket create — Telegram notify | High | ⬜ | 1.1 | — |
@@ -119,20 +119,20 @@ Phase 4 ─► Phase 5:
 | 23 | 3.2 | 3 | Multi-admin support on Worker | Medium | ⬜ | 2.2 | 3.3, 4.8, 4.9 |
 | 24 | 3.3 | 3 | Admin join bypass — full admin set | Medium | ⬜ | None | — |
 | 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ⬜ | None | — |
-| 26 | 3.5 | 3 | Generic DB error responses | Medium | ⬜ | None | 4.5 |
+| 26 | 3.5 | 3 | Generic DB error responses | Medium | ✅ | None | 4.5 |
 | 27 | 3.6 | 3 | Remove unused Worker functions | Low | ✅ | 1.3 | — |
 | 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ⬜ | None | — |
 | 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ✅ | 1.6 | — |
 | 30 | 4.1 | 4 | AI history role allowlist — Worker | High | ⬜ | 2.9 | 4.2 |
-| 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ⬜ | None | — |
+| 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ✅ | None | — |
 | 32 | 4.3 | 4 | Remove initData from GET query | High | ⬜ | 1.1 | 4.6 |
 | 33 | 4.4 | 4 | FastAPI AI rate limits — KV migration doc | High | ⬜ | 1.0, 3.1 | — |
 | 34 | 4.5 | 4 | Generic provider error to client | High | ⬜ | 2.9, 3.5 | — |
-| 35 | 4.6 | 4 | Gemini API key — header not URL | High | ⬜ | None | — |
+| 35 | 4.6 | 4 | Gemini API key — header not URL | High | ✅ | None | — |
 | 36 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | ⬜ | 1.5 | — |
 | 37 | 4.8 | 4 | Debug join endpoint — admin only | Medium | ⬜ | 3.2 | — |
 | 38 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | ⬜ | 3.2 | — |
-| 39 | 4.10 | 4 | Referrer validation | Medium | ⬜ | None | — |
+| 39 | 4.10 | 4 | Referrer validation | Medium | ✅ | None | — |
 | 40 | 4.11 | 4 | Shorten initData max_age | Medium | ⬜ | 1.1 | — |
 | 41 | 4.12 | 4 | Sanitize env.example | Medium | ✅ | None | — |
 | 42 | 4.13 | 4 | Image failover — explicit warning | Medium | ⬜ | 2.9 | — |
@@ -155,20 +155,20 @@ Phase 4 ─► Phase 5:
 
 > با وضعیت فعلی، این Taskها dependency باز ندارند و می‌توانند شروع شوند:
 
-| Task ID | Phase | Title | Priority |
-|---------|-------|-------|----------|
-| 1.1 | 1 | Fix Worker Telegram HMAC | Critical |
-| 2.11 | 2 | Webhook secret validation — Worker | High |
-| 3.3 | 3 | Admin join bypass — full admin set | Medium |
-| 3.4 | 3 | Global error handler — 5xx not 200 | Medium |
-| 3.5 | 3 | Generic DB error responses | Medium |
-| 3.7 | 3 | Delete unused ticket_service.py | Low |
-| 4.2 | 4 | AI history sanitization — FastAPI | High |
-| 4.6 | 4 | Gemini API key — header not URL | High |
-| 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium |
-| 4.10 | 4 | Referrer validation | Medium |
+| Task ID | Phase | Title | Priority | Note |
+|---------|-------|-------|----------|------|
+| 1.1 | 1 | Fix Worker Telegram HMAC | Critical | unverified — نیاز به real initData |
+| 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | unverified — نیاز به real DB |
+| 2.3 | 2 | Analyses KV cache invalidation | High | unverified — نیاز به real DB+KV |
+| 2.7 | 2 | AI chat — port prompt assembly | High | unverified — indirect only |
+| 2.13 | 2 | Ticket create — Telegram notify | High | — |
+| 3.3 | 3 | Admin join bypass — full admin set | Medium | ⚠️ BUG: type mismatch int vs str |
+| 3.4 | 3 | Global error handler — 5xx not 200 | Medium | unverified — all paths caught |
+| 3.7 | 3 | Delete unused ticket_service.py | Low | — |
+| 4.5 | 4 | Generic provider error to client | High | — |
+| 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | — |
 
-**توصیه (Top priority):** 1.1 → 3.4 → 3.5 → 4.2 → …
+**توصیه (Top priority):** 3.3 (fix bug) → 1.1 → 2.2 → …
 
 ---
 
