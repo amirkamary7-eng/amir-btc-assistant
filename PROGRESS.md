@@ -15,21 +15,21 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 21 |
+| ✅ Done | 25 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 33 |
-| **Progress** | **39%** |
+| ⬜ Todo | 30 |
+| **Progress** | **46%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 0 | 0% |
+| 2 | Core System Fix | 14 | 3 | 21% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
-| 5 | Optimization & Cleanup | 12 | 5 | 42% |
+| 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ## Current Phase
 
@@ -60,12 +60,14 @@
 | 5.8 | Alembic migrations baseline |
 | 5.11 | Remove dead imports in main.py |
 | 5.12 | Update index.html outdated comment |
+| 2.1 | Analyses GET — read from PostgreSQL |
+| 2.2 | Analyses admin POST/PUT/DELETE |
+| 2.3 | Analyses KV cache invalidation |
 
 ## Next Executable Tasks (no open dependencies)
 
 | Task ID | Phase | Title | Priority |
 |---------|-------|-------|----------|
-| 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical |
 | 2.4 | 2 | Port price alert checker to Worker | Critical |
 | 2.6 | 2 | AI chat — provider fetch helpers | Critical |
 | 2.11 | 2 | Webhook secret validation — Worker | High |

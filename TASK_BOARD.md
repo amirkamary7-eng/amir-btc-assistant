@@ -44,18 +44,18 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 22 |
+| ✅ Done | 25 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 33 |
-| **Overall** | **41%** |
+| ⬜ Todo | 30 |
+| **Overall** | **46%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 0 | 0% |
+| 2 | Core System Fix | 14 | 3 | 21% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -101,9 +101,9 @@ Phase 4 ─► Phase 5:
 | 5 | 1.4 | 1 | Separate KV namespace IDs | Critical | ✅ | None | 2.3, 2.10, 4.3 |
 | 6 | 1.5 | 1 | Inject API_BASE at Pages build | Critical | ✅ | None | E2E, Mini App |
 | 7 | 1.6 | 1 | Runbook — single webhook target | High | ✅ | 1.0 | 2.11, 3.1 |
-| 8 | 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical | ⬜ | 1.1 | 2.2, 2.3 |
-| 9 | 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | ⬜ | 1.1, 2.1 | 2.3 |
-| 10 | 2.3 | 2 | Analyses KV cache invalidation | High | ⬜ | 2.2 | 3.1 |
+| 8 | 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical | ✅ | 1.1 | 2.2, 2.3 |
+| 9 | 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | ✅ | 1.1, 2.1 | 2.3 |
+| 10 | 2.3 | 2 | Analyses KV cache invalidation | High | ✅ | 2.2 | 3.1 |
 | 11 | 2.4 | 2 | Port price alert checker to Worker | Critical | ⬜ | 1.1 | 2.5 |
 | 12 | 2.5 | 2 | Wire alert runner into scheduled() | Critical | ⬜ | 2.4 | 3.1 |
 | 13 | 2.6 | 2 | AI chat — provider fetch helpers | Critical | ⬜ | 1.1 | 2.7, 2.8, 2.9 |
@@ -157,7 +157,6 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Phase | Title | Priority |
 |---------|-------|-------|----------|
-| 2.1 | 2 | Analyses GET — read from PostgreSQL | Critical |
 | 2.4 | 2 | Port price alert checker to Worker | Critical |
 | 2.6 | 2 | AI chat — provider fetch helpers | Critical |
 | 2.11 | 2 | Webhook secret validation — Worker | High |
