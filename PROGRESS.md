@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 18 |
+| ✅ Done | 19 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 36 |
-| **Progress** | **33%** |
+| ⬜ Todo | 35 |
+| **Progress** | **35%** |
 
 ## By Phase
 
@@ -29,7 +29,7 @@
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
-| 5 | Optimization & Cleanup | 12 | 2 | 17% |
+| 5 | Optimization & Cleanup | 12 | 3 | 25% |
 
 ## Current Phase
 
@@ -55,13 +55,13 @@
 | 4.12 | Sanitize env.example |
 | 4.2 | AI history sanitization — FastAPI |
 | 4.6 | Gemini API key — header not URL |
+| 5.3 | Remove unused wrangler vars |
 | 5.1 | Remove mock news fallback |
 
 ## Next Executable Tasks (no open dependencies)
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 5.3 | Remove unused wrangler vars | Low |
 | 5.8 | Alembic migrations baseline | Medium |
 | 5.11 | Remove dead imports/code in main.py | Low |
 
