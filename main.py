@@ -188,15 +188,6 @@ def parse_relative_time(date_str):
     except Exception:
         return "اخیراً"
 
-MOCK_NEWS = [{
-    "title": "فورى: بیت‌کوین سقف مقاومتی جدید را شکست!",
-    "description": "بازار ارزهای دیجیتال پس از ورود سرمایه‌گذاران سازمانی شاهد رشد شارپ فوق‌العاده‌ای در قیمت بیت‌کوین و اتریوم بوده است.",
-    "time_ago": "۵ دقیقه پیش",
-    "source": "کوین‌تلگراف",
-    "image": "https://images.cryptocompare.com/news/default/bitcoin.png",
-    "url": "https://cointelegraph.com"
-}]
-
 # دریافت خام اخبار rss را از منبع داده دریافت می‌کند.
 # ورودی: بدون ورودی.
 # خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
@@ -234,7 +225,7 @@ async def get_optimized_farsi_news():
     if not rss_data:
         if news_cache["data"]:
             return JSONResponse(content={"status": "success", "source": "expired_cache", "data": news_cache["data"]})
-        return JSONResponse(content={"status": "success", "source": "mock_fallback", "data": MOCK_NEWS})
+        return JSONResponse(content={"status": "success", "source": "rss_unavailable", "data": []})
 
     try:
         root = ET.fromstring(rss_data)
@@ -281,7 +272,7 @@ async def get_optimized_farsi_news():
     except Exception as e:
         print(f"Unexpected error: {e}")
 
-    return JSONResponse(content={"status": "success", "source": "mock_fallback", "data": MOCK_NEWS})
+    return JSONResponse(content={"status": "success", "source": "rss_unavailable", "data": []})
 
 # ==========================================
 # ۳.۵ سیستم تیکت و نوتیفیکیشن تلگرام

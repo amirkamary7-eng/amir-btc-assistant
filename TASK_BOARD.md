@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 16 |
+| ✅ Done | 17 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 38 |
-| **Overall** | **30%** |
+| ⬜ Todo | 37 |
+| **Overall** | **31%** |
 
 ### By Phase
 
@@ -58,7 +58,7 @@
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
-| 5 | Optimization & Cleanup | 12 | 0 | 0% |
+| 5 | Optimization & Cleanup | 12 | 1 | 8% |
 
 ---
 
@@ -136,7 +136,7 @@ Phase 4 ─► Phase 5:
 | 40 | 4.11 | 4 | Shorten initData max_age | Medium | ⬜ | 1.1 | — |
 | 41 | 4.12 | 4 | Sanitize env.example | Medium | ✅ | None | — |
 | 42 | 4.13 | 4 | Image failover — explicit warning | Medium | ⬜ | 2.9 | — |
-| 43 | 5.1 | 5 | Remove mock news fallback | Low | ⬜ | None | — |
+| 43 | 5.1 | 5 | Remove mock news fallback | Low | ✅ | None | — |
 | 44 | 5.2 | 5 | Remove unused config keys — Python | Low | ⬜ | None | — |
 | 45 | 5.3 | 5 | Remove unused wrangler vars | Low | ⬜ | None | — |
 | 46 | 5.4 | 5 | Add GitHub Actions CI | Medium | ⬜ | 1.3, 2.9 | — |
@@ -157,7 +157,6 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 5.1 | Remove mock news fallback | Low |
 | 5.2 | Remove unused config keys | Low |
 | 5.3 | Remove unused wrangler vars | Low |
 | 5.8 | Alembic migrations baseline | Medium |
