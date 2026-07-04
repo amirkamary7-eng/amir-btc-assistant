@@ -4,6 +4,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
+// ── Test environment setup ──────────────────────────────────────────────────
+// All tests use mocked PG / KV — no real database connections.
+// Each test creates fresh mocks, so tests are fully idempotent.
+// Worker console output is suppressed inside loadWorker() via source transform
+// so that intentional error-path noise (console.warn/error/log) does not
+// pollute test output.  The global-catch test overrides console.error
+// inside its own scope, which is unaffected.
+
 function loadWorker(overrides = {}) {
   const workerPath = path.join(__dirname, 'worker-proxy.js');
   const source = fs.readFileSync(workerPath, 'utf8');
@@ -15,6 +23,13 @@ function loadWorker(overrides = {}) {
     )
     .replace("import pg from 'pg';", "const pg = require('pg');")
     .replace('export default {', 'module.exports = {');
+
+  // Suppress worker console noise inside the eval'd scope.
+  // The node:test runner restores console before each test, so we must
+  // inject the suppression into the worker source itself.
+  const suppressedSource =
+    'console.log = () => {}; console.warn = () => {}; console.error = () => {};\n' +
+    transformed;
 
   const module = { exports: {} };
   const defaultMocks = {
@@ -35,7 +50,7 @@ function loadWorker(overrides = {}) {
     }
     return require(id);
   };
-  const evaluator = new Function('require', 'module', 'exports', transformed);
+  const evaluator = new Function('require', 'module', 'exports', suppressedSource);
   evaluator(localRequire, module, module.exports);
   return module.exports;
 }
@@ -2412,3 +2427,5 @@ test('Worker global catch returns 500 without leaking stack details on unhandled
     console.error = originalConsoleError;
   }
 });
+
+
