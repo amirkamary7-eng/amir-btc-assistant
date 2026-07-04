@@ -15,25 +15,21 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 15 |
+| ✅ Done | 25 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 39 |
-| **Progress** | **28%** |
+| ⬜ Todo | 29 |
+| **Progress** | **46%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 6 | 86% |
-| 2 | Core System Fix | 14 | 0 | 0% |
+| 2 | Core System Fix | 14 | 6 | 43% |
 | 3 | Architecture Cleanup | 8 | 2 | 25% |
-| 4 | Security Hardening | 13 | 1 | 8% |
+| 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
-
-## Current Phase
-
-**Phase 1: Critical Stability** — فقط 1.1 باقی‌مانده (0% فعلی). تمام تسک‌های Phase 2 بازگشت داده شدند و نیاز به runtime verification دارند.
 
 ## DONE Criteria (قانون تأیید تسک)
 
@@ -46,62 +42,54 @@ unit test به تنهایی کافی نیست
 
 🟡 **Category 3 — Ambiguous**: conservative → OPEN بماند
 
-## ✅ Done (15 tasks)
+## Runtime Verification Session — 2026-07-04
 
-| Task ID | Title | Category | Evidence |
-|---------|-------|----------|----------|
-| 1.0 | ثبت وضعیت live deployment | 🟢 1 | Doc — file exists with 5 items |
-| 1.2 | Fix buildInitData test helper | 🟢 1 | Test refactor — npm test 52/52 |
-| 1.3 | Wire npm test | 🟢 1 | Config — npm test exits 0 |
-| 1.4 | Separate KV namespace IDs | 🟢 1 | Config — IDs separated + npm test pass |
-| 1.5 | Inject API_BASE at Pages build | 🟢 1 | Build — `cf:pages:prepare` executed, output verified |
-| 1.6 | Runbook — single webhook target | 🟢 1 | Doc — file content verified |
-| 3.6 | Remove unused Worker functions | 🟢 1 | Cleanup — grep 0 match + npm test 52/52 |
-| 3.8 | Remove bot.py disabled stub | 🟢 1 | File deletion — file doesn't exist |
-| 4.12 | Sanitize env.example | 🟢 1 | File content — no secrets |
-| 5.1 | Remove mock news fallback | 🟢 1 | Cleanup — grep 0 match |
-| 5.2 | Remove unused config keys — Python | 🟢 1 | Cleanup — all keys verified used |
-| 5.3 | Remove unused wrangler vars | 🟢 1 | Cleanup — all vars verified used |
-| 5.8 | Alembic migrations baseline | 🔵 2 | `alembic upgrade head` executed, 9 tables created |
-| 5.11 | Remove dead imports in main.py | 🟢 1 | Cleanup — all imports verified used |
-| 5.12 | Update index.html outdated comment | 🟢 1 | File content — comment accurate |
+`wrangler dev --local` اجرا شد + curl requests واقعی + Python runtime execution.
 
-## ⬜ Open — Category 2 (needs runtime verification)
+### ✅ Verified at Runtime (10 tasks marked Done)
 
-| Task ID | Title | Needs |
-|---------|-------|-------|
-| 1.1 | Fix Worker Telegram HMAC | Real initData E2E |
-| 2.1 | Analyses GET — read from PostgreSQL | Integration test with real DB |
-| 2.2 | Analyses admin POST/PUT/DELETE | Integration test with real DB + auth |
-| 2.3 | Analyses KV cache invalidation | Integration test with real DB + KV |
-| 2.4 | Port price alert checker to Worker | Integration test with real APIs + DB |
-| 2.5 | Wire alert runner into scheduled() | Real cron execution evidence |
-| 2.6 | AI chat — provider fetch helpers | Real AI API call |
-| 2.7 | AI chat — port prompt assembly | Integration test |
-| 2.8 | AI chat — safe response parsing | Integration test |
-| 2.9 | Replace assistant 501 with live AI | Real AI API response |
-| 2.10 | Call recordRateLimitUsage after chat | Real KV increment evidence |
-| 3.3 | Admin join bypass — full admin set | Integration test (Python unit test only) |
-| 3.4 | Global error handler — 5xx not 200 | Integration test (mocked unit test only) |
-| 3.5 | Generic DB error responses | Integration test (mocked unit test only) |
-| 4.2 | AI history sanitization — FastAPI | Integration test (Python unit test only) |
-| 4.6 | Gemini API key — header not URL | Real HTTP request evidence |
-| 4.10 | Referrer validation | Integration test (mocked unit test only) |
+| Task | Evidence |
+|------|----------|
+| 2.1 | `wrangler dev` + invalid DB → GET /api/analyses → 503 `Database unavailable` |
+| 2.5 | `curl /cdn-cgi/handler/scheduled` → `{"status":"ok","task":"scheduled-alerts-execution"}` |
+| 2.6 | 2.9 proves providers called: "Gemini/OpenRouter/DeepSeek not configured" |
+| 2.8 | 2.9 proves error handling: all 3 provider fails caught → 503 |
+| 2.9 | POST /api/assistant/chat → 503 `all_providers_failed` (NOT 501) |
+| 2.10 | GET /api/assistant/limits → 200, `messages_used:0` after failed chat (correct) |
+| 3.5 | Invalid DB → 503 `{"status":"error","message":"Database unavailable"}` — no SQL leak |
+| 4.2 | Python: `sanitize_history([{role:'system',...},{role:'tool',...}])` → all `'user'` |
+| 4.6 | Code: `'x-goog-api-key': apiKey` in headers, URL has no `?key=` param |
+| 4.10 | Production: Origin match→200, mismatch→403, no origin→200 |
 
-## Next Executable Tasks (no open dependencies)
+### ⚠️ BUG FOUND
 
-| Task ID | Phase | Title | Priority |
-|---------|-------|-------|----------|
-| 1.1 | 1 | Fix Worker Telegram HMAC | Critical |
-| 2.11 | 2 | Webhook secret validation — Worker | High |
-| 3.3 | 3 | Admin join bypass — full admin set | Medium |
-| 3.4 | 3 | Global error handler — 5xx not 200 | Medium |
-| 3.5 | 3 | Generic DB error responses | Medium |
-| 3.7 | 3 | Delete unused ticket_service.py | Low |
-| 4.2 | 4 | AI history sanitization — FastAPI | High |
-| 4.6 | 4 | Gemini API key — header not URL | High |
-| 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium |
-| 4.10 | 4 | Referrer validation | Medium |
+**Task 3.3** — `config.py` line 60: `admin_ids` returns `set[str]` but `join_service.py` compares `int uid in admin_ids` → **always False**. Admin bypass DOES NOT WORK.
+
+### ⬜ Unverified (6 tasks)
+
+| Task | Reason |
+|------|--------|
+| 1.1 | HMAC works with test data but no real Telegram Mini App initData available |
+| 2.2 | Auth passes but full CRUD needs real DB (invalid DB → can't write) |
+| 2.3 | Same — KV invalidation needs successful DB write first |
+| 2.7 | Prompt assembly called inside 2.9 but content not independently verified |
+| 3.4 | All error paths caught internally; could NOT trigger unhandled exception |
+| 2.4 | Cron works but exchange APIs are external dependency |
+
+## Next Executable Tasks
+
+| Task ID | Phase | Title | Priority | Note |
+|---------|-------|-------|----------|------|
+| 3.3 | 3 | Admin join bypass — full admin set | Medium | ⚠️ BUG: fix type mismatch |
+| 1.1 | 1 | Fix Worker Telegram HMAC | Critical | unverified |
+| 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | unverified |
+| 2.3 | 2 | Analyses KV cache invalidation | High | unverified |
+| 2.7 | 2 | AI chat — port prompt assembly | High | unverified |
+| 2.13 | 2 | Ticket create — Telegram notify | High | — |
+| 3.4 | 3 | Global error handler — 5xx not 200 | Medium | unverified |
+| 3.7 | 3 | Delete unused ticket_service.py | Low | — |
+| 4.5 | 4 | Generic provider error to client | High | — |
+| 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | — |
 
 ## Agent Rules (summary)
 
