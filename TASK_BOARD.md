@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 25 |
+| ✅ Done | 26 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
 | ⬜ Todo | 29 |
-| **Overall** | **46%** |
+| **Overall** | **48%** |
 
 ### By Phase
 
@@ -56,7 +56,7 @@
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 6 | 86% |
 | 2 | Core System Fix | 14 | 6 | 43% |
-| 3 | Architecture Cleanup | 8 | 2 | 25% |
+| 3 | Architecture Cleanup | 8 | 3 | 38% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
@@ -117,7 +117,7 @@ Phase 4 ─► Phase 5:
 | 21 | 2.14 | 2 | Ticket reply — Telegram notify | High | ⬜ | 2.13 | — |
 | 22 | 3.1 | 3 | Disable FastAPI duplicate routes | High | ⬜ | 2.3, 2.5, 2.9, 2.11, 1.0 | 3.2 |
 | 23 | 3.2 | 3 | Multi-admin support on Worker | Medium | ⬜ | 2.2 | 3.3, 4.8, 4.9 |
-| 24 | 3.3 | 3 | Admin join bypass — full admin set | Medium | ⬜ | None | — |
+| 24 | 3.3 | 3 | Admin join bypass — full admin set | Medium | ✅ | None | — |
 | 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ⬜ | None | — |
 | 26 | 3.5 | 3 | Generic DB error responses | Medium | ✅ | None | 4.5 |
 | 27 | 3.6 | 3 | Remove unused Worker functions | Low | ✅ | 1.3 | — |
@@ -162,13 +162,12 @@ Phase 4 ─► Phase 5:
 | 2.3 | 2 | Analyses KV cache invalidation | High | unverified — نیاز به real DB+KV |
 | 2.7 | 2 | AI chat — port prompt assembly | High | unverified — indirect only |
 | 2.13 | 2 | Ticket create — Telegram notify | High | — |
-| 3.3 | 3 | Admin join bypass — full admin set | Medium | ⚠️ BUG: type mismatch int vs str |
 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | unverified — all paths caught |
 | 3.7 | 3 | Delete unused ticket_service.py | Low | — |
 | 4.5 | 4 | Generic provider error to client | High | — |
 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | — |
 
-**توصیه (Top priority):** 3.3 (fix bug) → 1.1 → 2.2 → …
+**توصیه (Top priority):** 1.1 → 2.2 → 2.3 → …
 
 ---
 
