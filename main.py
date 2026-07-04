@@ -48,7 +48,6 @@ from backend.services.join_service import (
     invalidate_join_cache as invalidate_join_cache_entry,
     resolve_channel_membership,
 )
-from backend.services.user_service import get_user
 from backend.services.telegram_auth import (
     get_authenticated_telegram_user,
     get_authenticated_telegram_user_id,

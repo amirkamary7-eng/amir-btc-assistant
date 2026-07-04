@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 20 |
+| ✅ Done | 21 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 34 |
-| **Progress** | **37%** |
+| ⬜ Todo | 33 |
+| **Progress** | **39%** |
 
 ## By Phase
 
@@ -29,7 +29,7 @@
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
-| 5 | Optimization & Cleanup | 12 | 4 | 33% |
+| 5 | Optimization & Cleanup | 12 | 5 | 42% |
 
 ## Current Phase
 
@@ -58,12 +58,13 @@
 | 5.3 | Remove unused wrangler vars |
 | 5.1 | Remove mock news fallback |
 | 5.8 | Alembic migrations baseline |
+| 5.11 | Remove dead imports in main.py |
 
 ## Next Executable Tasks (no open dependencies)
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 5.11 | Remove dead imports/code in main.py | Low |
+| 5.12 | Update index.html outdated comment | Low |
 
 ## Agent Rules (summary)
 
