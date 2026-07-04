@@ -39,7 +39,7 @@
 
 ### TASK 2.2
 
-**Status:** ⬜ Todo | **Phase:** 2 | **Task ID:** 2.2
+**Status:** ✅ Done | **Phase:** 2 | **Task ID:** 2.2
 
 **Title:** Analyses admin POST/PUT/DELETE routes on Worker  
 **Type:** feature | **Priority:** Critical

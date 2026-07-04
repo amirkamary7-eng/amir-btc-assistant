@@ -15,18 +15,18 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 28 |
+| ✅ Done | 29 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 26 |
-| **Progress** | **52%** |
+| ⬜ Todo | 25 |
+| **Progress** | **54%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 6 | 86% |
-| 2 | Core System Fix | 14 | 7 | 50% |
+| 2 | Core System Fix | 14 | 8 | 57% |
 | 3 | Architecture Cleanup | 8 | 4 | 50% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -60,6 +60,7 @@ unit test به تنهایی کافی نیست
 | 4.2 | Python: `sanitize_history([{role:'system',...},{role:'tool',...}])` → all `'user'` |
 | 4.6 | Code: `'x-goog-api-key': apiKey` in headers, URL has no `?key=` param |
 | 4.10 | Production: Origin match→200, mismatch→403, no origin→200 |
+| 2.2 | Direct Worker invocation: non-admin POST/PUT/DELETE → 403, admin+no-DB → 503 `Database not configured`. All 3 routes exist. |
 | 2.7 | Node.js runtime: 13 tests (history, empty, image, truncation, bad data, parity with Python `ai_service.py._build_prompt`). `npm test` 52/52 pass. |
 | 3.4 | Direct Worker invocation: malformed URL → 500 `{"status":"error","message":"Internal server error"}`, no TypeError/detail/stack in body. Normal paths (health=200, unknown=404) unaffected. |
 
@@ -73,13 +74,12 @@ unit test به تنهایی کافی نیست
 
 **Conclusion:** Task 3.3 was already correctly implemented in commit `ccd1d77`. The audit agent's bug report was wrong.
 
-### ⬜ Unverified (4 tasks)
+### ⬜ Unverified (3 tasks)
 
 | Task | Reason |
 |------|--------|
 | 1.1 | HMAC works with test data but no real Telegram Mini App initData available |
-| 2.2 | Auth passes but full CRUD needs real DB (invalid DB → can't write) |
-| 2.3 | Same — KV invalidation needs successful DB write first |
+| 2.3 | KV invalidation needs successful DB write (2.2 verified, but no real DB) |
 | 2.4 | Cron works but exchange APIs are external dependency |
 
 ## Next Executable Tasks
@@ -87,10 +87,8 @@ unit test به تنهایی کافی نیست
 | Task ID | Phase | Title | Priority | Note |
 |---------|-------|-------|----------|------|
 | 1.1 | 1 | Fix Worker Telegram HMAC | Critical | unverified |
-| 2.2 | 2 | Analyses admin POST/PUT/DELETE | Critical | unverified |
 | 2.3 | 2 | Analyses KV cache invalidation | High | unverified |
 | 2.13 | 2 | Ticket create — Telegram notify | High | — |
-| 3.4 | 3 | Global error handler — 5xx not 200 | Medium | unverified |
 | 3.7 | 3 | Delete unused ticket_service.py | Low | — |
 | 4.5 | 4 | Generic provider error to client | High | — |
 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | — |
