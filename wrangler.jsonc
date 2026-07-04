@@ -1,148 +1,142 @@
 {
-	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "amir-btc-assistant-api",
-	"main": "worker-proxy.js",
-	"compatibility_date": "2026-06-27",
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
-	"observability": {
-		"enabled": true,
-		"head_sampling_rate": 1
-	},
-	"triggers": {
-		"crons": [
-			"*/5 * * * *"
-		]
-	},
-	"kv_namespaces": [
-		{
-			"binding": "JOIN_CACHE",
-			"id": "61813c11a2064a67ac994dc62c30a990"
-		},
-		{
-			"binding": "APP_CACHE",
-			"id": "a37aa8e1368e4a6a92e666273936673b"
-		},
-		{
-			"binding": "RATE_LIMITS",
-			"id": "03bfb4851d09452489d631e038f9e791"
-		},
-		{
-			"binding": "SESSION_CACHE",
-			"id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
-		}
-	],
-	"vars": {
-		"APP_ENV": "development",
-		"ALERTS_CRON_ENABLED": "false",
-		"JOIN_CACHE_TTL": 1800,
-		"MARKET_CACHE_TTL": 60,
-		"NEWS_CACHE_TTL": 300,
-		"CALENDAR_CACHE_TTL": 600,
-		"CHART_EXCHANGE_CACHE_TTL": 86400,
-		"ANALYSIS_CACHE_TTL": 30,
-		"SESSION_TTL": 120,
-		"AI_DAILY_MESSAGE_LIMIT": 50,
-		"AI_DAILY_IMAGE_LIMIT": 3,
-		"AI_COOLDOWN_SECONDS": 4,
-		"REFERRAL_TOKENS_PER_INVITE": 3
-	},
-	"env": {
-		"staging": {
-			"name": "amir-btc-assistant-api-staging",
-			"triggers": {
-				"crons": [
-					"*/5 * * * *"
-				]
-			},
-			// ============================================================================
-			// KV namespaces — STAGING
-			// IMPORTANT:
-			// - این IDها باید با production متفاوت باشند (جلوگیری از bleed بین محیط‌ها)
-			// - برای ساخت namespace ها (۴ تا) و گرفتن ID:
-			//   wrangler kv namespace create "JOIN_CACHE" --env staging
-			//   wrangler kv namespace create "APP_CACHE" --env staging
-			//   wrangler kv namespace create "RATE_LIMITS" --env staging
-			//   wrangler kv namespace create "SESSION_CACHE" --env staging
-			// سپس IDهای خروجی را اینجا paste کنید.
-			// ============================================================================
-			"kv_namespaces": [
-				{
-					"binding": "JOIN_CACHE",
-					"id": "35b0badcf95343618a2b3ef1a7f2d551"
-				},
-				{
-					"binding": "APP_CACHE",
-					"id": "e5c68aa04c034a319adf2630c4f24a6d"
-				},
-				{
-					"binding": "RATE_LIMITS",
-					"id": "5bfe54bc3fdb43ed9ff34fb8fa0e1b17"
-				},
-				{
-					"binding": "SESSION_CACHE",
-					"id": "6de016b566f3404e832bb98895a60e85"
-				}
-				
-			],
-			"vars": {
-				"APP_ENV": "staging",
-				"ALERTS_CRON_ENABLED": "false",
-				"JOIN_CACHE_TTL": 1800,
-				"MARKET_CACHE_TTL": 60,
-				"NEWS_CACHE_TTL": 300,
-				"CALENDAR_CACHE_TTL": 600,
-				"CHART_EXCHANGE_CACHE_TTL": 86400,
-				"ANALYSIS_CACHE_TTL": 30,
-				"SESSION_TTL": 120,
-				"AI_DAILY_MESSAGE_LIMIT": 50,
-				"AI_DAILY_IMAGE_LIMIT": 3,
-				"AI_COOLDOWN_SECONDS": 4,
-				"REFERRAL_TOKENS_PER_INVITE": 3
-			}
-		},
-		"production": {
-			"name": "amir-btc-assistant-api-production",
-			"triggers": {
-				"crons": [
-					"*/5 * * * *"
-				]
-			},
-			"kv_namespaces": [
-				{
-					"binding": "JOIN_CACHE",
-					"id": "61813c11a2064a67ac994dc62c30a990"
-				},
-				{
-					"binding": "APP_CACHE",
-					"id": "a37aa8e1368e4a6a92e666273936673b"
-				},
-				{
-					"binding": "RATE_LIMITS",
-					"id": "03bfb4851d09452489d631e038f9e791"
-				},
-				{
-					"binding": "SESSION_CACHE",
-					"id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
-				}
-			],
-			"vars": {
-				"APP_ENV": "production",
-				"ALERTS_CRON_ENABLED": "false",
-				"JOIN_CACHE_TTL": 1800,
-				"MARKET_CACHE_TTL": 60,
-				"NEWS_CACHE_TTL": 300,
-				"CALENDAR_CACHE_TTL": 600,
-				"CHART_EXCHANGE_CACHE_TTL": 86400,
-				"ANALYSIS_CACHE_TTL": 30,
-				"SESSION_TTL": 120,
-				"AI_DAILY_MESSAGE_LIMIT": 50,
-				"AI_DAILY_IMAGE_LIMIT": 3,
-				"AI_COOLDOWN_SECONDS": 4,
-				"REFERRAL_TOKENS_PER_INVITE": 3
-			}
-		}
-	}
+        "$schema": "./node_modules/wrangler/config-schema.json",
+        "name": "amir-btc-assistant-api",
+        "main": "worker-proxy.js",
+        "compatibility_date": "2026-06-27",
+        "compatibility_flags": [
+                "nodejs_compat"
+        ],
+        "observability": {
+                "enabled": true,
+                "head_sampling_rate": 1
+        },
+        "triggers": {
+                "crons": [
+                        "*/5 * * * *"
+                ]
+        },
+        "kv_namespaces": [
+                {
+                        "binding": "JOIN_CACHE",
+                        "id": "61813c11a2064a67ac994dc62c30a990"
+                },
+                {
+                        "binding": "APP_CACHE",
+                        "id": "a37aa8e1368e4a6a92e666273936673b"
+                },
+                {
+                        "binding": "RATE_LIMITS",
+                        "id": "03bfb4851d09452489d631e038f9e791"
+                },
+                {
+                        "binding": "SESSION_CACHE",
+                        "id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
+                }
+        ],
+        "vars": {
+                "APP_ENV": "development",
+                "ALERTS_CRON_ENABLED": "false",
+                "JOIN_CACHE_TTL": 1800,
+                "NEWS_CACHE_TTL": 300,
+                "CALENDAR_CACHE_TTL": 600,
+                "CHART_EXCHANGE_CACHE_TTL": 86400,
+                "SESSION_TTL": 120,
+                "AI_DAILY_MESSAGE_LIMIT": 50,
+                "AI_DAILY_IMAGE_LIMIT": 3,
+                "AI_COOLDOWN_SECONDS": 4,
+                "REFERRAL_TOKENS_PER_INVITE": 3
+        },
+        "env": {
+                "staging": {
+                        "name": "amir-btc-assistant-api-staging",
+                        "triggers": {
+                                "crons": [
+                                        "*/5 * * * *"
+                                ]
+                        },
+                        // ============================================================================
+                        // KV namespaces — STAGING
+                        // IMPORTANT:
+                        // - این IDها باید با production متفاوت باشند (جلوگیری از bleed بین محیط‌ها)
+                        // - برای ساخت namespace ها (۴ تا) و گرفتن ID:
+                        //   wrangler kv namespace create "JOIN_CACHE" --env staging
+                        //   wrangler kv namespace create "APP_CACHE" --env staging
+                        //   wrangler kv namespace create "RATE_LIMITS" --env staging
+                        //   wrangler kv namespace create "SESSION_CACHE" --env staging
+                        // سپس IDهای خروجی را اینجا paste کنید.
+                        // ============================================================================
+                        "kv_namespaces": [
+                                {
+                                        "binding": "JOIN_CACHE",
+                                        "id": "35b0badcf95343618a2b3ef1a7f2d551"
+                                },
+                                {
+                                        "binding": "APP_CACHE",
+                                        "id": "e5c68aa04c034a319adf2630c4f24a6d"
+                                },
+                                {
+                                        "binding": "RATE_LIMITS",
+                                        "id": "5bfe54bc3fdb43ed9ff34fb8fa0e1b17"
+                                },
+                                {
+                                        "binding": "SESSION_CACHE",
+                                        "id": "6de016b566f3404e832bb98895a60e85"
+                                }
+                                
+                        ],
+                        "vars": {
+                                "APP_ENV": "staging",
+                                "ALERTS_CRON_ENABLED": "false",
+                                "JOIN_CACHE_TTL": 1800,
+                                "NEWS_CACHE_TTL": 300,
+                                "CALENDAR_CACHE_TTL": 600,
+                                "CHART_EXCHANGE_CACHE_TTL": 86400,
+                                "SESSION_TTL": 120,
+                                "AI_DAILY_MESSAGE_LIMIT": 50,
+                                "AI_DAILY_IMAGE_LIMIT": 3,
+                                "AI_COOLDOWN_SECONDS": 4,
+                                "REFERRAL_TOKENS_PER_INVITE": 3
+                        }
+                },
+                "production": {
+                        "name": "amir-btc-assistant-api-production",
+                        "triggers": {
+                                "crons": [
+                                        "*/5 * * * *"
+                                ]
+                        },
+                        "kv_namespaces": [
+                                {
+                                        "binding": "JOIN_CACHE",
+                                        "id": "61813c11a2064a67ac994dc62c30a990"
+                                },
+                                {
+                                        "binding": "APP_CACHE",
+                                        "id": "a37aa8e1368e4a6a92e666273936673b"
+                                },
+                                {
+                                        "binding": "RATE_LIMITS",
+                                        "id": "03bfb4851d09452489d631e038f9e791"
+                                },
+                                {
+                                        "binding": "SESSION_CACHE",
+                                        "id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
+                                }
+                        ],
+                        "vars": {
+                                "APP_ENV": "production",
+                                "ALERTS_CRON_ENABLED": "false",
+                                "JOIN_CACHE_TTL": 1800,
+                                "NEWS_CACHE_TTL": 300,
+                                "CALENDAR_CACHE_TTL": 600,
+                                "CHART_EXCHANGE_CACHE_TTL": 86400,
+                                "SESSION_TTL": 120,
+                                "AI_DAILY_MESSAGE_LIMIT": 50,
+                                "AI_DAILY_IMAGE_LIMIT": 3,
+                                "AI_COOLDOWN_SECONDS": 4,
+                                "REFERRAL_TOKENS_PER_INVITE": 3
+                        }
+                }
+        }
 }
 
