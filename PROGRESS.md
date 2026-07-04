@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 17 |
+| ✅ Done | 18 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 37 |
-| **Progress** | **31%** |
+| ⬜ Todo | 36 |
+| **Progress** | **33%** |
 
 ## By Phase
 
@@ -29,7 +29,7 @@
 | 2 | Core System Fix | 14 | 0 | 0% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
-| 5 | Optimization & Cleanup | 12 | 1 | 8% |
+| 5 | Optimization & Cleanup | 12 | 2 | 17% |
 
 ## Current Phase
 
@@ -61,7 +61,6 @@
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 5.2 | Remove unused config keys — Python | Low |
 | 5.3 | Remove unused wrangler vars | Low |
 | 5.8 | Alembic migrations baseline | Medium |
 | 5.11 | Remove dead imports/code in main.py | Low |
