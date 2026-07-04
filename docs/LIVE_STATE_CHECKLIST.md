@@ -36,3 +36,9 @@
 
 - [ ] Remove/stop FastAPI webhook registration  
   نتیجه: 
+
+## Removed Files
+
+> این فایل‌ها در حین توسعه حذف شدند و نباید دوباره ایجاد شوند.
+
+- `bot.py` — disabled stub; bot runner via `main.py` webhook only (Task 3.8) 

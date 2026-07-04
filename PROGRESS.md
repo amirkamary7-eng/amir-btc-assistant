@@ -33,7 +33,7 @@
 
 ## Current Phase
 
-**Phase 3: Architecture Cleanup** — تسک‌های 3.3، 3.4، 3.5، 3.6 و 3.7 ✅ Done شده‌اند و این فاز به ۶۳٪ رسیده است.
+**Phase 3: Architecture Cleanup** — تسک‌های 3.3، 3.4، 3.5، 3.6 و 3.8 ✅ Done شده‌اند و این فاز به ۶۳٪ رسیده است.
 
 ## Recently Completed
 
@@ -50,7 +50,7 @@
 | 3.4 | Global error handler — 5xx not 200 |
 | 3.5 | Generic DB error responses on Worker |
 | 3.6 | Remove unused Worker functions |
-| 3.7 | Delete unused ticket_service.py |
+| 3.8 | Remove bot.py disabled stub |
 | 4.2 | AI history sanitization — FastAPI |
 | 4.6 | Gemini API key — header not URL |
 
@@ -58,7 +58,6 @@
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 3.8 | Remove bot.py disabled stub | Low |
 | 4.10 | Referrer validation | Medium |
 | 4.12 | Sanitize env.example | Medium |
 | 5.1 | Remove mock news fallback | Low |
