@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 13 |
+| ✅ Done | 14 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 41 |
-| **Overall** | **24%** |
+| ⬜ Todo | 40 |
+| **Overall** | **26%** |
 
 ### By Phase
 
@@ -56,7 +56,7 @@
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
-| 3 | Architecture Cleanup | 8 | 4 | 50% |
+| 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 2 | 15% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
@@ -121,7 +121,7 @@ Phase 4 ─► Phase 5:
 | 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ✅ | None | — |
 | 26 | 3.5 | 3 | Generic DB error responses | Medium | ✅ | None | 4.5 |
 | 27 | 3.6 | 3 | Remove unused Worker functions | Low | ✅ | 1.3 | — |
-| 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ⬜ | None | — |
+| 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ✅ | None | — |
 | 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ⬜ | 1.6 | — |
 | 30 | 4.1 | 4 | AI history role allowlist — Worker | High | ⬜ | 2.9 | 4.2 |
 | 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ✅ | None | — |
@@ -157,7 +157,6 @@ Phase 4 ─► Phase 5:
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 3.7 | Delete ticket_service.py | Low |
 | 3.8 | Remove bot.py disabled stub | Low |
 | 4.10 | Referrer validation | Medium |
 | 4.12 | Sanitize env.example | Medium |

@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 13 |
+| ✅ Done | 14 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 41 |
-| **Progress** | **24%** |
+| ⬜ Todo | 40 |
+| **Progress** | **26%** |
 
 ## By Phase
 
@@ -27,13 +27,13 @@
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 0 | 0% |
-| 3 | Architecture Cleanup | 8 | 4 | 50% |
+| 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 2 | 15% |
 | 5 | Optimization & Cleanup | 12 | 0 | 0% |
 
 ## Current Phase
 
-**Phase 3: Architecture Cleanup** — تسک‌های 3.3، 3.4، 3.5 و 3.6 ✅ Done شده‌اند و این فاز به ۵۰٪ رسیده است.
+**Phase 3: Architecture Cleanup** — تسک‌های 3.3، 3.4، 3.5، 3.6 و 3.7 ✅ Done شده‌اند و این فاز به ۶۳٪ رسیده است.
 
 ## Recently Completed
 
@@ -50,6 +50,7 @@
 | 3.4 | Global error handler — 5xx not 200 |
 | 3.5 | Generic DB error responses on Worker |
 | 3.6 | Remove unused Worker functions |
+| 3.7 | Delete unused ticket_service.py |
 | 4.2 | AI history sanitization — FastAPI |
 | 4.6 | Gemini API key — header not URL |
 
@@ -57,7 +58,6 @@
 
 | Task ID | Title | Priority |
 |---------|-------|----------|
-| 3.7 | Delete unused ticket_service.py | Low |
 | 3.8 | Remove bot.py disabled stub | Low |
 | 4.10 | Referrer validation | Medium |
 | 4.12 | Sanitize env.example | Medium |
