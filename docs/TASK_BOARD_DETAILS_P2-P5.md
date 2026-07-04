@@ -476,7 +476,7 @@
 
 ### TASK 3.6
 
-**Status:** ⬜ Todo | **Phase:** 3 | **Task ID:** 3.6
+**Status:** ✅ Done | **Phase:** 3 | **Task ID:** 3.6
 
 **Title:** Remove unused Worker functions  
 **Type:** cleanup | **Priority:** Low
