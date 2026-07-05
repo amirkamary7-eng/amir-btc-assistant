@@ -820,94 +820,6 @@ async function creditReferralTokens(env, userId, amount, refId, inviteeId) {
   );
 }
 
-async function createOrReactivateAlertInDb(env, userId, payload) {
-  const normalizedUserId = String(userId);
-  const symbol = (normalizeOptionalString(payload.symbol) || '').toUpperCase();
-  const direction = (normalizeOptionalString(payload.direction) || 'above').toLowerCase();
-  await ensureUserRow(env, normalizedUserId);
-  const existingResult = await queryDb(
-    env,
-    `
-      SELECT id, user_id, symbol, price, direction, created_at
-      FROM price_alerts
-      WHERE user_id = $1 AND symbol = $2 AND price = $3 AND direction = $4
-      LIMIT 1
-    `,
-    [normalizedUserId, symbol, Number(payload.price), direction],
-  );
-  const existingRow = existingResult.rows[0] || null;
-  if (existingRow) {
-    await queryDb(
-      env,
-      `
-        UPDATE price_alerts
-        SET status = 'active', triggered_at = NULL, created_at = NOW()
-        WHERE id = $1
-      `,
-      [String(existingRow.id)],
-    );
-    const refreshedResult = await queryDb(
-      env,
-      `
-        SELECT id, user_id, symbol, price, direction, created_at
-        FROM price_alerts
-        WHERE id = $1
-        LIMIT 1
-      `,
-      [String(existingRow.id)],
-    );
-    return serializeAlertRow(refreshedResult.rows[0] || existingRow);
-  }
-  const insertResult = await queryDb(
-    env,
-    `
-      INSERT INTO price_alerts (id, user_id, symbol, price, direction, status, created_at)
-      VALUES ($1, $2, $3, $4, $5, 'active', NOW())
-      RETURNING id, user_id, symbol, price, direction, created_at
-    `,
-    [
-      String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16),
-      normalizedUserId,
-      symbol,
-      Number(payload.price),
-      direction,
-    ],
-  );
-  return serializeAlertRow(insertResult.rows[0]);
-}
-
-async function listAlertsFromDb(env, userId) {
-  const result = await queryDb(
-    env,
-    `
-      SELECT id, user_id, symbol, price, direction, created_at
-      FROM price_alerts
-      WHERE user_id = $1 AND status = 'active'
-      ORDER BY created_at DESC
-    `,
-    [String(userId)],
-  );
-  return result.rows.map((row) => serializeAlertRow(row));
-}
-
-async function getAlertRowById(env, alertId) {
-  const result = await queryDb(
-    env,
-    `
-      SELECT id, user_id, symbol, price, direction, created_at
-      FROM price_alerts
-      WHERE id = $1
-      LIMIT 1
-    `,
-    [String(alertId)],
-  );
-  return result.rows[0] || null;
-}
-
-async function deleteAlertInDb(env, alertId) {
-  await queryDb(env, 'DELETE FROM price_alerts WHERE id = $1', [String(alertId)]);
-}
-
 async function getChatMemberDebugPayload(userId, env) {
   const uid = String(userId);
   const requiredChannel = resolveRequiredChannel(env);
@@ -1721,7 +1633,7 @@ async function resolveChartExchange(env, rawSymbol) {
 // ============================================================================
 //#region پاسخ‌های مستقیم Worker
 // ============================================================================
-function handleRoot() {
+function handleRoot(env) {
   return jsonResponse({
     status: 'ok',
     message: 'Amir BTC Assistant Backend is running!',
@@ -2218,7 +2130,7 @@ export default {
       if (referrerCheck) return referrerCheck;
 
       if (request.method === 'GET' && url.pathname === '/') {
-        return handleRoot();
+        return handleRoot(env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
