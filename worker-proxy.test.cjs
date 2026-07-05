@@ -2952,4 +2952,48 @@ test('POST /api/assistant/chat 503 response does not leak provider error details
   }
 });
 
+// ── Task 4.7: Restrict CORS to WEBAPP_URL ────────────────────────────────────
+
+test('OPTIONS preflight returns WEBAPP_URL origin, not wildcard (Task 4.7)', async () => {
+  const worker = loadWorker();
+
+  const response = await worker.fetch(
+    new Request('https://worker.example/api/health', { method: 'OPTIONS' }),
+    createEnv(),
+  );
+
+  assert.equal(response.status, 204);
+  const origin = response.headers.get('Access-Control-Allow-Origin');
+  assert.equal(origin, 'https://amir-btc-assistant.vercel.app');
+  assert.notEqual(origin, '*', 'CORS origin must NOT be wildcard');
+});
+
+test('JSON response includes WEBAPP_URL origin, not wildcard (Task 4.7)', async () => {
+  const worker = loadWorker();
+
+  const response = await worker.fetch(
+    new Request('https://worker.example/api/health'),
+    createEnv(),
+  );
+
+  assert.equal(response.status, 200);
+  const origin = response.headers.get('Access-Control-Allow-Origin');
+  assert.equal(origin, 'https://amir-btc-assistant.vercel.app');
+  assert.notEqual(origin, '*', 'CORS origin must NOT be wildcard');
+});
+
+test('Custom WEBAPP_URL is reflected in CORS header (Task 4.7)', async () => {
+  const worker = loadWorker();
+
+  const response = await worker.fetch(
+    new Request('https://worker.example/api/health'),
+    createEnv({ WEBAPP_URL: 'https://custom.example.com/app' }),
+  );
+
+  assert.equal(response.status, 200);
+  const origin = response.headers.get('Access-Control-Allow-Origin');
+  assert.equal(origin, 'https://custom.example.com');
+  assert.notEqual(origin, '*', 'CORS origin must NOT be wildcard');
+});
+
 

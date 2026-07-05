@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 43 |
+| ✅ Done | 44 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 11 |
-| **Progress** | **80%** |
+| ⬜ Todo | 10 |
+| **Progress** | **81%** |
 
 ## By Phase
 
@@ -28,7 +28,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 7 | 54% |
+| 4 | Security Hardening | 13 | 8 | 62% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ## DONE Criteria (قانون تأیید تسک)
@@ -304,6 +304,30 @@ None.
 - Existing "all providers fail" test also updated — passes with new generic format ✅
 
 **`node --test worker-proxy.test.cjs` → 60/60 pass**
+
+### ✅ Task 4.7 — Restrict CORS to WEBAPP_URL (2026-07-05)
+
+**Category:** 2 — Behavioral (security fix, proven by request/response)
+
+**Change:** Replaced hardcoded `Access-Control-Allow-Origin: *` with dynamic origin from `env.WEBAPP_URL` (worker-proxy.js L17-27, L29-35, L3898).
+
+**Before:** `const CORS_HEADERS = { 'Access-Control-Allow-Origin': '*', ... }`
+**After:** `setCorsOrigin(env)` at fetch entry → `_corsAllowOrigin` = `new URL(WEBAPP_URL).origin` → `withCors()` uses this value.
+
+**Runtime evidence (3 new tests, 63/63 total pass):**
+
+| Test | Checks | Result |
+|------|--------|--------|
+| OPTIONS preflight → header is WEBAPP_URL origin | 2 | ✅ |
+| GET /api/health → header is WEBAPP_URL origin | 2 | ✅ |
+| Custom WEBAPP_URL → header matches custom origin | 2 | ✅ |
+
+**Smoking gun assertions:**
+- `header === 'https://amir-btc-assistant.vercel.app'` (default) ✅
+- `header !== '*'` — wildcard eliminated ✅
+- `header === 'https://custom.example.com'` with custom env ✅
+
+**`node --test worker-proxy.test.cjs` → 63/63 pass**
 
 ## Next Executable Tasks
 
