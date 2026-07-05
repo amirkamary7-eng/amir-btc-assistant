@@ -14,6 +14,8 @@ import { createUserRepository } from './src/repositories/users.js';
 import { createUserHandlers } from './src/controllers/users.js';
 import { createNotifyHandlers } from './src/controllers/notify.js';
 import { createAssistantHandlers } from './src/controllers/assistant.js';
+import { createAnalysisRepository } from './src/repositories/analyses.js';
+import { createAnalysisHandlers } from './src/controllers/analyses.js';
 
 /**
  * Cloudflare Worker Shell
@@ -726,110 +728,6 @@ async function ensureUserRow(env, userId) {
   );
 }
 
-function serializeAnalysisRow(row) {
-  const createdAt = row?.created_at ? new Date(row.created_at) : null;
-  const updatedAt = row?.updated_at ? new Date(row.updated_at) : null;
-  return {
-    id: String(row?.id || ''),
-    coin: String(row?.coin || '').toUpperCase(),
-    timeframe: normalizeOptionalString(row?.timeframe) || '1d',
-    image: normalizeOptionalString(row?.image) || '',
-    text: String(row?.text || ''),
-    author: normalizeOptionalString(row?.author) || '',
-    author_id: normalizeOptionalString(row?.author_id),
-    date: createdAt ? createdAt.toISOString().slice(0, 10) : '',
-    created_at: createdAt ? createdAt.toISOString() : null,
-    updated_at: updatedAt ? updatedAt.toISOString() : null,
-  };
-}
-
-async function listAnalysesFromDb(env) {
-  const result = await queryDb(
-    env,
-    `
-      SELECT id, coin, timeframe, image, text, author, author_id, created_at, updated_at
-      FROM analyses
-      ORDER BY created_at DESC
-    `,
-  );
-  return result.rows.map((row) => serializeAnalysisRow(row));
-}
-
-async function updateAnalysesCache(env, analyses, version) {
-  const cacheTtlSeconds = 86400 * 7;
-  await Promise.all([
-    writeAppCache(env, ANALYSES_VERSION_KEY, String(version), cacheTtlSeconds),
-    writeAppCache(env, ANALYSES_LIST_KEY, JSON.stringify(analyses), cacheTtlSeconds),
-  ]);
-}
-
-async function readCurrentAnalysesVersion(env) {
-  const cachedState = await readCachedAnalysesState(env);
-  return Number.isInteger(cachedState.version) ? cachedState.version : null;
-}
-
-async function createAnalysisInDb(env, adminUserId, payload) {
-  const result = await queryDb(
-    env,
-    `
-      INSERT INTO analyses (id, coin, timeframe, image, text, author, author_id, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-      RETURNING id, coin, timeframe, image, text, author, author_id, created_at, updated_at
-    `,
-    [
-      String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 12),
-      (normalizeOptionalString(payload.coin) || '').toUpperCase(),
-      normalizeOptionalString(payload.timeframe) || '1d',
-      normalizeOptionalString(payload.image) || '',
-      String(payload.text),
-      normalizeOptionalString(payload.author) || '',
-      String(adminUserId),
-    ],
-  );
-  return serializeAnalysisRow(result.rows[0]);
-}
-
-async function updateAnalysisInDb(env, analysisId, payload) {
-  const result = await queryDb(
-    env,
-    `
-      UPDATE analyses
-      SET
-        coin = $2,
-        timeframe = $3,
-        image = $4,
-        text = $5,
-        updated_at = NOW()
-      WHERE id = $1
-      RETURNING id, coin, timeframe, image, text, author, author_id, created_at, updated_at
-    `,
-    [
-      String(analysisId),
-      (normalizeOptionalString(payload.coin) || '').toUpperCase(),
-      normalizeOptionalString(payload.timeframe) || '1d',
-      normalizeOptionalString(payload.image) || '',
-      String(payload.text),
-    ],
-  );
-  if (!result.rows[0]) {
-    return null;
-  }
-  return serializeAnalysisRow(result.rows[0]);
-}
-
-async function deleteAnalysisInDb(env, analysisId) {
-  const result = await queryDb(
-    env,
-    `
-      DELETE FROM analyses
-      WHERE id = $1
-      RETURNING id
-    `,
-    [String(analysisId)],
-  );
-  return Boolean(result.rows[0]);
-}
-
 async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined) {
   const normalizedReferrerId = normalizeOptionalString(referrerId);
   if (!normalizedReferrerId || normalizedReferrerId === String(inviteeId)) {
@@ -1292,8 +1190,6 @@ async function fetchSpotPriceUsd(env, symbol) {
 
 const CALENDAR_CACHE_KEY = 'calendar:events';
 const FARSI_NEWS_CACHE_KEY = 'news:farsi';
-const ANALYSES_LIST_KEY = 'analyses:list';
-const ANALYSES_VERSION_KEY = 'analyses:version';
 
 const NEWS_RSS_SOURCES = [
   ['https://cointelegraph.com/rss', 'کوین‌تلگراف'],
@@ -1574,36 +1470,6 @@ async function fetchFarsiNews(env) {
     source: 'rss_unavailable',
     data: [],
   };
-}
-
-async function readCachedAnalysesState(env) {
-  const [cachedVersion, cachedList] = await Promise.all([
-    readAppCache(env, ANALYSES_VERSION_KEY),
-    readAppCache(env, ANALYSES_LIST_KEY),
-  ]);
-
-  let version = null;
-  let analyses = null;
-
-  if (cachedVersion !== null) {
-    const numericVersion = Number(cachedVersion);
-    if (Number.isFinite(numericVersion)) {
-      version = numericVersion;
-    }
-  }
-
-  if (cachedList) {
-    try {
-      const parsed = JSON.parse(cachedList);
-      if (Array.isArray(parsed)) {
-        analyses = parsed;
-      }
-    } catch {
-      analyses = null;
-    }
-  }
-
-  return { version, analyses };
 }
 
 function parseCalendarDate(dateString) {
@@ -1961,6 +1827,19 @@ const assistantHandlers = createAssistantHandlers({
   getTodayIsoDate,
   getNumericEnv,
 });
+const analysisRepo = createAnalysisRepository({ queryDb, normalizeOptionalString });
+const analysisHandlers = createAnalysisHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  safeDbErrorResponse,
+  buildBodyFieldValidationError,
+  buildQueryFieldValidationError,
+  isDatabaseConfigured,
+  isAdminTelegramId,
+  readAppCache,
+  writeAppCache,
+  analysisRepo,
+});
 //#endregion
 
 async function handleChartResolve(request, env) {
@@ -2010,236 +1889,6 @@ async function handleCalendarEvents(env) {
 
 async function handleFarsiNews(env) {
   return jsonResponse(await fetchFarsiNews(env), {}, env);
-}
-
-async function handleAnalyses(request, env) {
-  const url = new URL(request.url);
-  const rawVersion = url.searchParams.get('version');
-  let requestedVersion = null;
-
-  if (rawVersion !== null && rawVersion !== '') {
-    const numericVersion = Number(rawVersion);
-    if (!Number.isInteger(numericVersion)) {
-      return jsonResponse(
-        buildQueryFieldValidationError('version', 'int_parsing', 'Input should be a valid integer', rawVersion),
-        { status: 422 }, env);
-    }
-    requestedVersion = numericVersion;
-  }
-
-  const cachedState = await readCachedAnalysesState(env);
-  if (requestedVersion !== null && cachedState.version !== null && requestedVersion === cachedState.version) {
-    return jsonResponse({
-      status: 'success',
-      analyses: null,
-      version: cachedState.version,
-      unchanged: true,
-    }, env);
-  }
-
-  if (requestedVersion === null && cachedState.version !== null && cachedState.analyses !== null) {
-    return jsonResponse({
-      status: 'success',
-      analyses: cachedState.analyses,
-      version: cachedState.version,
-    }, env);
-  }
-
-  if (isDatabaseConfigured(env)) {
-    try {
-      const analyses = await listAnalysesFromDb(env);
-      const version = cachedState.version !== null ? cachedState.version : (analyses.length > 0 ? 1 : 0);
-      await updateAnalysesCache(env, analyses, version);
-      return jsonResponse({
-        status: 'success',
-        analyses,
-        version,
-      }, env);
-    } catch (error) {
-      console.warn('list analyses failed:', error);
-      return safeDbErrorResponse(error, env);
-    }
-  }
-
-  return jsonResponse({
-    status: 'success',
-    analyses: cachedState.analyses ?? [],
-    version: cachedState.version ?? 0,
-  }, env);
-}
-
-function parseAnalysisPayload(originalBody, options = {}) {
-  const { requireAuthor = false } = options;
-  let payload;
-  try {
-    payload = JSON.parse(originalBody);
-  } catch {
-    return {
-      error: jsonResponse(
-        buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-        { status: 422 }, env),
-    };
-  }
-
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return {
-      error: jsonResponse(
-        buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-        { status: 422 }, env),
-    };
-  }
-
-  const validated = {};
-  const fieldSpecs = [
-    { name: 'coin', required: true, minLength: 1, maxLength: 16 },
-    { name: 'timeframe', required: false, defaultValue: '1d', maxLength: 16 },
-    { name: 'image', required: false, defaultValue: '', maxLength: 512 },
-    { name: 'text', required: true, minLength: 1 },
-    ...(requireAuthor ? [{ name: 'author', required: true, minLength: 1, maxLength: 128 }] : []),
-  ];
-
-  for (const spec of fieldSpecs) {
-    const rawValue = Object.prototype.hasOwnProperty.call(payload, spec.name) ? payload[spec.name] : spec.defaultValue;
-    if (typeof rawValue !== 'string') {
-      return {
-        error: jsonResponse(
-          buildBodyFieldValidationError(spec.name, 'string_type', 'Input should be a valid string', rawValue ?? null),
-          { status: 422 }, env),
-      };
-    }
-    if (spec.minLength && rawValue.length < spec.minLength) {
-      return {
-        error: jsonResponse(
-          buildBodyFieldValidationError(
-            spec.name,
-            'string_too_short',
-            `String should have at least ${spec.minLength} character${spec.minLength === 1 ? '' : 's'}`,
-            rawValue,
-            { min_length: spec.minLength },
-          ),
-          { status: 422 }, env),
-      };
-    }
-    if (spec.maxLength && rawValue.length > spec.maxLength) {
-      return {
-        error: jsonResponse(
-          buildBodyFieldValidationError(
-            spec.name,
-            'string_too_long',
-            `String should have at most ${spec.maxLength} characters`,
-            rawValue,
-            { max_length: spec.maxLength },
-          ),
-          { status: 422 }, env),
-      };
-    }
-    validated[spec.name] = rawValue;
-  }
-
-  return { payload: validated };
-}
-
-async function handleAnalysesCreate(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: true });
-  if (parsed.error) {
-    return parsed.error;
-  }
-
-  try {
-    const analysis = await createAnalysisInDb(env, authState.user.id, parsed.payload);
-    const analyses = await listAnalysesFromDb(env);
-    const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
-    await updateAnalysesCache(env, analyses, version);
-    return jsonResponse({ status: 'success', analysis, version }, env);
-  } catch (error) {
-    console.warn('create analysis failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleAnalysesUpdate(request, env, analysisId) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: false });
-  if (parsed.error) {
-    return parsed.error;
-  }
-
-  try {
-    const analysis = await updateAnalysisInDb(env, analysisId, parsed.payload);
-    if (!analysis) {
-      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, {}, env);
-    }
-    const analyses = await listAnalysesFromDb(env);
-    const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
-    await updateAnalysesCache(env, analyses, version);
-    return jsonResponse({ status: 'success', analysis, version }, env);
-  } catch (error) {
-    console.warn('update analysis failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleAnalysesDelete(request, env, analysisId) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  try {
-    const deleted = await deleteAnalysisInDb(env, analysisId);
-    if (!deleted) {
-      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, {}, env);
-    }
-    const analyses = await listAnalysesFromDb(env);
-    const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
-    await updateAnalysesCache(env, analyses, version);
-    return jsonResponse({ status: 'success', version }, env);
-  } catch (error) {
-    console.warn('delete analysis failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
 }
 
 async function handleCheckJoin(request, env) {
@@ -2589,21 +2238,21 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
-        return await handleAnalyses(request, env);
+        return await analysisHandlers.handleList(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/analyses') {
-        return await handleAnalysesCreate(request, env);
+        return await analysisHandlers.handleCreate(request, env);
       }
 
       if (request.method === 'PUT' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
-        return await handleAnalysesUpdate(request, env, analysisId);
+        return await analysisHandlers.handleUpdate(request, env, analysisId);
       }
 
       if (request.method === 'DELETE' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
-        return await handleAnalysesDelete(request, env, analysisId);
+        return await analysisHandlers.handleDelete(request, env, analysisId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/tickets') {
