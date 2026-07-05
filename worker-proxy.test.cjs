@@ -3516,4 +3516,109 @@ test('Non-admin cannot POST/PUT/DELETE analyses — all return 403 without DB to
   }
 });
 
+// ============================================================================
+// Task 5.7 — Integration test: webhook secret validation
+// ============================================================================
+
+function makeWebhookRequest(payload, extraHeaders = {}) {
+  return new Request('https://worker.example/telegram', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
+    body: JSON.stringify(payload),
+  });
+}
+
+test('Webhook without secret configured (no TELEGRAM_WEBHOOK_SECRET) passes through (Task 5.7)', async () => {
+  const worker = loadWorker();
+  const request = makeWebhookRequest({
+    update_id: 1,
+    message: { message_id: 1, from: { id: 999, first_name: 'X' }, chat: { id: 999, type: 'private' }, date: 1710000000, text: 'hello' },
+  });
+  const env = createEnv(); // no TELEGRAM_WEBHOOK_SECRET
+
+  const response = await worker.fetch(request, env);
+  assert.equal(response.status, 200, 'without secret configured, webhook should pass through');
+});
+
+test('Webhook with secret configured but no header returns 403 (Task 5.7)', async () => {
+  const worker = loadWorker();
+  const request = makeWebhookRequest({
+    update_id: 1,
+    message: { message_id: 1, from: { id: 999, first_name: 'X' }, chat: { id: 999, type: 'private' }, date: 1710000000, text: '/start' },
+  });
+  const env = createEnv({ TELEGRAM_WEBHOOK_SECRET: 'my-secret-token-abc123' });
+
+  const response = await worker.fetch(request, env);
+  assert.equal(response.status, 403, 'missing secret header must be rejected');
+  const body = await response.json();
+  assert.equal(body.status, 'error');
+  assert.equal(body.detail, 'Invalid or missing webhook secret token');
+});
+
+test('Webhook with secret configured but wrong header returns 403 (Task 5.7)', async () => {
+  const worker = loadWorker();
+  const request = makeWebhookRequest(
+    {
+      update_id: 1,
+      message: { message_id: 1, from: { id: 999, first_name: 'X' }, chat: { id: 999, type: 'private' }, date: 1710000000, text: '/start' },
+    },
+    { 'X-Telegram-Bot-Api-Secret-Token': 'wrong-token' },
+  );
+  const env = createEnv({ TELEGRAM_WEBHOOK_SECRET: 'my-secret-token-abc123' });
+
+  const response = await worker.fetch(request, env);
+  assert.equal(response.status, 403, 'wrong secret header must be rejected');
+  const body = await response.json();
+  assert.equal(body.detail, 'Invalid or missing webhook secret token');
+});
+
+test('Webhook with correct secret header processes /start normally (Task 5.7)', async () => {
+  const worker = loadWorker();
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(
+      JSON.stringify(
+        calls.length === 0
+          ? { ok: true, result: { status: 'left' } }
+          : { ok: true, result: { message_id: 1 } },
+      ),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = makeWebhookRequest(
+      {
+        update_id: 2,
+        message: { message_id: 10, from: { id: 12345, first_name: 'Amir' }, chat: { id: 12345, type: 'private' }, date: 1710000000, text: '/start' },
+      },
+      { 'X-Telegram-Bot-Api-Secret-Token': 'my-secret-token-abc123' },
+    );
+    const env = createEnv({ TELEGRAM_WEBHOOK_SECRET: 'my-secret-token-abc123' });
+
+    const response = await worker.fetch(request, env);
+    assert.equal(response.status, 200, 'correct secret header should pass through');
+    assert.equal(calls.length, 2, '/start with valid secret should trigger getChatMember + sendMessage');
+    assert.match(calls[0].url, /getChatMember/);
+    assert.match(calls[1].url, /sendMessage/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Webhook secret validation rejects non-/start updates with wrong secret (Task 5.7)', async () => {
+  const worker = loadWorker();
+  const request = makeWebhookRequest(
+    { update_id: 3, callback_query: { id: 'cb1', from: { id: 111 } } },
+    { 'X-Telegram-Bot-Api-Secret-Token': 'wrong' },
+  );
+  const env = createEnv({ TELEGRAM_WEBHOOK_SECRET: 'correct-secret' });
+
+  const response = await worker.fetch(request, env);
+  assert.equal(response.status, 403, 'callback_query with wrong secret must also be rejected');
+  const body = await response.json();
+  assert.equal(body.detail, 'Invalid or missing webhook secret token');
+});
+
 
