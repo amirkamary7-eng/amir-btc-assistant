@@ -293,7 +293,7 @@
 
 ### TASK 2.12
 
-**Status:** ⬜ Todo | **Phase:** 2 | **Task ID:** 2.12
+**Status:** ✅ Done | **Phase:** 2 | **Task ID:** 2.12
 
 **Title:** Webhook secret validation — FastAPI  
 **Type:** security | **Priority:** High
