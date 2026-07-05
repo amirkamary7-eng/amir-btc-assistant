@@ -3644,6 +3644,10 @@ async function handleDebugCheckJoin(request, env) {
     return authState.error;
   }
 
+  if (!isAdminTelegramId(env, authState.user.id)) {
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+  }
+
   const debugPayload = await getChatMemberDebugPayload(String(authState.user.id), env);
   return jsonResponse({
     required_channel: debugPayload.required_channel,
