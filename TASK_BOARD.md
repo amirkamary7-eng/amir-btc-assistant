@@ -44,18 +44,18 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 32 |
+| ✅ Done | 31 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 22 |
-| **Overall** | **59%** |
+| ⬜ Todo | 23 |
+| **Overall** | **57%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 10 | 71% |
+| 2 | Core System Fix | 14 | 9 | 64% |
 | 3 | Architecture Cleanup | 8 | 4 | 50% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -111,7 +111,7 @@ Phase 4 ─► Phase 5:
 | 15 | 2.8 | 2 | AI chat — safe response parsing | High | ✅ | 2.6 | 2.9 |
 | 16 | 2.9 | 2 | Replace assistant 501 with live AI | Critical | ✅ | 2.6, 2.7, 2.8, 1.1 | 2.10, 4.1, 4.2, 5.6 |
 | 17 | 2.10 | 2 | Call recordRateLimitUsage after chat | High | ✅ | 2.9, 1.4 | 4.3 |
-| 18 | 2.11 | 2 | Webhook secret validation — Worker | High | ✅ | 1.6 | 2.12, 5.7 |
+| 18 | 2.11 | 2 | Webhook secret validation — Worker | High | ⬜ | 1.6 | 2.12, 5.7 |
 | 19 | 2.12 | 2 | Webhook secret validation — FastAPI | High | ⬜ | 2.11 | 3.1 |
 | 20 | 2.13 | 2 | Ticket create — Telegram notify | High | ⬜ | 1.1 | — |
 | 21 | 2.14 | 2 | Ticket reply — Telegram notify | High | ⬜ | 2.13 | — |
