@@ -16,19 +16,19 @@ import { Pool } from '@neondatabase/serverless';
 // ============================================================================
 const CORS_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
 const CORS_ALLOW_HEADERS = 'Content-Type, X-Telegram-Init-Data, X-Telegram-Bot-Api-Secret-Token';
-let _corsAllowOrigin = '*';
-
-function setCorsOrigin(env) {
-  try {
-    _corsAllowOrigin = new URL(resolveWebAppUrl(env)).origin;
-  } catch {
-    _corsAllowOrigin = '*';
-  }
-}
+let _requestEnv = null;
 
 function withCors(headers = {}) {
   const merged = new Headers(headers);
-  merged.set('Access-Control-Allow-Origin', _corsAllowOrigin);
+  if (_requestEnv) {
+    try {
+      merged.set('Access-Control-Allow-Origin', new URL(resolveWebAppUrl(_requestEnv)).origin);
+    } catch {
+      merged.set('Access-Control-Allow-Origin', '*');
+    }
+  } else {
+    merged.set('Access-Control-Allow-Origin', '*');
+  }
   merged.set('Access-Control-Allow-Methods', CORS_METHODS);
   merged.set('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
   return merged;
@@ -3942,7 +3942,7 @@ async function runScheduledAlertsBaseline(controller, env) {
 // ============================================================================
 export default {
   async fetch(request, env) {
-    setCorsOrigin(env);
+    _requestEnv = env;
 
     if (request.method === 'OPTIONS') {
       return new Response(null, {
