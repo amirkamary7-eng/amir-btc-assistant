@@ -575,7 +575,7 @@
 | 5.7 | ✅ | Integration test — webhook secret | Medium | 2.11 |
 | 5.8 | ⬜ | Alembic migrations baseline | Medium | None |
 | 5.9 | ⬜ | Sync status docs with code reality | Low | Phase 2 complete |
-| 5.10 | ⬜ | Remove legacy query params | Low | 3.1 |
+| 5.10 | ✅ | Remove legacy query params | Low | 3.1 |
 | 5.11 | ⬜ | Remove dead imports in main.py | Low | None |
 | 5.12 | ⬜ | Update index.html outdated comment | Low | 1.5 |
 

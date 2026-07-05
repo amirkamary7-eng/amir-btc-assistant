@@ -709,15 +709,14 @@ async function fetchAnalyses(force = false) {
  */
 async function saveAnalysisToServer(payload, method, analysisId) {
     if (!API_BASE || !isAdmin()) return null;
-    const adminId = encodeURIComponent(getUserId());
     if (method === 'POST') {
-        return apiFetch(`/api/analyses?admin_id=${adminId}`, { method: 'POST', body: JSON.stringify(payload) });
+        return apiFetch('/api/analyses', { method: 'POST', body: JSON.stringify(payload) });
     }
     if (method === 'PUT') {
-        return apiFetch(`/api/analyses/${analysisId}?admin_id=${adminId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        return apiFetch(`/api/analyses/${analysisId}`, { method: 'PUT', body: JSON.stringify(payload) });
     }
     if (method === 'DELETE') {
-        return apiFetch(`/api/analyses/${analysisId}?admin_id=${adminId}`, { method: 'DELETE' });
+        return apiFetch(`/api/analyses/${analysisId}`, { method: 'DELETE' });
     }
     return null;
 }
@@ -781,7 +780,7 @@ async function loadReferralStats() {
     const uid = getUserId();
     if (!API_BASE || isGuestUserId(uid) || isPendingTelegramUserId(uid) || UserContext.isPending()) return;
     try {
-        const data = await apiFetch(`/api/referrals/stats?user_id=${encodeURIComponent(uid)}`);
+        const data = await apiFetch('/api/referrals/stats');
         document.getElementById('ref-total').innerText = data.total ?? 0;
         document.getElementById('ref-active').innerText = data.active ?? 0;
         document.getElementById('ref-reward').innerText = `${data.tokens ?? 0} AB`;
@@ -835,18 +834,6 @@ async function resolveChartSymbol(symbol) {
 }
 
 /**
- * init data to URL را به مسیر یا داده موجود اضافه می‌کند.
- * ورودی: پارامترهای `path` را دریافت می‌کند.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function appendInitDataToUrl(path) {
-    const initData = getTelegramInitData();
-    if (!initData) return path;
-    const sep = path.includes('?') ? '&' : '?';
-    return `${path}${sep}init_data=${encodeURIComponent(initData)}`;
-}
-
-/**
  * درخواست HTTP داخلی را با هدر احراز هویت تلگرام و مدیریت خطا به API ارسال می‌کند.
  * ورودی: پارامترهای `path, options = {}` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
@@ -856,9 +843,7 @@ async function apiFetch(path, options = {}) {
     const headers = { 'Content-Type': 'application/json', ...options.headers };
     const initData = getTelegramInitData();
     if (initData) headers['X-Telegram-Init-Data'] = initData;
-    const method = (options.method || 'GET').toUpperCase();
-    let url = `${API_BASE}${path}`;
-    if (initData && method === 'GET') url = `${API_BASE}${appendInitDataToUrl(path)}`;
+    const url = `${API_BASE}${path}`;
     const res = await fetch(url, { headers, ...options });
     if (!res.ok) {
         let detail = '';
@@ -2004,7 +1989,7 @@ async function syncAlertToServer(alert) {
 async function removeAlertFromServer(alert) {
     if (!API_BASE || !alert.serverId || isGuestUserId(String(alert.userId)) || isPendingTelegramUserId(String(alert.userId)) || UserContext.isPending()) return;
     try {
-        await apiFetch(`/api/alerts/${alert.serverId}?user_id=${encodeURIComponent(alert.userId)}`, { method: 'DELETE' });
+        await apiFetch(`/api/alerts/${alert.serverId}`, { method: 'DELETE' });
     } catch (e) { console.warn('removeAlertFromServer:', e); }
 }
 
@@ -2017,7 +2002,7 @@ async function loadAlertsFromServer() {
     const uid = getUserId();
     if (!API_BASE || isGuestUserId(uid) || isPendingTelegramUserId(uid) || UserContext.isPending()) return;
     try {
-        const data = await apiFetch(`/api/alerts?user_id=${encodeURIComponent(uid)}`);
+        const data = await apiFetch('/api/alerts');
         alerts = (data.alerts || []).map(a => ({
             id: a.id,
             serverId: a.id,
@@ -2405,7 +2390,7 @@ function closeAdminTicketsModal() { document.getElementById('admin-tickets-modal
 async function fetchTickets() {
     if (!API_BASE) { tickets = []; return; }
     try {
-        const data = await apiFetch(`/api/tickets?user_id=${encodeURIComponent(getUserId())}`);
+        const data = await apiFetch('/api/tickets');
         tickets = data.tickets || [];
     } catch (e) {
         console.warn('fetchTickets:', e);
@@ -2421,7 +2406,7 @@ async function fetchTickets() {
 async function fetchAdminTickets() {
     if (!API_BASE || !isAdmin()) return;
     try {
-        const data = await apiFetch(`/api/tickets/all?admin_id=${encodeURIComponent(getUserId())}`);
+        const data = await apiFetch('/api/tickets/all');
         tickets = data.tickets || [];
     } catch (e) { console.warn('fetchAdminTickets:', e); }
 }
@@ -2588,10 +2573,7 @@ async function deleteTicket(ticketId, isAdminView = false) {
     if (!confirm(t('ticket_delete') + '?')) return;
     try {
         if (API_BASE) {
-            const params = isAdminView
-                ? `admin_id=${encodeURIComponent(getUserId())}`
-                : `user_id=${encodeURIComponent(getUserId())}`;
-            await apiFetch(`/api/tickets/${ticketId}?${params}`, { method: 'DELETE' });
+            await apiFetch(`/api/tickets/${ticketId}`, { method: 'DELETE' });
         } else {
             const local = JSON.parse(localStorage.getItem('tickets') || '[]').filter(t => t.id !== ticketId);
             localStorage.setItem('tickets', JSON.stringify(local));
@@ -2769,8 +2751,8 @@ async function checkMandatoryJoin(options = {}) {
     }
 
     try {
-        const refreshParam = force ? '&refresh=true' : '';
-        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(resolvedId)}${refreshParam}`);
+        const refreshParam = force ? '?refresh=true' : '';
+        const data = await apiFetch(`/api/check-join${refreshParam}`);
         joinCheckDone = true;
         if (data.status === 'DB_ERROR') {
             hasChannelAccess = false;
@@ -2833,7 +2815,7 @@ async function verifyJoin() {
             alert(t('join_not_verified'));
             return;
         }
-        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}&refresh=true`);
+        const data = await apiFetch('/api/check-join?refresh=true');
         if (data.status === 'DB_ERROR') {
             showJoinStatus(t('join_db_error'), true);
             alert(t('join_db_error'));
@@ -2844,7 +2826,7 @@ async function verifyJoin() {
             joinCheckDone = true;
             UserContext.setCachedJoin(true);
             try {
-                await apiFetch(`/api/check-join/invalidate?user_id=${encodeURIComponent(userId)}`, { method: 'POST' });
+                await apiFetch('/api/check-join/invalidate', { method: 'POST' });
             } catch (invalidateError) {
                 console.warn('join cache invalidate:', invalidateError);
             }

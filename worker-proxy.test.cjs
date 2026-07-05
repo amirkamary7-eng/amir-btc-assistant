@@ -3621,4 +3621,84 @@ test('Webhook secret validation rejects non-/start updates with wrong secret (Ta
   assert.equal(body.detail, 'Invalid or missing webhook secret token');
 });
 
+// ============================================================================
+// Task 5.10 — Remove legacy query params
+// ============================================================================
+
+test('Legacy ?user_id= in query is ignored — auth header wins (Task 5.10)', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const joinCache = createMemoryKv();
+  const pgMock = createPgMock(async (sql) => {
+    if (/SELECT telegram_id, channel_joined FROM users/i.test(sql)) {
+      return { rows: [{ telegram_id: 12345, channel_joined: true }] };
+    }
+    return { rows: [] };
+  });
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    // Spoof user_id in query but auth as real user 12345
+    const request = new Request(
+      'https://worker.example/api/check-join?user_id=99999&refresh=true',
+      {
+        method: 'GET',
+        headers: { 'X-Telegram-Init-Data': initData },
+      },
+    );
+    const env = createEnv({ DATABASE_URL: 'postgres://x/y', JOIN_CACHE: joinCache });
+
+    const response = await worker.fetch(request, env);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 'success', 'should succeed with header user, not query user');
+    // KV cache key must be for real user (12345), not spoofed (99999)
+    const cachedValue = await joinCache.get('join:12345');
+    assert.equal(cachedValue, '1', 'KV cache keyed on header-authenticated user, not query param');
+    const spoofedCache = await joinCache.get('join:99999');
+    assert.equal(spoofedCache, null, 'spoofed user_id in query must never create a KV entry');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Legacy ?admin_id= in query is ignored — header auth determines admin (Task 5.10)', async () => {
+  const worker = loadWorker();
+  const pgMock = createPgMock(async (sql) => {
+    if (/INSERT INTO analyses/i.test(sql)) {
+      return { rows: [{ id: 'an1' }] };
+    }
+    return { rows: [] };
+  });
+  const workerWithDb = loadWorker({ pg: pgMock.module });
+
+  // Auth as non-admin user 99999, but try to spoof admin_id in query
+  const fakeUser = { id: 99999, first_name: 'Hacker' };
+  const fakeInitData = buildInitData('test-bot-token', fakeUser);
+  const request = new Request(
+    'https://worker.example/api/analyses?admin_id=831704732',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': fakeInitData,
+      },
+      body: JSON.stringify({ coin: 'btc', text: 'pump incoming' }),
+    },
+  );
+  const env = createEnv({ ADMIN_TELEGRAM_ID: '831704732' });
+
+  const response = await workerWithDb.fetch(request, env);
+  assert.equal(response.status, 403, 'spoofed admin_id in query must be ignored; real header user is non-admin');
+  assert.equal(pgMock.calls.length, 0, 'DB must never be touched');
+});
+
 
