@@ -268,7 +268,7 @@
 
 ### TASK 2.11
 
-**Status:** ✅ Done | **Phase:** 2 | **Task ID:** 2.11
+**Status:** ⬜ Todo | **Phase:** 2 | **Task ID:** 2.11
 
 **Title:** Webhook secret validation — Worker  
 **Type:** security | **Priority:** High

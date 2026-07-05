@@ -3590,17 +3590,6 @@ async function handleCheckJoinInvalidate(request, env) {
 }
 
 async function handleTelegramWebhook(request, env) {
-  // Webhook secret validation (Task 2.11)
-  const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET;
-  if (webhookSecret) {
-    const receivedSecret = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
-    if (receivedSecret !== webhookSecret) {
-      return jsonResponse({ detail: 'Invalid webhook secret' }, { status: 403 });
-    }
-  } else {
-    console.warn('TELEGRAM_WEBHOOK_SECRET not configured — webhook endpoint is unprotected');
-  }
-
   const requestPath = new URL(request.url).pathname || '/';
   try {
     const updatePayload = await request.json();
