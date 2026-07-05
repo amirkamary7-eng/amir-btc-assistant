@@ -498,14 +498,31 @@ async function recordRateLimitUsage(env, userId, hasImage) {
   }
 }
 
+const ALLOWED_HISTORY_ROLES = new Set(['user', 'assistant']);
+const MAX_HISTORY_CONTENT_LENGTH = 4000;
+
 function normalizeAssistantHistory(history) {
   if (!Array.isArray(history)) {
     return [];
   }
-  return history.slice(-6).map((entry) => ({
-    role: typeof entry?.role === 'string' && entry.role.trim() ? entry.role.trim() : 'user',
-    content: typeof entry?.content === 'string' ? entry.content : '',
-  }));
+  const sanitized = [];
+  for (const entry of history.slice(-6)) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+    let role = typeof entry.role === 'string' && entry.role.trim()
+      ? entry.role.trim().toLowerCase() : 'user';
+    if (!ALLOWED_HISTORY_ROLES.has(role)) {
+      role = 'user';
+    }
+    let content = typeof entry.content === 'string' ? entry.content : '';
+    content = content.replace(/\0/g, '').trim();
+    if (content.length > MAX_HISTORY_CONTENT_LENGTH) {
+      content = content.slice(0, MAX_HISTORY_CONTENT_LENGTH);
+    }
+    sanitized.push({ role, content });
+  }
+  return sanitized;
 }
 
 function extractAssistantImageBase64(imageData) {

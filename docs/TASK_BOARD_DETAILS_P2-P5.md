@@ -542,7 +542,7 @@
 
 | Task ID | Status | Title | Priority | Dependencies |
 |---------|--------|-------|----------|--------------|
-| 4.1 | ⬜ | AI history role allowlist — Worker | High | 2.9 |
+| 4.1 | ✅ | AI history role allowlist — Worker | High | 2.9 |
 | 4.2 | ⬜ | AI history sanitization — FastAPI | High | None |
 | 4.3 | ⬜ | Remove initData from GET query | High | 1.1 |
 | 4.4 | ⬜ | FastAPI AI rate limits — KV migration doc | High | 1.0, 3.1 |
