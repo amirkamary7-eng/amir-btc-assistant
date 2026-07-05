@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 46 |
+| ✅ Done | 47 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 8 |
-| **Overall** | **85%** |
+| ⬜ Todo | 7 |
+| **Overall** | **87%** |
 
 ### By Phase
 
@@ -57,7 +57,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 10 | 77% |
+| 4 | Security Hardening | 13 | 11 | 85% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ---
@@ -133,7 +133,7 @@ Phase 4 ─► Phase 5:
 | 37 | 4.8 | 4 | Debug join endpoint — admin only | Medium | ✅ | 3.2 | — |
 | 38 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | ✅ | 3.2 | 4.10 |
 | 39 | 4.10 | 4 | Referrer validation | Medium | ✅ | None | — |
-| 40 | 4.11 | 4 | Shorten initData max_age | Medium | ⬜ | 1.1 | — |
+| 40 | 4.11 | 4 | Shorten initData max_age | Medium | ✅ | 1.1 | 4.12 |
 | 41 | 4.12 | 4 | Sanitize env.example | Medium | ✅ | None | — |
 | 42 | 4.13 | 4 | Image failover — explicit warning | Medium | ⬜ | 2.9 | — |
 | 43 | 5.1 | 5 | Remove mock news fallback | Low | ✅ | None | — |
@@ -170,9 +170,9 @@ Phase 4 ─► Phase 5:
 | ~~4.7~~ | ~~4~~ | ~~Restrict CORS to WEBAPP_URL~~ | ~~Medium~~ | ✅ implemented + verified |
 | ~~4.8~~ | ~~4~~ | ~~Debug join endpoint — admin only~~ | ~~Medium~~ | ✅ implemented + verified |
 | ~~4.9~~ | ~~4~~ | ~~Remove hardcoded default admin ID~~ | ~~Medium~~ | ✅ implemented + verified |
-| 4.11 | 4 | Shorten initData max_age | Medium | — |
+| ~~4.11~~ | ~~4~~ | ~~Shorten initData max_age~~ | ~~Medium~~ | ✅ implemented + verified |
 
-**توصیه (Top priority):** 4.11 → 4.13 → …
+**توصیه (Top priority):** 4.13 → …
 
 ---
 

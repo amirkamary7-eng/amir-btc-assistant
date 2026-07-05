@@ -55,9 +55,9 @@ function loadWorker(overrides = {}) {
   return module.exports;
 }
 
-function buildInitData(botToken, user) {
+function buildInitData(botToken, user, options = {}) {
   const entries = [
-    ['auth_date', String(Math.floor(Date.now() / 1000))],
+    ['auth_date', String(options.authDate ?? Math.floor(Date.now() / 1000))],
     ['query_id', 'AAHdF6IQAAAAAN0XohDhrOrc'],
     ['user', JSON.stringify(user)],
   ];
@@ -2371,6 +2371,56 @@ test('Admin still works when ADMIN_TELEGRAM_ID is explicitly set (Task 4.9 regre
     assert.equal(res.status, 200, 'admin must still get 200 when ADMIN_TELEGRAM_ID is explicitly set');
     const body = await res.json();
     assert.equal(body.status, 'success', 'response status must be success');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('initData with auth_date older than 1 hour is rejected (Task 4.11)', async () => {
+  // Build initData with auth_date 2 hours in the past
+  const twoHoursAgo = Math.floor(Date.now() / 1000) - 7200;
+  const staleInitData = buildInitData('test-bot-token', { id: 123456, first_name: 'Old' }, { authDate: twoHoursAgo });
+
+  const env = createEnv({ DATABASE_URL: 'postgres://db.example/app' });
+  const pgMock = createPgMock(async () => ({ rows: [] }));
+  const worker = loadWorker({ pg: pgMock.module });
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('unexpected', { status: 500 });
+
+  try {
+    const req = new Request('https://worker.example/api/check-join', {
+      method: 'GET',
+      headers: { 'X-Telegram-Init-Data': staleInitData },
+    });
+    const res = await worker.fetch(req, env);
+    assert.equal(res.status, 401, 'stale initData (2h old) must be rejected with 401');
+    const body = await res.json();
+    assert.equal(body.detail, 'Invalid Telegram init data', 'should report invalid init data due to expired auth_date');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('initData with recent auth_date still works after max_age reduction (Task 4.11 regression)', async () => {
+  // Build initData with current auth_date — must still pass
+  const recentInitData = buildInitData('test-bot-token', { id: 123456, first_name: 'Fresh' });
+
+  const env = createEnv({ DATABASE_URL: 'postgres://db.example/app' });
+  const pgMock = createPgMock(async () => ({ rows: [] }));
+  const worker = loadWorker({ pg: pgMock.module });
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('{"ok":true,"result":{}}', { status: 200 });
+
+  try {
+    const req = new Request('https://worker.example/api/check-join', {
+      method: 'GET',
+      headers: { 'X-Telegram-Init-Data': recentInitData },
+    });
+    const res = await worker.fetch(req, env);
+    // check-join calls Telegram API; we just verify auth passes (not 401)
+    assert.notEqual(res.status, 401, 'recent initData must not be rejected as stale');
   } finally {
     global.fetch = originalFetch;
   }

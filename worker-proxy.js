@@ -222,7 +222,7 @@ function safeCompareStrings(left, right) {
   return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
+function validateTelegramInitData(initData, botToken, maxAgeSeconds = 3600) {
   if (!initData || !botToken || botToken === 'REPLACE_WITH_TOKEN') {
     return null;
   }
