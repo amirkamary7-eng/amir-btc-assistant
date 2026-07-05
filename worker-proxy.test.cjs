@@ -715,9 +715,9 @@ test('GET /api/check-join uses users.channel_joined from DB as source of truth',
   }
 });
 
-test('GET /api/debug/check-join returns Telegram debug payload for authenticated user', async () => {
+test('GET /api/debug/check-join returns Telegram debug payload for admin user', async () => {
   const worker = loadWorker();
-  const authUser = { id: 12345, first_name: 'Amir' };
+  const authUser = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', authUser);
   const { stub, calls } = createFetchStub(async () =>
     new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
@@ -738,12 +738,11 @@ test('GET /api/debug/check-join returns Telegram debug payload for authenticated
 
     const response = await worker.fetch(request, createEnv());
     assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.match(calls[0].url, /user_id=12345/);
+    assert.equal(calls.length, 0, 'Admin bypass — Telegram API not called');
     assert.deepEqual(await response.json(), {
       required_channel: 'amir_btc_2024',
-      user_id: '12345',
-      telegram_response: { ok: true, result: { status: 'member' } },
+      user_id: '831704732',
+      telegram_response: { admin: true, reason: 'admin_bypass' },
       joined: true,
     });
   } finally {
@@ -2994,6 +2993,39 @@ test('Custom WEBAPP_URL is reflected in CORS header (Task 4.7)', async () => {
   const origin = response.headers.get('Access-Control-Allow-Origin');
   assert.equal(origin, 'https://custom.example.com');
   assert.notEqual(origin, '*', 'CORS origin must NOT be wildcard');
+});
+
+// ── Task 4.8: Debug join endpoint — admin only ──────────────────────────────
+
+test('GET /api/debug/check-join rejects non-admin user with 403 (Task 4.8)', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'RegularUser' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/debug/check-join', {
+      method: 'GET',
+      headers: {
+        'X-Telegram-Init-Data': initData,
+      },
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.equal(body.detail, 'Admin access required');
+    assert.equal(calls.length, 0, 'Telegram API must NOT be called for non-admin');
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 

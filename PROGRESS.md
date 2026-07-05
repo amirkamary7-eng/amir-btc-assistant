@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 44 |
+| ✅ Done | 45 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 10 |
-| **Progress** | **81%** |
+| ⬜ Todo | 9 |
+| **Progress** | **83%** |
 
 ## By Phase
 
@@ -28,7 +28,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 8 | 62% |
+| 4 | Security Hardening | 13 | 9 | 69% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ## DONE Criteria (قانون تأیید تسک)
@@ -328,6 +328,26 @@ None.
 - `header === 'https://custom.example.com'` with custom env ✅
 
 **`node --test worker-proxy.test.cjs` → 63/63 pass**
+
+### ✅ Task 4.8 — Debug join endpoint — admin only (2026-07-05)
+
+**Category:** 2 — Behavioral (security fix, proven by request/response)
+
+**Change:** Added `isAdminTelegramId` check to `handleDebugCheckJoin` (worker-proxy.js L3647-3649). Non-admin users now get 403 before any Telegram API call is made. Updated existing test to use admin user ID.
+
+**Runtime evidence (1 new test + 1 updated, 64/64 total pass):**
+
+| Test | Checks | Result |
+|------|--------|--------|
+| Non-admin user → 403, no Telegram API call | 3 | ✅ |
+| Admin user → 200, admin bypass (updated) | 3 | ✅ |
+
+**Smoking gun assertions:**
+- Non-admin: `response.status === 403` + `body.detail === 'Admin access required'` ✅
+- Non-admin: `calls.length === 0` — Telegram API never called ✅
+- Admin: `response.status === 200` + `telegram_response: { admin: true, reason: 'admin_bypass' }` ✅
+
+**`node --test worker-proxy.test.cjs` → 64/64 pass**
 
 ## Next Executable Tasks
 
