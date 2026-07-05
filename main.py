@@ -23,7 +23,7 @@ except ImportError:
 import requests
 import xml.etree.ElementTree as ET
 from pydantic import BaseModel
-from fastapi import FastAPI, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
@@ -142,6 +142,13 @@ def verify_telegram_auth(func):
 # خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت ماژول اثر می‌گذارد.
 def verify_admin_telegram_auth(func):
     return _verify_admin_telegram_auth(func)
+
+
+def _require_legacy_routes(request: Request) -> None:
+    """Raise 410 if FASTAPI_LEGACY_ROUTES is disabled (routes moved to Cloudflare Worker)."""
+    if not get_settings().FASTAPI_LEGACY_ROUTES:
+        raise HTTPException(status_code=410, detail="This route has been migrated to Cloudflare Worker. Set FASTAPI_LEGACY_ROUTES=true to re-enable (not recommended).")
+
 
 # ==========================================
 # ۲. مسیر ریشه برای تست سلامت سرور
@@ -529,7 +536,7 @@ async def health_check():
         "redis_ready": redis_ready(),
     }
 
-@app.get("/api/check-join")
+@app.get("/api/check-join", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def check_join(
     request: Request,
@@ -580,7 +587,7 @@ async def check_join(
 # عملیات مربوط به debug بررسی عضویت را انجام می‌دهد.
 # ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.get("/api/debug/check-join")
+@app.get("/api/debug/check-join", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def debug_check_join(request: Request, user_id: Optional[str] = Query(None)):
     resolved_id = get_authenticated_telegram_user_id(request)
@@ -601,7 +608,7 @@ async def debug_check_join(request: Request, user_id: Optional[str] = Query(None
 # عملیات مربوط به invalidate عضویت کش را انجام می‌دهد.
 # ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.post("/api/check-join/invalidate")
+@app.post("/api/check-join/invalidate", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def invalidate_join_cache(request: Request, user_id: Optional[str] = Query(None)):
     resolved_id = get_authenticated_telegram_user_id(request)
@@ -612,7 +619,7 @@ async def invalidate_join_cache(request: Request, user_id: Optional[str] = Query
 # ایجاد تیکت را ایجاد می‌کند.
 # ورودی: پارامترهای `ticket: TicketCreate, request: Request` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.post("/api/tickets")
+@app.post("/api/tickets", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def create_ticket(ticket: TicketCreate, request: Request):
     telegram_user = get_authenticated_telegram_user(request)
@@ -653,7 +660,7 @@ async def create_ticket(ticket: TicketCreate, request: Request):
 # مقدار کاربر تیکت‌ها را بازیابی می‌کند.
 # ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.get("/api/tickets")
+@app.get("/api/tickets", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def get_user_tickets(request: Request, user_id: Optional[str] = Query(None)):
     resolved_user_id = get_authenticated_telegram_user_id(request)
@@ -672,7 +679,7 @@ async def get_user_tickets(request: Request, user_id: Optional[str] = Query(None
 # مقدار all تیکت‌ها را بازیابی می‌کند.
 # ورودی: پارامترهای `request: Request, admin_id: Optional[str] = Query(None)` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.get("/api/tickets/all")
+@app.get("/api/tickets/all", dependencies=[Depends(_require_legacy_routes)])
 @verify_admin_telegram_auth
 async def get_all_tickets(request: Request, admin_id: Optional[str] = Query(None)):
     if not database_ready():
@@ -685,7 +692,7 @@ async def get_all_tickets(request: Request, admin_id: Optional[str] = Query(None
 # عملیات مربوط به reply تیکت را انجام می‌دهد.
 # ورودی: پارامترهای `ticket_id: str, reply: TicketReply, request: Request` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.post("/api/tickets/{ticket_id}/reply")
+@app.post("/api/tickets/{ticket_id}/reply", dependencies=[Depends(_require_legacy_routes)])
 @verify_admin_telegram_auth
 async def reply_ticket(ticket_id: str, reply: TicketReply, request: Request):
     if not database_ready():
@@ -717,7 +724,7 @@ async def reply_ticket(ticket_id: str, reply: TicketReply, request: Request):
     )
     return {"status": "success", "ticket": serialized_ticket}
 
-@app.delete("/api/tickets/{ticket_id}")
+@app.delete("/api/tickets/{ticket_id}", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def delete_ticket(
     request: Request,
@@ -742,7 +749,7 @@ async def delete_ticket(
 # عملیات مربوط به اعلان کاربر را انجام می‌دهد.
 # ورودی: پارامترهای `req: NotifyRequest, request: Request` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.post("/api/notify")
+@app.post("/api/notify", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def notify_user(req: NotifyRequest, request: Request):
     resolved_user_id = get_authenticated_telegram_user_id(request)
@@ -765,7 +772,7 @@ class AlertCreate(BaseModel):
 # ایجاد هشدار را ایجاد می‌کند.
 # ورودی: پارامترهای `alert: AlertCreate, request: Request` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.post("/api/alerts")
+@app.post("/api/alerts", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def create_alert(alert: AlertCreate, request: Request):
     resolved_user_id = get_authenticated_telegram_user_id(request)
@@ -816,7 +823,7 @@ async def create_alert(alert: AlertCreate, request: Request):
 # مقدار کاربر هشدارها را بازیابی می‌کند.
 # ورودی: پارامترهای `request: Request, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.get("/api/alerts")
+@app.get("/api/alerts", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def get_user_alerts(request: Request, user_id: Optional[str] = Query(None)):
     resolved_user_id = get_authenticated_telegram_user_id(request)
@@ -838,7 +845,7 @@ async def get_user_alerts(request: Request, user_id: Optional[str] = Query(None)
 # حذف هشدار را حذف می‌کند.
 # ورودی: پارامترهای `request: Request, alert_id: str, user_id: Optional[str] = Query(None)` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
-@app.delete("/api/alerts/{alert_id}")
+@app.delete("/api/alerts/{alert_id}", dependencies=[Depends(_require_legacy_routes)])
 @verify_telegram_auth
 async def delete_alert(request: Request, alert_id: str, user_id: Optional[str] = Query(None)):
     resolved_user_id = get_authenticated_telegram_user_id(request)
@@ -970,7 +977,7 @@ if TOKEN == "REPLACE_WITH_TOKEN":
 # ورودی: پارامترهای `request: Request` را دریافت می‌کند.
 # خروجی: یک نتیجه غیرهمزمان از این عملیات برمی‌گرداند.
 # DEPRECATED — use Worker webhook only
-@app.post("/telegram")
+@app.post("/telegram", dependencies=[Depends(_require_legacy_routes)])
 async def telegram_webhook(request: Request):
     print("ℹ️ backend /telegram received a compatibility request; Worker owns the active webhook runtime.")
     return Response(status_code=200)

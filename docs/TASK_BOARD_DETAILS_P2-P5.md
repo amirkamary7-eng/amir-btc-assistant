@@ -363,7 +363,7 @@
 
 ### TASK 3.1
 
-**Status:** ⬜ Todo | **Phase:** 3 | **Task ID:** 3.1
+**Status:** ✅ Done | **Phase:** 3 | **Task ID:** 3.1
 
 **Title:** Disable FastAPI duplicate routes — flag-gated  
 **Type:** refactor | **Priority:** High

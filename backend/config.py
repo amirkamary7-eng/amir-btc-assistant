@@ -43,6 +43,8 @@ class Settings:
         self.AI_DAILY_IMAGE_LIMIT = int(os.environ.get("AI_DAILY_IMAGE_LIMIT", "3"))
         self.AI_COOLDOWN_SECONDS = int(os.environ.get("AI_COOLDOWN_SECONDS", "4"))
         self.REFERRAL_TOKENS_PER_INVITE = int(os.environ.get("REFERRAL_TOKENS_PER_INVITE", "3"))
+        self.TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+        self.FASTAPI_LEGACY_ROUTES = os.environ.get("FASTAPI_LEGACY_ROUTES", "true").lower() in ("true", "1", "yes")
 
     @property
     def database_enabled(self) -> bool:
