@@ -2227,6 +2227,84 @@ test('POST /api/analyses rejects non-admin user before touching DB', async () =>
   }
 });
 
+test('Multi-admin: ADMIN_TELEGRAM_IDS allows second admin to access admin routes (Task 3.2)', async () => {
+  const worker = loadWorker();
+  const secondAdmin = { id: 999888, first_name: 'Admin2' };
+  const initData = buildInitData('test-bot-token', secondAdmin);
+
+  const env = createEnv({
+    ADMIN_TELEGRAM_ID: '831704732',
+    ADMIN_TELEGRAM_IDS: '111222,999888',
+    DATABASE_URL: 'postgres://db.example/app',
+  });
+
+  // Test: GET /api/tickets/all — second admin should pass
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM tickets')) return { rows: [] };
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const workerWithDb = loadWorker({ pg: pgMock.module });
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('unexpected', { status: 500 });
+
+  try {
+    const request = new Request('https://worker.example/api/tickets/all', {
+      method: 'GET',
+      headers: { 'X-Telegram-Init-Data': initData },
+    });
+    const response = await workerWithDb.fetch(request, env);
+    assert.equal(response.status, 200, 'second admin should get 200 on /api/tickets/all');
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // Test: POST /api/analyses — second admin should pass (not 403)
+  const pgMock2 = createPgMock(async (sql) => {
+    if (sql.includes('INSERT INTO analyses')) return { rows: [{ id: 'a1' }] };
+    if (sql.includes('FROM analyses')) return { rows: [] };
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const workerWithDb2 = loadWorker({ pg: pgMock2.module });
+  global.fetch = async () => new Response('unexpected', { status: 500 });
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ coin: 'btc', timeframe: '4h', image: '', text: 'body', author: 'Admin2' }),
+    });
+    const response = await workerWithDb2.fetch(request, env);
+    assert.equal(response.status, 200, 'second admin should get 200 on POST /api/analyses');
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // Test: non-admin still rejected
+  const nonAdmin = { id: 555666, first_name: 'User' };
+  const nonAdminInitData = buildInitData('test-bot-token', nonAdmin);
+  global.fetch = async () => new Response('unexpected', { status: 500 });
+
+  try {
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': nonAdminInitData,
+      },
+      body: JSON.stringify({ coin: 'btc', timeframe: '4h', image: '', text: 'body', author: 'User' }),
+    });
+    const response = await workerWithDb2.fetch(request, env);
+    assert.equal(response.status, 403, 'non-admin should still get 403');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('POST /api/analyses stores analysis in DB, ignores spoofed author_id, and bumps cache version', async () => {
   const now = new Date().toISOString();
   const analysesCache = createMemoryKv();

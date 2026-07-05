@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 38 |
+| ✅ Done | 39 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 16 |
-| **Progress** | **70%** |
+| ⬜ Todo | 15 |
+| **Progress** | **72%** |
 
 ## By Phase
 
@@ -27,7 +27,7 @@
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
-| 3 | Architecture Cleanup | 8 | 5 | 63% |
+| 3 | Architecture Cleanup | 8 | 6 | 75% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
@@ -188,7 +188,22 @@ handleAnalysesDelete (L2674-2681):
 | Text contains reply message `安娜 چطوری؟` | ✅ |
 | Existing 53 tests unchanged | ✅ |
 
-**`node --test worker-proxy.test.cjs` → 54/54 pass**
+**`node --test worker-proxy.test.cjs` → 55/55 pass**
+
+### ✅ Task 3.2 — Multi-admin support on Worker (2026-07-05)
+
+**Change:** Added `getAdminIds(env)` (worker-proxy.js L804-817) that parses `ADMIN_TELEGRAM_IDS` (comma-separated) + always includes `ADMIN_TELEGRAM_ID`. Rewrote `isAdminTelegramId` to use `Set.has()`. Updated ticket create to notify all admins. Mirrors `backend/config.py:admin_ids`.
+
+**Runtime evidence (1 new test, 55/55 total pass):**
+
+| Check | Result |
+|-------|--------|
+| Admin 999888 (in ADMIN_TELEGRAM_IDS) → GET /tickets/all → 200 | ✅ |
+| Admin 999888 → POST /analyses → 200 | ✅ |
+| Non-admin 555666 → POST /analyses → 403 | ✅ |
+| 54 existing tests unchanged | ✅ |
+
+**`node --test worker-proxy.test.cjs` → 55/55 pass**
 
 ### ⬜ Unverified (0 tasks)
 
