@@ -3263,4 +3263,257 @@ test('GET /api/debug/check-join rejects non-admin user with 403 (Task 4.8)', asy
   }
 });
 
+// ── Task 5.6: Integration test — analyses CRUD + KV cache lifecycle ─────────
+
+test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → DELETE → GET(empty) with KV sync (Task 5.6)', async () => {
+  // Mutable in-memory DB shared across all requests in this test
+  const db = { analyses: [] };
+  const analysesCache = createMemoryKv();
+  const now = new Date().toISOString();
+
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('INSERT INTO analyses')) {
+      const newRow = {
+        id: params[0],
+        coin: params[1],
+        timeframe: params[2],
+        image: params[3],
+        text: params[4],
+        author: params[5],
+        author_id: params[6],
+        created_at: now,
+        updated_at: now,
+      };
+      db.analyses.unshift(newRow);
+      return { rows: [newRow] };
+    }
+    if (sql.includes('UPDATE analyses')) {
+      const idx = db.analyses.findIndex((a) => a.id === params[0]);
+      if (idx === -1) return { rows: [] };
+      db.analyses[idx] = {
+        ...db.analyses[idx],
+        coin: params[1],
+        timeframe: params[2],
+        image: params[3],
+        text: params[4],
+        updated_at: now,
+      };
+      return { rows: [db.analyses[idx]] };
+    }
+    if (sql.includes('DELETE FROM analyses')) {
+      const idx = db.analyses.findIndex((a) => a.id === params[0]);
+      if (idx === -1) return { rows: [] };
+      db.analyses.splice(idx, 1);
+      return { rows: [{ id: params[0] }] };
+    }
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY')) {
+      return { rows: [...db.analyses] };
+    }
+    throw new Error(`Unexpected SQL in integration test: ${sql}`);
+  });
+
+  const worker = loadWorker({ pg: pgMock.module });
+  const admin = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', admin);
+  const env = createEnv({
+    DATABASE_URL: 'postgres://db.example/app',
+    APP_CACHE: analysesCache,
+  });
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('fetch should not be called in analyses CRUD test');
+  };
+
+  try {
+    // ── Step 1: GET → empty (no cache, DB empty) → version=0 ──
+    let res = await worker.fetch(new Request('https://worker.example/api/analyses'), env);
+    assert.equal(res.status, 200);
+    let body = await res.json();
+    assert.equal(body.status, 'success');
+    assert.deepEqual(body.analyses, []);
+    assert.equal(body.version, 0, 'initial version should be 0');
+
+    // ── Step 2: POST → create first analysis → version bumps to 1 ──
+    res = await worker.fetch(
+      new Request('https://worker.example/api/analyses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
+        body: JSON.stringify({ coin: 'btc', timeframe: '4h', text: 'BTC analysis', author: 'Admin' }),
+      }),
+      env,
+    );
+    assert.equal(res.status, 200);
+    body = await res.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.analysis.coin, 'BTC');
+    assert.equal(body.analysis.text, 'BTC analysis');
+    assert.equal(body.version, 1, 'version should bump to 1 after CREATE');
+    const createdId = body.analysis.id;
+    assert.ok(createdId, 'created analysis must have an id');
+
+    // KV cache must be updated
+    assert.equal(await analysesCache.get('analyses:version'), '1', 'KV version must be 1 after CREATE');
+    const cachedList1 = JSON.parse(await analysesCache.get('analyses:list'));
+    assert.equal(cachedList1.length, 1, 'KV list must have 1 analysis after CREATE');
+    assert.equal(cachedList1[0].id, createdId);
+
+    // ── Step 3: GET → should return cached data (no DB query for version match) ──
+    res = await worker.fetch(new Request('https://worker.example/api/analyses'), env);
+    assert.equal(res.status, 200);
+    body = await res.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.analyses.length, 1, 'GET should return cached analysis');
+    assert.equal(body.analyses[0].coin, 'BTC');
+    assert.equal(body.version, 1);
+
+    // ── Step 4: POST → create second analysis → version bumps to 2 ──
+    res = await worker.fetch(
+      new Request('https://worker.example/api/analyses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
+        body: JSON.stringify({ coin: 'eth', timeframe: '1d', text: 'ETH analysis', author: 'Admin' }),
+      }),
+      env,
+    );
+    assert.equal(res.status, 200);
+    body = await res.json();
+    assert.equal(body.analysis.coin, 'ETH');
+    assert.equal(body.version, 2, 'version should bump to 2 after second CREATE');
+    assert.equal(await analysesCache.get('analyses:version'), '2');
+    const cachedList2 = JSON.parse(await analysesCache.get('analyses:list'));
+    assert.equal(cachedList2.length, 2, 'KV list must have 2 analyses');
+
+    // ── Step 5: PUT → update first analysis → version bumps to 3 ──
+    res = await worker.fetch(
+      new Request(`https://worker.example/api/analyses/${createdId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
+        body: JSON.stringify({ coin: 'btc', timeframe: '1d', text: 'Updated BTC analysis' }),
+      }),
+      env,
+    );
+    assert.equal(res.status, 200);
+    body = await res.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.analysis.text, 'Updated BTC analysis');
+    assert.equal(body.analysis.coin, 'BTC');
+    assert.equal(body.version, 3, 'version should bump to 3 after UPDATE');
+    assert.equal(await analysesCache.get('analyses:version'), '3');
+
+    // ── Step 6: GET with ?version=3 → unchanged:true (cache hit) ──
+    res = await worker.fetch(new Request('https://worker.example/api/analyses?version=3'), env);
+    assert.equal(res.status, 200);
+    body = await res.json();
+    assert.equal(body.unchanged, true, '?version=3 should return unchanged:true');
+    assert.equal(body.analyses, null, 'analyses should be null when unchanged');
+    assert.equal(body.version, 3);
+
+    // ── Step 7: GET with ?version=1 → full data (stale client) ──
+    res = await worker.fetch(new Request('https://worker.example/api/analyses?version=1'), env);
+    assert.equal(res.status, 200);
+    body = await res.json();
+    assert.equal(body.unchanged, undefined, 'stale version should not be unchanged');
+    assert.ok(body.analyses, 'stale version should return full data');
+    assert.equal(body.analyses.length, 2);
+
+    // ── Step 8: DELETE first analysis → version bumps to 4 ──
+    res = await worker.fetch(
+      new Request(`https://worker.example/api/analyses/${createdId}`, {
+        method: 'DELETE',
+        headers: { 'X-Telegram-Init-Data': initData },
+      }),
+      env,
+    );
+    assert.equal(res.status, 200);
+    body = await res.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.version, 4, 'version should bump to 4 after DELETE');
+    assert.equal(await analysesCache.get('analyses:version'), '4');
+
+    // ── Step 9: GET → should return only 1 analysis (the ETH one) ──
+    res = await worker.fetch(new Request('https://worker.example/api/analyses'), env);
+    assert.equal(res.status, 200);
+    body = await res.json();
+    assert.equal(body.analyses.length, 1, 'only ETH analysis should remain after DELETE');
+    assert.equal(body.analyses[0].coin, 'ETH');
+
+    // ── Step 10: DELETE non-existent → 404 ──
+    res = await worker.fetch(
+      new Request('https://worker.example/api/analyses/nonexistent', {
+        method: 'DELETE',
+        headers: { 'X-Telegram-Init-Data': initData },
+      }),
+      env,
+    );
+    assert.equal(res.status, 404, 'deleting non-existent analysis should return 404');
+
+    // ── Final: verify DB state matches expectations ──
+    assert.equal(db.analyses.length, 1, 'DB should have exactly 1 analysis remaining');
+    assert.equal(db.analyses[0].coin, 'ETH');
+
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Non-admin cannot POST/PUT/DELETE analyses — all return 403 without DB touch (Task 5.6 auth boundary)', async () => {
+  const dbTouched = { value: false };
+  const analysesCache = createMemoryKv();
+  const pgMock = createPgMock(async () => {
+    dbTouched.value = true;
+    throw new Error('DB should never be reached for non-admin');
+  });
+
+  const worker = loadWorker({ pg: pgMock.module });
+  const regularUser = { id: 999888, first_name: 'User' };
+  const initData = buildInitData('test-bot-token', regularUser);
+  const env = createEnv({
+    DATABASE_URL: 'postgres://db.example/app',
+    APP_CACHE: analysesCache,
+  });
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('unexpected', { status: 500 });
+
+  try {
+    // POST → 403
+    let res = await worker.fetch(
+      new Request('https://worker.example/api/analyses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
+        body: JSON.stringify({ coin: 'btc', text: 'hack', author: 'bad' }),
+      }),
+      env,
+    );
+    assert.equal(res.status, 403);
+
+    // PUT → 403
+    res = await worker.fetch(
+      new Request('https://worker.example/api/analyses/an1', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
+        body: JSON.stringify({ coin: 'btc', text: 'hack' }),
+      }),
+      env,
+    );
+    assert.equal(res.status, 403);
+
+    // DELETE → 403
+    res = await worker.fetch(
+      new Request('https://worker.example/api/analyses/an1', {
+        method: 'DELETE',
+        headers: { 'X-Telegram-Init-Data': initData },
+      }),
+      env,
+    );
+    assert.equal(res.status, 403);
+
+    // Verify DB was never touched
+    assert.equal(dbTouched.value, false, 'non-admin must never reach the database');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 
