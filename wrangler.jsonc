@@ -2,7 +2,10 @@
         "$schema": "./node_modules/wrangler/config-schema.json",
         "name": "amir-btc-assistant-api",
         "main": "worker-proxy.js",
-        "compatibility_date": "2026-06-27",
+        // IMPORTANT: Pin this date when upgrading nodejs_compat or Workers runtime.
+// Changing compatibility_date can break node:crypto, Pool, or other polyfilled APIs.
+// Always test with `npm test` after any compatibility_date change.
+"compatibility_date": "2026-06-27",
         "compatibility_flags": [
                 "nodejs_compat"
         ],
