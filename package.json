@@ -32,10 +32,6 @@
   },
   "homepage": "https://github.com/amirkamary7-eng/amir-btc-assistant#readme",
   "dependencies": {
-    "@prisma/adapter-pg": "^7.8.0",
-    "@prisma/client": "^7.8.0",
-    "@supabase/supabase-js": "^2.108.2",
-    "dotenv": "^17.4.2",
-    "pg": "^8.22.0"
+    "@neondatabase/serverless": "^1.1.0"
   }
 }

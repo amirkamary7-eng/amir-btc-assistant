@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import pg from 'pg';
+import { Pool } from '@neondatabase/serverless';
 
 /**
  * Cloudflare Worker Shell
@@ -222,6 +222,27 @@ function safeCompareStrings(left, right) {
   return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+/**
+ * C1/C2 FIX: Timing-safe string comparison that does NOT leak length.
+ * Pads the shorter buffer to match the longer one before comparison.
+ * Use this for comparing secrets/tokens of variable length.
+ */
+function timingSafeEqualSecret(a, b) {
+  const aBuf = Buffer.from(String(a || ''), 'utf8');
+  const bBuf = Buffer.from(String(b || ''), 'utf8');
+  const maxLen = Math.max(aBuf.length, bBuf.length);
+  if (maxLen === 0) return true;
+  // Use HMAC as a constant-time comparison since timingSafeEqual requires equal length.
+  // SHA-256 output is always 32 bytes → eliminates length side-channel.
+  const hmac = createHmac('sha256', 'timing-comparison-key');
+  hmac.update(aBuf);
+  const hashA = hmac.digest();
+  const hmac2 = createHmac('sha256', 'timing-comparison-key');
+  hmac2.update(bBuf);
+  const hashB = hmac2.digest();
+  return timingSafeEqual(hashA, hashB);
+}
+
 function validateTelegramInitData(initData, botToken, maxAgeSeconds = 3600) {
   if (!initData || !botToken || botToken === 'REPLACE_WITH_TOKEN') {
     return null;
@@ -329,7 +350,6 @@ function normalizeOptionalString(value) {
   return normalized ? normalized : null;
 }
 
-const { Pool } = pg;
 const JOIN_CACHE_PREFIX = 'join:';
 const JOINED_STATUSES = new Set(['creator', 'administrator', 'member', 'restricted']);
 const SESSION_PREFIX = 'session:';
@@ -2855,7 +2875,7 @@ async function handleAssistantLimits(request, env) {
 }
 
 async function handleAssistantChat(request, env) {
-  const authState = authenticateTelegramRequest(request, env, true);
+  const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
     return authState.error;
   }
@@ -3689,10 +3709,11 @@ async function handleTelegramWebhook(request, env) {
   const requestPath = new URL(request.url).pathname || '/';
 
   // ── Webhook secret validation (Task 2.11) ──────────────────────────────────
+  // C1 FIX: timing-safe comparison to prevent side-channel secret extraction
   const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET;
   if (webhookSecret) {
     const headerToken = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
-    if (!headerToken || headerToken !== webhookSecret) {
+    if (!headerToken || !timingSafeEqualSecret(headerToken, webhookSecret)) {
       return jsonResponse(
         { status: 'error', detail: 'Invalid or missing webhook secret token' },
         { status: 403 },
