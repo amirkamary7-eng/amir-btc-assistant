@@ -1981,14 +1981,20 @@ const HTML_ENTITY_MAP = {
   '&nbsp;': ' ',
 };
 
+const EXTERNAL_FETCH_TIMEOUT_MS = 8000;
+
 async function fetchJson(url) {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
     const response = await fetch(url, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
       },
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       return { ok: false, body: null };
@@ -2118,13 +2124,17 @@ async function translateToFarsi(text) {
 async function fetchRawNewsRss() {
   for (const [url, sourceName] of NEWS_RSS_SOURCES) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
       const response = await fetch(url, {
         method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0',
           Accept: 'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
         },
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       const rssText = await response.text();
       if (response.ok && rssText.includes('<item>')) {
