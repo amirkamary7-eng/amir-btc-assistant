@@ -2,6 +2,16 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Pool } from '@neondatabase/serverless';
 import { createAlertRepository } from './src/repositories/alerts.js';
 import { createAlertHandlers } from './src/controllers/alerts.js';
+import { createWatchlistRepository } from './src/repositories/watchlist.js';
+import { createWatchlistHandlers } from './src/controllers/watchlist.js';
+import { createReferralRepository } from './src/repositories/referrals.js';
+import { createReferralHandlers } from './src/controllers/referrals.js';
+import { createSessionRepository } from './src/repositories/sessions.js';
+import { createSessionHandlers } from './src/controllers/sessions.js';
+import { createTicketRepository } from './src/repositories/tickets.js';
+import { createTicketHandlers } from './src/controllers/tickets.js';
+import { createUserRepository } from './src/repositories/users.js';
+import { createUserHandlers } from './src/controllers/users.js';
 
 /**
  * Cloudflare Worker Shell
@@ -353,8 +363,6 @@ function normalizeOptionalString(value) {
 
 const JOIN_CACHE_PREFIX = 'join:';
 const JOINED_STATUSES = new Set(['creator', 'administrator', 'member', 'restricted']);
-const SESSION_PREFIX = 'session:';
-const SESSION_PRESENCE_STATE_KEY = 'session:presence_state';
 const RATE_LIMIT_COOLDOWN_PREFIX = 'ai:cooldown:';
 const RATE_LIMIT_MSG_PREFIX = 'ai:msgs:';
 const RATE_LIMIT_IMG_PREFIX = 'ai:imgs:';
@@ -719,35 +727,6 @@ async function generateAssistantReply(env, prompt, imageBase64) {
   throw new Error(lastError);
 }
 
-async function readPresenceState(env) {
-  const raw = await readSessionCache(env, SESSION_PRESENCE_STATE_KEY);
-  if (!raw) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return {};
-    }
-    return parsed;
-  } catch {
-    return {};
-  }
-}
-
-function prunePresenceState(state, nowMs) {
-  for (const [userId, expiresAt] of Object.entries(state)) {
-    if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) {
-      delete state[userId];
-    }
-  }
-}
-
-async function persistPresenceState(env, state, ttlSeconds) {
-  await writeSessionCache(env, SESSION_PRESENCE_STATE_KEY, JSON.stringify(state), ttlSeconds * 2);
-}
-
 function normalizeRequiredChannel(rawValue) {
   let value = String(rawValue || '').trim();
   if (!value) {
@@ -969,29 +948,6 @@ function getReferralRewardPerInvite(env) {
   return Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0);
 }
 
-function normalizeLanguage(value, fallbackValue = 'fa') {
-  const normalized = normalizeOptionalString(value);
-  if (normalized === 'fa' || normalized === 'en') {
-    return normalized;
-  }
-  return fallbackValue === 'en' ? 'en' : 'fa';
-}
-
-function normalizeUserRow(row, watchlist = []) {
-  return {
-    user_id: String(row.telegram_id),
-    username: normalizeOptionalString(row.username),
-    first_name: normalizeOptionalString(row.first_name),
-    last_name: normalizeOptionalString(row.last_name),
-    lang: normalizeLanguage(row.lang),
-    channel_joined: Boolean(row.channel_joined),
-    channel_verified_at: row.channel_verified_at ? new Date(row.channel_verified_at).toISOString() : null,
-    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
-    updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null,
-    watchlist,
-  };
-}
-
 async function queryDb(env, sql, params = [], retries = 1) {
   const pool = getDbPool(env);
   if (!pool) {
@@ -1018,137 +974,6 @@ async function ensureUserRow(env, userId) {
     `,
     [String(userId)],
   );
-}
-
-async function getUserRow(env, userId) {
-  const result = await queryDb(
-    env,
-    `
-      SELECT
-        telegram_id,
-        username,
-        first_name,
-        last_name,
-        lang,
-        channel_joined,
-        channel_verified_at,
-        created_at,
-        updated_at
-      FROM users
-      WHERE telegram_id = $1
-      LIMIT 1
-    `,
-    [String(userId)],
-  );
-  return result.rows[0] || null;
-}
-
-async function getWatchlistSymbolsFromDb(env, userId) {
-  const result = await queryDb(
-    env,
-    `
-      SELECT symbol
-      FROM watchlist_items
-      WHERE user_id = $1
-      ORDER BY position ASC, id ASC
-    `,
-    [String(userId)],
-  );
-  return result.rows.map((row) => String(row.symbol).toUpperCase());
-}
-
-async function bootstrapUserInDb(env, userId, payload) {
-  const existingUser = await getUserRow(env, userId);
-  const fallbackLang = existingUser?.lang || 'fa';
-  const lang = normalizeLanguage(payload.lang, fallbackLang);
-  const result = await queryDb(
-    env,
-    `
-      INSERT INTO users (
-        telegram_id,
-        username,
-        first_name,
-        last_name,
-        lang,
-        channel_joined,
-        channel_verified_at,
-        created_at,
-        updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, COALESCE($6, FALSE), $7, NOW(), NOW())
-      ON CONFLICT (telegram_id) DO UPDATE
-      SET
-        username = COALESCE(EXCLUDED.username, users.username),
-        first_name = COALESCE(EXCLUDED.first_name, users.first_name),
-        last_name = COALESCE(EXCLUDED.last_name, users.last_name),
-        lang = COALESCE(EXCLUDED.lang, users.lang),
-        updated_at = NOW()
-      RETURNING
-        telegram_id,
-        username,
-        first_name,
-        last_name,
-        lang,
-        channel_joined,
-        channel_verified_at,
-        created_at,
-        updated_at
-    `,
-    [
-      String(userId),
-      normalizeOptionalString(payload.username),
-      normalizeOptionalString(payload.first_name),
-      normalizeOptionalString(payload.last_name),
-      lang,
-      existingUser ? Boolean(existingUser.channel_joined) : false,
-      existingUser?.channel_verified_at ? new Date(existingUser.channel_verified_at).toISOString() : null,
-    ],
-  );
-  return result.rows[0] || null;
-}
-
-async function updateUserSettingsInDb(env, userId, payload) {
-  const lang = normalizeLanguage(payload.lang);
-  const result = await queryDb(
-    env,
-    `
-      UPDATE users
-      SET
-        lang = $2,
-        updated_at = NOW()
-      WHERE telegram_id = $1
-      RETURNING
-        telegram_id,
-        username,
-        first_name,
-        last_name,
-        lang,
-        channel_joined,
-        channel_verified_at,
-        created_at,
-        updated_at
-    `,
-    [String(userId), lang],
-  );
-  return result.rows[0] || null;
-}
-
-async function replaceWatchlistInDb(env, userId, symbols) {
-  await ensureUserRow(env, userId);
-  await queryDb(env, 'DELETE FROM watchlist_items WHERE user_id = $1', [String(userId)]);
-  if (symbols.length > 0) {
-    const params = [String(userId)];
-    const values = symbols.map((_, i) => `($1, $${i + 2}, $${i + 2 + symbols.length}, NOW())`);
-    for (const sym of symbols) params.push(sym);
-    for (let i = 0; i < symbols.length; i++) params.push(i);
-    await queryDb(
-      env,
-      `INSERT INTO watchlist_items (user_id, symbol, position, created_at) VALUES ${values.join(', ')}`,
-      params,
-    );
-  }
-  await queryDb(env, 'UPDATE users SET updated_at = NOW() WHERE telegram_id = $1', [String(userId)]);
-  return getWatchlistSymbolsFromDb(env, userId);
 }
 
 function serializeAnalysisRow(row) {
@@ -1345,226 +1170,6 @@ async function creditReferralTokens(env, userId, amount, refId, inviteeId) {
     `,
     [String(userId), Number(amount), `Invite reward for user ${String(inviteeId)}`, String(refId)],
   );
-}
-
-async function getReferralStatsFromDb(env, userId) {
-  const referralsResult = await queryDb(
-    env,
-    `
-      SELECT channel_verified, rewarded
-      FROM referrals
-      WHERE inviter_id = $1
-    `,
-    [String(userId)],
-  );
-  const balanceResult = await queryDb(
-    env,
-    'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
-    [String(userId)],
-  );
-  const referrals = referralsResult.rows;
-  return {
-    total: referrals.length,
-    active: referrals.filter((row) => Boolean(row.channel_verified)).length,
-    rewarded: referrals.filter((row) => Boolean(row.rewarded)).length,
-    tokens: Number(balanceResult.rows[0]?.balance || 0),
-    reward_per_invite: getReferralRewardPerInvite(env),
-  };
-}
-
-async function getReferralTokensFromDb(env, userId) {
-  const balanceResult = await queryDb(
-    env,
-    'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
-    [String(userId)],
-  );
-  const historyResult = await queryDb(
-    env,
-    `
-      SELECT id, amount, tx_type, description, ref_id, created_at
-      FROM token_transactions
-      WHERE user_id = $1
-      ORDER BY created_at DESC
-      LIMIT 50
-    `,
-    [String(userId)],
-  );
-  return {
-    balance: Number(balanceResult.rows[0]?.balance || 0),
-    history: historyResult.rows.map((row) => ({
-      id: row.id,
-      amount: Number(row.amount),
-      type: row.tx_type,
-      description: row.description,
-      ref_id: row.ref_id,
-      created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
-    })),
-  };
-}
-
-function serializeTicketReplyRow(row) {
-  const senderType = String(row.sender_type || 'user').trim().toLowerCase();
-  return {
-    message: row.message,
-    from: senderType === 'admin' ? 'admin' : 'user',
-    at: row.created_at ? new Date(row.created_at).toISOString() : null,
-  };
-}
-
-function serializeTicketRow(row, replies = []) {
-  return {
-    id: String(row.id),
-    user_id: String(row.user_id),
-    user_name: row.user_name,
-    title: row.title,
-    body: row.body,
-    status: row.status,
-    replies,
-    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
-  };
-}
-
-function serializeAlertRow(row) {
-  return {
-    id: String(row.id),
-    user_id: String(row.user_id),
-    symbol: String(row.symbol).toUpperCase(),
-    price: Number(row.price),
-    direction: row.direction,
-    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
-  };
-}
-
-async function getTicketRepliesFromDb(env, ticketId) {
-  const result = await queryDb(
-    env,
-    `
-      SELECT sender_type, message, created_at
-      FROM ticket_replies
-      WHERE ticket_id = $1
-      ORDER BY created_at ASC, id ASC
-    `,
-    [String(ticketId)],
-  );
-  return result.rows.map((row) => serializeTicketReplyRow(row));
-}
-
-async function hydrateTicketRow(env, row) {
-  const replies = await getTicketRepliesFromDb(env, row.id);
-  return serializeTicketRow(row, replies);
-}
-
-async function createTicketInDb(env, user, payload) {
-  const userId = String(user.id);
-  const displayName =
-    normalizeOptionalString(user.username)
-    || normalizeOptionalString(user.first_name)
-    || normalizeOptionalString(payload.user_name)
-    || userId;
-  await ensureUserRow(env, userId);
-  const result = await queryDb(
-    env,
-    `
-      INSERT INTO tickets (id, user_id, user_name, title, body, status, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, 'open', NOW(), NOW())
-      RETURNING id, user_id, user_name, title, body, status, created_at
-    `,
-    [
-      String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16),
-      userId,
-      displayName,
-      normalizeOptionalString(payload.title) || '',
-      normalizeOptionalString(payload.body) || '',
-    ],
-  );
-  return hydrateTicketRow(env, result.rows[0]);
-}
-
-async function listTicketsFromDb(env, userId = null) {
-  const ticketRows = userId
-    ? await queryDb(
-      env,
-      `
-        SELECT id, user_id, user_name, title, body, status, created_at
-        FROM tickets
-        WHERE user_id = $1
-        ORDER BY created_at DESC
-      `,
-      [String(userId)],
-    )
-    : await queryDb(
-      env,
-      `
-        SELECT id, user_id, user_name, title, body, status, created_at
-        FROM tickets
-        ORDER BY created_at DESC
-      `,
-    );
-  if (ticketRows.rows.length === 0) return [];
-  const ticketIds = ticketRows.rows.map((r) => String(r.id));
-  const replyResult = await queryDb(
-    env,
-    `
-      SELECT ticket_id, sender_type, message, created_at
-      FROM ticket_replies
-      WHERE ticket_id = ANY($1)
-      ORDER BY ticket_id, created_at ASC, id ASC
-    `,
-    [ticketIds],
-  );
-  const repliesByTicket = new Map();
-  for (const row of replyResult.rows) {
-    const tid = String(row.ticket_id);
-    if (!repliesByTicket.has(tid)) repliesByTicket.set(tid, []);
-    repliesByTicket.get(tid).push(serializeTicketReplyRow(row));
-  }
-  return ticketRows.rows.map((row) =>
-    serializeTicketRow(row, repliesByTicket.get(String(row.id)) || []),
-  );
-}
-
-async function getTicketRowById(env, ticketId) {
-  const result = await queryDb(
-    env,
-    `
-      SELECT id, user_id, user_name, title, body, status, created_at
-      FROM tickets
-      WHERE id = $1
-      LIMIT 1
-    `,
-    [String(ticketId)],
-  );
-  return result.rows[0] || null;
-}
-
-async function replyToTicketInDb(env, ticketId, adminId, message) {
-  const ticketRow = await getTicketRowById(env, ticketId);
-  if (!ticketRow) {
-    return null;
-  }
-  await queryDb(
-    env,
-    `
-      INSERT INTO ticket_replies (ticket_id, sender_type, sender_id, message, created_at)
-      VALUES ($1, 'admin', $2, $3, NOW())
-    `,
-    [String(ticketId), String(adminId), message],
-  );
-  await queryDb(
-    env,
-    `
-      UPDATE tickets
-      SET status = 'answered', updated_at = NOW()
-      WHERE id = $1
-    `,
-    [String(ticketId)],
-  );
-  const updatedTicketRow = await getTicketRowById(env, ticketId);
-  return hydrateTicketRow(env, updatedTicketRow || ticketRow);
-}
-
-async function deleteTicketInDb(env, ticketId) {
-  await queryDb(env, 'DELETE FROM tickets WHERE id = $1', [String(ticketId)]);
 }
 
 async function createOrReactivateAlertInDb(env, userId, payload) {
@@ -2529,6 +2134,59 @@ const alertHandlers = createAlertHandlers({
   isDatabaseConfigured,
   alertRepo,
 });
+const watchlistRepo = createWatchlistRepository({ queryDb, ensureUserRow });
+const watchlistHandlers = createWatchlistHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  readJsonBody,
+  safeDbErrorResponse,
+  buildBodyFieldValidationError,
+  isDatabaseConfigured,
+  watchlistRepo,
+});
+const referralRepo = createReferralRepository({ queryDb, getReferralRewardPerInvite });
+const referralHandlers = createReferralHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  safeDbErrorResponse,
+  isDatabaseConfigured,
+  referralRepo,
+});
+const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
+const sessionHandlers = createSessionHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  getNumericEnv,
+  normalizeOptionalString,
+  sessionRepo,
+});
+const ticketRepo = createTicketRepository({ queryDb, ensureUserRow, normalizeOptionalString });
+const ticketHandlers = createTicketHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  readJsonBody,
+  safeDbErrorResponse,
+  buildBodyFieldValidationError,
+  isDatabaseConfigured,
+  isAdminTelegramId,
+  getAdminIds,
+  sendTelegramMessage,
+  normalizeOptionalString,
+  ticketRepo,
+});
+const userRepo = createUserRepository({ queryDb, normalizeOptionalString });
+const userHandlers = createUserHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  readJsonBody,
+  safeDbErrorResponse,
+  buildBodyFieldValidationError,
+  isDatabaseConfigured,
+  normalizeOptionalString,
+  processReferralOnBootstrap,
+  userRepo,
+  watchlistRepo,
+});
 //#endregion
 
 async function handleChartResolve(request, env) {
@@ -2810,110 +2468,6 @@ async function handleAnalysesDelete(request, env, analysisId) {
   }
 }
 
-async function handleSessionsHeartbeat(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!env.SESSION_CACHE) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'SESSION_CACHE binding not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const url = new URL(request.url);
-  const providedSessionId = normalizeOptionalString(url.searchParams.get('session_id'));
-  const sessionId = providedSessionId || String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16);
-  const userId = String(authState.user.id);
-  const ttlSeconds = getNumericEnv(env, 'SESSION_TTL', 120);
-  const now = new Date();
-  const lastSeen = now.toISOString();
-  const nowMs = now.getTime();
-
-  await Promise.all([
-    writeSessionCache(env, `${SESSION_PREFIX}${userId}`, sessionId, ttlSeconds),
-    writeSessionCache(env, `${SESSION_PREFIX}${userId}:seen`, lastSeen, ttlSeconds),
-  ]);
-
-  const state = await readPresenceState(env);
-  prunePresenceState(state, nowMs);
-  state[userId] = nowMs + ttlSeconds * 1000;
-  await persistPresenceState(env, state, ttlSeconds);
-
-  return jsonResponse({
-    status: 'success',
-    session_id: sessionId,
-    last_seen: lastSeen,
-    online_count: Object.keys(state).length,
-  }, env);
-}
-
-async function handleSessionsOnline(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!env.SESSION_CACHE) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'SESSION_CACHE binding not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const ttlSeconds = getNumericEnv(env, 'SESSION_TTL', 120);
-  const nowMs = Date.now();
-  const state = await readPresenceState(env);
-  prunePresenceState(state, nowMs);
-  await persistPresenceState(env, state, ttlSeconds);
-
-  return jsonResponse({
-    status: 'success',
-    count: Object.keys(state).length,
-  }, env);
-}
-
-async function handleSessionsEnd(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!env.SESSION_CACHE) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'SESSION_CACHE binding not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const ttlSeconds = getNumericEnv(env, 'SESSION_TTL', 120);
-  const nowMs = Date.now();
-  const userId = String(authState.user.id);
-
-  await Promise.all([
-    deleteSessionCache(env, `${SESSION_PREFIX}${userId}`),
-    deleteSessionCache(env, `${SESSION_PREFIX}${userId}:seen`),
-  ]);
-
-  const state = await readPresenceState(env);
-  prunePresenceState(state, nowMs);
-  delete state[userId];
-  await persistPresenceState(env, state, ttlSeconds);
-
-  return jsonResponse({
-    status: 'success',
-    online_count: Object.keys(state).length,
-  }, env);
-}
-
 async function handleAssistantLimits(request, env) {
   const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
@@ -3039,437 +2593,6 @@ async function handleAssistantChat(request, env) {
         message: 'AI service temporarily unavailable',
       },
       { status: 503 }, env);
-  }
-}
-
-async function handleTicketsCreate(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const bodyResult = await readJsonBody(request, env);
-  if (bodyResult.error) return bodyResult.error;
-  let payload = bodyResult.payload;
-
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 }, env);
-  }
-
-  payload.user_id = String(authState.user.id);
-  try {
-    const ticket = await createTicketInDb(env, authState.user, payload);
-
-    // Notify all admins via Telegram (Task 2.13 + 3.2)
-    try {
-      for (const adminStr of getAdminIds(env)) {
-        const adminId = Number(adminStr);
-        if (Number.isFinite(adminId)) {
-          await sendTelegramMessage(env, {
-            chat_id: adminId,
-            text: `🎫 تیکت جدید\nاز: ${ticket.user_name || ''} (${ticket.user_id})\nعنوان: ${ticket.title}\n\n${ticket.body}`,
-            disable_web_page_preview: true,
-          });
-        }
-      }
-    } catch (notifyErr) {
-      console.warn('ticket create: admin notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
-    }
-    try {
-      const userId = Number(authState.user.id);
-      if (Number.isFinite(userId)) {
-        await sendTelegramMessage(env, {
-          chat_id: userId,
-          text: `✅ تیکت شما ثبت شد\nعنوان: ${ticket.title}\nبه زودی پاسخ داده می‌شود.`,
-          disable_web_page_preview: true,
-        });
-      }
-    } catch (notifyErr) {
-      console.warn('ticket create: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
-    }
-
-    return jsonResponse({ status: 'success', ticket }, env);
-  } catch (error) {
-    console.warn('create ticket failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleTicketsList(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-  const userId = String(authState.user.id);
-  try {
-    const tickets = await listTicketsFromDb(env, userId);
-    return jsonResponse({ status: 'success', tickets }, env);
-  } catch (error) {
-    console.warn('list tickets failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleTicketsAll(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-  try {
-    const tickets = await listTicketsFromDb(env);
-    return jsonResponse({ status: 'success', tickets }, env);
-  } catch (error) {
-    console.warn('list all tickets failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleTicketReply(request, env, ticketId) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-  const bodyResult = await readJsonBody(request, env);
-  if (bodyResult.error) return bodyResult.error;
-  let payload = bodyResult.payload;
-
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 }, env);
-  }
-
-  const message = normalizeOptionalString(payload.message) || '';
-  if (!message) {
-    return jsonResponse(
-      buildBodyFieldValidationError('message', 'string_too_short', 'String should have at least 1 character', message, { min_length: 1 }),
-      { status: 422 }, env);
-  }
-  try {
-    const ticket = await replyToTicketInDb(env, ticketId, authState.user.id, message);
-    if (!ticket) {
-      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, {}, env);
-    }
-
-    // Notify ticket owner via Telegram (Task 2.14 — mirror main.py:721-724)
-    try {
-      const ownerId = Number(ticket.user_id);
-      if (Number.isFinite(ownerId)) {
-        await sendTelegramMessage(env, {
-          chat_id: ownerId,
-          text: `💬 پاسخ تیکت: ${ticket.title}\n\n${message}`,
-          disable_web_page_preview: true,
-        });
-      }
-    } catch (notifyErr) {
-      console.warn('ticket reply: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
-    }
-
-    return jsonResponse({ status: 'success', ticket }, env);
-  } catch (error) {
-    console.warn('reply ticket failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleTicketDelete(request, env, ticketId) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  const userId = String(authState.user.id);
-  const isAdmin = isAdminTelegramId(env, authState.user.id);
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-  try {
-    const ticket = await getTicketRowById(env, ticketId);
-    if (!ticket) {
-      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, {}, env);
-    }
-    if (!isAdmin && String(ticket.user_id) !== userId) {
-      return jsonResponse({ detail: 'Forbidden' }, { status: 403 }, {}, env);
-    }
-    await deleteTicketInDb(env, ticketId);
-    return jsonResponse({ status: 'success' }, env);
-  } catch (error) {
-    console.warn('delete ticket failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleUsersBootstrap(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'DB_ERROR',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const bodyResult = await readJsonBody(request, env);
-  if (bodyResult.error) return bodyResult.error;
-  let payload = bodyResult.payload;
-
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 }, env);
-  }
-  const userId = String(authState.user.id);
-  payload.user_id = userId;
-  try {
-    const userRow = await bootstrapUserInDb(env, userId, {
-      username: normalizeOptionalString(payload.username) || normalizeOptionalString(authState.user.username),
-      first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(authState.user.first_name),
-      last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(authState.user.last_name),
-      lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(authState.user.language_code),
-    });
-    await processReferralOnBootstrap(
-      env,
-      userId,
-      normalizeOptionalString(payload.referrer_id),
-      Boolean(userRow?.channel_joined),
-    );
-    const freshUserRow = await getUserRow(env, userId);
-    const watchlist = await getWatchlistSymbolsFromDb(env, userId);
-    return jsonResponse({
-      status: 'success',
-      user: normalizeUserRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
-      watchlist,
-    }, env);
-  } catch (error) {
-    console.warn('bootstrap user failed:', error);
-    return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, {}, env);
-  }
-}
-
-async function handleUsersMe(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-  const userId = String(authState.user.id);
-  try {
-    const userRow = await getUserRow(env, userId);
-    if (!userRow) {
-      return jsonResponse(
-        {
-          status: 'error',
-          message: 'User not found',
-        },
-        { status: 404 }, env);
-    }
-    const watchlist = await getWatchlistSymbolsFromDb(env, userId);
-    return jsonResponse({
-      status: 'success',
-      user: normalizeUserRow(userRow, watchlist),
-      watchlist,
-    }, env);
-  } catch (error) {
-    console.warn('get current user failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleUsersMeSettings(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const bodyResult = await readJsonBody(request, env);
-  if (bodyResult.error) return bodyResult.error;
-  let payload = bodyResult.payload;
-
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 }, env);
-  }
-
-  const userId = String(authState.user.id);
-  payload.user_id = userId;
-  try {
-    const userRow = await updateUserSettingsInDb(env, userId, payload);
-    if (!userRow) {
-      return jsonResponse(
-        {
-          status: 'error',
-          message: 'User not found',
-        },
-        { status: 404 }, env);
-    }
-    return jsonResponse({ status: 'success', user: normalizeUserRow(userRow) }, env);
-  } catch (error) {
-    console.warn('update user settings failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleWatchlistGet(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-  const userId = String(authState.user.id);
-  try {
-    const symbols = await getWatchlistSymbolsFromDb(env, userId);
-    return jsonResponse({ status: 'success', symbols, watchlist: symbols }, env);
-  } catch (error) {
-    console.warn('get watchlist failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleWatchlistPut(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const bodyResult = await readJsonBody(request, env);
-  if (bodyResult.error) return bodyResult.error;
-  let payload = bodyResult.payload;
-
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 }, env);
-  }
-
-  payload.user_id = String(authState.user.id);
-  const symbols = Array.isArray(payload.symbols)
-    ? [...new Set(payload.symbols.map((value) => String(value).toUpperCase().trim()).filter(Boolean))].slice(0, 7)
-    : [];
-  try {
-    const storedSymbols = await replaceWatchlistInDb(env, payload.user_id, symbols);
-    return jsonResponse({ status: 'success', symbols: storedSymbols }, env);
-  } catch (error) {
-    console.warn('update watchlist failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleReferralsStats(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse({ status: 'success', total: 0, active: 0, rewarded: 0, tokens: 0 }, env);
-  }
-  try {
-    const stats = await getReferralStatsFromDb(env, authState.user.id);
-    return jsonResponse({ status: 'success', ...stats }, env);
-  } catch (error) {
-    console.warn('get referral stats failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleReferralTokens(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse({ status: 'success', balance: 0, history: [] }, env);
-  }
-  try {
-    const tokenState = await getReferralTokensFromDb(env, authState.user.id);
-    return jsonResponse({ status: 'success', ...tokenState }, env);
-  } catch (error) {
-    console.warn('get referral tokens failed:', error);
-    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3886,25 +3009,25 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/tickets') {
-        return await handleTicketsCreate(request, env);
+        return await ticketHandlers.handleCreate(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/tickets') {
-        return await handleTicketsList(request, env);
+        return await ticketHandlers.handleList(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/tickets/all') {
-        return await handleTicketsAll(request, env);
+        return await ticketHandlers.handleListAll(request, env);
       }
 
       if (request.method === 'POST' && /^\/api\/tickets\/[^/]+\/reply$/u.test(url.pathname)) {
         const ticketId = url.pathname.split('/')[3] || '';
-        return await handleTicketReply(request, env, ticketId);
+        return await ticketHandlers.handleReply(request, env, ticketId);
       }
 
       if (request.method === 'DELETE' && /^\/api\/tickets\/[^/]+$/u.test(url.pathname) && url.pathname !== '/api/tickets/all') {
         const ticketId = url.pathname.split('/')[3] || '';
-        return await handleTicketDelete(request, env, ticketId);
+        return await ticketHandlers.handleDelete(request, env, ticketId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/alerts') {
@@ -3921,15 +3044,15 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
-        return await handleSessionsHeartbeat(request, env);
+        return await sessionHandlers.handleHeartbeat(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/sessions/online') {
-        return await handleSessionsOnline(request, env);
+        return await sessionHandlers.handleOnline(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/sessions/end') {
-        return await handleSessionsEnd(request, env);
+        return await sessionHandlers.handleEnd(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/assistant/limits') {
@@ -3941,23 +3064,23 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/users/me') {
-        return await handleUsersMe(request, env);
+        return await userHandlers.handleMe(request, env);
       }
 
       if (request.method === 'PUT' && url.pathname === '/api/users/me/settings') {
-        return await handleUsersMeSettings(request, env);
+        return await userHandlers.handleMeSettings(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
-        return await handleUsersBootstrap(request, env);
+        return await userHandlers.handleBootstrap(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/watchlist') {
-        return await handleWatchlistGet(request, env);
+        return await watchlistHandlers.handleGet(request, env);
       }
 
       if (request.method === 'PUT' && url.pathname === '/api/watchlist') {
-        return await handleWatchlistPut(request, env);
+        return await watchlistHandlers.handlePut(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/notify') {
@@ -3965,11 +3088,11 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/stats') {
-        return handleReferralsStats(request, env);
+        return referralHandlers.handleStats(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/tokens') {
-        return handleReferralTokens(request, env);
+        return referralHandlers.handleTokens(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/check-join') {
