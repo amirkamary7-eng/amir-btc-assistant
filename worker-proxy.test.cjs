@@ -21,7 +21,7 @@ function loadWorker(overrides = {}) {
       "import { createHmac, timingSafeEqual } from 'node:crypto';",
       "const { createHmac, timingSafeEqual } = require('node:crypto');",
     )
-    .replace("import pg from 'pg';", "const pg = require('pg');")
+    .replace("import { Pool } from '@neondatabase/serverless';", "const { Pool } = require('@neondatabase/serverless');")
     .replace('export default {', 'module.exports = {');
 
   // Suppress worker console noise inside the eval'd scope.
@@ -33,7 +33,7 @@ function loadWorker(overrides = {}) {
 
   const module = { exports: {} };
   const defaultMocks = {
-    pg: {
+    '@neondatabase/serverless': {
       Pool: class Pool {
         async query() {
           return { rows: [] };
@@ -213,7 +213,7 @@ test('PUT /api/users/me/settings ignores spoofed user_id and updates DB-backed u
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -256,7 +256,7 @@ test('GET /api/watchlist ignores spoofed query user_id and returns DB-backed sym
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -314,7 +314,7 @@ test('PUT /api/watchlist ignores spoofed body user_id and stores DB-backed symbo
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -377,7 +377,7 @@ test('POST /api/users/bootstrap writes profile to DB and returns DB-backed watch
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir', username: 'amir', language_code: 'en' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -419,7 +419,7 @@ test('POST /api/users/bootstrap returns generic DB_ERROR without leaking SQL det
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir', username: 'amir', language_code: 'en' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -474,7 +474,7 @@ test('GET /api/referrals/stats returns DB-backed referral stats', async () => {
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -527,7 +527,7 @@ test('GET /api/referrals/tokens returns DB-backed token history', async () => {
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -625,7 +625,7 @@ test('GET /api/check-join returns cached join status for authenticated user', as
 
 test('GET /api/check-join refresh=true checks Telegram and persists DB plus KV', async () => {
   const pgMock = createPgMock(async () => ({ rows: [] }));
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const joinCache = createMemoryKv();
@@ -678,7 +678,7 @@ test('GET /api/check-join uses users.channel_joined from DB as source of truth',
     }
     return { rows: [] };
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -884,7 +884,7 @@ test('GET /api/check-join tolerates DB read failure and still confirms joined vi
     }
     return { rows: [] };
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const joinCache = createMemoryKv();
@@ -935,7 +935,7 @@ test('POST /telegram handles /start for joined member with web_app button', asyn
     }
     return { rows: [] };
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const { stub, calls } = createFetchStub(async () =>
     new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
       status: 200,
@@ -986,7 +986,7 @@ test('POST /telegram handles /start for joined member with web_app button', asyn
 
 test('POST /telegram handles /start for joined member via live Telegram check and persists DB', async () => {
   const pgMock = createPgMock(async () => ({ rows: [] }));
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const { stub, calls } = createFetchStub(async (url) => {
     if (String(url).includes('/getChatMember?')) {
       return new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
@@ -1152,37 +1152,12 @@ test('POST /api/assistant/chat without Telegram init data is rejected when DEV_M
   }
 });
 
-test('POST /api/assistant/chat in DEV_MODE bypasses Telegram init data and uses mocked user id', async () => {
+test('POST /api/assistant/chat rejects DEV_MODE bypass — auth is always required (C3 fix)', async () => {
   const prevDevMode = process.env.DEV_MODE;
   process.env.DEV_MODE = 'true';
 
   const worker = loadWorker();
   const rateLimits = createMemoryKv();
-  const originalFetch = global.fetch;
-  global.fetch = async (url, init = {}) => {
-    if (!String(url).includes('generativelanguage.googleapis.com')) {
-      throw new Error(`Unexpected fetch url: ${url}`);
-    }
-    assert.equal(String(url).includes('?key='), false);
-    assert.equal(init.headers['x-goog-api-key'], 'gemini-key');
-    const body = JSON.parse(await new Response(init.body).text());
-    assert.equal(body.contents[0].parts[0].text.includes('user: hi'), true);
-    return new Response(
-      JSON.stringify({
-        candidates: [
-          {
-            content: {
-              parts: [{ text: 'gemini reply' }],
-            },
-          },
-        ],
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  };
 
   try {
     const request = new Request('https://worker.example/api/assistant/chat', {
@@ -1190,7 +1165,7 @@ test('POST /api/assistant/chat in DEV_MODE bypasses Telegram init data and uses 
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ user_id: 'spoofed', message: 'hi', history: [] }),
+      body: JSON.stringify({ message: 'hi', history: [] }),
     });
 
     const response = await worker.fetch(
@@ -1201,18 +1176,9 @@ test('POST /api/assistant/chat in DEV_MODE bypasses Telegram init data and uses 
       }),
     );
 
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
-      status: 'success',
-      reply: 'gemini reply',
-      provider: 'gemini',
-    });
-
-    const today = new Date().toISOString().slice(0, 10);
-    assert.equal(await rateLimits.get('ai:cooldown:12345'), '1');
-    assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), '1');
+    // C3 fix: even with DEV_MODE=true, chat endpoint must require real Telegram auth
+    assert.equal(response.status, 401);
   } finally {
-    global.fetch = originalFetch;
     process.env.DEV_MODE = prevDevMode;
   }
 });
@@ -1498,7 +1464,7 @@ test('POST /api/tickets ignores spoofed user_id and stores ticket in DB', async 
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -1559,7 +1525,7 @@ test('POST /api/tickets sends Telegram notifications to admin and user after cre
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 54321, first_name: 'Sara', username: 'sara_btc' };
   const initData = buildInitData('test-bot-token', authUser);
 
@@ -1629,7 +1595,7 @@ test('GET /api/tickets returns only authenticated user tickets from DB', async (
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -1705,7 +1671,7 @@ test('GET /api/tickets/all allows admin and returns all tickets from DB', async 
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const adminUser = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', adminUser);
   const originalFetch = global.fetch;
@@ -1804,7 +1770,7 @@ test('POST /api/tickets/:id/reply sends Telegram notification to ticket owner', 
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', authUser);
 
@@ -1869,7 +1835,7 @@ test('DELETE /api/tickets/:id deletes ticket when user owns it in DB', async () 
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -1943,7 +1909,7 @@ test('POST /api/alerts ignores spoofed user_id and stores alert in DB', async ()
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -1989,7 +1955,7 @@ test('GET /api/alerts returns stored alerts for authenticated user from DB', asy
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -2037,7 +2003,7 @@ test('DELETE /api/alerts/:id removes alert for authenticated user in DB', async 
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 12345, first_name: 'Amir' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -2090,7 +2056,7 @@ test('GET /api/analyses falls back to DB and hydrates APP_CACHE on cache miss', 
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const originalFetch = global.fetch;
   global.fetch = async () => {
     throw new Error('fetch should not be called for /api/analyses');
@@ -2158,7 +2124,7 @@ test('GET /api/analyses returns generic 503 without leaking SQL details on DB er
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const originalFetch = global.fetch;
   global.fetch = async () => {
     throw new Error('fetch should not be called for /api/analyses');
@@ -2242,7 +2208,7 @@ test('Multi-admin: ADMIN_TELEGRAM_IDS allows second admin to access admin routes
     if (sql.includes('FROM tickets')) return { rows: [] };
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const workerWithDb = loadWorker({ pg: pgMock.module });
+  const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const originalFetch = global.fetch;
   global.fetch = async () => new Response('unexpected', { status: 500 });
 
@@ -2311,7 +2277,7 @@ test('No hardcoded admin fallback: omitting ADMIN_TELEGRAM_ID rejects previously
     if (sql.includes('FROM tickets')) return { rows: [] };
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
 
   // Build auth for user 831704732 — the old hardcoded default
   const oldDefaultAdmin = { id: 831704732, first_name: 'OldDefault' };
@@ -2348,7 +2314,7 @@ test('Admin still works when ADMIN_TELEGRAM_ID is explicitly set (Task 4.9 regre
     if (sql.includes('FROM tickets')) return { rows: [] };
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
 
   const adminUser = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', adminUser);
@@ -2383,7 +2349,7 @@ test('initData with auth_date older than 1 hour is rejected (Task 4.11)', async 
 
   const env = createEnv({ DATABASE_URL: 'postgres://db.example/app' });
   const pgMock = createPgMock(async () => ({ rows: [] }));
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
 
   const originalFetch = global.fetch;
   global.fetch = async () => new Response('unexpected', { status: 500 });
@@ -2408,7 +2374,7 @@ test('initData with recent auth_date still works after max_age reduction (Task 4
 
   const env = createEnv({ DATABASE_URL: 'postgres://db.example/app' });
   const pgMock = createPgMock(async () => ({ rows: [] }));
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
 
   const originalFetch = global.fetch;
   global.fetch = async () => new Response('{"ok":true,"result":{}}', { status: 200 });
@@ -2470,7 +2436,7 @@ test('POST /api/analyses stores analysis in DB, ignores spoofed author_id, and b
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -2567,7 +2533,7 @@ test('PUT and DELETE /api/analyses/:id update DB-backed cache version', async ()
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const authUser = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', authUser);
   const originalFetch = global.fetch;
@@ -2639,7 +2605,7 @@ test('scheduled alerts runner triggers active price alerts and marks them trigge
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const calls = [];
   const originalFetch = global.fetch;
   global.fetch = async (url, init = {}) => {
@@ -2710,7 +2676,7 @@ test('scheduled alerts runner does not mark alert triggered when Telegram delive
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const originalFetch = global.fetch;
   global.fetch = async (url) => {
     if (String(url).includes('api.binance.com/api/v3/ticker/price')) {
@@ -2793,7 +2759,7 @@ test('Worker global catch returns 500 without leaking stack details on unhandled
 
 test('Referrer validation: matching Origin in production env passes through', async () => {
   const pgMock = createPgMock(async () => ({ rows: [] }));
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
 
   const initData = buildInitData('test-bot-token', { id: 831704732, first_name: 'A', last_name: 'B' });
   const request = new Request('https://worker.example/api/health', {
@@ -3312,7 +3278,7 @@ test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → 
     throw new Error(`Unexpected SQL in integration test: ${sql}`);
   });
 
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const admin = { id: 831704732, first_name: 'Admin' };
   const initData = buildInitData('test-bot-token', admin);
   const env = createEnv({
@@ -3465,7 +3431,7 @@ test('Non-admin cannot POST/PUT/DELETE analyses — all return 403 without DB to
     throw new Error('DB should never be reached for non-admin');
   });
 
-  const worker = loadWorker({ pg: pgMock.module });
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
   const regularUser = { id: 999888, first_name: 'User' };
   const initData = buildInitData('test-bot-token', regularUser);
   const env = createEnv({
@@ -3678,7 +3644,7 @@ test('Legacy ?admin_id= in query is ignored — header auth determines admin (Ta
     }
     return { rows: [] };
   });
-  const workerWithDb = loadWorker({ pg: pgMock.module });
+  const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
 
   // Auth as non-admin user 99999, but try to spoof admin_id in query
   const fakeUser = { id: 99999, first_name: 'Hacker' };
