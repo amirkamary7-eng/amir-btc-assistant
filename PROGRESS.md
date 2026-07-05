@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 41 |
+| ✅ Done | 42 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 13 |
-| **Progress** | **76%** |
+| ⬜ Todo | 12 |
+| **Progress** | **78%** |
 
 ## By Phase
 
@@ -28,7 +28,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 5 | 38% |
+| 4 | Security Hardening | 13 | 6 | 46% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ## DONE Criteria (قانون تأیید تسک)
@@ -256,6 +256,29 @@ None.
 **Parity with Python:** Identical behavior to `backend/services/ai_service.py:sanitize_history` (L85-107).
 
 **`node --test worker-proxy.test.cjs` → 57/57 pass**
+
+### ✅ Task 4.3 — Remove initData from GET query (2026-07-05)
+
+**Category:** 2 — Behavioral (security fix, proven by request/response)
+
+**Change:** Removed `searchParams.get('init_data')` fallback from `getTelegramInitData` (worker-proxy.js L186-188). Now only `X-Telegram-Init-Data` header is accepted. Query param `?init_data=` is no longer a valid auth path.
+
+**Before:** `return request.headers.get('X-Telegram-Init-Data') || new URL(request.url).searchParams.get('init_data') || '';`
+**After:** `return request.headers.get('X-Telegram-Init-Data') || '';`
+
+**Runtime evidence (2 new tests, 59/59 total pass):**
+
+| Test | Checks | Result |
+|------|--------|--------|
+| GET /api/check-join?init_data=<valid> → 401 | 2 | ✅ |
+| GET /api/assistant/limits with header → 200 | 2 | ✅ |
+
+**Smoking gun assertions:**
+- Valid HMAC-signed initData in query param → `response.status === 401` ✅
+- `body.detail === 'Missing Telegram init data'` — query param completely ignored ✅
+- Same initData in header → `response.status === 200` — header auth unaffected ✅
+
+**`node --test worker-proxy.test.cjs` → 59/59 pass**
 
 ## Next Executable Tasks
 
