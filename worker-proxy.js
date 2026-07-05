@@ -342,7 +342,11 @@ const RATE_LIMIT_IMG_PREFIX = 'ai:imgs:';
 const dbPools = new Map();
 
 function resolveDatabaseUrl(env) {
-  return String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
+  const url = String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
+  if (url && !url.includes('pgbouncer=true')) {
+    console.warn('DATABASE_URL should include ?pgbouncer=true for Neon serverless Pool');
+  }
+  return url;
 }
 
 function resolveRequiredChannel(env) {
