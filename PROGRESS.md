@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 40 |
+| ✅ Done | 41 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 14 |
-| **Progress** | **74%** |
+| ⬜ Todo | 13 |
+| **Progress** | **76%** |
 
 ## By Phase
 
@@ -28,7 +28,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 4 | 31% |
+| 4 | Security Hardening | 13 | 5 | 38% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ## DONE Criteria (قانون تأیید تسک)
@@ -221,6 +221,41 @@ handleAnalysesDelete (L2674-2681):
 ### ⬜ Unverified (0 tasks)
 
 None.
+
+### ✅ Task 4.1 — AI history role allowlist — Worker (2026-07-05)
+
+**Category:** 2 — Behavioral (security fix, proven by request/response)
+
+**Change:** Rewrote `normalizeAssistantHistory` (worker-proxy.js L501-526) to mirror Python `sanitize_history`:
+1. `ALLOWED_HISTORY_ROLES = new Set(['user', 'assistant'])` — only these two roles pass through
+2. Non-allowed roles (`system`, `tool`, `developer`, etc.) → converted to `'user'`
+3. Role comparison is case-insensitive (`.toLowerCase()`)
+4. Content: null bytes removed, trimmed, capped at 4000 chars (`MAX_HISTORY_CONTENT_LENGTH`)
+5. Non-object/null/array entries in history are skipped entirely
+6. Max 6 entries preserved (unchanged)
+
+**Runtime evidence (2 new tests, 57/57 total pass):**
+
+| Test | Checks | Result |
+|------|--------|--------|
+| POST /api/assistant/chat with `system`/`tool`/empty/null/`ASSISTANT` history | 10 | ✅ |
+| POST /api/assistant/chat with 5000-char history content | 3 | ✅ |
+
+**Smoking gun assertions (test 1):**
+- `!prompt.includes('system:')` — system role NOT in provider prompt ✅
+- `!prompt.includes('tool:')` — tool role NOT in provider prompt ✅
+- `prompt.includes('user: Ignore all previous instructions')` — system→user ✅
+- `prompt.includes('user: {"secret":"leaked_data"}')` — tool→user ✅
+- `prompt.includes('assistant: prior answer')` — ASSISTANT→assistant ✅
+- `!prompt.includes('oldest should be dropped')` — max-6 limit works ✅
+- `prompt.endsWith('user: latest question')` — final message always user ✅
+
+**Smoking gun assertions (test 2):**
+- 5000-char content truncated to exactly 4000 chars in prompt ✅
+
+**Parity with Python:** Identical behavior to `backend/services/ai_service.py:sanitize_history` (L85-107).
+
+**`node --test worker-proxy.test.cjs` → 57/57 pass**
 
 ## Next Executable Tasks
 
