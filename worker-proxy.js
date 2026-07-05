@@ -1449,7 +1449,7 @@ async function createTicketInDb(env, user, payload) {
 }
 
 async function listTicketsFromDb(env, userId = null) {
-  const result = userId
+  const ticketRows = userId
     ? await queryDb(
       env,
       `
@@ -1468,11 +1468,27 @@ async function listTicketsFromDb(env, userId = null) {
         ORDER BY created_at DESC
       `,
     );
-  const tickets = [];
-  for (const row of result.rows) {
-    tickets.push(await hydrateTicketRow(env, row));
+  if (ticketRows.rows.length === 0) return [];
+  const ticketIds = ticketRows.rows.map((r) => String(r.id));
+  const replyResult = await queryDb(
+    env,
+    `
+      SELECT ticket_id, sender_type, message, created_at
+      FROM ticket_replies
+      WHERE ticket_id = ANY($1)
+      ORDER BY ticket_id, created_at ASC, id ASC
+    `,
+    [ticketIds],
+  );
+  const repliesByTicket = new Map();
+  for (const row of replyResult.rows) {
+    const tid = String(row.ticket_id);
+    if (!repliesByTicket.has(tid)) repliesByTicket.set(tid, []);
+    repliesByTicket.get(tid).push(serializeTicketReplyRow(row));
   }
-  return tickets;
+  return ticketRows.rows.map((row) =>
+    serializeTicketRow(row, repliesByTicket.get(String(row.id)) || []),
+  );
 }
 
 async function getTicketRowById(env, ticketId) {
