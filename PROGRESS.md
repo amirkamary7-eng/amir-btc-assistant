@@ -15,18 +15,18 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 37 |
+| ✅ Done | 38 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 17 |
-| **Progress** | **69%** |
+| ⬜ Todo | 16 |
+| **Progress** | **70%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 13 | 93% |
+| 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -168,6 +168,27 @@ handleAnalysesDelete (L2674-2681):
 | Existing 52 tests unchanged (no regression) | ✅ |
 
 **`node --test worker-proxy.test.cjs` → 53/53 pass**
+
+### ✅ Task 2.14 — Ticket reply — Telegram notification (2026-07-05)
+
+**Change:** Added `sendTelegramMessage` call in ticket reply handler (worker-proxy.js L3104-3116), mirroring `main.py:721-724`:
+
+- After admin reply DB write: `💬 پاسخ تیکت: {title}\n\n{message}` → ticket owner's `user_id`
+- Wrapped in try/catch with `console.warn` on failure
+
+**Runtime evidence (1 new test, 54/54 total pass):**
+
+| Check | Result |
+|-------|--------|
+| POST /api/tickets/:id/reply → 200 (admin) | ✅ |
+| Exactly 1 `/sendMessage` fetch call | ✅ |
+| `chat_id = 54321` (ticket owner) | ✅ |
+| Text contains `💬 پاسخ تیکت` | ✅ |
+| Text contains ticket title `مشکل در خرید` | ✅ |
+| Text contains reply message `安娜 چطوری؟` | ✅ |
+| Existing 53 tests unchanged | ✅ |
+
+**`node --test worker-proxy.test.cjs` → 54/54 pass**
 
 ### ⬜ Unverified (0 tasks)
 

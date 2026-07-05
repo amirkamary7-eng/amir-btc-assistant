@@ -337,7 +337,7 @@
 
 ### TASK 2.14
 
-**Status:** ⬜ Todo | **Phase:** 2 | **Task ID:** 2.14
+**Status:** ✅ Done | **Phase:** 2 | **Task ID:** 2.14
 
 **Title:** Ticket reply — Telegram notification on Worker  
 **Type:** feature / bugfix | **Priority:** High

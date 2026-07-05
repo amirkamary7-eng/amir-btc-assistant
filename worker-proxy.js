@@ -3100,6 +3100,21 @@ async function handleTicketReply(request, env, ticketId) {
     if (!ticket) {
       return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
     }
+
+    // Notify ticket owner via Telegram (Task 2.14 — mirror main.py:721-724)
+    try {
+      const ownerId = Number(ticket.user_id);
+      if (Number.isFinite(ownerId)) {
+        await sendTelegramMessage(env, {
+          chat_id: ownerId,
+          text: `💬 پاسخ تیکت: ${ticket.title}\n\n${message}`,
+          disable_web_page_preview: true,
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('ticket reply: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
+    }
+
     return jsonResponse({ status: 'success', ticket });
   } catch (error) {
     console.warn('reply ticket failed:', error);
