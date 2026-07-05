@@ -315,7 +315,7 @@
 
 ### TASK 2.13
 
-**Status:** ⬜ Todo | **Phase:** 2 | **Task ID:** 2.13
+**Status:** ✅ Done | **Phase:** 2 | **Task ID:** 2.13
 
 **Title:** Ticket create — Telegram notification on Worker  
 **Type:** feature / bugfix | **Priority:** High

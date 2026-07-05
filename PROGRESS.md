@@ -15,18 +15,18 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 36 |
+| ✅ Done | 37 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 18 |
-| **Progress** | **67%** |
+| ⬜ Todo | 17 |
+| **Progress** | **69%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 12 | 86% |
+| 2 | Core System Fix | 14 | 13 | 93% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -145,7 +145,29 @@ handleAnalysesDelete (L2674-2681):
 | Triggers active alerts, marks triggered in DB | 4 | ✅ 1 UPDATE (a1), 1 sendMessage, correct Persian text, ETH (2000<999999) not triggered |
 | Does not mark triggered when Telegram fails | 1 | ✅ 0 UPDATE calls when `ok: false` |
 
-**`node --test worker-proxy.test.cjs` → 52/52 pass**
+**`node --test worker-proxy.test.cjs` → 53/53 pass**
+
+### ✅ Task 2.13 — Ticket create — Telegram notification (2026-07-05)
+
+**Change:** Added two `sendTelegramMessage` calls in `handleTicketsCreate` (worker-proxy.js L2971-2995), mirroring `main.py:649-656`:
+
+1. Admin notification: `🎫 تیکت جدید\nاز: {user_name} ({user_id})\nعنوان: {title}\n\n{body}` → `env.ADMIN_TELEGRAM_ID`
+2. User confirmation: `✅ تیکت شما ثبت شد\nعنوان: {title}\nبه زودی پاسخ داده می‌شود.` → user's chat_id
+3. Each wrapped in try/catch with `console.warn` on failure (ticket still returns success)
+
+**Runtime evidence (1 new test, 53/53 total pass):**
+
+| Check | Result |
+|-------|--------|
+| POST /api/tickets → 200 status | ✅ |
+| Exactly 2 `/sendMessage` fetch calls | ✅ |
+| Admin chat_id = 831704732 | ✅ |
+| Admin text contains `🎫 تیکت جدید`, `Sara`, `مشکل در خرید` | ✅ |
+| User chat_id = 54321 | ✅ |
+| User text contains `✅ تیکت شما ثبت شد`, `مشکل در خرید` | ✅ |
+| Existing 52 tests unchanged (no regression) | ✅ |
+
+**`node --test worker-proxy.test.cjs` → 53/53 pass**
 
 ### ⬜ Unverified (0 tasks)
 

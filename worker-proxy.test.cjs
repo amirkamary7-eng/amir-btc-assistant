@@ -1534,6 +1534,86 @@ test('POST /api/tickets ignores spoofed user_id and stores ticket in DB', async 
   }
 });
 
+test('POST /api/tickets sends Telegram notifications to admin and user after create', async () => {
+  const now = new Date().toISOString();
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('ON CONFLICT (telegram_id) DO NOTHING')) {
+      return { rows: [] };
+    }
+    if (sql.includes('INSERT INTO tickets')) {
+      return {
+        rows: [
+          {
+            id: 'ticket-n1',
+            user_id: '54321',
+            user_name: 'Sara',
+            title: 'مشکل در خرید',
+            body: 'خریدم انجام نشد',
+            status: 'open',
+            created_at: now,
+          },
+        ],
+      };
+    }
+    if (sql.includes('FROM ticket_replies')) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 54321, first_name: 'Sara', username: 'sara_btc' };
+  const initData = buildInitData('test-bot-token', authUser);
+
+  const { stub, calls } = createFetchStub(async (url) => {
+    if (String(url).includes('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 99 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  });
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/tickets', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ title: 'مشکل در خرید', body: 'خریدم انجام نشد' }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({ DATABASE_URL: 'postgres://db.example/app' }),
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+
+    const sendCalls = calls.filter((c) => c.url.includes('/sendMessage'));
+    assert.equal(sendCalls.length, 2, 'expected 2 sendMessage calls (admin + user)');
+
+    // First call: admin notification
+    const adminBody = JSON.parse(sendCalls[0].body);
+    assert.equal(adminBody.chat_id, 831704732, 'admin chat_id');
+    assert.ok(adminBody.text.includes('🎫 تیکت جدید'), 'admin text has ticket icon');
+    assert.ok(adminBody.text.includes('Sara'), 'admin text has user_name');
+    assert.ok(adminBody.text.includes('مشکل در خرید'), 'admin text has title');
+
+    // Second call: user confirmation
+    const userBody = JSON.parse(sendCalls[1].body);
+    assert.equal(userBody.chat_id, 54321, 'user chat_id');
+    assert.ok(userBody.text.includes('✅ تیکت شما ثبت شد'), 'user text has confirmation');
+    assert.ok(userBody.text.includes('مشکل در خرید'), 'user text has title');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('GET /api/tickets returns only authenticated user tickets from DB', async () => {
   const now = new Date().toISOString();
   const pgMock = createPgMock(async (sql, params) => {

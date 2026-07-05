@@ -2967,6 +2967,33 @@ async function handleTicketsCreate(request, env) {
   payload.user_id = String(authState.user.id);
   try {
     const ticket = await createTicketInDb(env, authState.user, payload);
+
+    // Notify admin via Telegram (Task 2.13 — mirror main.py:649-656)
+    try {
+      const adminId = Number(env.ADMIN_TELEGRAM_ID);
+      if (Number.isFinite(adminId)) {
+        await sendTelegramMessage(env, {
+          chat_id: adminId,
+          text: `🎫 تیکت جدید\nاز: ${ticket.user_name || ''} (${ticket.user_id})\nعنوان: ${ticket.title}\n\n${ticket.body}`,
+          disable_web_page_preview: true,
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('ticket create: admin notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
+    }
+    try {
+      const userId = Number(authState.user.id);
+      if (Number.isFinite(userId)) {
+        await sendTelegramMessage(env, {
+          chat_id: userId,
+          text: `✅ تیکت شما ثبت شد\nعنوان: ${ticket.title}\nبه زودی پاسخ داده می‌شود.`,
+          disable_web_page_preview: true,
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('ticket create: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
+    }
+
     return jsonResponse({ status: 'success', ticket });
   } catch (error) {
     console.warn('create ticket failed:', error);
