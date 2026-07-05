@@ -16,7 +16,6 @@ function loadWorker(overrides = {}) {
   const workerPath = path.join(__dirname, 'worker-proxy.js');
   const source = fs.readFileSync(workerPath, 'utf8');
   const transformed = source
-    .replace("import { Buffer } from 'node:buffer';", "const { Buffer } = require('node:buffer');")
     .replace(
       "import { createHmac, timingSafeEqual } from 'node:crypto';",
       "const { createHmac, timingSafeEqual } = require('node:crypto');",
@@ -89,11 +88,10 @@ function loadValidateTelegramInitData() {
   const evaluator = new Function(
     'createHmac',
     'timingSafeEqual',
-    'Buffer',
     'exports',
     `${helperSrc}; exports.validateTelegramInitData = validateTelegramInitData;`,
   );
-  evaluator(crypto.createHmac, crypto.timingSafeEqual, Buffer, exportsObj);
+  evaluator(crypto.createHmac, crypto.timingSafeEqual, exportsObj);
   return exportsObj.validateTelegramInitData;
 }
 
