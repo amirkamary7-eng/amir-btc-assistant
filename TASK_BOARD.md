@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 39 |
+| ✅ Done | 40 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 15 |
-| **Overall** | **72%** |
+| ⬜ Todo | 14 |
+| **Overall** | **74%** |
 
 ### By Phase
 
@@ -56,7 +56,7 @@
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
-| 3 | Architecture Cleanup | 8 | 6 | 75% |
+| 3 | Architecture Cleanup | 8 | 7 | 88% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
@@ -121,7 +121,7 @@ Phase 4 ─► Phase 5:
 | 25 | 3.4 | 3 | Global error handler — 5xx not 200 | Medium | ✅ | None | — |
 | 26 | 3.5 | 3 | Generic DB error responses | Medium | ✅ | None | 4.5 |
 | 27 | 3.6 | 3 | Remove unused Worker functions | Low | ✅ | 1.3 | — |
-| 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ⬜ | None | — |
+| 28 | 3.7 | 3 | Delete unused ticket_service.py | Low | ✅ | None | — |
 | 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ✅ | 1.6 | — |
 | 30 | 4.1 | 4 | AI history role allowlist — Worker | High | ⬜ | 2.9 | 4.2 |
 | 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ✅ | None | — |
@@ -163,6 +163,7 @@ Phase 4 ─► Phase 5:
 | ~~2.13~~ | ~~2~~ | ~~Ticket create — Telegram notify~~ | ~~High~~ | ✅ implemented + verified |
 | ~~2.14~~ | ~~2~~ | ~~Ticket reply — Telegram notify~~ | ~~High~~ | ✅ implemented + verified |
 | ~~3.2~~ | ~~3~~ | ~~Multi-admin support on Worker~~ | ~~Medium~~ | ✅ implemented + verified |
+| ~~3.7~~ | ~~3~~ | ~~Delete unused ticket_service.py~~ | ~~Low~~ | ✅ already deleted, verified |
 | 4.5 | 4 | Generic provider error to client | High | — |
 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | — |
 
