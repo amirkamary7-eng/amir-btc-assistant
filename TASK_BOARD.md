@@ -44,18 +44,18 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 37 |
+| ✅ Done | 38 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 17 |
-| **Overall** | **69%** |
+| ⬜ Todo | 16 |
+| **Overall** | **70%** |
 
 ### By Phase
 
 | Phase | Name | Tasks | Done | % |
 |-------|------|-------|------|---|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 13 | 93% |
+| 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -114,7 +114,7 @@ Phase 4 ─► Phase 5:
 | 18 | 2.11 | 2 | Webhook secret validation — Worker | High | ✅ | 1.6 | 2.12, 5.7 |
 | 19 | 2.12 | 2 | Webhook secret validation — FastAPI | High | ✅ | 2.11 | 3.1 |
 | 20 | 2.13 | 2 | Ticket create — Telegram notify | High | ✅ | 1.1 | — |
-| 21 | 2.14 | 2 | Ticket reply — Telegram notify | High | ⬜ | 2.13 | — |
+| 21 | 2.14 | 2 | Ticket reply — Telegram notify | High | ✅ | 2.13 | — |
 | 22 | 3.1 | 3 | Disable FastAPI duplicate routes | High | ✅ | 2.3, 2.5, 2.9, 2.11, 1.0 | 3.2 |
 | 23 | 3.2 | 3 | Multi-admin support on Worker | Medium | ⬜ | 2.2 | 3.3, 4.8, 4.9 |
 | 24 | 3.3 | 3 | Admin join bypass — full admin set | Medium | ✅ | None | — |
@@ -161,8 +161,8 @@ Phase 4 ─► Phase 5:
 | ~~2.3~~ | ~~2~~ | ~~Analyses KV cache invalidation~~ | ~~High~~ | ✅ verified |
 | ~~2.4~~ | ~~2~~ | ~~Port price alert checker to Worker~~ | ~~Critical~~ | ✅ already implemented, verified |
 | ~~2.13~~ | ~~2~~ | ~~Ticket create — Telegram notify~~ | ~~High~~ | ✅ implemented + verified |
-| 2.14 | 2 | Ticket reply — Telegram notify | High | — |
-| 3.7 | 3 | Delete unused ticket_service.py | Low | — |
+| ~~2.14~~ | ~~2~~ | ~~Ticket reply — Telegram notify~~ | ~~High~~ | ✅ implemented + verified |
+| 3.2 | 3 | Multi-admin support on Worker | Medium | — |
 | 4.5 | 4 | Generic provider error to client | High | — |
 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | — |
 

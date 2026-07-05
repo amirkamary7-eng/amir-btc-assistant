@@ -1768,6 +1768,90 @@ test('POST /api/tickets/:id/reply rejects non-admin user before proxying', async
   }
 });
 
+test('POST /api/tickets/:id/reply sends Telegram notification to ticket owner', async () => {
+  const now = new Date().toISOString();
+  const ticketRow = {
+    id: 'ticket-r1',
+    user_id: '54321',
+    user_name: 'Sara',
+    title: 'مشکل در خرید',
+    body: 'خریدم انجام نشد',
+    status: 'answered',
+    created_at: now,
+  };
+  const pgMock = createPgMock(async (sql, params) => {
+    // getTicketRowById (before reply)
+    if (sql.includes('FROM tickets') && sql.includes('LIMIT 1') && sql.includes('WHERE id')) {
+      return { rows: [ticketRow] };
+    }
+    // INSERT INTO ticket_replies
+    if (sql.includes('INSERT INTO ticket_replies')) {
+      assert.equal(params[0], 'ticket-r1');
+      assert.equal(params[1], '831704732');
+      assert.equal(params[2], '安娜 چطوری؟');
+      return { rows: [] };
+    }
+    // UPDATE tickets SET status = 'answered'
+    if (sql.includes('UPDATE tickets') && sql.includes("status = 'answered'")) {
+      return { rows: [] };
+    }
+    // getTicketRowById (after reply, for hydrate)
+    if (sql.includes('FROM tickets') && sql.includes('LIMIT 1')) {
+      return { rows: [{ ...ticketRow, status: 'answered' }] };
+    }
+    // FROM ticket_replies (hydrate)
+    if (sql.includes('FROM ticket_replies')) {
+      return { rows: [{ ticket_id: 'ticket-r1', sender_type: 'admin', sender_id: '831704732', message: '安娜 چطوری؟', created_at: now }] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+  const authUser = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', authUser);
+
+  const { stub, calls } = createFetchStub(async (url) => {
+    if (String(url).includes('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 50 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  });
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/api/tickets/ticket-r1/reply', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ message: '安娜 چطوری؟' }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({ DATABASE_URL: 'postgres://db.example/app' }),
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 'success');
+
+    const sendCalls = calls.filter((c) => c.url.includes('/sendMessage'));
+    assert.equal(sendCalls.length, 1, 'expected 1 sendMessage call to ticket owner');
+
+    const msg = JSON.parse(sendCalls[0].body);
+    assert.equal(msg.chat_id, 54321, 'owner chat_id');
+    assert.ok(msg.text.includes('💬 پاسخ تیکت'), 'text has reply icon');
+    assert.ok(msg.text.includes('مشکل در خرید'), 'text has ticket title');
+    assert.ok(msg.text.includes('安娜 چطوری؟'), 'text has reply message');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('DELETE /api/tickets/:id deletes ticket when user owns it in DB', async () => {
   let deletedTicketId = null;
   const now = new Date().toISOString();
