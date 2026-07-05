@@ -91,7 +91,7 @@
 
 ### TASK 2.4
 
-**Status:** ⬜ Todo | **Phase:** 2 | **Task ID:** 2.4
+**Status:** ✅ Done (already implemented, verified by unit tests) | **Phase:** 2 | **Task ID:** 2.4
 
 **Title:** Port price alert checker logic to Worker  
 **Type:** feature | **Priority:** Critical

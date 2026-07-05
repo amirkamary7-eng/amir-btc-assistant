@@ -15,18 +15,18 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 35 |
+| ✅ Done | 36 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 19 |
-| **Progress** | **65%** |
+| ⬜ Todo | 18 |
+| **Progress** | **67%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 11 | 79% |
+| 2 | Core System Fix | 14 | 12 | 86% |
 | 3 | Architecture Cleanup | 8 | 5 | 63% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -128,17 +128,34 @@ handleAnalysesDelete (L2674-2681):
 
 **`node --test worker-proxy.test.cjs` → 52/52 pass**
 
-### ⬜ Unverified (1 task)
+### ✅ Task 2.4 — Port price alert checker to Worker (2026-07-05)
 
-| Task | Reason |
-|------|--------|
-| 2.4 | Cron works but exchange APIs are external dependency |
+**Finding:** Logic already fully implemented inside `runScheduledAlertsBaseline` (worker-proxy.js L3645-3804). No separate `runPriceAlertCheck` function needed — all 5 implementation steps are present:
+
+1. ✅ Fetch prices via `fetchSpotPriceUsd` (Binance/MEXC)
+2. ✅ Query DB: `SELECT ... FROM price_alerts WHERE status = 'active'`
+3. ✅ Compare price/direction: `above` (currentPrice >= target) / `below` (currentPrice <= target)
+4. ✅ On trigger: `sendTelegramMessage` + `UPDATE price_alerts SET status = 'triggered'`
+5. ✅ Summary object with `checked_count`, `triggered_count`, `price_fetch_failures`, `delivery_failures`
+
+**Runtime evidence (2 tests, 52/52 total pass):**
+
+| Test | Checks | Result |
+|------|--------|--------|
+| Triggers active alerts, marks triggered in DB | 4 | ✅ 1 UPDATE (a1), 1 sendMessage, correct Persian text, ETH (2000<999999) not triggered |
+| Does not mark triggered when Telegram fails | 1 | ✅ 0 UPDATE calls when `ok: false` |
+
+**`node --test worker-proxy.test.cjs` → 52/52 pass**
+
+### ⬜ Unverified (0 tasks)
+
+None.
 
 ## Next Executable Tasks
 
 | Task ID | Phase | Title | Priority | Note |
 |---------|-------|-------|----------|------|
-| 2.3 | 2 | Analyses KV cache invalidation | High | unverified — نیاز به real DB |
+| 2.4 | 2 | Port price alert checker to Worker | High | ✅ already implemented + 2 tests pass (triggered_count=1, delivery failure) |
 | 2.13 | 2 | Ticket create — Telegram notify | High | — |
 | 3.7 | 3 | Delete unused ticket_service.py | Low | — |
 | 4.5 | 4 | Generic provider error to client | High | — |
