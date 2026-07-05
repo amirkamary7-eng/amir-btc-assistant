@@ -1370,11 +1370,11 @@ test('POST /api/assistant/chat returns 503 when all AI providers fail and does n
     );
 
     assert.equal(response.status, 503);
-    assert.deepEqual(await response.json(), {
-      status: 'error',
-      reason: 'all_providers_failed',
-      detail: 'DeepSeek not configured',
-    });
+    const json = await response.json();
+    assert.equal(json.status, 'error');
+    assert.equal(json.reason, 'all_providers_failed');
+    assert.equal(json.message, 'AI service temporarily unavailable');
+    assert.ok(!json.detail, 'Response must NOT contain internal error detail');
     const today = new Date().toISOString().slice(0, 10);
     assert.equal(await rateLimits.get('ai:cooldown:12345'), null);
     assert.equal(await rateLimits.get(`ai:msgs:12345:${today}`), null);
@@ -2900,6 +2900,56 @@ test('Header-based X-Telegram-Init-Data auth still works after query param remov
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.status, 'success');
+});
+
+// ── Task 4.5: Generic provider error to client ──────────────────────────────
+
+test('POST /api/assistant/chat 503 response does not leak provider error details (Task 4.5)', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 42102, first_name: 'LeakTest' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+  const originalFetch = global.fetch;
+
+  // Gemini returns an error with sensitive internal message
+  global.fetch = async (url) => {
+    if (String(url).includes('generativelanguage.googleapis.com')) {
+      return new Response(
+        JSON.stringify({ error: { message: 'API key invalid for project secret-project-123' } }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    throw new Error(`Unexpected fetch url: ${url}`);
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ message: 'test', history: [] }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({ RATE_LIMITS: rateLimits, GEMINI_API_KEY: 'fake-key' }),
+    );
+
+    assert.equal(response.status, 503);
+    const json = await response.json();
+
+    // Must have generic error, NOT provider-specific details
+    assert.equal(json.reason, 'all_providers_failed');
+    assert.equal(json.message, 'AI service temporarily unavailable');
+    assert.ok(!json.detail, 'Response must NOT contain detail field');
+    assert.ok(!JSON.stringify(json).includes('secret-project'), 'Must NOT leak project name');
+    assert.ok(!JSON.stringify(json).includes('API key invalid'), 'Must NOT leak API key error');
+    assert.ok(!JSON.stringify(json).includes('Gemini'), 'Must NOT leak provider name');
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 

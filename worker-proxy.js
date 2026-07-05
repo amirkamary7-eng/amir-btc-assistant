@@ -2952,11 +2952,12 @@ async function handleAssistantChat(request, env) {
       provider: result.provider,
     });
   } catch (error) {
+    console.error('AI provider error:', error instanceof Error ? error.message : String(error));
     return jsonResponse(
       {
         status: 'error',
         reason: 'all_providers_failed',
-        detail: error instanceof Error ? error.message : String(error),
+        message: 'AI service temporarily unavailable',
       },
       { status: 503 },
     );
