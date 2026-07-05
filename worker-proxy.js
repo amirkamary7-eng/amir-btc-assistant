@@ -828,8 +828,8 @@ function parseBooleanQueryParam(value) {
 
 function getAdminIds(env) {
   const ids = new Set();
-  // Always include the primary admin ID
-  const primary = String(env.ADMIN_TELEGRAM_ID || '831704732').trim();
+  // Include the primary admin ID only if explicitly configured (Task 4.9 — no hardcoded fallback)
+  const primary = String(env.ADMIN_TELEGRAM_ID || '').trim();
   if (primary) ids.add(primary);
   // Add additional comma-separated IDs (Task 3.2 — mirror backend/config.py:admin_ids)
   const extra = String(env.ADMIN_TELEGRAM_IDS || '').trim();

@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 45 |
+| ✅ Done | 46 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 9 |
-| **Progress** | **83%** |
+| ⬜ Todo | 8 |
+| **Progress** | **85%** |
 
 ## By Phase
 
@@ -28,7 +28,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 9 | 69% |
+| 4 | Security Hardening | 13 | 10 | 77% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ## DONE Criteria (قانون تأیید تسک)
@@ -349,15 +349,41 @@ None.
 
 **`node --test worker-proxy.test.cjs` → 64/64 pass**
 
+## Task 4.9 — Remove hardcoded default admin ID (Exec#38)
+
+**Session:** 2026-07-05
+
+### Code Change
+- **File:** `worker-proxy.js` L831–832
+- **Before:** `const primary = String(env.ADMIN_TELEGRAM_ID || '831704732').trim();`
+- **After:** `const primary = String(env.ADMIN_TELEGRAM_ID || '').trim();`
+- Removed hardcoded fallback `'831704732'` so missing env var = no admin access
+
+### Runtime Evidence
+
+**Test 1: No hardcoded admin fallback — omitting ADMIN_TELEGRAM_ID rejects previously-hardcoded ID**
+- User 831704732 authenticates with valid HMAC to `GET /api/tickets/all`
+- Env has NO `ADMIN_TELEGRAM_ID` (deleted after createEnv)
+- **Result:** `response.status === 403` + `body.detail === 'Admin access required'` ✅
+
+**Test 2: Admin still works when ADMIN_TELEGRAM_ID is explicitly set (regression)**
+- Same user 831704732 authenticates to same endpoint
+- Env has `ADMIN_TELEGRAM_ID: '831704732'`
+- **Result:** `response.status === 200` + `body.status === 'success'` ✅
+
+**`node --test worker-proxy.test.cjs` → 66/66 pass**
+
 ## Next Executable Tasks
 
 | Task ID | Phase | Title | Priority | Note |
 |---------|-------|-------|----------|------|
 | 2.4 | 2 | Port price alert checker to Worker | High | ✅ already implemented + 2 tests pass (triggered_count=1, delivery failure) |
-| 2.13 | 2 | Ticket create — Telegram notify | High | — |
-| 3.7 | 3 | Delete unused ticket_service.py | Low | — |
-| 4.5 | 4 | Generic provider error to client | High | — |
-| 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | — |
+| 2.13 | 2 | Ticket create — Telegram notify | High | ✅ implemented + verified |
+| 3.7 | 3 | Delete unused ticket_service.py | Low | ✅ already deleted, verified |
+| 4.5 | 4 | Generic provider error to client | High | ✅ implemented + verified |
+| 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | ✅ implemented + verified |
+| 4.8 | 4 | Debug join endpoint — admin only | Medium | ✅ implemented + verified |
+| 4.9 | 4 | Remove hardcoded default admin ID | Medium | ✅ implemented + verified |
 
 ## Agent Rules (summary)
 

@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 45 |
+| ✅ Done | 46 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 9 |
-| **Overall** | **83%** |
+| ⬜ Todo | 8 |
+| **Overall** | **85%** |
 
 ### By Phase
 
@@ -57,7 +57,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 9 | 69% |
+| 4 | Security Hardening | 13 | 10 | 77% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ---
@@ -131,7 +131,7 @@ Phase 4 ─► Phase 5:
 | 35 | 4.6 | 4 | Gemini API key — header not URL | High | ✅ | None | — |
 | 36 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | ✅ | 1.5 | — |
 | 37 | 4.8 | 4 | Debug join endpoint — admin only | Medium | ✅ | 3.2 | — |
-| 38 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | ⬜ | 3.2 | — |
+| 38 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | ✅ | 3.2 | 4.10 |
 | 39 | 4.10 | 4 | Referrer validation | Medium | ✅ | None | — |
 | 40 | 4.11 | 4 | Shorten initData max_age | Medium | ⬜ | 1.1 | — |
 | 41 | 4.12 | 4 | Sanitize env.example | Medium | ✅ | None | — |
@@ -169,10 +169,10 @@ Phase 4 ─► Phase 5:
 | ~~4.5~~ | ~~4~~ | ~~Generic provider error to client~~ | ~~High~~ | ✅ implemented + verified |
 | ~~4.7~~ | ~~4~~ | ~~Restrict CORS to WEBAPP_URL~~ | ~~Medium~~ | ✅ implemented + verified |
 | ~~4.8~~ | ~~4~~ | ~~Debug join endpoint — admin only~~ | ~~Medium~~ | ✅ implemented + verified |
-| 4.9 | 4 | Remove hardcoded default admin ID | Medium | — |
+| ~~4.9~~ | ~~4~~ | ~~Remove hardcoded default admin ID~~ | ~~Medium~~ | ✅ implemented + verified |
 | 4.11 | 4 | Shorten initData max_age | Medium | — |
 
-**توصیه (Top priority):** 4.9 → 4.11 → …
+**توصیه (Top priority):** 4.11 → 4.13 → …
 
 ---
 

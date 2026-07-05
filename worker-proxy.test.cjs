@@ -2304,6 +2304,78 @@ test('Multi-admin: ADMIN_TELEGRAM_IDS allows second admin to access admin routes
   }
 });
 
+test('No hardcoded admin fallback: omitting ADMIN_TELEGRAM_ID rejects previously-hardcoded ID (Task 4.9)', async () => {
+  // The ID 831704732 was previously a hardcoded fallback in getAdminIds.
+  // After Task 4.9, if ADMIN_TELEGRAM_ID is not set, that ID must NOT be treated as admin.
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM tickets')) return { rows: [] };
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+
+  // Build auth for user 831704732 — the old hardcoded default
+  const oldDefaultAdmin = { id: 831704732, first_name: 'OldDefault' };
+  const initData = buildInitData('test-bot-token', oldDefaultAdmin);
+
+  // Env WITHOUT ADMIN_TELEGRAM_ID — no admin configured at all
+  const envNoAdmin = createEnv({
+    ADMIN_TELEGRAM_ID: '',  // explicitly empty
+    DATABASE_URL: 'postgres://db.example/app',
+  });
+  delete envNoAdmin.ADMIN_TELEGRAM_ID; // fully omit it
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('unexpected', { status: 500 });
+
+  try {
+    // GET /api/tickets/all requires admin → should be 403
+    const req = new Request('https://worker.example/api/tickets/all', {
+      method: 'GET',
+      headers: { 'X-Telegram-Init-Data': initData },
+    });
+    const res = await worker.fetch(req, envNoAdmin);
+    assert.equal(res.status, 403, 'old hardcoded admin ID must be rejected when ADMIN_TELEGRAM_ID is not set');
+    const body = await res.json();
+    assert.equal(body.detail, 'Admin access required', 'should return admin access error');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Admin still works when ADMIN_TELEGRAM_ID is explicitly set (Task 4.9 regression)', async () => {
+  // Verify that removing the hardcoded fallback doesn't break normal admin access
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM tickets')) return { rows: [] };
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const worker = loadWorker({ pg: pgMock.module });
+
+  const adminUser = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', adminUser);
+
+  // Env WITH ADMIN_TELEGRAM_ID explicitly set
+  const envWithAdmin = createEnv({
+    ADMIN_TELEGRAM_ID: '831704732',
+    DATABASE_URL: 'postgres://db.example/app',
+  });
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('unexpected', { status: 500 });
+
+  try {
+    const req = new Request('https://worker.example/api/tickets/all', {
+      method: 'GET',
+      headers: { 'X-Telegram-Init-Data': initData },
+    });
+    const res = await worker.fetch(req, envWithAdmin);
+    assert.equal(res.status, 200, 'admin must still get 200 when ADMIN_TELEGRAM_ID is explicitly set');
+    const body = await res.json();
+    assert.equal(body.status, 'success', 'response status must be success');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('POST /api/analyses stores analysis in DB, ignores spoofed author_id, and bumps cache version', async () => {
   const now = new Date().toISOString();
   const analysesCache = createMemoryKv();
