@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 39 |
+| ✅ Done | 40 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 15 |
-| **Progress** | **72%** |
+| ⬜ Todo | 14 |
+| **Progress** | **74%** |
 
 ## By Phase
 
@@ -27,7 +27,7 @@
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
-| 3 | Architecture Cleanup | 8 | 6 | 75% |
+| 3 | Architecture Cleanup | 8 | 7 | 88% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
@@ -202,6 +202,19 @@ handleAnalysesDelete (L2674-2681):
 | Admin 999888 → POST /analyses → 200 | ✅ |
 | Non-admin 555666 → POST /analyses → 403 | ✅ |
 | 54 existing tests unchanged | ✅ |
+
+**`node --test worker-proxy.test.cjs` → 55/55 pass**
+
+### ✅ Task 3.7 — Delete unused ticket_service.py (2026-07-05)
+
+**Finding:** File already deleted from repo. Runtime verification:
+
+| Check | Result |
+|-------|--------|
+| `ls backend/services/ticket_service.py` → No such file | ✅ |
+| Python AST scan: no `ticket_service` imports in main.py, config.py | ✅ |
+| Worker tests: 55/55 pass (no import errors) | ✅ |
+| `rg ticket_service` — only board/docs references remain | ✅ |
 
 **`node --test worker-proxy.test.cjs` → 55/55 pass**
 
