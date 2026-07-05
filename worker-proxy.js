@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Pool } from '@neondatabase/serverless';
+import { createAlertRepository } from './src/repositories/alerts.js';
+import { createAlertHandlers } from './src/controllers/alerts.js';
 
 /**
  * Cloudflare Worker Shell
@@ -2514,6 +2516,21 @@ function handleHealth(env) {
   }, {}, env);
 }
 
+// ============================================================================
+//#region Composition Root — Wired dependencies for layered modules
+// ============================================================================
+const alertRepo = createAlertRepository({ queryDb, ensureUserRow, normalizeOptionalString });
+const alertHandlers = createAlertHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  readJsonBody,
+  safeDbErrorResponse,
+  buildBodyFieldValidationError,
+  isDatabaseConfigured,
+  alertRepo,
+});
+//#endregion
+
 async function handleChartResolve(request, env) {
   const url = new URL(request.url);
   const rawSymbol = url.searchParams.get('symbol');
@@ -3229,94 +3246,6 @@ async function handleTicketDelete(request, env, ticketId) {
   }
 }
 
-async function handleAlertsCreate(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-
-  const bodyResult = await readJsonBody(request, env);
-  if (bodyResult.error) return bodyResult.error;
-  let payload = bodyResult.payload;
-
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 }, env);
-  }
-
-  payload.user_id = String(authState.user.id);
-  try {
-    const alert = await createOrReactivateAlertInDb(env, payload.user_id, payload);
-    return jsonResponse({ status: 'success', alert }, env);
-  } catch (error) {
-    console.warn('create alert failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleAlertsList(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-  const userId = String(authState.user.id);
-  try {
-    const alerts = await listAlertsFromDb(env, userId);
-    return jsonResponse({ status: 'success', alerts }, env);
-  } catch (error) {
-    console.warn('list alerts failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
-async function handleAlertDelete(request, env, alertId) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-  if (!isDatabaseConfigured(env)) {
-    return jsonResponse(
-      {
-        status: 'error',
-        message: 'Database not configured',
-      },
-      { status: 503 }, env);
-  }
-  const userId = String(authState.user.id);
-  try {
-    const alert = await getAlertRowById(env, alertId);
-    if (!alert) {
-      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, {}, env);
-    }
-    if (String(alert.user_id) !== userId) {
-      return jsonResponse({ status: 'error', message: 'Forbidden' }, { status: 403 }, {}, env);
-    }
-    await deleteAlertInDb(env, alertId);
-    return jsonResponse({ status: 'success', deleted: true }, env);
-  } catch (error) {
-    console.warn('delete alert failed:', error);
-    return safeDbErrorResponse(error, env);
-  }
-}
-
 async function handleUsersBootstrap(request, env) {
   const authState = authenticateTelegramRequest(request, env);
   if (authState.error) {
@@ -3979,16 +3908,16 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/alerts') {
-        return await handleAlertsCreate(request, env);
+        return await alertHandlers.handleCreate(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/alerts') {
-        return await handleAlertsList(request, env);
+        return await alertHandlers.handleList(request, env);
       }
 
       if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
         const alertId = url.pathname.split('/')[3] || '';
-        return await handleAlertDelete(request, env, alertId);
+        return await alertHandlers.handleDelete(request, env, alertId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
