@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 49 |
+| ✅ Done | 50 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 5 |
-| **Progress** | **91%** |
+| ⬜ Todo | 4 |
+| **Progress** | **93%** |
 
 ## By Phase
 
@@ -29,7 +29,7 @@
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
 | 4 | Security Hardening | 13 | 12 | 92% |
-| 5 | Optimization & Cleanup | 12 | 7 | 58% |
+| 5 | Optimization & Cleanup | 12 | 8 | 67% |
 
 ## DONE Criteria (قانون تأیید تسک)
 
@@ -517,6 +517,37 @@ Key assertions proven at runtime:
 - Invalid user JSON → `None` ✅
 - Extra fields in HMAC → still valid ✅
 
+## Task 5.6 — Integration test — analyses CRUD + KV (Exec#48)
+
+**Session:** 2026-07-05
+
+### Code Change
+- **File:** `worker-proxy.test.cjs` — 2 new integration tests (no production code changes)
+
+### Runtime Evidence
+
+**Test 1: Full CRUD lifecycle (10 steps, ~25 assertions)**
+Uses a shared mutable in-memory DB (`db.analyses[]`) and `createMemoryKv()` to prove DB↔KV sync:
+
+| Step | Operation | Key Assertions |
+|------|-----------|----------------|
+| 1 | GET → empty | `analyses: []`, `version: 0` ✅ |
+| 2 | POST (BTC) → 201 | `version: 1`, KV `analyses:version` = `"1"`, KV list has 1 item ✅ |
+| 3 | GET (cached) | Returns BTC from cache, no DB query ✅ |
+| 4 | POST (ETH) → 200 | `version: 2`, KV list has 2 items ✅ |
+| 5 | PUT (BTC→updated) | `version: 3`, KV `analyses:version` = `"3"` ✅ |
+| 6 | GET `?version=3` | `unchanged: true`, `analyses: null` ✅ |
+| 7 | GET `?version=1` | Full data returned (stale client) ✅ |
+| 8 | DELETE (BTC) | `version: 4`, KV `analyses:version` = `"4"` ✅ |
+| 9 | GET → 1 item (ETH) | `analyses[0].coin === 'ETH'` ✅ |
+| 10 | DELETE nonexistent → 404 | ✅ |
+
+**Test 2: Auth boundary — non-admin 403 without DB touch**
+- POST/PUT/DELETE all return 403 ✅
+- `dbTouched.value === false` — DB mock never called ✅
+
+**`node --test worker-proxy.test.cjs` → 72/72 pass**
+
 ## Next Executable Tasks
 
 | Task ID | Phase | Title | Priority | Note |
@@ -531,6 +562,7 @@ Key assertions proven at runtime:
 | 4.11 | 4 | Shorten initData max_age | Medium | ✅ implemented + verified |
 | 4.13 | 4 | Image failover — explicit warning | Medium | ✅ implemented + verified |
 | 5.5 | 5 | Add minimal Python auth pytest | Medium | ✅ 21 tests, pytest passes |
+| 5.6 | 5 | Integration test — analyses CRUD + KV | Medium | ✅ 10-step lifecycle, 72/72 pass |
 
 ## Agent Rules (summary)
 
