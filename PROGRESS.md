@@ -15,18 +15,18 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 31 |
+| ✅ Done | 32 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 23 |
-| **Progress** | **57%** |
+| ⬜ Todo | 22 |
+| **Progress** | **59%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 9 | 64% |
+| 2 | Core System Fix | 14 | 10 | 71% |
 | 3 | Architecture Cleanup | 8 | 4 | 50% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
@@ -127,6 +127,23 @@ handleAnalysesDelete (L2674-2681):
 **Smoking gun (S5):** After POST populates KV, a subsequent GET serves from KV cache without any DB query — proving the cache is correctly invalidated and refreshed after writes.
 
 **`node --test worker-proxy.test.cjs` → 52/52 pass**
+
+### ✅ Task 2.11 — Webhook secret validation — Worker (2026-07-05)
+
+**Implementation:** Added `X-Telegram-Bot-Api-Secret-Token` header check at top of `handleTelegramWebhook` (worker-proxy.js L3593-3602).
+
+**Runtime evidence (8/8 checks, 6 scenarios):**
+
+| Scenario | Result |
+|----------|--------|
+| Secret set + correct header | ✅ 200 (passes through) |
+| Secret set + NO header | ✅ 403 `{"detail":"Invalid webhook secret"}` |
+| Secret set + WRONG header | ✅ 403 |
+| NO secret configured | ✅ 200 (unprotected, warning logged) |
+| Empty string secret | ✅ 200 (treated as not configured) |
+| Substring match attempt | ✅ 403 (exact match required) |
+
+**`node --test worker-proxy.test.cjs` → 52/52 pass (no regression)**
 
 ### ⬜ Unverified (1 task)
 
