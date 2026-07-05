@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 42 |
+| ✅ Done | 43 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 12 |
-| **Progress** | **78%** |
+| ⬜ Todo | 11 |
+| **Progress** | **80%** |
 
 ## By Phase
 
@@ -28,7 +28,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 6 | 46% |
+| 4 | Security Hardening | 13 | 7 | 54% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ## DONE Criteria (قانون تأیید تسک)
@@ -279,6 +279,31 @@ None.
 - Same initData in header → `response.status === 200` — header auth unaffected ✅
 
 **`node --test worker-proxy.test.cjs` → 59/59 pass**
+
+### ✅ Task 4.5 — Generic provider error to client (2026-07-05)
+
+**Category:** 2 — Behavioral (security fix, proven by request/response)
+
+**Change:** Replaced `detail: error.message` (leaking internal provider errors) with generic `message: 'AI service temporarily unavailable'` in `handleAssistantChat` 503 response (worker-proxy.js L2954-2963). Internal error logged via `console.error` only.
+
+**Before (leaked to client):** `{ status: "error", reason: "all_providers_failed", detail: "Gemini failed: API key invalid for project secret-project-123" }`
+**After (generic):** `{ status: "error", reason: "all_providers_failed", message: "AI service temporarily unavailable" }`
+
+**Runtime evidence (1 new test, 60/60 total pass):**
+
+| Test | Checks | Result |
+|------|--------|--------|
+| POST chat → Gemini 403 with sensitive error → response body sanitized | 5 | ✅ |
+
+**Smoking gun assertions:**
+- `json.message === 'AI service temporarily unavailable'` — generic message only ✅
+- `!json.detail` — no `detail` field in response ✅
+- `!responseBody.includes('secret-project')` — project name not leaked ✅
+- `!responseBody.includes('API key invalid')` — API key error not leaked ✅
+- `!responseBody.includes('Gemini')` — provider name not leaked ✅
+- Existing "all providers fail" test also updated — passes with new generic format ✅
+
+**`node --test worker-proxy.test.cjs` → 60/60 pass**
 
 ## Next Executable Tasks
 
