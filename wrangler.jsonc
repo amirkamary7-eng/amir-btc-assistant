@@ -1,6 +1,6 @@
 {
         "$schema": "./node_modules/wrangler/config-schema.json",
-        "name": "amir-btc-assistant-api",
+        "name": "amir-btc-assistantnewgithub",
         "main": "worker-proxy.js",
         "compatibility_date": "2026-06-27",
         "compatibility_flags": [
