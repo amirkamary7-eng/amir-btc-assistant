@@ -15,7 +15,7 @@ import pg from 'pg';
 //#region ثابت‌ها و ابزارهای کمکی
 // ============================================================================
 const CORS_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
-const CORS_ALLOW_HEADERS = 'Content-Type, X-Telegram-Init-Data';
+const CORS_ALLOW_HEADERS = 'Content-Type, X-Telegram-Init-Data, X-Telegram-Bot-Api-Secret-Token';
 let _corsAllowOrigin = '*';
 
 function setCorsOrigin(env) {
@@ -3687,6 +3687,22 @@ async function handleCheckJoinInvalidate(request, env) {
 
 async function handleTelegramWebhook(request, env) {
   const requestPath = new URL(request.url).pathname || '/';
+
+  // ── Webhook secret validation (Task 2.11) ──────────────────────────────────
+  const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET;
+  if (webhookSecret) {
+    const headerToken = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
+    if (!headerToken || headerToken !== webhookSecret) {
+      return jsonResponse(
+        { status: 'error', detail: 'Invalid or missing webhook secret token' },
+        { status: 403 },
+      );
+    }
+  } else {
+    console.warn('TELEGRAM_WEBHOOK_SECRET is not configured — webhook endpoint is unprotected');
+  }
+  // ── End webhook secret validation ─────────────────────────────────────────
+
   try {
     const updatePayload = await request.json();
     const messageContext = extractTelegramMessageContext(updatePayload);

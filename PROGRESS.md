@@ -548,6 +548,39 @@ Uses a shared mutable in-memory DB (`db.analyses[]`) and `createMemoryKv()` to p
 
 **`node --test worker-proxy.test.cjs` → 72/72 pass**
 
+---
+
+### Task 5.7 — Integration test: webhook secret (Exec#49)
+
+**Date:** 2026-07-05
+
+**Category:** 🔵 Category 2 (behavioral — integration test with runtime evidence)
+
+**What was done:**
+- Discovered Task 2.11 (webhook secret validation in Worker) was marked ✅ but **never actually implemented** — `handleTelegramWebhook` had zero secret checking
+- Implemented `X-Telegram-Bot-Api-Secret-Token` header validation in `handleTelegramWebhook`:
+  - When `env.TELEGRAM_WEBHOOK_SECRET` is set: reads header, rejects with 403 JSON on mismatch/missing
+  - When not set: passes through (dev mode), logs warning
+- Added `X-Telegram-Bot-Api-Secret-Token` to `CORS_ALLOW_HEADERS`
+- Wrote 5 integration tests covering all acceptance criteria
+
+**Code changes:**
+- `worker-proxy.js` L3691–3704: Secret validation gate before webhook processing
+- `worker-proxy.js` L18: CORS_ALLOW_HEADERS updated
+- `worker-proxy.test.cjs` L3519–3622: 5 new tests
+
+**Tests (5 new, total 77):**
+
+| # | Test | Assertions | Result |
+|---|------|-----------|--------|
+| 1 | No secret configured → 200 passthrough | 1 | ✅ |
+| 2 | Secret configured + no header → 403 + error JSON | 2 | ✅ |
+| 3 | Secret configured + wrong header → 403 + error JSON | 2 | ✅ |
+| 4 | Secret configured + correct header → 200 + /start processes (getChatMember + sendMessage) | 3 | ✅ |
+| 5 | Non-/start update with wrong secret → 403 (covers all payload types) | 2 | ✅ |
+
+**`node --test worker-proxy.test.cjs` → 77/77 pass**
+
 ## Next Executable Tasks
 
 | Task ID | Phase | Title | Priority | Note |
@@ -563,6 +596,7 @@ Uses a shared mutable in-memory DB (`db.analyses[]`) and `createMemoryKv()` to p
 | 4.13 | 4 | Image failover — explicit warning | Medium | ✅ implemented + verified |
 | 5.5 | 5 | Add minimal Python auth pytest | Medium | ✅ 21 tests, pytest passes |
 | 5.6 | 5 | Integration test — analyses CRUD + KV | Medium | ✅ 10-step lifecycle, 72/72 pass |
+| 5.7 | 5 | Integration test — webhook secret | Medium | ✅ 5 tests, 77/77 pass |
 
 ## Agent Rules (summary)
 

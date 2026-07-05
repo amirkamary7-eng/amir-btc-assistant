@@ -572,7 +572,7 @@
 | 5.4 | ⬜ | Add GitHub Actions CI | Medium | 1.3, 2.9 |
 | 5.5 | ⬜ | Add minimal Python auth pytest | Medium | 1.1 |
 | 5.6 | ⬜ | Integration test — analyses CRUD + KV | Medium | 2.3 |
-| 5.7 | ⬜ | Integration test — webhook secret | Medium | 2.11 |
+| 5.7 | ✅ | Integration test — webhook secret | Medium | 2.11 |
 | 5.8 | ⬜ | Alembic migrations baseline | Medium | None |
 | 5.9 | ⬜ | Sync status docs with code reality | Low | Phase 2 complete |
 | 5.10 | ⬜ | Remove legacy query params | Low | 3.1 |
