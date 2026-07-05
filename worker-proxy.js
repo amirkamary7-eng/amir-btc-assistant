@@ -801,8 +801,24 @@ function parseBooleanQueryParam(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
 }
 
+function getAdminIds(env) {
+  const ids = new Set();
+  // Always include the primary admin ID
+  const primary = String(env.ADMIN_TELEGRAM_ID || '831704732').trim();
+  if (primary) ids.add(primary);
+  // Add additional comma-separated IDs (Task 3.2 — mirror backend/config.py:admin_ids)
+  const extra = String(env.ADMIN_TELEGRAM_IDS || '').trim();
+  if (extra) {
+    for (const id of extra.split(',')) {
+      const trimmed = id.trim();
+      if (trimmed) ids.add(trimmed);
+    }
+  }
+  return ids;
+}
+
 function isAdminTelegramId(env, userId) {
-  return String(userId) === String(env.ADMIN_TELEGRAM_ID || '831704732');
+  return getAdminIds(env).has(String(userId));
 }
 
 function getDbPool(env) {
@@ -2968,15 +2984,17 @@ async function handleTicketsCreate(request, env) {
   try {
     const ticket = await createTicketInDb(env, authState.user, payload);
 
-    // Notify admin via Telegram (Task 2.13 — mirror main.py:649-656)
+    // Notify all admins via Telegram (Task 2.13 + 3.2)
     try {
-      const adminId = Number(env.ADMIN_TELEGRAM_ID);
-      if (Number.isFinite(adminId)) {
-        await sendTelegramMessage(env, {
-          chat_id: adminId,
-          text: `🎫 تیکت جدید\nاز: ${ticket.user_name || ''} (${ticket.user_id})\nعنوان: ${ticket.title}\n\n${ticket.body}`,
-          disable_web_page_preview: true,
-        });
+      for (const adminStr of getAdminIds(env)) {
+        const adminId = Number(adminStr);
+        if (Number.isFinite(adminId)) {
+          await sendTelegramMessage(env, {
+            chat_id: adminId,
+            text: `🎫 تیکت جدید\nاز: ${ticket.user_name || ''} (${ticket.user_id})\nعنوان: ${ticket.title}\n\n${ticket.body}`,
+            disable_web_page_preview: true,
+          });
+        }
       }
     } catch (notifyErr) {
       console.warn('ticket create: admin notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));

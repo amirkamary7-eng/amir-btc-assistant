@@ -388,7 +388,7 @@
 
 ### TASK 3.2
 
-**Status:** ⬜ Todo | **Phase:** 3 | **Task ID:** 3.2
+**Status:** ✅ Done | **Phase:** 3 | **Task ID:** 3.2
 
 **Title:** Multi-admin support on Worker  
 **Type:** refactor | **Priority:** Medium
