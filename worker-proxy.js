@@ -15,13 +15,11 @@ import { Pool } from '@neondatabase/serverless';
 // ============================================================================
 const CORS_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
 const CORS_ALLOW_HEADERS = 'Content-Type, X-Telegram-Init-Data, X-Telegram-Bot-Api-Secret-Token';
-let _requestEnv = null;
-
-function withCors(headers = {}) {
+function withCors(headers = {}, env = null) {
   const merged = new Headers(headers);
-  if (_requestEnv) {
+  if (env) {
     try {
-      merged.set('Access-Control-Allow-Origin', new URL(resolveWebAppUrl(_requestEnv)).origin);
+      merged.set('Access-Control-Allow-Origin', new URL(resolveWebAppUrl(env)).origin);
     } catch {
       merged.set('Access-Control-Allow-Origin', '*');
     }
@@ -33,8 +31,8 @@ function withCors(headers = {}) {
   return merged;
 }
 
-function jsonResponse(payload, init = {}) {
-  const headers = withCors(init.headers);
+function jsonResponse(payload, init = {}, env = null) {
+  const headers = withCors(init.headers, env);
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json; charset=utf-8');
   }
@@ -45,7 +43,7 @@ function jsonResponse(payload, init = {}) {
   });
 }
 
-function safeDbErrorResponse(error, options = {}) {
+function safeDbErrorResponse(error, options = {}, env = null) {
   const {
     statusValue = 'error',
     message = 'Database unavailable',
@@ -57,24 +55,25 @@ function safeDbErrorResponse(error, options = {}) {
       message,
     },
     { status: 503 },
+    env,
   );
 }
 
 const MAX_BODY_BYTES = 102400; // 100 KB
 
-async function readJsonBody(request, maxSize = MAX_BODY_BYTES) {
+async function readJsonBody(request, maxSize = MAX_BODY_BYTES, env = null) {
   const contentLength = request.headers.get('Content-Length');
   if (contentLength && Number(contentLength) > maxSize) {
-    return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }) };
+    return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }, env) };
   }
   const body = await request.text();
   if (body.length > maxSize) {
-    return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }) };
+    return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }, env) };
   }
   try {
     return { payload: JSON.parse(body) };
   } catch {
-    return { error: jsonResponse(buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null), { status: 422 }) };
+    return { error: jsonResponse(buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null), { status: 422 }, env) };
   }
 }
 
@@ -319,14 +318,14 @@ function authenticateTelegramRequest(request, env) {
   const initData = getTelegramInitData(request);
   if (!initData) {
     return {
-      error: jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }),
+      error: jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, {}, env),
       user: null,
     };
   }
 
   if (!isBotConfigured(env)) {
     return {
-      error: jsonResponse({ detail: 'Telegram bot token is not configured' }, { status: 401 }),
+      error: jsonResponse({ detail: 'Telegram bot token is not configured' }, { status: 401 }, {}, env),
       user: null,
     };
   }
@@ -334,7 +333,7 @@ function authenticateTelegramRequest(request, env) {
   const user = validateTelegramInitData(initData, String(env.TELEGRAM_BOT_TOKEN || ''));
   if (!user || !user.id) {
     return {
-      error: jsonResponse({ detail: 'Invalid Telegram init data' }, { status: 401 }),
+      error: jsonResponse({ detail: 'Invalid Telegram init data' }, { status: 401 }, {}, env),
       user: null,
     };
   }
@@ -410,8 +409,7 @@ function validateReferrer(request, env) {
 
   return jsonResponse(
     { status: 'error', message: 'Forbidden: invalid origin' },
-    { status: 403 },
-  );
+    { status: 403 }, env);
 }
 
 function getJoinCacheKey(userId) {
@@ -2504,7 +2502,7 @@ function handleRoot() {
   return jsonResponse({
     status: 'ok',
     message: 'Amir BTC Assistant Backend is running!',
-  });
+  }, env);
 }
 
 function handleHealth(env) {
@@ -2513,7 +2511,7 @@ function handleHealth(env) {
     bot_configured: isBotConfigured(env),
     database_ready: isDatabaseConfigured(env),
     redis_ready: isCacheLayerConfigured(env),
-  });
+  }, {}, env);
 }
 
 async function handleChartResolve(request, env) {
@@ -2521,7 +2519,7 @@ async function handleChartResolve(request, env) {
   const rawSymbol = url.searchParams.get('symbol');
 
   if (rawSymbol === null) {
-    return jsonResponse(buildFastApiValidationError('missing', 'Field required', null), { status: 422 });
+    return jsonResponse(buildFastApiValidationError('missing', 'Field required', null), { status: 422 }, {}, env);
   }
 
   if (rawSymbol.length < 1) {
@@ -2532,8 +2530,7 @@ async function handleChartResolve(request, env) {
         rawSymbol,
         { min_length: 1 },
       ),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   if (rawSymbol.length > 16) {
@@ -2544,15 +2541,14 @@ async function handleChartResolve(request, env) {
         rawSymbol,
         { max_length: 16 },
       ),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   const result = await resolveChartExchange(env, rawSymbol);
   return jsonResponse({
     status: 'success',
     ...result,
-  });
+  }, env);
 }
 
 async function handleCalendarEvents(env) {
@@ -2560,11 +2556,11 @@ async function handleCalendarEvents(env) {
   return jsonResponse({
     status: 'success',
     events,
-  });
+  }, env);
 }
 
 async function handleFarsiNews(env) {
-  return jsonResponse(await fetchFarsiNews(env));
+  return jsonResponse(await fetchFarsiNews(env), {}, env);
 }
 
 async function handleAnalyses(request, env) {
@@ -2577,8 +2573,7 @@ async function handleAnalyses(request, env) {
     if (!Number.isInteger(numericVersion)) {
       return jsonResponse(
         buildQueryFieldValidationError('version', 'int_parsing', 'Input should be a valid integer', rawVersion),
-        { status: 422 },
-      );
+        { status: 422 }, env);
     }
     requestedVersion = numericVersion;
   }
@@ -2590,7 +2585,7 @@ async function handleAnalyses(request, env) {
       analyses: null,
       version: cachedState.version,
       unchanged: true,
-    });
+    }, env);
   }
 
   if (requestedVersion === null && cachedState.version !== null && cachedState.analyses !== null) {
@@ -2598,7 +2593,7 @@ async function handleAnalyses(request, env) {
       status: 'success',
       analyses: cachedState.analyses,
       version: cachedState.version,
-    });
+    }, env);
   }
 
   if (isDatabaseConfigured(env)) {
@@ -2610,10 +2605,10 @@ async function handleAnalyses(request, env) {
         status: 'success',
         analyses,
         version,
-      });
+      }, env);
     } catch (error) {
       console.warn('list analyses failed:', error);
-      return safeDbErrorResponse(error);
+      return safeDbErrorResponse(error, env);
     }
   }
 
@@ -2621,7 +2616,7 @@ async function handleAnalyses(request, env) {
     status: 'success',
     analyses: cachedState.analyses ?? [],
     version: cachedState.version ?? 0,
-  });
+  }, env);
 }
 
 function parseAnalysisPayload(originalBody, options = {}) {
@@ -2633,8 +2628,7 @@ function parseAnalysisPayload(originalBody, options = {}) {
     return {
       error: jsonResponse(
         buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-        { status: 422 },
-      ),
+        { status: 422 }, env),
     };
   }
 
@@ -2642,8 +2636,7 @@ function parseAnalysisPayload(originalBody, options = {}) {
     return {
       error: jsonResponse(
         buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-        { status: 422 },
-      ),
+        { status: 422 }, env),
     };
   }
 
@@ -2662,8 +2655,7 @@ function parseAnalysisPayload(originalBody, options = {}) {
       return {
         error: jsonResponse(
           buildBodyFieldValidationError(spec.name, 'string_type', 'Input should be a valid string', rawValue ?? null),
-          { status: 422 },
-        ),
+          { status: 422 }, env),
       };
     }
     if (spec.minLength && rawValue.length < spec.minLength) {
@@ -2676,8 +2668,7 @@ function parseAnalysisPayload(originalBody, options = {}) {
             rawValue,
             { min_length: spec.minLength },
           ),
-          { status: 422 },
-        ),
+          { status: 422 }, env),
       };
     }
     if (spec.maxLength && rawValue.length > spec.maxLength) {
@@ -2690,8 +2681,7 @@ function parseAnalysisPayload(originalBody, options = {}) {
             rawValue,
             { max_length: spec.maxLength },
           ),
-          { status: 422 },
-        ),
+          { status: 422 }, env),
       };
     }
     validated[spec.name] = rawValue;
@@ -2706,7 +2696,7 @@ async function handleAnalysesCreate(request, env) {
     return authState.error;
   }
   if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
   }
   if (!isDatabaseConfigured(env)) {
     return jsonResponse(
@@ -2714,8 +2704,7 @@ async function handleAnalysesCreate(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
   const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: true });
@@ -2728,10 +2717,10 @@ async function handleAnalysesCreate(request, env) {
     const analyses = await listAnalysesFromDb(env);
     const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
     await updateAnalysesCache(env, analyses, version);
-    return jsonResponse({ status: 'success', analysis, version });
+    return jsonResponse({ status: 'success', analysis, version }, env);
   } catch (error) {
     console.warn('create analysis failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -2741,7 +2730,7 @@ async function handleAnalysesUpdate(request, env, analysisId) {
     return authState.error;
   }
   if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
   }
   if (!isDatabaseConfigured(env)) {
     return jsonResponse(
@@ -2749,8 +2738,7 @@ async function handleAnalysesUpdate(request, env, analysisId) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
   const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: false });
@@ -2761,15 +2749,15 @@ async function handleAnalysesUpdate(request, env, analysisId) {
   try {
     const analysis = await updateAnalysisInDb(env, analysisId, parsed.payload);
     if (!analysis) {
-      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 });
+      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, {}, env);
     }
     const analyses = await listAnalysesFromDb(env);
     const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
     await updateAnalysesCache(env, analyses, version);
-    return jsonResponse({ status: 'success', analysis, version });
+    return jsonResponse({ status: 'success', analysis, version }, env);
   } catch (error) {
     console.warn('update analysis failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -2779,7 +2767,7 @@ async function handleAnalysesDelete(request, env, analysisId) {
     return authState.error;
   }
   if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
   }
   if (!isDatabaseConfigured(env)) {
     return jsonResponse(
@@ -2787,22 +2775,21 @@ async function handleAnalysesDelete(request, env, analysisId) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
   try {
     const deleted = await deleteAnalysisInDb(env, analysisId);
     if (!deleted) {
-      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 });
+      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, {}, env);
     }
     const analyses = await listAnalysesFromDb(env);
     const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
     await updateAnalysesCache(env, analyses, version);
-    return jsonResponse({ status: 'success', version });
+    return jsonResponse({ status: 'success', version }, env);
   } catch (error) {
     console.warn('delete analysis failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -2818,8 +2805,7 @@ async function handleSessionsHeartbeat(request, env) {
         status: 'error',
         message: 'SESSION_CACHE binding not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
   const url = new URL(request.url);
@@ -2846,7 +2832,7 @@ async function handleSessionsHeartbeat(request, env) {
     session_id: sessionId,
     last_seen: lastSeen,
     online_count: Object.keys(state).length,
-  });
+  }, env);
 }
 
 async function handleSessionsOnline(request, env) {
@@ -2861,8 +2847,7 @@ async function handleSessionsOnline(request, env) {
         status: 'error',
         message: 'SESSION_CACHE binding not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
   const ttlSeconds = getNumericEnv(env, 'SESSION_TTL', 120);
@@ -2874,7 +2859,7 @@ async function handleSessionsOnline(request, env) {
   return jsonResponse({
     status: 'success',
     count: Object.keys(state).length,
-  });
+  }, env);
 }
 
 async function handleSessionsEnd(request, env) {
@@ -2889,8 +2874,7 @@ async function handleSessionsEnd(request, env) {
         status: 'error',
         message: 'SESSION_CACHE binding not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
   const ttlSeconds = getNumericEnv(env, 'SESSION_TTL', 120);
@@ -2910,7 +2894,7 @@ async function handleSessionsEnd(request, env) {
   return jsonResponse({
     status: 'success',
     online_count: Object.keys(state).length,
-  });
+  }, env);
 }
 
 async function handleAssistantLimits(request, env) {
@@ -2925,12 +2909,11 @@ async function handleAssistantLimits(request, env) {
         status: 'error',
         message: 'RATE_LIMITS binding not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
   const limits = await checkRateLimits(env, authState.user.id);
-  return jsonResponse({ status: 'success', ...limits });
+  return jsonResponse({ status: 'success', ...limits }, env);
 }
 
 async function handleAssistantChat(request, env) {
@@ -2945,27 +2928,24 @@ async function handleAssistantChat(request, env) {
         status: 'error',
         message: 'RATE_LIMITS binding not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
-  const bodyResult = await readJsonBody(request, 2_000_000);
+  const bodyResult = await readJsonBody(request, 2_000_000, MAX_BODY_BYTES, env);
   if (bodyResult.error) return bodyResult.error;
   let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
       buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   const message = payload.message;
   if (typeof message !== 'string') {
     return jsonResponse(
       buildBodyFieldValidationError('message', 'string_type', 'Input should be a valid string', message ?? null),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   if (message.length < 1) {
@@ -2977,8 +2957,7 @@ async function handleAssistantChat(request, env) {
         message,
         { min_length: 1 },
       ),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   if (message.length > 4000) {
@@ -2990,22 +2969,19 @@ async function handleAssistantChat(request, env) {
         message,
         { max_length: 4000 },
       ),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   if (payload.image !== undefined && payload.image !== null && typeof payload.image !== 'string') {
     return jsonResponse(
       buildBodyFieldValidationError('image', 'string_type', 'Input should be a valid string', payload.image),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   if (typeof payload.image === 'string' && payload.image.length > 2000000) {
     return jsonResponse(
       buildBodyFieldValidationError('image', 'string_too_long', 'String should have at most 2000000 characters', payload.image, { max_length: 2000000 }),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   const userId = String(authState.user.id);
@@ -3014,11 +2990,11 @@ async function handleAssistantChat(request, env) {
 
   const limits = await checkRateLimits(env, userId);
   if (!limits.allowed) {
-    return jsonResponse({ status: 'error', ...limits }, { status: 429 });
+    return jsonResponse({ status: 'error', ...limits }, { status: 429 }, {}, env);
   }
 
   if (hasImage && limits.images_used >= limits.images_limit) {
-    return jsonResponse({ status: 'error', reason: 'daily_image_limit', allowed: false }, { status: 429 });
+    return jsonResponse({ status: 'error', reason: 'daily_image_limit', allowed: false }, { status: 429 }, {}, env);
   }
 
   try {
@@ -3036,7 +3012,7 @@ async function handleAssistantChat(request, env) {
       responseBody.image_ignored = true;
       responseBody.warning = 'Image could not be processed by the active AI provider';
     }
-    return jsonResponse(responseBody);
+    return jsonResponse(responseBody, env);
   } catch (error) {
     console.error('AI provider error:', error instanceof Error ? error.message : String(error));
     return jsonResponse(
@@ -3045,8 +3021,7 @@ async function handleAssistantChat(request, env) {
         reason: 'all_providers_failed',
         message: 'AI service temporarily unavailable',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 }
 
@@ -3062,19 +3037,17 @@ async function handleTicketsCreate(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
-  const bodyResult = await readJsonBody(request);
+  const bodyResult = await readJsonBody(request, env);
   if (bodyResult.error) return bodyResult.error;
   let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
       buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   payload.user_id = String(authState.user.id);
@@ -3109,10 +3082,10 @@ async function handleTicketsCreate(request, env) {
       console.warn('ticket create: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
     }
 
-    return jsonResponse({ status: 'success', ticket });
+    return jsonResponse({ status: 'success', ticket }, env);
   } catch (error) {
     console.warn('create ticket failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3127,16 +3100,15 @@ async function handleTicketsList(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
   const userId = String(authState.user.id);
   try {
     const tickets = await listTicketsFromDb(env, userId);
-    return jsonResponse({ status: 'success', tickets });
+    return jsonResponse({ status: 'success', tickets }, env);
   } catch (error) {
     console.warn('list tickets failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3147,7 +3119,7 @@ async function handleTicketsAll(request, env) {
   }
 
   if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
   }
   if (!isDatabaseConfigured(env)) {
     return jsonResponse(
@@ -3155,15 +3127,14 @@ async function handleTicketsAll(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
   try {
     const tickets = await listTicketsFromDb(env);
-    return jsonResponse({ status: 'success', tickets });
+    return jsonResponse({ status: 'success', tickets }, env);
   } catch (error) {
     console.warn('list all tickets failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3174,7 +3145,7 @@ async function handleTicketReply(request, env, ticketId) {
   }
 
   if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
   }
   if (!isDatabaseConfigured(env)) {
     return jsonResponse(
@@ -3182,31 +3153,28 @@ async function handleTicketReply(request, env, ticketId) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
-  const bodyResult = await readJsonBody(request);
+  const bodyResult = await readJsonBody(request, env);
   if (bodyResult.error) return bodyResult.error;
   let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
       buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   const message = normalizeOptionalString(payload.message) || '';
   if (!message) {
     return jsonResponse(
       buildBodyFieldValidationError('message', 'string_too_short', 'String should have at least 1 character', message, { min_length: 1 }),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
   try {
     const ticket = await replyToTicketInDb(env, ticketId, authState.user.id, message);
     if (!ticket) {
-      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
+      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, {}, env);
     }
 
     // Notify ticket owner via Telegram (Task 2.14 — mirror main.py:721-724)
@@ -3223,10 +3191,10 @@ async function handleTicketReply(request, env, ticketId) {
       console.warn('ticket reply: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
     }
 
-    return jsonResponse({ status: 'success', ticket });
+    return jsonResponse({ status: 'success', ticket }, env);
   } catch (error) {
     console.warn('reply ticket failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3243,22 +3211,21 @@ async function handleTicketDelete(request, env, ticketId) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
   try {
     const ticket = await getTicketRowById(env, ticketId);
     if (!ticket) {
-      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 });
+      return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, {}, env);
     }
     if (!isAdmin && String(ticket.user_id) !== userId) {
-      return jsonResponse({ detail: 'Forbidden' }, { status: 403 });
+      return jsonResponse({ detail: 'Forbidden' }, { status: 403 }, {}, env);
     }
     await deleteTicketInDb(env, ticketId);
-    return jsonResponse({ status: 'success' });
+    return jsonResponse({ status: 'success' }, env);
   } catch (error) {
     console.warn('delete ticket failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3274,28 +3241,26 @@ async function handleAlertsCreate(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
-  const bodyResult = await readJsonBody(request);
+  const bodyResult = await readJsonBody(request, env);
   if (bodyResult.error) return bodyResult.error;
   let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
       buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   payload.user_id = String(authState.user.id);
   try {
     const alert = await createOrReactivateAlertInDb(env, payload.user_id, payload);
-    return jsonResponse({ status: 'success', alert });
+    return jsonResponse({ status: 'success', alert }, env);
   } catch (error) {
     console.warn('create alert failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3310,16 +3275,15 @@ async function handleAlertsList(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
   const userId = String(authState.user.id);
   try {
     const alerts = await listAlertsFromDb(env, userId);
-    return jsonResponse({ status: 'success', alerts });
+    return jsonResponse({ status: 'success', alerts }, env);
   } catch (error) {
     console.warn('list alerts failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3334,23 +3298,22 @@ async function handleAlertDelete(request, env, alertId) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
   const userId = String(authState.user.id);
   try {
     const alert = await getAlertRowById(env, alertId);
     if (!alert) {
-      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 });
+      return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, {}, env);
     }
     if (String(alert.user_id) !== userId) {
-      return jsonResponse({ status: 'error', message: 'Forbidden' }, { status: 403 });
+      return jsonResponse({ status: 'error', message: 'Forbidden' }, { status: 403 }, {}, env);
     }
     await deleteAlertInDb(env, alertId);
-    return jsonResponse({ status: 'success', deleted: true });
+    return jsonResponse({ status: 'success', deleted: true }, env);
   } catch (error) {
     console.warn('delete alert failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3366,19 +3329,17 @@ async function handleUsersBootstrap(request, env) {
         status: 'DB_ERROR',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
-  const bodyResult = await readJsonBody(request);
+  const bodyResult = await readJsonBody(request, env);
   if (bodyResult.error) return bodyResult.error;
   let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
       buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
   const userId = String(authState.user.id);
   payload.user_id = userId;
@@ -3401,10 +3362,10 @@ async function handleUsersBootstrap(request, env) {
       status: 'success',
       user: normalizeUserRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
       watchlist,
-    });
+    }, env);
   } catch (error) {
     console.warn('bootstrap user failed:', error);
-    return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' });
+    return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, {}, env);
   }
 }
 
@@ -3419,8 +3380,7 @@ async function handleUsersMe(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
   const userId = String(authState.user.id);
   try {
@@ -3431,18 +3391,17 @@ async function handleUsersMe(request, env) {
           status: 'error',
           message: 'User not found',
         },
-        { status: 404 },
-      );
+        { status: 404 }, env);
     }
     const watchlist = await getWatchlistSymbolsFromDb(env, userId);
     return jsonResponse({
       status: 'success',
       user: normalizeUserRow(userRow, watchlist),
       watchlist,
-    });
+    }, env);
   } catch (error) {
     console.warn('get current user failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3458,19 +3417,17 @@ async function handleUsersMeSettings(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
-  const bodyResult = await readJsonBody(request);
+  const bodyResult = await readJsonBody(request, env);
   if (bodyResult.error) return bodyResult.error;
   let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
       buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   const userId = String(authState.user.id);
@@ -3483,13 +3440,12 @@ async function handleUsersMeSettings(request, env) {
           status: 'error',
           message: 'User not found',
         },
-        { status: 404 },
-      );
+        { status: 404 }, env);
     }
-    return jsonResponse({ status: 'success', user: normalizeUserRow(userRow) });
+    return jsonResponse({ status: 'success', user: normalizeUserRow(userRow) }, env);
   } catch (error) {
     console.warn('update user settings failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3504,16 +3460,15 @@ async function handleWatchlistGet(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
   const userId = String(authState.user.id);
   try {
     const symbols = await getWatchlistSymbolsFromDb(env, userId);
-    return jsonResponse({ status: 'success', symbols, watchlist: symbols });
+    return jsonResponse({ status: 'success', symbols, watchlist: symbols }, env);
   } catch (error) {
     console.warn('get watchlist failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3529,19 +3484,17 @@ async function handleWatchlistPut(request, env) {
         status: 'error',
         message: 'Database not configured',
       },
-      { status: 503 },
-    );
+      { status: 503 }, env);
   }
 
-  const bodyResult = await readJsonBody(request);
+  const bodyResult = await readJsonBody(request, env);
   if (bodyResult.error) return bodyResult.error;
   let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
       buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   payload.user_id = String(authState.user.id);
@@ -3550,10 +3503,10 @@ async function handleWatchlistPut(request, env) {
     : [];
   try {
     const storedSymbols = await replaceWatchlistInDb(env, payload.user_id, symbols);
-    return jsonResponse({ status: 'success', symbols: storedSymbols });
+    return jsonResponse({ status: 'success', symbols: storedSymbols }, env);
   } catch (error) {
     console.warn('update watchlist failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3563,14 +3516,14 @@ async function handleReferralsStats(request, env) {
     return authState.error;
   }
   if (!isDatabaseConfigured(env)) {
-    return jsonResponse({ status: 'success', total: 0, active: 0, rewarded: 0, tokens: 0 });
+    return jsonResponse({ status: 'success', total: 0, active: 0, rewarded: 0, tokens: 0 }, env);
   }
   try {
     const stats = await getReferralStatsFromDb(env, authState.user.id);
-    return jsonResponse({ status: 'success', ...stats });
+    return jsonResponse({ status: 'success', ...stats }, env);
   } catch (error) {
     console.warn('get referral stats failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3580,14 +3533,14 @@ async function handleReferralTokens(request, env) {
     return authState.error;
   }
   if (!isDatabaseConfigured(env)) {
-    return jsonResponse({ status: 'success', balance: 0, history: [] });
+    return jsonResponse({ status: 'success', balance: 0, history: [] }, env);
   }
   try {
     const tokenState = await getReferralTokensFromDb(env, authState.user.id);
-    return jsonResponse({ status: 'success', ...tokenState });
+    return jsonResponse({ status: 'success', ...tokenState }, env);
   } catch (error) {
     console.warn('get referral tokens failed:', error);
-    return safeDbErrorResponse(error);
+    return safeDbErrorResponse(error, env);
   }
 }
 
@@ -3602,31 +3555,29 @@ async function handleNotify(request, env) {
   const rawNotifyCount = await readRateLimitCache(env, notifyKey);
   const notifyCount = rawNotifyCount && /^\d+$/.test(String(rawNotifyCount)) ? Number(rawNotifyCount) : 0;
   if (notifyCount >= 5) {
-    return jsonResponse({ status: 'error', reason: 'rate_limited', retry_after: 3600 }, { status: 429 });
+    return jsonResponse({ status: 'error', reason: 'rate_limited', retry_after: 3600 }, { status: 429 }, {}, env);
   }
   await writeRateLimitCache(env, notifyKey, String(notifyCount + 1), 3600);
 
-  const bodyResult = await readJsonBody(request);
+  const bodyResult = await readJsonBody(request, env);
   if (bodyResult.error) return bodyResult.error;
   let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
       buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   const message = normalizeOptionalString(payload.message) || '';
   if (!message) {
     return jsonResponse(
       buildBodyFieldValidationError('message', 'string_too_short', 'String should have at least 1 character', message, { min_length: 1 }),
-      { status: 422 },
-    );
+      { status: 422 }, env);
   }
 
   if (!isBotConfigured(env)) {
-    return jsonResponse({ status: 'skipped', sent: false, reason: 'bot_not_configured' }, { status: 200 });
+    return jsonResponse({ status: 'skipped', sent: false, reason: 'bot_not_configured' }, { status: 200 }, {}, env);
   }
 
   try {
@@ -3635,9 +3586,9 @@ async function handleNotify(request, env) {
       text: message,
       disable_web_page_preview: true,
     });
-    return jsonResponse({ status: 'success', sent: true });
+    return jsonResponse({ status: 'success', sent: true }, env);
   } catch {
-    return jsonResponse({ status: 'skipped', sent: false }, { status: 200 });
+    return jsonResponse({ status: 'skipped', sent: false }, { status: 200 }, {}, env);
   }
 }
 
@@ -3667,13 +3618,13 @@ async function handleCheckJoin(request, env) {
     }),
   );
   if (result.status === 'DB_ERROR') {
-    return jsonResponse(result);
+    return jsonResponse(result, env);
   }
 
   return jsonResponse({
     status: 'success',
     ...result,
-  });
+  }, env);
 }
 
 async function handleDebugCheckJoin(request, env) {
@@ -3683,7 +3634,7 @@ async function handleDebugCheckJoin(request, env) {
   }
 
   if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 });
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
   }
 
   const debugPayload = await getChatMemberDebugPayload(String(authState.user.id), env);
@@ -3692,7 +3643,7 @@ async function handleDebugCheckJoin(request, env) {
     user_id: String(authState.user.id),
     telegram_response: debugPayload.telegram_response,
     joined: debugPayload.joined,
-  });
+  }, env);
 }
 
 async function handleCheckJoinInvalidate(request, env) {
@@ -3714,7 +3665,7 @@ async function handleCheckJoinInvalidate(request, env) {
     status: 'success',
     invalidated,
     user_id: resolvedUserId,
-  });
+  }, env);
 }
 
 async function handleTelegramWebhook(request, env) {
@@ -3728,8 +3679,7 @@ async function handleTelegramWebhook(request, env) {
     if (!headerToken || !timingSafeEqualSecret(headerToken, webhookSecret)) {
       return jsonResponse(
         { status: 'error', detail: 'Invalid or missing webhook secret token' },
-        { status: 403 },
-      );
+        { status: 403 }, env);
     }
   } else {
     console.warn('TELEGRAM_WEBHOOK_SECRET is not configured — webhook endpoint is unprotected');
@@ -3751,14 +3701,14 @@ async function handleTelegramWebhook(request, env) {
     if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
       return new Response(null, {
         status: 200,
-        headers: withCors(),
+        headers: withCors({}, env),
       });
     }
 
     if (!isBotConfigured(env)) {
       return new Response(null, {
         status: 200,
-        headers: withCors(),
+        headers: withCors({}, env),
       });
     }
 
@@ -3779,7 +3729,7 @@ async function handleTelegramWebhook(request, env) {
 
   return new Response(null, {
     status: 200,
-    headers: withCors(),
+    headers: withCors({}, env),
   });
 }
 //#endregion
@@ -3954,12 +3904,10 @@ async function runScheduledAlertsBaseline(controller, env) {
 // ============================================================================
 export default {
   async fetch(request, env) {
-    _requestEnv = env;
-
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
-        headers: withCors(),
+        headers: withCors({}, env),
       });
     }
 
@@ -4116,8 +4064,7 @@ export default {
           status: 'error',
           message: 'Route not found in Cloudflare shell',
         },
-        { status: 404 },
-      );
+        { status: 404 }, env);
     } catch (error) {
       console.error('Unhandled worker request error:', error);
       return jsonResponse(
@@ -4125,8 +4072,7 @@ export default {
           status: 'error',
           message: 'Internal server error',
         },
-        { status: 500 },
-      );
+        { status: 500 }, env);
     }
   },
 
