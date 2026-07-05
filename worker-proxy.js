@@ -60,6 +60,24 @@ function safeDbErrorResponse(error, options = {}) {
   );
 }
 
+const MAX_BODY_BYTES = 102400; // 100 KB
+
+async function readJsonBody(request, maxSize = MAX_BODY_BYTES) {
+  const contentLength = request.headers.get('Content-Length');
+  if (contentLength && Number(contentLength) > maxSize) {
+    return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }) };
+  }
+  const body = await request.text();
+  if (body.length > maxSize) {
+    return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }) };
+  }
+  try {
+    return { payload: JSON.parse(body) };
+  } catch {
+    return { error: jsonResponse(buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null), { status: 422 }) };
+  }
+}
+
 function getNumericEnv(env, key, fallbackValue) {
   const rawValue = Number(env[key]);
   return Number.isFinite(rawValue) ? rawValue : fallbackValue;
@@ -2919,16 +2937,9 @@ async function handleAssistantChat(request, env) {
     );
   }
 
-  const originalBody = await request.text();
-  let payload;
-  try {
-    payload = JSON.parse(originalBody);
-  } catch {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-      { status: 422 },
-    );
-  }
+  const bodyResult = await readJsonBody(request, 2_000_000);
+  if (bodyResult.error) return bodyResult.error;
+  let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
@@ -3043,16 +3054,9 @@ async function handleTicketsCreate(request, env) {
     );
   }
 
-  const originalBody = await request.text();
-  let payload;
-  try {
-    payload = JSON.parse(originalBody);
-  } catch {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-      { status: 422 },
-    );
-  }
+  const bodyResult = await readJsonBody(request);
+  if (bodyResult.error) return bodyResult.error;
+  let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
@@ -3169,16 +3173,9 @@ async function handleTicketReply(request, env, ticketId) {
       { status: 503 },
     );
   }
-  const originalBody = await request.text();
-  let payload;
-  try {
-    payload = JSON.parse(originalBody);
-  } catch {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-      { status: 422 },
-    );
-  }
+  const bodyResult = await readJsonBody(request);
+  if (bodyResult.error) return bodyResult.error;
+  let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
@@ -3269,16 +3266,9 @@ async function handleAlertsCreate(request, env) {
     );
   }
 
-  const originalBody = await request.text();
-  let payload;
-  try {
-    payload = JSON.parse(originalBody);
-  } catch {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-      { status: 422 },
-    );
-  }
+  const bodyResult = await readJsonBody(request);
+  if (bodyResult.error) return bodyResult.error;
+  let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
@@ -3368,16 +3358,9 @@ async function handleUsersBootstrap(request, env) {
     );
   }
 
-  const originalBody = await request.text();
-  let payload;
-  try {
-    payload = JSON.parse(originalBody);
-  } catch {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-      { status: 422 },
-    );
-  }
+  const bodyResult = await readJsonBody(request);
+  if (bodyResult.error) return bodyResult.error;
+  let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
@@ -3467,16 +3450,9 @@ async function handleUsersMeSettings(request, env) {
     );
   }
 
-  const originalBody = await request.text();
-  let payload;
-  try {
-    payload = JSON.parse(originalBody);
-  } catch {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-      { status: 422 },
-    );
-  }
+  const bodyResult = await readJsonBody(request);
+  if (bodyResult.error) return bodyResult.error;
+  let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
@@ -3545,16 +3521,9 @@ async function handleWatchlistPut(request, env) {
     );
   }
 
-  const originalBody = await request.text();
-  let payload;
-  try {
-    payload = JSON.parse(originalBody);
-  } catch {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-      { status: 422 },
-    );
-  }
+  const bodyResult = await readJsonBody(request);
+  if (bodyResult.error) return bodyResult.error;
+  let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
@@ -3616,16 +3585,9 @@ async function handleNotify(request, env) {
     return authState.error;
   }
 
-  const originalBody = await request.text();
-  let payload;
-  try {
-    payload = JSON.parse(originalBody);
-  } catch {
-    return jsonResponse(
-      buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null),
-      { status: 422 },
-    );
-  }
+  const bodyResult = await readJsonBody(request);
+  if (bodyResult.error) return bodyResult.error;
+  let payload = bodyResult.payload;
 
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return jsonResponse(
