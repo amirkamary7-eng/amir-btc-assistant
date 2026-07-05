@@ -15,18 +15,18 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 33 |
+| ✅ Done | 31 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 21 |
-| **Progress** | **61%** |
+| ⬜ Todo | 23 |
+| **Progress** | **57%** |
 
 ## By Phase
 
 | Phase | Name | Tasks | Done | Progress |
 |-------|------|-------|------|----------|
 | 1 | Critical Stability | 7 | 7 | 100% |
-| 2 | Core System Fix | 14 | 11 | 79% |
+| 2 | Core System Fix | 14 | 9 | 64% |
 | 3 | Architecture Cleanup | 8 | 4 | 50% |
 | 4 | Security Hardening | 13 | 4 | 31% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |

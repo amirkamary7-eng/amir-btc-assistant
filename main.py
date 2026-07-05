@@ -972,17 +972,6 @@ if TOKEN == "REPLACE_WITH_TOKEN":
 # DEPRECATED — use Worker webhook only
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
-    settings = get_settings()
-    secret = settings.TELEGRAM_WEBHOOK_SECRET
-    if secret:
-        received = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-        if received != secret:
-            return JSONResponse(
-                {"detail": "Invalid webhook secret"},
-                status_code=403,
-            )
-    else:
-        print("⚠️ TELEGRAM_WEBHOOK_SECRET not configured — /telegram endpoint is unprotected")
     print("ℹ️ backend /telegram received a compatibility request; Worker owns the active webhook runtime.")
     return Response(status_code=200)
 

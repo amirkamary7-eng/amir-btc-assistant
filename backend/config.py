@@ -43,7 +43,6 @@ class Settings:
         self.AI_DAILY_IMAGE_LIMIT = int(os.environ.get("AI_DAILY_IMAGE_LIMIT", "3"))
         self.AI_COOLDOWN_SECONDS = int(os.environ.get("AI_COOLDOWN_SECONDS", "4"))
         self.REFERRAL_TOKENS_PER_INVITE = int(os.environ.get("REFERRAL_TOKENS_PER_INVITE", "3"))
-        self.TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 
     @property
     def database_enabled(self) -> bool:
