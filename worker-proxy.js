@@ -2954,11 +2954,17 @@ async function handleAssistantChat(request, env) {
     const prompt = buildAssistantPrompt(message, history, imageBase64);
     const result = await generateAssistantReply(env, prompt, imageBase64);
     await recordRateLimitUsage(env, userId, hasImage);
-    return jsonResponse({
+    const responseBody = {
       status: 'success',
       reply: result.reply,
       provider: result.provider,
-    });
+    };
+    // Task 4.13 — warn user if image was sent but a non-vision provider answered
+    if (hasImage && result.provider !== 'gemini') {
+      responseBody.image_ignored = true;
+      responseBody.warning = 'Image could not be processed by the active AI provider';
+    }
+    return jsonResponse(responseBody);
   } catch (error) {
     console.error('AI provider error:', error instanceof Error ? error.message : String(error));
     return jsonResponse(

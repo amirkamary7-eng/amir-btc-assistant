@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 47 |
+| ✅ Done | 48 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 7 |
-| **Progress** | **87%** |
+| ⬜ Todo | 6 |
+| **Progress** | **89%** |
 
 ## By Phase
 
@@ -28,7 +28,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 11 | 85% |
+| 4 | Security Hardening | 13 | 12 | 92% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ## DONE Criteria (قانون تأیید تسک)
@@ -421,6 +421,76 @@ None.
 
 **`node --test worker-proxy.test.cjs` → 68/68 pass**
 
+## Task 4.9 — Remove hardcoded default admin ID (Exec#38)
+
+**Session:** 2026-07-05
+
+### Code Change
+- **File:** `worker-proxy.js` L831–832
+- **Before:** `const primary = String(env.ADMIN_TELEGRAM_ID || '831704732').trim();`
+- **After:** `const primary = String(env.ADMIN_TELEGRAM_ID || '').trim();`
+- Removed hardcoded fallback `'831704732'` so missing env var = no admin access
+
+### Runtime Evidence
+
+**Test 1: No hardcoded admin fallback — omitting ADMIN_TELEGRAM_ID rejects previously-hardcoded ID**
+- User 831704732 authenticates with valid HMAC to `GET /api/tickets/all`
+- Env has NO `ADMIN_TELEGRAM_ID` (deleted after createEnv)
+- **Result:** `response.status === 403` + `body.detail === 'Admin access required'` ✅
+
+**Test 2: Admin still works when ADMIN_TELEGRAM_ID is explicitly set (regression)**
+- Same user 831704732 authenticates to same endpoint
+- Env has `ADMIN_TELEGRAM_ID: '831704732'`
+- **Result:** `response.status === 200` + `body.status === 'success'` ✅
+
+**`node --test worker-proxy.test.cjs` → 66/66 pass**
+
+## Task 4.11 — Shorten initData max_age (Exec#40)
+
+**Session:** 2026-07-05
+
+### Code Change
+- **File:** `worker-proxy.js` L225
+- **Before:** `function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400)`
+- **After:** `function validateTelegramInitData(initData, botToken, maxAgeSeconds = 3600)`
+- Reduced initData validity window from 24 hours to 1 hour
+
+### Runtime Evidence
+
+**Test 1: initData with auth_date older than 1 hour is rejected**
+- `buildInitData` with `authDate = now - 7200` (2 hours ago)
+- `GET /api/check-join` with this stale initData
+- **Result:** `response.status === 401` + `body.detail === 'Invalid Telegram init data'` ✅
+
+**Test 2: Recent auth_date still works (regression)**
+- `buildInitData` with default (current time) auth_date
+- Same endpoint
+- **Result:** `response.status !== 401` (auth passes, not rejected as stale) ✅
+
+**`node --test worker-proxy.test.cjs` → 68/68 pass**
+
+## Task 4.13 — Image failover — explicit warning (Exec#42)
+
+**Session:** 2026-07-05
+
+### Code Change
+- **File:** `worker-proxy.js` L2957–2967 (handleAssistantChat response)
+- After successful AI reply, checks `hasImage && result.provider !== 'gemini'`
+- If true: adds `image_ignored: true` + `warning: 'Image could not be processed by the active AI provider'` to response JSON
+
+### Runtime Evidence
+
+**Test 1: Image + Gemini fails → OpenRouter succeeds → warning present**
+- `POST /api/assistant/chat` with `image: 'data:image/jpeg;base64,...'`
+- Mock: Gemini 429, OpenRouter 200 with text reply
+- **Result:** `status === 200` + `provider === 'openrouter'` + `image_ignored === true` + `warning` present ✅
+
+**Test 2: Image + Gemini succeeds → NO warning (regression)**
+- Same request, mock: Gemini 200 with vision reply
+- **Result:** `provider === 'gemini'` + `image_ignored === undefined` + `warning === undefined` ✅
+
+**`node --test worker-proxy.test.cjs` → 70/70 pass**
+
 ## Next Executable Tasks
 
 | Task ID | Phase | Title | Priority | Note |
@@ -433,6 +503,7 @@ None.
 | 4.8 | 4 | Debug join endpoint — admin only | Medium | ✅ implemented + verified |
 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | ✅ implemented + verified |
 | 4.11 | 4 | Shorten initData max_age | Medium | ✅ implemented + verified |
+| 4.13 | 4 | Image failover — explicit warning | Medium | ✅ implemented + verified |
 
 ## Agent Rules (summary)
 

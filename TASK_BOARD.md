@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 47 |
+| ✅ Done | 48 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 7 |
-| **Overall** | **87%** |
+| ⬜ Todo | 6 |
+| **Overall** | **89%** |
 
 ### By Phase
 
@@ -57,7 +57,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 11 | 85% |
+| 4 | Security Hardening | 13 | 12 | 92% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ---
@@ -135,7 +135,7 @@ Phase 4 ─► Phase 5:
 | 39 | 4.10 | 4 | Referrer validation | Medium | ✅ | None | — |
 | 40 | 4.11 | 4 | Shorten initData max_age | Medium | ✅ | 1.1 | 4.12 |
 | 41 | 4.12 | 4 | Sanitize env.example | Medium | ✅ | None | — |
-| 42 | 4.13 | 4 | Image failover — explicit warning | Medium | ⬜ | 2.9 | — |
+| 42 | 4.13 | 4 | Image failover — explicit warning | Medium | ✅ | 2.9 | — |
 | 43 | 5.1 | 5 | Remove mock news fallback | Low | ✅ | None | — |
 | 44 | 5.2 | 5 | Remove unused config keys — Python | Low | ✅ | None | — |
 | 45 | 5.3 | 5 | Remove unused wrangler vars | Low | ✅ | None | — |
@@ -172,7 +172,7 @@ Phase 4 ─► Phase 5:
 | ~~4.9~~ | ~~4~~ | ~~Remove hardcoded default admin ID~~ | ~~Medium~~ | ✅ implemented + verified |
 | ~~4.11~~ | ~~4~~ | ~~Shorten initData max_age~~ | ~~Medium~~ | ✅ implemented + verified |
 
-**توصیه (Top priority):** 4.13 → …
+**توصیه (Top priority):** Phase 4 complete (except 4.4 doc-only) → Phase 5
 
 ---
 

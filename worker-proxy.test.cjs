@@ -3073,6 +3073,119 @@ test('POST /api/assistant/chat 503 response does not leak provider error details
   }
 });
 
+test('Image failover to non-vision provider returns explicit warning (Task 4.13)', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 42102, first_name: 'ImgFailover' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+  const originalFetch = global.fetch;
+
+  // Gemini fails, OpenRouter succeeds (no vision support)
+  global.fetch = async (url) => {
+    if (String(url).includes('generativelanguage.googleapis.com')) {
+      return new Response(
+        JSON.stringify({ error: { message: 'Rate limited' } }),
+        { status: 429, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (String(url).includes('openrouter.ai')) {
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: 'Text-only reply from OpenRouter' } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    throw new Error(`Unexpected fetch url: ${url}`);
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({
+        message: 'What is in this image?',
+        history: [],
+        image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEA',
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+        GEMINI_API_KEY: 'fake-key',
+        OPENROUTER_API_KEY: 'fake-or-key',
+      }),
+    );
+
+    assert.equal(response.status, 200, 'failover to OpenRouter should return 200');
+    const json = await response.json();
+
+    // Core assertions — response must indicate image was ignored
+    assert.equal(json.status, 'success', 'status must be success');
+    assert.equal(json.provider, 'openrouter', 'provider must be openrouter (failover)');
+    assert.equal(json.image_ignored, true, 'image_ignored must be true when non-vision provider answers');
+    assert.equal(json.warning, 'Image could not be processed by the active AI provider', 'warning message must be present');
+    assert.equal(json.reply, 'Text-only reply from OpenRouter', 'reply must come from OpenRouter');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Image with Gemini success does NOT include image_ignored warning (Task 4.13 regression)', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 42102, first_name: 'ImgGemini' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+  const originalFetch = global.fetch;
+
+  // Gemini succeeds with image
+  global.fetch = async (url) => {
+    if (String(url).includes('generativelanguage.googleapis.com')) {
+      return new Response(
+        JSON.stringify({ candidates: [{ content: { parts: [{ text: 'I can see the chart shows BTC uptrend' }] } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    throw new Error(`Unexpected fetch url: ${url}`);
+  };
+
+  try {
+    const request = new Request('https://worker.example/api/assistant/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({
+        message: 'What is in this image?',
+        history: [],
+        image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEA',
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({
+        RATE_LIMITS: rateLimits,
+        GEMINI_API_KEY: 'fake-key',
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    const json = await response.json();
+
+    assert.equal(json.status, 'success');
+    assert.equal(json.provider, 'gemini', 'provider must be gemini (no failover)');
+    assert.equal(json.image_ignored, undefined, 'image_ignored must NOT be present when gemini handles image');
+    assert.equal(json.warning, undefined, 'warning must NOT be present when gemini handles image');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 // ── Task 4.7: Restrict CORS to WEBAPP_URL ────────────────────────────────────
 
 test('OPTIONS preflight returns WEBAPP_URL origin, not wildcard (Task 4.7)', async () => {
