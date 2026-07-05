@@ -861,6 +861,24 @@ function getDbPool(env) {
       new Pool({
         connectionString: databaseUrl,
         max: 3,
+        idleTimeoutMillis: 10000,
+        connectionTimeoutMillis: 5000,
+      }),
+    );
+  }
+
+  const pool = dbPools.get(databaseUrl);
+  // @ts-expect-error — idleTimeoutMillis is valid for @neondatabase/serverless Pool
+  if (pool && typeof pool.totalCount === 'function' && pool.totalCount() === 0 && pool.idleCount() === 0) {
+    // Stale pool detected (no connections, likely after isolate eviction). Recreate.
+    pool.end().catch(() => {});
+    dbPools.set(
+      databaseUrl,
+      new Pool({
+        connectionString: databaseUrl,
+        max: 3,
+        idleTimeoutMillis: 10000,
+        connectionTimeoutMillis: 5000,
       }),
     );
   }
