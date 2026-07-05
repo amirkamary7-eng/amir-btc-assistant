@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 50 |
+| ✅ Done | 52 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 4 |
-| **Overall** | **93%** |
+| ⬜ Todo | 2 |
+| **Overall** | **96%** |
 
 ### By Phase
 
@@ -58,7 +58,7 @@
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
 | 4 | Security Hardening | 13 | 12 | 92% |
-| 5 | Optimization & Cleanup | 12 | 8 | 67% |
+| 5 | Optimization & Cleanup | 12 | 10 | 83% |
 
 ---
 
@@ -142,10 +142,10 @@ Phase 4 ─► Phase 5:
 | 46 | 5.4 | 5 | Add GitHub Actions CI | Medium | ⬜ | 1.3, 2.9 | — |
 | 47 | 5.5 | 5 | Add minimal Python auth pytest | Medium | ✅ | 1.1 | — |
 | 48 | 5.6 | 5 | Integration test — analyses CRUD + KV | Medium | ✅ | 2.3 | — |
-| 49 | 5.7 | 5 | Integration test — webhook secret | Medium | ⬜ | 2.11 | — |
+| 49 | 5.7 | 5 | Integration test — webhook secret | Medium | ✅ | 2.11 | — |
 | 50 | 5.8 | 5 | Alembic migrations baseline | Medium | ✅ | None | — |
 | 51 | 5.9 | 5 | Sync status docs with code reality | Low | ⬜ | Phase 2 complete | — |
-| 52 | 5.10 | 5 | Remove legacy query params | Low | ⬜ | 3.1 | — |
+| 52 | 5.10 | 5 | Remove legacy query params | Low | ✅ | 3.1 | — |
 | 53 | 5.11 | 5 | Remove dead imports in main.py | Low | ✅ | None | — |
 | 54 | 5.12 | 5 | Update index.html outdated comment | Low | ✅ | 1.5 | — |
 
@@ -174,9 +174,9 @@ Phase 4 ─► Phase 5:
 | ~~4.13~~ | ~~4~~ | ~~Image failover — explicit warning~~ | ~~Medium~~ | ✅ implemented + verified |
 | ~~5.5~~ | ~~5~~ | ~~Add minimal Python auth pytest~~ | ~~Medium~~ | ✅ 21 tests, pytest passes |
 | ~~5.6~~ | ~~5~~ | ~~Integration test — analyses CRUD + KV~~ | ~~Medium~~ | ✅ 10-step lifecycle, 72 tests pass |
-| 5.10 | 5 | Remove legacy query params | Low | — |
+| 5.9 | 5 | Sync status docs with code reality | Low | — |
 
-**توصیه (Top priority):** 5.10 → 5.4 → …
+**توصیه (Top priority):** 5.9 → 5.4 → …
 
 ---
 

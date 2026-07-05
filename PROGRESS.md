@@ -581,6 +581,49 @@ Uses a shared mutable in-memory DB (`db.analyses[]`) and `createMemoryKv()` to p
 
 **`node --test worker-proxy.test.cjs` → 77/77 pass**
 
+---
+
+### Task 5.10 — Remove legacy query params (Exec#52)
+
+**Date:** 2026-07-05
+
+**Category:** 🟢 Category 1 (config/cleanup — code change + no regression + tests pass)
+
+**What was done:**
+- Removed all legacy `user_id`, `admin_id`, and `init_data` query parameters from `app.js`
+- Deleted `appendInitDataToUrl()` function — was appending `?init_data=...` to GET URLs (already blocked by Worker since Task 4.3)
+- Simplified `apiFetch()` to only use `X-Telegram-Init-Data` header (no query param fallback)
+- Removed `admin_id` from analyses CRUD (POST/PUT/DELETE)
+- Removed `user_id` from: referrals/stats, alerts (GET/DELETE), tickets, tickets/all, check-join, check-join/invalidate
+- Removed now-unused `adminId` variable from `saveAnalysisToServer`
+- Wrote 2 integration tests proving Worker ignores spoofed query params
+
+**Removed legacy query params (12 occurrences across 8 functions):**
+
+| File | Function | Removed param |
+|------|----------|--------------|
+| `app.js` | `appendInitDataToUrl` | **entire function deleted** |
+| `app.js` | `apiFetch` | `?init_data=...` GET injection |
+| `app.js` | `saveAnalysisToServer` | `?admin_id=` (POST/PUT/DELETE) |
+| `app.js` | `loadReferralStats` | `?user_id=` |
+| `app.js` | `removeAlertFromServer` | `?user_id=` |
+| `app.js` | `loadAlertsFromServer` | `?user_id=` |
+| `app.js` | `fetchTickets` | `?user_id=` |
+| `app.js` | `fetchAdminTickets` | `?admin_id=` |
+| `app.js` | `deleteTicket` | `?admin_id=` / `?user_id=` |
+| `app.js` | `performJoinCheck` | `?user_id=` |
+| `app.js` | `verifyJoinAndUnlock` | `?user_id=` |
+| `app.js` | `verifyJoinAndUnlock` | `?user_id=` (invalidate) |
+
+**Tests (2 new, total 79):**
+
+| # | Test | Assertions | Result |
+|---|------|-----------|--------|
+| 1 | `?user_id=99999` with valid header user 12345 → KV keyed on 12345, not 99999 | 3 | ✅ |
+| 2 | `?admin_id=831704732` with non-admin header auth → 403, DB untouched | 2 | ✅ |
+
+**`node --test worker-proxy.test.cjs` → 79/79 pass**
+
 ## Next Executable Tasks
 
 | Task ID | Phase | Title | Priority | Note |
