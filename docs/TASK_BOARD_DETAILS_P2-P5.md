@@ -548,7 +548,7 @@
 | 4.4 | ⬜ | FastAPI AI rate limits — KV migration doc | High | 1.0, 3.1 |
 | 4.5 | ✅ | Generic provider error to client | High | 2.9, 3.5 |
 | 4.6 | ⬜ | Gemini API key — header not URL | High | None |
-| 4.7 | ⬜ | Restrict CORS to WEBAPP_URL | Medium | 1.5 |
+| 4.7 | ✅ | Restrict CORS to WEBAPP_URL | Medium | 1.5 |
 | 4.8 | ⬜ | Debug join endpoint — admin only | Medium | 3.2 |
 | 4.9 | ⬜ | Remove hardcoded default admin ID | Medium | 3.2 |
 | 4.10 | ⬜ | Referrer validation | Medium | None |
