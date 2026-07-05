@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Pool } from '@neondatabase/serverless';
 
@@ -214,8 +213,8 @@ function decodeTelegramValue(value) {
 }
 
 function safeCompareStrings(left, right) {
-  const leftBuffer = Buffer.from(String(left || ''), 'utf8');
-  const rightBuffer = Buffer.from(String(right || ''), 'utf8');
+  const leftBuffer = new TextEncoder().encode(String(left || ''));
+  const rightBuffer = new TextEncoder().encode(String(right || ''));
   if (leftBuffer.length !== rightBuffer.length) {
     return false;
   }
@@ -228,8 +227,8 @@ function safeCompareStrings(left, right) {
  * Use this for comparing secrets/tokens of variable length.
  */
 function timingSafeEqualSecret(a, b) {
-  const aBuf = Buffer.from(String(a || ''), 'utf8');
-  const bBuf = Buffer.from(String(b || ''), 'utf8');
+  const aBuf = new TextEncoder().encode(String(a || ''));
+  const bBuf = new TextEncoder().encode(String(b || ''));
   const maxLen = Math.max(aBuf.length, bBuf.length);
   if (maxLen === 0) return true;
   // Use HMAC as a constant-time comparison since timingSafeEqual requires equal length.
