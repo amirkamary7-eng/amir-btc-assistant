@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 48 |
+| ✅ Done | 49 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 6 |
-| **Overall** | **89%** |
+| ⬜ Todo | 5 |
+| **Overall** | **91%** |
 
 ### By Phase
 
@@ -58,7 +58,7 @@
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
 | 4 | Security Hardening | 13 | 12 | 92% |
-| 5 | Optimization & Cleanup | 12 | 6 | 50% |
+| 5 | Optimization & Cleanup | 12 | 7 | 58% |
 
 ---
 
@@ -140,7 +140,7 @@ Phase 4 ─► Phase 5:
 | 44 | 5.2 | 5 | Remove unused config keys — Python | Low | ✅ | None | — |
 | 45 | 5.3 | 5 | Remove unused wrangler vars | Low | ✅ | None | — |
 | 46 | 5.4 | 5 | Add GitHub Actions CI | Medium | ⬜ | 1.3, 2.9 | — |
-| 47 | 5.5 | 5 | Add minimal Python auth pytest | Medium | ⬜ | 1.1 | — |
+| 47 | 5.5 | 5 | Add minimal Python auth pytest | Medium | ✅ | 1.1 | — |
 | 48 | 5.6 | 5 | Integration test — analyses CRUD + KV | Medium | ⬜ | 2.3 | — |
 | 49 | 5.7 | 5 | Integration test — webhook secret | Medium | ⬜ | 2.11 | — |
 | 50 | 5.8 | 5 | Alembic migrations baseline | Medium | ✅ | None | — |
@@ -171,8 +171,11 @@ Phase 4 ─► Phase 5:
 | ~~4.8~~ | ~~4~~ | ~~Debug join endpoint — admin only~~ | ~~Medium~~ | ✅ implemented + verified |
 | ~~4.9~~ | ~~4~~ | ~~Remove hardcoded default admin ID~~ | ~~Medium~~ | ✅ implemented + verified |
 | ~~4.11~~ | ~~4~~ | ~~Shorten initData max_age~~ | ~~Medium~~ | ✅ implemented + verified |
+| ~~4.13~~ | ~~4~~ | ~~Image failover — explicit warning~~ | ~~Medium~~ | ✅ implemented + verified |
+| ~~5.5~~ | ~~5~~ | ~~Add minimal Python auth pytest~~ | ~~Medium~~ | ✅ 21 tests, pytest passes |
+| 5.6 | 5 | Integration test — analyses CRUD + KV | Medium | — |
 
-**توصیه (Top priority):** Phase 4 complete (except 4.4 doc-only) → Phase 5
+**توصیه (Top priority):** 5.6 → 5.10 → …
 
 ---
 

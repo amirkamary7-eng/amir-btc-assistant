@@ -15,11 +15,11 @@
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 48 |
+| ✅ Done | 49 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 6 |
-| **Progress** | **89%** |
+| ⬜ Todo | 5 |
+| **Progress** | **91%** |
 
 ## By Phase
 
@@ -29,7 +29,7 @@
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
 | 4 | Security Hardening | 13 | 12 | 92% |
-| 5 | Optimization & Cleanup | 12 | 6 | 50% |
+| 5 | Optimization & Cleanup | 12 | 7 | 58% |
 
 ## DONE Criteria (قانون تأیید تسک)
 
@@ -491,6 +491,32 @@ None.
 
 **`node --test worker-proxy.test.cjs` → 70/70 pass**
 
+## Task 5.5 — Add minimal Python auth pytest (Exec#47)
+
+**Session:** 2026-07-05
+
+### Code Change
+- **New file:** `tests/test_telegram_auth.py` (21 tests)
+- Tests two pure functions from `backend/services/telegram_auth.py`:
+  - `_parse_init_data_pairs` — 7 tests (basic, URL-encoded, edge cases)
+  - `validate_telegram_init_data` — 14 tests (valid, wrong token, tampered hash, expired, missing fields, custom max_age, extra fields)
+
+### Runtime Evidence
+
+```
+pytest tests/test_telegram_auth.py -v → 21 passed in 0.63s
+pytest tests/ -v → 25 passed in 0.65s (21 new + 4 existing)
+```
+
+Key assertions proven at runtime:
+- Valid HMAC → returns `{"id": 42, "first_name": "Test"}` ✅
+- Wrong bot token → `None` ✅
+- Tampered hash → `None` ✅
+- Expired auth_date (2 days) → `None` ✅
+- Custom max_age: 30min old + max_age=600s → `None`; + max_age=3600s → user dict ✅
+- Invalid user JSON → `None` ✅
+- Extra fields in HMAC → still valid ✅
+
 ## Next Executable Tasks
 
 | Task ID | Phase | Title | Priority | Note |
@@ -504,6 +530,7 @@ None.
 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | ✅ implemented + verified |
 | 4.11 | 4 | Shorten initData max_age | Medium | ✅ implemented + verified |
 | 4.13 | 4 | Image failover — explicit warning | Medium | ✅ implemented + verified |
+| 5.5 | 5 | Add minimal Python auth pytest | Medium | ✅ 21 tests, pytest passes |
 
 ## Agent Rules (summary)
 
