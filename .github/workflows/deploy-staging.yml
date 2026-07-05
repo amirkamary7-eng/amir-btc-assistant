@@ -1,0 +1,72 @@
+# ============================================================================
+# deploy-staging.yml — ONLY deploys to STAGING on push to main
+# ============================================================================
+# SECURITY POLICY:
+#   - Production is NEVER deployed by this workflow
+#   - Production deploy is MANUAL only: wrangler deploy --env production
+#   - This workflow runs tests first, then deploys to staging
+# ============================================================================
+
+name: Deploy Staging
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - ".gitignore"
+
+# Prevent concurrent deployments
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: Run tests ──────────────────────────────────────────────────────
+  test:
+    name: Run Worker Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run worker tests
+        run: npm test
+
+  # ── Job 2: Deploy to STAGING only ────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to Staging
+    needs: test
+    runs-on: ubuntu-latest
+    environment: staging          # GitHub environment gate (optional review)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── HARD BLOCK: production deploy protection ────────────────────────
+      - name: Block production deploy
+        run: |
+          echo "============================================="
+          echo "  SECURITY: This workflow deploys to STAGING only"
+          echo "  Production must be deployed MANUALLY via:"
+          echo "    wrangler deploy --env production"
+          echo "============================================="
+
+      - name: Deploy Worker to Staging
+        run: npx wrangler deploy --env staging
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
