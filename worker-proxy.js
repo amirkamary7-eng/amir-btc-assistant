@@ -1104,14 +1104,15 @@ async function updateUserSettingsInDb(env, userId, payload) {
 async function replaceWatchlistInDb(env, userId, symbols) {
   await ensureUserRow(env, userId);
   await queryDb(env, 'DELETE FROM watchlist_items WHERE user_id = $1', [String(userId)]);
-  for (let index = 0; index < symbols.length; index += 1) {
+  if (symbols.length > 0) {
+    const params = [String(userId)];
+    const values = symbols.map((_, i) => `($1, $${i + 2}, $${i + 2 + symbols.length}, NOW())`);
+    for (const sym of symbols) params.push(sym);
+    for (let i = 0; i < symbols.length; i++) params.push(i);
     await queryDb(
       env,
-      `
-        INSERT INTO watchlist_items (user_id, symbol, position, created_at)
-        VALUES ($1, $2, $3, NOW())
-      `,
-      [String(userId), symbols[index], index],
+      `INSERT INTO watchlist_items (user_id, symbol, position, created_at) VALUES ${values.join(', ')}`,
+      params,
     );
   }
   await queryDb(env, 'UPDATE users SET updated_at = NOW() WHERE telegram_id = $1', [String(userId)]);

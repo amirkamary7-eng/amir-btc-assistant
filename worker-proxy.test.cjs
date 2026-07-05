@@ -300,7 +300,11 @@ test('PUT /api/watchlist ignores spoofed body user_id and stores DB-backed symbo
       return { rows: [] };
     }
     if (sql.includes('INSERT INTO watchlist_items')) {
-      storedSymbols[params[2]] = params[1];
+      // Batch insert: params = [userId, ...symbols, ...positions]
+      const n = Math.floor((params.length - 1) / 2);
+      for (let i = 0; i < n; i++) {
+        storedSymbols[params[1 + n + i]] = params[1 + i];
+      }
       return { rows: [] };
     }
     if (sql.includes('UPDATE users SET updated_at = NOW()')) {
