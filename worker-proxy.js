@@ -968,12 +968,20 @@ function normalizeUserRow(row, watchlist = []) {
   };
 }
 
-async function queryDb(env, sql, params = []) {
+async function queryDb(env, sql, params = [], retries = 1) {
   const pool = getDbPool(env);
   if (!pool) {
     throw new Error('Database not configured');
   }
-  return pool.query(sql, params);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await pool.query(sql, params);
+    } catch (error) {
+      if (attempt === retries) throw error;
+      const ms = Math.min(100 * 2 ** attempt, 1000);
+      await new Promise((r) => setTimeout(r, ms));
+    }
+  }
 }
 
 async function ensureUserRow(env, userId) {
