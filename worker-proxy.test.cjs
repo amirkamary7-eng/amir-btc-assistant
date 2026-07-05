@@ -11,26 +11,10 @@ const crypto = require('node:crypto');
 // so that intentional error-path noise (console.warn/error/log) does not
 // pollute test output.  The global-catch test overrides console.error
 // inside its own scope, which is unaffected.
-
 function loadWorker(overrides = {}) {
   const workerPath = path.join(__dirname, 'worker-proxy.js');
-  const source = fs.readFileSync(workerPath, 'utf8');
-  const transformed = source
-    .replace(
-      "import { createHmac, timingSafeEqual } from 'node:crypto';",
-      "const { createHmac, timingSafeEqual } = require('node:crypto');",
-    )
-    .replace("import { Pool } from '@neondatabase/serverless';", "const { Pool } = require('@neondatabase/serverless');")
-    .replace('export default {', 'module.exports = {');
+  let source = fs.readFileSync(workerPath, 'utf8');
 
-  // Suppress worker console noise inside the eval'd scope.
-  // The node:test runner restores console before each test, so we must
-  // inject the suppression into the worker source itself.
-  const suppressedSource =
-    'console.log = () => {}; console.warn = () => {}; console.error = () => {};\n' +
-    transformed;
-
-  const module = { exports: {} };
   const defaultMocks = {
     '@neondatabase/serverless': {
       Pool: class Pool {
@@ -40,20 +24,70 @@ function loadWorker(overrides = {}) {
       },
     },
   };
+
+  // ── Build require function with local module support ──────────────────
+  const localModuleCache = {};
   const localRequire = (id) => {
     if (Object.prototype.hasOwnProperty.call(overrides, id)) {
       return overrides[id];
+    }
+    if (localModuleCache[id]) {
+      return localModuleCache[id];
     }
     if (Object.prototype.hasOwnProperty.call(defaultMocks, id)) {
       return defaultMocks[id];
     }
     return require(id);
   };
+
+  // ── Resolve and bundle local ESM modules (src/**/*.js) ───────────────
+  const localImportRe = /import\s+(?:\{([^}]*)\}|\*\s+as\s+(\w+)|(\w+))\s+from\s+['"](\.\/src\/[^'"]+)['"];?/g;
+  let localMatch;
+  while ((localMatch = localImportRe.exec(source)) !== null) {
+    const importPath = localMatch[4];
+    if (localModuleCache[importPath]) continue;
+    const resolvedPath = path.resolve(path.dirname(workerPath), importPath);
+    let modSource = fs.readFileSync(resolvedPath, 'utf8');
+    modSource = modSource
+      .replace(/export\s+function\s+(\w+)/g, 'module.exports.$1 = function $1')
+      .replace(/export\s+default\s+/g, 'module.exports.default = ');
+    const mod = { exports: {} };
+    new Function('require', 'module', 'exports',
+      'console.log = () => {}; console.warn = () => {}; console.error = () => {};\n' + modSource
+    )(localRequire, mod, mod.exports);
+    localModuleCache[importPath] = mod.exports;
+  }
+
+  // ── Transform main source ESM → CJS ────────────────────────────────────
+  const transformed = source
+    .replace(
+      "import { createHmac, timingSafeEqual } from 'node:crypto';",
+      "const { createHmac, timingSafeEqual } = require('node:crypto');",
+    )
+    .replace("import { Pool } from '@neondatabase/serverless';", "const { Pool } = require('@neondatabase/serverless');")
+    .replace(
+      /import\s+\{([^}]*)\}\s+from\s+['"](\.\/src\/[^'"]+)['"];?/g,
+      (_, named, p) => `const { ${named} } = require('${p}');`,
+    )
+    .replace(
+      /import\s+\*\s+as\s+(\w+)\s+from\s+['"](\.\/src\/[^'"]+)['"];?/g,
+      (_, name, p) => `const ${name} = require('${p}');`,
+    )
+    .replace(
+      /import\s+(\w+)\s+from\s+['"](\.\/src\/[^'"]+)['"];?/g,
+      (_, name, p) => `const ${name} = require('${p}');`,
+    )
+    .replace('export default {', 'module.exports = {');
+
+  const suppressedSource =
+    'console.log = () => {}; console.warn = () => {}; console.error = () => {};\n' +
+    transformed;
+
+  const module = { exports: {} };
   const evaluator = new Function('require', 'module', 'exports', suppressedSource);
   evaluator(localRequire, module, module.exports);
   return module.exports;
 }
-
 function buildInitData(botToken, user, options = {}) {
   const entries = [
     ['auth_date', String(options.authDate ?? Math.floor(Date.now() / 1000))],
