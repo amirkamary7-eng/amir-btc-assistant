@@ -184,7 +184,7 @@ function buildBodyFieldValidationError(fieldName, type, msg, input, ctx) {
 }
 
 function getTelegramInitData(request) {
-  return request.headers.get('X-Telegram-Init-Data') || new URL(request.url).searchParams.get('init_data') || '';
+  return request.headers.get('X-Telegram-Init-Data') || '';
 }
 
 function parseTelegramInitDataPairs(initData) {

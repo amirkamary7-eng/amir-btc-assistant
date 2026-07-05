@@ -2861,4 +2861,45 @@ test('POST /api/assistant/chat truncates history content to 4000 chars (Task 4.1
   }
 });
 
+// ── Task 4.3: Remove initData from GET query ─────────────────────────────────
+
+test('GET request with ?init_data= query param is rejected (Task 4.3)', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const validInitData = buildInitData('test-bot-token', authUser);
+
+  // Send valid initData as query param instead of header → must fail (401)
+  const request = new Request(
+    `https://worker.example/api/check-join?init_data=${encodeURIComponent(validInitData)}`,
+  );
+
+  const response = await worker.fetch(request, createEnv());
+  assert.equal(response.status, 401);
+  const body = await response.json();
+  assert.equal(body.detail, 'Missing Telegram init data');
+});
+
+test('Header-based X-Telegram-Init-Data auth still works after query param removal (Task 4.3)', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 12345, first_name: 'Amir' };
+  const validInitData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv({ 'ai:cooldown:12345': '0' });
+
+  // Same valid initData via header → must succeed
+  const request = new Request('https://worker.example/api/assistant/limits', {
+    method: 'GET',
+    headers: {
+      'X-Telegram-Init-Data': validInitData,
+    },
+  });
+
+  const response = await worker.fetch(
+    request,
+    createEnv({ RATE_LIMITS: rateLimits }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.status, 'success');
+});
+
 

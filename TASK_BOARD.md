@@ -44,11 +44,11 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 41 |
+| ✅ Done | 42 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
-| ⬜ Todo | 13 |
-| **Overall** | **76%** |
+| ⬜ Todo | 12 |
+| **Overall** | **78%** |
 
 ### By Phase
 
@@ -57,7 +57,7 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 5 | 38% |
+| 4 | Security Hardening | 13 | 6 | 46% |
 | 5 | Optimization & Cleanup | 12 | 6 | 50% |
 
 ---
@@ -125,7 +125,7 @@ Phase 4 ─► Phase 5:
 | 29 | 3.8 | 3 | Remove bot.py disabled stub | Low | ✅ | 1.6 | — |
 | 30 | 4.1 | 4 | AI history role allowlist — Worker | High | ✅ | 2.9 | 4.2 |
 | 31 | 4.2 | 4 | AI history sanitization — FastAPI | High | ✅ | None | — |
-| 32 | 4.3 | 4 | Remove initData from GET query | High | ⬜ | 1.1 | 4.6 |
+| 32 | 4.3 | 4 | Remove initData from GET query | High | ✅ | 1.1 | 4.6 |
 | 33 | 4.4 | 4 | FastAPI AI rate limits — KV migration doc | High | ⬜ | 1.0, 3.1 | — |
 | 34 | 4.5 | 4 | Generic provider error to client | High | ⬜ | 2.9, 3.5 | — |
 | 35 | 4.6 | 4 | Gemini API key — header not URL | High | ✅ | None | — |
@@ -165,14 +165,14 @@ Phase 4 ─► Phase 5:
 | ~~3.2~~ | ~~3~~ | ~~Multi-admin support on Worker~~ | ~~Medium~~ | ✅ implemented + verified |
 | ~~3.7~~ | ~~3~~ | ~~Delete unused ticket_service.py~~ | ~~Low~~ | ✅ already deleted, verified |
 | ~~4.1~~ | ~~4~~ | ~~AI history role allowlist — Worker~~ | ~~High~~ | ✅ implemented + verified |
-| 4.3 | 4 | Remove initData from GET query | High | — |
+| ~~4.3~~ | ~~4~~ | ~~Remove initData from GET query~~ | ~~High~~ | ✅ implemented + verified |
 | 4.5 | 4 | Generic provider error to client | High | — |
 | 4.7 | 4 | Restrict CORS to WEBAPP_URL | Medium | — |
 | 4.8 | 4 | Debug join endpoint — admin only | Medium | — |
 | 4.9 | 4 | Remove hardcoded default admin ID | Medium | — |
 | 4.11 | 4 | Shorten initData max_age | Medium | — |
 
-**توصیه (Top priority):** 4.3 → 4.5 → 4.7 → …
+**توصیه (Top priority):** 4.5 → 4.7 → 4.8 → …
 
 ---
 
