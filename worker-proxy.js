@@ -3597,6 +3597,15 @@ async function handleNotify(request, env) {
     return authState.error;
   }
 
+  // Rate limit: max 5 notifies per user per hour
+  const notifyKey = `notify:${authState.user.id}:${getTodayIsoDate()}`;
+  const rawNotifyCount = await readRateLimitCache(env, notifyKey);
+  const notifyCount = rawNotifyCount && /^\d+$/.test(String(rawNotifyCount)) ? Number(rawNotifyCount) : 0;
+  if (notifyCount >= 5) {
+    return jsonResponse({ status: 'error', reason: 'rate_limited', retry_after: 3600 }, { status: 429 });
+  }
+  await writeRateLimitCache(env, notifyKey, String(notifyCount + 1), 3600);
+
   const bodyResult = await readJsonBody(request);
   if (bodyResult.error) return bodyResult.error;
   let payload = bodyResult.payload;
