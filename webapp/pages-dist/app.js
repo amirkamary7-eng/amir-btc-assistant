@@ -13,11 +13,7 @@
 // ============================================================================
 
 function getTg() {
-    const tg = window.Telegram?.WebApp ?? null;
-    // DEBUG: remove after Telegram auth is confirmed working
-    const dbg = document.getElementById('tg-debug');
-    if (dbg) dbg.textContent = `WebApp:${!!tg} | platform:${tg?.platform||'N/A'} | initData:${(tg?.initData||'').length}`;
-    return tg;
+    return window.Telegram?.WebApp ?? null;
 }
 
 let telegramInitDone = false;
@@ -175,7 +171,6 @@ async function ensureTelegramAuthReady(maxWaitMs = 8000) {
 
 function canRunSessionRequests(userId = getUserId()) {
     if (!API_BASE) return false;
-    if (!hasChannelAccess) return false;
     if (isGuestUserId(userId) || isPendingTelegramUserId(userId) || UserContext.isPending()) return false;
     if (isInTelegram() && (!hasTelegramAuthPayload() || !getTelegramUser()?.id)) return false;
     return true;
@@ -244,7 +239,6 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
 // ============================================================================
 
 const ADMIN_ID = '831704732';
-const CHANNEL = 'amir_btc_2024';
 const MAX_WATCHLIST = 7;
 const PROXY = 'https://proxyserveramirbtc.amirkamari9939.workers.dev/?url=';
 const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
@@ -280,8 +274,6 @@ let searchTerm = '';
 let sliderInterval = null;
 let currentSlide = 0;
 let editingAnalysisId = null;
-let hasChannelAccess = false;
-let joinCheckDone = false;
 let analysisVersion = 0;
 let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
@@ -456,8 +448,6 @@ const UserContext = {
     ready: false,
     loading: true,
     user: null,
-    joinCache: { value: null, ts: 0 },
-    JOIN_CACHE_MS: 5 * 60 * 1000,
 
     async init() {
         this.loading = true;
@@ -480,22 +470,6 @@ const UserContext = {
 
     isPending() {
         return isInTelegram() && !this.isAuthenticated();
-    },
-
-    getCachedJoin() {
-        if (this.joinCache.value !== null && Date.now() - this.joinCache.ts < this.JOIN_CACHE_MS) {
-            return this.joinCache.value;
-        }
-        if (getJoinCache()) {
-            this.joinCache = { value: true, ts: Date.now() };
-            return true;
-        }
-        return null;
-    },
-
-    setCachedJoin(value) {
-        this.joinCache = { value: !!value, ts: Date.now() };
-        setJoinCache(!!value);
     },
 
     _setLoadingUI(show) {
@@ -565,33 +539,6 @@ function loadWatchlistFromStorage() {
 function saveLangToStorage() {
     localStorage.setItem(userStorageKey('app_lang'), currentLang);
     localStorage.setItem('app_lang', currentLang);
-}
-
-/**
- * مقدار عضویت کش key را بازیابی می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
- */
-function getJoinCacheKey() {
-    return userStorageKey('has_joined_channel');
-}
-
-/**
- * مقدار عضویت کش را بازیابی می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
- */
-function getJoinCache() {
-    return localStorage.getItem(getJoinCacheKey()) === 'true';
-}
-
-/**
- * عضویت کش را تنظیم می‌کند.
- * ورودی: پارامترهای `value` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function setJoinCache(value) {
-    localStorage.setItem(getJoinCacheKey(), value ? 'true' : 'false');
 }
 
 /**
@@ -666,10 +613,6 @@ async function bootstrapUser() {
                 await persistWatchlist();
             }
             localStorage.setItem(userStorageKey('watchlist'), JSON.stringify(watchlist));
-        }
-        if (data.user?.channel_joined) {
-            hasChannelAccess = true;
-            setJoinCache(true);
         }
         saveLangToStorage();
         applyLanguage();
@@ -839,19 +782,7 @@ async function resolveChartSymbol(symbol) {
 }
 
 /**
- * init data to URL را به مسیر یا داده موجود اضافه می‌کند.
- * ورودی: پارامترهای `path` را دریافت می‌کند.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function appendInitDataToUrl(path) {
-    const initData = getTelegramInitData();
-    if (!initData) return path;
-    const sep = path.includes('?') ? '&' : '?';
-    return `${path}${sep}init_data=${encodeURIComponent(initData)}`;
-}
-
-/**
- * درخواست HTTP داخلی را با هدر احراز هویت تلگرام و مدیریت خطا به API ارسال می‌کند.
+ * درخواست HTTP داخلی را با مدیریت خطا به API ارسال می‌کند.
  * ورودی: پارامترهای `path, options = {}` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
@@ -860,10 +791,7 @@ async function apiFetch(path, options = {}) {
     const headers = { 'Content-Type': 'application/json', ...options.headers };
     const initData = getTelegramInitData();
     if (initData) headers['X-Telegram-Init-Data'] = initData;
-    const method = (options.method || 'GET').toUpperCase();
-    let url = `${API_BASE}${path}`;
-    if (initData && method === 'GET') url = `${API_BASE}${appendInitDataToUrl(path)}`;
-    const res = await fetch(url, { headers, ...options });
+    const res = await fetch(`${API_BASE}${path}`, { headers, ...options });
     if (!res.ok) {
         let detail = '';
         try { detail = await res.text(); } catch (_) {}
@@ -885,101 +813,6 @@ async function checkBackendHealth() {
     } catch (_) { return false; }
 }
 
-/**
- * اپلیکیشن قفل را تنظیم می‌کند.
- * ورودی: پارامترهای `locked` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function setAppLocked(locked) {
-    if (locked) showMandatoryJoinOverlay();
-    else hideMandatoryJoinOverlay();
-}
-
-/**
- * مقدار اجباری عضویت اوورلی را بازیابی می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
- */
-function getMandatoryJoinOverlay() {
-    return document.getElementById('mandatory-join-overlay');
-}
-
-/**
- * اوورلی عضویت اجباری را در DOM پیدا یا در صورت نبود ایجاد می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function ensureMandatoryJoinOverlay() {
-    let overlay = getMandatoryJoinOverlay();
-    if (overlay) return overlay;
-
-    overlay = document.createElement('div');
-    overlay.id = 'mandatory-join-overlay';
-    overlay.style.display = 'none';
-
-    const legacy = document.getElementById('mandatory-join-modal');
-    if (legacy) {
-        const box = legacy.querySelector('.modal-box');
-        if (box) overlay.appendChild(box);
-        legacy.remove();
-    }
-
-    document.body.appendChild(overlay);
-    return overlay;
-}
-
-/**
- * عملیات مربوط به showMandatoryJoinOverlay را انجام می‌دهد.
- * ورودی: بدون ورودی.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function showMandatoryJoinOverlay() {
-    const overlay = ensureMandatoryJoinOverlay();
-    if (getJoinCache()) return overlay;
-    overlay.style.display = 'flex';
-    return overlay;
-}
-
-/**
- * عملیات مربوط به hideMandatoryJoinOverlay را انجام می‌دهد.
- * ورودی: بدون ورودی.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function hideMandatoryJoinOverlay() {
-    const overlay = getMandatoryJoinOverlay();
-    if (overlay) overlay.style.display = 'none';
-}
-
-/**
- * بررسی می‌کند که آیا عضویت پاسخ مثبت برقرار است یا خیر.
- * ورودی: پارامترهای `data` را دریافت می‌کند.
- * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
- */
-function isJoinResponsePositive(data) {
-    if (!data || typeof data !== 'object') return false;
-    return (
-        data.joined === true ||
-        data.is_member === true ||
-        data.isMember === true ||
-        data.member === true ||
-        data.channel_joined === true ||
-        data.channelJoined === true
-    );
-}
-
-/**
- * پس از تایید عضویت، وضعیت دسترسی کاربر را آزاد و قفل اپ را برطرف می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function unlockAppFromJoin() {
-    hasChannelAccess = true;
-    joinCheckDone = true;
-    UserContext.setCachedJoin(true);
-    hideMandatoryJoinOverlay();
-    stopJoinRecheck();
-    try { loadUser(); } catch (_) {}
-}
 /**
  * زبان وضعیت انتخاب را به‌روزرسانی می‌کند.
  * ورودی: بدون ورودی.
@@ -2246,19 +2079,6 @@ function markNotifRead(id) {
 //#region پروفایل و ارجاع
 // ============================================================================
 /**
- * عملیات مربوط به showJoinStatus را انجام می‌دهد.
- * ورودی: پارامترهای `msg, isError = false` را دریافت می‌کند.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function showJoinStatus(msg, isError = false) {
-    const el = document.getElementById('join-status-msg');
-    if (!el) return;
-    el.style.display = msg ? 'block' : 'none';
-    el.innerText = msg || '';
-    el.classList.toggle('join-status-error', !!isError);
-}
-
-/**
  * اطلاعات پروفایل کاربر را بر اساس وضعیت احراز هویت در رابط کاربری نمایش می‌دهد.
  * ورودی: بدون ورودی.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
@@ -2612,268 +2432,6 @@ async function deleteTicket(ticketId, isAdminView = false) {
  */
 //#endregion
 
-// ============================================================================
-//#region لینک‌های تلگرام و کنترل مودال جوین
-// ============================================================================
-
-function joinChannel() {
-    const tg = getTg();
-    if (tg?.openTelegramLink) tg.openTelegramLink(`https://t.me/${CHANNEL}`);
-    else window.open(`https://t.me/${CHANNEL}`, '_blank');
-}
-
-/**
- * تلگرام ربات را باز می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function openTelegramBot() {
-    const botUrl = 'https://t.me/AmirBtcBot/app';
-    const tg = getTg();
-    if (tg?.openTelegramLink) tg.openTelegramLink(botUrl);
-    else window.open(botUrl, '_blank');
-}
-
-/**
- * عضویت مودال حالت را تنظیم می‌کند.
- * ورودی: پارامترهای `mode` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function setJoinModalMode(mode) {
-    const vipBlock = document.getElementById('join-vip-block');
-    const webBlock = document.getElementById('join-web-block');
-    if (vipBlock) vipBlock.style.display = mode === 'vip' ? 'block' : 'none';
-    if (webBlock) webBlock.style.display = mode === 'web' ? 'block' : 'none';
-}
-
-let joinRecheckInterval = null;
-let joinRecheckRunning = false;
-
-/**
- * عضویت بررسی مجدد را متوقف می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function stopJoinRecheck() {
-    if (joinRecheckInterval) clearInterval(joinRecheckInterval);
-    joinRecheckInterval = null;
-    joinRecheckRunning = false;
-}
-
-/**
- * عضویت بررسی مجدد را شروع می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function startJoinRecheck() {
-    stopJoinRecheck();
-    ensureMandatoryJoinOverlay();
-    const startedAt = Date.now();
-    const maxMs = 90 * 1000;
-
-    joinRecheckInterval = setInterval(async () => {
-        if (joinRecheckRunning) return;
-        if (Date.now() - startedAt > maxMs) { stopJoinRecheck(); return; }
-        if (document.visibilityState !== 'visible') return;
-
-        const overlay = getMandatoryJoinOverlay();
-        if (!overlay || overlay.style.display === 'none') { stopJoinRecheck(); return; }
-        if (hasChannelAccess) { stopJoinRecheck(); return; }
-
-        joinRecheckRunning = true;
-        try {
-            await checkMandatoryJoin({ force: true });
-        } finally {
-            joinRecheckRunning = false;
-        }
-    }, 3000);
-}
-
-/**
- * عضویت and اعتبارسنجی را باز می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function openJoinAndVerify() {
-    joinChannel();
-    startJoinRecheck();
-}
-
-//#endregion
-
-// ============================================================================
-//#region جوین اجباری
-// ============================================================================
-/**
- * وضعیت عضویت اجباری کاربر در کانال را بررسی و قفل بودن یا نبودن اپ را مدیریت می‌کند.
- * ورودی: پارامترهای `options = {}` را دریافت می‌کند.
- * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
- */
-async function checkMandatoryJoin(options = {}) {
-    const { force = false } = typeof options === 'boolean' ? { force: options } : options;
-    ensureMandatoryJoinOverlay();
-
-    if (!UserContext.ready) await UserContext.init();
-    else if (!telegramInitDone) await initTelegramWebApp();
-
-    showJoinStatus('');
-
-    if (isAdmin()) {
-        hasChannelAccess = true;
-        joinCheckDone = true;
-        hideMandatoryJoinOverlay();
-        return;
-    }
-
-    const userId = getUserId();
-
-    if (UserContext.isGuest()) {
-        hasChannelAccess = false;
-        joinCheckDone = true;
-        setJoinModalMode('web');
-        showMandatoryJoinOverlay();
-        return;
-    }
-
-    if (UserContext.isPending()) {
-        await initTelegramWebApp(3000);
-    }
-
-    const resolvedId = getUserId();
-    if (resolvedId === 'pending_telegram') {
-        joinCheckDone = false;
-        setJoinModalMode('vip');
-        showJoinStatus(t('loading_user'));
-        showMandatoryJoinOverlay();
-        return;
-    }
-
-    setJoinModalMode('vip');
-
-    if (!force && joinCheckDone && hasChannelAccess) {
-        hideMandatoryJoinOverlay();
-        return;
-    }
-
-    if (!force) {
-        const cachedJoin = UserContext.getCachedJoin();
-        if (cachedJoin === true) {
-            hasChannelAccess = true;
-            joinCheckDone = true;
-            hideMandatoryJoinOverlay();
-            return;
-        }
-    }
-
-    if (!API_BASE) {
-        hasChannelAccess = false;
-        joinCheckDone = true;
-        showMandatoryJoinOverlay();
-        return;
-    }
-
-    try {
-        const refreshParam = force ? '&refresh=true' : '';
-        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(resolvedId)}${refreshParam}`);
-        joinCheckDone = true;
-        if (data.status === 'DB_ERROR') {
-            hasChannelAccess = false;
-            showJoinStatus(t('join_db_error'), true);
-            showMandatoryJoinOverlay();
-            return;
-        }
-        if (isJoinResponsePositive(data)) {
-            unlockAppFromJoin();
-            return;
-        }
-        hasChannelAccess = false;
-        UserContext.setCachedJoin(false);
-        showMandatoryJoinOverlay();
-    } catch (e) {
-        console.warn('checkMandatoryJoin:', e);
-        const msg = String(e?.message || e || '');
-        if (msg.includes('401')) {
-            joinCheckDone = false;
-            hasChannelAccess = false;
-            setJoinModalMode('vip');
-            showJoinStatus(t('loading_user'));
-            showMandatoryJoinOverlay();
-            stopJoinRecheck();
-            return;
-        }
-        joinCheckDone = true;
-        hasChannelAccess = false;
-        showJoinStatus(t('join_db_error'), true);
-        showMandatoryJoinOverlay();
-    }
-}
-
-/**
- * پس از اقدام کاربر، عضویت کانال را دوباره اعتبارسنجی می‌کند و در صورت موفقیت اپ را آزاد می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
- */
-async function verifyJoin() {
-    if (!UserContext.ready) await UserContext.init();
-    else if (!telegramInitDone) await initTelegramWebApp();
-
-    if (UserContext.isGuest()) {
-        alert(t('join_guest_hint'));
-        return;
-    }
-    if (UserContext.isPending()) {
-        await initTelegramWebApp(3000);
-    }
-    const userId = getUserId();
-    if (userId === 'pending_telegram') {
-        alert(t('loading_user'));
-        return;
-    }
-
-    const verifyBtn = document.getElementById('join-verify-btn');
-    if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.innerText = '...'; }
-    try {
-        if (!API_BASE) {
-            alert(t('join_not_verified'));
-            return;
-        }
-        const data = await apiFetch(`/api/check-join?user_id=${encodeURIComponent(userId)}&refresh=true`);
-        if (data.status === 'DB_ERROR') {
-            showJoinStatus(t('join_db_error'), true);
-            alert(t('join_db_error'));
-            return;
-        }
-        if (isJoinResponsePositive(data)) {
-            hasChannelAccess = true;
-            joinCheckDone = true;
-            UserContext.setCachedJoin(true);
-            try {
-                await apiFetch(`/api/check-join/invalidate?user_id=${encodeURIComponent(userId)}`, { method: 'POST' });
-            } catch (invalidateError) {
-                console.warn('join cache invalidate:', invalidateError);
-            }
-            unlockAppFromJoin();
-            addNotification(t('join_verified'), t('join_welcome'), false);
-            getTg()?.showPopup?.({ title: t('join_verified'), message: t('join_welcome'), buttons: [{ type: 'ok' }] });
-            return;
-        }
-        alert(t('join_not_verified'));
-    } catch (e) {
-        console.warn('verifyJoin:', e);
-        const msg = String(e?.message || e || '');
-        if (msg.includes('401')) {
-            showJoinStatus(t('loading_user'));
-            showMandatoryJoinOverlay();
-        } else {
-            showJoinStatus(t('join_db_error'), true);
-            alert(t('join_db_error'));
-        }
-    } finally {
-        if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerText = t('join_verify_btn'); }
-    }
-}
-
-//#endregion
 
 // ============================================================================
 //#region نویگیشن و محتوای داشبورد
@@ -3001,12 +2559,6 @@ function startPolling() {
     }, 10000);
 }
 
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    if (hasChannelAccess || !isInTelegram()) return;
-    checkMandatoryJoin({ force: true }).catch(() => {});
-});
-
 //#endregion
 
 // ============================================================================
@@ -3019,8 +2571,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     await bootstrapUser();
     loadUser();
     updateNotifBadge();
-    ensureMandatoryJoinOverlay();
-    checkMandatoryJoin().catch(() => {});
 
     tabLoaded.dashboard = true;
     loadMarketData(true);
@@ -3083,13 +2633,9 @@ window.closeAdminTicketsModal = closeAdminTicketsModal;
 window.replyToTicket = replyToTicket;
 window.deleteTicket = deleteTicket;
 window.submitTicket = submitTicket;
-window.joinChannel = joinChannel;
 window.changeLang = changeLang;
 window.openNewsModal = openNewsModal;
 window.closeNewsModal = closeNewsModal;
-window.verifyJoin = verifyJoin;
-window.openJoinAndVerify = openJoinAndVerify;
-window.openTelegramBot = openTelegramBot;
 window.getUserId = getUserId;
 window.getTg = getTg;
 window.getTelegramUser = getTelegramUser;

@@ -559,13 +559,19 @@ function buildStartReplyPayload(env, chatId, isMember) {
   if (!isMember) {
     return {
       chat_id: chatId,
-      text: '⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.',
+      text: '⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.\n\nپس از عضویت، دکمه «✅ عضو شدم» را بزنید.',
       reply_markup: {
         inline_keyboard: [
           [
             {
-              text: 'عضویت در کانال',
+              text: '📌 عضویت در کانال',
               url: `https://t.me/${normalizeRequiredChannel(resolveRequiredChannel(env))}`,
+            },
+          ],
+          [
+            {
+              text: '✅ عضو شدم',
+              callback_data: 'check_join',
             },
           ],
         ],
@@ -576,7 +582,7 @@ function buildStartReplyPayload(env, chatId, isMember) {
 
   return {
     chat_id: chatId,
-    text: 'خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
+    text: '✅ خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
     reply_markup: {
       inline_keyboard: [
         [
@@ -607,6 +613,51 @@ async function sendTelegramMessage(env, payload) {
   }
 
   return response;
+}
+
+async function answerTelegramCallbackQuery(env, callbackQueryId, text = '', showAlert = false) {
+  try {
+    await fetch(buildTelegramApiUrl(env, 'answerCallbackQuery'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text,
+        show_alert: showAlert,
+      }),
+    });
+  } catch (error) {
+    console.warn('answerTelegramCallbackQuery failed:', error);
+  }
+}
+
+async function editTelegramMessageReplyMarkup(env, chatId, messageId, replyMarkup) {
+  try {
+    await fetch(buildTelegramApiUrl(env, 'editMessageReplyMarkup'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: replyMarkup,
+      }),
+    });
+  } catch (error) {
+    console.warn('editTelegramMessageReplyMarkup failed:', error);
+  }
+}
+
+const CALLBACK_RATE_LIMIT_TTL = 10; // seconds
+const CALLBACK_RATE_LIMIT_KEY_PREFIX = 'cbrl:';
+
+async function isCallbackRateLimited(env, userId) {
+  const key = `${CALLBACK_RATE_LIMIT_KEY_PREFIX}${String(userId)}`;
+  const existing = await readRateLimitCache(env, key);
+  if (existing) {
+    return true;
+  }
+  await writeRateLimitCache(env, key, '1', CALLBACK_RATE_LIMIT_TTL);
+  return false;
 }
 
 function parseBooleanQueryParam(value) {
@@ -1833,83 +1884,6 @@ async function handleFarsiNews(env) {
   return jsonResponse(await fetchFarsiNews(env), {}, env);
 }
 
-async function handleCheckJoin(request, env) {
-  // Optional auth: prefers initData, falls back to ?user_id= for testing
-  const auth = optionalTelegramAuth(request, env);
-  if (!auth.user) {
-    return auth.error;
-  }
-
-  const url = new URL(request.url);
-  const forceRefresh = parseBooleanQueryParam(url.searchParams.get('refresh'));
-  const resolvedUserId = String(auth.user.id);
-
-  if (forceRefresh) {
-    await invalidateJoinCache(env, resolvedUserId);
-  }
-
-  const result = await resolveChannelMembership(env, resolvedUserId, {
-    forceRefresh,
-  });
-  console.log(
-    JSON.stringify({
-      scope: 'check-join',
-      user_id: resolvedUserId,
-      force_refresh: forceRefresh,
-      result,
-    }),
-  );
-  if (result.status === 'DB_ERROR') {
-    return jsonResponse(result, {}, env);
-  }
-
-  return jsonResponse({
-    status: 'success',
-    ...result,
-  }, {}, env);
-}
-
-async function handleDebugCheckJoin(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
-  }
-
-  const debugPayload = await getChatMemberDebugPayload(String(authState.user.id), env);
-  return jsonResponse({
-    required_channel: debugPayload.required_channel,
-    user_id: String(authState.user.id),
-    telegram_response: debugPayload.telegram_response,
-    joined: debugPayload.joined,
-  }, {}, env);
-}
-
-async function handleCheckJoinInvalidate(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
-  }
-
-  const resolvedUserId = String(authState.user.id);
-  const invalidated = await invalidateJoinCache(env, resolvedUserId);
-  console.log(
-    JSON.stringify({
-      scope: 'check-join-invalidate',
-      user_id: resolvedUserId,
-      invalidated,
-    }),
-  );
-  return jsonResponse({
-    status: 'success',
-    invalidated,
-    user_id: resolvedUserId,
-  }, {}, env);
-}
-
 async function handleTelegramWebhook(request, env) {
   const requestPath = new URL(request.url).pathname || '/';
 
@@ -1930,6 +1904,74 @@ async function handleTelegramWebhook(request, env) {
 
   try {
     const updatePayload = await request.json();
+    const callbackQuery = updatePayload?.callback_query;
+
+    // ── Handle callback_query: "check_join" ────────────────────────────────
+    if (callbackQuery) {
+      const callbackData = callbackQuery?.data;
+      const userId = String(callbackQuery?.from?.id || '');
+      const chatId = callbackQuery?.message?.chat?.id;
+      const messageId = callbackQuery?.message?.message_id;
+
+      console.log(JSON.stringify({
+        scope: 'telegram-callback',
+        callback_data: callbackData,
+        user_id: userId,
+      }));
+
+      if (callbackData !== 'check_join' || !userId || !chatId || !messageId) {
+        await answerTelegramCallbackQuery(env, callbackQuery.id);
+        return new Response(null, { status: 200, headers: withCors({}, env) });
+      }
+
+      // Rate limit: max 1 callback per 10 seconds per user
+      const rateLimited = await isCallbackRateLimited(env, userId);
+      if (rateLimited) {
+        await answerTelegramCallbackQuery(env, callbackQuery.id, '⏳ لطفاً ۱۰ ثانیه صبر کنید و دوباره تلاش کنید.', false);
+        return new Response(null, { status: 200, headers: withCors({}, env) });
+      }
+
+      // Check channel membership
+      const membership = await resolveChannelMembership(env, userId, { forceRefresh: true });
+      console.log(JSON.stringify({
+        scope: 'callback-check-join',
+        user_id: userId,
+        result: membership,
+      }));
+
+      if (membership?.joined) {
+        // User is a member → show WebApp button, answer callback with success
+        await answerTelegramCallbackQuery(env, callbackQuery.id, '✅ عضویت شما تأیید شد!', false);
+        await editTelegramMessageReplyMarkup(env, chatId, messageId, {
+          inline_keyboard: [
+            [
+              {
+                text: '🚀 باز کردن مینی‌اپ',
+                web_app: {
+                  url: resolveWebAppUrl(env),
+                },
+              },
+            ],
+          ],
+        });
+      } else {
+        // User is NOT a member
+        const reason = membership?.reason || 'not_member';
+        let errorMsg = '❌ هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید و دوباره تلاش کنید.';
+        if (reason === 'bot_not_in_channel') {
+          errorMsg = '⚠️ خطای سیستمی: ربات عضو کانال نیست. لطفاً به مدیر اطلاع دهید.';
+        } else if (reason === 'channel_not_found') {
+          errorMsg = '⚠️ خطای سیستمی: کانال یافت نشد. لطفاً به مدیر اطلاع دهید.';
+        } else if (reason === 'api_error') {
+          errorMsg = '⚠️ خطای موقت در بررسی عضویت. لطفاً چند ثانیه دیگر دوباره تلاش کنید.';
+        }
+        await answerTelegramCallbackQuery(env, callbackQuery.id, errorMsg, true);
+      }
+
+      return new Response(null, { status: 200, headers: withCors({}, env) });
+    }
+
+    // ── Handle /start command ───────────────────────────────────────────────
     const messageContext = extractTelegramMessageContext(updatePayload);
     console.log(
       JSON.stringify({
@@ -2283,18 +2325,6 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/tokens') {
         return referralHandlers.handleTokens(request, env);
-      }
-
-      if (request.method === 'GET' && url.pathname === '/api/check-join') {
-        return await handleCheckJoin(request, env);
-      }
-
-      if (request.method === 'GET' && url.pathname === '/api/debug/check-join') {
-        return await handleDebugCheckJoin(request, env);
-      }
-
-      if (request.method === 'POST' && url.pathname === '/api/check-join/invalidate') {
-        return await handleCheckJoinInvalidate(request, env);
       }
 
       if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {
