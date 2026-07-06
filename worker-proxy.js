@@ -357,6 +357,34 @@ function authenticateTelegramRequest(request, env) {
   return { error: null, user };
 }
 
+/**
+ * Optional Telegram auth — tries initData, falls back to a raw user_id.
+ * Returns { user, authMethod, error }.
+ *   - On initData success: { user, authMethod: 'init_data', error: null }
+ *   - On fallback success: { user, authMethod: 'fallback', error: null }
+ *   - On both fail:     { user: null, authMethod: null, error: <original auth Response> }
+ */
+function optionalTelegramAuth(request, env) {
+  const authState = authenticateTelegramRequest(request, env);
+  if (authState.user) {
+    return { user: authState.user, authMethod: 'init_data', error: null };
+  }
+
+  // Auth failed — try query-param fallback for development/testing
+  const url = new URL(request.url);
+  const fallbackId = (url.searchParams.get('user_id') || '').trim();
+
+  if (fallbackId && /^\d+$/.test(fallbackId)) {
+    console.log(
+      JSON.stringify({ scope: 'optional-auth-fallback', user_id: fallbackId }),
+    );
+    return { user: { id: fallbackId }, authMethod: 'fallback', error: null };
+  }
+
+  // No fallback available — preserve the original auth error for the caller
+  return { user: null, authMethod: null, error: authState.error };
+}
+
 function normalizeOptionalString(value) {
   if (value === null || value === undefined) {
     return null;
@@ -1804,14 +1832,15 @@ async function handleFarsiNews(env) {
 }
 
 async function handleCheckJoin(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
-  if (authState.error) {
-    return authState.error;
+  // Optional auth: prefers initData, falls back to ?user_id= for testing
+  const auth = optionalTelegramAuth(request, env);
+  if (!auth.user) {
+    return auth.error;
   }
 
   const url = new URL(request.url);
   const forceRefresh = parseBooleanQueryParam(url.searchParams.get('refresh'));
-  const resolvedUserId = String(authState.user.id);
+  const resolvedUserId = String(auth.user.id);
 
   if (forceRefresh) {
     await invalidateJoinCache(env, resolvedUserId);

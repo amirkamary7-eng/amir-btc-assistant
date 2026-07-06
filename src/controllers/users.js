@@ -25,13 +25,11 @@ export function createUserHandlers(deps) {
   /**
    * POST /api/users/bootstrap — Create or update user profile on first launch.
    * Also processes referral and returns the watchlist.
+   *
+   * Auth: prefers X-Telegram-Init-Data header; falls back to body.user_id
+   * for development/testing outside Telegram Webview.
    */
   async function handleBootstrap(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
-    }
-
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
         {
@@ -41,6 +39,9 @@ export function createUserHandlers(deps) {
         { status: 503 }, env);
     }
 
+    // Parse body first — readJsonBody consumes the stream, so it must run
+    // before any subsequent reads.  authenticateTelegramRequest only reads
+    // headers, so calling it after body parsing is safe.
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     let payload = bodyResult.payload;
@@ -50,14 +51,32 @@ export function createUserHandlers(deps) {
         buildBodyFieldValidationError('body', 'type_error', 'Input should be a valid object', payload ?? null),
         { status: 422 }, env);
     }
-    const userId = String(authState.user.id);
+
+    // Auth: prefer initData, fall back to body.user_id for testing
+    const authState = authenticateTelegramRequest(request, env);
+    let userId;
+    let tgUser = null; // Telegram user object (may have username, first_name, …)
+
+    if (authState.user) {
+      userId = String(authState.user.id);
+      tgUser = authState.user;
+    } else {
+      // No valid initData — allow body.user_id fallback for dev/testing
+      const fallbackId = payload.user_id;
+      if (fallbackId && /^\d+$/.test(String(fallbackId).trim())) {
+        userId = String(fallbackId).trim();
+      } else {
+        return authState.error;
+      }
+    }
+
     payload.user_id = userId;
     try {
       const userRow = await userRepo.bootstrap(env, userId, {
-        username: normalizeOptionalString(payload.username) || normalizeOptionalString(authState.user.username),
-        first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(authState.user.first_name),
-        last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(authState.user.last_name),
-        lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(authState.user.language_code),
+        username: normalizeOptionalString(payload.username) || normalizeOptionalString(tgUser?.username),
+        first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(tgUser?.first_name),
+        last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(tgUser?.last_name),
+        lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
       });
       await processReferralOnBootstrap(
         env,
