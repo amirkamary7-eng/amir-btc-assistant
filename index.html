@@ -42,7 +42,7 @@
     <!-- #region DashboardPage -->
     <!-- این بخش ویترین اولیه برنامه شامل بنر، اسلایدر تحلیل، واچ‌لیست و اخبار مهم است. -->
     <section id="dashboard-page" class="page active">
-        <div class="hero-banner" onclick="joinChannel()">
+        <div class="hero-banner">
             <div class="hero-inner">
                 <div class="hero-content">
                     <span class="hero-badge" data-i18n="hero_badge">کانال تحلیلی</span>
@@ -241,36 +241,6 @@
     <!-- ==================== مودال‌ها و لایه‌های تعاملی ==================== -->
     <!-- #region Modals -->
     <!-- این بخش همه پنجره‌های مودال، فرم‌ها و لایه‌های کمکی برنامه را شامل می‌شود. -->
-
-    <!-- پاپ‌آپ جوین اجباری -->
-    <div id="mandatory-join-modal" class="modal" style="display:none; z-index: 10000; backdrop-filter: blur(15px);">
-        <div class="modal-box join-box" style="text-align: center; padding: 30px 20px;">
-            <div class="join-icon-wrap">
-                <img src="assets/amirbtc-logo.png" alt="AMIRBTC" class="join-logo">
-            </div>
-
-            <!-- حالت عضویت VIP (کاربر تلگرام) -->
-            <div id="join-vip-block">
-                <h3 style="font-size: 18px; margin-bottom: 10px; color: var(--accent);" data-i18n="join_vip_title">عضویت در کانال VIP</h3>
-                <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 20px; line-height: 1.6;" data-i18n="join_vip_desc">
-                    برای دسترسی به چارت‌های لحظه‌ای، تحلیل‌های اختصاصی و 100 ارز برتر، ابتدا در کانال رسمی ما عضو شوید.
-                </p>
-                <button class="submit-btn" style="margin-bottom: 10px; font-size: 15px;" onclick="openJoinAndVerify()" data-i18n="join_vip_btn">عضویت در کانال</button>
-                <button id="join-verify-btn" class="cancel-btn" style="width:100%; margin-bottom: 10px;" onclick="verifyJoin()" data-i18n="join_verify_btn">بررسی عضویت</button>
-                <p style="font-size: 11px; color: var(--text-sub);" data-i18n="join_vip_hint">بعد از عضویت، دکمه «بررسی عضویت» را بزنید.</p>
-                <p id="join-status-msg" class="join-status-msg" style="display:none;"></p>
-            </div>
-
-            <!-- حالت وب (کاربر خارج از تلگرام) -->
-            <div id="join-web-block" style="display:none;">
-                <h3 style="font-size: 18px; margin-bottom: 10px; color: var(--accent);" data-i18n="join_web_title">فقط از تلگرام</h3>
-                <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 20px; line-height: 1.6;" data-i18n="join_web_desc">
-                    این اپلیکیشن فقط از داخل ربات تلگرام قابل استفاده است.
-                </p>
-                <button class="submit-btn" style="width:100%; font-size: 15px;" onclick="openTelegramBot()" data-i18n="join_open_bot">باز کردن ربات تلگرام</button>
-            </div>
-        </div>
-    </div>
 
     <!-- مودال افزودن واچ‌لیست -->
     <div id="add-coin-modal" class="modal" onclick="if(event.target===this) closeAddCoinModal()">
@@ -472,7 +442,7 @@
                 <h3>Amir BTC Assistant</h3>
                 <p data-i18n="about_version">نسخه 1.0.0</p>
                 <p data-i18n="about_desc">دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر جهانی.</p>
-                <p><span data-i18n="official_channel">کانال رسمی:</span> <a href="#" onclick="joinChannel(); return false;">amir_btc_2024</a></p>
+                <p><span data-i18n="official_channel">کانال رسمی:</span> <a href="https://t.me/amir_btc_2024" target="_blank" rel="noopener">amir_btc_2024</a></p>
             </div>
         </div>
     </div>
