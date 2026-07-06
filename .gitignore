@@ -18,3 +18,4 @@ data/
 
 /generated/prisma
 node_modules/
+webapp/pages-dist/
