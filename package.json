@@ -5,8 +5,6 @@
   "main": "app.js",
   "scripts": {
     "test": "node --test worker-proxy.test.cjs",
-    "db:test": "node test_db.js",
-    "prisma:generate": "prisma generate",
     "cf:dev": "wrangler dev",
     "cf:deploy:staging": "wrangler deploy --env staging",
     "cf:deploy:production": "node -e \"console.error('\\n⚠️  PRODUCTION DEPLOY — MANUAL ONLY\\n    This deploys to amir-btc-assistant-api-production\\n    Make sure tests pass first: npm test\\n    Press Ctrl+C to cancel, or Enter to continue...');require('readline').createInterface({input:process.stdin,output:process.stdout}).question('',()=>{require('child_process').execSync('npx wrangler deploy --env production',{stdio:'inherit'})})\"",
@@ -16,7 +14,6 @@
     "cf:pages:deploy": "wrangler pages deploy ./webapp/pages-dist --config wrangler.pages.jsonc"
   },
   "devDependencies": {
-    "prisma": "^7.8.0",
     "wrangler": "^4.67.0"
   },
   "repository": {

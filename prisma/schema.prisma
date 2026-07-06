@@ -1,9 +1,0 @@
-generator client {
-  provider = "prisma-client-js"
-}
-
-// در پریزما ۷، وقتی می‌خواهیم آدرس را دستی تزریق کنیم، 
-// datasource را بدون url تعریف می‌کنیم.
-datasource db {
-  provider = "postgresql"
-}
