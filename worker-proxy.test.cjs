@@ -2818,7 +2818,9 @@ test('Referrer validation: mismatched Origin in production env returns 403', asy
     },
   });
 
-  const response = await worker.fetch(request, createEnv());
+  const response = await worker.fetch(request, createEnv({
+    WEBAPP_URL: 'https://ebac5d41.amir-btc-assistant-pages.pages.dev',
+  }));
   assert.equal(response.status, 403);
   const body = await response.json();
   assert.equal(body.message, 'Forbidden: invalid origin');
@@ -3195,12 +3197,12 @@ test('OPTIONS preflight returns WEBAPP_URL origin, not wildcard (Task 4.7)', asy
 
   const response = await worker.fetch(
     new Request('https://worker.example/api/health', { method: 'OPTIONS' }),
-    createEnv(),
+    createEnv({ WEBAPP_URL: 'https://ebac5d41.amir-btc-assistant-pages.pages.dev' }),
   );
 
   assert.equal(response.status, 204);
   const origin = response.headers.get('Access-Control-Allow-Origin');
-  assert.equal(origin, 'https://amir-btc-assistant.vercel.app');
+  assert.equal(origin, 'https://ebac5d41.amir-btc-assistant-pages.pages.dev');
   assert.notEqual(origin, '*', 'CORS origin must NOT be wildcard');
 });
 
@@ -3209,12 +3211,12 @@ test('JSON response includes WEBAPP_URL origin, not wildcard (Task 4.7)', async 
 
   const response = await worker.fetch(
     new Request('https://worker.example/api/health'),
-    createEnv(),
+    createEnv({ WEBAPP_URL: 'https://ebac5d41.amir-btc-assistant-pages.pages.dev' }),
   );
 
   assert.equal(response.status, 200);
   const origin = response.headers.get('Access-Control-Allow-Origin');
-  assert.equal(origin, 'https://amir-btc-assistant.vercel.app');
+  assert.equal(origin, 'https://ebac5d41.amir-btc-assistant-pages.pages.dev');
   assert.notEqual(origin, '*', 'CORS origin must NOT be wildcard');
 });
 
