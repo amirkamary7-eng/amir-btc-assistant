@@ -15,9 +15,8 @@
 function getTg() {
     const tg = window.Telegram?.WebApp ?? null;
     // DEBUG: remove after Telegram auth is confirmed working
-    console.log('[TG-DEBUG] WebApp object:', !!tg);
-    console.log('[TG-DEBUG] platform:', tg?.platform || 'N/A');
-    console.log('[TG-DEBUG] initData length:', (tg?.initData || '').length);
+    const dbg = document.getElementById('tg-debug');
+    if (dbg) dbg.textContent = `WebApp:${!!tg} | platform:${tg?.platform||'N/A'} | initData:${(tg?.initData||'').length}`;
     return tg;
 }
 
