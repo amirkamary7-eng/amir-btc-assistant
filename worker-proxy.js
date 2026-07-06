@@ -410,7 +410,9 @@ function resolveRequiredChannel(env) {
 }
 
 function resolveWebAppUrl(env) {
-  return String(env.WEBAPP_URL || 'https://amir-btc-assistant.vercel.app').trim();
+  // WEBAPP_URL must be set as a secret (wrangler secret put WEBAPP_URL --env production)
+  // to the Cloudflare Pages domain, e.g. https://ebac5d41.amir-btc-assistant-pages.pages.dev
+  return String(env.WEBAPP_URL || '').trim();
 }
 
 /**
