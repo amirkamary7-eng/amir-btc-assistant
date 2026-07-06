@@ -39,7 +39,7 @@ export function createAlertHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const bodyResult = await readJsonBody(request, env);
+    const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     let payload = bodyResult.payload;
 
@@ -52,10 +52,10 @@ export function createAlertHandlers(deps) {
     payload.user_id = String(authState.user.id);
     try {
       const alert = await alertRepo.create(env, payload.user_id, payload);
-      return jsonResponse({ status: 'success', alert }, env);
+      return jsonResponse({ status: 'success', alert }, {}, env);
     } catch (error) {
       console.warn('create alert failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -78,10 +78,10 @@ export function createAlertHandlers(deps) {
     const userId = String(authState.user.id);
     try {
       const alerts = await alertRepo.list(env, userId);
-      return jsonResponse({ status: 'success', alerts }, env);
+      return jsonResponse({ status: 'success', alerts }, {}, env);
     } catch (error) {
       console.warn('list alerts failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -105,16 +105,16 @@ export function createAlertHandlers(deps) {
     try {
       const alert = await alertRepo.findById(env, alertId);
       if (!alert) {
-        return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, {}, env);
+        return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
       if (String(alert.user_id) !== userId) {
-        return jsonResponse({ status: 'error', message: 'Forbidden' }, { status: 403 }, {}, env);
+        return jsonResponse({ status: 'error', message: 'Forbidden' }, { status: 403 }, env);
       }
       await alertRepo.remove(env, alertId);
-      return jsonResponse({ status: 'success', deleted: true }, env);
+      return jsonResponse({ status: 'success', deleted: true }, {}, env);
     } catch (error) {
       console.warn('delete alert failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 

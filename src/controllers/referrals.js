@@ -25,14 +25,14 @@ export function createReferralHandlers(deps) {
       return authState.error;
     }
     if (!isDatabaseConfigured(env)) {
-      return jsonResponse({ status: 'success', total: 0, active: 0, rewarded: 0, tokens: 0 }, env);
+      return jsonResponse({ status: 'success', total: 0, active: 0, rewarded: 0, tokens: 0 }, {}, env);
     }
     try {
       const stats = await referralRepo.getStats(env, authState.user.id);
-      return jsonResponse({ status: 'success', ...stats }, env);
+      return jsonResponse({ status: 'success', ...stats }, {}, env);
     } catch (error) {
       console.warn('get referral stats failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -46,14 +46,14 @@ export function createReferralHandlers(deps) {
       return authState.error;
     }
     if (!isDatabaseConfigured(env)) {
-      return jsonResponse({ status: 'success', balance: 0, history: [] }, env);
+      return jsonResponse({ status: 'success', balance: 0, history: [] }, {}, env);
     }
     try {
       const tokenState = await referralRepo.getTokens(env, authState.user.id);
-      return jsonResponse({ status: 'success', ...tokenState }, env);
+      return jsonResponse({ status: 'success', ...tokenState }, {}, env);
     } catch (error) {
       console.warn('get referral tokens failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 

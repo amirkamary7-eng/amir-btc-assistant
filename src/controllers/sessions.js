@@ -57,7 +57,7 @@ export function createSessionHandlers(deps) {
       session_id: sessionId,
       last_seen: lastSeen,
       online_count: Object.keys(state).length,
-    }, env);
+    }, {}, env);
   }
 
   /**
@@ -87,7 +87,7 @@ export function createSessionHandlers(deps) {
     return jsonResponse({
       status: 'success',
       count: Object.keys(state).length,
-    }, env);
+    }, {}, env);
   }
 
   /**
@@ -123,7 +123,7 @@ export function createSessionHandlers(deps) {
     return jsonResponse({
       status: 'success',
       online_count: Object.keys(state).length,
-    }, env);
+    }, {}, env);
   }
 
   return Object.freeze({ handleHeartbeat, handleOnline, handleEnd });

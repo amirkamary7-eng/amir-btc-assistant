@@ -40,10 +40,10 @@ export function createWatchlistHandlers(deps) {
     const userId = String(authState.user.id);
     try {
       const symbols = await watchlistRepo.getSymbols(env, userId);
-      return jsonResponse({ status: 'success', symbols, watchlist: symbols }, env);
+      return jsonResponse({ status: 'success', symbols, watchlist: symbols }, {}, env);
     } catch (error) {
       console.warn('get watchlist failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -66,7 +66,7 @@ export function createWatchlistHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const bodyResult = await readJsonBody(request, env);
+    const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     let payload = bodyResult.payload;
 
@@ -82,10 +82,10 @@ export function createWatchlistHandlers(deps) {
       : [];
     try {
       const storedSymbols = await watchlistRepo.replace(env, payload.user_id, symbols);
-      return jsonResponse({ status: 'success', symbols: storedSymbols }, env);
+      return jsonResponse({ status: 'success', symbols: storedSymbols }, {}, env);
     } catch (error) {
       console.warn('update watchlist failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 

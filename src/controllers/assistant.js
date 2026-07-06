@@ -308,7 +308,7 @@ export function createAssistantHandlers(deps) {
     }
 
     const limits = await checkRateLimits(env, authState.user.id);
-    return jsonResponse({ status: 'success', ...limits }, env);
+    return jsonResponse({ status: 'success', ...limits }, {}, env);
   }
 
   /**
@@ -329,7 +329,7 @@ export function createAssistantHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const bodyResult = await readJsonBody(request, 2_000_000, MAX_BODY_BYTES, env);
+    const bodyResult = await readJsonBody(request, 2_000_000, env);
     if (bodyResult.error) return bodyResult.error;
     let payload = bodyResult.payload;
 
@@ -388,11 +388,11 @@ export function createAssistantHandlers(deps) {
 
     const limits = await checkRateLimits(env, userId);
     if (!limits.allowed) {
-      return jsonResponse({ status: 'error', ...limits }, { status: 429 }, {}, env);
+      return jsonResponse({ status: 'error', ...limits }, { status: 429 }, env);
     }
 
     if (hasImage && limits.images_used >= limits.images_limit) {
-      return jsonResponse({ status: 'error', reason: 'daily_image_limit', allowed: false }, { status: 429 }, {}, env);
+      return jsonResponse({ status: 'error', reason: 'daily_image_limit', allowed: false }, { status: 429 }, env);
     }
 
     try {
@@ -410,7 +410,7 @@ export function createAssistantHandlers(deps) {
         responseBody.image_ignored = true;
         responseBody.warning = 'Image could not be processed by the active AI provider';
       }
-      return jsonResponse(responseBody, env);
+      return jsonResponse(responseBody, {}, env);
     } catch (error) {
       console.error('AI provider error:', error instanceof Error ? error.message : String(error));
       return jsonResponse(

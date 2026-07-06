@@ -36,7 +36,7 @@ export function createNotifyHandlers(deps) {
     const rawNotifyCount = await readRateLimitCache(env, notifyKey);
     const notifyCount = rawNotifyCount && /^\d+$/.test(String(rawNotifyCount)) ? Number(rawNotifyCount) : 0;
     if (notifyCount >= 5) {
-      return jsonResponse({ status: 'error', reason: 'rate_limited', retry_after: 3600 }, { status: 429 }, {}, env);
+      return jsonResponse({ status: 'error', reason: 'rate_limited', retry_after: 3600 }, { status: 429 }, env);
     }
     await writeRateLimitCache(env, notifyKey, String(notifyCount + 1), 3600);
 
@@ -58,7 +58,7 @@ export function createNotifyHandlers(deps) {
     }
 
     if (!isBotConfigured(env)) {
-      return jsonResponse({ status: 'skipped', sent: false, reason: 'bot_not_configured' }, { status: 200 }, {}, env);
+      return jsonResponse({ status: 'skipped', sent: false, reason: 'bot_not_configured' }, { status: 200 }, env);
     }
 
     try {
@@ -67,9 +67,9 @@ export function createNotifyHandlers(deps) {
         text: message,
         disable_web_page_preview: true,
       });
-      return jsonResponse({ status: 'success', sent: true }, env);
+      return jsonResponse({ status: 'success', sent: true }, {}, env);
     } catch {
-      return jsonResponse({ status: 'skipped', sent: false }, { status: 200 }, {}, env);
+      return jsonResponse({ status: 'skipped', sent: false }, { status: 200 }, env);
     }
   }
 

@@ -18,22 +18,31 @@
                         "*/5 * * * *"
                 ]
         },
+        // ============================================================================
+        // KV namespaces — DEVELOPMENT (default / wrangler dev)
+        // IMPORTANT: These MUST differ from production IDs to prevent cache bleed.
+        // Create with: wrangler kv namespace create "JOIN_CACHE"
+        //              wrangler kv namespace create "APP_CACHE"
+        //              wrangler kv namespace create "RATE_LIMITS"
+        //              wrangler kv namespace create "SESSION_CACHE"
+        // Then paste the output IDs here.
+        // ============================================================================
         "kv_namespaces": [
                 {
                         "binding": "JOIN_CACHE",
-                        "id": "61813c11a2064a67ac994dc62c30a990"
+                        "id": "TODO_CREATE_DEV_NAMESPACE"
                 },
                 {
                         "binding": "APP_CACHE",
-                        "id": "a37aa8e1368e4a6a92e666273936673b"
+                        "id": "TODO_CREATE_DEV_NAMESPACE"
                 },
                 {
                         "binding": "RATE_LIMITS",
-                        "id": "03bfb4851d09452489d631e038f9e791"
+                        "id": "TODO_CREATE_DEV_NAMESPACE"
                 },
                 {
                         "binding": "SESSION_CACHE",
-                        "id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
+                        "id": "TODO_CREATE_DEV_NAMESPACE"
                 }
         ],
         "vars": {
