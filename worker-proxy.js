@@ -1934,7 +1934,7 @@ async function handleTelegramWebhook(request, env) {
       // Check channel membership
       const membership = await resolveChannelMembership(env, userId, { forceRefresh: true });
       console.log(JSON.stringify({
-        scope: 'callback-check-join',
+        scope: 'callback-join-verify',
         user_id: userId,
         result: membership,
       }));
