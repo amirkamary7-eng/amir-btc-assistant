@@ -1,6 +1,0 @@
-[00:22:28.621] Server  ERROR   Error: ENOENT: no such file or directory, scandir '/home/z/my-project/src/app'
-[00:22:28.622] Server  ERROR   Error: ENOENT: no such file or directory, scandir '/home/z/my-project/src/app'
-[00:22:28.624] Server  ERROR   Error: ENOENT: no such file or directory, scandir '/home/z/my-project/src/app'
-[00:22:28.626] Server  ERROR   Error: ENOENT: no such file or directory, scandir '/home/z/my-project/src/app'
-[00:22:29.854] Server  ERROR   Error: ENOENT: no such file or directory, scandir '/home/z/my-project/src/app'
-[00:22:29.857] Server  ERROR   Error: ENOENT: no such file or directory, scandir '/home/z/my-project/src/app'
