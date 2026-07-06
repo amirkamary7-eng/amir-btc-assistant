@@ -5,6 +5,8 @@ __pycache__/
 .env.local
 .DS_Store
 .vercel
+.next/
+*.db
 .env*
 !.env.example
 data/
