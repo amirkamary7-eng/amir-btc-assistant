@@ -621,202 +621,6 @@ test('POST /api/notify returns standardized success payload when Telegram send s
   }
 });
 
-test('GET /api/check-join returns cached join status for authenticated user', async () => {
-  const worker = loadWorker();
-  const authUser = { id: 12345, first_name: 'Amir' };
-  const initData = buildInitData('test-bot-token', authUser);
-  const joinCache = createMemoryKv({ 'join:12345': '1' });
-  let fetchCalled = false;
-  const originalFetch = global.fetch;
-  global.fetch = async () => {
-    fetchCalled = true;
-    throw new Error('fetch should not be called when JOIN_CACHE already has a positive value');
-  };
-
-  try {
-    const request = new Request('https://worker.example/api/check-join?user_id=spoofed', {
-      method: 'GET',
-      headers: {
-        'X-Telegram-Init-Data': initData,
-      },
-    });
-
-    const response = await worker.fetch(
-      request,
-      createEnv({
-        JOIN_CACHE: joinCache,
-      }),
-    );
-    assert.equal(response.status, 200);
-    assert.equal(fetchCalled, false);
-    assert.deepEqual(await response.json(), {
-      status: 'success',
-      joined: true,
-      cached: true,
-    });
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
-
-test('GET /api/check-join refresh=true checks Telegram and persists DB plus KV', async () => {
-  const pgMock = createPgMock(async () => ({ rows: [] }));
-  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
-  const authUser = { id: 12345, first_name: 'Amir' };
-  const initData = buildInitData('test-bot-token', authUser);
-  const joinCache = createMemoryKv();
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
-  const originalFetch = global.fetch;
-  global.fetch = stub;
-
-  try {
-    const request = new Request('https://worker.example/api/check-join?user_id=spoofed&refresh=true', {
-      method: 'GET',
-      headers: {
-        'X-Telegram-Init-Data': initData,
-      },
-    });
-
-    const response = await worker.fetch(
-      request,
-      createEnv({
-        DATABASE_URL: 'postgres://example.test/db',
-        JOIN_CACHE: joinCache,
-      }),
-    );
-    assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.match(calls[0].url, /https:\/\/api\.telegram\.org\/bot.*\/getChatMember\?/);
-    assert.match(calls[0].url, /user_id=12345/);
-    assert.equal((await joinCache.get('join:12345')), '1');
-    assert.equal(pgMock.calls.length, 1);
-    assert.match(pgMock.calls[0].sql, /INSERT INTO users/i);
-    assert.deepEqual(await response.json(), {
-      status: 'success',
-      joined: true,
-    });
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
-
-test('GET /api/check-join uses users.channel_joined from DB as source of truth', async () => {
-  const pgMock = createPgMock(async (sql) => {
-    if (/SELECT telegram_id, channel_joined FROM users/i.test(sql)) {
-      return {
-        rows: [{ telegram_id: '12345', channel_joined: true }],
-      };
-    }
-    return { rows: [] };
-  });
-  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
-  const authUser = { id: 12345, first_name: 'Amir' };
-  const initData = buildInitData('test-bot-token', authUser);
-  const originalFetch = global.fetch;
-  let fetchCalled = false;
-  global.fetch = async () => {
-    fetchCalled = true;
-    throw new Error('Telegram API should not be called when DB already confirms join');
-  };
-
-  try {
-    const request = new Request('https://worker.example/api/check-join?user_id=spoofed', {
-      method: 'GET',
-      headers: {
-        'X-Telegram-Init-Data': initData,
-      },
-    });
-
-    const response = await worker.fetch(
-      request,
-      createEnv({
-        DATABASE_URL: 'postgres://example.test/db',
-        JOIN_CACHE: createMemoryKv(),
-      }),
-    );
-    assert.equal(response.status, 200);
-    assert.equal(fetchCalled, false);
-    assert.deepEqual(await response.json(), {
-      status: 'success',
-      joined: true,
-      from_db: true,
-    });
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
-
-test('GET /api/debug/check-join returns Telegram debug payload for admin user', async () => {
-  const worker = loadWorker();
-  const authUser = { id: 831704732, first_name: 'Admin' };
-  const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
-  const originalFetch = global.fetch;
-  global.fetch = stub;
-
-  try {
-    const request = new Request('https://worker.example/api/debug/check-join?user_id=spoofed', {
-      method: 'GET',
-      headers: {
-        'X-Telegram-Init-Data': initData,
-      },
-    });
-
-    const response = await worker.fetch(request, createEnv());
-    assert.equal(response.status, 200);
-    assert.equal(calls.length, 0, 'Admin bypass — Telegram API not called');
-    assert.deepEqual(await response.json(), {
-      required_channel: 'amir_btc_2024',
-      user_id: '831704732',
-      telegram_response: { admin: true, reason: 'admin_bypass' },
-      joined: true,
-    });
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
-
-test('POST /api/check-join/invalidate clears JOIN_CACHE for authenticated user', async () => {
-  const worker = loadWorker();
-  const authUser = { id: 12345, first_name: 'Amir' };
-  const initData = buildInitData('test-bot-token', authUser);
-  const joinCache = createMemoryKv({ 'join:12345': '1' });
-
-  try {
-    const request = new Request('https://worker.example/api/check-join/invalidate?user_id=spoofed', {
-      method: 'POST',
-      headers: {
-        'X-Telegram-Init-Data': initData,
-      },
-    });
-
-    const response = await worker.fetch(
-      request,
-      createEnv({
-        JOIN_CACHE: joinCache,
-      }),
-    );
-    assert.equal(response.status, 200);
-    assert.equal(await joinCache.get('join:12345'), null);
-    assert.deepEqual(await response.json(), {
-      status: 'success',
-      invalidated: true,
-      user_id: '12345',
-    });
-  } finally {
-  }
-});
-
 test('POST / accepts Telegram webhook payloads as a compatibility alias', async () => {
   const worker = loadWorker();
   const { stub, calls } = createFetchStub(async () =>
@@ -861,7 +665,7 @@ test('POST / accepts Telegram webhook payloads as a compatibility alias', async 
   }
 });
 
-test('POST /telegram handles /start for non-member with join button', async () => {
+test('POST /telegram handles /start for non-member with join button and callback button', async () => {
   const worker = loadWorker();
   const { stub, calls } = createFetchStub(async () =>
     new Response(
@@ -902,60 +706,14 @@ test('POST /telegram handles /start for non-member with join button', async () =
     assert.equal(calls[1].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
     assert.deepEqual(JSON.parse(calls[1].body), {
       chat_id: 12345,
-      text: '⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.',
+      text: '⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.\n\nپس از عضویت، دکمه «✅ عضو شدم» را بزنید.',
       reply_markup: {
-        inline_keyboard: [[{ text: 'عضویت در کانال', url: 'https://t.me/amir_btc_2024' }]],
+        inline_keyboard: [
+          [{ text: '📌 عضویت در کانال', url: 'https://t.me/amir_btc_2024' }],
+          [{ text: '✅ عضو شدم', callback_data: 'check_join' }],
+        ],
       },
       disable_web_page_preview: true,
-    });
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
-
-test('GET /api/check-join tolerates DB read failure and still confirms joined via Telegram', async () => {
-  const pgMock = createPgMock(async (sql) => {
-    if (/SELECT telegram_id, channel_joined FROM users/i.test(sql)) {
-      throw new Error('db read failed');
-    }
-    return { rows: [] };
-  });
-  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
-  const authUser = { id: 12345, first_name: 'Amir' };
-  const initData = buildInitData('test-bot-token', authUser);
-  const joinCache = createMemoryKv();
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
-  const originalFetch = global.fetch;
-  global.fetch = stub;
-
-  try {
-    const request = new Request('https://worker.example/api/check-join?user_id=spoofed&refresh=true', {
-      method: 'GET',
-      headers: {
-        'X-Telegram-Init-Data': initData,
-      },
-    });
-
-    const response = await worker.fetch(
-      request,
-      createEnv({
-        DATABASE_URL: 'postgres://example.test/db',
-        JOIN_CACHE: joinCache,
-      }),
-    );
-    assert.equal(response.status, 200);
-    assert.equal(calls.length, 1);
-    assert.match(calls[0].url, /getChatMember/);
-    assert.equal(await joinCache.get('join:12345'), '1');
-    assert.equal(pgMock.calls.length, 1);
-    assert.deepEqual(await response.json(), {
-      status: 'success',
-      joined: true,
     });
   } finally {
     global.fetch = originalFetch;
@@ -1010,7 +768,7 @@ test('POST /telegram handles /start for joined member with web_app button', asyn
     assert.equal(calls[0].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
     assert.deepEqual(JSON.parse(calls[0].body), {
       chat_id: 12345,
-      text: 'خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
+      text: '✅ خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
       reply_markup: {
         inline_keyboard: [[{ text: '🚀 باز کردن مینی‌اپ', web_app: { url: 'https://miniapp.example' } }]],
       },
@@ -1069,7 +827,7 @@ test('POST /telegram handles /start for joined member via live Telegram check an
     assert.match(pgMock.calls[1].sql, /INSERT INTO users/i);
     assert.deepEqual(JSON.parse(calls[1].body), {
       chat_id: 12345,
-      text: 'خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
+      text: '✅ خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
       reply_markup: {
         inline_keyboard: [[{ text: '🚀 باز کردن مینی‌اپ', web_app: { url: 'https://miniapp.example' } }]],
       },
@@ -1078,6 +836,217 @@ test('POST /telegram handles /start for joined member via live Telegram check an
     global.fetch = originalFetch;
   }
 });
+
+// ── Bot-based join: callback_query tests ─────────────────────────────────────
+
+test('POST /telegram callback_query "check_join" for member answers success and edits to WebApp button', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  const { stub, calls } = createFetchStub(async (url) => {
+    if (String(url).includes('/getChatMember')) {
+      return new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true, result: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/telegram', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 100,
+        callback_query: {
+          id: 'cb_abc123',
+          from: { id: 12345, first_name: 'Amir' },
+          message: { message_id: 50, chat: { id: 12345, type: 'private' } },
+          data: 'check_join',
+        },
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({ RATE_LIMITS: rateLimits, WEBAPP_URL: 'https://miniapp.example' }),
+    );
+    assert.equal(response.status, 200);
+
+    // Fetch calls: getChatMember, answerCallbackQuery, editMessageReplyMarkup
+    assert.equal(calls.length, 3);
+
+    // 1) getChatMember
+    assert.match(calls[0].url, /getChatMember/);
+
+    // 2) answerCallbackQuery with success text
+    assert.match(calls[1].url, /answerCallbackQuery/);
+    const answerBody = JSON.parse(calls[1].body);
+    assert.equal(answerBody.callback_query_id, 'cb_abc123');
+    assert.equal(answerBody.text, '✅ عضویت شما تأیید شد!');
+    assert.equal(answerBody.show_alert, false);
+
+    // 3) editMessageReplyMarkup with WebApp button
+    assert.match(calls[2].url, /editMessageReplyMarkup/);
+    const editBody = JSON.parse(calls[2].body);
+    assert.equal(editBody.chat_id, 12345);
+    assert.equal(editBody.message_id, 50);
+    assert.deepEqual(editBody.reply_markup, {
+      inline_keyboard: [
+        [{ text: '🚀 باز کردن مینی‌اپ', web_app: { url: 'https://miniapp.example' } }],
+      ],
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /telegram callback_query "check_join" for non-member answers with error alert', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  const { stub, calls } = createFetchStub(async (url) => {
+    if (String(url).includes('/getChatMember')) {
+      return new Response(JSON.stringify({ ok: true, result: { status: 'left' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true, result: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/telegram', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 101,
+        callback_query: {
+          id: 'cb_nonmember',
+          from: { id: 99999, first_name: 'NonMember' },
+          message: { message_id: 51, chat: { id: 99999, type: 'private' } },
+          data: 'check_join',
+        },
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({ RATE_LIMITS: rateLimits }),
+    );
+    assert.equal(response.status, 200);
+
+    // Fetch calls: getChatMember, answerCallbackQuery
+    assert.equal(calls.length, 2);
+    assert.match(calls[0].url, /getChatMember/);
+
+    // answerCallbackQuery with error text and showAlert=true
+    assert.match(calls[1].url, /answerCallbackQuery/);
+    const answerBody = JSON.parse(calls[1].body);
+    assert.equal(answerBody.callback_query_id, 'cb_nonmember');
+    assert.equal(answerBody.text, '❌ هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید و دوباره تلاش کنید.');
+    assert.equal(answerBody.show_alert, true);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /telegram callback_query "check_join" rate-limits repeated calls within 10s', async () => {
+  const worker = loadWorker();
+  // Pre-populate rate limit key to simulate a recent callback
+  const rateLimits = createMemoryKv({ 'cbrl:12345': '1' });
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ ok: true, result: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/telegram', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 102,
+        callback_query: {
+          id: 'cb_ratelimited',
+          from: { id: 12345, first_name: 'FastUser' },
+          message: { message_id: 52, chat: { id: 12345, type: 'private' } },
+          data: 'check_join',
+        },
+      }),
+    });
+
+    const response = await worker.fetch(
+      request,
+      createEnv({ RATE_LIMITS: rateLimits }),
+    );
+    assert.equal(response.status, 200);
+
+    // Only answerCallbackQuery should be called (no getChatMember, no editMessageReplyMarkup)
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /answerCallbackQuery/);
+    const answerBody = JSON.parse(calls[0].body);
+    assert.equal(answerBody.callback_query_id, 'cb_ratelimited');
+    assert.equal(answerBody.text, '⏳ لطفاً ۱۰ ثانیه صبر کنید و دوباره تلاش کنید.');
+    assert.equal(answerBody.show_alert, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /telegram callback_query with unknown data is silently answered', async () => {
+  const worker = loadWorker();
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(JSON.stringify({ ok: true, result: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+
+  try {
+    const request = new Request('https://worker.example/telegram', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 103,
+        callback_query: {
+          id: 'cb_unknown',
+          from: { id: 12345, first_name: 'Amir' },
+          message: { message_id: 53, chat: { id: 12345, type: 'private' } },
+          data: 'some_other_action',
+        },
+      }),
+    });
+
+    const response = await worker.fetch(request, createEnv());
+    assert.equal(response.status, 200);
+
+    // Only answerCallbackQuery with no text (silent ack)
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /answerCallbackQuery/);
+    const answerBody = JSON.parse(calls[0].body);
+    assert.equal(answerBody.callback_query_id, 'cb_unknown');
+    assert.equal(answerBody.text, '');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+// ── End bot-based join callback_query tests ──────────────────────────────────
 
 test('GET /api/assistant/limits reads cooldown from RATE_LIMITS KV', async () => {
   const worker = loadWorker();
@@ -2391,7 +2360,7 @@ test('initData with auth_date older than 1 hour is rejected (Task 4.11)', async 
   global.fetch = async () => new Response('unexpected', { status: 500 });
 
   try {
-    const req = new Request('https://worker.example/api/check-join', {
+    const req = new Request('https://worker.example/api/alerts', {
       method: 'GET',
       headers: { 'X-Telegram-Init-Data': staleInitData },
     });
@@ -2416,13 +2385,14 @@ test('initData with recent auth_date still works after max_age reduction (Task 4
   global.fetch = async () => new Response('{"ok":true,"result":{}}', { status: 200 });
 
   try {
-    const req = new Request('https://worker.example/api/check-join', {
+    const req = new Request('https://worker.example/api/alerts', {
       method: 'GET',
       headers: { 'X-Telegram-Init-Data': recentInitData },
     });
     const res = await worker.fetch(req, env);
-    // check-join calls Telegram API; we just verify auth passes (not 401)
+    // Auth passes — we just verify it's not 401 (stale rejection)
     assert.notEqual(res.status, 401, 'recent initData must not be rejected as stale');
+    assert.equal(res.status, 200, 'should reach the handler with valid auth');
   } finally {
     global.fetch = originalFetch;
   }
@@ -2995,7 +2965,7 @@ test('GET request with ?init_data= query param is rejected (Task 4.3)', async ()
 
   // Send valid initData as query param instead of header → must fail (401)
   const request = new Request(
-    `https://worker.example/api/check-join?init_data=${encodeURIComponent(validInitData)}`,
+    `https://worker.example/api/alerts?init_data=${encodeURIComponent(validInitData)}`,
   );
 
   const response = await worker.fetch(request, createEnv());
@@ -3232,39 +3202,6 @@ test('Custom WEBAPP_URL is reflected in CORS header (Task 4.7)', async () => {
   const origin = response.headers.get('Access-Control-Allow-Origin');
   assert.equal(origin, 'https://custom.example.com');
   assert.notEqual(origin, '*', 'CORS origin must NOT be wildcard');
-});
-
-// ── Task 4.8: Debug join endpoint — admin only ──────────────────────────────
-
-test('GET /api/debug/check-join rejects non-admin user with 403 (Task 4.8)', async () => {
-  const worker = loadWorker();
-  const authUser = { id: 12345, first_name: 'RegularUser' };
-  const initData = buildInitData('test-bot-token', authUser);
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
-  const originalFetch = global.fetch;
-  global.fetch = stub;
-
-  try {
-    const request = new Request('https://worker.example/api/debug/check-join', {
-      method: 'GET',
-      headers: {
-        'X-Telegram-Init-Data': initData,
-      },
-    });
-
-    const response = await worker.fetch(request, createEnv());
-    assert.equal(response.status, 403);
-    const body = await response.json();
-    assert.equal(body.detail, 'Admin access required');
-    assert.equal(calls.length, 0, 'Telegram API must NOT be called for non-admin');
-  } finally {
-    global.fetch = originalFetch;
-  }
 });
 
 // ── Task 5.6: Integration test — analyses CRUD + KV cache lifecycle ─────────
@@ -3628,51 +3565,6 @@ test('Webhook secret validation rejects non-/start updates with wrong secret (Ta
 // ============================================================================
 // Task 5.10 — Remove legacy query params
 // ============================================================================
-
-test('Legacy ?user_id= in query is ignored — auth header wins (Task 5.10)', async () => {
-  const worker = loadWorker();
-  const authUser = { id: 12345, first_name: 'Amir' };
-  const initData = buildInitData('test-bot-token', authUser);
-  const joinCache = createMemoryKv();
-  const pgMock = createPgMock(async (sql) => {
-    if (/SELECT telegram_id, channel_joined FROM users/i.test(sql)) {
-      return { rows: [{ telegram_id: 12345, channel_joined: true }] };
-    }
-    return { rows: [] };
-  });
-  const { stub, calls } = createFetchStub(async () =>
-    new Response(JSON.stringify({ ok: true, result: { status: 'member' } }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
-  const originalFetch = global.fetch;
-  global.fetch = stub;
-
-  try {
-    // Spoof user_id in query but auth as real user 12345
-    const request = new Request(
-      'https://worker.example/api/check-join?user_id=99999&refresh=true',
-      {
-        method: 'GET',
-        headers: { 'X-Telegram-Init-Data': initData },
-      },
-    );
-    const env = createEnv({ DATABASE_URL: 'postgres://x/y', JOIN_CACHE: joinCache });
-
-    const response = await worker.fetch(request, env);
-    assert.equal(response.status, 200);
-    const body = await response.json();
-    assert.equal(body.status, 'success', 'should succeed with header user, not query user');
-    // KV cache key must be for real user (12345), not spoofed (99999)
-    const cachedValue = await joinCache.get('join:12345');
-    assert.equal(cachedValue, '1', 'KV cache keyed on header-authenticated user, not query param');
-    const spoofedCache = await joinCache.get('join:99999');
-    assert.equal(spoofedCache, null, 'spoofed user_id in query must never create a KV entry');
-  } finally {
-    global.fetch = originalFetch;
-  }
-});
 
 test('Legacy ?admin_id= in query is ignored — header auth determines admin (Task 5.10)', async () => {
   const worker = loadWorker();
