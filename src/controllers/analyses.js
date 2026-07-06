@@ -178,7 +178,7 @@ export function createAnalysisHandlers(deps) {
         analyses: null,
         version: cachedState.version,
         unchanged: true,
-      }, env);
+      }, {}, env);
     }
 
     if (requestedVersion === null && cachedState.version !== null && cachedState.analyses !== null) {
@@ -186,7 +186,7 @@ export function createAnalysisHandlers(deps) {
         status: 'success',
         analyses: cachedState.analyses,
         version: cachedState.version,
-      }, env);
+      }, {}, env);
     }
 
     if (isDatabaseConfigured(env)) {
@@ -198,10 +198,10 @@ export function createAnalysisHandlers(deps) {
           status: 'success',
           analyses,
           version,
-        }, env);
+        }, {}, env);
       } catch (error) {
         console.warn('list analyses failed:', error);
-        return safeDbErrorResponse(error, env);
+        return safeDbErrorResponse(error, {}, env);
       }
     }
 
@@ -209,7 +209,7 @@ export function createAnalysisHandlers(deps) {
       status: 'success',
       analyses: cachedState.analyses ?? [],
       version: cachedState.version ?? 0,
-    }, env);
+    }, {}, env);
   }
 
   /**
@@ -221,7 +221,7 @@ export function createAnalysisHandlers(deps) {
       return authState.error;
     }
     if (!isAdminTelegramId(env, authState.user.id)) {
-      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
+      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
     }
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -242,10 +242,10 @@ export function createAnalysisHandlers(deps) {
       const analyses = await analysisRepo.list(env);
       const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
       await updateAnalysesCache(env, analyses, version);
-      return jsonResponse({ status: 'success', analysis, version }, env);
+      return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {
       console.warn('create analysis failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -258,7 +258,7 @@ export function createAnalysisHandlers(deps) {
       return authState.error;
     }
     if (!isAdminTelegramId(env, authState.user.id)) {
-      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
+      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
     }
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -277,15 +277,15 @@ export function createAnalysisHandlers(deps) {
     try {
       const analysis = await analysisRepo.update(env, analysisId, parsed.payload);
       if (!analysis) {
-        return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, {}, env);
+        return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
       const analyses = await analysisRepo.list(env);
       const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
       await updateAnalysesCache(env, analyses, version);
-      return jsonResponse({ status: 'success', analysis, version }, env);
+      return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {
       console.warn('update analysis failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -298,7 +298,7 @@ export function createAnalysisHandlers(deps) {
       return authState.error;
     }
     if (!isAdminTelegramId(env, authState.user.id)) {
-      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
+      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
     }
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -312,15 +312,15 @@ export function createAnalysisHandlers(deps) {
     try {
       const deleted = await analysisRepo.remove(env, analysisId);
       if (!deleted) {
-        return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, {}, env);
+        return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
       const analyses = await analysisRepo.list(env);
       const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
       await updateAnalysesCache(env, analyses, version);
-      return jsonResponse({ status: 'success', version }, env);
+      return jsonResponse({ status: 'success', version }, {}, env);
     } catch (error) {
       console.warn('delete analysis failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 

@@ -42,7 +42,7 @@ export function createTicketHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const bodyResult = await readJsonBody(request, env);
+    const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     let payload = bodyResult.payload;
 
@@ -84,10 +84,10 @@ export function createTicketHandlers(deps) {
         console.warn('ticket create: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
       }
 
-      return jsonResponse({ status: 'success', ticket }, env);
+      return jsonResponse({ status: 'success', ticket }, {}, env);
     } catch (error) {
       console.warn('create ticket failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -110,10 +110,10 @@ export function createTicketHandlers(deps) {
     const userId = String(authState.user.id);
     try {
       const tickets = await ticketRepo.list(env, userId);
-      return jsonResponse({ status: 'success', tickets }, env);
+      return jsonResponse({ status: 'success', tickets }, {}, env);
     } catch (error) {
       console.warn('list tickets failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -127,7 +127,7 @@ export function createTicketHandlers(deps) {
     }
 
     if (!isAdminTelegramId(env, authState.user.id)) {
-      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
+      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
     }
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -139,10 +139,10 @@ export function createTicketHandlers(deps) {
     }
     try {
       const tickets = await ticketRepo.list(env);
-      return jsonResponse({ status: 'success', tickets }, env);
+      return jsonResponse({ status: 'success', tickets }, {}, env);
     } catch (error) {
       console.warn('list all tickets failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -157,7 +157,7 @@ export function createTicketHandlers(deps) {
     }
 
     if (!isAdminTelegramId(env, authState.user.id)) {
-      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
+      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
     }
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -167,7 +167,7 @@ export function createTicketHandlers(deps) {
         },
         { status: 503 }, env);
     }
-    const bodyResult = await readJsonBody(request, env);
+    const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     let payload = bodyResult.payload;
 
@@ -186,7 +186,7 @@ export function createTicketHandlers(deps) {
     try {
       const ticket = await ticketRepo.reply(env, ticketId, authState.user.id, message);
       if (!ticket) {
-        return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, {}, env);
+        return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, env);
       }
 
       // Notify ticket owner via Telegram (Task 2.14)
@@ -203,10 +203,10 @@ export function createTicketHandlers(deps) {
         console.warn('ticket reply: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
       }
 
-      return jsonResponse({ status: 'success', ticket }, env);
+      return jsonResponse({ status: 'success', ticket }, {}, env);
     } catch (error) {
       console.warn('reply ticket failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -231,16 +231,16 @@ export function createTicketHandlers(deps) {
     try {
       const ticket = await ticketRepo.findById(env, ticketId);
       if (!ticket) {
-        return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, {}, env);
+        return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, env);
       }
       if (!isAdmin && String(ticket.user_id) !== userId) {
-        return jsonResponse({ detail: 'Forbidden' }, { status: 403 }, {}, env);
+        return jsonResponse({ detail: 'Forbidden' }, { status: 403 }, env);
       }
       await ticketRepo.remove(env, ticketId);
-      return jsonResponse({ status: 'success' }, env);
+      return jsonResponse({ status: 'success' }, {}, env);
     } catch (error) {
       console.warn('delete ticket failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 

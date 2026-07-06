@@ -41,7 +41,7 @@ export function createUserHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const bodyResult = await readJsonBody(request, env);
+    const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     let payload = bodyResult.payload;
 
@@ -71,10 +71,10 @@ export function createUserHandlers(deps) {
         status: 'success',
         user: userRepo.normalizeRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
         watchlist,
-      }, env);
+      }, {}, env);
     } catch (error) {
       console.warn('bootstrap user failed:', error);
-      return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, {}, env);
+      return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, env);
     }
   }
 
@@ -110,10 +110,10 @@ export function createUserHandlers(deps) {
         status: 'success',
         user: userRepo.normalizeRow(userRow, watchlist),
         watchlist,
-      }, env);
+      }, {}, env);
     } catch (error) {
       console.warn('get current user failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
@@ -135,7 +135,7 @@ export function createUserHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const bodyResult = await readJsonBody(request, env);
+    const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     let payload = bodyResult.payload;
 
@@ -157,10 +157,10 @@ export function createUserHandlers(deps) {
           },
           { status: 404 }, env);
       }
-      return jsonResponse({ status: 'success', user: userRepo.normalizeRow(userRow) }, env);
+      return jsonResponse({ status: 'success', user: userRepo.normalizeRow(userRow) }, {}, env);
     } catch (error) {
       console.warn('update user settings failed:', error);
-      return safeDbErrorResponse(error, env);
+      return safeDbErrorResponse(error, {}, env);
     }
   }
 
