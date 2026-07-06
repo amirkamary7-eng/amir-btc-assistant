@@ -15,7 +15,7 @@
 export function createAssistantHandlers(deps) {
   const {
     jsonResponse,
-    authenticateTelegramRequest,
+    optionalTelegramAuth,
     readJsonBody,
     MAX_BODY_BYTES,
     buildBodyFieldValidationError,
@@ -293,9 +293,9 @@ export function createAssistantHandlers(deps) {
    * GET /api/assistant/limits — Return current AI rate limit status.
    */
   async function handleGetLimits(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
+    const auth = optionalTelegramAuth(request, env);
+    if (!auth.user) {
+      return auth.error;
     }
 
     if (!env.RATE_LIMITS) {
@@ -307,7 +307,7 @@ export function createAssistantHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const limits = await checkRateLimits(env, authState.user.id);
+    const limits = await checkRateLimits(env, auth.user.id);
     return jsonResponse({ status: 'success', ...limits }, {}, env);
   }
 
@@ -315,9 +315,9 @@ export function createAssistantHandlers(deps) {
    * POST /api/assistant/chat — Send message to AI with provider fallback chain.
    */
   async function handlePostChat(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
+    const auth = optionalTelegramAuth(request, env);
+    if (!auth.user) {
+      return auth.error;
     }
 
     if (!env.RATE_LIMITS) {
@@ -382,7 +382,7 @@ export function createAssistantHandlers(deps) {
         { status: 422 }, env);
     }
 
-    const userId = String(authState.user.id);
+    const userId = String(auth.user.id);
     const hasImage = Boolean(payload.image);
     const history = normalizeAssistantHistory(payload.history);
 

@@ -13,7 +13,7 @@
 export function createWatchlistHandlers(deps) {
   const {
     jsonResponse,
-    authenticateTelegramRequest,
+    optionalTelegramAuth,
     readJsonBody,
     safeDbErrorResponse,
     buildBodyFieldValidationError,
@@ -25,9 +25,9 @@ export function createWatchlistHandlers(deps) {
    * GET /api/watchlist — Return the authenticated user's watchlist symbols.
    */
   async function handleGet(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
+    const auth = optionalTelegramAuth(request, env);
+    if (!auth.user) {
+      return auth.error;
     }
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -37,7 +37,7 @@ export function createWatchlistHandlers(deps) {
         },
         { status: 503 }, env);
     }
-    const userId = String(authState.user.id);
+    const userId = String(auth.user.id);
     try {
       const symbols = await watchlistRepo.getSymbols(env, userId);
       return jsonResponse({ status: 'success', symbols, watchlist: symbols }, {}, env);
@@ -52,9 +52,9 @@ export function createWatchlistHandlers(deps) {
    * Accepts { symbols: string[] } and stores up to 7 deduplicated, uppercase symbols.
    */
   async function handlePut(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
+    const auth = optionalTelegramAuth(request, env);
+    if (!auth.user) {
+      return auth.error;
     }
 
     if (!isDatabaseConfigured(env)) {
@@ -76,7 +76,7 @@ export function createWatchlistHandlers(deps) {
         { status: 422 }, env);
     }
 
-    payload.user_id = String(authState.user.id);
+    payload.user_id = String(auth.user.id);
     const symbols = Array.isArray(payload.symbols)
       ? [...new Set(payload.symbols.map((value) => String(value).toUpperCase().trim()).filter(Boolean))].slice(0, 7)
       : [];

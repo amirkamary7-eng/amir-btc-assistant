@@ -11,7 +11,7 @@
 export function createUserHandlers(deps) {
   const {
     jsonResponse,
-    authenticateTelegramRequest,
+    optionalTelegramAuth,
     readJsonBody,
     safeDbErrorResponse,
     buildBodyFieldValidationError,
@@ -52,21 +52,21 @@ export function createUserHandlers(deps) {
         { status: 422 }, env);
     }
 
-    // Auth: prefer initData, fall back to body.user_id for testing
-    const authState = authenticateTelegramRequest(request, env);
+    // Auth: prefer initData, fall back to ?user_id= query param, then body.user_id
+    const auth = optionalTelegramAuth(request, env);
     let userId;
     let tgUser = null; // Telegram user object (may have username, first_name, …)
 
-    if (authState.user) {
-      userId = String(authState.user.id);
-      tgUser = authState.user;
+    if (auth.user) {
+      userId = String(auth.user.id);
+      tgUser = auth.user;
     } else {
-      // No valid initData — allow body.user_id fallback for dev/testing
+      // No valid initData, no ?user_id= query param — try body.user_id for dev/testing
       const fallbackId = payload.user_id;
       if (fallbackId && /^\d+$/.test(String(fallbackId).trim())) {
         userId = String(fallbackId).trim();
       } else {
-        return authState.error;
+        return auth.error;
       }
     }
 
@@ -101,9 +101,9 @@ export function createUserHandlers(deps) {
    * GET /api/users/me — Return the authenticated user's profile with watchlist.
    */
   async function handleMe(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
+    const auth = optionalTelegramAuth(request, env);
+    if (!auth.user) {
+      return auth.error;
     }
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -113,7 +113,7 @@ export function createUserHandlers(deps) {
         },
         { status: 503 }, env);
     }
-    const userId = String(authState.user.id);
+    const userId = String(auth.user.id);
     try {
       const userRow = await userRepo.getById(env, userId);
       if (!userRow) {
@@ -140,9 +140,9 @@ export function createUserHandlers(deps) {
    * PUT /api/users/me/settings — Update the authenticated user's language setting.
    */
   async function handleMeSettings(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
+    const auth = optionalTelegramAuth(request, env);
+    if (!auth.user) {
+      return auth.error;
     }
 
     if (!isDatabaseConfigured(env)) {
@@ -164,7 +164,7 @@ export function createUserHandlers(deps) {
         { status: 422 }, env);
     }
 
-    const userId = String(authState.user.id);
+    const userId = String(auth.user.id);
     payload.user_id = userId;
     try {
       const userRow = await userRepo.updateSettings(env, userId, payload);
