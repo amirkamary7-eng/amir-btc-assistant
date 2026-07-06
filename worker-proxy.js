@@ -1693,7 +1693,7 @@ const alertHandlers = createAlertHandlers({
 const watchlistRepo = createWatchlistRepository({ queryDb, ensureUserRow });
 const watchlistHandlers = createWatchlistHandlers({
   jsonResponse,
-  authenticateTelegramRequest,
+  optionalTelegramAuth,
   readJsonBody,
   safeDbErrorResponse,
   buildBodyFieldValidationError,
@@ -1733,7 +1733,7 @@ const ticketHandlers = createTicketHandlers({
 const userRepo = createUserRepository({ queryDb, normalizeOptionalString });
 const userHandlers = createUserHandlers({
   jsonResponse,
-  authenticateTelegramRequest,
+  optionalTelegramAuth,
   readJsonBody,
   safeDbErrorResponse,
   buildBodyFieldValidationError,
@@ -1757,7 +1757,7 @@ const notifyHandlers = createNotifyHandlers({
 });
 const assistantHandlers = createAssistantHandlers({
   jsonResponse,
-  authenticateTelegramRequest,
+  optionalTelegramAuth,
   readJsonBody,
   MAX_BODY_BYTES,
   buildBodyFieldValidationError,
