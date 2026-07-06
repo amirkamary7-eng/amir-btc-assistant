@@ -334,14 +334,14 @@ function authenticateTelegramRequest(request, env) {
   const initData = getTelegramInitData(request);
   if (!initData) {
     return {
-      error: jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, {}, env),
+      error: jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env),
       user: null,
     };
   }
 
   if (!isBotConfigured(env)) {
     return {
-      error: jsonResponse({ detail: 'Telegram bot token is not configured' }, { status: 401 }, {}, env),
+      error: jsonResponse({ detail: 'Telegram bot token is not configured' }, { status: 401 }, env),
       user: null,
     };
   }
@@ -349,7 +349,7 @@ function authenticateTelegramRequest(request, env) {
   const user = validateTelegramInitData(initData, String(env.TELEGRAM_BOT_TOKEN || ''));
   if (!user || !user.id) {
     return {
-      error: jsonResponse({ detail: 'Invalid Telegram init data' }, { status: 401 }, {}, env),
+      error: jsonResponse({ detail: 'Invalid Telegram init data' }, { status: 401 }, env),
       user: null,
     };
   }
@@ -1637,7 +1637,7 @@ function handleRoot(env) {
   return jsonResponse({
     status: 'ok',
     message: 'Amir BTC Assistant Backend is running!',
-  }, env);
+  }, {}, env);
 }
 
 function handleHealth(env) {
@@ -1759,7 +1759,7 @@ async function handleChartResolve(request, env) {
   const rawSymbol = url.searchParams.get('symbol');
 
   if (rawSymbol === null) {
-    return jsonResponse(buildFastApiValidationError('missing', 'Field required', null), { status: 422 }, {}, env);
+    return jsonResponse(buildFastApiValidationError('missing', 'Field required', null), { status: 422 }, env);
   }
 
   if (rawSymbol.length < 1) {
@@ -1788,7 +1788,7 @@ async function handleChartResolve(request, env) {
   return jsonResponse({
     status: 'success',
     ...result,
-  }, env);
+  }, {}, env);
 }
 
 async function handleCalendarEvents(env) {
@@ -1796,7 +1796,7 @@ async function handleCalendarEvents(env) {
   return jsonResponse({
     status: 'success',
     events,
-  }, env);
+  }, {}, env);
 }
 
 async function handleFarsiNews(env) {
@@ -1829,13 +1829,13 @@ async function handleCheckJoin(request, env) {
     }),
   );
   if (result.status === 'DB_ERROR') {
-    return jsonResponse(result, env);
+    return jsonResponse(result, {}, env);
   }
 
   return jsonResponse({
     status: 'success',
     ...result,
-  }, env);
+  }, {}, env);
 }
 
 async function handleDebugCheckJoin(request, env) {
@@ -1845,7 +1845,7 @@ async function handleDebugCheckJoin(request, env) {
   }
 
   if (!isAdminTelegramId(env, authState.user.id)) {
-    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, {}, env);
+    return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
   }
 
   const debugPayload = await getChatMemberDebugPayload(String(authState.user.id), env);
@@ -1854,7 +1854,7 @@ async function handleDebugCheckJoin(request, env) {
     user_id: String(authState.user.id),
     telegram_response: debugPayload.telegram_response,
     joined: debugPayload.joined,
-  }, env);
+  }, {}, env);
 }
 
 async function handleCheckJoinInvalidate(request, env) {
@@ -1876,7 +1876,7 @@ async function handleCheckJoinInvalidate(request, env) {
     status: 'success',
     invalidated,
     user_id: resolvedUserId,
-  }, env);
+  }, {}, env);
 }
 
 async function handleTelegramWebhook(request, env) {
