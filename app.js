@@ -242,7 +242,7 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
 const ADMIN_ID = '831704732';
 const CHANNEL = 'amir_btc_2024';
 const MAX_WATCHLIST = 7;
-const PROXY = 'https://proxyserveramirbtc.amirkamari9939.workers.dev/?url=';
+const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
 
 // لیست ارزهای محبوب برای Fallback
