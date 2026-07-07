@@ -11,7 +11,7 @@
     "cf:types": "wrangler types",
     "cf:pages:prepare": "node scripts/prepare-pages.mjs",
     "cf:pages:dev": "wrangler pages dev ./webapp/pages-dist --config wrangler.pages.jsonc",
-    "cf:pages:deploy": "wrangler pages deploy ./webapp/pages-dist --config wrangler.pages.jsonc"
+    "cf:pages:deploy": "wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages"
   },
   "devDependencies": {
     "wrangler": "^4.67.0"

@@ -1,5 +1,6 @@
 import { mkdir, cp, copyFile, rm, readFile, writeFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +17,24 @@ const hashedFiles = [
   'watchlist.js',
 ];
 
+// ============================================================================
+// Build ID Generation
+// ============================================================================
+function generateBuildId() {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  let shortHash = 'dev';
+  try {
+    shortHash = execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: projectRoot }).trim();
+  } catch {
+    // Not in a git repo or git not available — use a random hex
+    shortHash = createHash('sha256').update(timestamp).digest('hex').slice(0, 7);
+  }
+  return `${timestamp}-${shortHash}`;
+}
+
+// ============================================================================
+// Core Build Steps
+// ============================================================================
 async function ensureCleanOutput() {
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
@@ -115,28 +134,92 @@ async function injectApiBase(html) {
   );
 }
 
+/**
+ * Inject the BUILD_ID into the inline version-check script in index.html.
+ * Replaces __BUILD_ID_PLACEHOLDER__ with the actual build ID.
+ */
+function injectBuildId(html, buildId) {
+  return html.replace(/__BUILD_ID_PLACEHOLDER__/g, buildId);
+}
+
+/**
+ * Generate version.json — a tiny file fetched by the client to detect new deploys.
+ * This file gets aggressive no-cache headers so it's ALWAYS fresh.
+ */
+async function writeVersionJson(buildId) {
+  const versionData = {
+    buildId,
+    build_id: buildId,
+    timestamp: new Date().toISOString(),
+    deployedAt: Date.now(),
+  };
+  const versionPath = path.join(outputDir, 'version.json');
+  await writeFile(versionPath, JSON.stringify(versionData, null, 2), 'utf8');
+  console.log(`  version.json written (buildId: ${buildId})`);
+}
+
+/**
+ * Write Cloudflare Pages _headers file with precise cache rules.
+ * 
+ * Key rules:
+ * - index.html: NEVER cache (ensures Telegram WebView always gets fresh HTML)
+ * - version.json: NEVER cache (version check must always hit origin)
+ * - Hashed JS/CSS: cache 1 year immutable (content hash guarantees uniqueness)
+ * - Hashed assets: cache 1 year immutable
+ * - Everything else: no cache (safety net)
+ */
 async function writeHeadersFile() {
   const headersContent = [
     '# Cloudflare Pages cache headers',
     '# See: https://developers.cloudflare.com/pages/platform/headers/',
     '',
-    '# index.html: never cache — always serve fresh',
+    '# ============================================================',
+    '# CRITICAL: index.html — NEVER cache',
+    '# Telegram WebView, Android WebView, and iOS WKWebView all respect',
+    '# these headers. This ensures users ALWAYS get the latest HTML.',
+    '# ============================================================',
     '/index.html',
-    '  Cache-Control: no-cache, no-store, must-revalidate',
+    '  Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate',
     '  Pragma: no-cache',
     '  Expires: 0',
+    '  Surrogate-Control: no-store',
+    '  X-Content-Type-Options: nosniff',
     '',
+    '# ============================================================',
+    '# version.json — NEVER cache (version check endpoint)',
+    '# ============================================================',
+    '/version.json',
+    '  Cache-Control: no-store, no-cache, must-revalidate',
+    '  Pragma: no-cache',
+    '  Expires: 0',
+    '  Access-Control-Allow-Origin: *',
+    '',
+    '# ============================================================',
     '# Hashed JS files: cache 1 year (immutable)',
+    '# Filenames include content hash, so they never change.',
+    '# ============================================================',
     '/*.js',
     '  Cache-Control: public, max-age=31536000, immutable',
     '',
-    '# Hashed CSS files: cache 1 year',
+    '# ============================================================',
+    '# Hashed CSS files: cache 1 year (immutable)',
+    '# ============================================================',
     '/*.css',
     '  Cache-Control: public, max-age=31536000, immutable',
     '',
-    '# Asset images: cache 1 day, revalidate',
+    '# ============================================================',
+    '# Hashed asset images: cache 1 year (immutable)',
+    '# ============================================================',
     '/assets/*',
-    '  Cache-Control: public, max-age=86400, stale-while-revalidate=604800',
+    '  Cache-Control: public, max-age=31536000, immutable',
+    '',
+    '# ============================================================',
+    '# Catch-all: no cache for anything else (safety net)',
+    '# ============================================================',
+    '/*',
+    '  Cache-Control: no-store, no-cache, must-revalidate',
+    '  Pragma: no-cache',
+    '  Expires: 0',
     '',
   ].join('\n');
 
@@ -145,7 +228,12 @@ async function writeHeadersFile() {
   console.log('  _headers written');
 }
 
+// ============================================================================
+// Main
+// ============================================================================
 async function main() {
+  const buildId = generateBuildId();
+  console.log(`Build ID: ${buildId}`);
   console.log('Preparing Pages build output...');
 
   await ensureCleanOutput();
@@ -163,12 +251,17 @@ async function main() {
   let indexHtml = await readFile(path.join(outputDir, 'index.html'), 'utf8');
   indexHtml = replaceReferences(indexHtml, jsRenameMap, assetRenameMap);
   indexHtml = await injectApiBase(indexHtml);
+  indexHtml = injectBuildId(indexHtml, buildId);
   await writeFile(path.join(outputDir, 'index.html'), indexHtml, 'utf8');
-  console.log('  Updated references & API_BASE in index.html');
+  console.log('  Updated references, API_BASE, and BUILD_ID in index.html');
+
+  await writeVersionJson(buildId);
 
   await writeHeadersFile();
 
-  console.log(`\nPages build output: ${outputDir}`);
+  console.log(`\n✅ Pages build complete: ${outputDir}`);
+  console.log(`   Build ID: ${buildId}`);
+  console.log(`   Deploy with: npx wrangler pages deploy ${outputDir} --project-name amir-btc-assistant-pages`);
 }
 
 main().catch((error) => {
