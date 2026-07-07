@@ -16,6 +16,7 @@ export function createWatchlistHandlers(deps) {
     optionalTelegramAuth,
     readJsonBody,
     safeDbErrorResponse,
+    safeError,
     buildBodyFieldValidationError,
     isDatabaseConfigured,
     watchlistRepo,
@@ -42,7 +43,7 @@ export function createWatchlistHandlers(deps) {
       const symbols = await watchlistRepo.getSymbols(env, userId);
       return jsonResponse({ status: 'success', symbols, watchlist: symbols }, {}, env);
     } catch (error) {
-      console.warn('get watchlist failed:', error);
+      console.warn(safeError('get-watchlist', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -84,7 +85,7 @@ export function createWatchlistHandlers(deps) {
       const storedSymbols = await watchlistRepo.replace(env, payload.user_id, symbols);
       return jsonResponse({ status: 'success', symbols: storedSymbols }, {}, env);
     } catch (error) {
-      console.warn('update watchlist failed:', error);
+      console.warn(safeError('update-watchlist', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }

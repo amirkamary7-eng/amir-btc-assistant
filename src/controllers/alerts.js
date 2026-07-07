@@ -16,6 +16,7 @@ export function createAlertHandlers(deps) {
     authenticateTelegramRequest,
     readJsonBody,
     safeDbErrorResponse,
+    safeError,
     buildBodyFieldValidationError,
     isDatabaseConfigured,
     alertRepo,
@@ -54,7 +55,7 @@ export function createAlertHandlers(deps) {
       const alert = await alertRepo.create(env, payload.user_id, payload);
       return jsonResponse({ status: 'success', alert }, {}, env);
     } catch (error) {
-      console.warn('create alert failed:', error);
+      console.warn(safeError('create-alert', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -80,7 +81,7 @@ export function createAlertHandlers(deps) {
       const alerts = await alertRepo.list(env, userId);
       return jsonResponse({ status: 'success', alerts }, {}, env);
     } catch (error) {
-      console.warn('list alerts failed:', error);
+      console.warn(safeError('list-alerts', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -113,7 +114,7 @@ export function createAlertHandlers(deps) {
       await alertRepo.remove(env, alertId);
       return jsonResponse({ status: 'success', deleted: true }, {}, env);
     } catch (error) {
-      console.warn('delete alert failed:', error);
+      console.warn(safeError('delete-alert', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }

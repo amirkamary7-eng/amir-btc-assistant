@@ -14,6 +14,7 @@ export function createTicketHandlers(deps) {
     authenticateTelegramRequest,
     readJsonBody,
     safeDbErrorResponse,
+    safeError,
     buildBodyFieldValidationError,
     isDatabaseConfigured,
     isAdminTelegramId,
@@ -69,7 +70,7 @@ export function createTicketHandlers(deps) {
           }
         }
       } catch (notifyErr) {
-        console.warn('ticket create: admin notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
+        console.warn(safeError('create-ticket-admin-notify', notifyErr));
       }
       try {
         const userId = Number(authState.user.id);
@@ -81,12 +82,12 @@ export function createTicketHandlers(deps) {
           });
         }
       } catch (notifyErr) {
-        console.warn('ticket create: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
+        console.warn(safeError('create-ticket-user-notify', notifyErr));
       }
 
       return jsonResponse({ status: 'success', ticket }, {}, env);
     } catch (error) {
-      console.warn('create ticket failed:', error);
+      console.warn(safeError('create-ticket', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -112,7 +113,7 @@ export function createTicketHandlers(deps) {
       const tickets = await ticketRepo.list(env, userId);
       return jsonResponse({ status: 'success', tickets }, {}, env);
     } catch (error) {
-      console.warn('list tickets failed:', error);
+      console.warn(safeError('list-tickets', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -141,7 +142,7 @@ export function createTicketHandlers(deps) {
       const tickets = await ticketRepo.list(env);
       return jsonResponse({ status: 'success', tickets }, {}, env);
     } catch (error) {
-      console.warn('list all tickets failed:', error);
+      console.warn(safeError('list-all-tickets', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -200,12 +201,12 @@ export function createTicketHandlers(deps) {
           });
         }
       } catch (notifyErr) {
-        console.warn('ticket reply: user notify failed:', notifyErr instanceof Error ? notifyErr.message : String(notifyErr));
+        console.warn(safeError('ticket-reply-user-notify', notifyErr));
       }
 
       return jsonResponse({ status: 'success', ticket }, {}, env);
     } catch (error) {
-      console.warn('reply ticket failed:', error);
+      console.warn(safeError('reply-ticket', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -239,7 +240,7 @@ export function createTicketHandlers(deps) {
       await ticketRepo.remove(env, ticketId);
       return jsonResponse({ status: 'success' }, {}, env);
     } catch (error) {
-      console.warn('delete ticket failed:', error);
+      console.warn(safeError('delete-ticket', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }

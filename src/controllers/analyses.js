@@ -14,6 +14,7 @@ export function createAnalysisHandlers(deps) {
     jsonResponse,
     authenticateTelegramRequest,
     safeDbErrorResponse,
+    safeError,
     buildBodyFieldValidationError,
     buildQueryFieldValidationError,
     isDatabaseConfigured,
@@ -200,7 +201,7 @@ export function createAnalysisHandlers(deps) {
           version,
         }, {}, env);
       } catch (error) {
-        console.warn('list analyses failed:', error);
+        console.warn(safeError('list-analyses', error));
         return safeDbErrorResponse(error, {}, env);
       }
     }
@@ -244,7 +245,7 @@ export function createAnalysisHandlers(deps) {
       await updateAnalysesCache(env, analyses, version);
       return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {
-      console.warn('create analysis failed:', error);
+      console.warn(safeError('create-analysis', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -284,7 +285,7 @@ export function createAnalysisHandlers(deps) {
       await updateAnalysesCache(env, analyses, version);
       return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {
-      console.warn('update analysis failed:', error);
+      console.warn(safeError('update-analysis', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -319,7 +320,7 @@ export function createAnalysisHandlers(deps) {
       await updateAnalysesCache(env, analyses, version);
       return jsonResponse({ status: 'success', version }, {}, env);
     } catch (error) {
-      console.warn('delete analysis failed:', error);
+      console.warn(safeError('delete-analysis', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
