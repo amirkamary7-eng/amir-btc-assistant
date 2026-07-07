@@ -2770,7 +2770,7 @@ test('Referrer validation: matching Origin in production env passes through', as
   const initData = buildInitData('test-bot-token', { id: 831704732, first_name: 'A', last_name: 'B' });
   const request = new Request('https://worker.example/api/health', {
     headers: {
-      'Origin': 'https://amir-btc-assistant.vercel.app',
+      'Origin': 'https://amir-btc-assistant-pages.pages.dev',
     },
   });
 

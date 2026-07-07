@@ -323,7 +323,7 @@ None.
 | Custom WEBAPP_URL → header matches custom origin | 2 | ✅ |
 
 **Smoking gun assertions:**
-- `header === 'https://amir-btc-assistant.vercel.app'` (default) ✅
+- `header === 'https://amir-btc-assistant-pages.pages.dev'` (default) ✅
 - `header !== '*'` — wildcard eliminated ✅
 - `header === 'https://custom.example.com'` with custom env ✅
 

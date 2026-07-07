@@ -25,7 +25,7 @@ class Settings:
         self.ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "831704732")
         self.ADMIN_IDS = os.environ.get("ADMIN_IDS", self.ADMIN_TELEGRAM_ID)
         self.TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
-        self.WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant.vercel.app")
+        self.WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant-pages.pages.dev")
         self.REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")
 
         self.JOIN_CACHE_TTL = int(os.environ.get("JOIN_CACHE_TTL", "1800"))
