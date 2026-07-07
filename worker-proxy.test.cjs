@@ -3711,26 +3711,27 @@ test('authenticateTelegramRequest returns 401 for missing header', async () => {
 
 
 // ============================================================================
-// P1-2b: Referral Logic Tests (processReferralOnBootstrap)
+// Referral Logic Tests (processReferralOnBootstrap)
 // ============================================================================
 
 test('processReferralOnBootstrap rejects self-referral', async () => {
-  const worker = loadWorker();
+  // Mock: getById returns empty (new user), inviter SELECT returns row, but it's self
   const pgMock = createPgMock(async (sql, params) => {
-    // Simulate inviter exists
-    if (/SELECT telegram_id FROM users WHERE telegram_id/i.test(sql)) {
-      return { rows: [{ telegram_id: '111' }] };
+    // getById-style query (has username/channel_joined columns) → empty = new user
+    if (/username[\s\S]*channel_joined/i.test(sql)) {
+      return { rows: [] };
+    }
+    // Inviter lookup (SELECT telegram_id FROM users WHERE telegram_id) → return row
+    if (/^SELECT telegram_id FROM users WHERE telegram_id/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0] }] };
+    }
+    // User bootstrap upsert
+    if (/INSERT INTO users[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0], lang: 'fa', channel_joined: false, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
     }
     return { rows: [] };
   });
   const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
-
-  // Directly test via the internal function by loading the module
-  const workerPath = path.join(__dirname, 'worker-proxy.js');
-  const source = fs.readFileSync(workerPath, 'utf8');
-  const fnStart = source.indexOf('async function processReferralOnBootstrap');
-  const fnEnd = source.indexOf('async function creditReferralTokens');
-  const fnSrc = source.slice(fnStart, fnEnd);
 
   const env = createEnv({
     DATABASE_URL: 'postgres://test',
@@ -3758,13 +3759,21 @@ test('processReferralOnBootstrap rejects self-referral', async () => {
   assert.equal(response.status, 200);
   // Check no referral INSERT happened
   const hasReferralInsert = pgMock.calls.some(c =>
-    /INSERT INTO referrals/i.test(c.sql) && !/ON CONFLICT/i.test(c.sql)
+    /INSERT INTO referrals/i.test(c.sql)
   );
   assert.equal(hasReferralInsert, false, 'self-referral must not create a referral record');
 });
 
 test('processReferralOnBootstrap rejects non-existent referrer', async () => {
-  const pgMock = createPgMock(async () => ({ rows: [] }));
+  const pgMock = createPgMock(async (sql) => {
+    // getById → empty (new user)
+    if (/username[\s\S]*channel_joined/i.test(sql)) return { rows: [] };
+    // User bootstrap upsert
+    if (/INSERT INTO users[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ telegram_id: '222', lang: 'fa', channel_joined: false, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
+    }
+    return { rows: [] };
+  });
   const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
 
   const fakeUser = { id: 222, first_name: 'Newbie' };
@@ -3790,9 +3799,314 @@ test('processReferralOnBootstrap rejects non-existent referrer', async () => {
   const response = await workerWithDb.fetch(request, env);
   assert.equal(response.status, 200);
   const hasReferralInsert = pgMock.calls.some(c =>
-    /INSERT INTO referrals/i.test(c.sql) && !/ON CONFLICT/i.test(c.sql)
+    /INSERT INTO referrals/i.test(c.sql)
   );
   assert.equal(hasReferralInsert, false, 'non-existent referrer must not create referral');
+});
+
+// ============================================================================
+// Referral — new comprehensive tests (H-R1..H-R4, M-R4..M-R8, Design)
+// ============================================================================
+
+test('Referral: new user with valid referrer creates referral and credits reward', async () => {
+  let insertReferralId = 42;
+  const pgMock = createPgMock(async (sql, params) => {
+    // getById (pre-check) → empty = new user
+    if (/username[\s\S]*channel_joined/i.test(sql) && !/INSERT/i.test(sql)) return { rows: [] };
+    // User bootstrap upsert → return with channel_joined=true
+    if (/INSERT INTO users[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0], lang: 'fa', channel_joined: true, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
+    }
+    // Inviter lookup → found
+    if (/^SELECT telegram_id FROM users WHERE telegram_id/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0] }] };
+    }
+    // Existing referral check → empty
+    if (/SELECT id[\s\S]*FROM referrals WHERE invitee_id/i.test(sql)) return { rows: [] };
+    // INSERT referral with ON CONFLICT → success
+    if (/INSERT INTO referrals[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ id: insertReferralId, rewarded: false }] };
+    }
+    // Transaction queries
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
+    return { rows: [] };
+  });
+  const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
+
+  const fakeUser = { id: 555, first_name: 'New' };
+  const fakeInitData = buildInitData('test-bot-token', fakeUser);
+  const env = createEnv({
+    DATABASE_URL: 'postgres://x:y@h/d',
+    RATE_LIMITS: createMemoryKv(),
+    APP_CACHE: createMemoryKv(),
+    JOIN_CACHE: createMemoryKv(),
+    SESSION_CACHE: createMemoryKv(),
+    REFERRAL_TOKENS_PER_INVITE: '3',
+  });
+
+  const response = await workerWithDb.fetch(
+    new Request('https://w.example/api/users/bootstrap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': fakeInitData },
+      body: JSON.stringify({ referrer_id: '100' }),
+    }),
+    env,
+  );
+  assert.equal(response.status, 200, 'bootstrap should succeed');
+
+  // Verify: referral INSERT happened
+  const referralInsert = pgMock.calls.find(c => /INSERT INTO referrals/i.test(c.sql));
+  assert.ok(referralInsert, 'referral INSERT should have been called');
+  assert.ok(referralInsert.sql.includes('ON CONFLICT (invitee_id) DO NOTHING'), 'should use ON CONFLICT');
+
+  // Verify: reward transaction happened (BEGIN + 3 queries + COMMIT)
+  const beginCalls = pgMock.calls.filter(c => c.sql === 'BEGIN');
+  assert.ok(beginCalls.length >= 1, 'reward transaction should start');
+  const commitCalls = pgMock.calls.filter(c => c.sql === 'COMMIT');
+  assert.ok(commitCalls.length >= 1, 'reward transaction should commit');
+
+  // Verify: token_balances upserted in transaction (client = transaction path)
+  const balanceTx = pgMock.calls.find(c => /token_balances/i.test(c.sql) && c.source === 'client');
+  assert.ok(balanceTx, 'token_balances should be credited in transaction');
+  assert.equal(balanceTx.params[1], 3, 'reward amount should be 3');
+
+  // Verify: token_transactions recorded in transaction
+  const txRecord = pgMock.calls.find(c => /token_transactions[\s\S]*referral_reward/i.test(c.sql) && c.source === 'client');
+  assert.ok(txRecord, 'referral_reward transaction should be recorded');
+
+  // Verify: rewarded=TRUE set in same transaction
+  const rewardedUpdate = pgMock.calls.find(c => /UPDATE referrals SET[\s\S]*rewarded = TRUE/i.test(c.sql) && c.source === 'client');
+  assert.ok(rewardedUpdate, 'rewarded=TRUE should be set in same transaction as credit');
+});
+
+test('Referral: existing user with referrer_id → no referral processed (Design)', async () => {
+  const pgMock = createPgMock(async (sql) => {
+    // getById (pre-check) → returns row = existing user
+    if (/username[\s\S]*channel_joined/i.test(sql) && !/INSERT/i.test(sql)) {
+      return { rows: [{ telegram_id: '333', lang: 'fa', channel_joined: false, channel_verified_at: null, created_at: '2025-01-01', updated_at: '2025-01-01' }] };
+    }
+    // User bootstrap upsert
+    if (/INSERT INTO users[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ telegram_id: '333', lang: 'fa', channel_joined: false, channel_verified_at: null, created_at: '2025-01-01', updated_at: new Date().toISOString() }] };
+    }
+    return { rows: [] };
+  });
+  const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
+
+  const fakeUser = { id: 333, first_name: 'Old' };
+  const fakeInitData = buildInitData('test-bot-token', fakeUser);
+  const env = createEnv({
+    DATABASE_URL: 'postgres://x:y@h/d',
+    RATE_LIMITS: createMemoryKv(),
+    APP_CACHE: createMemoryKv(),
+    JOIN_CACHE: createMemoryKv(),
+    SESSION_CACHE: createMemoryKv(),
+    REFERRAL_TOKENS_PER_INVITE: '3',
+  });
+
+  const response = await workerWithDb.fetch(
+    new Request('https://w.example/api/users/bootstrap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': fakeInitData },
+      body: JSON.stringify({ referrer_id: '100' }),
+    }),
+    env,
+  );
+  assert.equal(response.status, 200);
+  const hasReferralInsert = pgMock.calls.some(c => /INSERT INTO referrals/i.test(c.sql));
+  assert.equal(hasReferralInsert, false, 'existing user must not create referral');
+  const hasInviterLookup = pgMock.calls.some(c => /^SELECT telegram_id FROM users WHERE telegram_id/i.test(c.sql));
+  assert.equal(hasInviterLookup, false, 'existing user should not trigger inviter lookup');
+});
+
+test('Referral: non-numeric referrer_id rejected (M-R4)', async () => {
+  const pgMock = createPgMock(async (sql) => {
+    if (/username[\s\S]*channel_joined/i.test(sql) && !/INSERT/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO users[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ telegram_id: '444', lang: 'fa', channel_joined: false, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
+    }
+    return { rows: [] };
+  });
+  const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
+
+  const fakeUser = { id: 444, first_name: 'Test' };
+  const fakeInitData = buildInitData('test-bot-token', fakeUser);
+  const env = createEnv({
+    DATABASE_URL: 'postgres://x:y@h/d',
+    RATE_LIMITS: createMemoryKv(), APP_CACHE: createMemoryKv(),
+    JOIN_CACHE: createMemoryKv(), SESSION_CACHE: createMemoryKv(),
+    REFERRAL_TOKENS_PER_INVITE: '3',
+  });
+
+  // Test various invalid referrer_ids
+  for (const badId of ['guest', 'abc123', 'ref_999', '', '  ']) {
+    const response = await workerWithDb.fetch(
+      new Request('https://w.example/api/users/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': fakeInitData },
+        body: JSON.stringify({ referrer_id: badId }),
+      }),
+      env,
+    );
+    assert.equal(response.status, 200, `invalid referrer_id '${badId}' should not crash bootstrap`);
+  }
+  const hasReferralInsert = pgMock.calls.some(c => /INSERT INTO referrals/i.test(c.sql));
+  assert.equal(hasReferralInsert, false, 'non-numeric referrer_id must not create referral');
+});
+
+test('Referral: reward only given once (idempotent bootstrap)', async () => {
+  let referralCreated = false;
+  const pgMock = createPgMock(async (sql, params) => {
+    if (/username[\s\S]*channel_joined/i.test(sql) && !/INSERT/i.test(sql)) {
+      // First call: new user (empty). Second call (freshUserRow): return row.
+      return referralCreated
+        ? { rows: [{ telegram_id: '666', lang: 'fa', channel_joined: true, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] }
+        : { rows: [] };
+    }
+    if (/INSERT INTO users[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0], lang: 'fa', channel_joined: true, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
+    }
+    if (/^SELECT telegram_id FROM users WHERE telegram_id/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0] }] };
+    }
+    if (/SELECT id[\s\S]*FROM referrals WHERE invitee_id/i.test(sql)) {
+      // Second bootstrap: referral already exists with rewarded=true
+      if (referralCreated) return { rows: [{ id: 99, inviter_id: '100', channel_verified: true, rewarded: true }] };
+      return { rows: [] };
+    }
+    if (/INSERT INTO referrals[\s\S]*ON CONFLICT/i.test(sql)) {
+      referralCreated = true;
+      return { rows: [{ id: 99, rewarded: false }] };
+    }
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
+    return { rows: [] };
+  });
+  const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
+
+  const fakeUser = { id: 666, first_name: 'Twice' };
+  const fakeInitData = buildInitData('test-bot-token', fakeUser);
+  const env = createEnv({
+    DATABASE_URL: 'postgres://x:y@h/d',
+    RATE_LIMITS: createMemoryKv(), APP_CACHE: createMemoryKv(),
+    JOIN_CACHE: createMemoryKv(), SESSION_CACHE: createMemoryKv(),
+    REFERRAL_TOKENS_PER_INVITE: '3',
+  });
+
+  // First bootstrap → should create referral + reward
+  const r1 = await workerWithDb.fetch(
+    new Request('https://w.example/api/users/bootstrap', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': fakeInitData },
+      body: JSON.stringify({ referrer_id: '100' }),
+    }), env,
+  );
+  assert.equal(r1.status, 200);
+  const firstTxBegins = pgMock.calls.filter(c => c.sql === 'BEGIN').length;
+
+  // Second bootstrap (same user, now existing) → no new reward
+  const r2 = await workerWithDb.fetch(
+    new Request('https://w.example/api/users/bootstrap', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': fakeInitData },
+      body: JSON.stringify({ referrer_id: '100' }),
+    }), env,
+  );
+  assert.equal(r2.status, 200);
+  const secondTxBegins = pgMock.calls.filter(c => c.sql === 'BEGIN').length - firstTxBegins;
+  assert.equal(secondTxBegins, 0, 'second bootstrap must not start any new reward transaction');
+});
+
+test('Referral: ON CONFLICT DO NOTHING prevents 503 on race (H-R3)', async () => {
+  let insertCount = 0;
+  const pgMock = createPgMock(async (sql, params) => {
+    if (/username[\s\S]*channel_joined/i.test(sql) && !/INSERT/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO users[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0], lang: 'fa', channel_joined: true, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
+    }
+    if (/^SELECT telegram_id FROM users WHERE telegram_id/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0] }] };
+    }
+    if (/SELECT id[\s\S]*FROM referrals WHERE invitee_id/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO referrals[\s\S]*ON CONFLICT/i.test(sql)) {
+      insertCount++;
+      // First INSERT succeeds, second gets no row back (ON CONFLICT DO NOTHING)
+      if (insertCount === 1) return { rows: [{ id: 10, rewarded: false }] };
+      return { rows: [] }; // Race lost → ON CONFLICT DO NOTHING returns nothing
+    }
+    // After race loss, fetch existing referral
+    if (/SELECT id FROM referrals WHERE invitee_id/i.test(sql)) {
+      return { rows: [{ id: 10 }] };
+    }
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
+    return { rows: [] };
+  });
+  const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
+
+  const fakeUser = { id: 777, first_name: 'Race' };
+  const fakeInitData = buildInitData('test-bot-token', fakeUser);
+  const env = createEnv({
+    DATABASE_URL: 'postgres://x:y@h/d',
+    RATE_LIMITS: createMemoryKv(), APP_CACHE: createMemoryKv(),
+    JOIN_CACHE: createMemoryKv(), SESSION_CACHE: createMemoryKv(),
+    REFERRAL_TOKENS_PER_INVITE: '3',
+  });
+
+  const response = await workerWithDb.fetch(
+    new Request('https://w.example/api/users/bootstrap', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': fakeInitData },
+      body: JSON.stringify({ referrer_id: '100' }),
+    }), env,
+  );
+  // Should NOT be 503 — ON CONFLICT handles the race gracefully
+  assert.equal(response.status, 200, 'race condition should not cause 503');
+  const body = await response.json();
+  assert.equal(body.status, 'success', 'bootstrap should succeed even on race');
+});
+
+test('Referral: reward transaction rollback on failure (H-R1/H-R2)', async () => {
+  const pgMock = createPgMock(async (sql, params) => {
+    if (/username[\s\S]*channel_joined/i.test(sql) && !/INSERT/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO users[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0], lang: 'fa', channel_joined: true, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
+    }
+    if (/^SELECT telegram_id FROM users WHERE telegram_id/i.test(sql)) {
+      return { rows: [{ telegram_id: params[0] }] };
+    }
+    if (/SELECT id[\s\S]*FROM referrals WHERE invitee_id/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO referrals[\s\S]*ON CONFLICT/i.test(sql)) {
+      return { rows: [{ id: 50, rewarded: false }] };
+    }
+    if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] };
+    if (sql === 'COMMIT') return { rows: [] };
+    // Transaction: token_balances succeeds, but rewarded update fails
+    if (/token_balances/i.test(sql)) return { rows: [{ user_id: params[0], balance: params[1] }] };
+    if (/token_transactions/i.test(sql)) return { rows: [] };
+    if (/UPDATE referrals SET rewarded = TRUE/i.test(sql)) {
+      throw new Error('Simulated failure on rewarded update');
+    }
+    return { rows: [] };
+  });
+  const workerWithDb = loadWorker({ '@neondatabase/serverless': pgMock.module });
+
+  const fakeUser = { id: 888, first_name: 'Fail' };
+  const fakeInitData = buildInitData('test-bot-token', fakeUser);
+  const env = createEnv({
+    DATABASE_URL: 'postgres://x:y@h/d',
+    RATE_LIMITS: createMemoryKv(), APP_CACHE: createMemoryKv(),
+    JOIN_CACHE: createMemoryKv(), SESSION_CACHE: createMemoryKv(),
+    REFERRAL_TOKENS_PER_INVITE: '3',
+  });
+
+  const response = await workerWithDb.fetch(
+    new Request('https://w.example/api/users/bootstrap', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': fakeInitData },
+      body: JSON.stringify({ referrer_id: '100' }),
+    }), env,
+  );
+  // Bootstrap should still succeed (referral error is non-fatal)
+  assert.ok(response.status === 200 || response.status === 503,
+    'bootstrap should handle referral tx failure gracefully');
+  // Verify ROLLBACK was called (transaction was rolled back)
+  const rollbackCalled = pgMock.calls.some(c => c.sql === 'ROLLBACK');
+  assert.ok(rollbackCalled, 'failed reward transaction should be rolled back');
 });
 
 

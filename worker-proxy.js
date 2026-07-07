@@ -904,9 +904,65 @@ async function ensureUserRow(env, userId) {
   );
 }
 
-async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined) {
+/**
+ * Credit referral reward tokens AND mark referral as rewarded — all in a
+ * single database transaction so they are guaranteed to be consistent.
+ *
+ * If alsoVerifyChannel is true, also sets channel_verified = TRUE (used when
+ * an existing referral gets its channel verification + reward in one go).
+ *
+ * Solves H-R1 + H-R2: no possibility of double-reward or balance/rewarded drift.
+ */
+async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
+  await queryDbTransaction(env, [
+    {
+      sql: `
+        INSERT INTO token_balances (user_id, balance, updated_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (user_id) DO UPDATE
+        SET
+          balance = token_balances.balance + EXCLUDED.balance,
+          updated_at = NOW()
+      `,
+      params: [String(inviterId), Number(amount)],
+    },
+    {
+      sql: `
+        INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
+        VALUES ($1, $2, 'referral_reward', $3, $4, NOW())
+      `,
+      params: [String(inviterId), Number(amount), `Invite reward for user ${String(inviteeId)}`, String(referralId)],
+    },
+    {
+      sql: alsoVerifyChannel
+        ? 'UPDATE referrals SET channel_verified = TRUE, rewarded = TRUE WHERE id = $1'
+        : 'UPDATE referrals SET rewarded = TRUE WHERE id = $1',
+      params: [referralId],
+    },
+  ]);
+}
+
+/**
+ * Process referral on user bootstrap.
+ *
+ * Key design decisions:
+ * - Only NEW users (first bootstrap) can generate a referral + reward.
+ *   Existing users clicking a referral link are silently ignored (Design).
+ * - Self-referral is rejected.
+ * - Non-numeric referrer_id is rejected (M-R4).
+ * - INSERT uses ON CONFLICT DO NOTHING to avoid 503 on concurrent bootstraps (H-R3).
+ * - Reward (credit tokens + set rewarded=TRUE) is atomic via single transaction (H-R1, H-R2).
+ */
+async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined, isNewUser) {
   const normalizedReferrerId = normalizeOptionalString(referrerId);
-  if (!normalizedReferrerId || normalizedReferrerId === String(inviteeId)) {
+
+  // M-R4: reject non-numeric referrer_id
+  if (!normalizedReferrerId || !/^\d{1,20}$/.test(normalizedReferrerId) || normalizedReferrerId === String(inviteeId)) {
+    return null;
+  }
+
+  // Design: only new users can be referred
+  if (!isNewUser) {
     return null;
   }
 
@@ -933,17 +989,16 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   const rewardAmount = getReferralRewardPerInvite(env);
 
   if (existing) {
+    // Existing referral (e.g. race — another concurrent bootstrap won).
+    // If channel was just joined, still verify + reward if not already done.
     if (channelJoined && !existing.channel_verified) {
-      await queryDb(
-        env,
-        'UPDATE referrals SET channel_verified = TRUE WHERE id = $1',
-        [existing.id],
-      );
       if (!existing.rewarded && rewardAmount > 0) {
-        await creditReferralTokens(env, String(existing.inviter_id), rewardAmount, String(existing.id), inviteeId);
+        // Atomic: channel_verified + credit tokens + rewarded in one TX
+        await creditReferralWithReward(env, String(existing.inviter_id), String(existing.id), inviteeId, rewardAmount, true);
+      } else {
         await queryDb(
           env,
-          'UPDATE referrals SET rewarded = TRUE WHERE id = $1',
+          'UPDATE referrals SET channel_verified = TRUE WHERE id = $1',
           [existing.id],
         );
       }
@@ -951,49 +1006,38 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     return { referral_id: existing.id, already_exists: true };
   }
 
+  // H-R3: INSERT with ON CONFLICT DO NOTHING — race-safe.
+  // If two concurrent bootstraps race, one wins, the other gets no row back.
   const insertResult = await queryDb(
     env,
     `
       INSERT INTO referrals (inviter_id, invitee_id, channel_verified, rewarded, created_at)
       VALUES ($1, $2, $3, FALSE, NOW())
+      ON CONFLICT (invitee_id) DO NOTHING
       RETURNING id, rewarded
     `,
     [normalizedReferrerId, String(inviteeId), Boolean(channelJoined)],
   );
   const createdReferral = insertResult.rows[0] || null;
   if (!createdReferral) {
-    return null;
+    // Race lost — another request already inserted the referral.
+    // Fetch the existing row for the caller.
+    const raceResult = await queryDb(
+      env,
+      'SELECT id FROM referrals WHERE invitee_id = $1 LIMIT 1',
+      [String(inviteeId)],
+    );
+    return raceResult.rows[0]
+      ? { referral_id: raceResult.rows[0].id, already_exists: true, race_won: false }
+      : null;
   }
 
+  // H-R1 + H-R2: Atomic reward — balance + transaction record + rewarded flag in one TX
   if (channelJoined && rewardAmount > 0) {
-    await creditReferralTokens(env, normalizedReferrerId, rewardAmount, String(createdReferral.id), inviteeId);
-    await queryDb(env, 'UPDATE referrals SET rewarded = TRUE WHERE id = $1', [createdReferral.id]);
+    await creditReferralWithReward(env, normalizedReferrerId, createdReferral.id, inviteeId, rewardAmount, false);
   }
 
   return { referral_id: createdReferral.id, rewarded: Boolean(channelJoined && rewardAmount > 0) };
-}
-
-async function creditReferralTokens(env, userId, amount, refId, inviteeId) {
-  await queryDbTransaction(env, [
-    {
-      sql: `
-        INSERT INTO token_balances (user_id, balance, updated_at)
-        VALUES ($1, $2, NOW())
-        ON CONFLICT (user_id) DO UPDATE
-        SET
-          balance = token_balances.balance + EXCLUDED.balance,
-          updated_at = NOW()
-      `,
-      params: [String(userId), Number(amount)],
-    },
-    {
-      sql: `
-        INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
-        VALUES ($1, $2, 'referral_reward', $3, $4, NOW())
-      `,
-      params: [String(userId), Number(amount), `Invite reward for user ${String(inviteeId)}`, String(refId)],
-    },
-  ]);
 }
 
 async function getChatMemberDebugPayload(userId, env) {
