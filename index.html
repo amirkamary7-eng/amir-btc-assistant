@@ -21,17 +21,19 @@
     <!-- #region Header -->
     <!-- این بخش نوار بالای برنامه و دسترسی سریع به اعلان‌ها را نگه می‌دارد. -->
     <header class="app-header">
-        <div class="header-left">
-            <!-- placeholder for flex symmetry -->
+        <div class="header-side header-left">
+            <div class="live-indicator">
+                <span class="live-dot"></span>
+                <span class="live-count">123</span>
+                <span class="live-label">آنلاین</span>
+            </div>
         </div>
-        <div class="header-center">
-            <div class="brand-dot"></div>
-            <span class="brand-name">AMIR BTC</span>
+        <div class="header-brand">
+            <span class="brand-text">AMIRBTC</span>
         </div>
-        <div class="header-right">
-            <span class="online-badge">🟢 123 Online</span>
+        <div class="header-side header-right">
             <button class="notif-btn" onclick="toggleNotificationPanel()">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                     <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                 </svg>
