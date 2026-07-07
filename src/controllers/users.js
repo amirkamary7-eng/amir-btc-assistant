@@ -78,6 +78,10 @@ export function createUserHandlers(deps) {
 
     payload.user_id = userId;
     try {
+      // Check if user already exists — referral only allowed for new users (Design)
+      const preExistingUser = await userRepo.getById(env, userId);
+      const isNewUser = !preExistingUser;
+
       const userRow = await userRepo.bootstrap(env, userId, {
         username: normalizeOptionalString(payload.username) || normalizeOptionalString(tgUser?.username),
         first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(tgUser?.first_name),
@@ -89,6 +93,7 @@ export function createUserHandlers(deps) {
         userId,
         normalizeOptionalString(payload.referrer_id),
         Boolean(userRow?.channel_joined),
+        isNewUser,
       );
       const freshUserRow = await userRepo.getById(env, userId);
       const watchlist = await watchlistRepo.getSymbols(env, userId);

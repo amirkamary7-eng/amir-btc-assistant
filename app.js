@@ -239,6 +239,7 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
 // ============================================================================
 
 const ADMIN_ID = '831704732';
+const BOT_USERNAME = 'AmirBtcBot'; // Single source of truth for referral links (H-R4)
 const MAX_WATCHLIST = 7;
 const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
@@ -415,12 +416,11 @@ function t(key) { return i18n[currentLang]?.[key] || i18n.fa[key] || key; }
 
 function getReferrerId() {
     const tg = getTg();
-    const startParam = tg?.initDataUnsafe?.start_param || (() => {
-        if (!tg?.initData) return '';
-        try { return new URLSearchParams(tg.initData).get('start_param') || ''; } catch (_) { return ''; }
-    })();
-    if (startParam.startsWith('ref_')) return startParam.slice(4);
-    return null;
+    const startParam = tg?.initDataUnsafe?.start_param;
+    if (!startParam || !startParam.startsWith('ref_')) return null;
+    const id = startParam.slice(4);
+    // M-R7: only accept numeric Telegram IDs
+    return /^\d{1,20}$/.test(id) ? id : null;
 }
 /**
  * مقدار کاربر id را بازیابی می‌کند.
@@ -2106,18 +2106,21 @@ function loadUser() {
         document.getElementById('profile-username').innerText = user.username ? `@${user.username}` : '@guest';
         document.getElementById('profile-id-num').innerText = user.id || '000000';
         if (user.photo_url) document.getElementById('profile-avatar').src = user.photo_url;
-        document.getElementById('ref-link').value = `https://t.me/AmirBtcBot/app?startapp=ref_${user.id}`;
+        document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}/app?startapp=ref_${user.id}`;
         loadReferralStats();
     } else if (UserContext.isPending()) {
         document.getElementById('profile-name').innerText = t('loading_user');
         document.getElementById('profile-username').innerText = '...';
         document.getElementById('profile-id-num').innerText = '...';
-        document.getElementById('ref-link').value = 'https://t.me/AmirBtcBot/app';
+        document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}/app`;
     } else if (UserContext.isGuest()) {
         document.getElementById('profile-name').innerText = t('guest');
         document.getElementById('profile-username').innerText = '@guest';
         document.getElementById('profile-id-num').innerText = getUserId().replace('guest_', '') || '000000';
-        document.getElementById('ref-link').value = 'https://t.me/AmirBtcBot/app?startapp=ref_guest';
+        // M-R5: guest users should not have a working referral link
+        document.getElementById('ref-link').value = '';
+        const refLinkInput = document.getElementById('ref-link');
+        if (refLinkInput) refLinkInput.placeholder = 'Login required';
     }
     const adminBtn = document.getElementById('admin-add-btn');
     if (adminBtn) adminBtn.style.display = isAdmin() ? 'block' : 'none';
