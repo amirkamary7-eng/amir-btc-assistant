@@ -766,13 +766,10 @@ test('POST /telegram handles /start for joined member with web_app button', asyn
     assert.equal(pgMock.calls.length, 1);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
-    assert.deepEqual(JSON.parse(calls[0].body), {
-      chat_id: 12345,
-      text: '✅ خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
-      reply_markup: {
-        inline_keyboard: [[{ text: '🚀 باز کردن مینی‌اپ', web_app: { url: 'https://miniapp.example' } }]],
-      },
-    });
+    const body0 = JSON.parse(calls[0].body);
+    assert.equal(body0.chat_id, 12345);
+    assert.equal(body0.text, '✅ خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.');
+    assert.match(body0.reply_markup.inline_keyboard[0][0].web_app.url, /^https:\/\/miniapp\.example.*[?&]_v=/);
   } finally {
     global.fetch = originalFetch;
   }
@@ -825,13 +822,10 @@ test('POST /telegram handles /start for joined member via live Telegram check an
     assert.equal(calls[1].url, 'https://api.telegram.org/bottest-bot-token/sendMessage');
     assert.equal(pgMock.calls.length, 2);
     assert.match(pgMock.calls[1].sql, /INSERT INTO users/i);
-    assert.deepEqual(JSON.parse(calls[1].body), {
-      chat_id: 12345,
-      text: '✅ خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
-      reply_markup: {
-        inline_keyboard: [[{ text: '🚀 باز کردن مینی‌اپ', web_app: { url: 'https://miniapp.example' } }]],
-      },
-    });
+    const body1 = JSON.parse(calls[1].body);
+    assert.equal(body1.chat_id, 12345);
+    assert.equal(body1.text, '✅ خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.');
+    assert.match(body1.reply_markup.inline_keyboard[0][0].web_app.url, /^https:\/\/miniapp\.example.*[?&]_v=/);
   } finally {
     global.fetch = originalFetch;
   }
@@ -896,11 +890,9 @@ test('POST /telegram callback_query "check_join" for member answers success and 
     const editBody = JSON.parse(calls[2].body);
     assert.equal(editBody.chat_id, 12345);
     assert.equal(editBody.message_id, 50);
-    assert.deepEqual(editBody.reply_markup, {
-      inline_keyboard: [
-        [{ text: '🚀 باز کردن مینی‌اپ', web_app: { url: 'https://miniapp.example' } }],
-      ],
-    });
+    assert.match(editBody.reply_markup.inline_keyboard[0][0].web_app.url, /^https:\/\/miniapp\.example.*[?&]_v=/);
+    assert.equal(editBody.reply_markup.inline_keyboard.length, 1);
+    assert.equal(editBody.reply_markup.inline_keyboard[0][0].text, '🚀 باز کردن مینی‌اپ');
   } finally {
     global.fetch = originalFetch;
   }

@@ -409,10 +409,20 @@ function resolveRequiredChannel(env) {
   return String(env.REQUIRED_CHANNEL || 'amir_btc_2024').trim();
 }
 
-function resolveWebAppUrl(env) {
+function resolveWebAppUrl(env, { cacheBust = true } = {}) {
   // WEBAPP_URL must be set as a secret (wrangler secret put WEBAPP_URL --env production)
   // to the Cloudflare Pages domain, e.g. https://ebac5d41.amir-btc-assistant-pages.pages.dev
-  return String(env.WEBAPP_URL || '').trim();
+  const baseUrl = String(env.WEBAPP_URL || '').trim();
+  if (!baseUrl || !cacheBust) return baseUrl;
+
+  // Append daily cache-busting param to prevent Telegram WebView from serving stale HTML.
+  // Telegram WebView caches aggressively by URL — a static URL = cached page.
+  // Changes daily, so every deploy is guaranteed to reach users within 24h.
+  // The inline version-check script in index.html handles sub-daily updates.
+  const dayStamp = Math.floor(Date.now() / 86400000).toString(36);
+  const url = new URL(baseUrl);
+  url.searchParams.set('_v', dayStamp);
+  return url.toString();
 }
 
 /**
@@ -628,6 +638,32 @@ async function answerTelegramCallbackQuery(env, callbackQueryId, text = '', show
     });
   } catch (error) {
     console.warn('answerTelegramCallbackQuery failed:', error);
+  }
+}
+
+/**
+ * Set the Telegram Menu Button (hamburger menu) to open the Mini App.
+ * Called on /start so the Menu Button URL is always in sync with WEBAPP_URL.
+ * Fails silently — non-critical (inline keyboard works independently).
+ */
+async function syncMenuButton(env) {
+  try {
+    const webAppUrl = resolveWebAppUrl(env);
+    if (!webAppUrl) return;
+    await fetch(buildTelegramApiUrl(env, 'setChatMenuButton'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        chat_id: env.ADMIN_TELEGRAM_ID,
+        menu_button: {
+          type: 'web_app',
+          text: '🚀 باز کردن مینی‌اپ',
+          web_app: { url: webAppUrl },
+        },
+      }),
+    });
+  } catch (error) {
+    console.warn('syncMenuButton failed (non-critical):', error);
   }
 }
 
@@ -2007,6 +2043,9 @@ async function handleTelegramWebhook(request, env) {
     const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(membership?.joined));
 
     await sendTelegramMessage(env, replyPayload);
+
+    // Sync the hamburger Menu Button URL with WEBAPP_URL (non-critical, fire-and-forget)
+    syncMenuButton(env);
   } catch (error) {
     console.warn('Telegram webhook processing error:', error);
   }
