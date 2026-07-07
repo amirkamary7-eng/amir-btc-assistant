@@ -2006,8 +2006,12 @@ async function handleTelegramWebhook(request, env) {
         { status: 'error', detail: 'Invalid or missing webhook secret token' },
         { status: 403 }, env);
     }
+  } else if (env.APP_ENV === 'production') {
+    return jsonResponse(
+      { status: 'error', detail: 'Webhook secret not configured — rejecting in production' },
+      { status: 403 }, env);
   } else {
-    console.warn('TELEGRAM_WEBHOOK_SECRET is not configured — webhook endpoint is unprotected');
+    console.warn('TELEGRAM_WEBHOOK_SECRET is not configured — webhook endpoint is unprotected (non-production)');
   }
   // ── End webhook secret validation ─────────────────────────────────────────
 

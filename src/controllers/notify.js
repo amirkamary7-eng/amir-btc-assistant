@@ -36,9 +36,9 @@ export function createNotifyHandlers(deps) {
     const rawNotifyCount = await readRateLimitCache(env, notifyKey);
     const notifyCount = rawNotifyCount && /^\d+$/.test(String(rawNotifyCount)) ? Number(rawNotifyCount) : 0;
     if (notifyCount >= 5) {
-      return jsonResponse({ status: 'error', reason: 'rate_limited', retry_after: 3600 }, { status: 429 }, env);
+      return jsonResponse({ status: 'error', reason: 'rate_limited', retry_after: 86400 }, { status: 429 }, env);
     }
-    await writeRateLimitCache(env, notifyKey, String(notifyCount + 1), 3600);
+    await writeRateLimitCache(env, notifyKey, String(notifyCount + 1), 86400);
 
     const bodyResult = await readJsonBody(request, env);
     if (bodyResult.error) return bodyResult.error;
