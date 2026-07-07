@@ -283,7 +283,7 @@ async def get_optimized_farsi_news():
 # ==========================================
 # ۳.۵ سیستم تیکت و نوتیفیکیشن تلگرام
 # ==========================================
-ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "831704732")
+ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "")
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant-pages.pages.dev")
 REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")

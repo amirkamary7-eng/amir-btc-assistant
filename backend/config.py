@@ -22,8 +22,10 @@ class Settings:
         self.DATABASE_URL = os.environ.get("DATABASE_URL", "")
         self.REDIS_URL = os.environ.get("REDIS_URL", "")
 
-        self.ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "831704732")
-        self.ADMIN_IDS = os.environ.get("ADMIN_IDS", self.ADMIN_TELEGRAM_ID)
+        # SECURITY: No hardcoded fallback — must be set via env var in production.
+        # Fail-fast: validate_admin_config() will raise if missing in production.
+        self.ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "")
+        self.ADMIN_IDS = os.environ.get("ADMIN_IDS", "")
         self.TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_TOKEN")
         self.WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://amir-btc-assistant-pages.pages.dev")
         self.REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "amir_btc_2024")
@@ -58,10 +60,23 @@ class Settings:
     def bot_configured(self) -> bool:
         return bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_BOT_TOKEN != "REPLACE_WITH_TOKEN")
 
+    def validate_admin_config(self) -> None:
+        """Fail-fast if ADMIN_TELEGRAM_ID is not set in production.
+
+        Raises:
+            RuntimeError: If no admin ID is configured.
+        """
+        if not self.ADMIN_TELEGRAM_ID and not self.ADMIN_IDS:
+            raise RuntimeError(
+                "ADMIN_TELEGRAM_ID (or ADMIN_IDS) environment variable is required. "
+                "Set it to your Telegram user ID (numeric string)."
+            )
+
     @property
     def admin_ids(self) -> set[str]:
         ids = {item.strip() for item in str(self.ADMIN_IDS or "").split(",") if item.strip()}
-        ids.add(str(self.ADMIN_TELEGRAM_ID))
+        if self.ADMIN_TELEGRAM_ID:
+            ids.add(str(self.ADMIN_TELEGRAM_ID))
         return ids
 
 

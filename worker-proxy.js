@@ -31,6 +31,20 @@ import { createAnalysisHandlers } from './src/controllers/analyses.js';
 // ============================================================================
 const CORS_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
 const CORS_ALLOW_HEADERS = 'Content-Type, X-Telegram-Init-Data, X-Telegram-Bot-Api-Secret-Token';
+
+/**
+ * Sanitize an error for safe logging — strips potential secrets (DB URLs, tokens).
+ * Neon/Postgres errors often include the connection string (with password).
+ */
+function safeError(scope, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  // Strip common secret patterns from error messages
+  const sanitized = message
+    .replace(/(postgres|postgresql|pgbouncer):\/\/[^\s@]+:[^\s@]+@/gi, 'postgres://***:***@')
+    .replace(/(token|key|secret|password)=["'][^"']+["']/gi, '$1=***');
+  return JSON.stringify({ scope, error: sanitized, type: error?.constructor?.name });
+}
+
 function withCors(headers = {}, env = null) {
   const merged = new Headers(headers);
   if (env) {
@@ -2072,7 +2086,7 @@ async function handleTelegramWebhook(request, env) {
     // Sync the hamburger Menu Button URL with WEBAPP_URL (non-critical, fire-and-forget)
     syncMenuButton(env);
   } catch (error) {
-    console.warn('Telegram webhook processing error:', error);
+    console.error(safeError('telegram-webhook-error', error));
   }
 
   return new Response(null, {
@@ -2407,7 +2421,7 @@ export default {
         },
         { status: 404 }, env);
     } catch (error) {
-      console.error('Unhandled worker request error:', error);
+      console.error(safeError('unhandled-request-error', error));
       return jsonResponse(
         {
           status: 'error',
