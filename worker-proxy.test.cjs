@@ -2732,7 +2732,7 @@ test('Render removal: repo no longer hardcodes onrender.com in runtime config fi
     path.join(__dirname, 'index.html'),
     path.join(__dirname, 'env.example'),
     path.join(__dirname, 'main.py'),
-    path.join(__dirname, 'webapp', 'pages-dist', 'index.html'),
+    // webapp/pages-dist/index.html removed in commit 066830a (stale build artifacts)
   ];
 
   for (const filePath of files) {
