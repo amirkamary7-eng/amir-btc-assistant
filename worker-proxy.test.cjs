@@ -3478,10 +3478,24 @@ test('Webhook without secret configured (no TELEGRAM_WEBHOOK_SECRET) passes thro
     update_id: 1,
     message: { message_id: 1, from: { id: 999, first_name: 'X' }, chat: { id: 999, type: 'private' }, date: 1710000000, text: 'hello' },
   });
-  const env = createEnv(); // no TELEGRAM_WEBHOOK_SECRET
+  const env = createEnv(); // no TELEGRAM_WEBHOOK_SECRET, no APP_ENV (non-production)
 
   const response = await worker.fetch(request, env);
-  assert.equal(response.status, 200, 'without secret configured, webhook should pass through');
+  assert.equal(response.status, 200, 'without secret configured in non-production, webhook should pass through');
+});
+
+test('H-2: Webhook without secret in production returns 403', async () => {
+  const worker = loadWorker();
+  const request = makeWebhookRequest({
+    update_id: 1,
+    message: { message_id: 1, from: { id: 999, first_name: 'X' }, chat: { id: 999, type: 'private' }, date: 1710000000, text: 'hello' },
+  });
+  const env = createEnv({ APP_ENV: 'production' }); // no TELEGRAM_WEBHOOK_SECRET
+
+  const response = await worker.fetch(request, env);
+  assert.equal(response.status, 403, 'production without webhook secret should be rejected');
+  const body = await response.json();
+  assert.equal(body.detail, 'Webhook secret not configured — rejecting in production');
 });
 
 test('Webhook with secret configured but no header returns 403 (Task 5.7)', async () => {
