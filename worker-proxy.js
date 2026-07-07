@@ -128,6 +128,15 @@ function isAlertsCronEnabled(env) {
   return String(env.ALERTS_CRON_ENABLED || 'false').trim().toLowerCase() === 'true';
 }
 
+/**
+ * Returns true when the Worker is NOT running in production.
+ * Used to gate development-only auth fallbacks (e.g. ?user_id=) that must
+ * never be active in production to prevent user impersonation.
+ */
+function isDevMode(env) {
+  return String(env.APP_ENV || '').trim().toLowerCase() !== 'production';
+}
+
 async function readAppCache(env, key) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.get !== 'function') {
     return null;
@@ -384,7 +393,13 @@ function optionalTelegramAuth(request, env) {
     return { user: authState.user, authMethod: 'init_data', error: null };
   }
 
-  // Auth failed — try query-param fallback for development/testing
+  // Security (C-1): fallback is ONLY allowed outside production.
+  // In production, only cryptographically-verified initData is accepted.
+  if (!isDevMode(env)) {
+    return { user: null, authMethod: null, error: authState.error };
+  }
+
+  // Dev/test fallback — try query-param ?user_id=
   const url = new URL(request.url);
   const fallbackId = (url.searchParams.get('user_id') || '').trim();
 
@@ -495,7 +510,7 @@ async function getCachedJoinStatus(env, userId) {
       return false;
     }
   } catch (error) {
-    console.warn('JOIN_CACHE read failed:', error);
+    console.warn(safeError('join-cache-read', error));
   }
 
   return null;
@@ -511,7 +526,7 @@ async function setCachedJoinStatus(env, userId, joined) {
       expirationTtl: getNumericEnv(env, 'JOIN_CACHE_TTL', 1800),
     });
   } catch (error) {
-    console.warn('JOIN_CACHE write failed:', error);
+    console.warn(safeError('join-cache-write', error));
   }
 }
 
@@ -522,7 +537,7 @@ async function invalidateJoinCache(env, userId) {
     try {
       await env.JOIN_CACHE.delete(getJoinCacheKey(userId));
     } catch (error) {
-      console.warn('JOIN_CACHE delete failed:', error);
+      console.warn(safeError('join-cache-delete', error));
     }
   }
 
@@ -651,7 +666,7 @@ async function answerTelegramCallbackQuery(env, callbackQueryId, text = '', show
       }),
     });
   } catch (error) {
-    console.warn('answerTelegramCallbackQuery failed:', error);
+    console.warn(safeError('answer-callback-query', error));
   }
 }
 
@@ -680,7 +695,7 @@ async function syncMenuButton(env) {
     });
     console.log(JSON.stringify({ scope: 'sync-menu-button', url: webAppUrl }));
   } catch (error) {
-    console.warn('syncMenuButton failed (non-critical):', error);
+    console.warn(safeError('sync-menu-button', error));
   }
 }
 
@@ -696,7 +711,7 @@ async function editTelegramMessageReplyMarkup(env, chatId, messageId, replyMarku
       }),
     });
   } catch (error) {
-    console.warn('editTelegramMessageReplyMarkup failed:', error);
+    console.warn(safeError('edit-message-reply-markup', error));
   }
 }
 
@@ -794,7 +809,7 @@ async function getDbUserJoinState(env, userId) {
       channel_joined: Boolean(row.channel_joined),
     };
   } catch (error) {
-    console.warn('JOIN DB read failed:', error);
+    console.warn(safeError('join-db-read', error));
     return null;
   }
 }
@@ -826,7 +841,7 @@ async function persistDbUserJoinState(env, userId, joined) {
       [String(userId), Boolean(joined), joined ? new Date().toISOString() : null],
     );
   } catch (error) {
-    console.warn('JOIN DB write failed:', error);
+    console.warn(safeError('join-db-write', error));
   }
 }
 
@@ -847,6 +862,33 @@ async function queryDb(env, sql, params = [], retries = 1) {
       const ms = Math.min(100 * 2 ** attempt, 1000);
       await new Promise((r) => setTimeout(r, ms));
     }
+  }
+}
+
+/**
+ * Execute multiple SQL statements inside a single DB transaction.
+ * Uses pool.connect() → BEGIN → queries → COMMIT (ROLLBACK on error).
+ * Requires Neon serverless Pool with transaction_mode support.
+ */
+async function queryDbTransaction(env, queries) {
+  const pool = getDbPool(env);
+  if (!pool) {
+    throw new Error('Database not configured');
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const results = [];
+    for (const { sql, params } of queries) {
+      results.push(await client.query(sql, params));
+    }
+    await client.query('COMMIT');
+    return results;
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore rollback error */ }
+    throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -932,26 +974,26 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
 }
 
 async function creditReferralTokens(env, userId, amount, refId, inviteeId) {
-  await queryDb(
-    env,
-    `
-      INSERT INTO token_balances (user_id, balance, updated_at)
-      VALUES ($1, $2, NOW())
-      ON CONFLICT (user_id) DO UPDATE
-      SET
-        balance = token_balances.balance + EXCLUDED.balance,
-        updated_at = NOW()
-    `,
-    [String(userId), Number(amount)],
-  );
-  await queryDb(
-    env,
-    `
-      INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
-      VALUES ($1, $2, 'referral_reward', $3, $4, NOW())
-    `,
-    [String(userId), Number(amount), `Invite reward for user ${String(inviteeId)}`, String(refId)],
-  );
+  await queryDbTransaction(env, [
+    {
+      sql: `
+        INSERT INTO token_balances (user_id, balance, updated_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (user_id) DO UPDATE
+        SET
+          balance = token_balances.balance + EXCLUDED.balance,
+          updated_at = NOW()
+      `,
+      params: [String(userId), Number(amount)],
+    },
+    {
+      sql: `
+        INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
+        VALUES ($1, $2, 'referral_reward', $3, $4, NOW())
+      `,
+      params: [String(userId), Number(amount), `Invite reward for user ${String(inviteeId)}`, String(refId)],
+    },
+  ]);
 }
 
 async function getChatMemberDebugPayload(userId, env) {
@@ -1787,21 +1829,6 @@ function handleHealth(env) {
     bot_configured: isBotConfigured(env),
     database_ready: isDatabaseConfigured(env),
     redis_ready: isCacheLayerConfigured(env),
-    _debug_webapp_url: webAppUrl,
-  }, {}, env);
-}
-
-/** Temporary debug endpoint — remove after verifying cache-bust works. */
-function handleDebugWebAppUrl(env) {
-  const raw = String(env.WEBAPP_URL || '').trim();
-  const withBust = resolveWebAppUrl(env);
-  const noBust = resolveWebAppUrl(env, { cacheBust: false });
-  return jsonResponse({
-    webapp_url_raw: raw,
-    webapp_url_with_cache_bust: withBust,
-    webapp_url_without_cache_bust: noBust,
-    cache_bust_param: withBust.includes('_v=') ? withBust.match(/[?&]_v=([^&]+)/)?.[1] : null,
-    day_stamp: Math.floor(Date.now() / 86400000).toString(36),
   }, {}, env);
 }
 
@@ -1814,6 +1841,7 @@ const alertHandlers = createAlertHandlers({
   authenticateTelegramRequest,
   readJsonBody,
   safeDbErrorResponse,
+  safeError,
   buildBodyFieldValidationError,
   isDatabaseConfigured,
   alertRepo,
@@ -1824,6 +1852,7 @@ const watchlistHandlers = createWatchlistHandlers({
   optionalTelegramAuth,
   readJsonBody,
   safeDbErrorResponse,
+  safeError,
   buildBodyFieldValidationError,
   isDatabaseConfigured,
   watchlistRepo,
@@ -1833,6 +1862,7 @@ const referralHandlers = createReferralHandlers({
   jsonResponse,
   authenticateTelegramRequest,
   safeDbErrorResponse,
+  safeError,
   isDatabaseConfigured,
   referralRepo,
 });
@@ -1850,6 +1880,7 @@ const ticketHandlers = createTicketHandlers({
   authenticateTelegramRequest,
   readJsonBody,
   safeDbErrorResponse,
+  safeError,
   buildBodyFieldValidationError,
   isDatabaseConfigured,
   isAdminTelegramId,
@@ -1864,9 +1895,11 @@ const userHandlers = createUserHandlers({
   optionalTelegramAuth,
   readJsonBody,
   safeDbErrorResponse,
+  safeError,
   buildBodyFieldValidationError,
   isDatabaseConfigured,
   normalizeOptionalString,
+  isDevMode,
   processReferralOnBootstrap,
   userRepo,
   watchlistRepo,
@@ -1900,6 +1933,7 @@ const analysisHandlers = createAnalysisHandlers({
   jsonResponse,
   authenticateTelegramRequest,
   safeDbErrorResponse,
+  safeError,
   buildBodyFieldValidationError,
   buildQueryFieldValidationError,
   isDatabaseConfigured,
@@ -2248,7 +2282,7 @@ async function runScheduledAlertsBaseline(controller, env) {
 
     console.log(JSON.stringify({ ...resultPayload, finished: true }));
   } catch (error) {
-    console.warn('scheduled alerts runner failed:', error);
+    console.warn(safeError('scheduled-alerts-runner', error));
     console.log(
       JSON.stringify({
         ...payload,
@@ -2286,11 +2320,6 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return handleHealth(env);
-      }
-
-      // TEMP: remove after verifying cache-bust on production
-      if (request.method === 'GET' && url.pathname === '/api/debug/webapp-url') {
-        return handleDebugWebAppUrl(env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {

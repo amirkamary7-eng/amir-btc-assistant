@@ -11,6 +11,7 @@ export function createReferralHandlers(deps) {
     jsonResponse,
     authenticateTelegramRequest,
     safeDbErrorResponse,
+    safeError,
     isDatabaseConfigured,
     referralRepo,
   } = deps;
@@ -31,7 +32,7 @@ export function createReferralHandlers(deps) {
       const stats = await referralRepo.getStats(env, authState.user.id);
       return jsonResponse({ status: 'success', ...stats }, {}, env);
     } catch (error) {
-      console.warn('get referral stats failed:', error);
+      console.warn(safeError('get-referral-stats', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -52,7 +53,7 @@ export function createReferralHandlers(deps) {
       const tokenState = await referralRepo.getTokens(env, authState.user.id);
       return jsonResponse({ status: 'success', ...tokenState }, {}, env);
     } catch (error) {
-      console.warn('get referral tokens failed:', error);
+      console.warn(safeError('get-referral-tokens', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }

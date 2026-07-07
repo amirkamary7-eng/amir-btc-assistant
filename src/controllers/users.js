@@ -14,9 +14,11 @@ export function createUserHandlers(deps) {
     optionalTelegramAuth,
     readJsonBody,
     safeDbErrorResponse,
+    safeError,
     buildBodyFieldValidationError,
     isDatabaseConfigured,
     normalizeOptionalString,
+    isDevMode,
     processReferralOnBootstrap,
     userRepo,
     watchlistRepo,
@@ -61,11 +63,15 @@ export function createUserHandlers(deps) {
       userId = String(auth.user.id);
       tgUser = auth.user;
     } else {
-      // No valid initData, no ?user_id= query param — try body.user_id for dev/testing
-      const fallbackId = payload.user_id;
-      if (fallbackId && /^\d+$/.test(String(fallbackId).trim())) {
-        userId = String(fallbackId).trim();
-      } else {
+      // Security (C-3): body.user_id fallback ONLY in development.
+      // In production, only cryptographically-verified initData is accepted.
+      if (isDevMode(env)) {
+        const fallbackId = payload.user_id;
+        if (fallbackId && /^\d+$/.test(String(fallbackId).trim())) {
+          userId = String(fallbackId).trim();
+        }
+      }
+      if (!userId) {
         return auth.error;
       }
     }
@@ -92,7 +98,7 @@ export function createUserHandlers(deps) {
         watchlist,
       }, {}, env);
     } catch (error) {
-      console.warn('bootstrap user failed:', error);
+      console.warn(safeError('bootstrap-user', error));
       return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, env);
     }
   }
@@ -131,7 +137,7 @@ export function createUserHandlers(deps) {
         watchlist,
       }, {}, env);
     } catch (error) {
-      console.warn('get current user failed:', error);
+      console.warn(safeError('get-current-user', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -178,7 +184,7 @@ export function createUserHandlers(deps) {
       }
       return jsonResponse({ status: 'success', user: userRepo.normalizeRow(userRow) }, {}, env);
     } catch (error) {
-      console.warn('update user settings failed:', error);
+      console.warn(safeError('update-user-settings', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
