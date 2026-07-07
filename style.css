@@ -51,10 +51,14 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* این بخش استایل‌های مرتبط با "هدر" را در خود نگه می‌دارد. */
 /* ============================================================================ */
 .app-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: rgba(11,18,32,0.85); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
-.header-left { display: flex; align-items: center; gap: 10px; }
+.header-left { display: flex; align-items: center; gap: 10px; min-width: 90px; }
+.header-center { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: center; }
 .brand-dot { width: 10px; height: 10px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 12px var(--accent); }
 .brand-name { font-weight: 800; font-size: 16px; letter-spacing: 0.5px; }
-.header-right { display: flex; align-items: center; gap: 12px; }
+.header-right { display: flex; align-items: center; gap: 12px; min-width: 90px; justify-content: flex-end; }
+.online-badge { font-size: 12px; font-weight: 600; color: var(--text-dim); white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.online-badge .pulse-dot { width: 7px; height: 7px; background: #22c55e; border-radius: 50%; animation: pulse-glow 2s ease-in-out infinite; }
+@keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 4px #22c55e; } 50% { box-shadow: 0 0 12px #22c55e, 0 0 20px rgba(34,197,94,0.3); } }
 .notif-btn { background: rgba(255,255,255,0.04); border: 1px solid var(--border); width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: var(--text); cursor: pointer; position: relative; }
 .notif-badge { position: absolute; top: -4px; right: -4px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
 
