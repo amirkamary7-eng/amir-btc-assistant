@@ -101,6 +101,7 @@ export function createUserHandlers(deps) {
         status: 'success',
         user: userRepo.normalizeRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
         watchlist,
+        bot_username: String(env.BOT_USERNAME || ''),
       }, {}, env);
     } catch (error) {
       console.warn(safeError('bootstrap-user', error));

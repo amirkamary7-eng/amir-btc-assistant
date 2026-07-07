@@ -56,7 +56,8 @@
                 "AI_DAILY_MESSAGE_LIMIT": 50,
                 "AI_DAILY_IMAGE_LIMIT": 3,
                 "AI_COOLDOWN_SECONDS": 4,
-                "REFERRAL_TOKENS_PER_INVITE": 3
+                "REFERRAL_TOKENS_PER_INVITE": 3,
+                "BOT_USERNAME": "Amir_BTC_AssistantBot"
         },
         "env": {
                 "staging": {
@@ -107,7 +108,8 @@
                                 "AI_DAILY_MESSAGE_LIMIT": 50,
                                 "AI_DAILY_IMAGE_LIMIT": 3,
                                 "AI_COOLDOWN_SECONDS": 4,
-                                "REFERRAL_TOKENS_PER_INVITE": 3
+                                "REFERRAL_TOKENS_PER_INVITE": 3,
+                                "BOT_USERNAME": "Amir_BTC_AssistantBot"
                         }
                 },
                 "production": {
@@ -146,7 +148,8 @@
                                 "AI_DAILY_MESSAGE_LIMIT": 50,
                                 "AI_DAILY_IMAGE_LIMIT": 3,
                                 "AI_COOLDOWN_SECONDS": 4,
-                                "REFERRAL_TOKENS_PER_INVITE": 3
+                                "REFERRAL_TOKENS_PER_INVITE": 3,
+                                "BOT_USERNAME": "Amir_BTC_AssistantBot"
                         }
                 }
         }

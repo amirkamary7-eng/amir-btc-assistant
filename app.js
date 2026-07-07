@@ -239,7 +239,7 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
 // ============================================================================
 
 const ADMIN_ID = '831704732';
-const BOT_USERNAME = 'AmirBtcBot'; // Single source of truth for referral links (H-R4)
+let BOT_USERNAME = 'Amir_BTC_AssistantBot'; // Fallback — overridden by bootstrap API (H-R4)
 const MAX_WATCHLIST = 7;
 const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
@@ -609,6 +609,9 @@ async function bootstrapUser() {
                 referrer_id: getReferrerId()
             })
         });
+        if (data.bot_username) {
+            BOT_USERNAME = data.bot_username;
+        }
         if (data.user?.lang === 'fa' || data.user?.lang === 'en') {
             currentLang = data.user.lang;
         }
