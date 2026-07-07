@@ -644,6 +644,7 @@ async function answerTelegramCallbackQuery(env, callbackQueryId, text = '', show
 /**
  * Set the Telegram Menu Button (hamburger menu) to open the Mini App.
  * Called on /start so the Menu Button URL is always in sync with WEBAPP_URL.
+ * No chat_id = sets the DEFAULT menu button for ALL users.
  * Fails silently — non-critical (inline keyboard works independently).
  */
 async function syncMenuButton(env) {
@@ -654,7 +655,8 @@ async function syncMenuButton(env) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
       body: JSON.stringify({
-        chat_id: env.ADMIN_TELEGRAM_ID,
+        // Intentionally NO chat_id — sets the DEFAULT menu button for ALL users.
+        // See: https://core.telegram.org/bots/api#setchatmenubutton
         menu_button: {
           type: 'web_app',
           text: '🚀 باز کردن مینی‌اپ',
@@ -662,6 +664,7 @@ async function syncMenuButton(env) {
         },
       }),
     });
+    console.log(JSON.stringify({ scope: 'sync-menu-button', url: webAppUrl }));
   } catch (error) {
     console.warn('syncMenuButton failed (non-critical):', error);
   }
