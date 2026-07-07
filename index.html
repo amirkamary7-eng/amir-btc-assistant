@@ -3,10 +3,84 @@
 <!-- #region Head -->
 <!-- ==================== تنظیمات و وابستگی‌های صفحه ==================== -->
 <head>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- ==================== Cache-Control (Telegram WebView bypass) ==================== -->
     <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Amir BTC Assistant Pro</title>
+
+    <!-- ==================== Version Check (MUST be first: runs before any asset loads) ==================== -->
+    <!--
+      این اسکریپت قبل از هر بارگذاری منبعی اجرا می‌شود.
+      اگر نسخه جدیدی روی سرور باشد، صفحه بدون نیاز به پاک‌کردن کش کاربر ریلود می‌شود.
+      BUILD_ID در زمان build توسط prepare-pages.mjs تزریق می‌شود.
+    -->
+    <script>
+    (function() {
+      'use strict';
+      var BUILD_ID = '__BUILD_ID_PLACEHOLDER__';
+      var VERSION_CHECK_URL = 'version.json';
+      var STORAGE_KEY = 'app_build_id';
+      var FORCE_BUST_KEY = 'app_cache_bust';
+
+      // Step 1: Check if a forced cache-bust is pending (set by previous session)
+      var pendingBust = sessionStorage.getItem(FORCE_BUST_KEY);
+      if (pendingBust) {
+        sessionStorage.removeItem(FORCE_BUST_KEY);
+        // Append a unique query string to bust any intermediate cache
+        window.location.replace(window.location.pathname + '?_cb=' + Date.now() + '#' + window.location.hash);
+        return;
+      }
+
+      // Step 2: Compare stored build ID with current injected ID
+      var storedBuildId = localStorage.getItem(STORAGE_KEY);
+
+      if (storedBuildId && storedBuildId !== BUILD_ID) {
+        // Build ID changed → new deploy detected from injected value
+        localStorage.setItem(STORAGE_KEY, BUILD_ID);
+        // Hard reload to get fresh assets
+        window.location.replace(window.location.pathname + '?_v=' + BUILD_ID + '#' + window.location.hash);
+        return;
+      }
+
+      if (!storedBuildId) {
+        // First visit ever → store current build ID
+        localStorage.setItem(STORAGE_KEY, BUILD_ID);
+      }
+
+      // Step 3: Async version check (non-blocking — fetches version.json in background)
+      // This catches the case where the cached HTML itself is stale
+      if (window.fetch) {
+        var checkUrl = VERSION_CHECK_URL + '?_t=' + Date.now();
+        fetch(checkUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            var serverBuildId = data.buildId || data.build_id;
+            var currentStored = localStorage.getItem(STORAGE_KEY);
+            if (serverBuildId && currentStored && serverBuildId !== currentStored) {
+              // Server has a newer version than what we have
+              localStorage.setItem(STORAGE_KEY, serverBuildId);
+              sessionStorage.setItem(FORCE_BUST_KEY, '1');
+              // Use Telegram's reload if available, otherwise window.location
+              try {
+                if (window.Telegram && window.Telegram.WebApp) {
+                  window.Telegram.WebApp.reload();
+                } else {
+                  window.location.reload(true);
+                }
+              } catch(e) {
+                window.location.reload(true);
+              }
+            }
+          })
+          .catch(function() { /* silently fail — version check is best-effort */ });
+      }
+    })();
+    </script>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="style.css">
     <script src="https://s3.tradingview.com/tv.js"></script>
     <!-- این مقدار در build با WORKER_API_URL inject می‌شود؛ در نبود env همان origin استفاده می‌شود -->
