@@ -910,6 +910,19 @@ const Cache = {
     }
 };
 
+/**
+ * رشته متنی را برای استفاده امن در innerHTML escape می‌کند.
+ * جلوگیری از XSS — گزارش §7#6, §8.2#9
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+}
+
 //#endregion
 
 // ============================================================================
@@ -1385,15 +1398,8 @@ async function loadNews(force = false) {
             }
         }
 
-        if (!articles.length) {
-            articles = currentLang === 'fa' ? [
-                { title: 'بیت‌کوین به ۷۰ هزار دلار نزدیک شد', source: 'کوین‌تلگراف', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'با افزایش حجم معاملات...', category: 'crypto', time: 'اخیراً' },
-                { title: 'اتریوم ۱۵٪ رشد کرد', source: 'کوین‌دسک', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'اتریوم به سطح ۴۰۰۰ دلار رسید...', category: 'crypto', time: 'اخیراً' }
-            ] : [
-                { title: 'Bitcoin approaches $70K', source: 'CoinTelegraph', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'Trading volume surged...', category: 'crypto', time: 'Recently' },
-                { title: 'Ethereum up 15%', source: 'CoinDesk', image: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop', url: '#', body: 'ETH reached $4000...', category: 'crypto', time: 'Recently' }
-            ];
-        }
+        // §7#5, §8.2#10: placeholder اخبار جعلی حذف شد — در صورت عدم دسترسی،
+        // renderNews() خالی بودن اخبار را با empty-state نمایش می‌دهد.
 
         newsCache = articles.slice(0, 20);
         Cache.set('news', newsCache, 300);
@@ -1448,8 +1454,8 @@ function renderNews(category) {
         <div class="news-item" onclick="openNewsModal(${i})">
             <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2270%22 height=%2270%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="news-img">
             <div class="news-content">
-                <div class="news-title">${n.title}</div>
-                <div class="news-source">${n.source} • ${n.time || ''}</div>
+                <div class="news-title">${escapeHtml(n.title)}</div>
+                <div class="news-source">${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</div>
             </div>
         </div>
     `).join('');
@@ -2513,8 +2519,8 @@ async function loadImportantNews() {
             <div class="important-news-item" onclick="openNewsModal(${i})">
                 <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="important-news-img">
                 <div class="important-news-content">
-                    <div class="important-news-title">${n.title}</div>
-                    <div class="important-news-source">${n.source}</div>
+                    <div class="important-news-title">${escapeHtml(n.title)}</div>
+                    <div class="important-news-source">${escapeHtml(n.source)}</div>
                 </div>
             </div>
         `).join('');
