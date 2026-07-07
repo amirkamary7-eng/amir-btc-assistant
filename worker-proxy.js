@@ -943,15 +943,63 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
 }
 
 /**
+ * Process a pending (unrewarded) referral reward.
+ *
+ * Independent of bootstrap — can be called from any point where channel_joined
+ * becomes true. Finds the unrewarded referral for the invitee and, if the
+ * invitee has joined the channel, atomically credits the reward.
+ *
+ * Idempotent: if rewarded is already TRUE, this is a no-op.
+ * Race-safe: uses UPDATE ... WHERE rewarded = FALSE so only one caller wins.
+ *
+ * @param {object} env - Worker env
+ * @param {string} inviteeId - The invitee's telegram_id
+ * @param {boolean} channelJoined - Whether the invitee has joined the channel
+ */
+async function processPendingReferralReward(env, inviteeId, channelJoined) {
+  if (!channelJoined) return null;
+
+  const rewardAmount = getReferralRewardPerInvite(env);
+  if (rewardAmount <= 0) return null;
+
+  // Find unrewarded referral for this invitee
+  const pendingResult = await queryDb(
+    env,
+    `
+      SELECT id, inviter_id, rewarded
+      FROM referrals
+      WHERE invitee_id = $1 AND rewarded = FALSE
+      LIMIT 1
+    `,
+    [String(inviteeId)],
+  );
+  const pending = pendingResult.rows[0] || null;
+  if (!pending) return null;
+
+  // Atomic: credit tokens + transaction record + rewarded=TRUE + channel_verified=TRUE
+  await creditReferralWithReward(
+    env,
+    String(pending.inviter_id),
+    String(pending.id),
+    inviteeId,
+    rewardAmount,
+    true, // alsoVerifyChannel
+  );
+
+  return { referral_id: pending.id, rewarded: true };
+}
+
+/**
  * Process referral on user bootstrap.
  *
  * Key design decisions:
- * - Only NEW users (first bootstrap) can generate a referral + reward.
- *   Existing users clicking a referral link are silently ignored (Design).
+ * - Only NEW users (first bootstrap) can generate a referral (Design).
+ *   Existing users clicking a referral link are silently ignored.
  * - Self-referral is rejected.
  * - Non-numeric referrer_id is rejected (M-R4).
  * - INSERT uses ON CONFLICT DO NOTHING to avoid 503 on concurrent bootstraps (H-R3).
- * - Reward (credit tokens + set rewarded=TRUE) is atomic via single transaction (H-R1, H-R2).
+ * - Reward is delegated to processPendingReferralReward (called here and
+ *   also after channel join verification).
  */
 async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined, isNewUser) {
   const normalizedReferrerId = normalizeOptionalString(referrerId);
@@ -975,10 +1023,11 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     return null;
   }
 
+  // Check for existing referral (race condition between concurrent bootstraps)
   const existingResult = await queryDb(
     env,
     `
-      SELECT id, inviter_id, channel_verified, rewarded
+      SELECT id, inviter_id, rewarded
       FROM referrals
       WHERE invitee_id = $1
       LIMIT 1
@@ -986,58 +1035,35 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     [String(inviteeId)],
   );
   const existing = existingResult.rows[0] || null;
-  const rewardAmount = getReferralRewardPerInvite(env);
 
   if (existing) {
-    // Existing referral (e.g. race — another concurrent bootstrap won).
-    // If channel was just joined, still verify + reward if not already done.
-    if (channelJoined && !existing.channel_verified) {
-      if (!existing.rewarded && rewardAmount > 0) {
-        // Atomic: channel_verified + credit tokens + rewarded in one TX
-        await creditReferralWithReward(env, String(existing.inviter_id), String(existing.id), inviteeId, rewardAmount, true);
-      } else {
-        await queryDb(
-          env,
-          'UPDATE referrals SET channel_verified = TRUE WHERE id = $1',
-          [existing.id],
-        );
-      }
-    }
+    // Race: another concurrent bootstrap already inserted the referral.
+    // Delegate reward processing (idempotent — won't double-reward).
+    await processPendingReferralReward(env, inviteeId, channelJoined);
     return { referral_id: existing.id, already_exists: true };
   }
 
   // H-R3: INSERT with ON CONFLICT DO NOTHING — race-safe.
-  // If two concurrent bootstraps race, one wins, the other gets no row back.
   const insertResult = await queryDb(
     env,
     `
       INSERT INTO referrals (inviter_id, invitee_id, channel_verified, rewarded, created_at)
-      VALUES ($1, $2, $3, FALSE, NOW())
+      VALUES ($1, $2, FALSE, FALSE, NOW())
       ON CONFLICT (invitee_id) DO NOTHING
       RETURNING id, rewarded
     `,
-    [normalizedReferrerId, String(inviteeId), Boolean(channelJoined)],
+    [normalizedReferrerId, String(inviteeId)],
   );
   const createdReferral = insertResult.rows[0] || null;
   if (!createdReferral) {
     // Race lost — another request already inserted the referral.
-    // Fetch the existing row for the caller.
-    const raceResult = await queryDb(
-      env,
-      'SELECT id FROM referrals WHERE invitee_id = $1 LIMIT 1',
-      [String(inviteeId)],
-    );
-    return raceResult.rows[0]
-      ? { referral_id: raceResult.rows[0].id, already_exists: true, race_won: false }
-      : null;
+    return { referral_id: null, already_exists: true, race_won: false };
   }
 
-  // H-R1 + H-R2: Atomic reward — balance + transaction record + rewarded flag in one TX
-  if (channelJoined && rewardAmount > 0) {
-    await creditReferralWithReward(env, normalizedReferrerId, createdReferral.id, inviteeId, rewardAmount, false);
-  }
+  // Delegate reward processing (idempotent — safe to call even if channel_joined=false)
+  const rewardResult = await processPendingReferralReward(env, inviteeId, channelJoined);
 
-  return { referral_id: createdReferral.id, rewarded: Boolean(channelJoined && rewardAmount > 0) };
+  return { referral_id: createdReferral.id, rewarded: Boolean(rewardResult?.rewarded) };
 }
 
 async function getChatMemberDebugPayload(userId, env) {
@@ -1161,6 +1187,8 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
       await setCachedJoinStatus(env, uid, true);
       if (isDatabaseConfigured(env)) {
         await persistDbUserJoinState(env, uid, true);
+        // Process any pending referral reward now that the user has joined the channel
+        await processPendingReferralReward(env, uid, true);
       }
       return result;
     }
