@@ -1761,11 +1761,33 @@ function handleRoot(env) {
 }
 
 function handleHealth(env) {
+  const webAppUrl = resolveWebAppUrl(env);
+  console.log(JSON.stringify({
+    scope: 'health-check',
+    webapp_url_raw: String(env.WEBAPP_URL || '').trim(),
+    webapp_url_resolved: webAppUrl,
+    has_cache_bust: webAppUrl.includes('_v='),
+  }));
   return jsonResponse({
     status: 'ok',
     bot_configured: isBotConfigured(env),
     database_ready: isDatabaseConfigured(env),
     redis_ready: isCacheLayerConfigured(env),
+    _debug_webapp_url: webAppUrl,
+  }, {}, env);
+}
+
+/** Temporary debug endpoint — remove after verifying cache-bust works. */
+function handleDebugWebAppUrl(env) {
+  const raw = String(env.WEBAPP_URL || '').trim();
+  const withBust = resolveWebAppUrl(env);
+  const noBust = resolveWebAppUrl(env, { cacheBust: false });
+  return jsonResponse({
+    webapp_url_raw: raw,
+    webapp_url_with_cache_bust: withBust,
+    webapp_url_without_cache_bust: noBust,
+    cache_bust_param: withBust.includes('_v=') ? withBust.match(/[?&]_v=([^&]+)/)?.[1] : null,
+    day_stamp: Math.floor(Date.now() / 86400000).toString(36),
   }, {}, env);
 }
 
@@ -2250,6 +2272,11 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return handleHealth(env);
+      }
+
+      // TEMP: remove after verifying cache-bust on production
+      if (request.method === 'GET' && url.pathname === '/api/debug/webapp-url') {
+        return handleDebugWebAppUrl(env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
