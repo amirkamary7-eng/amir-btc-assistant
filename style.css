@@ -270,7 +270,7 @@ body.user-loading .profile-loading-target.skeleton-text {
 .watch-change { font-size: 11px; font-weight: 600; }
 .watch-change.up { color: var(--green); }
 .watch-change.down { color: var(--red); }
-.remove-watch { position: absolute; top: 4px; right: 6px; color: var(--text-dim); cursor: pointer; }
+.remove-watch { position: absolute; top: 4px; right: 6px; color: var(--text-dim); cursor: pointer; padding: 6px; margin: -6px; }
 
 /* #endregion */
 
