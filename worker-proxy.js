@@ -1762,6 +1762,13 @@ function parseCalendarTimeParts(timeString) {
 }
 
 function parseEventTime(dateString, timeString) {
+  // ── ISO 8601 support (e.g. "2026-07-05T21:00:00-04:00") ─────────
+  if (dateString && /^\d{4}-\d{2}-\d{2}T/.test(dateString)) {
+    const d = new Date(dateString);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // ── Legacy MM-DD-YYYY + HH:MMam/pm format ───────────────────────
   const parsedDate = parseCalendarDate(dateString);
   if (!parsedDate) {
     return null;
@@ -1889,7 +1896,13 @@ async function fetchCalendarEvents(env) {
   const events = rawEvents
     .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
     .filter((item) => item !== null)
-    .sort((left, right) => String(left.timestamp || '').localeCompare(String(right.timestamp || '')));
+    .sort((left, right) => {
+      // Null timestamps (unparseable) go to end
+      if (!left.timestamp && !right.timestamp) return 0;
+      if (!left.timestamp) return 1;
+      if (!right.timestamp) return -1;
+      return left.timestamp.localeCompare(right.timestamp);
+    });
 
   await writeAppCache(
     env,
