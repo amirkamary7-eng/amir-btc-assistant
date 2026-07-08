@@ -9,6 +9,12 @@
         "compatibility_flags": [
                 "nodejs_compat"
         ],
+        // Workers AI binding — used for news translation (Phase 3)
+        // Replaces unofficial Google Translate endpoint.
+        // Model: @cf/meta/m2m100-1.2b (free, no rate limit, runs inside Worker)
+        "ai": {
+                "binding": "AI"
+        },
         "observability": {
                 "enabled": true,
                 "head_sampling_rate": 1
