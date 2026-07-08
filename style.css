@@ -318,8 +318,10 @@ body.user-loading .profile-loading-target.skeleton-text {
 .coin-change.down { color: var(--red); background: rgba(255,77,77,0.1); }
 strong.up { color: var(--green); }
 strong.down { color: var(--red); }
-.watch-star { cursor: pointer; opacity: 0.3; transition: 0.2s; display: inline-flex; padding: 8px; margin: -8px; align-items: center; justify-content: center; }
-.watch-star.active { opacity: 1; }
+.watch-star { cursor: pointer; opacity: 0.3; transition: 0.2s; display: inline-flex; padding: 8px; margin: -8px; align-items: center; justify-content: center; color: var(--text-sub); }
+.watch-star.active { opacity: 1; color: var(--accent); }
+.star-filled { color: var(--accent); display: inline-flex; }
+.star-empty { color: var(--text-sub); display: inline-flex; }
 
 /* #endregion */
 
