@@ -1231,6 +1231,7 @@ const EXCHANGE_ORDER = [
   ['KUCOIN', 'kucoin'],
   ['GATEIO', 'gateio'],
   ['MEXC', 'mexc'],
+  ['COINEX', 'coinex'],
 ];
 
 const CHART_CHECKERS = {
@@ -1282,6 +1283,14 @@ const CHART_CHECKERS = {
       return Boolean(body && typeof body === 'object' && 'price' in body);
     },
   },
+  coinex: {
+    buildUrl(symbol) {
+      return `https://api.coinex.com/v1/market/ticker?market=${encodeURIComponent(`${symbol}USDT`)}`;
+    },
+    isMatch(body) {
+      return Boolean(body?.code === 0 && body?.data && typeof body.data.last === 'string');
+    },
+  },
 };
 
 function parseSpotTickerPrice(exchangeKey, body) {
@@ -1306,6 +1315,10 @@ function parseSpotTickerPrice(exchangeKey, body) {
   if (exchangeKey === 'gateio') {
     const item = Array.isArray(body) ? body[0] : null;
     const price = Number(item?.last ?? item?.last_price);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'coinex') {
+    const price = Number(body?.data?.last);
     return Number.isFinite(price) ? price : null;
   }
   return null;

@@ -1933,6 +1933,7 @@ function createTradingViewWidget(chartInfo) {
         try { currentTvWidget.remove(); } catch {}
         currentTvWidget = null;
     }
+    document.querySelector('.chart-exchange-badge')?.remove();
     chartContainer.innerHTML = '';
     if (typeof TradingView !== 'undefined' && chartInfo && chartInfo.found) {
         if (chartInfo.exchange) {
