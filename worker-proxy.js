@@ -1490,9 +1490,18 @@ function extractFirstMatch(text, pattern) {
   return capturedValue ? decodeHtmlEntities(capturedValue.trim()) : '';
 }
 
-function extractImageUrl(descriptionHtml) {
-  const match = String(descriptionHtml || '').match(/src="([^"]+)"/i);
-  return match ? match[1] : 'https://images.cryptocompare.com/news/default/bitcoin.png';
+function extractImageUrl(descriptionHtml, itemBlock) {
+  // 1. Check for <img src="..."> inside description HTML
+  const imgMatch = String(descriptionHtml || '').match(/src="([^"]+)"/i);
+  if (imgMatch) return imgMatch[1];
+
+  // 2. Check for <enclosure url="..."> (used by IRNA, ISNA, many Persian feeds)
+  if (itemBlock) {
+    const enclosureMatch = String(itemBlock).match(/<enclosure[^>]+url="([^"]+)"/i);
+    if (enclosureMatch) return enclosureMatch[1];
+  }
+
+  return 'https://images.cryptocompare.com/news/default/bitcoin.png';
 }
 
 function parseRssItems(rssText) {
@@ -1512,7 +1521,7 @@ function parseRssItems(rssText) {
       descriptionHtml: descriptionRaw,
       description: cleanHtml(descriptionRaw),
       pubDate,
-      image: extractImageUrl(descriptionRaw),
+      image: extractImageUrl(descriptionRaw, block),
     };
   }).map((item) => ({
     ...item,
