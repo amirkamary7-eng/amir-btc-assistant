@@ -282,7 +282,7 @@ const tabLoaded = { dashboard: false, market: false, analysis: false, news: fals
 let calendarEvents = [];
 let calendarLoading = false;
 let currentTvWidget = null; // P1-5: track TradingView widget for cleanup
-let currentTvInterval = '60';
+let currentTvInterval = localStorage.getItem('tv_interval') || '60';
 let currentTvChartInfo = null;
 
 //#endregion
@@ -1965,6 +1965,7 @@ function createTradingViewWidget(chartInfo) {
  */
 function switchTvTimeframe(interval, btn) {
     currentTvInterval = interval;
+    localStorage.setItem('tv_interval', interval);
     updateTvTimeframeUI();
     createTradingViewWidget(currentTvChartInfo);
 }
