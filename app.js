@@ -1264,7 +1264,10 @@ function renderMarket() {
     }
     if (!filtered.length && allCoins.length) {
         const msg = searchTerm ? t('search_no_result') : t('no_data');
-        list.innerHTML = `<div class="empty-state">${msg}</div>`;
+        const icon = searchTerm
+            ? '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>'
+            : '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="8" y1="15" x2="16" y2="15"/></svg>';
+        list.innerHTML = `<div class="empty-state">${icon}<br>${msg}</div>`;
         return;
     }
     if (!filtered.length) {
@@ -1960,7 +1963,7 @@ function createTradingViewWidget(chartInfo) {
             disabled_features: ['header_widget_dom_node']
         });
     } else {
-        chartContainer.innerHTML = `<div class="empty-state">${t('chart_unavailable')}</div>`;
+        chartContainer.innerHTML = `<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg><br>${t('chart_unavailable')}</div>`;
     }
 }
 /**
