@@ -1091,6 +1091,8 @@ async function fetchCoinGecko() {
  */
 async function loadMarketData(force = false) {
     const listEl = document.getElementById('coin-list');
+    const refreshBtn = document.getElementById('market-refresh-btn');
+    if (refreshBtn) refreshBtn.classList.add('spinning');
     try {
         if (!force) {
             const cached = Cache.get('market');
@@ -1170,7 +1172,17 @@ async function loadMarketData(force = false) {
         if (listEl && !allCoins.length) {
             listEl.innerHTML = `<div class="empty-state">${t('market_error')}</div>`;
         }
+    } finally {
+        const refreshBtn = document.getElementById('market-refresh-btn');
+        if (refreshBtn) refreshBtn.classList.remove('spinning');
     }
+}
+
+/**
+ * Refresh market data (force reload).
+ */
+function refreshMarketData() {
+    loadMarketData(true);
 }
 
 /**
@@ -2193,7 +2205,22 @@ function deleteAnalysis(id, event) {
 async function openCoinDetail(symbol) {
     const coin = allCoins.find(c => c.symbol === symbol);
     if (!coin) return;
+
+    // Update header with icon, title, rank, and watchlist state
+    const icon = coin.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(coin.symbol).toLowerCase()}@2x.png`;
+    const iconEl = document.getElementById('detail-coin-icon');
+    if (iconEl) {
+        iconEl.src = icon;
+        iconEl.onerror = function() { this.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="%2394a3b8"><circle cx="12" cy="12" r="10"/></svg>'); };
+    }
+
     document.getElementById('detail-coin-title').innerText = currentLang === 'fa' && coin.name ? `${coin.name} (${symbol})` : `${symbol} / USDT`;
+    const rankEl = document.getElementById('detail-coin-rank');
+    if (rankEl) rankEl.innerText = `#${Number(coin.rank) || 0}`;
+
+    // Update watchlist button state
+    updateDetailWatchBtn(symbol);
+
     const modal = document.getElementById('coin-detail-modal');
     modal.style.display = 'flex';
 
@@ -2275,6 +2302,29 @@ function updateTvTimeframeUI() {
         b.classList.toggle('active', b.dataset.interval === currentTvInterval);
     });
 }
+/**
+ * Update the watchlist button in the detail modal.
+ */
+function updateDetailWatchBtn(symbol) {
+    const btn = document.getElementById('detail-watch-btn');
+    if (!btn) return;
+    const inWatch = watchlist.includes(symbol);
+    btn.classList.toggle('active', inWatch);
+    btn.querySelector('svg').setAttribute('fill', inWatch ? 'currentColor' : 'none');
+    btn.dataset.symbol = symbol;
+}
+
+/**
+ * Toggle watchlist from the detail modal.
+ */
+function toggleWatchlistFromDetail() {
+    const btn = document.getElementById('detail-watch-btn');
+    if (!btn || !btn.dataset.symbol) return;
+    const symbol = btn.dataset.symbol;
+    toggleWatchlist(symbol, null);
+    updateDetailWatchBtn(symbol);
+}
+
 /**
  * ارز جزئیات را می‌بندد.
  * ورودی: بدون ورودی.
@@ -3211,6 +3261,9 @@ window.switchSubTab = switchSubTab;
 window.switchNewsTab = switchNewsTab;
 window.toggleWatchlist = toggleWatchlist;
 window.showMiniToast = showMiniToast;
+window.updateDetailWatchBtn = updateDetailWatchBtn;
+window.toggleWatchlistFromDetail = toggleWatchlistFromDetail;
+window.refreshMarketData = refreshMarketData;
 window.openAddCoinModal = openAddCoinModal;
 window.closeAddCoinModal = closeAddCoinModal;
 window.filterCoinList = filterCoinList;
