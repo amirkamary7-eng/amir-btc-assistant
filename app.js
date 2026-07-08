@@ -270,6 +270,7 @@ let tickets = [];
 let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
 let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
 let allCoins = [];
+let allForexPairs = []; // Forex data from /api/forex
 let globalMarketData = null; // P2-1: { totalMarketCap, totalVolume, btcDominance }
 let currentMarketTab = 'overview';
 let searchTerm = '';
@@ -300,7 +301,7 @@ const i18n = {
         price_alert: 'هشدار قیمت', set_alert: 'ثبت هشدار', alert_target: 'قیمت هدف (USD)',
         alert_bot_hint: 'اعلان در اپ + پیام تلگرام', alert_empty: 'هیچ هشدار فعالی نیست',
         alert_registered: 'هشدار ثبت شد',
-        tab_overview: 'برترین‌ها', tab_trending: 'پرحجم', tab_gainers: 'رشد', tab_losers: 'ریزش',
+        tab_overview: 'برترین‌ها', tab_forex: 'فارکس', tab_gainers: 'رشد', tab_losers: 'ریزش',
         analysis_title: 'تحلیل‌های بازار', new_analysis: 'تحلیل جدید',
         news_all: 'همه', news_crypto: 'کریپتو', news_economy: 'اقتصادی', news_forex: 'فارکس', news_calendar: 'تقویم',
         hero_badge: 'کانال تحلیلی', hero_desc: 'سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار', hero_cta: 'عضویت رایگان',
@@ -358,7 +359,7 @@ const i18n = {
         price_alert: 'Price Alert', set_alert: 'Set Alert', alert_target: 'Target price (USD)',
         alert_bot_hint: 'In-app + Telegram message', alert_empty: 'No active alerts',
         alert_registered: 'Alert registered',
-        tab_overview: 'Overview', tab_trending: 'Trending', tab_gainers: 'Gainers', tab_losers: 'Losers',
+        tab_overview: 'Overview', tab_forex: 'Forex', tab_gainers: 'Gainers', tab_losers: 'Losers',
         analysis_title: 'Market Analysis', new_analysis: 'New Analysis',
         news_all: 'All', news_crypto: 'Crypto', news_economy: 'Economy', news_forex: 'Forex', news_calendar: 'Calendar',
         hero_badge: 'Analysis Channel', hero_desc: 'Daily signals, analysis & market education', hero_cta: 'Join Free',
@@ -1170,6 +1171,29 @@ async function loadMarketData(force = false) {
     }
 }
 
+/**
+ * Load forex pair data from backend.
+ */
+async function loadForexData() {
+    if (!API_BASE) return;
+    try {
+        const cached = Cache.get('forex');
+        if (cached?.length) {
+            allForexPairs = cached;
+            renderMarket();
+            return;
+        }
+        const res = await apiFetch('/api/forex');
+        if (res.status === 'success' && Array.isArray(res.data)) {
+            allForexPairs = res.data;
+            Cache.set('forex', allForexPairs, 60);
+            renderMarket();
+        }
+    } catch (e) {
+        console.warn('Forex data load failed:', e);
+    }
+}
+
 //#endregion
 
 // ============================================================================
@@ -1238,35 +1262,91 @@ function formatLargeNumber(n) {
 function renderMarket() {
     const list = document.getElementById('coin-list');
     if (!list) return;
-    let filtered = [...allCoins];
+
+    // Unified search: search across both crypto and forex
     if (searchTerm) {
-        filtered = filtered.filter(c =>
+        const cryptoResults = allCoins.filter(c =>
             c.symbol.toLowerCase().includes(searchTerm) ||
             c.name.toLowerCase().includes(searchTerm)
         ).slice(0, 50);
-    } else {
-        switch (currentMarketTab) {
-            case 'trending':
-                filtered = filtered.sort((a, b) => b.volumeUsd24Hr - a.volumeUsd24Hr).slice(0, 30);
-                break;
-            case 'gainers':
-                filtered = filtered.filter(c => c.changePercent24Hr > 0).sort((a, b) => b.changePercent24Hr - a.changePercent24Hr).slice(0, 30);
-                break;
-            case 'losers':
-                filtered = filtered.filter(c => c.changePercent24Hr < 0).sort((a, b) => a.changePercent24Hr - b.changePercent24Hr).slice(0, 30);
-                break;
-            case 'watchlist':
-                filtered = filtered.filter(c => watchlist.includes(c.symbol));
-                break;
-            default:
-                filtered = filtered.slice(0, 100);
+
+        const forexResults = allForexPairs.filter(f =>
+            f.symbol.toLowerCase().includes(searchTerm) ||
+            f.name.toLowerCase().includes(searchTerm)
+        ).slice(0, 20);
+
+        const allResults = [...cryptoResults.map(c => ({...c, _type: 'crypto'})), ...forexResults.map(f => ({...f, _type: 'forex'}))];
+
+        if (!allResults.length && (allCoins.length || allForexPairs.length)) {
+            const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
+            list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result')}</div>`;
+            return;
         }
+        if (!allResults.length) {
+            list.innerHTML = Array(8).fill(`
+                <div class="market-skeleton">
+                    <div class="market-skeleton-left">
+                        <div class="market-skeleton-icon"></div>
+                        <div class="market-skeleton-text">
+                            <div class="market-skeleton-line"></div>
+                            <div class="market-skeleton-line"></div>
+                        </div>
+                    </div>
+                    <div class="market-skeleton-right">
+                        <div class="market-skeleton-block"></div>
+                        <div class="market-skeleton-block"></div>
+                    </div>
+                </div>
+            `).join('');
+            return;
+        }
+        list.innerHTML = allResults.map(item => renderMarketItem(item)).join('');
+        return;
+    }
+
+    // Tab-based rendering (no search)
+    if (currentMarketTab === 'forex') {
+        if (!allForexPairs.length) {
+            // Show skeleton or loading for forex
+            list.innerHTML = Array(5).fill(`
+                <div class="market-skeleton">
+                    <div class="market-skeleton-left">
+                        <div class="market-skeleton-icon"></div>
+                        <div class="market-skeleton-text">
+                            <div class="market-skeleton-line"></div>
+                            <div class="market-skeleton-line"></div>
+                        </div>
+                    </div>
+                    <div class="market-skeleton-right">
+                        <div class="market-skeleton-block"></div>
+                        <div class="market-skeleton-block"></div>
+                    </div>
+                </div>
+            `).join('');
+            return;
+        }
+        list.innerHTML = allForexPairs.map(f => renderMarketItem({...f, _type: 'forex'})).join('');
+        return;
+    }
+
+    // Crypto tabs (overview, gainers, losers, watchlist)
+    let filtered = [...allCoins];
+    switch (currentMarketTab) {
+        case 'gainers':
+            filtered = filtered.filter(c => c.changePercent24Hr > 0).sort((a, b) => b.changePercent24Hr - a.changePercent24Hr).slice(0, 30);
+            break;
+        case 'losers':
+            filtered = filtered.filter(c => c.changePercent24Hr < 0).sort((a, b) => a.changePercent24Hr - b.changePercent24Hr).slice(0, 30);
+            break;
+        case 'watchlist':
+            filtered = filtered.filter(c => watchlist.includes(c.symbol));
+            break;
+        default:
+            filtered = filtered.slice(0, 100);
     }
     if (!filtered.length && allCoins.length) {
-        const msg = searchTerm ? t('search_no_result') : t('no_data');
-        const icon = searchTerm
-            ? '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>'
-            : '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="8" y1="15" x2="16" y2="15"/></svg>';
+        const msg = t('no_data');
+        const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="8" y1="15" x2="16" y2="15"/></svg>';
         list.innerHTML = `<div class="empty-state">${icon}<br>${msg}</div>`;
         return;
     }
@@ -1288,34 +1368,72 @@ function renderMarket() {
             `).join('');
         return;
     }
-    list.innerHTML = filtered.map(c => {
-        const isPos = c.changePercent24Hr >= 0;
-        const inWatch = watchlist.includes(c.symbol);
-        const safeSymbol = escapeHtml(c.symbol);
-        const safeName = escapeHtml(c.name);
-        const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
-        return `
-            <div class="coin-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
-                <div class="coin-left">
-                    <span class="coin-rank">#${Number(c.rank) || 0}</span>
-                    <img src="${escapeHtml(icon)}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="coin-icon" alt="${safeSymbol}">
-                    <div>
-                        <div class="coin-sym">${safeSymbol}</div>
-                        <div class="coin-name">${safeName}</div>
-                    </div>
-                </div>
-                <div class="coin-right">
-                    <div class="coin-price">$${c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6)}</div>
-                    <div class="coin-change ${isPos ? 'up' : 'down'}">${isPos ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</div>
-                    <span class="watch-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}" tabindex="0">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                        </svg>
-                    </span>
+    list.innerHTML = filtered.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
+}
+
+/**
+ * Render a single market item (crypto or forex).
+ */
+function renderMarketItem(item) {
+    if (item._type === 'forex') {
+        return renderForexItem(item);
+    }
+    return renderCryptoItem(item);
+}
+
+function renderCryptoItem(c) {
+    const isPos = c.changePercent24Hr >= 0;
+    const inWatch = watchlist.includes(c.symbol);
+    const safeSymbol = escapeHtml(c.symbol);
+    const safeName = escapeHtml(c.name);
+    const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
+    return `
+        <div class="coin-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
+            <div class="coin-left">
+                <span class="coin-rank">#${Number(c.rank) || 0}</span>
+                <img src="${escapeHtml(icon)}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="coin-icon" alt="${safeSymbol}">
+                <div>
+                    <div class="coin-sym">${safeSymbol}</div>
+                    <div class="coin-name">${safeName}</div>
                 </div>
             </div>
-        `;
-    }).join('');
+            <div class="coin-right">
+                <div class="coin-price">$${c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6)}</div>
+                <div class="coin-change ${isPos ? 'up' : 'down'}">${isPos ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</div>
+                <span class="watch-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}" tabindex="0">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                    </svg>
+                </span>
+            </div>
+        </div>
+    `;
+}
+
+function renderForexItem(f) {
+    const safeSymbol = escapeHtml(f.symbol);
+    const safeName = escapeHtml(f.name);
+    const categoryColors = { major: 'var(--green)', cross: 'var(--accent)', metal: '#ffd700' };
+    const catColor = categoryColors[f.category] || 'var(--text-dim)';
+    const priceStr = f.price > 0 ? f.price.toFixed(f.category === 'metal' ? 2 : 4) : '--';
+    return `
+        <div class="coin-item" data-symbol="${safeSymbol}" data-forex="true" onclick="openForexDetail(this.dataset.symbol)" role="listitem">
+            <div class="coin-left">
+                <span class="coin-rank forex-cat" style="color:${catColor}">${f.category === 'metal' ? '🥇' : '💱'}</span>
+                <div class="forex-icon-wrap">
+                    <span class="forex-pair-icon">${safeSymbol.slice(0,3)}</span>
+                </div>
+                <div>
+                    <div class="coin-sym">${safeName}</div>
+                    <div class="coin-name">${f.category === 'major' ? 'Major' : f.category === 'cross' ? 'Cross' : 'Metal'}</div>
+                </div>
+            </div>
+            <div class="coin-right">
+                <div class="coin-price">${priceStr}</div>
+                <div class="coin-change" style="color:var(--text-dim); background:transparent;">FX</div>
+            </div>
+        </div>
+    `;
 }
 /**
  * نمایش یا وضعیت بازار تب را تعویض می‌کند.
@@ -1330,6 +1448,18 @@ function switchMarketTab(tab, btn) {
     });
     btn.classList.add('active');
     btn.setAttribute('aria-selected', 'true');
+
+    // Hide/show summary bar for forex tab
+    const summaryBar = document.getElementById('market-summary-bar');
+    if (summaryBar) {
+        summaryBar.style.display = tab === 'forex' ? 'none' : '';
+    }
+
+    // Load forex data on first visit to forex tab
+    if (tab === 'forex' && !allForexPairs.length) {
+        loadForexData();
+    }
+
     const list = document.getElementById('coin-list');
     if (list) {
         list.classList.remove('fade-in');
@@ -1908,6 +2038,10 @@ async function openCoinDetail(symbol) {
     const modal = document.getElementById('coin-detail-modal');
     modal.style.display = 'flex';
 
+    // Show alert section for crypto
+    const alertSection = document.querySelector('.alert-section');
+    if (alertSection) alertSection.style.display = '';
+
     const chartContainer = document.getElementById('detail-chart');
     document.querySelector('.chart-exchange-badge')?.remove();
     chartContainer.innerHTML = '<div class="empty-state">Loading chart...</div>';
@@ -1995,6 +2129,78 @@ function closeCoinDetail() {
     }
     currentTvChartInfo = null;
     document.getElementById('coin-detail-modal').style.display = 'none';
+}
+
+/**
+ * Open forex pair detail modal with TradingView chart.
+ */
+function openForexDetail(symbol) {
+    const pair = allForexPairs.find(f => f.symbol === symbol);
+    if (!pair) return;
+
+    const modal = document.getElementById('coin-detail-modal');
+    modal.style.display = 'flex';
+
+    document.getElementById('detail-coin-title').innerText = pair.name || symbol;
+
+    const chartContainer = document.getElementById('detail-chart');
+    document.querySelector('.chart-exchange-badge')?.remove();
+    chartContainer.innerHTML = '<div class="empty-state">Loading chart...</div>';
+
+    // Build chart info for forex — uses TradingView's built-in FX/OANDA symbols
+    const chartInfo = {
+        found: true,
+        tv_symbol: pair.tvSymbol || `FX:${symbol}`,
+        exchange: pair.tvSymbol?.startsWith('OANDA') ? 'OANDA' : 'FX',
+    };
+    currentTvChartInfo = chartInfo;
+    currentTvInterval = '60';
+    updateTvTimeframeUI();
+
+    // Clear old widget
+    if (currentTvWidget) {
+        try { currentTvWidget.remove(); } catch {}
+        currentTvWidget = null;
+    }
+    document.querySelector('.chart-exchange-badge')?.remove();
+    chartContainer.innerHTML = '';
+
+    if (typeof TradingView !== 'undefined') {
+        // Show exchange badge
+        const badge = document.createElement('div');
+        badge.className = 'chart-exchange-badge';
+        badge.innerText = chartInfo.exchange.toUpperCase();
+        chartContainer.parentNode.insertBefore(badge, chartContainer);
+
+        currentTvWidget = new TradingView.widget({
+            width: '100%',
+            height: '100%',
+            symbol: chartInfo.tv_symbol,
+            interval: currentTvInterval,
+            theme: 'dark',
+            style: '1',
+            locale: 'en',
+            container_id: 'detail-chart',
+            hide_side_toolbar: true,
+            disabled_features: ['header_widget_dom_node']
+        });
+    } else {
+        chartContainer.innerHTML = `<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg><br>${t('chart_unavailable')}</div>`;
+    }
+
+    // Forex stats
+    const priceStr = pair.price > 0 ? pair.price.toFixed(pair.category === 'metal' ? 2 : 4) : '--';
+    const catLabel = pair.category === 'major' ? 'Major' : pair.category === 'cross' ? 'Cross' : 'Metal';
+    document.getElementById('detail-stats').innerHTML = `
+        <div><span>${t('price')}</span><strong>${priceStr}</strong></div>
+        <div><span>Category</span><strong>${catLabel}</strong></div>
+        <div><span>Symbol</span><strong>${escapeHtml(symbol)}</strong></div>
+        <div><span>Type</span><strong>Forex</strong></div>
+    `;
+
+    // Hide alert section for forex
+    const alertSection = document.querySelector('.alert-section');
+    if (alertSection) alertSection.style.display = 'none';
 }
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
