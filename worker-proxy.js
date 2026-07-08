@@ -1337,12 +1337,18 @@ async function fetchSpotPriceUsd(env, symbol) {
     }
   }
 
-  for (const [, exchangeKey] of EXCHANGE_ORDER) {
-    const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
-    if (price !== null) {
-      await writeAppCache(env, cacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
-      return { price, exchange: exchangeKey, cached: false };
-    }
+  // P1-3: Parallel exchange resolution — race all exchanges, use first success
+  const raced = await Promise.any(
+    EXCHANGE_ORDER.map(async ([, exchangeKey]) => {
+      const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
+      if (price === null) throw new Error(`${exchangeKey}: no price`);
+      return { price, exchange: exchangeKey };
+    })
+  ).catch(() => null);
+
+  if (raced) {
+    await writeAppCache(env, cacheKey, raced.exchange, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
+    return { price: raced.price, exchange: raced.exchange, cached: false };
   }
 
   return null;
