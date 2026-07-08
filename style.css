@@ -295,10 +295,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* #region صفحه مارکت */
 /* این بخش استایل‌های مرتبط با "صفحه مارکت" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.search-bar { padding: 0 16px 12px; }
-.search-input { width: 100%; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.04); color: var(--text); font-size: 14px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+.search-bar { padding: 0 16px 12px; position: relative; }
+.search-input { width: 100%; padding: 11px 14px 11px 40px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.04); color: var(--text); font-size: 14px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
 .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(247,147,26,0.12); }
 .search-input::placeholder { color: var(--text-sub); }
+.search-icon { position: absolute; left: 30px; top: 50%; transform: translateY(calc(-50% + 6px)); color: var(--text-sub); pointer-events: none; transition: color 0.2s; }
+.search-input:focus ~ .search-icon { color: var(--accent); }
 
 /* ===== Main Tabs: Crypto / Forex / Watchlist ===== */
 .market-main-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 0 16px 12px; }
@@ -316,7 +318,8 @@ body.user-loading .profile-loading-target.skeleton-text {
   overflow: hidden;
 }
 .main-tab-btn svg { flex-shrink: 0; opacity: 0.5; transition: opacity 0.25s; }
-.main-tab-btn:active { transform: scale(0.97); }
+.main-tab-btn:not(.active):hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
+.main-tab-btn:not(.active):active { transform: scale(0.97); }
 .main-tab-btn.active {
   background: linear-gradient(135deg, rgba(247,147,26,0.15), rgba(247,147,26,0.05));
   border-color: rgba(247,147,26,0.4);
@@ -376,13 +379,18 @@ body.user-loading .profile-loading-target.skeleton-text {
   background: var(--accent);
   border-radius: 2px 2px 0 0;
 }
-.coin-list { padding: 0 16px; }
+.coin-list { padding: 0 16px; position: relative; }
+.coin-list-info { display: flex; justify-content: space-between; align-items: center; padding: 0 0 8px; font-size: 11px; color: var(--text-sub); }
+.coin-list-count { font-variant-numeric: tabular-nums; }
+.coin-list-shadow { position: sticky; top: 0; z-index: 5; height: 8px; background: linear-gradient(to bottom, var(--bg-primary), transparent); pointer-events: none; opacity: 0; transition: opacity 0.3s; margin: -8px -16px 0; }
+.coin-list-shadow.visible { opacity: 1; }
 .coin-list.fade-out { animation: coinFadeOut 0.12s ease forwards; }
 .coin-list.fade-in { animation: coinFadeIn 0.18s ease forwards; }
 @keyframes coinFadeOut { to { opacity: 0; transform: translateY(6px); } }
 @keyframes coinFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-.coin-item { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; border-radius: 8px; margin-bottom: 2px; }
-.coin-item:last-child { border-bottom: none; }
+.coin-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 8px; cursor: pointer; transition: background 0.15s; border-radius: 10px; }
+.coin-item:hover { background: rgba(255,255,255,0.03); }
+.coin-item:active { background: rgba(255,255,255,0.06); }
 .coin-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 0%; direction: ltr; }
 .coin-left > div { min-width: 0; overflow: hidden; }
 .coin-rank { font-size: 11px; color: var(--text-sub); width: 26px; flex-shrink: 0; text-align: center; }
@@ -405,6 +413,7 @@ strong.down { color: var(--red); }
 .forex-icon-wrap { width: 32px; height: 32px; border-radius: 50%; background: rgba(0,200,150,0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .forex-pair-icon { font-size: 10px; font-weight: 700; color: var(--green); letter-spacing: -0.5px; }
 .forex-cat { font-size: 16px !important; }
+.coin-item[data-forex="true"] { border-left: 3px solid rgba(0,200,150,0.3); padding-left: 5px; }
 
 /* #endregion */
 
@@ -789,7 +798,8 @@ strong.down { color: var(--red); }
 /* #region وضعیت خالی */
 /* این بخش استایل‌های مرتبط با "وضعیت خالی" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.empty-state { text-align: center; color: var(--text-dim); padding: 24px 10px; font-size: 13px; }
+.empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; font-size: 13px; }
+.empty-state svg { margin-bottom: 12px; opacity: 0.4; }
 
 /* Loading skeleton for news list (§6.3) */
 .news-skeleton { display: flex; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
@@ -821,10 +831,11 @@ strong.down { color: var(--red); }
   padding: 10px 12px;
   margin: 0 16px 10px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.03);
+  background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
   border: 1px solid var(--border);
   gap: 8px;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .summary-item {
   flex: 1;
@@ -879,18 +890,20 @@ strong.down { color: var(--red); }
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), #e07c0f);
   color: #000;
   border: none;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(247,147,26,0.4);
+  box-shadow: 0 4px 20px rgba(247,147,26,0.45);
   z-index: 999;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.25s;
 }
+.fab-add-watch:hover { box-shadow: 0 6px 24px rgba(247,147,26,0.55); }
 .fab-add-watch:active { transform: scale(0.92); box-shadow: 0 2px 8px rgba(247,147,26,0.3); }
+.fab-add-watch.fab-hidden { opacity: 0; pointer-events: none; transform: scale(0.8); }
 
 /* #endregion */
 
@@ -914,7 +927,8 @@ strong.down { color: var(--red); }
     .market-sub-tabs { padding: 0 12px 12px; }
     .sub-tab-btn { font-size: 11px; padding: 6px 0; }
     .search-bar { padding: 0 12px 10px; }
-    .search-input { padding: 10px 12px; font-size: 13px; }
+    .search-input { padding: 10px 12px 10px 36px; font-size: 13px; }
+    .search-icon { left: 26px; }
     .coin-rank { width: 22px; font-size: 10px; }
     .coin-icon { width: 28px; height: 28px; }
     .coin-sym { font-size: 13px; }
