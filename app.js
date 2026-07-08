@@ -1251,8 +1251,26 @@ function renderMarket() {
                 filtered = filtered.slice(0, 100);
         }
     }
-    if (!filtered.length) {
+    if (!filtered.length && allCoins.length) {
         list.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
+        return;
+    }
+    if (!filtered.length) {
+        list.innerHTML = Array(8).fill(`
+                <div class="market-skeleton">
+                    <div class="market-skeleton-left">
+                        <div class="market-skeleton-icon"></div>
+                        <div class="market-skeleton-text">
+                            <div class="market-skeleton-line"></div>
+                            <div class="market-skeleton-line"></div>
+                        </div>
+                    </div>
+                    <div class="market-skeleton-right">
+                        <div class="market-skeleton-block"></div>
+                        <div class="market-skeleton-block"></div>
+                    </div>
+                </div>
+            `).join('');
         return;
     }
     list.innerHTML = filtered.map(c => {
