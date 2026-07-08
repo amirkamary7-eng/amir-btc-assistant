@@ -1850,7 +1850,7 @@ function deleteAnalysis(id, event) {
 async function openCoinDetail(symbol) {
     const coin = allCoins.find(c => c.symbol === symbol);
     if (!coin) return;
-    document.getElementById('detail-coin-title').innerText = `${symbol} / USDT`;
+    document.getElementById('detail-coin-title').innerText = currentLang === 'fa' && coin.name ? `${coin.name} (${symbol})` : `${symbol} / USDT`;
     const modal = document.getElementById('coin-detail-modal');
     modal.style.display = 'flex';
 
