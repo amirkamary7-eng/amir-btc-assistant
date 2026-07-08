@@ -1185,6 +1185,11 @@ function renderSummary() {
     const domEl = document.getElementById('btc-dom');
     if (!mcapEl) return;
 
+    // Remove skeleton loading state
+    mcapEl.classList.remove('loading');
+    volEl?.classList.remove('loading');
+    domEl?.classList.remove('loading');
+
     if (globalMarketData) {
         mcapEl.textContent = '$' + formatLargeNumber(globalMarketData.totalMarketCap);
         volEl.textContent = '$' + formatLargeNumber(globalMarketData.totalVolume);

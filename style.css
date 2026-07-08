@@ -768,6 +768,17 @@ strong.down { color: var(--red); }
   white-space: nowrap;
   direction: ltr;
   font-variant-numeric: tabular-nums;
+  min-width: 60px;
+}
+.summary-value.loading {
+  color: transparent !important;
+  background: linear-gradient(90deg, rgba(255,255,255,0.06) 25%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.06) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+  border-radius: 4px;
+  min-width: 48px;
+  min-height: 16px;
+  display: inline-block;
 }
 .summary-divider {
   width: 1px;
