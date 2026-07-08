@@ -329,8 +329,10 @@ const i18n = {
         ticket_error: 'خطا در ارسال تیکت. لطفاً دوباره تلاش کنید.',
         ticket_reply_error: 'خطا در ارسال پاسخ. لطفاً دوباره تلاش کنید.',
         ticket_sent: 'تیکت با موفقیت ارسال شد', ticket_admin: 'ادمین', ticket_you: 'شما',
-        cal_today: 'امروز', cal_tomorrow: 'فردا', cal_impact_high: 'بالا', cal_impact_med: 'متوسط',
+        cal_today: 'امروز', cal_tomorrow: 'فردا', cal_day_after: 'پس‌فردا', cal_past: 'گذشته',
+        cal_impact_high: 'بالا', cal_impact_med: 'متوسط', cal_impact_low: 'کم',
         cal_cpi: 'نرخ تورم (CPI)', cal_fed: 'سخنرانی رئیس فدرال رزرو', cal_pmi: 'شاخص مدیران خرید (PMI)',
+        cal_loading: 'در حال بارگذاری تقویم...', cal_empty: 'رویدادی موجود نیست',
         about_version: 'نسخه 1.0.0', about_desc: 'دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر.',
         official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
         price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h',
@@ -383,8 +385,10 @@ const i18n = {
         ticket_error: 'Failed to submit ticket. Please try again.',
         ticket_reply_error: 'Failed to send reply. Please try again.',
         ticket_sent: 'Ticket submitted successfully', ticket_admin: 'Admin', ticket_you: 'You',
-        cal_today: 'Today', cal_tomorrow: 'Tomorrow', cal_impact_high: 'High', cal_impact_med: 'Medium',
+        cal_today: 'Today', cal_tomorrow: 'Tomorrow', cal_day_after: 'Day After', cal_past: 'Past',
+        cal_impact_high: 'High', cal_impact_med: 'Medium', cal_impact_low: 'Low',
         cal_cpi: 'Inflation Rate (CPI)', cal_fed: 'Fed Chair Speech', cal_pmi: 'Purchasing Managers Index (PMI)',
+        cal_loading: 'Loading calendar...', cal_empty: 'No events available',
         about_version: 'Version 1.0.0',
         about_desc: 'Smart trading assistant connected to global exchange APIs.',
         official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
@@ -758,10 +762,74 @@ async function loadCalendarEvents(force = false) {
         calendarEvents = data.events || [];
     } catch (e) {
         console.warn('loadCalendarEvents:', e);
+        calendarEvents = [];
     } finally {
         calendarLoading = false;
     }
     return calendarEvents;
+}
+
+/**
+ * رویداد تقویم را به بخش‌های امروز/فردا/پس‌فردا/گذشته گروه‌بندی و مرتب می‌کند.
+ * زمان‌ها به منطقه زمانی کاربر تبدیل می‌شوند.
+ */
+function groupCalendarEvents(events) {
+    const now = new Date();
+    const userTz = now.getTimezoneOffset(); // minutes offset from UTC
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+    const dayAfterStart = new Date(todayStart.getTime() + 2 * 86400000);
+
+    const groups = { today: [], tomorrow: [], dayAfter: [], past: [] };
+
+    events.forEach(e => {
+        let eventDate = null;
+        if (e.timestamp) {
+            eventDate = new Date(e.timestamp);
+        }
+        if (!eventDate || isNaN(eventDate.getTime())) {
+            groups.past.push(e);
+            return;
+        }
+
+        const eventLocal = new Date(eventDate.getTime() - userTz * 60000);
+        const eventDay = new Date(eventLocal.getFullYear(), eventLocal.getMonth(), eventLocal.getDate());
+
+        if (eventDay.getTime() === todayStart.getTime()) {
+            groups.today.push(e);
+        } else if (eventDay.getTime() === tomorrowStart.getTime()) {
+            groups.tomorrow.push(e);
+        } else if (eventDay.getTime() === dayAfterStart.getTime()) {
+            groups.dayAfter.push(e);
+        } else if (eventDay < tomorrowStart) {
+            groups.past.push(e);
+        } else {
+            groups.dayAfter.push(e);
+        }
+    });
+
+    return groups;
+}
+
+/**
+ * زمان ISO رویداد را به فرمت محلی تبدیل می‌کند.
+ * خروجی مثال: "14:30" یا "8 July - 16:00"
+ */
+function formatCalendarTime(timestamp) {
+    if (!timestamp) return '';
+    const d = new Date(timestamp);
+    if (isNaN(d.getTime())) return '';
+    const now = new Date();
+    const userTz = now.getTimezoneOffset();
+    const local = new Date(d.getTime() - userTz * 60000);
+    const hh = String(local.getHours()).padStart(2, '0');
+    const mm = String(local.getMinutes()).padStart(2, '0');
+    const day = local.getDate();
+    const monthNames = currentLang === 'fa'
+        ? ['ژانویه','فوریه','مارس','آوریل','مه','ژوئن','ژوئیه','اوت','سپتامبر','اکتبر','نوامبر','دسامبر']
+        : ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthName = monthNames[local.getMonth()];
+    return { time: `${hh}:${mm}`, dayStr: `${day} ${monthName}` };
 }
 
 /**
@@ -1363,27 +1431,61 @@ function renderNews(category) {
     else if (category === 'economy') filtered = filtered.filter(n => n.category === 'economy');
     else if (category === 'forex') filtered = filtered.filter(n => n.category === 'forex');
     else if (category === 'calendar') {
+        // Show skeleton while loading
+        if (calendarLoading) {
+            container.innerHTML = Array(5).fill(`
+                <div class="news-skeleton" style="height:56px;">
+                    <div class="news-skeleton-content" style="width:100%;">
+                        <div class="news-skeleton-line" style="width:70%;"></div>
+                        <div class="news-skeleton-line" style="width:50%;"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
         loadCalendarEvents().then(events => {
             if (!events.length) {
-                container.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
+                container.innerHTML = `<div class="empty-state">${t('cal_empty')}</div>`;
                 return;
             }
+            const groups = groupCalendarEvents(events);
             const statusLabel = { past: t('cal_status_past'), live: t('cal_status_live'), upcoming: t('cal_status_upcoming') };
-            container.innerHTML = events.map(e => `
+            const impactLabel = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
+
+            function renderCard(e, timePrefix) {
+                const ft = formatCalendarTime(e.timestamp);
+                const timeDisplay = ft.time || '';
+                const dayDisplay = timePrefix || (ft.dayStr ? `${ft.dayStr}` : '');
+                const timeText = dayDisplay ? `${dayDisplay} - ${timeDisplay}` : timeDisplay;
+                return `
                 <div class="eco-event-card ${e.status || 'upcoming'}">
                     <div class="eco-event-left">
                         <span class="eco-flag-emoji">${e.flag || '🏳️'}</span>
                         <div>
-                            <div class="eco-event-title">${e.title}</div>
-                            <div class="eco-event-meta">${e.date || ''} • ${e.time || ''} • ${e.country || ''}</div>
+                            <div class="eco-event-title">${escapeHtml(e.title)}</div>
+                            <div class="eco-event-meta">${timeText} • ${e.country || ''}</div>
                         </div>
                     </div>
                     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-                        <span class="eco-impact eco-impact-${e.impact || 'medium'}">${e.impact === 'high' ? t('cal_impact_high') : t('cal_impact_med')}</span>
+                        <span class="eco-impact eco-impact-${e.impact || 'medium'}">${impactLabel[e.impact] || impactLabel.medium}</span>
                         <span class="eco-status eco-status-${e.status || 'upcoming'}">${statusLabel[e.status] || e.status}</span>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }
+
+            function renderSection(title, events, timePrefix) {
+                if (!events.length) return '';
+                return `
+                <div class="cal-section">
+                    <div class="cal-section-header">${title}</div>
+                    ${events.map(e => renderCard(e, timePrefix)).join('')}
+                </div>`;
+            }
+
+            container.innerHTML =
+                renderSection(t('cal_today'), groups.today, '') +
+                renderSection(t('cal_tomorrow'), groups.tomorrow, '') +
+                renderSection(t('cal_day_after'), groups.dayAfter, '') +
+                renderSection(t('cal_past'), groups.past, '');
         });
         return;
     }
@@ -2500,7 +2602,13 @@ function startPolling() {
         if (activePage === 'news-page') {
             loadNews();
             // Calendar auto-refresh (§7#7): refresh every 30s when on news page
-            loadCalendarEvents(true);
+            const activeTab = document.querySelector('.news-tab.active')?.dataset?.news;
+            if (activeTab === 'calendar') {
+                calendarEvents = [];
+                loadCalendarEvents(true).then(events => renderNews('calendar'));
+            } else {
+                loadCalendarEvents(true);
+            }
         }
     }, 30000);
     setInterval(checkAlerts, 15000);

@@ -749,6 +749,13 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* #region Economic calendar enhancements */
 /* این بخش استایل‌های مرتبط با "Economic calendar enhancements" را در خود نگه می‌دارد. */
 /* ============================================================================ */
+.cal-section { margin-bottom: 16px; }
+.cal-section-header {
+    font-size: 13px; font-weight: 700; color: var(--accent);
+    padding: 6px 4px 8px; border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+}
+.cal-section:last-child .cal-section-header { border-bottom-color: transparent; }
 .eco-event-card.past { opacity: 0.45; }
 .eco-event-card.live { border-color: var(--green); box-shadow: 0 0 12px rgba(0,200,150,0.15); }
 .eco-event-card.upcoming { opacity: 1; }
@@ -756,6 +763,7 @@ body.user-loading .profile-loading-target.skeleton-text {
 .eco-status-past { background: rgba(255,255,255,0.06); color: var(--text-sub); }
 .eco-status-live { background: rgba(0,200,150,0.15); color: var(--green); }
 .eco-status-upcoming { background: rgba(247,147,26,0.12); color: var(--accent); }
+.eco-impact-low { background: rgba(100,116,139,0.1); color: var(--text-dim); }
 .eco-flag-emoji { font-size: 20px; margin-left: 8px; }
 .chart-exchange-badge { font-size: 10px; color: var(--text-sub); text-align: center; margin-bottom: 6px; }
 
