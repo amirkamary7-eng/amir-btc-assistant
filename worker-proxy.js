@@ -1351,9 +1351,19 @@ async function fetchSpotPriceUsd(env, symbol) {
 const CALENDAR_CACHE_KEY = 'calendar:events';
 const FARSI_NEWS_CACHE_KEY = 'news:farsi';
 
+// News RSS sources with category metadata.
+// All 7 sources verified working (HTTP 200) from prior testing.
+// Rejected: CryptoPanic(403), DailyFX(403), FXStreet(403), Yahoo Finance(429)
 const NEWS_RSS_SOURCES = [
-  ['https://cointelegraph.com/rss', 'کوین‌تلگراف'],
-  ['https://www.coindesk.com/arc/outboundfeeds/rss/', 'کوین‌دسک'],
+  // ── Crypto ───────────────────────────────────────────────────────────
+  { url: 'https://cointelegraph.com/rss', name: 'کوین‌تلگراف', category: 'crypto' },
+  { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', name: 'کوین‌دسک', category: 'crypto' },
+  { url: 'https://decrypt.co/feed', name: 'دیکریپت', category: 'crypto' },
+  // ── Forex ────────────────────────────────────────────────────────────
+  { url: 'https://www.actionforex.com/rss/forex-news/', name: 'اکشن‌فارکس', category: 'forex' },
+  { url: 'https://www.investing.com/rss/news_301.rss', name: 'اینستینگ', category: 'forex' },
+  // ── Economy ──────────────────────────────────────────────────────────
+  { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114', name: 'CNBC', category: 'economy' },
 ];
 
 const COUNTRY_FLAGS = {
@@ -1551,39 +1561,47 @@ async function translateToFarsi(text, env) {
   }
 }
 
-async function fetchRawNewsRss() {
-  for (const [url, sourceName] of NEWS_RSS_SOURCES) {
-    try {
+/**
+ * Fetch ALL RSS sources in parallel. Returns array of { rssText, sourceName, category }
+ * for each source that responded successfully.
+ */
+async function fetchAllNewsRss() {
+  const results = await Promise.allSettled(
+    NEWS_RSS_SOURCES.map(async (source) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0',
-          Accept: 'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      const rssText = await response.text();
-      if (response.ok && rssText.includes('<item>')) {
-        return { rssText, sourceName };
+      try {
+        const response = await fetch(source.url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)',
+            Accept: 'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const rssText = await response.text();
+        if (response.ok && rssText.includes('<item>')) {
+          return { rssText, sourceName: source.name, category: source.category };
+        }
+      } catch {
+        // Source failed — will be filtered out below
+      } finally {
+        clearTimeout(timeoutId);
       }
-    } catch {
-      // به منبع بعدی RSS می‌رویم.
-    }
-  }
-
-  return { rssText: null, sourceName: null };
+      return null;
+    })
+  );
+  return results
+    .filter((r) => r.status === 'fulfilled' && r.value !== null)
+    .map((r) => r.value);
 }
 
-async function buildFarsiNewsArticles(rssText, sourceName, env) {
+async function buildFarsiNewsArticles(rssText, sourceName, category, env) {
   const items = parseRssItems(rssText);
   if (items.length === 0) return [];
 
   // Parallel translation — all titles + descriptions translated concurrently
-  // Reduces latency from ~10s (sequential) to ~1s (parallel)
   const allTranslations = await Promise.all(
     items.flatMap((item) => [
       translateToFarsi(item.title || 'بدون عنوان', env),
@@ -1601,6 +1619,7 @@ async function buildFarsiNewsArticles(rssText, sourceName, env) {
       description: String(translatedDescription || items[i].description || '').replace(/\n/g, ' ').trim(),
       time_ago: parseRelativeTime(items[i].pubDate),
       source: sourceName,
+      category: category || 'crypto',
       image: items[i].image,
       url: items[i].url,
     });
@@ -1609,54 +1628,73 @@ async function buildFarsiNewsArticles(rssText, sourceName, env) {
   return articles.filter((item) => item.title || item.description);
 }
 
-async function fetchFarsiNews(env) {
-  const cachedNews = await readAppCache(env, FARSI_NEWS_CACHE_KEY);
+async function fetchFarsiNews(env, categoryFilter) {
+  // Cache key includes category filter for per-category caching
+  const cacheKey = categoryFilter
+    ? `${FARSI_NEWS_CACHE_KEY}:${categoryFilter}`
+    : FARSI_NEWS_CACHE_KEY;
+
+  const cachedNews = await readAppCache(env, cacheKey);
   if (cachedNews) {
     try {
-      return {
-        status: 'success',
-        source: 'redis_cache',
-        data: JSON.parse(cachedNews),
-      };
+      const parsed = JSON.parse(cachedNews);
+      // If a category filter is requested, apply it to cached data too
+      const data = categoryFilter
+        ? parsed.filter((a) => a.category === categoryFilter)
+        : parsed;
+      return { status: 'success', source: 'cache', data };
     } catch {
-      // cache خراب نادیده گرفته می‌شود تا داده تازه جایگزین شود.
+      // Corrupt cache — fall through to live fetch
     }
   }
 
-  const { rssText, sourceName } = await fetchRawNewsRss();
-  if (!rssText || !sourceName) {
-    return {
-      status: 'success',
-      source: 'rss_unavailable',
-      data: [],
-    };
+  // Fetch ALL sources in parallel
+  const sources = await fetchAllNewsRss();
+  if (sources.length === 0) {
+    return { status: 'success', source: 'rss_unavailable', data: [] };
   }
 
   try {
-    const articles = await buildFarsiNewsArticles(rssText, sourceName, env);
-    if (articles.length > 0) {
+    // Build articles from all sources in parallel (translate within each source)
+    const allArticles = (
+      await Promise.all(
+        sources.map((s) => buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env))
+      )
+    ).flat();
+
+    // Deduplicate by URL (same article from multiple sources)
+    const seen = new Set();
+    const deduped = allArticles.filter((a) => {
+      if (!a.url || seen.has(a.url)) return false;
+      seen.add(a.url);
+      return true;
+    });
+
+    if (deduped.length > 0) {
+      // Cache the full (unfiltered) list
       await writeAppCache(
         env,
         FARSI_NEWS_CACHE_KEY,
-        JSON.stringify(articles),
+        JSON.stringify(deduped),
         getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
       );
 
+      // Apply category filter if requested
+      const data = categoryFilter
+        ? deduped.filter((a) => a.category === categoryFilter)
+        : deduped;
+
       return {
         status: 'success',
-        source: `${sourceName}_live`,
-        data: articles,
+        source: `${sources.map((s) => s.sourceName).join(', ')}_live`,
+        data,
       };
     }
   } catch {
-    // در شکست parse/translate، fallback قراردادی برگردانده می‌شود.
+    // Parse/translate failure
   }
 
-  return {
-    status: 'success',
-    source: 'rss_unavailable',
-    data: [],
-  };
+  return { status: 'success', source: 'rss_unavailable', data: [] };
 }
 
 function parseCalendarDate(dateString) {
@@ -2088,8 +2126,15 @@ async function handleCalendarEvents(env) {
   }, {}, env);
 }
 
-async function handleFarsiNews(env) {
-  return jsonResponse(await fetchFarsiNews(env), {}, env);
+async function handleFarsiNews(request, env) {
+  const url = new URL(request.url);
+  const category = url.searchParams.get('category');
+  // Only allow known categories
+  const validCategories = ['crypto', 'forex', 'economy', 'all'];
+  const categoryFilter = category && validCategories.includes(category) && category !== 'all'
+    ? category
+    : null;
+  return jsonResponse(await fetchFarsiNews(env, categoryFilter), {}, env);
 }
 
 async function handleTelegramWebhook(request, env) {
@@ -2434,7 +2479,7 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
-        return await handleFarsiNews(env);
+        return await handleFarsiNews(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
