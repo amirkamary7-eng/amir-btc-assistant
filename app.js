@@ -1267,6 +1267,9 @@ function filterCoinList() {
 //#region اخبار و تقویم اقتصادی
 // ============================================================================
 let newsCache = [];
+let newsPage = 1;
+let newsHasMore = false;
+let newsTotalCount = 0;
 
 let displayedNews = [];
 
@@ -1281,16 +1284,22 @@ let displayedNews = [];
  * ورودی: پارامترهای `force = false` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
-async function loadNews(force = false) {
+async function loadNews(force = false, append = false) {
     try {
-        if (!force) {
+        if (!force && !append) {
             const cached = Cache.get('news');
-            if (cached) { newsCache = cached; renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all'); return; }
+            if (cached) {
+                newsCache = cached;
+                renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
+                // Stale-While-Revalidate: show cached, refresh in background
+                loadNews(true);
+                return;
+            }
         }
-        // Show skeleton loader while fetching (§6.3)
+        // Show skeleton loader while fetching (§6.3) — only on initial load
         const container = document.getElementById('news-list');
         const activeTab = document.querySelector('.news-tab.active')?.dataset?.news || 'all';
-        if (activeTab !== 'calendar') {
+        if (!append && activeTab !== 'calendar') {
             container.innerHTML = Array(4).fill(`
                 <div class="news-skeleton">
                     <div class="news-skeleton-img"></div>
@@ -1302,11 +1311,13 @@ async function loadNews(force = false) {
             `).join('');
         }
 
+        const page = append ? newsPage + 1 : 1;
         let articles = [];
+        let hasMore = false;
+        let total = 0;
 
-        // Backend handles RSS fetching, translation, and categories
         try {
-            const res = await fetch(`${API_BASE}/api/farsi-news`);
+            const res = await fetch(`${API_BASE}/api/farsi-news?page=${page}&limit=30`);
             const json = await res.json();
             if (json.data?.length) {
                 articles = json.data.map(a => ({
@@ -1315,15 +1326,30 @@ async function loadNews(force = false) {
                     category: a.category || 'crypto'
                 }));
             }
+            hasMore = json.pagination?.hasMore || false;
+            total = json.pagination?.total || 0;
         } catch (e) { console.warn('Farsi news API error:', e); }
 
-        newsCache = articles.slice(0, 30);
+        if (append) {
+            newsCache = [...newsCache, ...articles];
+        } else {
+            newsCache = articles;
+        }
+        newsPage = page;
+        newsHasMore = hasMore;
+        newsTotalCount = total;
+
         Cache.set('news', newsCache, 300);
         renderNews(activeTab);
     } catch (e) {
         console.error('News error:', e);
         document.getElementById('news-list').innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
     }
+}
+
+function loadMoreNews() {
+    if (!newsHasMore) return;
+    loadNews(false, true);
 }
 /**
  * اخبار را در رابط کاربری رندر می‌کند.
@@ -1374,7 +1400,11 @@ function renderNews(category) {
                 <div class="news-source">${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</div>
             </div>
         </div>
-    `).join('');
+    `).join('') + (newsHasMore && category === 'all' ? `
+        <button class="load-more-btn" onclick="loadMoreNews()">
+            ${t('load_more') || 'نمایش بیشتر'}
+        </button>
+    ` : '');
 }
 /**
  * نمایش یا وضعیت اخبار تب را تعویض می‌کند.
