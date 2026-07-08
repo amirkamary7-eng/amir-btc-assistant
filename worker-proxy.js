@@ -1352,8 +1352,9 @@ const CALENDAR_CACHE_KEY = 'calendar:events';
 const FARSI_NEWS_CACHE_KEY = 'news:farsi';
 
 // News RSS sources with category metadata.
-// All 7 sources verified working (HTTP 200) from prior testing.
+// All English sources verified working (HTTP 200) from prior testing.
 // Rejected: CryptoPanic(403), DailyFX(403), FXStreet(403), Yahoo Finance(429)
+// Persian sources: may be geo-blocked from CF Workers — silently skipped on failure.
 const NEWS_RSS_SOURCES = [
   // ── Crypto ───────────────────────────────────────────────────────────
   { url: 'https://cointelegraph.com/rss', name: 'کوین‌تلگراف', category: 'crypto' },
@@ -1364,6 +1365,11 @@ const NEWS_RSS_SOURCES = [
   { url: 'https://www.investing.com/rss/news_301.rss', name: 'اینستینگ', category: 'forex' },
   // ── Economy ──────────────────────────────────────────────────────────
   { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114', name: 'CNBC', category: 'economy' },
+  // ── Persian (general economy/finance) ────────────────────────────────
+  // No translation needed — articles already in Farsi.
+  // Skipped automatically by fetchAllNewsRss() if source is unavailable.
+  { url: 'https://www.irna.ir/rss', name: 'خبرگزاری ایرنا', category: 'economy', skipTranslate: true },
+  { url: 'https://www.isna.ir/rss', name: 'خبرگزاری ایسنا', category: 'economy', skipTranslate: true },
 ];
 
 const COUNTRY_FLAGS = {
@@ -1582,7 +1588,7 @@ async function fetchAllNewsRss() {
         clearTimeout(timeoutId);
         const rssText = await response.text();
         if (response.ok && rssText.includes('<item>')) {
-          return { rssText, sourceName: source.name, category: source.category };
+          return { rssText, sourceName: source.name, category: source.category, skipTranslate: !!source.skipTranslate };
         }
       } catch {
         // Source failed — will be filtered out below
@@ -1597,17 +1603,26 @@ async function fetchAllNewsRss() {
     .map((r) => r.value);
 }
 
-async function buildFarsiNewsArticles(rssText, sourceName, category, env) {
+async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTranslate = false) {
   const items = parseRssItems(rssText);
   if (items.length === 0) return [];
 
-  // Parallel translation — all titles + descriptions translated concurrently
-  const allTranslations = await Promise.all(
-    items.flatMap((item) => [
-      translateToFarsi(item.title || 'بدون عنوان', env),
-      translateToFarsi(item.description || '', env),
-    ])
-  );
+  let allTranslations;
+  if (skipTranslate) {
+    // Persian sources — no translation needed
+    allTranslations = items.map((item) => [
+      item.title || 'بدون عنوان',
+      item.description || '',
+    ]);
+  } else {
+    // Parallel translation — all titles + descriptions translated concurrently
+    allTranslations = await Promise.all(
+      items.flatMap((item) => [
+        translateToFarsi(item.title || 'بدون عنوان', env),
+        translateToFarsi(item.description || '', env),
+      ])
+    );
+  }
 
   const articles = [];
   for (let i = 0; i < items.length; i++) {
@@ -1658,7 +1673,7 @@ async function fetchFarsiNews(env, categoryFilter) {
     // Build articles from all sources in parallel (translate within each source)
     const allArticles = (
       await Promise.all(
-        sources.map((s) => buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env))
+        sources.map((s) => buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env, s.skipTranslate))
       )
     ).flat();
 
@@ -2501,6 +2516,10 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
         return await handleFarsiNews(request, env);
       }
+
+      // TODO (Phase 8 future): /api/news/stream SSE endpoint for breaking news push.
+      // Requires Durable Object for true WebSocket, or simple SSE stream.
+      // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
 
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
         return await analysisHandlers.handleList(request, env);
