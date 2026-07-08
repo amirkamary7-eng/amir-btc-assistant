@@ -406,6 +406,15 @@
                 <button class="modal-close-btn" onclick="closeCoinDetail()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="detail-stats" id="detail-stats"></div>
+            <div class="tv-tf-bar" id="tv-tf-bar" role="group" aria-label="Chart timeframe">
+                <button class="tv-tf-btn" data-interval="1" onclick="switchTvTimeframe('1', this)" data-i18n="tf_1m">1m</button>
+                <button class="tv-tf-btn" data-interval="5" onclick="switchTvTimeframe('5', this)" data-i18n="tf_5m">5m</button>
+                <button class="tv-tf-btn" data-interval="15" onclick="switchTvTimeframe('15', this)" data-i18n="tf_15m">15m</button>
+                <button class="tv-tf-btn active" data-interval="60" onclick="switchTvTimeframe('60', this)" data-i18n="tf_1h">1H</button>
+                <button class="tv-tf-btn" data-interval="240" onclick="switchTvTimeframe('240', this)" data-i18n="tf_4h">4H</button>
+                <button class="tv-tf-btn" data-interval="D" onclick="switchTvTimeframe('D', this)" data-i18n="tf_1d">1D</button>
+                <button class="tv-tf-btn" data-interval="W" onclick="switchTvTimeframe('W', this)" data-i18n="tf_1w">1W</button>
+            </div>
             <div id="detail-chart" class="detail-chart"></div>
             <div class="alert-section">
                 <div class="alert-section-header">

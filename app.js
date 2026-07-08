@@ -282,6 +282,8 @@ const tabLoaded = { dashboard: false, market: false, analysis: false, news: fals
 let calendarEvents = [];
 let calendarLoading = false;
 let currentTvWidget = null; // P1-5: track TradingView widget for cleanup
+let currentTvInterval = '60';
+let currentTvChartInfo = null;
 
 //#endregion
 
@@ -340,6 +342,7 @@ const i18n = {
         summary_mcap: 'مارکت‌کپ کل', summary_volume: 'حجم ۲۴h', summary_btc_dom: 'سلطه BTC',
         price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h', rank: 'رتبه', supply: 'عرضه در گردش',
         view_source: 'مشاهده منبع', guest: 'کاربر میهمان', required_fields: 'فیلدهای الزامی را پر کنید',
+        tf_1m: '1د', tf_5m: '5د', tf_15m: '15د', tf_1h: '1س', tf_4h: '4س', tf_1d: '1ر', tf_1w: '1ه',
         invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.',
         online_users: 'کاربر آنلاین', cal_status_past: 'گذشته', cal_status_live: 'زنده', cal_status_upcoming: 'آینده',
         price_reached: 'قیمت به', ai_title: 'دستیار هوشمند', ai_messages_today: 'پیام امروز',
@@ -398,6 +401,7 @@ const i18n = {
         summary_mcap: 'Total Market Cap', summary_volume: '24h Volume', summary_btc_dom: 'BTC Dominance',
         price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume', rank: 'Rank', supply: 'Circulating Supply',
         view_source: 'View source', guest: 'Guest User', required_fields: 'Please fill required fields',
+        tf_1m: '1m', tf_5m: '5m', tf_15m: '15m', tf_1h: '1H', tf_4h: '4H', tf_1d: '1D', tf_1w: '1W',
         invalid_price: 'Enter a valid price', copied: 'Copied!', copy_ref_msg: 'Referral link copied.',
         online_users: 'users online', cal_status_past: 'Past', cal_status_live: 'Live', cal_status_upcoming: 'Upcoming',
         price_reached: 'Price reached', ai_title: 'AI Assistant', ai_messages_today: 'messages today',
@@ -1888,34 +1892,10 @@ async function openCoinDetail(symbol) {
     chartContainer.innerHTML = '<div class="empty-state">Loading chart...</div>';
 
     const chartInfo = await resolveChartSymbol(symbol);
-    // P1-5: destroy previous TradingView widget to prevent memory leak
-    if (currentTvWidget) {
-        try { currentTvWidget.remove(); } catch {}
-        currentTvWidget = null;
-    }
-    chartContainer.innerHTML = '';
-    if (typeof TradingView !== 'undefined' && chartInfo.found) {
-        if (chartInfo.exchange) {
-            const badge = document.createElement('div');
-            badge.className = 'chart-exchange-badge';
-            badge.innerText = chartInfo.exchange.toUpperCase();
-            chartContainer.parentNode.insertBefore(badge, chartContainer);
-        }
-        currentTvWidget = new TradingView.widget({
-            width: '100%',
-            height: '100%',
-            symbol: chartInfo.tv_symbol,
-            interval: '60',
-            theme: 'dark',
-            style: '1',
-            locale: 'en',
-            container_id: 'detail-chart',
-            hide_side_toolbar: true,
-            disabled_features: ['header_widget_dom_node']
-        });
-    } else {
-        chartContainer.innerHTML = `<div class="empty-state">${t('chart_unavailable')}</div>`;
-    }
+    currentTvChartInfo = chartInfo;
+    currentTvInterval = '60';
+    updateTvTimeframeUI();
+    createTradingViewWidget(chartInfo);
 
     const supplyStr = coin.supply ? formatLargeNumber(coin.supply) : '--';
     const rankVal = Number(coin.rank) || 0;
@@ -1930,17 +1910,67 @@ async function openCoinDetail(symbol) {
     renderActiveAlerts(symbol);
 }
 /**
+ * ویجت TradingView را با تنظیمات فعلی می‌سازد.
+ * ورودی: پارامترهای `chartInfo` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
+function createTradingViewWidget(chartInfo) {
+    const chartContainer = document.getElementById('detail-chart');
+    if (currentTvWidget) {
+        try { currentTvWidget.remove(); } catch {}
+        currentTvWidget = null;
+    }
+    chartContainer.innerHTML = '';
+    if (typeof TradingView !== 'undefined' && chartInfo && chartInfo.found) {
+        if (chartInfo.exchange) {
+            const badge = document.createElement('div');
+            badge.className = 'chart-exchange-badge';
+            badge.innerText = chartInfo.exchange.toUpperCase();
+            chartContainer.parentNode.insertBefore(badge, chartContainer);
+        }
+        currentTvWidget = new TradingView.widget({
+            width: '100%',
+            height: '100%',
+            symbol: chartInfo.tv_symbol,
+            interval: currentTvInterval,
+            theme: 'dark',
+            style: '1',
+            locale: 'en',
+            container_id: 'detail-chart',
+            hide_side_toolbar: true,
+            disabled_features: ['header_widget_dom_node']
+        });
+    } else {
+        chartContainer.innerHTML = `<div class="empty-state">${t('chart_unavailable')}</div>`;
+    }
+}
+/**
+ * تایم‌فریم نمودار را تغییر می‌دهد.
+ * ورودی: پارامترهای `interval, btn` را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ */
+function switchTvTimeframe(interval, btn) {
+    currentTvInterval = interval;
+    updateTvTimeframeUI();
+    createTradingViewWidget(currentTvChartInfo);
+}
+function updateTvTimeframeUI() {
+    document.querySelectorAll('.tv-tf-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.interval === currentTvInterval);
+    });
+}
+/**
  * ارز جزئیات را می‌بندد.
  * ورودی: بدون ورودی.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function closeCoinDetail() {
     document.querySelector('.chart-exchange-badge')?.remove();
-    // P1-5: destroy TradingView widget on modal close
     if (currentTvWidget) {
         try { currentTvWidget.remove(); } catch {}
         currentTvWidget = null;
     }
+    currentTvChartInfo = null;
     document.getElementById('coin-detail-modal').style.display = 'none';
 }
 /**
