@@ -628,7 +628,7 @@ strong.down { color: var(--red); }
 /* این بخش استایل‌های نمودار، آمار کوین و ناحیه هشدار قیمت را نگه می‌دارد. */
 /* ============================================================================ */
 .detail-chart { height: 260px; border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
-.detail-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
+.detail-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 0 0 12px; }
 .detail-stats div { background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 8px; }
 .detail-stats span { display: block; font-size: 11px; color: var(--text-sub); }
 .detail-stats strong { font-size: 14px; font-variant-numeric: tabular-nums; }
