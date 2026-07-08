@@ -245,3 +245,34 @@ Stage Summary:
 - No pull-to-refresh gesture (only programmatic refresh)
 - CoinCap direct fallback still used when backend unavailable (rate limits possible)
 - Next priority: improve coin detail modal, add market cap/volume to forex pairs
+
+---
+Task ID: cron-qa-detail-refresh-header
+Agent: cron-qa
+Task: Coin detail modal improvements + market page header + refresh button
+
+Work Log:
+- Coin detail modal: added icon (40px), rank badge, watchlist star button in header
+- New functions: updateDetailWatchBtn(), toggleWatchlistFromDetail()
+- Market page: added title header + circular refresh button with spin animation
+- refreshMarketData() calls loadMarketData(true), button spins during load
+- Added @keyframes spin for refresh icon rotation
+- CSS: .detail-modal-header, .detail-modal-identity, .detail-watch-btn, .market-page-header, .market-refresh-btn
+- 360px: reduced header padding, smaller title font
+
+Stage Summary:
+- Commit: 92dcd9d
+- Tests: 109/109 pass
+- Browser QA: all new elements verified (header, icon, rank, watch btn, refresh btn, functions)
+
+### Current Project Status
+- Market page: title + refresh → summary → search → 3 main tabs → sub-tabs → list
+- Detail modal: icon + name + rank + watchlist star + stats grid + chart + alerts
+- All features: hierarchical tabs, unified search, forex, watchlist toast, count badges, refresh
+- Styling: dark glassmorphism, animations, mobile-first, RTL
+
+### Next Priority
+1. Improve home page watchlist section (card grid styling)
+2. Add 24h high/low to detail stats
+3. Implement pull-to-refresh gesture (touch events)
+4. Fix metals (XAU/XAG) forex prices — need alternative API
