@@ -1891,8 +1891,8 @@ async function openCoinDetail(symbol) {
     document.getElementById('detail-stats').innerHTML = `
         <div><span>${t('price')}</span><strong>$${coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6)}</strong></div>
         <div><span>${t('change_24h')}</span><strong class="${coin.changePercent24Hr >= 0 ? 'up' : 'down'}">${coin.changePercent24Hr >= 0 ? '+' : ''}${coin.changePercent24Hr.toFixed(2)}%</strong></div>
-        <div><span>${t('mcap')}</span><strong>$${(coin.marketCapUsd / 1e9).toFixed(2)}B</strong></div>
-        <div><span>${t('volume_24h')}</span><strong>$${(coin.volumeUsd24Hr / 1e6).toFixed(2)}M</strong></div>
+        <div><span>${t('mcap')}</span><strong>$${formatLargeNumber(coin.marketCapUsd)}</strong></div>
+        <div><span>${t('volume_24h')}</span><strong>$${formatLargeNumber(coin.volumeUsd24Hr)}</strong></div>
     `;
     renderActiveAlerts(symbol);
 }
