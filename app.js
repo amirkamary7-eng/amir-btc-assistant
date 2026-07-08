@@ -1268,102 +1268,14 @@ function filterCoinList() {
 // ============================================================================
 let newsCache = [];
 
-/**
- * متن را ترجمه می‌کند.
- * ورودی: پارامترهای `text, targetLang` را دریافت می‌کند.
- * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
- */
-async function translateText(text, targetLang) {
-    if (!text?.trim()) return text;
-    const tl = targetLang || (currentLang === 'fa' ? 'fa' : 'en');
-    try {
-        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${tl}&dt=t&q=${encodeURIComponent(text.substring(0, 500))}`;
-        const res = await fetch(url);
-        const data = await res.json();
-        return data[0]?.map(x => x[0]).join('') || text;
-    } catch { return text; }
-}
-
-/**
- * مقاله‌ها را ترجمه می‌کند.
- * ورودی: پارامترهای `articles` را دریافت می‌کند.
- * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
- */
-async function translateArticles(articles) {
-    if (currentLang !== 'fa') return articles;
-    const translated = [];
-    for (const a of articles.slice(0, 12)) {
-        const title = await translateText(a.title, 'fa');
-        const body = a.body ? await translateText(a.body, 'fa') : a.body;
-        translated.push({ ...a, title, body });
-    }
-    return translated;
-}
-
-/**
- * اخبار دسته‌بندی را تشخیص می‌دهد.
- * ورودی: پارامترهای `title, body` را دریافت می‌کند.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function detectNewsCategory(title, body) {
-    const text = `${title} ${body}`.toLowerCase();
-    if (/forex|dollar|eur\/usd|fed rate|interest rate|central bank|fx /.test(text)) return 'forex';
-    if (/economy|gdp|inflation|cpi|pmi|employment|recession|stock market|wall street/.test(text)) return 'economy';
-    return 'crypto';
-}
-
-/**
- * داده RSS آیتم‌ها را تجزیه و مقدار قابل استفاده استخراج می‌کند.
- * ورودی: پارامترهای `rssText, sourceName` را دریافت می‌کند.
- * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
- */
-function parseRssItems(rssText, sourceName) {
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(rssText, 'text/xml');
-    const items = xmlDoc.querySelectorAll('item');
-    const articles = [];
-    items.forEach(item => {
-        const title = item.querySelector('title')?.textContent || '';
-        const link = item.querySelector('link')?.textContent || '#';
-        const description = item.querySelector('description')?.textContent || '';
-        const imgMatch = description.match(/<img[^>]+src="([^">]+)"/);
-        const image = imgMatch ? imgMatch[1] : null;
-        const body = description.replace(/<[^>]*>/g, '').trim().substring(0, 200);
-        articles.push({
-            title: title.replace(/<[^>]*>/g, '').trim(),
-            source: sourceName,
-            image,
-            url: link,
-            body,
-            category: detectNewsCategory(title, body),
-            time: new Date(item.querySelector('pubDate')?.textContent || Date.now()).toLocaleString(currentLang === 'fa' ? 'fa-IR' : 'en-US')
-        });
-    });
-    return articles;
-}
-
-/**
- * RSS مقاله‌ها را از منبع داده دریافت می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
- */
-async function fetchRssArticles() {
-    const articles = [];
-    const sources = [
-        ['https://cointelegraph.com/rss', 'CoinTelegraph'],
-        ['https://www.coindesk.com/arc/outboundfeeds/rss/', 'CoinDesk'],
-        ['https://cryptopanic.com/feed/', 'CryptoPanic']
-    ];
-    for (const [url, name] of sources) {
-        try {
-            const rssText = await fetchWithProxy(url, { asText: true });
-            articles.push(...parseRssItems(rssText, name));
-        } catch (e) { console.warn(`${name} RSS error:`, e); }
-    }
-    return articles;
-}
-
 let displayedNews = [];
+
+// ============================================================================
+// NOTE (Phase 5): translateText, translateArticles, detectNewsCategory,
+// parseRssItems, fetchRssArticles — all removed.
+// Backend now handles: multi-source RSS, translation (CF Workers AI), categories.
+// Frontend only calls /api/farsi-news and uses the 'category' field directly.
+// ============================================================================
 /**
  * اخبار را از کش یا منابع راه‌دور دریافت می‌کند و فهرست خبرها را برای نمایش آماده می‌سازد.
  * ورودی: پارامترهای `force = false` را دریافت می‌کند.
@@ -1377,31 +1289,20 @@ async function loadNews(force = false) {
         }
         let articles = [];
 
-        if (currentLang === 'fa' && API_BASE) {
-            try {
-                const res = await fetch(`${API_BASE}/api/farsi-news`);
-                const json = await res.json();
-                if (json.data?.length) {
-                    articles = json.data.map(a => ({
-                        title: a.title, body: a.description, source: a.source,
-                        image: a.image, url: a.url, time: a.time_ago,
-                        category: detectNewsCategory(a.title, a.description || '')
-                    }));
-                }
-            } catch (e) { console.warn('Farsi news API error:', e); }
-        }
-
-        if (!articles.length) {
-            articles = await fetchRssArticles();
-            if (currentLang === 'fa' && articles.length) {
-                articles = await translateArticles(articles);
+        // Backend handles RSS fetching, translation, and categories
+        try {
+            const res = await fetch(`${API_BASE}/api/farsi-news`);
+            const json = await res.json();
+            if (json.data?.length) {
+                articles = json.data.map(a => ({
+                    title: a.title, body: a.description, source: a.source,
+                    image: a.image, url: a.url, time: a.time_ago,
+                    category: a.category || 'crypto'
+                }));
             }
-        }
+        } catch (e) { console.warn('Farsi news API error:', e); }
 
-        // §7#5, §8.2#10: placeholder اخبار جعلی حذف شد — در صورت عدم دسترسی،
-        // renderNews() خالی بودن اخبار را با empty-state نمایش می‌دهد.
-
-        newsCache = articles.slice(0, 20);
+        newsCache = articles.slice(0, 30);
         Cache.set('news', newsCache, 300);
         renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
     } catch (e) {
