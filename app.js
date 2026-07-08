@@ -343,7 +343,7 @@ const i18n = {
         summary_mcap: 'مارکت‌کپ کل', summary_volume: 'حجم ۲۴h', summary_btc_dom: 'سلطه BTC',
         price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h', rank: 'رتبه', supply: 'عرضه در گردش',
         view_source: 'مشاهده منبع', guest: 'کاربر میهمان', required_fields: 'فیلدهای الزامی را پر کنید',
-        tf_1m: '1د', tf_5m: '5د', tf_15m: '15د', tf_1h: '1س', tf_4h: '4س', tf_1d: '1ر', tf_1w: '1ه',
+        tf_1m: '1m', tf_5m: '5m', tf_15m: '15m', tf_1h: '1H', tf_4h: '4H', tf_1d: '1D', tf_1w: '1W',
         invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.',
         online_users: 'کاربر آنلاین', cal_status_past: 'گذشته', cal_status_live: 'زنده', cal_status_upcoming: 'آینده',
         price_reached: 'قیمت به', ai_title: 'دستیار هوشمند', ai_messages_today: 'پیام امروز',
