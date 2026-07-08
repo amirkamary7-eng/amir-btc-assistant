@@ -154,7 +154,7 @@
                 <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                 <span data-i18n="section_watchlist">واچ‌لیست من</span>
             </span>
-            <button class="add-watch-btn" onclick="openAddCoinModal()">
+            <button type="button" class="add-watch-btn" onclick="openAddCoinModal()" aria-label="Add to watchlist">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
         </div>
@@ -178,12 +178,12 @@
         <div class="search-bar">
             <input type="text" id="market-search" placeholder="جستجوی ارز..." class="search-input" data-i18n-placeholder="search">
         </div>
-        <div class="market-tabs" id="market-tabs">
-            <button class="tab-btn active" data-tab="overview" onclick="switchMarketTab('overview', this)" data-i18n="tab_overview">Overview</button>
-            <button class="tab-btn" data-tab="trending" onclick="switchMarketTab('trending', this)" data-i18n="tab_trending">Trending</button>
-            <button class="tab-btn" data-tab="gainers" onclick="switchMarketTab('gainers', this)" data-i18n="tab_gainers">Gainers</button>
-            <button class="tab-btn" data-tab="losers" onclick="switchMarketTab('losers', this)" data-i18n="tab_losers">Losers</button>
-            <button class="tab-btn" data-tab="watchlist" onclick="switchMarketTab('watchlist', this)" data-i18n="watchlist">Watchlist</button>
+        <div class="market-tabs" id="market-tabs" role="tablist">
+            <button type="button" class="tab-btn active" data-tab="overview" onclick="switchMarketTab('overview', this)" data-i18n="tab_overview" role="tab" aria-selected="true">Overview</button>
+            <button type="button" class="tab-btn" data-tab="trending" onclick="switchMarketTab('trending', this)" data-i18n="tab_trending" role="tab" aria-selected="false">Trending</button>
+            <button type="button" class="tab-btn" data-tab="gainers" onclick="switchMarketTab('gainers', this)" data-i18n="tab_gainers" role="tab" aria-selected="false">Gainers</button>
+            <button type="button" class="tab-btn" data-tab="losers" onclick="switchMarketTab('losers', this)" data-i18n="tab_losers" role="tab" aria-selected="false">Losers</button>
+            <button type="button" class="tab-btn" data-tab="watchlist" onclick="switchMarketTab('watchlist', this)" data-i18n="watchlist" role="tab" aria-selected="false">Watchlist</button>
         </div>
         <div class="market-summary-bar" id="market-summary-bar" role="status" aria-live="polite">
             <div class="summary-item">
@@ -201,8 +201,8 @@
                 <span class="summary-value" id="btc-dom">--</span>
             </div>
         </div>
-        <div class="coin-list" id="coin-list"></div>
-        <button class="fab-add-watch" onclick="openAddCoinModal()" aria-label="Add to watchlist">
+        <div class="coin-list" id="coin-list" role="list"></div>
+        <button type="button" class="fab-add-watch" onclick="openAddCoinModal()" aria-label="Add to watchlist">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
     </section>
@@ -407,13 +407,13 @@
             </div>
             <div class="detail-stats" id="detail-stats"></div>
             <div class="tv-tf-bar" id="tv-tf-bar" role="group" aria-label="Chart timeframe">
-                <button class="tv-tf-btn" data-interval="1" onclick="switchTvTimeframe('1', this)" data-i18n="tf_1m">1m</button>
-                <button class="tv-tf-btn" data-interval="5" onclick="switchTvTimeframe('5', this)" data-i18n="tf_5m">5m</button>
-                <button class="tv-tf-btn" data-interval="15" onclick="switchTvTimeframe('15', this)" data-i18n="tf_15m">15m</button>
-                <button class="tv-tf-btn active" data-interval="60" onclick="switchTvTimeframe('60', this)" data-i18n="tf_1h">1H</button>
-                <button class="tv-tf-btn" data-interval="240" onclick="switchTvTimeframe('240', this)" data-i18n="tf_4h">4H</button>
-                <button class="tv-tf-btn" data-interval="D" onclick="switchTvTimeframe('D', this)" data-i18n="tf_1d">1D</button>
-                <button class="tv-tf-btn" data-interval="W" onclick="switchTvTimeframe('W', this)" data-i18n="tf_1w">1W</button>
+                <button type="button" class="tv-tf-btn" data-interval="1" onclick="switchTvTimeframe('1', this)" data-i18n="tf_1m">1m</button>
+                <button type="button" class="tv-tf-btn" data-interval="5" onclick="switchTvTimeframe('5', this)" data-i18n="tf_5m">5m</button>
+                <button type="button" class="tv-tf-btn" data-interval="15" onclick="switchTvTimeframe('15', this)" data-i18n="tf_15m">15m</button>
+                <button type="button" class="tv-tf-btn active" data-interval="60" onclick="switchTvTimeframe('60', this)" data-i18n="tf_1h">1H</button>
+                <button type="button" class="tv-tf-btn" data-interval="240" onclick="switchTvTimeframe('240', this)" data-i18n="tf_4h">4H</button>
+                <button type="button" class="tv-tf-btn" data-interval="D" onclick="switchTvTimeframe('D', this)" data-i18n="tf_1d">1D</button>
+                <button type="button" class="tv-tf-btn" data-interval="W" onclick="switchTvTimeframe('W', this)" data-i18n="tf_1w">1W</button>
             </div>
             <div id="detail-chart" class="detail-chart"></div>
             <div class="alert-section">
