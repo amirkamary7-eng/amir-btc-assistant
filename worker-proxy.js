@@ -1361,7 +1361,7 @@ const NEWS_RSS_SOURCES = [
   { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', name: 'کوین‌دسک', category: 'crypto' },
   { url: 'https://decrypt.co/feed', name: 'دیکریپت', category: 'crypto' },
   // ── Forex ────────────────────────────────────────────────────────────
-  { url: 'https://www.actionforex.com/rss/forex-news/', name: 'اکشن‌فارکس', category: 'forex' },
+  { url: 'https://www.actionforex.com/rss/', name: 'اکشن‌فارکس', category: 'forex' },
   { url: 'https://www.investing.com/rss/news_301.rss', name: 'اینستینگ', category: 'forex' },
   // ── Economy ──────────────────────────────────────────────────────────
   { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114', name: 'CNBC', category: 'economy' },
