@@ -295,19 +295,93 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* #region صفحه مارکت */
 /* این بخش استایل‌های مرتبط با "صفحه مارکت" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.search-bar { padding: 0 20px 12px; }
-.search-input { width: 100%; padding: 12px 16px; border-radius: 14px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text); font-size: 14px; outline: none; }
-.search-input:focus { border-color: var(--accent); }
-.market-tabs { display: flex; gap: 4px; padding: 0 20px 12px; overflow-x: auto; scrollbar-width: none; }
-.market-tabs::-webkit-scrollbar { display: none; }
-.tab-btn { flex-shrink: 0; padding: 8px 16px; border: none; background: transparent; color: var(--text-dim); font-size: 13px; font-weight: 600; cursor: pointer; border-radius: 20px; transition: all 0.2s; }
-.tab-btn.active { background: var(--accent); color: #000; }
-.coin-list { padding: 0 20px; }
+.search-bar { padding: 0 16px 12px; }
+.search-input { width: 100%; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.04); color: var(--text); font-size: 14px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+.search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(247,147,26,0.12); }
+.search-input::placeholder { color: var(--text-sub); }
+
+/* ===== Main Tabs: Crypto / Forex / Watchlist ===== */
+.market-main-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 0 16px 12px; }
+.main-tab-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 0;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text-dim);
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+.main-tab-btn svg { flex-shrink: 0; opacity: 0.5; transition: opacity 0.25s; }
+.main-tab-btn:active { transform: scale(0.97); }
+.main-tab-btn.active {
+  background: linear-gradient(135deg, rgba(247,147,26,0.15), rgba(247,147,26,0.05));
+  border-color: rgba(247,147,26,0.4);
+  color: var(--accent);
+  box-shadow: 0 2px 12px rgba(247,147,26,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.main-tab-btn.active svg { opacity: 1; }
+.main-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 20%; right: 20%;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+
+/* ===== Crypto Sub-Tabs: Top Market / Gainers / Losers ===== */
+.market-sub-tabs {
+  display: flex; gap: 4px;
+  padding: 0 16px 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  transition: opacity 0.2s, max-height 0.3s ease, padding 0.3s ease;
+  max-height: 50px;
+  opacity: 1;
+}
+.market-sub-tabs::-webkit-scrollbar { display: none; }
+.market-sub-tabs.hidden {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.sub-tab-btn {
+  flex: 1;
+  padding: 7px 0;
+  border: none;
+  background: transparent;
+  color: var(--text-sub);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+  position: relative;
+}
+.sub-tab-btn.active {
+  color: var(--text);
+  background: rgba(255,255,255,0.06);
+}
+.sub-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 25%; right: 25%;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+.coin-list { padding: 0 16px; }
 .coin-list.fade-out { animation: coinFadeOut 0.12s ease forwards; }
 .coin-list.fade-in { animation: coinFadeIn 0.18s ease forwards; }
 @keyframes coinFadeOut { to { opacity: 0; transform: translateY(6px); } }
 @keyframes coinFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-.coin-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.coin-item { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; border-radius: 8px; margin-bottom: 2px; }
 .coin-item:last-child { border-bottom: none; }
 .coin-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 0%; direction: ltr; }
 .coin-left > div { min-width: 0; overflow: hidden; }
@@ -745,11 +819,12 @@ strong.down { color: var(--red); }
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  margin: 0 20px 10px;
+  margin: 0 16px 10px;
   border-radius: 12px;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--border);
   gap: 8px;
+  backdrop-filter: blur(8px);
 }
 .summary-item {
   flex: 1;
@@ -832,10 +907,13 @@ strong.down { color: var(--red); }
     /* 360px Market page optimization */
     .section-header { padding: 16px 14px 12px; }
     .coin-list { padding: 0 14px; }
-    .market-summary-bar { margin: 0 14px 8px; padding: 8px 10px; }
-    .market-tabs { padding: 0 14px 10px; }
-    .tab-btn { padding: 7px 12px; font-size: 12px; }
-    .search-bar { padding: 0 14px 10px; }
+    .market-summary-bar { margin: 0 12px 8px; padding: 8px 10px; }
+    .market-main-tabs { padding: 0 12px 10px; gap: 6px; }
+    .main-tab-btn { padding: 9px 0; font-size: 12px; border-radius: 10px; }
+    .main-tab-btn svg { width: 14px; height: 14px; }
+    .market-sub-tabs { padding: 0 12px 12px; }
+    .sub-tab-btn { font-size: 11px; padding: 6px 0; }
+    .search-bar { padding: 0 12px 10px; }
     .search-input { padding: 10px 12px; font-size: 13px; }
     .coin-rank { width: 22px; font-size: 10px; }
     .coin-icon { width: 28px; height: 28px; }
