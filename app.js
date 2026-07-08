@@ -1164,20 +1164,14 @@ async function loadMarketData(force = false) {
 //#region خلاصه بازار
 // ============================================================================
 /**
- * خلاصه را در رابط کاربری رندر می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ * خلاصه بازار را در رابط کاربری رندر می‌کند.
+ * P1-4: Disabled — target DOM elements (global-mcap, global-volume, btc-dom)
+ * do not exist in index.html. Re-enable when summary bar is added to HTML.
+ * @param {boolean} _unused - kept for call-site compatibility
  */
-function renderSummary() {
-    if (!allCoins.length) return;
-    const mcapEl = document.getElementById('global-mcap');
-    if (!mcapEl) return;
-    const mcap = allCoins.reduce((s, c) => s + c.marketCapUsd, 0);
-    const volume = allCoins.reduce((s, c) => s + c.volumeUsd24Hr, 0);
-    const btc = allCoins.find(c => c.symbol === 'BTC');
-    mcapEl.innerText = '$' + (mcap / 1e12).toFixed(2) + 'T';
-    document.getElementById('global-volume').innerText = '$' + (volume / 1e9).toFixed(2) + 'B';
-    document.getElementById('btc-dom').innerText = btc ? ((btc.marketCapUsd / mcap) * 100).toFixed(1) + '%' : '--';
+// eslint-disable-next-line no-unused-vars
+function renderSummary(_unused) {
+    // No-op: summary elements removed from HTML. Re-enable when needed.
 }
 
 //#endregion
