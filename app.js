@@ -280,6 +280,7 @@ let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
 let calendarEvents = [];
 let calendarLoading = false;
+let currentTvWidget = null; // P1-5: track TradingView widget for cleanup
 
 //#endregion
 
@@ -1819,6 +1820,11 @@ async function openCoinDetail(symbol) {
     chartContainer.innerHTML = '<div class="empty-state">Loading chart...</div>';
 
     const chartInfo = await resolveChartSymbol(symbol);
+    // P1-5: destroy previous TradingView widget to prevent memory leak
+    if (currentTvWidget) {
+        try { currentTvWidget.remove(); } catch {}
+        currentTvWidget = null;
+    }
     chartContainer.innerHTML = '';
     if (typeof TradingView !== 'undefined' && chartInfo.found) {
         if (chartInfo.exchange) {
@@ -1827,7 +1833,7 @@ async function openCoinDetail(symbol) {
             badge.innerText = chartInfo.exchange.toUpperCase();
             chartContainer.parentNode.insertBefore(badge, chartContainer);
         }
-        new TradingView.widget({
+        currentTvWidget = new TradingView.widget({
             width: '100%',
             height: '100%',
             symbol: chartInfo.tv_symbol,
@@ -1858,6 +1864,11 @@ async function openCoinDetail(symbol) {
  */
 function closeCoinDetail() {
     document.querySelector('.chart-exchange-badge')?.remove();
+    // P1-5: destroy TradingView widget on modal close
+    if (currentTvWidget) {
+        try { currentTvWidget.remove(); } catch {}
+        currentTvWidget = null;
+    }
     document.getElementById('coin-detail-modal').style.display = 'none';
 }
 /**
