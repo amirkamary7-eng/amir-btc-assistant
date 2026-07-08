@@ -725,9 +725,11 @@ strong.down { color: var(--red); }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 4px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  margin: 0 20px 6px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
   gap: 8px;
 }
 .summary-item {
@@ -748,7 +750,7 @@ strong.down { color: var(--red); }
 .summary-value {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   white-space: nowrap;
   direction: ltr;
   font-variant-numeric: tabular-nums;
