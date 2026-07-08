@@ -306,6 +306,7 @@ const i18n = {
         hero_badge: 'کانال تحلیلی', hero_desc: 'سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار', hero_cta: 'عضویت رایگان',
         section_analysis: 'تحلیل‌های جدید', section_watchlist: 'واچ‌لیست من', section_news: 'اخبار مهم و فوری',
         view_all: 'مشاهده همه', watchlist_empty: 'واچ‌لیست خالی است',
+        watchlist_empty_desc: 'ارزهای مورد علاقه خود را اضافه کنید', watchlist_add_btn: 'افزودن ارز',
         watchlist_limit: 'حداکثر ۷ ارز می‌توانید به واچ‌لیست اضافه کنید.', no_analysis: 'تحلیلی موجود نیست',
         no_analysis_list: 'هیچ تحلیلی ثبت نشده است.', no_news: 'خبری وجود ندارد', news_error: 'خطا در دریافت اخبار',
         news_unavailable: 'متن کامل خبر در دسترس نیست.', notif_center: 'مرکز اعلانات', clear_all_notif: 'پاک کردن همه اعلانات',
@@ -363,6 +364,7 @@ const i18n = {
         hero_badge: 'Analysis Channel', hero_desc: 'Daily signals, analysis & market education', hero_cta: 'Join Free',
         section_analysis: 'Latest Analysis', section_watchlist: 'My Watchlist', section_news: 'Breaking News',
         view_all: 'View all', watchlist_empty: 'Watchlist is empty',
+        watchlist_empty_desc: 'Add your favorite coins to track them', watchlist_add_btn: 'Add Coin',
         watchlist_limit: 'You can add up to 7 coins to your watchlist.', no_analysis: 'No analysis available',
         no_analysis_list: 'No analysis posted yet.', no_news: 'No news available', news_error: 'Failed to load news',
         news_unavailable: 'Full article text is not available.', notif_center: 'Notification Center',
@@ -1374,7 +1376,13 @@ function renderWatchlist() {
     const grid = document.getElementById('watchlist-grid');
     const watchCoins = allCoins.filter(c => watchlist.includes(c.symbol));
     if (!watchCoins.length) {
-        grid.innerHTML = `<div class="empty-state">${t('watchlist_empty')}</div>`;
+        grid.innerHTML = `
+            <div class="watchlist-empty-state">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                <span class="watchlist-empty-title">${t('watchlist_empty')}</span>
+                <span class="watchlist-empty-desc">${t('watchlist_empty_desc')}</span>
+                <button class="watchlist-empty-btn" onclick="openAddCoinModal()">${t('watchlist_add_btn')}</button>
+            </div>`;
         return;
     }
     grid.innerHTML = watchCoins.map(c => {
