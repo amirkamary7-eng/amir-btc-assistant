@@ -1108,24 +1108,42 @@ async function loadMarketData(force = false) {
                 </div>
             `).join('');
         }
-        try {
-            allCoins = await fetchCoinGecko();
-        } catch (e1) {
-            console.warn('CoinGecko direct failed:', e1);
-            const data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
-            const assets = data.data || data;
-            if (Array.isArray(data) && data[0]?.symbol) {
-                allCoins = data;
-            } else if (assets?.length) {
-                allCoins = assets.map((item, i) => ({
-                    symbol: item.symbol, name: item.name, rank: i + 1,
-                    priceUsd: parseFloat(item.priceUsd) || 0,
-                    changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
-                    volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
-                    marketCapUsd: parseFloat(item.marketCapUsd) || 0,
-                    supply: parseFloat(item.supply) || 0, image: ''
-                }));
-            } else throw new Error('No market data');
+
+        // Primary: backend /api/market (P0-2)
+        let fetched = false;
+        if (API_BASE) {
+            try {
+                const res = await apiFetch('/api/market');
+                if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
+                    allCoins = res.data;
+                    fetched = true;
+                }
+            } catch (e) {
+                console.warn('Backend /api/market failed, trying direct fallback:', e);
+            }
+        }
+
+        // Fallback: direct CoinGecko (kept for when API_BASE is not set)
+        if (!fetched) {
+            try {
+                allCoins = await fetchCoinGecko();
+            } catch (e1) {
+                console.warn('CoinGecko direct failed:', e1);
+                const data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
+                const assets = data.data || data;
+                if (Array.isArray(data) && data[0]?.symbol) {
+                    allCoins = data;
+                } else if (assets?.length) {
+                    allCoins = assets.map((item, i) => ({
+                        symbol: item.symbol, name: item.name, rank: i + 1,
+                        priceUsd: parseFloat(item.priceUsd) || 0,
+                        changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
+                        volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
+                        marketCapUsd: parseFloat(item.marketCapUsd) || 0,
+                        supply: parseFloat(item.supply) || 0, image: ''
+                    }));
+                } else throw new Error('No market data');
+            }
         }
         Cache.set('market', allCoins, 60);
         renderMarket();
