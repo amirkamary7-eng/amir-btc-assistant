@@ -1180,7 +1180,7 @@ function renderSummary() {
     if (!mcapEl) return;
 
     if (globalMarketData) {
-        mcapEl.textContent = formatLargeNumber(globalMarketData.totalMarketCap);
+        mcapEl.textContent = '$' + formatLargeNumber(globalMarketData.totalMarketCap);
         volEl.textContent = '$' + formatLargeNumber(globalMarketData.totalVolume);
         domEl.textContent = globalMarketData.btcDominance.toFixed(1) + '%';
     } else {
@@ -1194,7 +1194,7 @@ function renderSummary() {
             totalVol += (c.volumeUsd24Hr || 0);
             if (c.symbol === 'BTC') btcMcap = c.marketCapUsd || 0;
         }
-        mcapEl.textContent = formatLargeNumber(totalMcap);
+        mcapEl.textContent = '$' + formatLargeNumber(totalMcap);
         volEl.textContent = '$' + formatLargeNumber(totalVol);
         domEl.textContent = totalMcap > 0 ? ((btcMcap / totalMcap) * 100).toFixed(1) + '%' : '--';
     }
