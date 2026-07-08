@@ -1057,7 +1057,7 @@ async function fetchCoinGecko() {
         .map((item, index) => ({
             symbol: String(item.symbol || '').toUpperCase(),
             name: item.name || '',
-            rank: index + 1,
+            rank: item.market_cap_rank || (index + 1),
             priceUsd: item.current_price || 0,
             changePercent24Hr: item.price_change_percentage_24h || 0,
             volumeUsd24Hr: item.total_volume || 0,
