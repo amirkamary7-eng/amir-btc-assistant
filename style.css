@@ -270,7 +270,7 @@ body.user-loading .profile-loading-target.skeleton-text {
 .watch-change { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .watch-change.up { color: var(--green); }
 .watch-change.down { color: var(--red); }
-.remove-watch { position: absolute; top: 4px; right: 6px; color: var(--text-dim); cursor: pointer; padding: 6px; margin: -6px; }
+.remove-watch { position: absolute; top: 4px; inset-inline-end: 6px; color: var(--text-dim); cursor: pointer; padding: 6px; margin: -6px; }
 .watchlist-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 28px 16px; width: 100%; }
 .watchlist-empty-title { font-size: 14px; font-weight: 600; color: var(--text-dim); }
 .watchlist-empty-desc { font-size: 12px; color: var(--text-sub); }
@@ -568,8 +568,8 @@ strong.down { color: var(--red); }
 .ticket-status.open { background: rgba(255,77,77,0.15); color: var(--red); }
 .ticket-status.answered { background: rgba(0,200,150,0.15); color: var(--green); }
 .ticket-thread { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.ticket-reply { background: rgba(0,200,150,0.06); border-right: 3px solid var(--green); border-radius: 8px; padding: 10px 12px; font-size: 13px; color: var(--text); line-height: 1.5; }
-.ticket-reply.admin { border-right-color: var(--accent); background: rgba(247,147,26,0.06); }
+.ticket-reply { background: rgba(0,200,150,0.06); border-inline-start: 3px solid var(--green); border-radius: 8px; padding: 10px 12px; font-size: 13px; color: var(--text); line-height: 1.5; }
+.ticket-reply.admin { border-inline-start-color: var(--accent); background: rgba(247,147,26,0.06); }
 .ticket-reply-meta { font-size: 10px; color: var(--text-sub); margin-top: 4px; }
 .ticket-actions { display: flex; gap: 8px; margin-top: 10px; }
 .ticket-delete-btn { background: rgba(255,77,77,0.1); border: 1px solid rgba(255,77,77,0.2); color: var(--red); padding: 6px 12px; border-radius: 8px; font-size: 11px; cursor: pointer; }
@@ -657,7 +657,7 @@ strong.down { color: var(--red); }
 /* ============================================================================ */
 .notif-list { max-height: 300px; overflow-y: auto; }
 .notif-item { padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
-.notif-item.unread { background: rgba(247,147,26,0.04); border-left: 3px solid var(--accent); }
+.notif-item.unread { background: rgba(247,147,26,0.04); border-inline-start: 3px solid var(--accent); }
 .notif-title { font-weight: 600; }
 .notif-body { font-size: 12px; color: var(--text-dim); }
 .notif-date { font-size: 10px; color: var(--text-sub); text-align: right; }
