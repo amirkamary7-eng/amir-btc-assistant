@@ -1364,12 +1364,12 @@ const NEWS_RSS_SOURCES = [
   { url: 'https://www.actionforex.com/rss/', name: 'اکشن‌فارکس', category: 'forex' },
   { url: 'https://www.investing.com/rss/news_301.rss', name: 'اینستینگ', category: 'forex' },
   // ── Economy ──────────────────────────────────────────────────────────
-  { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114', name: 'CNBC', category: 'economy' },
+  { url: 'https://feeds.bbci.co.uk/news/business/rss.xml', name: 'BBC Economy', category: 'economy' },
+  { url: 'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml', name: 'NYT Economy', category: 'economy' },
   // ── Persian (general economy/finance) ────────────────────────────────
   // No translation needed — articles already in Farsi.
   // Skipped automatically by fetchAllNewsRss() if source is unavailable.
   { url: 'https://www.irna.ir/rss', name: 'خبرگزاری ایرنا', category: 'economy', skipTranslate: true },
-  { url: 'https://www.isna.ir/rss', name: 'خبرگزاری ایسنا', category: 'economy', skipTranslate: true },
 ];
 
 const COUNTRY_FLAGS = {
