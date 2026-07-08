@@ -1224,21 +1224,23 @@ function renderMarket() {
     list.innerHTML = filtered.map(c => {
         const isPos = c.changePercent24Hr >= 0;
         const inWatch = watchlist.includes(c.symbol);
-        const icon = c.image || `https://assets.coincap.io/assets/icons/${c.symbol.toLowerCase()}@2x.png`;
+        const safeSymbol = escapeHtml(c.symbol);
+        const safeName = escapeHtml(c.name);
+        const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
         return `
-            <div class="coin-item" onclick="openCoinDetail('${c.symbol}')">
+            <div class="coin-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
                 <div class="coin-left">
-                    <span class="coin-rank">#${c.rank}</span>
-                    <img src="${icon}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="coin-icon">
+                    <span class="coin-rank">#${Number(c.rank) || 0}</span>
+                    <img src="${escapeHtml(icon)}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="coin-icon">
                     <div>
-                        <div class="coin-sym">${c.symbol}</div>
-                        <div class="coin-name">${c.name}</div>
+                        <div class="coin-sym">${safeSymbol}</div>
+                        <div class="coin-name">${safeName}</div>
                     </div>
                 </div>
                 <div class="coin-right">
                     <div class="coin-price">$${c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6)}</div>
                     <div class="coin-change ${isPos ? 'up' : 'down'}">${isPos ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</div>
-                    <span class="watch-star ${inWatch ? 'active' : ''}" onclick="toggleWatchlist('${c.symbol}', event)">
+                    <span class="watch-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="${inWatch ? '#f7931a' : 'none'}" stroke="${inWatch ? '#f7931a' : '#555'}" stroke-width="2">
                             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                         </svg>
