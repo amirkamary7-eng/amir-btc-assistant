@@ -338,7 +338,7 @@ const i18n = {
         about_version: 'نسخه 1.0.0', about_desc: 'دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر.',
         official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
         summary_mcap: 'مارکت‌کپ کل', summary_volume: 'حجم ۲۴h', summary_btc_dom: 'سلطه BTC',
-        price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h',
+        price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h', rank: 'رتبه', supply: 'عرضه در گردش',
         view_source: 'مشاهده منبع', guest: 'کاربر میهمان', required_fields: 'فیلدهای الزامی را پر کنید',
         invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.',
         online_users: 'کاربر آنلاین', cal_status_past: 'گذشته', cal_status_live: 'زنده', cal_status_upcoming: 'آینده',
@@ -396,7 +396,7 @@ const i18n = {
         about_desc: 'Smart trading assistant connected to global exchange APIs.',
         official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
         summary_mcap: 'Total Market Cap', summary_volume: '24h Volume', summary_btc_dom: 'BTC Dominance',
-        price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume',
+        price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume', rank: 'Rank', supply: 'Circulating Supply',
         view_source: 'View source', guest: 'Guest User', required_fields: 'Please fill required fields',
         invalid_price: 'Enter a valid price', copied: 'Copied!', copy_ref_msg: 'Referral link copied.',
         online_users: 'users online', cal_status_past: 'Past', cal_status_live: 'Live', cal_status_upcoming: 'Upcoming',
@@ -1906,11 +1906,15 @@ async function openCoinDetail(symbol) {
         chartContainer.innerHTML = `<div class="empty-state">${t('chart_unavailable')}</div>`;
     }
 
+    const supplyStr = coin.supply ? formatLargeNumber(coin.supply) : '--';
+    const rankVal = Number(coin.rank) || 0;
     document.getElementById('detail-stats').innerHTML = `
         <div><span>${t('price')}</span><strong>$${coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6)}</strong></div>
         <div><span>${t('change_24h')}</span><strong class="${coin.changePercent24Hr >= 0 ? 'up' : 'down'}">${coin.changePercent24Hr >= 0 ? '+' : ''}${coin.changePercent24Hr.toFixed(2)}%</strong></div>
         <div><span>${t('mcap')}</span><strong>$${formatLargeNumber(coin.marketCapUsd)}</strong></div>
         <div><span>${t('volume_24h')}</span><strong>$${formatLargeNumber(coin.volumeUsd24Hr)}</strong></div>
+        <div><span>${t('rank')}</span><strong>#${rankVal}</strong></div>
+        <div><span>${t('supply')}</span><strong>${supplyStr}</strong></div>
     `;
     renderActiveAlerts(symbol);
 }
