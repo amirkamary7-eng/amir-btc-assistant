@@ -2304,6 +2304,139 @@ async function fetchGlobalData(env) {
   return null;
 }
 
+// ============================================================================
+//#region Forex Data
+// ============================================================================
+const FOREX_PAIRS = [
+  { symbol: 'EURUSD', name: 'EUR/USD', tvSymbol: 'FX:EURUSD', category: 'major' },
+  { symbol: 'GBPUSD', name: 'GBP/USD', tvSymbol: 'FX:GBPUSD', category: 'major' },
+  { symbol: 'USDJPY', name: 'USD/JPY', tvSymbol: 'FX:USDJPY', category: 'major' },
+  { symbol: 'AUDUSD', name: 'AUD/USD', tvSymbol: 'FX:AUDUSD', category: 'major' },
+  { symbol: 'USDCAD', name: 'USD/CAD', tvSymbol: 'FX:USDCAD', category: 'major' },
+  { symbol: 'USDCHF', name: 'USD/CHF', tvSymbol: 'FX:USDCHF', category: 'major' },
+  { symbol: 'NZDUSD', name: 'NZD/USD', tvSymbol: 'FX:NZDUSD', category: 'major' },
+  { symbol: 'EURJPY', name: 'EUR/JPY', tvSymbol: 'FX:EURJPY', category: 'cross' },
+  { symbol: 'GBPJPY', name: 'GBP/JPY', tvSymbol: 'FX:GBPJPY', category: 'cross' },
+  { symbol: 'XAUUSD', name: 'XAU/USD', tvSymbol: 'OANDA:XAUUSD', category: 'metal' },
+  { symbol: 'XAGUSD', name: 'XAG/USD', tvSymbol: 'OANDA:XAGUSD', category: 'metal' },
+];
+
+const FOREX_CACHE_TTL = 120; // 2 minutes
+
+async function handleForexData(env) {
+  // Check KV cache
+  const cachedRaw = await readAppCache(env, 'forex:data');
+  if (cachedRaw) {
+    try {
+      const parsed = JSON.parse(cachedRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return jsonResponse({ status: 'success', data: parsed, cached: true }, {}, env);
+      }
+    } catch {}
+  }
+
+  // Fetch from exchangerate-api or fallback
+  let data = null;
+
+  // Primary: fetch rates using a free API
+  try {
+    // Use frankfurter.app (free, no API key, reliable)
+    const { ok, body } = await fetchJson('https://api.frankfurter.app/latest?from=USD');
+    if (ok && body?.rates) {
+      const rates = body.rates;
+      data = FOREX_PAIRS.map(pair => {
+        let price = 0;
+        let change = 0;
+
+        if (pair.symbol === 'XAUUSD') {
+          // Gold — approximate from a secondary source
+          price = 0; // will be 0 if no source
+        } else if (pair.symbol === 'XAGUSD') {
+          price = 0;
+        } else {
+          // Parse pair: e.g. EURUSD = EUR/USD = how many USD per EUR = rates.EUR
+          // GBPUSD = GBP/USD = rates.GBP
+          // USDJPY = USD/JPY = 1/rates.JPY
+          // AUDUSD = AUD/USD = rates.AUD
+          // etc.
+          const base = pair.symbol.slice(0, 3);  // EUR, GBP, USD, AUD, NZD
+          const quote = pair.symbol.slice(3, 6);  // USD, JPY, CAD, CHF
+
+          if (base === 'USD') {
+            // USD/XXX = 1 / rates[XXX]
+            const quoteRate = rates[quote];
+            if (quoteRate) price = 1 / quoteRate;
+          } else if (quote === 'USD') {
+            // XXX/USD = rates[XXX]
+            price = rates[base] || 0;
+          } else {
+            // Cross: EUR/JPY = rates[EUR] / rates[JPY]
+            const baseRate = rates[base];
+            const quoteRate = rates[quote];
+            if (baseRate && quoteRate) price = baseRate / quoteRate;
+          }
+        }
+
+        return {
+          symbol: pair.symbol,
+          name: pair.name,
+          tvSymbol: pair.tvSymbol,
+          category: pair.category,
+          price: price,
+          change: change,
+          isForex: true,
+        };
+      });
+
+      // Fetch gold/silver from metals API fallback
+      try {
+        const metalRes = await fetchJson('https://api.frankfurter.app/latest?from=XAU&to=USD');
+        if (metalRes.ok && metalRes.body?.rates?.USD) {
+          const xauItem = data.find(d => d.symbol === 'XAUUSD');
+          if (xauItem) xauItem.price = metalRes.body.rates.USD;
+        }
+      } catch {}
+
+      try {
+        const metalRes2 = await fetchJson('https://api.frankfurter.app/latest?from=XAG&to=USD');
+        if (metalRes2.ok && metalRes2.body?.rates?.USD) {
+          const xagItem = data.find(d => d.symbol === 'XAGUSD');
+          if (xagItem) xagItem.price = metalRes2.body.rates.USD;
+        }
+      } catch {}
+
+      await writeAppCache(env, 'forex:data', JSON.stringify(data), FOREX_CACHE_TTL);
+      return jsonResponse({ status: 'success', data, cached: false }, {}, env);
+    }
+  } catch (e) {
+    console.warn('Forex: frankfurter.app failed', e.message || e);
+  }
+
+  // Fallback: return static data with zero prices (user can still see charts)
+  const fallback = FOREX_PAIRS.map(pair => ({
+    symbol: pair.symbol,
+    name: pair.name,
+    tvSymbol: pair.tvSymbol,
+    category: pair.category,
+    price: 0,
+    change: 0,
+    isForex: true,
+  }));
+
+  // Serve stale cache if available
+  if (cachedRaw) {
+    try {
+      const parsed = JSON.parse(cachedRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return jsonResponse({ status: 'success', data: parsed, cached: true, stale: true }, {}, env);
+      }
+    } catch {}
+  }
+
+  return jsonResponse({ status: 'success', data: fallback, cached: false }, {}, env);
+}
+//#endregion
+
 async function handleFarsiNews(request, env) {
   const url = new URL(request.url);
   const category = url.searchParams.get('category');
@@ -2678,6 +2811,10 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/market') {
         return await handleMarketData(env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/forex') {
+        return await handleForexData(env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/farsi-news') {

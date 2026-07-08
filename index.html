@@ -175,16 +175,6 @@
     <!-- #region MarketPage -->
     <!-- این بخش تب‌های بازار، جستجو و فهرست ارزها را نمایش می‌دهد. -->
     <section id="market-page" class="page">
-        <div class="search-bar">
-            <input type="text" id="market-search" placeholder="جستجوی ارز..." class="search-input" data-i18n-placeholder="search">
-        </div>
-        <div class="market-tabs" id="market-tabs" role="tablist">
-            <button type="button" class="tab-btn active" data-tab="overview" onclick="switchMarketTab('overview', this)" data-i18n="tab_overview" role="tab" aria-selected="true">Overview</button>
-            <button type="button" class="tab-btn" data-tab="trending" onclick="switchMarketTab('trending', this)" data-i18n="tab_trending" role="tab" aria-selected="false">Trending</button>
-            <button type="button" class="tab-btn" data-tab="gainers" onclick="switchMarketTab('gainers', this)" data-i18n="tab_gainers" role="tab" aria-selected="false">Gainers</button>
-            <button type="button" class="tab-btn" data-tab="losers" onclick="switchMarketTab('losers', this)" data-i18n="tab_losers" role="tab" aria-selected="false">Losers</button>
-            <button type="button" class="tab-btn" data-tab="watchlist" onclick="switchMarketTab('watchlist', this)" data-i18n="watchlist" role="tab" aria-selected="false">Watchlist</button>
-        </div>
         <div class="market-summary-bar" id="market-summary-bar" role="status" aria-live="polite">
             <div class="summary-item">
                 <span class="summary-label" data-i18n="summary_mcap">مارکت‌کپ کل</span>
@@ -200,6 +190,16 @@
                 <span class="summary-label" data-i18n="summary_btc_dom">سلطه BTC</span>
                 <span class="summary-value loading" id="btc-dom">--</span>
             </div>
+        </div>
+        <div class="search-bar">
+            <input type="text" id="market-search" placeholder="جستجوی ارز..." class="search-input" data-i18n-placeholder="search">
+        </div>
+        <div class="market-tabs" id="market-tabs" role="tablist">
+            <button type="button" class="tab-btn active" data-tab="overview" onclick="switchMarketTab('overview', this)" data-i18n="tab_overview" role="tab" aria-selected="true">Overview</button>
+            <button type="button" class="tab-btn" data-tab="forex" onclick="switchMarketTab('forex', this)" data-i18n="tab_forex" role="tab" aria-selected="false">Forex</button>
+            <button type="button" class="tab-btn" data-tab="gainers" onclick="switchMarketTab('gainers', this)" data-i18n="tab_gainers" role="tab" aria-selected="false">Gainers</button>
+            <button type="button" class="tab-btn" data-tab="losers" onclick="switchMarketTab('losers', this)" data-i18n="tab_losers" role="tab" aria-selected="false">Losers</button>
+            <button type="button" class="tab-btn" data-tab="watchlist" onclick="switchMarketTab('watchlist', this)" data-i18n="watchlist" role="tab" aria-selected="false">Watchlist</button>
         </div>
         <div class="coin-list" id="coin-list" role="list"></div>
         <button type="button" class="fab-add-watch" onclick="openAddCoinModal()" aria-label="Add to watchlist">
