@@ -1311,7 +1311,18 @@ function switchMarketTab(tab, btn) {
     currentMarketTab = tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    renderMarket();
+    const list = document.getElementById('coin-list');
+    if (list) {
+        list.classList.remove('fade-in');
+        list.classList.add('fade-out');
+        setTimeout(() => {
+            renderMarket();
+            list.classList.remove('fade-out');
+            list.classList.add('fade-in');
+        }, 120);
+    } else {
+        renderMarket();
+    }
 }
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('market-search')?.addEventListener('input', (e) => {
