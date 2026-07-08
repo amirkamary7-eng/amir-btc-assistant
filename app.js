@@ -1135,13 +1135,14 @@ async function loadMarketData(force = false) {
                 if (Array.isArray(data) && data[0]?.symbol) {
                     allCoins = data;
                 } else if (assets?.length) {
-                    allCoins = assets.map((item, i) => ({
-                        symbol: item.symbol, name: item.name, rank: i + 1,
+                    allCoins = assets.map((item) => ({
+                        symbol: item.symbol, name: item.name, rank: parseInt(item.rank, 10) || 0,
                         priceUsd: parseFloat(item.priceUsd) || 0,
                         changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
                         volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
                         marketCapUsd: parseFloat(item.marketCapUsd) || 0,
-                        supply: parseFloat(item.supply) || 0, image: ''
+                        supply: parseFloat(item.supply) || 0,
+                        image: `https://assets.coincap.io/assets/icons/${String(item.symbol || '').toLowerCase()}@2x.png`
                     }));
                 } else throw new Error('No market data');
             }
