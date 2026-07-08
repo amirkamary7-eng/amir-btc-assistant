@@ -1267,7 +1267,9 @@ function renderMarket() {
 
     // Helper to build the info bar
     function buildInfoBar(count, label) {
-        return `<div class="coin-list-info"><span class="coin-list-count">${count} ${label}</span></div>`;
+        const now = new Date();
+        const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+        return `<div class="coin-list-info"><span class="coin-list-count">${count} ${label}</span><span class="coin-list-time">${timeStr}</span></div>`;
     }
 
     // Unified search: search across both crypto and forex
@@ -1629,9 +1631,8 @@ document.addEventListener('DOMContentLoaded', () => {
 function toggleWatchlist(symbol, event) {
     if (event) event.stopPropagation();
     const idx = watchlist.indexOf(symbol);
-    if (idx > -1) {
-        watchlist.splice(idx, 1);
-    } else {
+    const isAdding = idx === -1;
+    if (isAdding) {
         if (watchlist.length >= MAX_WATCHLIST) {
             getTg()?.showPopup?.({
                 title: t('watchlist'),
@@ -1641,10 +1642,32 @@ function toggleWatchlist(symbol, event) {
             return;
         }
         watchlist.push(symbol);
+    } else {
+        watchlist.splice(idx, 1);
     }
     persistWatchlist();
     renderMarket();
     renderWatchlist();
+    showMiniToast(isAdding ? '★ ' + symbol : '✕ ' + symbol);
+}
+
+/**
+ * Show a brief inline toast notification.
+ */
+function showMiniToast(msg) {
+    let toast = document.getElementById('mini-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'mini-toast';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = msg;
+    toast.classList.remove('toast-show');
+    // Force reflow to restart animation
+    void toast.offsetWidth;
+    toast.classList.add('toast-show');
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => toast.classList.remove('toast-show'), 1200);
 }
 /**
  * واچ‌لیست را در رابط کاربری رندر می‌کند.
@@ -3187,6 +3210,7 @@ window.switchMainTab = switchMainTab;
 window.switchSubTab = switchSubTab;
 window.switchNewsTab = switchNewsTab;
 window.toggleWatchlist = toggleWatchlist;
+window.showMiniToast = showMiniToast;
 window.openAddCoinModal = openAddCoinModal;
 window.closeAddCoinModal = closeAddCoinModal;
 window.filterCoinList = filterCoinList;
