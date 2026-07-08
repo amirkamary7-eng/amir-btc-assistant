@@ -704,6 +704,10 @@ body.user-loading .profile-loading-target.skeleton-text {
 .news-skeleton-line:nth-child(2) { width: 60%; }
 @keyframes skeleton-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 
+/* Load More button (Phase 7) */
+.load-more-btn { display: block; width: 100%; padding: 12px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--accent); font-size: 14px; cursor: pointer; transition: background 0.2s; }
+.load-more-btn:active { background: rgba(247,147,26,0.1); }
+
 /* #endregion */
 
 /* ============================================================================ */

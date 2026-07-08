@@ -2129,12 +2129,32 @@ async function handleCalendarEvents(env) {
 async function handleFarsiNews(request, env) {
   const url = new URL(request.url);
   const category = url.searchParams.get('category');
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') || '30', 10) || 30));
+
   // Only allow known categories
   const validCategories = ['crypto', 'forex', 'economy', 'all'];
   const categoryFilter = category && validCategories.includes(category) && category !== 'all'
     ? category
     : null;
-  return jsonResponse(await fetchFarsiNews(env, categoryFilter), {}, env);
+
+  const result = await fetchFarsiNews(env, categoryFilter);
+  const allData = result.data || [];
+
+  // Pagination
+  const start = (page - 1) * limit;
+  const paginatedData = allData.slice(start, start + limit);
+
+  return jsonResponse({
+    ...result,
+    data: paginatedData,
+    pagination: {
+      page,
+      limit,
+      total: allData.length,
+      hasMore: start + limit < allData.length,
+    },
+  }, {}, env);
 }
 
 async function handleTelegramWebhook(request, env) {
