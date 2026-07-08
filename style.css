@@ -695,6 +695,15 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* ============================================================================ */
 .empty-state { text-align: center; color: var(--text-dim); padding: 24px 10px; font-size: 13px; }
 
+/* Loading skeleton for news list (§6.3) */
+.news-skeleton { display: flex; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+.news-skeleton-img { width: 70px; height: 70px; border-radius: 10px; flex-shrink: 0; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
+.news-skeleton-content { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.news-skeleton-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
+.news-skeleton-line:nth-child(1) { width: 90%; }
+.news-skeleton-line:nth-child(2) { width: 60%; }
+@keyframes skeleton-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
 /* #endregion */
 
 /* ============================================================================ */
