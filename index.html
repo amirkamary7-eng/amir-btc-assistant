@@ -175,6 +175,12 @@
     <!-- #region MarketPage -->
     <!-- این بخش تب‌های بازار، جستجو و فهرست ارزها را نمایش می‌دهد. -->
     <section id="market-page" class="page">
+        <div class="market-page-header">
+            <h2 data-i18n="market" style="margin:0">مارکت</h2>
+            <button class="market-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+        </div>
         <div class="market-summary-bar" id="market-summary-bar" role="status" aria-live="polite">
             <div class="summary-item">
                 <span class="summary-label" data-i18n="summary_mcap">مارکت‌کپ کل</span>
@@ -416,9 +422,20 @@
     <!-- مودال جزئیات کوین -->
     <div id="coin-detail-modal" class="modal" role="dialog" aria-modal="true" aria-label="Coin detail" onclick="if(event.target===this) closeCoinDetail()">
         <div class="modal-box">
-            <div class="modal-header">
-                <h3 id="detail-coin-title">BTC / USDT</h3>
-                <button class="modal-close-btn" onclick="closeCoinDetail()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            <div class="modal-header detail-modal-header">
+                <div class="detail-modal-identity">
+                    <img id="detail-coin-icon" class="detail-coin-icon" src="" alt="">
+                    <div>
+                        <h3 id="detail-coin-title">BTC / USDT</h3>
+                        <span id="detail-coin-rank" class="detail-coin-rank">#1</span>
+                    </div>
+                </div>
+                <div class="detail-modal-actions">
+                    <button class="detail-watch-btn" id="detail-watch-btn" onclick="toggleWatchlistFromDetail()" aria-label="Toggle watchlist">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    </button>
+                    <button class="modal-close-btn" onclick="closeCoinDetail()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                </div>
             </div>
             <div class="detail-stats" id="detail-stats"></div>
             <div class="tv-tf-bar" id="tv-tf-bar" role="group" aria-label="Chart timeframe">

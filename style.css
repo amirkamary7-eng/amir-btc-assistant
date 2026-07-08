@@ -295,6 +295,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* #region صفحه مارکت */
 /* این بخش استایل‌های مرتبط با "صفحه مارکت" را در خود نگه می‌دارد. */
 /* ============================================================================ */
+.market-page-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 16px 10px; }
+.market-page-header h2 { font-size: 20px; font-weight: 700; }
+.market-refresh-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text-dim); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.25s; }
+.market-refresh-btn:active { transform: scale(0.9); }
+.market-refresh-btn.spinning svg { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .search-bar { padding: 0 16px 12px; position: relative; }
 .search-input { width: 100%; padding: 11px 14px 11px 40px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.04); color: var(--text); font-size: 14px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
 .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(247,147,26,0.12); }
@@ -759,9 +765,17 @@ strong.down { color: var(--red); }
 /* این بخش استایل‌های نمودار، آمار کوین و ناحیه هشدار قیمت را نگه می‌دارد. */
 /* ============================================================================ */
 .detail-chart { height: 260px; border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+.detail-modal-header { align-items: flex-start; gap: 12px; }
+.detail-modal-identity { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.detail-coin-icon { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; }
+.detail-coin-rank { font-size: 11px; color: var(--text-sub); font-weight: 500; }
+.detail-modal-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.detail-watch-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text-sub); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
+.detail-watch-btn:active { transform: scale(0.9); }
+.detail-watch-btn.active { color: var(--accent); border-color: rgba(247,147,26,0.4); background: rgba(247,147,26,0.1); }
 .detail-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 0 0 12px; direction: ltr; }
 .detail-stats div { background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 8px; }
-.detail-stats span { display: block; font-size: 11px; color: var(--text-sub); }
+.detail-stats span { display: block; font-size: 11px; color: var(--text-sub); margin-bottom: 2px; }
 .detail-stats strong { font-size: 14px; font-variant-numeric: tabular-nums; }
 .tv-tf-bar { display: flex; gap: 4px; margin-bottom: 10px; overflow-x: auto; scrollbar-width: none; direction: ltr; }
 .tv-tf-bar::-webkit-scrollbar { display: none; }
@@ -956,6 +970,8 @@ strong.down { color: var(--red); }
     .hero-content p { font-size: 11px; }
     /* 360px Market page optimization */
     .section-header { padding: 16px 14px 12px; }
+    .market-page-header { padding: 14px 14px 8px; }
+    .market-page-header h2 { font-size: 18px; }
     .coin-list { padding: 0 14px; }
     .market-summary-bar { margin: 0 12px 8px; padding: 8px 10px; }
     .market-main-tabs { padding: 0 12px 10px; gap: 6px; }

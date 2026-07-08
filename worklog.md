@@ -213,3 +213,35 @@ Stage Summary:
 - Summary bar logic: hidden only for Forex (not Watchlist)
 - Files modified: index.html, style.css, app.js
 - No breaking changes: legacy switchMarketTab still works
+
+---
+Task ID: qa-styling-features
+Agent: cron-qa
+Task: Styling improvements + new features (QA round)
+
+Work Log:
+- Committed uncommitted changes from previous session (e301b16): search icon, FAB logic, count badges, forex price fix
+- Bottom nav: added active tab top accent line (::before pseudo), press scale animation, active icon scale-up, -webkit-backdrop-filter
+- Coin list: staggered fade-in animation on tab switch (first 3 items, only during .fade-in), hover/active bg
+- Info bar: added HH:MM timestamp via .coin-list-time
+- Watchlist: mini toast notification on toggle (showMiniToast), star press scale(1.3x), toast CSS pill with slide-up
+- Visual: summary letter-spacing, FAB gradient/hover, empty state padding, forex left-border accent
+- Fixed forex price calculation bug (frankfurter rates were inverted)
+
+Stage Summary:
+- Commits: e301b16, 4022c70
+- Tests: 109/109 pass
+- All features verified via agent-browser programmatic QA
+- No bugs, no regressions
+
+### Current Project Status
+- Market page: hierarchical tabs (3 main + 3 sub), card-style, glassmorphism
+- Features: unified search, forex tab, watchlist with toast, FAB context-aware, count badges
+- Styling: dark theme, mobile-first (360px/390px), RTL, animations
+- Backend: 109 tests passing, /api/market + /api/forex endpoints
+
+### Unresolved / Risks
+- frankfurter.app doesn't support XAU/XAG → metals show 0 price
+- No pull-to-refresh gesture (only programmatic refresh)
+- CoinCap direct fallback still used when backend unavailable (rate limits possible)
+- Next priority: improve coin detail modal, add market cap/volume to forex pairs
