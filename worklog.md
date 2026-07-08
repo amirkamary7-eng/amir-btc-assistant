@@ -158,3 +158,31 @@ Stage Summary:
 - ALL 9 FIXES PASS — Zero regressions
 - Pre-existing: duplicate `escapeHtml` definitions (low severity, not a regression)
 - All DOM IDs verified present in HTML
+
+---
+Task ID: session3-market-overhaul
+Agent: main
+Task: Market Layout Overhaul + Forex Tab + Unified Search
+
+Work Log:
+- P0-1: Reordered market page layout — Summary Bar → Search → Tabs → Market List
+- P0-2: Improved market list alignment (flex-basis, max-width names, 32px icons, tabular-nums)
+- P0-4: Replaced Trending tab with Forex tab (Crypto, Forex, Gainers, Losers, Watchlist)
+- P0-5: Backend /api/forex endpoint — 11 pairs (7 major, 2 cross, 2 metals) via frankfurter.app
+- P0-6: Unified search across crypto (200 coins) + forex (11 pairs) simultaneously
+- P0-7: Verified single exchange badge (previous fix confirmed, no duplicates)
+- P0-8: Verified English-only timeframe labels (1m, 5m, 15m, 1H, 4H, 1D, 1W)
+- P0-9: Forex detail modal with TradingView chart (FX:*/OANDA:XAUUSD/OANDA:XAGUSD)
+- Summary bar hidden on Forex tab, alert section hidden for forex pairs
+- Mobile 360px optimizations for coin items
+- i18n: Added tab_forex key in FA and EN
+
+Stage Summary:
+- Commit: 189a9c3
+- Tests: 109/109 pass
+- Push: 58131ab..189a9c3 main → main
+- Files modified: app.js, index.html, style.css, worker-proxy.js
+
+### Unresolved / Future
+- Forex prices from frankfurter.app may not include gold/silver (XAU/XAG not standard currencies)
+- Could add NASDAQ/SPX500 as TradingView-only entries in future (user mentioned in search requirements)
