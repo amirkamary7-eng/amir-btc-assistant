@@ -1287,6 +1287,21 @@ async function loadNews(force = false) {
             const cached = Cache.get('news');
             if (cached) { newsCache = cached; renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all'); return; }
         }
+        // Show skeleton loader while fetching (§6.3)
+        const container = document.getElementById('news-list');
+        const activeTab = document.querySelector('.news-tab.active')?.dataset?.news || 'all';
+        if (activeTab !== 'calendar') {
+            container.innerHTML = Array(4).fill(`
+                <div class="news-skeleton">
+                    <div class="news-skeleton-img"></div>
+                    <div class="news-skeleton-content">
+                        <div class="news-skeleton-line"></div>
+                        <div class="news-skeleton-line"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
         let articles = [];
 
         // Backend handles RSS fetching, translation, and categories
@@ -1304,7 +1319,7 @@ async function loadNews(force = false) {
 
         newsCache = articles.slice(0, 30);
         Cache.set('news', newsCache, 300);
-        renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
+        renderNews(activeTab);
     } catch (e) {
         console.error('News error:', e);
         document.getElementById('news-list').innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
@@ -2454,6 +2469,8 @@ function startPolling() {
         }
         if (activePage === 'news-page') {
             loadNews();
+            // Calendar auto-refresh (§7#7): refresh every 30s when on news page
+            loadCalendarEvents(true);
         }
     }, 30000);
     setInterval(checkAlerts, 15000);
