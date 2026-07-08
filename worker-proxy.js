@@ -2163,6 +2163,83 @@ async function handleCalendarEvents(env) {
   }, {}, env);
 }
 
+const MARKET_CACHE_TTL = 120; // 2 minutes — prices change frequently
+const MARKET_FETCH_LIMIT = 200;
+
+async function handleMarketData(env) {
+  // Check KV cache first
+  const cachedRaw = await readAppCache(env, 'market:data');
+  if (cachedRaw) {
+    try {
+      const parsed = JSON.parse(cachedRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return jsonResponse({ status: 'success', data: parsed, cached: true }, {}, env);
+      }
+    } catch {}
+  }
+
+  // Primary: CoinGecko
+  try {
+    const { ok, body } = await fetchJson(
+      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MARKET_FETCH_LIMIT}&page=1&sparkline=false`
+    );
+    if (ok && Array.isArray(body) && body.length > 0) {
+      const data = body
+        .filter(item => item && typeof item === 'object')
+        .map((item, index) => ({
+          symbol: String(item.symbol || '').toUpperCase(),
+          name: item.name || '',
+          rank: item.market_cap_rank || (index + 1),
+          priceUsd: item.current_price || 0,
+          changePercent24Hr: item.price_change_percentage_24h || 0,
+          volumeUsd24Hr: item.total_volume || 0,
+          marketCapUsd: item.market_cap || 0,
+          supply: item.circulating_supply || 0,
+          image: item.image || '',
+        }));
+      await writeAppCache(env, 'market:data', JSON.stringify(data), MARKET_CACHE_TTL);
+      return jsonResponse({ status: 'success', data, cached: false }, {}, env);
+    }
+  } catch (e) {
+    console.warn('Market: CoinGecko failed', e.message || e);
+  }
+
+  // Fallback: CoinCap
+  try {
+    const { ok, body } = await fetchJson('https://api.coincap.io/v2/assets?limit=' + MARKET_FETCH_LIMIT);
+    const assets = body?.data || (Array.isArray(body) ? body : null);
+    if (Array.isArray(assets) && assets.length > 0) {
+      const data = assets.map(item => ({
+        symbol: String(item.symbol || '').toUpperCase(),
+        name: item.name || '',
+        rank: parseInt(item.rank, 10) || 0,
+        priceUsd: parseFloat(item.priceUsd) || 0,
+        changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
+        volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
+        marketCapUsd: parseFloat(item.marketCapUsd) || 0,
+        supply: parseFloat(item.supply) || 0,
+        image: `https://assets.coincap.io/assets/icons/${String(item.symbol || '').toLowerCase()}@2x.png`,
+      }));
+      await writeAppCache(env, 'market:data', JSON.stringify(data), MARKET_CACHE_TTL);
+      return jsonResponse({ status: 'success', data, cached: false }, {}, env);
+    }
+  } catch (e) {
+    console.warn('Market: CoinCap fallback failed', e.message || e);
+  }
+
+  // If stale cache exists, serve it (stale-while-error)
+  if (cachedRaw) {
+    try {
+      const parsed = JSON.parse(cachedRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return jsonResponse({ status: 'success', data: parsed, cached: true, stale: true }, {}, env);
+      }
+    } catch {}
+  }
+
+  return jsonResponse({ status: 'error', message: 'All market data sources failed' }, { status: 503 }, env);
+}
+
 async function handleFarsiNews(request, env) {
   const url = new URL(request.url);
   const category = url.searchParams.get('category');
@@ -2533,6 +2610,10 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/calendar/events') {
         return await handleCalendarEvents(env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/market') {
+        return await handleMarketData(env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
