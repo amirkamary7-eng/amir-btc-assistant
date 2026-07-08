@@ -1090,6 +1090,24 @@ async function loadMarketData(force = false) {
                 return;
             }
         }
+        // Show skeleton loader while fetching (P0-1)
+        if (listEl && !allCoins.length) {
+            listEl.innerHTML = Array(8).fill(`
+                <div class="market-skeleton">
+                    <div class="market-skeleton-left">
+                        <div class="market-skeleton-icon"></div>
+                        <div class="market-skeleton-text">
+                            <div class="market-skeleton-line"></div>
+                            <div class="market-skeleton-line"></div>
+                        </div>
+                    </div>
+                    <div class="market-skeleton-right">
+                        <div class="market-skeleton-block"></div>
+                        <div class="market-skeleton-block"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
         try {
             allCoins = await fetchCoinGecko();
         } catch (e1) {
