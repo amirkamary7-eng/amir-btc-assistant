@@ -717,6 +717,44 @@ body.user-loading .profile-loading-target.skeleton-text {
 .market-skeleton-block:nth-child(1) { width: 70px; }
 .market-skeleton-block:nth-child(2) { width: 50px; }
 
+/* Market Summary Bar (P2-1) */
+.market-summary-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.summary-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.summary-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.summary-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.summary-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
 /* Load More button (Phase 7) */
 .load-more-btn { display: block; width: 100%; padding: 12px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--accent); font-size: 14px; cursor: pointer; transition: background 0.2s; }
 .load-more-btn:active { background: rgba(247,147,26,0.1); }

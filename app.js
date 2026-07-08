@@ -270,6 +270,7 @@ let tickets = [];
 let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
 let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
 let allCoins = [];
+let globalMarketData = null; // P2-1: { totalMarketCap, totalVolume, btcDominance }
 let currentMarketTab = 'overview';
 let searchTerm = '';
 let sliderInterval = null;
@@ -336,6 +337,7 @@ const i18n = {
         cal_loading: 'در حال بارگذاری تقویم...', cal_empty: 'رویدادی موجود نیست',
         about_version: 'نسخه 1.0.0', about_desc: 'دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر.',
         official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
+        summary_mcap: 'مارکت‌کپ کل', summary_volume: 'حجم ۲۴h', summary_btc_dom: 'سلطه BTC',
         price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h',
         view_source: 'مشاهده منبع', guest: 'کاربر میهمان', required_fields: 'فیلدهای الزامی را پر کنید',
         invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.',
@@ -393,6 +395,7 @@ const i18n = {
         about_version: 'Version 1.0.0',
         about_desc: 'Smart trading assistant connected to global exchange APIs.',
         official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
+        summary_mcap: 'Total Market Cap', summary_volume: '24h Volume', summary_btc_dom: 'BTC Dominance',
         price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume',
         view_source: 'View source', guest: 'Guest User', required_fields: 'Please fill required fields',
         invalid_price: 'Enter a valid price', copied: 'Copied!', copy_ref_msg: 'Referral link copied.',
@@ -1117,6 +1120,7 @@ async function loadMarketData(force = false) {
                 const res = await apiFetch('/api/market');
                 if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
                     allCoins = res.data;
+                    if (res.global) globalMarketData = res.global;
                     fetched = true;
                 }
             } catch (e) {
@@ -1166,14 +1170,48 @@ async function loadMarketData(force = false) {
 //#region خلاصه بازار
 // ============================================================================
 /**
- * خلاصه بازار را در رابط کاربری رندر می‌کند.
- * P1-4: Disabled — target DOM elements (global-mcap, global-volume, btc-dom)
- * do not exist in index.html. Re-enable when summary bar is added to HTML.
- * @param {boolean} _unused - kept for call-site compatibility
+ * خلاصه بازار (مارکت‌کپ کل، حجم ۲۴h، سلطه BTC) را در summary bar رندر می‌کند.
+ * داده از globalMarketData (backend /api/market response) یا محاسبه از allCoins.
  */
-// eslint-disable-next-line no-unused-vars
-function renderSummary(_unused) {
-    // No-op: summary elements removed from HTML. Re-enable when needed.
+function renderSummary() {
+    const mcapEl = document.getElementById('global-mcap');
+    const volEl = document.getElementById('global-volume');
+    const domEl = document.getElementById('btc-dom');
+    if (!mcapEl) return;
+
+    if (globalMarketData) {
+        mcapEl.textContent = formatLargeNumber(globalMarketData.totalMarketCap);
+        volEl.textContent = '$' + formatLargeNumber(globalMarketData.totalVolume);
+        domEl.textContent = globalMarketData.btcDominance.toFixed(1) + '%';
+    } else {
+        // Fallback: compute from allCoins
+        let totalMcap = 0;
+        let totalVol = 0;
+        let btcMcap = 0;
+        for (let i = 0; i < allCoins.length; i++) {
+            const c = allCoins[i];
+            totalMcap += (c.marketCapUsd || 0);
+            totalVol += (c.volumeUsd24Hr || 0);
+            if (c.symbol === 'BTC') btcMcap = c.marketCapUsd || 0;
+        }
+        mcapEl.textContent = formatLargeNumber(totalMcap);
+        volEl.textContent = '$' + formatLargeNumber(totalVol);
+        domEl.textContent = totalMcap > 0 ? ((btcMcap / totalMcap) * 100).toFixed(1) + '%' : '--';
+    }
+}
+
+/**
+ * Format large numbers: >1T → X.XXT, >1B → X.XXB, >1M → X.XXM
+ */
+function formatLargeNumber(n) {
+    if (n == null || isNaN(n)) return '--';
+    const abs = Math.abs(n);
+    const sign = n < 0 ? '-' : '';
+    if (abs >= 1e12) return sign + (abs / 1e12).toFixed(2) + 'T';
+    if (abs >= 1e9) return sign + (abs / 1e9).toFixed(2) + 'B';
+    if (abs >= 1e6) return sign + (abs / 1e6).toFixed(2) + 'M';
+    if (abs >= 1e3) return sign + (abs / 1e3).toFixed(1) + 'K';
+    return sign + abs.toFixed(0);
 }
 
 //#endregion

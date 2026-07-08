@@ -185,6 +185,22 @@
             <button class="tab-btn" data-tab="losers" onclick="switchMarketTab('losers', this)" data-i18n="tab_losers">Losers</button>
             <button class="tab-btn" data-tab="watchlist" onclick="switchMarketTab('watchlist', this)" data-i18n="watchlist">Watchlist</button>
         </div>
+        <div class="market-summary-bar" id="market-summary-bar">
+            <div class="summary-item">
+                <span class="summary-label" data-i18n="summary_mcap">مارکت‌کپ کل</span>
+                <span class="summary-value" id="global-mcap">--</span>
+            </div>
+            <div class="summary-divider"></div>
+            <div class="summary-item">
+                <span class="summary-label" data-i18n="summary_volume">حجم ۲۴h</span>
+                <span class="summary-value" id="global-volume">--</span>
+            </div>
+            <div class="summary-divider"></div>
+            <div class="summary-item">
+                <span class="summary-label" data-i18n="summary_btc_dom">سلطه BTC</span>
+                <span class="summary-value" id="btc-dom">--</span>
+            </div>
+        </div>
         <div class="coin-list" id="coin-list"></div>
     </section>
 
