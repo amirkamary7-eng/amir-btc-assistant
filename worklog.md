@@ -185,4 +185,31 @@ Stage Summary:
 
 ### Unresolved / Future
 - Forex prices from frankfurter.app may not include gold/silver (XAU/XAG not standard currencies)
-- Could add NASDAQ/SPX500 as TradingView-only entries in future (user mentioned in search requirements)
+- Could add NASDAQ/SPX500 as TradingView-only entries in future (user mentioned in search requirements)---
+Task ID: 1
+Agent: main
+Task: Market UI/UX Complete Redesign - Hierarchical Tab Structure
+
+Work Log:
+- Analyzed current 5-flat-tab structure (Overview, Forex, Gainers, Losers, Watchlist)
+- Redesigned to hierarchical: 3 main tabs (Crypto/Forex/Watchlist) + Crypto sub-tabs (Top Market/Gainers/Losers)
+- Updated index.html: Replaced old .market-tabs with .market-main-tabs (3 equal grid cards) + .market-sub-tabs (3 flex buttons)
+- Added SVG icons to main tabs (dollar, currency, star)
+- Updated style.css: New .main-tab-btn (card-style, grid 3-col, gradient active state, glow border, bottom accent line)
+- Added .market-sub-tabs with smooth show/hide animation (max-height + opacity transition)
+- Updated app.js: Added switchMainTab() and switchSubTab() functions
+- Kept switchMarketTab() as legacy backward-compat wrapper
+- Added currentMainTab and currentSubTab state variables
+- Fixed summary bar: visible for Crypto+Watchlist, hidden only for Forex
+- Added i18n keys: tab_crypto (FA: کریپتو / EN: Crypto), tab_top_market (FA: برترین‌ها / EN: Top Market)
+- Mobile optimization: 360px media query updated for new tabs
+- Verified: 109/109 backend tests pass
+- Browser verification at 390px and 360px: all tabs, sub-tabs, search, state persistence working
+
+Stage Summary:
+- Structure changed from 5 flat tabs → 3 main + 3 sub (hierarchical)
+- Main tabs: equal-width CSS grid cards with SVG icons, gradient active state
+- Sub-tabs: smooth show/hide animation, only visible under Crypto
+- Summary bar logic: hidden only for Forex (not Watchlist)
+- Files modified: index.html, style.css, app.js
+- No breaking changes: legacy switchMarketTab still works

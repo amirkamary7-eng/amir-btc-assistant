@@ -273,6 +273,8 @@ let allCoins = [];
 let allForexPairs = []; // Forex data from /api/forex
 let globalMarketData = null; // P2-1: { totalMarketCap, totalVolume, btcDominance }
 let currentMarketTab = 'overview';
+let currentMainTab = 'crypto';   // crypto | forex | watchlist
+let currentSubTab = 'top';       // top | gainers | losers
 let searchTerm = '';
 let sliderInterval = null;
 let currentSlide = 0;
@@ -301,7 +303,7 @@ const i18n = {
         price_alert: 'هشدار قیمت', set_alert: 'ثبت هشدار', alert_target: 'قیمت هدف (USD)',
         alert_bot_hint: 'اعلان در اپ + پیام تلگرام', alert_empty: 'هیچ هشدار فعالی نیست',
         alert_registered: 'هشدار ثبت شد',
-        tab_overview: 'برترین‌ها', tab_forex: 'فارکس', tab_gainers: 'رشد', tab_losers: 'ریزش',
+        tab_crypto: 'کریپتو', tab_top_market: 'برترین‌ها', tab_forex: 'فارکس', tab_gainers: 'رشد', tab_losers: 'ریزش',
         analysis_title: 'تحلیل‌های بازار', new_analysis: 'تحلیل جدید',
         news_all: 'همه', news_crypto: 'کریپتو', news_economy: 'اقتصادی', news_forex: 'فارکس', news_calendar: 'تقویم',
         hero_badge: 'کانال تحلیلی', hero_desc: 'سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار', hero_cta: 'عضویت رایگان',
@@ -359,7 +361,7 @@ const i18n = {
         price_alert: 'Price Alert', set_alert: 'Set Alert', alert_target: 'Target price (USD)',
         alert_bot_hint: 'In-app + Telegram message', alert_empty: 'No active alerts',
         alert_registered: 'Alert registered',
-        tab_overview: 'Overview', tab_forex: 'Forex', tab_gainers: 'Gainers', tab_losers: 'Losers',
+        tab_crypto: 'Crypto', tab_top_market: 'Top Market', tab_forex: 'Forex', tab_gainers: 'Gainers', tab_losers: 'Losers',
         analysis_title: 'Market Analysis', new_analysis: 'New Analysis',
         news_all: 'All', news_crypto: 'Crypto', news_economy: 'Economy', news_forex: 'Forex', news_calendar: 'Calendar',
         hero_badge: 'Analysis Channel', hero_desc: 'Daily signals, analysis & market education', hero_cta: 'Join Free',
@@ -1435,29 +1437,148 @@ function renderForexItem(f) {
         </div>
     `;
 }
+
 /**
- * نمایش یا وضعیت بازار تب را تعویض می‌کند.
- * ورودی: پارامترهای `tab, btn` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ * Switch between the 3 main tabs: crypto / forex / watchlist.
  */
-function switchMarketTab(tab, btn) {
-    currentMarketTab = tab;
-    document.querySelectorAll('.tab-btn').forEach(b => {
+function switchMainTab(tab, btn) {
+    currentMainTab = tab;
+    // Sync legacy currentMarketTab for backward compatibility
+    if (tab === 'crypto') {
+        currentMarketTab = currentSubTab === 'top' ? 'overview' : currentSubTab;
+    } else {
+        currentMarketTab = tab;
+    }
+
+    // Update main tab active states
+    document.querySelectorAll('.main-tab-btn').forEach(b => {
         b.classList.remove('active');
         b.setAttribute('aria-selected', 'false');
     });
     btn.classList.add('active');
     btn.setAttribute('aria-selected', 'true');
 
-    // Hide/show summary bar for forex tab
-    const summaryBar = document.getElementById('market-summary-bar');
-    if (summaryBar) {
-        summaryBar.style.display = tab === 'forex' ? 'none' : '';
+    // Show/hide crypto sub-tabs
+    const subTabs = document.getElementById('market-sub-tabs');
+    if (subTabs) {
+        if (tab === 'crypto') {
+            subTabs.classList.remove('hidden');
+        } else {
+            subTabs.classList.add('hidden');
+        }
     }
 
-    // Load forex data on first visit to forex tab
+    // Show/hide summary bar (only for crypto, not forex/watchlist in search mode)
+    const summaryBar = document.getElementById('market-summary-bar');
+    if (summaryBar) {
+        summaryBar.style.display = (tab === 'forex') ? 'none' : '';
+    }
+
+    // Load forex data on first visit
     if (tab === 'forex' && !allForexPairs.length) {
         loadForexData();
+    }
+
+    // Re-render with animation
+    const list = document.getElementById('coin-list');
+    if (list) {
+        list.classList.remove('fade-in');
+        list.classList.add('fade-out');
+        setTimeout(() => {
+            renderMarket();
+            list.classList.remove('fade-out');
+            list.classList.add('fade-in');
+        }, 120);
+    } else {
+        renderMarket();
+    }
+}
+
+/**
+ * Switch between crypto sub-tabs: top / gainers / losers.
+ */
+function switchSubTab(tab, btn) {
+    currentSubTab = tab;
+    // Sync legacy currentMarketTab
+    currentMarketTab = tab === 'top' ? 'overview' : tab;
+
+    // Update sub-tab active states
+    document.querySelectorAll('.sub-tab-btn').forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+    });
+    btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
+
+    // Re-render with animation
+    const list = document.getElementById('coin-list');
+    if (list) {
+        list.classList.remove('fade-in');
+        list.classList.add('fade-out');
+        setTimeout(() => {
+            renderMarket();
+            list.classList.remove('fade-out');
+            list.classList.add('fade-in');
+        }, 120);
+    } else {
+        renderMarket();
+    }
+}
+
+/**
+ * Legacy function kept for backward compatibility.
+ */
+function switchMarketTab(tab, btn) {
+    // Map old tabs to new structure
+    if (tab === 'overview' || tab === 'gainers' || tab === 'losers') {
+        currentMainTab = 'crypto';
+        currentSubTab = tab === 'overview' ? 'top' : tab;
+        currentMarketTab = tab === 'overview' ? 'overview' : tab;
+        // Activate crypto main tab
+        const cryptoBtn = document.querySelector('.main-tab-btn[data-main-tab="crypto"]');
+        if (cryptoBtn) {
+            document.querySelectorAll('.main-tab-btn').forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-selected', 'false');
+            });
+            cryptoBtn.classList.add('active');
+            cryptoBtn.setAttribute('aria-selected', 'true');
+        }
+        // Show sub-tabs
+        const subTabs = document.getElementById('market-sub-tabs');
+        if (subTabs) subTabs.classList.remove('hidden');
+        // Show summary bar
+        const summaryBar = document.getElementById('market-summary-bar');
+        if (summaryBar) summaryBar.style.display = '';
+        // Activate correct sub-tab
+        document.querySelectorAll('.sub-tab-btn').forEach(b => {
+            b.classList.remove('active');
+            b.setAttribute('aria-selected', 'false');
+        });
+        const subBtn = document.querySelector(`.sub-tab-btn[data-sub-tab="${currentSubTab}"]`);
+        if (subBtn) {
+            subBtn.classList.add('active');
+            subBtn.setAttribute('aria-selected', 'true');
+        }
+    } else if (tab === 'forex' || tab === 'watchlist') {
+        currentMainTab = tab;
+        currentMarketTab = tab;
+        const mainBtn = document.querySelector(`.main-tab-btn[data-main-tab="${tab}"]`);
+        if (mainBtn) {
+            document.querySelectorAll('.main-tab-btn').forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-selected', 'false');
+            });
+            mainBtn.classList.add('active');
+            mainBtn.setAttribute('aria-selected', 'true');
+        }
+        // Hide sub-tabs
+        const subTabs = document.getElementById('market-sub-tabs');
+        if (subTabs) subTabs.classList.add('hidden');
+        // Hide summary bar for forex
+        const summaryBar = document.getElementById('market-summary-bar');
+        if (summaryBar) summaryBar.style.display = tab === 'forex' ? 'none' : '';
+        if (tab === 'forex' && !allForexPairs.length) loadForexData();
     }
 
     const list = document.getElementById('coin-list');
@@ -3047,6 +3168,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ثبت توابع در فضای global
 window.switchTab = switchTab;
 window.switchMarketTab = switchMarketTab;
+window.switchMainTab = switchMainTab;
+window.switchSubTab = switchSubTab;
 window.switchNewsTab = switchNewsTab;
 window.toggleWatchlist = toggleWatchlist;
 window.openAddCoinModal = openAddCoinModal;
