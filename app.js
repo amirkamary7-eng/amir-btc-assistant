@@ -295,7 +295,7 @@ const i18n = {
         welcome: 'خوش آمدید،', dashboard: 'داشبورد', market: 'مارکت', analysis: 'تحلیل', news: 'اخبار',
         profile: 'پروفایل', watchlist: 'واچ‌لیست', settings: 'تنظیمات', referral: 'دعوت و پاداش',
         support: 'پشتیبانی و تیکت', about: 'درباره ما', language: 'زبان', search: 'جستجوی ارز...',
-        no_data: 'داده‌ای موجود نیست', join_channel: 'عضویت در کانال', copy: 'کپی', share: 'اشتراک‌گذاری',
+        no_data: 'داده‌ای موجود نیست', search_no_result: 'ارزی با این نام یافت نشد', join_channel: 'عضویت در کانال', copy: 'کپی', share: 'اشتراک‌گذاری',
         share_direct: 'اشتراک‌گذاری مستقیم', delete: 'حذف', mark_all_read: 'همه خوانده شد',
         price_alert: 'هشدار قیمت', set_alert: 'ثبت هشدار', alert_target: 'قیمت هدف (USD)',
         alert_bot_hint: 'اعلان در اپ + پیام تلگرام', alert_empty: 'هیچ هشدار فعالی نیست',
@@ -353,7 +353,7 @@ const i18n = {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
         profile: 'Profile', watchlist: 'Watchlist', settings: 'Settings', referral: 'Referral & Earn',
         support: 'Support & Tickets', about: 'About', language: 'Language', search: 'Search coin...',
-        no_data: 'No data available', join_channel: 'Join Channel', copy: 'Copy', share: 'Share',
+        no_data: 'No data available', search_no_result: 'No coins found', join_channel: 'Join Channel', copy: 'Copy', share: 'Share',
         share_direct: 'Share Link', delete: 'Delete', mark_all_read: 'Mark all read',
         price_alert: 'Price Alert', set_alert: 'Set Alert', alert_target: 'Target price (USD)',
         alert_bot_hint: 'In-app + Telegram message', alert_empty: 'No active alerts',
@@ -1258,7 +1258,8 @@ function renderMarket() {
         }
     }
     if (!filtered.length && allCoins.length) {
-        list.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
+        const msg = searchTerm ? t('search_no_result') : t('no_data');
+        list.innerHTML = `<div class="empty-state">${msg}</div>`;
         return;
     }
     if (!filtered.length) {
