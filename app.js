@@ -1996,6 +1996,11 @@ function closeCoinDetail() {
     currentTvChartInfo = null;
     document.getElementById('coin-detail-modal').style.display = 'none';
 }
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        if (document.getElementById('coin-detail-modal').style.display === 'flex') closeCoinDetail();
+    }
+});
 /**
  * فعال هشدارها را در رابط کاربری رندر می‌کند.
  * ورودی: پارامترهای `symbol` را دریافت می‌کند.

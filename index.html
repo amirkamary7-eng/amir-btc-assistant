@@ -399,7 +399,7 @@
     </div>
 
     <!-- مودال جزئیات کوین -->
-    <div id="coin-detail-modal" class="modal" onclick="if(event.target===this) closeCoinDetail()">
+    <div id="coin-detail-modal" class="modal" role="dialog" aria-modal="true" aria-label="Coin detail" onclick="if(event.target===this) closeCoinDetail()">
         <div class="modal-box">
             <div class="modal-header">
                 <h3 id="detail-coin-title">BTC / USDT</h3>
@@ -423,7 +423,7 @@
                 </div>
                 <div class="alert-form">
                     <input type="number" id="alert-price" placeholder="0.00" class="input-field alert-price-input" data-i18n-placeholder="alert_target">
-                    <button class="submit-btn alert-submit-btn" onclick="setPriceAlert()" data-i18n="set_alert">ثبت هشدار</button>
+                    <button type="button" class="submit-btn alert-submit-btn" onclick="setPriceAlert()" data-i18n="set_alert">ثبت هشدار</button>
                 </div>
                 <div id="active-alerts" class="alert-list"></div>
             </div>
