@@ -271,6 +271,10 @@ body.user-loading .profile-loading-target.skeleton-text {
 .watch-change.up { color: var(--green); }
 .watch-change.down { color: var(--red); }
 .remove-watch { position: absolute; top: 4px; right: 6px; color: var(--text-dim); cursor: pointer; padding: 6px; margin: -6px; }
+.watchlist-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 28px 16px; width: 100%; }
+.watchlist-empty-title { font-size: 14px; font-weight: 600; color: var(--text-dim); }
+.watchlist-empty-desc { font-size: 12px; color: var(--text-sub); }
+.watchlist-empty-btn { margin-top: 4px; padding: 8px 20px; background: var(--accent); color: #000; border: none; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
 
 /* #endregion */
 
