@@ -1504,28 +1504,45 @@ function parseRssItems(rssText) {
   }));
 }
 
-async function translateToFarsi(text) {
-  if (!text) {
-    return '';
+/**
+ * Translate text to Farsi using Cloudflare Workers AI (primary) with
+ * Google Translate (unofficial endpoint) as fallback.
+ *
+ * Workers AI: free, no rate-limit, runs inside the Worker — no external call.
+ * Google Translate fallback: kept for environments without AI binding.
+ */
+async function translateToFarsi(text, env) {
+  if (!text) return '';
+
+  // ── Primary: Cloudflare Workers AI ─────────────────────────────────
+  if (env?.AI) {
+    try {
+      const response = await env.AI.run('@cf/meta/m2m100-1.2b', {
+        text,
+        source_lang: 'english',
+        target_lang: 'persian',
+      });
+      const translated = response?.translated_text;
+      if (translated && typeof translated === 'string' && translated.trim()) {
+        return translated.trim();
+      }
+    } catch {
+      // AI unavailable or model error — fall through to Google Translate
+    }
   }
 
+  // ── Fallback: Google Translate (unofficial) ───────────────────────
   try {
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=fa&dt=t&q=${encodeURIComponent(text)}`;
     const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
+      headers: { Accept: 'application/json' },
     });
 
-    if (!response.ok) {
-      return text;
-    }
+    if (!response.ok) return text;
 
     const body = await response.json();
-    if (!Array.isArray(body?.[0])) {
-      return text;
-    }
+    if (!Array.isArray(body?.[0])) return text;
 
     const translated = body[0].map((part) => part?.[0] || '').join('').trim();
     return translated || text;
@@ -1561,7 +1578,7 @@ async function fetchRawNewsRss() {
   return { rssText: null, sourceName: null };
 }
 
-async function buildFarsiNewsArticles(rssText, sourceName) {
+async function buildFarsiNewsArticles(rssText, sourceName, env) {
   const items = parseRssItems(rssText);
   if (items.length === 0) return [];
 
@@ -1569,8 +1586,8 @@ async function buildFarsiNewsArticles(rssText, sourceName) {
   // Reduces latency from ~10s (sequential) to ~1s (parallel)
   const allTranslations = await Promise.all(
     items.flatMap((item) => [
-      translateToFarsi(item.title || 'بدون عنوان'),
-      translateToFarsi(item.description || ''),
+      translateToFarsi(item.title || 'بدون عنوان', env),
+      translateToFarsi(item.description || '', env),
     ])
   );
 
@@ -1616,7 +1633,7 @@ async function fetchFarsiNews(env) {
   }
 
   try {
-    const articles = await buildFarsiNewsArticles(rssText, sourceName);
+    const articles = await buildFarsiNewsArticles(rssText, sourceName, env);
     if (articles.length > 0) {
       await writeAppCache(
         env,
