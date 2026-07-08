@@ -1310,15 +1310,18 @@ function renderWatchlist() {
         grid.innerHTML = `<div class="empty-state">${t('watchlist_empty')}</div>`;
         return;
     }
-    grid.innerHTML = watchCoins.map(c => `
-        <div class="watch-item" onclick="openCoinDetail('${c.symbol}')">
-            <span class="remove-watch" onclick="toggleWatchlist('${c.symbol}', event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-            <img src="https://assets.coincap.io/assets/icons/${c.symbol.toLowerCase()}@2x.png" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="watch-icon">
-            <span class="watch-sym">${c.symbol}</span>
+    grid.innerHTML = watchCoins.map(c => {
+        const safeSymbol = escapeHtml(c.symbol);
+        const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
+        return `
+        <div class="watch-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
+            <span class="remove-watch" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+            <img src="${escapeHtml(icon)}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="watch-icon">
+            <span class="watch-sym">${safeSymbol}</span>
             <span class="watch-price">$${c.priceUsd.toFixed(2)}</span>
             <span class="watch-change ${c.changePercent24Hr >= 0 ? 'up' : 'down'}">${c.changePercent24Hr >= 0 ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</span>
         </div>
-    `).join('');
+    `;}).join('');
 }
 /**
  * add ارز مودال را باز می‌کند.
@@ -1348,9 +1351,11 @@ function populateCoinModal() {
     list.innerHTML = allCoins.map(c => {
         const inList = watchlist.includes(c.symbol);
         const atLimit = !inList && watchlist.length >= MAX_WATCHLIST;
+        const safeSymbol = escapeHtml(c.symbol);
+        const safeName = escapeHtml(c.name);
         return `
-        <div class="modal-coin-item ${atLimit ? 'disabled' : ''}" onclick="${atLimit ? '' : `toggleWatchlist('${c.symbol}', event); populateCoinModal();`}">
-            <span>${c.symbol} - ${c.name}</span>
+        <div class="modal-coin-item ${atLimit ? 'disabled' : ''}" data-symbol="${safeSymbol}" onclick="${atLimit ? '' : `toggleWatchlist(this.dataset.symbol, event); populateCoinModal();`}">
+            <span>${safeSymbol} - ${safeName}</span>
             <span>${inList ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="#f7931a" stroke="#f7931a" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>' : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'}</span>
         </div>`;
     }).join('');
@@ -1877,10 +1882,10 @@ function renderActiveAlerts(symbol) {
     container.innerHTML = userAlerts.map(a => `
         <div class="alert-item">
             <div class="alert-item-info">
-                <span class="alert-item-symbol">${a.symbol}</span>
+                <span class="alert-item-symbol">${escapeHtml(a.symbol)}</span>
                 <span class="alert-item-target">≥ $${a.price}</span>
             </div>
-            <button class="alert-remove-btn" onclick="removeAlert('${a.id}')">
+            <button class="alert-remove-btn" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
