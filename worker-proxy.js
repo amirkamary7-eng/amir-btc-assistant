@@ -2354,26 +2354,27 @@ async function handleForexData(env) {
         } else if (pair.symbol === 'XAGUSD') {
           price = 0;
         } else {
-          // Parse pair: e.g. EURUSD = EUR/USD = how many USD per EUR = rates.EUR
-          // GBPUSD = GBP/USD = rates.GBP
-          // USDJPY = USD/JPY = 1/rates.JPY
-          // AUDUSD = AUD/USD = rates.AUD
-          // etc.
+          // frankfurter returns: 1 USD = rates[XXX] units of XXX
+          // EURUSD = how many USD per 1 EUR = 1 / rates.EUR
+          // GBPUSD = how many USD per 1 GBP = 1 / rates.GBP
+          // USDJPY = how many JPY per 1 USD = rates.JPY
+          // USDCAD = how many CAD per 1 USD = rates.CAD
           const base = pair.symbol.slice(0, 3);  // EUR, GBP, USD, AUD, NZD
           const quote = pair.symbol.slice(3, 6);  // USD, JPY, CAD, CHF
 
           if (base === 'USD') {
-            // USD/XXX = 1 / rates[XXX]
+            // USD/XXX = rates[XXX] (how many units of XXX per 1 USD)
             const quoteRate = rates[quote];
-            if (quoteRate) price = 1 / quoteRate;
+            if (quoteRate) price = quoteRate;
           } else if (quote === 'USD') {
-            // XXX/USD = rates[XXX]
-            price = rates[base] || 0;
+            // XXX/USD = 1 / rates[XXX] (how many USD per 1 unit of XXX)
+            const baseRate = rates[base];
+            if (baseRate) price = 1 / baseRate;
           } else {
-            // Cross: EUR/JPY = rates[EUR] / rates[JPY]
+            // Cross: EUR/JPY = (1/rates.EUR) * rates.JPY = rates.JPY / rates.EUR
             const baseRate = rates[base];
             const quoteRate = rates[quote];
-            if (baseRate && quoteRate) price = baseRate / quoteRate;
+            if (baseRate && quoteRate) price = quoteRate / baseRate;
           }
         }
 

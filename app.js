@@ -298,7 +298,7 @@ const i18n = {
         welcome: 'خوش آمدید،', dashboard: 'داشبورد', market: 'مارکت', analysis: 'تحلیل', news: 'اخبار',
         profile: 'پروفایل', watchlist: 'واچ‌لیست', settings: 'تنظیمات', referral: 'دعوت و پاداش',
         support: 'پشتیبانی و تیکت', about: 'درباره ما', language: 'زبان', search: 'جستجوی ارز...',
-        no_data: 'داده‌ای موجود نیست', search_no_result: 'ارزی با این نام یافت نشد', join_channel: 'عضویت در کانال', copy: 'کپی', share: 'اشتراک‌گذاری',
+        no_data: 'داده‌ای موجود نیست', search_no_result: 'ارزی با این نام یافت نشد', search_results: 'نتیجه', join_channel: 'عضویت در کانال', copy: 'کپی', share: 'اشتراک‌گذاری',
         share_direct: 'اشتراک‌گذاری مستقیم', delete: 'حذف', mark_all_read: 'همه خوانده شد',
         price_alert: 'هشدار قیمت', set_alert: 'ثبت هشدار', alert_target: 'قیمت هدف (USD)',
         alert_bot_hint: 'اعلان در اپ + پیام تلگرام', alert_empty: 'هیچ هشدار فعالی نیست',
@@ -356,7 +356,7 @@ const i18n = {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
         profile: 'Profile', watchlist: 'Watchlist', settings: 'Settings', referral: 'Referral & Earn',
         support: 'Support & Tickets', about: 'About', language: 'Language', search: 'Search coin...',
-        no_data: 'No data available', search_no_result: 'No coins found', join_channel: 'Join Channel', copy: 'Copy', share: 'Share',
+        no_data: 'No data available', search_no_result: 'No coins found', search_results: 'results', join_channel: 'Join Channel', copy: 'Copy', share: 'Share',
         share_direct: 'Share Link', delete: 'Delete', mark_all_read: 'Mark all read',
         price_alert: 'Price Alert', set_alert: 'Set Alert', alert_target: 'Target price (USD)',
         alert_bot_hint: 'In-app + Telegram message', alert_empty: 'No active alerts',
@@ -1265,6 +1265,11 @@ function renderMarket() {
     const list = document.getElementById('coin-list');
     if (!list) return;
 
+    // Helper to build the info bar
+    function buildInfoBar(count, label) {
+        return `<div class="coin-list-info"><span class="coin-list-count">${count} ${label}</span></div>`;
+    }
+
     // Unified search: search across both crypto and forex
     if (searchTerm) {
         const cryptoResults = allCoins.filter(c =>
@@ -1302,7 +1307,7 @@ function renderMarket() {
             `).join('');
             return;
         }
-        list.innerHTML = allResults.map(item => renderMarketItem(item)).join('');
+        list.innerHTML = buildInfoBar(allResults.length, t('search_results') || 'result') + allResults.map(item => renderMarketItem(item)).join('');
         return;
     }
 
@@ -1327,7 +1332,7 @@ function renderMarket() {
             `).join('');
             return;
         }
-        list.innerHTML = allForexPairs.map(f => renderMarketItem({...f, _type: 'forex'})).join('');
+        list.innerHTML = buildInfoBar(allForexPairs.length, t('tab_forex') || 'Forex') + allForexPairs.map(f => renderMarketItem({...f, _type: 'forex'})).join('');
         return;
     }
 
@@ -1370,7 +1375,7 @@ function renderMarket() {
             `).join('');
         return;
     }
-    list.innerHTML = filtered.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
+    list.innerHTML = buildInfoBar(filtered.length, currentMarketTab === 'watchlist' ? (t('watchlist') || 'Watchlist') : (t('tab_crypto') || 'Crypto')) + filtered.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
 }
 
 /**
@@ -1472,6 +1477,16 @@ function switchMainTab(tab, btn) {
     const summaryBar = document.getElementById('market-summary-bar');
     if (summaryBar) {
         summaryBar.style.display = (tab === 'forex') ? 'none' : '';
+    }
+
+    // Show/hide FAB (only on watchlist tab)
+    const fab = document.querySelector('.fab-add-watch');
+    if (fab) {
+        if (tab === 'watchlist') {
+            fab.classList.remove('fab-hidden');
+        } else {
+            fab.classList.add('fab-hidden');
+        }
     }
 
     // Load forex data on first visit
