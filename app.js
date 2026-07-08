@@ -1906,7 +1906,7 @@ async function openCoinDetail(symbol) {
             height: '100%',
             symbol: chartInfo.tv_symbol,
             interval: '60',
-            theme: document.documentElement.classList.contains('light-mode') ? 'light' : 'dark',
+            theme: 'dark',
             style: '1',
             locale: 'en',
             container_id: 'detail-chart',
