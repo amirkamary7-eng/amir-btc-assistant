@@ -1352,7 +1352,7 @@ function renderWatchlist() {
             <span class="remove-watch" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
             <img src="${escapeHtml(icon)}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="watch-icon">
             <span class="watch-sym">${safeSymbol}</span>
-            <span class="watch-price">$${c.priceUsd.toFixed(2)}</span>
+            <span class="watch-price">$${c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6)}</span>
             <span class="watch-change ${c.changePercent24Hr >= 0 ? 'up' : 'down'}">${c.changePercent24Hr >= 0 ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</span>
         </div>
     `;}).join('');
