@@ -427,7 +427,7 @@ strong.down { color: var(--red); }
 .forex-icon-wrap { width: 32px; height: 32px; border-radius: 50%; background: rgba(0,200,150,0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .forex-pair-icon { font-size: 10px; font-weight: 700; color: var(--green); letter-spacing: -0.5px; }
 .forex-cat { font-size: 16px !important; }
-.coin-item[data-forex="true"] { border-left: 3px solid rgba(0,200,150,0.3); padding-left: 5px; }
+.coin-item[data-forex="true"] { border-inline-start: 3px solid rgba(0,200,150,0.3); padding-inline-start: 5px; }
 
 /* Mini Toast for watchlist toggle */
 #mini-toast {
