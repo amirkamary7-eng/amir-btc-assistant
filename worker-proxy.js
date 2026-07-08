@@ -1563,19 +1563,29 @@ async function fetchRawNewsRss() {
 
 async function buildFarsiNewsArticles(rssText, sourceName) {
   const items = parseRssItems(rssText);
-  const articles = [];
+  if (items.length === 0) return [];
 
-  for (const item of items) {
-    const translatedTitle = await translateToFarsi(item.title || 'بدون عنوان');
-    const translatedDescription = await translateToFarsi(item.description || '');
+  // Parallel translation — all titles + descriptions translated concurrently
+  // Reduces latency from ~10s (sequential) to ~1s (parallel)
+  const allTranslations = await Promise.all(
+    items.flatMap((item) => [
+      translateToFarsi(item.title || 'بدون عنوان'),
+      translateToFarsi(item.description || ''),
+    ])
+  );
+
+  const articles = [];
+  for (let i = 0; i < items.length; i++) {
+    const translatedTitle = allTranslations[i * 2];
+    const translatedDescription = allTranslations[i * 2 + 1];
 
     articles.push({
-      title: String(translatedTitle || item.title || 'بدون عنوان').replace(/\n/g, ' ').trim(),
-      description: String(translatedDescription || item.description || '').replace(/\n/g, ' ').trim(),
-      time_ago: parseRelativeTime(item.pubDate),
+      title: String(translatedTitle || items[i].title || 'بدون عنوان').replace(/\n/g, ' ').trim(),
+      description: String(translatedDescription || items[i].description || '').replace(/\n/g, ' ').trim(),
+      time_ago: parseRelativeTime(items[i].pubDate),
       source: sourceName,
-      image: item.image,
-      url: item.url,
+      image: items[i].image,
+      url: items[i].url,
     });
   }
 
