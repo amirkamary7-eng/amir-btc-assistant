@@ -805,6 +805,19 @@ strong.down { color: var(--red); }
     .hero-logo { max-height: 110px; }
     .hero-content h2 { font-size: 16px; }
     .hero-content p { font-size: 11px; }
+    /* 360px Market page optimization */
+    .section-header { padding: 16px 14px 12px; }
+    .coin-list { padding: 0 14px; }
+    .market-summary-bar { margin: 0 14px 6px; padding: 8px 10px; }
+    .market-tabs { padding: 0 14px 10px; }
+    .tab-btn { padding: 7px 12px; font-size: 12px; }
+    .search-input { padding: 10px 12px; font-size: 13px; }
+    /* 360px Modal optimization */
+    .modal-box { padding: 16px; border-radius: 14px; }
+    .detail-stats { grid-template-columns: 1fr 1fr; }
+    .detail-stats strong { font-size: 13px; }
+    /* 360px Watchlist card */
+    .watch-item { flex: 0 0 105px; padding: 10px 6px; }
 }
 
 /* #endregion */
