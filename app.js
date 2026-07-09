@@ -270,6 +270,7 @@ let tickets = [];
 let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
 let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
 let currentAlertDirection = 'above';
+let lastMarketFetchTime = 0;
 let allCoins = [];
 let allForexPairs = []; // Forex data from /api/forex
 let globalMarketData = null; // P2-1: { totalMarketCap, totalVolume, btcDominance }
@@ -1103,6 +1104,7 @@ async function loadMarketData(force = false) {
 
         if (!allCoins.length) throw new Error('No market data');
         Cache.set('market', allCoins, 120);
+        lastMarketFetchTime = Date.now();
         renderMarket();
         renderWatchlist();
         renderSummary();
@@ -2562,7 +2564,15 @@ async function triggerAlert(alert, currentPrice) {
 async function checkAlerts() {
     const userId = getUserId();
     const userAlerts = alerts.filter(a => a.userId === userId);
-    if (!userAlerts.length || !allCoins.length) return;
+    if (!userAlerts.length) return;
+
+    // Refresh market data if stale (> 45s old) for better alert accuracy
+    const ALERT_FRESHNESS_THRESHOLD = 45000;
+    if (Date.now() - lastMarketFetchTime > ALERT_FRESHNESS_THRESHOLD) {
+        await loadMarketData(false).catch(() => {});
+    }
+
+    if (!allCoins.length) return;
     const priceMap = {};
     allCoins.forEach(c => { priceMap[c.symbol] = c.priceUsd; });
     for (const alert of userAlerts) {
