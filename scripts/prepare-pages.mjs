@@ -14,7 +14,6 @@ const hashedFiles = [
   'style.css',
   'assistant.js',
   'notifications.js',
-  'watchlist.js',
 ];
 
 // ============================================================================
