@@ -2309,6 +2309,40 @@ async function handleMarketData(env) {
     console.warn('Market: CoinCap fallback failed', e.message || e);
   }
 
+  // Fallback 2: Binance (no API key required, very reliable)
+  try {
+    const binanceRes = await fetchJson('https://api.binance.com/api/v3/ticker/24hr');
+    if (Array.isArray(binanceRes.body) && binanceRes.body.length > 0) {
+      // Filter USDT pairs, sort by quoteVolume desc
+      const usdtPairs = binanceRes.body
+        .filter(item => item.symbol.endsWith('USDT') && parseFloat(item.quoteVolume) > 0)
+        .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+        .slice(0, MARKET_FETCH_LIMIT);
+
+      if (usdtPairs.length > 0) {
+        const data = usdtPairs.map((item, index) => {
+          const sym = item.symbol.replace('USDT', '');
+          return {
+            symbol: sym,
+            name: sym, // Binance doesn't return full names; symbol is sufficient
+            rank: index + 1,
+            priceUsd: parseFloat(item.lastPrice) || 0,
+            changePercent24Hr: parseFloat(item.priceChangePercent) || 0,
+            volumeUsd24Hr: parseFloat(item.quoteVolume) || 0,
+            marketCapUsd: 0, // Binance doesn't provide market cap
+            supply: 0,
+            image: `https://assets.coincap.io/assets/icons/${sym.toLowerCase()}@2x.png`,
+          };
+        });
+        const global = await globalPromise;
+        await writeAppCache(env, 'market:data', JSON.stringify(data), MARKET_CACHE_TTL);
+        return jsonResponse({ status: 'success', data, cached: false, global }, {}, env);
+      }
+    }
+  } catch (e) {
+    console.warn('Market: Binance fallback failed', e.message || e);
+  }
+
   // If stale cache exists, serve it (stale-while-error)
   if (cachedRaw) {
     try {
