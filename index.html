@@ -83,8 +83,9 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="style.css">
     <script src="https://s3.tradingview.com/tv.js"></script>
-    <!-- این مقدار در build با WORKER_API_URL inject می‌شود؛ در نبود env همان origin استفاده می‌شود -->
-    <script>window.API_BASE = window.API_BASE || window.location.origin;</script>
+    <!-- Build-time: prepare-pages.mjs replaces this with WORKER_API_URL if set -->
+    <!-- Fallback: Production Worker URL — ensures Cloudflare Pages GitHub Integration also works -->
+    <script>window.API_BASE = window.API_BASE || "https://amir-btc-assistant-api-production.amirkamari9939.workers.dev";</script>
 </head>
 <!-- #endregion -->
 <body>
