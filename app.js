@@ -1140,7 +1140,7 @@ async function loadForexData() {
         const res = await apiFetch('/api/forex');
         if (res.status === 'success' && Array.isArray(res.data)) {
             allForexPairs = res.data;
-            Cache.set('forex', allForexPairs, 60);
+            Cache.set('forex', allForexPairs, 120);
             renderMarket();
         }
     } catch (e) {
@@ -3164,7 +3164,7 @@ function startPolling() {
                 loadCalendarEvents(true);
             }
         }
-    }, 30000);
+    }, 120000); // Align with backend MARKET_CACHE_TTL (120s)
     setInterval(checkAlerts, 15000);
     setInterval(sendSessionHeartbeat, 45000);
     sendSessionHeartbeat();
