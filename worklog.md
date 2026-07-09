@@ -303,3 +303,33 @@ Stage Summary:
 - Branch: main, pushed to origin
 - Zero regressions, zero test failures
 - All Market audit issues resolved
+
+### Unresolved / Risks (found in post-phase audit)
+- ⚠️ Phase 9 deleted watchlist.js but forgot to remove it from scripts/prepare-pages.mjs → **BUILD CRASH** (fixed below)
+
+---
+Task ID: hotfix-build-crash
+Agent: Main Agent
+Task: Fix Mini App not opening — build crash due to missing watchlist.js
+
+Root Cause:
+- Phase 9 (commit ef53bb5) deleted watchlist.js and its <script> tag from index.html
+- BUT scripts/prepare-pages.mjs line 17 still had 'watchlist.js' in hashedFiles array
+- npm run cf:pages:prepare crashed with ENOENT → no webapp/pages-dist/ → no deployment possible → Mini App broken
+
+Fix:
+- Removed 'watchlist.js' from hashedFiles array in scripts/prepare-pages.mjs
+- Verified build succeeds: all 4 files hashed, index.html references correct, no watchlist artifacts
+- Verified 109/109 tests pass
+- Committed and pushed: e1b3cf0
+
+Verification:
+- npm run cf:pages:prepare → ✅ success (MRD87WIC-529d5a6)
+- npm test → 109/109 pass
+- Built index.html: only 4 JS files referenced (no watchlist.js)
+- git push origin main → success
+
+Stage Summary:
+- Commit: e1b3cf0
+- Mini App can now be deployed again
+- Required: run `npm run cf:pages:prepare && npm run cf:pages:deploy` to deploy
