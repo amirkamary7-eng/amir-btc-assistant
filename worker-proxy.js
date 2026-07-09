@@ -2404,17 +2404,37 @@ async function fetchGlobalData(env) {
 //#region Forex Data
 // ============================================================================
 const FOREX_PAIRS = [
+  // Major pairs
   { symbol: 'EURUSD', name: 'EUR/USD', tvSymbol: 'FX:EURUSD', category: 'major' },
   { symbol: 'GBPUSD', name: 'GBP/USD', tvSymbol: 'FX:GBPUSD', category: 'major' },
   { symbol: 'USDJPY', name: 'USD/JPY', tvSymbol: 'FX:USDJPY', category: 'major' },
+  { symbol: 'USDCHF', name: 'USD/CHF', tvSymbol: 'FX:USDCHF', category: 'major' },
   { symbol: 'AUDUSD', name: 'AUD/USD', tvSymbol: 'FX:AUDUSD', category: 'major' },
   { symbol: 'USDCAD', name: 'USD/CAD', tvSymbol: 'FX:USDCAD', category: 'major' },
-  { symbol: 'USDCHF', name: 'USD/CHF', tvSymbol: 'FX:USDCHF', category: 'major' },
   { symbol: 'NZDUSD', name: 'NZD/USD', tvSymbol: 'FX:NZDUSD', category: 'major' },
+  // Cross pairs
   { symbol: 'EURJPY', name: 'EUR/JPY', tvSymbol: 'FX:EURJPY', category: 'cross' },
   { symbol: 'GBPJPY', name: 'GBP/JPY', tvSymbol: 'FX:GBPJPY', category: 'cross' },
-  { symbol: 'XAUUSD', name: 'XAU/USD', tvSymbol: 'OANDA:XAUUSD', category: 'metal' },
-  { symbol: 'XAGUSD', name: 'XAG/USD', tvSymbol: 'OANDA:XAGUSD', category: 'metal' },
+  { symbol: 'EURGBP', name: 'EUR/GBP', tvSymbol: 'FX:EURGBP', category: 'cross' },
+  { symbol: 'AUDJPY', name: 'AUD/JPY', tvSymbol: 'FX:AUDJPY', category: 'cross' },
+  { symbol: 'EURCHF', name: 'EUR/CHF', tvSymbol: 'FX:EURCHF', category: 'cross' },
+  { symbol: 'GBPCAD', name: 'GBP/CAD', tvSymbol: 'FX:GBPCAD', category: 'cross' },
+  { symbol: 'AUDNZD', name: 'AUD/NZD', tvSymbol: 'FX:AUDNZD', category: 'cross' },
+  { symbol: 'EURCAD', name: 'EUR/CAD', tvSymbol: 'FX:EURCAD', category: 'cross' },
+  // Metals / Commodities
+  { symbol: 'XAUUSD', name: 'Gold', tvSymbol: 'OANDA:XAUUSD', category: 'metal' },
+  { symbol: 'XAGUSD', name: 'Silver', tvSymbol: 'OANDA:XAGUSD', category: 'metal' },
+  // Indices (no live price from frankfurter — price=0, chart via TradingView)
+  { symbol: 'DXY',    name: 'US Dollar Index',  tvSymbol: 'TVC:DXY',        category: 'index' },
+  { symbol: 'SPX',    name: 'S&P 500',         tvSymbol: 'SP:SPX',        category: 'index' },
+  { symbol: 'NASDAQ',  name: 'NASDAQ Composite', tvSymbol: 'NASDAQ:NDX',    category: 'index' },
+  { symbol: 'DJI',    name: 'Dow Jones 30',     tvSymbol: 'DJ:DJI',        category: 'index' },
+  { symbol: 'VIX',    name: 'VIX Fear Index',   tvSymbol: 'TVC:VIX',       category: 'index' },
+  { symbol: 'US10Y',  name: 'US 10Y Bond Yield', tvSymbol: 'TVC:US10Y',    category: 'index' },
+  // Commodities
+  { symbol: 'CL1',    name: 'Crude Oil WTI',   tvSymbol: 'NYMEX:CL1!',   category: 'commodity' },
+  { symbol: 'NG1',    name: 'Natural Gas',      tvSymbol: 'NYMEX:NG1!',   category: 'commodity' },
+  { symbol: 'BCOM',   name: 'Bloomberg Commodity', tvSymbol: 'TVC:BCOM',  category: 'commodity' },
 ];
 
 const FOREX_CACHE_TTL = 120; // 2 minutes
@@ -2458,6 +2478,11 @@ async function handleForexData(env) {
       data = FOREX_PAIRS.map(pair => {
         let price = 0;
         let change = 0;
+
+        // Indices & commodities have no API price — chart-only via TradingView
+        if (pair.category === 'index' || pair.category === 'commodity') {
+          return { symbol: pair.symbol, name: pair.name, tvSymbol: pair.tvSymbol, category: pair.category, price: 0, change: 0, isForex: true };
+        }
 
         if (pair.symbol === 'XAUUSD') {
           price = metals?.xau || 0;
