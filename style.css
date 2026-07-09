@@ -876,6 +876,15 @@ strong.down { color: var(--red); }
 .market-skeleton-block:nth-child(1) { width: 65px; }
 .market-skeleton-block:nth-child(2) { width: 45px; height: 12px; border-radius: 6px; }
 
+/* Loading skeleton for dashboard analysis slider (race-condition fix) */
+.slider-skeleton { display: flex; gap: 12px; padding: 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); min-height: 140px; }
+.slider-skeleton-img { width: 100px; height: 100px; border-radius: 10px; flex-shrink: 0; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
+.slider-skeleton-text { display: flex; flex-direction: column; gap: 10px; flex: 1; justify-content: center; }
+.slider-skeleton-line { height: 14px; border-radius: 7px; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
+.slider-skeleton-line:nth-child(1) { width: 60%; height: 16px; }
+.slider-skeleton-line:nth-child(2) { width: 90%; height: 11px; }
+.slider-skeleton-line:nth-child(3) { width: 40%; height: 10px; }
+
 /* Market Summary Bar (P2-1) */
 .market-summary-bar {
   display: flex;

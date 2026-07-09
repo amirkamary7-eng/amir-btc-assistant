@@ -3110,6 +3110,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadUser();
     updateNotifBadge();
 
+    // Phase A: Render analysis slider immediately from localStorage cache
+    // analyses is already populated from localStorage at module load (line 260)
+    if (analyses.length) {
+        renderAnalysisSlider();
+    } else {
+        // Show skeleton for analysis slider when no cache
+        document.getElementById('slider-track').innerHTML = `
+            <div class="slider-skeleton">
+                <div class="slider-skeleton-img"></div>
+                <div class="slider-skeleton-text">
+                    <div class="slider-skeleton-line"></div>
+                    <div class="slider-skeleton-line"></div>
+                    <div class="slider-skeleton-line"></div>
+                </div>
+            </div>`;
+    }
+
     tabLoaded.dashboard = true;
     loadMarketData(true);
     fetchAnalyses().then(() => renderAnalysisSlider());
