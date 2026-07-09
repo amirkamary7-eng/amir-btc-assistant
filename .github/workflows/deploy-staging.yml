@@ -55,10 +55,10 @@ jobs:
       - name: Build Pages
         run: npm run cf:pages:prepare
         env:
-          WORKER_API_URL: https://amir-btc-assistant-api-production.amirkamary7.workers.dev
+          WORKER_API_URL: https://amir-btc-assistant-api-production.amirkamari9939.workers.dev
 
-      - name: Deploy Pages
-        run: npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages
+      - name: Deploy Pages (Production)
+        run: npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --branch main
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
