@@ -1976,17 +1976,26 @@ async function resolveChartExchange(env, rawSymbol) {
     }
   }
 
-  for (const [tvName, key] of EXCHANGE_ORDER) {
+  // Check all exchanges in parallel — first match wins
+  const checkPromises = EXCHANGE_ORDER.map(async ([tvName, key]) => {
     if (await exchangeHasSymbol(key, normalizedSymbol)) {
-      await writeAppCache(env, cacheKey, key, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
-      return {
-        found: true,
-        symbol: normalizedSymbol,
-        exchange: key,
-        tv_symbol: `${tvName}:${normalizedSymbol}USDT`,
-        cached: false,
-      };
+      return { tvName, key };
     }
+    throw new Error(`${key}: not found`);
+  });
+
+  try {
+    const winner = await Promise.any(checkPromises);
+    await writeAppCache(env, cacheKey, winner.key, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
+    return {
+      found: true,
+      symbol: normalizedSymbol,
+      exchange: winner.key,
+      tv_symbol: `${winner.tvName}:${normalizedSymbol}USDT`,
+      cached: false,
+    };
+  } catch {
+    // All exchanges rejected — symbol not found
   }
 
   return {
