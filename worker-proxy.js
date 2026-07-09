@@ -2340,19 +2340,33 @@ async function handleForexData(env) {
 
   // Primary: fetch rates using a free API
   try {
-    // Use frankfurter.app (free, no API key, reliable)
+    // Fetch metals prices in parallel with forex rates
+    const metalsPromise = fetchJson('https://data-asg.goldprice.org/dbXRates/USD')
+      .then(res => {
+        if (res.ok && res.body) {
+          return {
+            xau: res.body.items?.[0]?.xauPrice || 0,
+            xag: res.body.items?.[0]?.xagPrice || 0,
+          };
+        }
+        return null;
+      })
+      .catch(() => null);
+
+    // Use frankfurter.app (free, no API key, reliable) for fiat pairs
     const { ok, body } = await fetchJson('https://api.frankfurter.app/latest?from=USD');
     if (ok && body?.rates) {
       const rates = body.rates;
+      const metals = await metalsPromise;
+
       data = FOREX_PAIRS.map(pair => {
         let price = 0;
         let change = 0;
 
         if (pair.symbol === 'XAUUSD') {
-          // Gold — approximate from a secondary source
-          price = 0; // will be 0 if no source
+          price = metals?.xau || 0;
         } else if (pair.symbol === 'XAGUSD') {
-          price = 0;
+          price = metals?.xag || 0;
         } else {
           // frankfurter returns: 1 USD = rates[XXX] units of XXX
           // EURUSD = how many USD per 1 EUR = 1 / rates.EUR
@@ -2388,23 +2402,6 @@ async function handleForexData(env) {
           isForex: true,
         };
       });
-
-      // Fetch gold/silver from metals API fallback
-      try {
-        const metalRes = await fetchJson('https://api.frankfurter.app/latest?from=XAU&to=USD');
-        if (metalRes.ok && metalRes.body?.rates?.USD) {
-          const xauItem = data.find(d => d.symbol === 'XAUUSD');
-          if (xauItem) xauItem.price = metalRes.body.rates.USD;
-        }
-      } catch {}
-
-      try {
-        const metalRes2 = await fetchJson('https://api.frankfurter.app/latest?from=XAG&to=USD');
-        if (metalRes2.ok && metalRes2.body?.rates?.USD) {
-          const xagItem = data.find(d => d.symbol === 'XAGUSD');
-          if (xagItem) xagItem.price = metalRes2.body.rates.USD;
-        }
-      } catch {}
 
       await writeAppCache(env, 'forex:data', JSON.stringify(data), FOREX_CACHE_TTL);
       return jsonResponse({ status: 'success', data, cached: false }, {}, env);
