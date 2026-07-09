@@ -2969,15 +2969,7 @@ function renderAdminTickets() {
     `).join('');
 }
 
-/**
- * HTML را برای نمایش ایمن‌سازی می‌کند.
- * ورودی: پارامترهای `str` را دریافت می‌کند.
- * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
- */
-function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+
 
 /**
  * فرم یا داده تیکت را ارسال می‌کند.
