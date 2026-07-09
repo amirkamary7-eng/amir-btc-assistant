@@ -74,7 +74,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Update WEBAPP_URL secret
-        run: echo "https://amir-btc-assistant-pages.amirkamari9939.pages.dev" | npx wrangler secret put WEBAPP_URL --env production
+        run: echo "https://amir-btc-assistant-pages.pages.dev" | npx wrangler secret put WEBAPP_URL --env production
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
