@@ -454,6 +454,10 @@
                     <span class="alert-hint" data-i18n="alert_bot_hint">اعلان در اپ + پیام تلگرام</span>
                 </div>
                 <div class="alert-form">
+                    <div class="alert-direction-row">
+                        <button type="button" class="alert-dir-btn active" data-dir="above" onclick="selectAlertDirection('above', this)" data-i18n="alert_above">رشد به بالا</button>
+                        <button type="button" class="alert-dir-btn" data-dir="below" onclick="selectAlertDirection('below', this)" data-i18n="alert_below">ریزش به پایین</button>
+                    </div>
                     <input type="number" id="alert-price" placeholder="0.00" class="input-field alert-price-input" data-i18n-placeholder="alert_target">
                     <button type="button" class="submit-btn alert-submit-btn" onclick="setPriceAlert()" data-i18n="set_alert">ثبت هشدار</button>
                 </div>
