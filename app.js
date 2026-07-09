@@ -269,6 +269,7 @@ let analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
 let tickets = [];
 let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
 let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
+let currentAlertDirection = 'above';
 let allCoins = [];
 let allForexPairs = []; // Forex data from /api/forex
 let globalMarketData = null; // P2-1: { totalMarketCap, totalVolume, btcDominance }
@@ -302,7 +303,7 @@ const i18n = {
         share_direct: 'اشتراک‌گذاری مستقیم', delete: 'حذف', mark_all_read: 'همه خوانده شد',
         price_alert: 'هشدار قیمت', set_alert: 'ثبت هشدار', alert_target: 'قیمت هدف (USD)',
         alert_bot_hint: 'اعلان در اپ + پیام تلگرام', alert_empty: 'هیچ هشدار فعالی نیست',
-        alert_registered: 'هشدار ثبت شد',
+        alert_registered: 'هشدار ثبت شد', alert_above: 'رشد به بالا', alert_below: 'ریزش به پایین',
         tab_crypto: 'کریپتو', tab_top_market: 'برترین‌ها', tab_forex: 'فارکس', tab_gainers: 'رشد', tab_losers: 'ریزش',
         analysis_title: 'تحلیل‌های بازار', new_analysis: 'تحلیل جدید',
         news_all: 'همه', news_crypto: 'کریپتو', news_economy: 'اقتصادی', news_forex: 'فارکس', news_calendar: 'تقویم',
@@ -360,7 +361,7 @@ const i18n = {
         share_direct: 'Share Link', delete: 'Delete', mark_all_read: 'Mark all read',
         price_alert: 'Price Alert', set_alert: 'Set Alert', alert_target: 'Target price (USD)',
         alert_bot_hint: 'In-app + Telegram message', alert_empty: 'No active alerts',
-        alert_registered: 'Alert registered',
+        alert_registered: 'Alert registered', alert_above: 'Rise above', alert_below: 'Drop below',
         tab_crypto: 'Crypto', tab_top_market: 'Top Market', tab_forex: 'Forex', tab_gainers: 'Gainers', tab_losers: 'Losers',
         analysis_title: 'Market Analysis', new_analysis: 'New Analysis',
         news_all: 'All', news_crypto: 'Crypto', news_economy: 'Economy', news_forex: 'Forex', news_calendar: 'Calendar',
@@ -2421,6 +2422,15 @@ document.addEventListener('keydown', (e) => {
  * ورودی: پارامترهای `symbol` را دریافت می‌کند.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
+/**
+ * جهت هشدار را انتخاب و UI را بروزرسانی می‌کند.
+ */
+function selectAlertDirection(dir, btn) {
+    currentAlertDirection = dir;
+    document.querySelectorAll('.alert-dir-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+}
+
 function renderActiveAlerts(symbol) {
     const container = document.getElementById('active-alerts');
     if (!container || !symbol) return;
@@ -2429,17 +2439,19 @@ function renderActiveAlerts(symbol) {
         container.innerHTML = `<div class="alert-empty">${t('alert_empty')}</div>`;
         return;
     }
-    container.innerHTML = userAlerts.map(a => `
+    container.innerHTML = userAlerts.map(a => {
+        const dirSymbol = a.direction === 'below' ? '≤' : '≥';
+        return `
         <div class="alert-item">
             <div class="alert-item-info">
                 <span class="alert-item-symbol">${escapeHtml(a.symbol)}</span>
-                <span class="alert-item-target">≥ $${a.price}</span>
+                <span class="alert-item-target">${dirSymbol} $${a.price}</span>
             </div>
             <button class="alert-remove-btn" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
-    `).join('');
+    `}).join('');
 }
 /**
  * هشدار صدا را پخش می‌کند.
@@ -2482,7 +2494,7 @@ async function syncAlertToServer(alert) {
                 user_id: alert.userId,
                 symbol: alert.symbol,
                 price: alert.price,
-                direction: 'above'
+                direction: alert.direction || 'above'
             })
         });
         if (data.alert?.id) alert.serverId = data.alert.id;
@@ -2517,6 +2529,7 @@ async function loadAlertsFromServer() {
             serverId: a.id,
             symbol: a.symbol,
             price: a.price,
+            direction: a.direction || 'above',
             userId: a.user_id,
             createdAt: a.created_at
         }));
@@ -2554,13 +2567,19 @@ async function setPriceAlert() {
     const symbol = document.getElementById('detail-coin-title').innerText.split(' ')[0];
     if (!price || price <= 0) { alert(t('invalid_price')); return; }
     const userId = getUserId();
-    let newAlert = { id: Date.now().toString(), symbol, price, userId, createdAt: new Date().toISOString() };
+    let newAlert = { id: Date.now().toString(), symbol, price, direction: currentAlertDirection, userId, createdAt: new Date().toISOString() };
     newAlert = await syncAlertToServer(newAlert);
     alerts.push(newAlert);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     input.value = '';
+    const dirSymbol = currentAlertDirection === 'below' ? '≤' : '≥';
+    // Reset direction to default
+    currentAlertDirection = 'above';
+    document.querySelectorAll('.alert-dir-btn').forEach(b => b.classList.remove('active'));
+    const defaultBtn = document.querySelector('.alert-dir-btn[data-dir="above"]');
+    if (defaultBtn) defaultBtn.classList.add('active');
     renderActiveAlerts(symbol);
-    addNotification(t('price_alert'), `${symbol} ≥ $${price}`);
+    addNotification(t('price_alert'), `${symbol} ${dirSymbol} $${price}`);
     getTg()?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${price}`, buttons: [{ type: 'ok' }] });
 }
 /**
@@ -2609,7 +2628,10 @@ async function checkAlerts() {
     allCoins.forEach(c => { priceMap[c.symbol] = c.priceUsd; });
     for (const alert of userAlerts) {
         const current = priceMap[alert.symbol];
-        if (current != null && current >= alert.price) await triggerAlert(alert, current);
+        if (current == null) continue;
+        const dir = (alert.direction || 'above').toLowerCase();
+        const shouldTrigger = dir === 'below' ? current <= alert.price : current >= alert.price;
+        if (shouldTrigger) await triggerAlert(alert, current);
     }
 }
 
@@ -3278,6 +3300,7 @@ window.deleteAnalysis = deleteAnalysis;
 window.openCoinDetail = openCoinDetail;
 window.closeCoinDetail = closeCoinDetail;
 window.setPriceAlert = setPriceAlert;
+window.selectAlertDirection = selectAlertDirection;
 window.removeAlert = removeAlert;
 window.toggleNotificationPanel = toggleNotificationPanel;
 window.closeNotifModal = closeNotifModal;
