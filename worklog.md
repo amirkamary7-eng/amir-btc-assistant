@@ -379,3 +379,45 @@ Stage Summary:
 - Cold start: user sees cached slider + cached watchlist + skeletons for news (or all cached on 2nd+ visit)
 - Network calls still fire and update data when they resolve
 - Zero regression: no other code changed
+
+---
+Task ID: fix-api-base-deploy
+Agent: main
+Task: Fix Mini App not loading data — API_BASE pointing to wrong domain
+
+Root Cause (confirmed via runtime investigation):
+1. `index.html` had: `window.API_BASE = window.API_BASE || window.location.origin;`
+2. In production, `window.location.origin` = `https://amir-btc-assistant-pages.pages.dev` (Pages domain)
+3. ALL API calls went to Pages domain → 404 (no /api/* endpoints) → no data loaded
+4. `prepare-pages.mjs` correctly replaces this with WORKER_API_URL when env is set
+5. BUT: Cloudflare Pages has a separate GitHub Integration ("pages build and deployment" workflow)
+   that builds and deploys on EVERY push WITHOUT the WORKER_API_URL env var
+6. This integration OVERWRITES our custom Deploy workflow's correct output every time
+7. Previous session's manual deploy (wrangler) also used wrong build (without WORKER_API_URL)
+
+Evidence:
+- `curl https://amir-btc-assistant-pages.pages.dev/` showed `window.location.origin` fallback
+- GitHub Actions showed TWO workflows per push: "Deploy" (ours) and "pages build and deployment" (CF integration)
+- Both "Deploy" and "pages build and deployment" succeeded for a44882b, but CF integration deployed last
+- The CF integration deploys raw source without running prepare-pages.mjs with env vars
+
+Fix (commit 8cd35c9):
+- Changed default fallback in index.html from `window.location.origin` to the actual Worker URL:
+  `"https://amir-btc-assistant-api-production.amirkamari9939.workers.dev"`
+- Now BOTH workflows produce correct API_BASE (prepare-pages.mjs still overrides when WORKER_API_URL is set)
+
+Verification:
+- Deployed HTML: `<script>window.API_BASE = "https://amir-btc-assistant-api-production.amirkamari9939.workers.dev";</script>` ✅
+- /api/health → 200 ✅
+- /api/market → 200, 200 coins, has global data ✅
+- /api/farsi-news → 200, articles loaded ✅
+- /api/calendar/events → 200, 43 events ✅
+- /api/analyses → 200 ✅
+- CORS: Access-Control-Allow-Origin matches Pages domain ✅
+- OPTIONS preflight: 204 with correct headers ✅
+
+Stage Summary:
+- Commit: 8cd35c9
+- Both workflows (Deploy + pages build and deployment) succeed and produce correct output
+- All API endpoints verified working with Pages Origin header
+- Mini App should now load all data (market, news, calendar, watchlist) correctly

@@ -1210,7 +1210,7 @@ function renderMarket() {
         return `<div class="coin-list-info"><span class="coin-list-count">${count} ${label}</span><span class="coin-list-time">${timeStr}</span></div>`;
     }
 
-    // Unified search: search across both crypto and forex
+    // Unified search: search across crypto and all market types
     if (searchTerm) {
         const cryptoResults = allCoins.filter(c =>
             c.symbol.toLowerCase().includes(searchTerm) ||
@@ -1219,8 +1219,9 @@ function renderMarket() {
 
         const forexResults = allForexPairs.filter(f =>
             f.symbol.toLowerCase().includes(searchTerm) ||
-            f.name.toLowerCase().includes(searchTerm)
-        ).slice(0, 20);
+            f.name.toLowerCase().includes(searchTerm) ||
+            (f.tvSymbol && f.tvSymbol.toLowerCase().includes(searchTerm))
+        ).slice(0, 30);
 
         const allResults = [...cryptoResults.map(c => ({...c, _type: 'crypto'})), ...forexResults.map(f => ({...f, _type: 'forex'}))];
 
@@ -1289,7 +1290,7 @@ function renderMarket() {
             filtered = filtered.filter(c => watchlist.includes(c.symbol));
             break;
         default:
-            filtered = filtered.slice(0, 100);
+            filtered = filtered; // Show all loaded coins (up to 200 from backend)
     }
     if (!filtered.length && allCoins.length) {
         const msg = t('no_data');
@@ -1334,19 +1335,22 @@ function renderCryptoItem(c) {
     const safeSymbol = escapeHtml(c.symbol);
     const safeName = escapeHtml(c.name);
     const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
+    const priceStr = c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6);
     return `
         <div class="coin-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
             <div class="coin-left">
-                <span class="coin-rank">#${Number(c.rank) || 0}</span>
-                <img src="${escapeHtml(icon)}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="coin-icon" alt="${safeSymbol}">
-                <div>
-                    <div class="coin-sym">${safeSymbol}</div>
-                    <div class="coin-name">${safeName}</div>
+                <img src="${escapeHtml(icon)}" onerror="this.style.display='none'" class="coin-icon" alt="${safeSymbol}">
+                <div class="coin-identity">
+                    <span class="coin-sym">${safeSymbol}</span>
+                    <span class="coin-name">${safeName}</span>
                 </div>
             </div>
             <div class="coin-right">
-                <div class="coin-price">$${c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6)}</div>
-                <div class="coin-change ${isPos ? 'up' : 'down'}">${isPos ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</div>
+                <span class="coin-rank">#${Number(c.rank) || 0}</span>
+                <div class="coin-price-data">
+                    <div class="coin-price">$${priceStr}</div>
+                    <div class="coin-change ${isPos ? 'up' : 'down'}">${isPos ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</div>
+                </div>
                 <span class="watch-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}" tabindex="0">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
@@ -1360,24 +1364,35 @@ function renderCryptoItem(c) {
 function renderForexItem(f) {
     const safeSymbol = escapeHtml(f.symbol);
     const safeName = escapeHtml(f.name);
-    const categoryColors = { major: 'var(--green)', cross: 'var(--accent)', metal: '#ffd700' };
-    const catColor = categoryColors[f.category] || 'var(--text-dim)';
-    const priceStr = f.price > 0 ? f.price.toFixed(f.category === 'metal' ? 2 : 4) : '--';
+    const cat = f.category || 'major';
+    const catConfig = {
+        major:    { color: 'var(--green)',  icon: 'M',  label: 'Major' },
+        cross:    { color: 'var(--accent)', icon: 'X',  label: 'Cross' },
+        metal:    { color: '#ffd700',     icon: 'Au', label: 'Metal' },
+        index:    { color: '#60a5fa',     icon: 'ID', label: 'Index' },
+        commodity:{ color: '#f97316',     icon: 'Cm', label: 'Commodity' },
+    };
+    const cfg = catConfig[cat] || catConfig.major;
+    const decimals = cat === 'metal' ? 2 : (cat === 'index' || cat === 'commodity' ? 0 : 4);
+    const priceStr = f.price > 0 ? f.price.toFixed(decimals) : '--';
+    const catLabelFa = { major: 'جفت اصلی', cross: 'کراس', metal: 'فلز', index: 'شاخص', commodity: 'کالا' };
+    const catLabel = currentLang === 'fa' ? (catLabelFa[cat] || cat) : cfg.label;
     return `
-        <div class="coin-item" data-symbol="${safeSymbol}" data-forex="true" onclick="openForexDetail(this.dataset.symbol)" role="listitem">
+        <div class="coin-item" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" onclick="openForexDetail(this.dataset.symbol)" role="listitem">
             <div class="coin-left">
-                <span class="coin-rank forex-cat" style="color:${catColor}">${f.category === 'metal' ? '🥇' : '💱'}</span>
-                <div class="forex-icon-wrap">
-                    <span class="forex-pair-icon">${safeSymbol.slice(0,3)}</span>
+                <div class="forex-icon-wrap" style="background:${cfg.color}15; color:${cfg.color}">
+                    <span class="forex-pair-icon">${cfg.icon}</span>
                 </div>
-                <div>
-                    <div class="coin-sym">${safeName}</div>
-                    <div class="coin-name">${f.category === 'major' ? 'Major' : f.category === 'cross' ? 'Cross' : 'Metal'}</div>
+                <div class="coin-identity">
+                    <span class="coin-sym">${safeName}</span>
+                    <span class="coin-name">${catLabel}</span>
                 </div>
             </div>
             <div class="coin-right">
-                <div class="coin-price">${priceStr}</div>
-                <div class="coin-change" style="color:var(--text-dim); background:transparent;">FX</div>
+                <div class="coin-price-data">
+                    <div class="coin-price">${priceStr}</div>
+                    <div class="coin-change" style="color:${cfg.color}; background:${cfg.color}15;">${cfg.label.toUpperCase()}</div>
+                </div>
             </div>
         </div>
     `;
@@ -2213,11 +2228,13 @@ function openForexDetail(symbol) {
     document.querySelector('.chart-exchange-badge')?.remove();
     chartContainer.innerHTML = '<div class="empty-state">Loading chart...</div>';
 
-    // Build chart info for forex — uses TradingView's built-in FX/OANDA symbols
+    // Build chart info — extract exchange from tvSymbol prefix
+    const tvSym = pair.tvSymbol || `FX:${symbol}`;
+    const exchangePart = tvSym.split(':')[0] || 'FX';
     const chartInfo = {
         found: true,
-        tv_symbol: pair.tvSymbol || `FX:${symbol}`,
-        exchange: pair.tvSymbol?.startsWith('OANDA') ? 'OANDA' : 'FX',
+        tv_symbol: tvSym,
+        exchange: exchangePart,
     };
     currentTvChartInfo = chartInfo;
     currentTvInterval = '60';
@@ -2254,14 +2271,21 @@ function openForexDetail(symbol) {
         chartContainer.innerHTML = `<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg><br>${t('chart_unavailable')}</div>`;
     }
 
-    // Forex stats
-    const priceStr = pair.price > 0 ? pair.price.toFixed(pair.category === 'metal' ? 2 : 4) : '--';
-    const catLabel = pair.category === 'major' ? 'Major' : pair.category === 'cross' ? 'Cross' : 'Metal';
+    // Stats
+    const cat = pair.category || 'major';
+    const decimals = cat === 'metal' ? 2 : (cat === 'index' || cat === 'commodity' ? 0 : 4);
+    const priceStr = pair.price > 0 ? pair.price.toFixed(decimals) : '--';
+    const catLabels = { major: 'Major', cross: 'Cross', metal: 'Metal', index: 'Index', commodity: 'Commodity' };
+    const catLabelFa = { major: 'جفت اصلی', cross: 'کراس', metal: 'فلز گران‌بها', index: 'شاخص', commodity: 'کامودیتی' };
+    const catLabel = currentLang === 'fa' ? (catLabelFa[cat] || cat) : (catLabels[cat] || cat);
+    const typeLabel = currentLang === 'fa'
+        ? ({ major: 'فارکس', cross: 'فارکس', metal: 'فلز', index: 'شاخص', commodity: 'کامودیتی' }[cat] || 'بازار')
+        : ({ major: 'Forex', cross: 'Forex', metal: 'Commodity', index: 'Index', commodity: 'Commodity' }[cat] || 'Market');
     document.getElementById('detail-stats').innerHTML = `
         <div><span>${t('price')}</span><strong>${priceStr}</strong></div>
         <div><span>Category</span><strong>${catLabel}</strong></div>
         <div><span>Symbol</span><strong>${escapeHtml(symbol)}</strong></div>
-        <div><span>Type</span><strong>Forex</strong></div>
+        <div><span>Type</span><strong>${typeLabel}</strong></div>
     `;
 
     // Hide alert section for forex
