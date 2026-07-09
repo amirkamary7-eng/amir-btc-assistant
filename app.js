@@ -1027,8 +1027,6 @@ function isRssUrl(url) {
 async function fetchWithProxy(url, options = {}) {
     const opts = typeof options === 'number' ? { retries: options } : options;
     const { asText = isRssUrl(url), retries = 2 } = opts;
-    const isCoinCap = url.includes('coincap.io');
-
     for (let i = 0; i < retries; i++) {
         try {
             const proxyUrl = PROXY + encodeURIComponent(url);
@@ -1036,50 +1034,15 @@ async function fetchWithProxy(url, options = {}) {
             if (!res.ok) {
                 const errorText = await res.text();
                 console.warn(`⚠️ Proxy HTTP ${res.status}: ${errorText}`);
-                if (isCoinCap) {
-                    console.log('🔄 Switching to CoinGecko fallback...');
-                    return await fetchCoinGecko();
-                }
                 throw new Error(`HTTP ${res.status}`);
             }
             return asText ? await res.text() : await res.json();
         } catch (e) {
             console.warn(`Attempt ${i+1} failed:`, e);
-            if (i === retries - 1 && isCoinCap) {
-                console.log('🔄 Final fallback to CoinGecko...');
-                return await fetchCoinGecko();
-            }
             await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
         }
     }
 }
-
-// تابع دریافت داده از CoinGecko (بدون نیاز به Proxy)
-/**
- * داده بازار ارزها را مستقیماً از API سرویس CoinGecko دریافت و نرمال‌سازی می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
- */
-async function fetchCoinGecko() {
-    const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=200&page=1&sparkline=false');
-    if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
-    const data = await res.json();
-    if (!Array.isArray(data)) throw new Error('Invalid CoinGecko response');
-    return data
-        .filter(item => item && typeof item === 'object')
-        .map((item, index) => ({
-            symbol: String(item.symbol || '').toUpperCase(),
-            name: item.name || '',
-            rank: item.market_cap_rank || (index + 1),
-            priceUsd: item.current_price || 0,
-            changePercent24Hr: item.price_change_percentage_24h || 0,
-            volumeUsd24Hr: item.total_volume || 0,
-            marketCapUsd: item.market_cap || 0,
-            supply: item.circulating_supply || 0,
-            image: item.image || ''
-        }));
-}
-
 //#endregion
 
 // ============================================================================
@@ -1126,44 +1089,20 @@ async function loadMarketData(force = false) {
         }
 
         // Primary: backend /api/market (P0-2)
-        let fetched = false;
         if (API_BASE) {
             try {
                 const res = await apiFetch('/api/market');
                 if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
                     allCoins = res.data;
                     if (res.global) globalMarketData = res.global;
-                    fetched = true;
                 }
             } catch (e) {
-                console.warn('Backend /api/market failed, trying direct fallback:', e);
+                console.warn('Backend /api/market failed:', e);
             }
         }
 
-        // Fallback: direct CoinGecko (kept for when API_BASE is not set)
-        if (!fetched) {
-            try {
-                allCoins = await fetchCoinGecko();
-            } catch (e1) {
-                console.warn('CoinGecko direct failed:', e1);
-                const data = await fetchWithProxy('https://api.coincap.io/v2/assets?limit=200');
-                const assets = data.data || data;
-                if (Array.isArray(data) && data[0]?.symbol) {
-                    allCoins = data;
-                } else if (assets?.length) {
-                    allCoins = assets.map((item) => ({
-                        symbol: item.symbol, name: item.name, rank: parseInt(item.rank, 10) || 0,
-                        priceUsd: parseFloat(item.priceUsd) || 0,
-                        changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
-                        volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
-                        marketCapUsd: parseFloat(item.marketCapUsd) || 0,
-                        supply: parseFloat(item.supply) || 0,
-                        image: `https://assets.coincap.io/assets/icons/${String(item.symbol || '').toLowerCase()}@2x.png`
-                    }));
-                } else throw new Error('No market data');
-            }
-        }
-        Cache.set('market', allCoins, 60);
+        if (!allCoins.length) throw new Error('No market data');
+        Cache.set('market', allCoins, 120);
         renderMarket();
         renderWatchlist();
         renderSummary();
