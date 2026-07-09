@@ -718,6 +718,10 @@ async function editTelegramMessageReplyMarkup(env, chatId, messageId, replyMarku
 const CALLBACK_RATE_LIMIT_TTL = 10; // seconds
 const CALLBACK_RATE_LIMIT_KEY_PREFIX = 'cbrl:';
 
+const MARKET_RATE_LIMIT_MAX = 30; // requests per window
+const MARKET_RATE_LIMIT_WINDOW = 60; // seconds
+const MARKET_RATE_LIMIT_KEY_PREFIX = 'mrl:';
+
 async function isCallbackRateLimited(env, userId) {
   const key = `${CALLBACK_RATE_LIMIT_KEY_PREFIX}${String(userId)}`;
   const existing = await readRateLimitCache(env, key);
@@ -725,6 +729,23 @@ async function isCallbackRateLimited(env, userId) {
     return true;
   }
   await writeRateLimitCache(env, key, '1', CALLBACK_RATE_LIMIT_TTL);
+  return false;
+}
+
+/**
+ * IP-based sliding-window rate limiter for public market endpoints.
+ * Returns true if rate limited, false if allowed.
+ */
+async function isMarketRateLimited(env, ip) {
+  const key = `${MARKET_RATE_LIMIT_KEY_PREFIX}${ip}`;
+  const existing = await readRateLimitCache(env, key);
+  if (existing) {
+    const count = parseInt(existing, 10) || 0;
+    if (count >= MARKET_RATE_LIMIT_MAX) return true;
+    await writeRateLimitCache(env, key, String(count + 1), MARKET_RATE_LIMIT_WINDOW);
+    return false;
+  }
+  await writeRateLimitCache(env, key, '1', MARKET_RATE_LIMIT_WINDOW);
   return false;
 }
 
@@ -2817,10 +2838,18 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/market') {
+        const clientIp = request.headers.get('cf-connecting-ip') || 'unknown';
+        if (await isMarketRateLimited(env, clientIp)) {
+          return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
+        }
         return await handleMarketData(env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/forex') {
+        const clientIp = request.headers.get('cf-connecting-ip') || 'unknown';
+        if (await isMarketRateLimited(env, clientIp)) {
+          return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
+        }
         return await handleForexData(env);
       }
 
