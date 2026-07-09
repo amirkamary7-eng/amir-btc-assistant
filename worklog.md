@@ -276,3 +276,30 @@ Stage Summary:
 2. Add 24h high/low to detail stats
 3. Implement pull-to-refresh gesture (touch events)
 4. Fix metals (XAU/XAG) forex prices — need alternative API
+
+---
+Task ID: market-fix-phase1-9
+Agent: Main Agent
+Task: Execute 9-phase Market section fixes (critical, high, medium, cleanup)
+
+Work Log:
+- Phase 1 (MKT-CRITICAL-1): Added alert direction support — above/below toggle buttons in UI, pass direction to backend, map from server, checkAlerts supports both directions, renderActiveAlerts shows correct symbol (≥/≤), i18n strings, CSS styling
+- Phase 2 (MKT-CRITICAL-4): Replaced broken frankfurter.app XAU/XAG calls with goldprice.org dbXRates API, metals fetched in parallel with fiat forex rates
+- Phase 3 (MKT-HIGH-1): Replaced sequential exchange iteration in resolveChartExchange with Promise.any — all 7 exchanges checked concurrently
+- Phase 4 (MKT-CRITICAL-3): Removed fetchCoinGecko() direct frontend call, removed CoinGecko/CoinCap fallback chain in loadMarketData, all market data flows through backend only
+- Phase 5 (MKT-HIGH-2): Aligned frontend polling to 120s (matches backend MARKET_CACHE_TTL), aligned forex cache to 120s
+- Phase 6 (MKT-HIGH-3): Added lastMarketFetchTime tracking, checkAlerts auto-refreshes market data if stale > 45s
+- Phase 7 (MKT-HIGH-5): Added IP-based rate limiter (30 req/min) for /api/market and /api/forex using RATE_LIMITS KV
+- Phase 8 (MKT-MED-1): Removed duplicate regex-based escapeHtml, kept DOM-based version
+- Phase 9 (Cleanup): Deleted watchlist.js, removed POPULAR_SYMBOLS, COIN_NAMES, getCoinFullName, switchMarketTab
+
+Verification:
+- All 109 tests pass after every phase
+- git status clean after every commit
+- 9 clean commits pushed to origin/main
+
+Stage Summary:
+- 9 commits: acf4eaf, ed41232, f7a8b5c, 814ae14, a2b2b6e, 183f45f, afc91a3, a1b4477, ef53bb5
+- Branch: main, pushed to origin
+- Zero regressions, zero test failures
+- All Market audit issues resolved
