@@ -1086,6 +1086,8 @@ async function loadMarketData(force = false) {
 
         if (!allCoins.length) throw new Error('No market data');
         Cache.set('market', allCoins, 120);
+        // Phase C: Persist market data to localStorage for instant watchlist render on cold start
+        try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); } catch(_) {}
         lastMarketFetchTime = Date.now();
         renderMarket();
         renderWatchlist();
@@ -3127,7 +3129,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>`;
     }
 
-    // Phase B: Show skeleton for watchlist and important-news while loading
+    // Phase C: Load cached market data for instant watchlist render
+    try {
+        const cachedMarket = JSON.parse(localStorage.getItem('market_data_cache') || '[]');
+        if (Array.isArray(cachedMarket) && cachedMarket.length) {
+            allCoins = cachedMarket;
+            renderWatchlist();
+            renderSummary();
+        }
+    } catch(_) {}
+
+    // Phase B: Show skeleton for watchlist and important-news while loading (only if not already rendered by Phase C)
     const watchGrid = document.getElementById('watchlist-grid');
     if (watchGrid && !watchGrid.children.length) {
         watchGrid.innerHTML = `<div class="watchlist-skeleton">${
