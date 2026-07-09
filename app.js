@@ -3127,6 +3127,32 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>`;
     }
 
+    // Phase B: Show skeleton for watchlist and important-news while loading
+    const watchGrid = document.getElementById('watchlist-grid');
+    if (watchGrid && !watchGrid.children.length) {
+        watchGrid.innerHTML = `<div class="watchlist-skeleton">${
+            Array(4).fill(`<div class="watchlist-skeleton-item">
+                <div class="watchlist-skeleton-icon"></div>
+                <div class="watchlist-skeleton-lines">
+                    <div class="watchlist-skeleton-line"></div>
+                    <div class="watchlist-skeleton-line"></div>
+                </div>
+            </div>`).join('')
+        }</div>`;
+    }
+    const newsContainer = document.getElementById('important-news');
+    if (newsContainer && !newsContainer.children.length) {
+        newsContainer.innerHTML = `<div class="important-news-skeleton">${
+            Array(3).fill(`<div class="important-news-skeleton-item">
+                <div class="important-news-skeleton-img"></div>
+                <div class="important-news-skeleton-text">
+                    <div class="important-news-skeleton-line"></div>
+                    <div class="important-news-skeleton-line"></div>
+                </div>
+            </div>`).join('')
+        }</div>`;
+    }
+
     tabLoaded.dashboard = true;
     loadMarketData(true);
     fetchAnalyses().then(() => renderAnalysisSlider());

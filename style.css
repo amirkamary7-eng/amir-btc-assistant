@@ -885,6 +885,24 @@ strong.down { color: var(--red); }
 .slider-skeleton-line:nth-child(2) { width: 90%; height: 11px; }
 .slider-skeleton-line:nth-child(3) { width: 40%; height: 10px; }
 
+/* Loading skeleton for dashboard watchlist (race-condition fix) */
+.watchlist-skeleton { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.watchlist-skeleton-item { display: flex; align-items: center; gap: 8px; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+.watchlist-skeleton-icon { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
+.watchlist-skeleton-lines { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.watchlist-skeleton-line { height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
+.watchlist-skeleton-line:nth-child(1) { width: 40px; }
+.watchlist-skeleton-line:nth-child(2) { width: 60px; height: 9px; }
+
+/* Loading skeleton for dashboard important-news (race-condition fix) */
+.important-news-skeleton { display: flex; flex-direction: column; gap: 10px; }
+.important-news-skeleton-item { display: flex; gap: 12px; align-items: center; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+.important-news-skeleton-img { width: 50px; height: 50px; border-radius: 10px; flex-shrink: 0; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
+.important-news-skeleton-text { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.important-news-skeleton-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
+.important-news-skeleton-line:nth-child(1) { width: 85%; }
+.important-news-skeleton-line:nth-child(2) { width: 50%; height: 10px; }
+
 /* Market Summary Bar (P2-1) */
 .market-summary-bar {
   display: flex;
