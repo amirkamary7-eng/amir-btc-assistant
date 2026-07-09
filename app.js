@@ -244,24 +244,6 @@ const MAX_WATCHLIST = 7;
 const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
 
-// لیست ارزهای محبوب برای Fallback
-const POPULAR_SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "SHIB", "DOT", "LINK", "MATIC", "TRX", "UNI", "LTC", "NEAR", "APT", "SUI", "FET", "ICP", "FIL", "RNDR", "HBAR", "ATOM", "STX", "IMX", "GRT", "LDO", "TAO", "INJ"];
-
-const COIN_NAMES = {
-    BTC: 'Bitcoin', ETH: 'Ethereum', SOL: 'Solana', BNB: 'BNB', XRP: 'Ripple',
-    ADA: 'Cardano', DOGE: 'Dogecoin', AVAX: 'Avalanche', SHIB: 'Shiba Inu',
-    DOT: 'Polkadot', LINK: 'Chainlink', MATIC: 'Polygon', TRX: 'TRON',
-    UNI: 'Uniswap', LTC: 'Litecoin', NEAR: 'NEAR Protocol', APT: 'Aptos',
-    SUI: 'Sui', FET: 'Fetch.ai', ICP: 'Internet Computer', FIL: 'Filecoin',
-    RNDR: 'Render', HBAR: 'Hedera', ATOM: 'Cosmos', STX: 'Stacks',
-    IMX: 'Immutable X', GRT: 'The Graph', LDO: 'Lido DAO', TAO: 'Bittensor', INJ: 'Injective'
-};
-/**
- * مقدار ارز full name را بازیابی می‌کند.
- * ورودی: پارامترهای `sym` را دریافت می‌کند.
- * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
- */
-function getCoinFullName(sym) { return COIN_NAMES[sym] || sym; }
 
 let currentLang = 'fa';
 let watchlist = [];
@@ -1496,75 +1478,6 @@ function switchSubTab(tab, btn) {
     }
 }
 
-/**
- * Legacy function kept for backward compatibility.
- */
-function switchMarketTab(tab, btn) {
-    // Map old tabs to new structure
-    if (tab === 'overview' || tab === 'gainers' || tab === 'losers') {
-        currentMainTab = 'crypto';
-        currentSubTab = tab === 'overview' ? 'top' : tab;
-        currentMarketTab = tab === 'overview' ? 'overview' : tab;
-        // Activate crypto main tab
-        const cryptoBtn = document.querySelector('.main-tab-btn[data-main-tab="crypto"]');
-        if (cryptoBtn) {
-            document.querySelectorAll('.main-tab-btn').forEach(b => {
-                b.classList.remove('active');
-                b.setAttribute('aria-selected', 'false');
-            });
-            cryptoBtn.classList.add('active');
-            cryptoBtn.setAttribute('aria-selected', 'true');
-        }
-        // Show sub-tabs
-        const subTabs = document.getElementById('market-sub-tabs');
-        if (subTabs) subTabs.classList.remove('hidden');
-        // Show summary bar
-        const summaryBar = document.getElementById('market-summary-bar');
-        if (summaryBar) summaryBar.style.display = '';
-        // Activate correct sub-tab
-        document.querySelectorAll('.sub-tab-btn').forEach(b => {
-            b.classList.remove('active');
-            b.setAttribute('aria-selected', 'false');
-        });
-        const subBtn = document.querySelector(`.sub-tab-btn[data-sub-tab="${currentSubTab}"]`);
-        if (subBtn) {
-            subBtn.classList.add('active');
-            subBtn.setAttribute('aria-selected', 'true');
-        }
-    } else if (tab === 'forex' || tab === 'watchlist') {
-        currentMainTab = tab;
-        currentMarketTab = tab;
-        const mainBtn = document.querySelector(`.main-tab-btn[data-main-tab="${tab}"]`);
-        if (mainBtn) {
-            document.querySelectorAll('.main-tab-btn').forEach(b => {
-                b.classList.remove('active');
-                b.setAttribute('aria-selected', 'false');
-            });
-            mainBtn.classList.add('active');
-            mainBtn.setAttribute('aria-selected', 'true');
-        }
-        // Hide sub-tabs
-        const subTabs = document.getElementById('market-sub-tabs');
-        if (subTabs) subTabs.classList.add('hidden');
-        // Hide summary bar for forex
-        const summaryBar = document.getElementById('market-summary-bar');
-        if (summaryBar) summaryBar.style.display = tab === 'forex' ? 'none' : '';
-        if (tab === 'forex' && !allForexPairs.length) loadForexData();
-    }
-
-    const list = document.getElementById('coin-list');
-    if (list) {
-        list.classList.remove('fade-in');
-        list.classList.add('fade-out');
-        setTimeout(() => {
-            renderMarket();
-            list.classList.remove('fade-out');
-            list.classList.add('fade-in');
-        }, 120);
-    } else {
-        renderMarket();
-    }
-}
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('market-search')?.addEventListener('input', (e) => {
         searchTerm = e.target.value.toLowerCase().trim();
@@ -3218,7 +3131,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ============================================================================
 // ثبت توابع در فضای global
 window.switchTab = switchTab;
-window.switchMarketTab = switchMarketTab;
 window.switchMainTab = switchMainTab;
 window.switchSubTab = switchSubTab;
 window.switchNewsTab = switchNewsTab;
