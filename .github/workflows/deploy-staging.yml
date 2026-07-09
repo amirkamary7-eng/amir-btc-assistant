@@ -57,8 +57,18 @@ jobs:
         env:
           WORKER_API_URL: https://amir-btc-assistant-api-production.amirkamari9939.workers.dev
 
+      - name: Configure Pages production branch
+        run: |
+          curl -s -X PATCH "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/amir-btc-assistant-pages" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"production_branch":"main"}'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
       - name: Deploy Pages (Production)
-        run: npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --production
+        run: npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --branch main
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
