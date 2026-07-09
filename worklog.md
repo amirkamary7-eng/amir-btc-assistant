@@ -333,3 +333,49 @@ Stage Summary:
 - Commit: e1b3cf0
 - Mini App can now be deployed again
 - Required: run `npm run cf:pages:prepare && npm run cf:pages:deploy` to deploy
+
+---
+Task ID: race-condition-fix
+Agent: main
+Task: Fix dashboard race condition — incomplete data on first cold open
+
+Root Cause (confirmed via static code analysis):
+- DOMContentLoaded awaits UserContext.init() (up to 8s) + bootstrapUser() (network)
+- After that, 3 fire-and-forget calls start: loadMarketData, fetchAnalyses, loadImportantNews
+- Dashboard sections (#slider-track, #watchlist-grid, #important-news) stay completely empty until slowest call resolves
+- analyses IS loaded from localStorage at module load (line 260) but renderAnalysisSlider() was only called in .then() of fetchAnalyses()
+- renderWatchlist() was only called inside loadMarketData() — needs allCoins which is [] until network completes
+- On 2nd open (tab switch): switchTab() calls renderWatchlist/renderAnalysisSlider from in-memory data → appears to work
+- On 2nd fresh reload: localStorage cache for analyses exists but was never used for initial render
+
+Work Log:
+- Read full app.js startup flow: DOMContentLoaded → UserContext.init → bootstrapUser → loadUser → data loading
+- Added temporary __tl timeline logging to trace execution order
+- Confirmed root cause: no cache-first rendering for any dashboard section
+- Removed temporary logging after analysis
+
+Phase A (commit c35d64c):
+- Render analysis slider immediately from localStorage cache after bootstrapUser()
+- If no cache, show skeleton placeholder instead of empty div
+- Added .slider-skeleton CSS with shimmer animation
+
+Phase B (commit 0cfd66f):
+- Added skeleton placeholders for #watchlist-grid and #important-news
+- Skeletons render immediately, replaced naturally when data arrives
+- Added .watchlist-skeleton and .important-news-skeleton CSS
+
+Phase C (commit 5e822e2):
+- Persist allCoins to localStorage on each successful loadMarketData()
+- On startup, preload allCoins from localStorage → renderWatchlist() + renderSummary() run instantly
+- Phase B skeleton check skips watchlist if Phase C already rendered it
+
+Verification:
+- npm run cf:pages:prepare → ✅ (MRDA9K3M-5e822e2)
+- npm test → 109/109 pass (all 3 phases)
+- git push origin main → ✅ (683ef0b..5e822e2)
+
+Stage Summary:
+- 3 separate commits: c35d64c, 0cfd66f, 5e822e2
+- Cold start: user sees cached slider + cached watchlist + skeletons for news (or all cached on 2nd+ visit)
+- Network calls still fire and update data when they resolve
+- Zero regression: no other code changed
