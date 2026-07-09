@@ -688,7 +688,7 @@ async function syncMenuButton(env) {
         // See: https://core.telegram.org/bots/api#setchatmenubutton
         menu_button: {
           type: 'web_app',
-          text: '🚀 باز کردن مینی‌اپ',
+          text: 'OPEN App',
           web_app: { url: webAppUrl },
         },
       }),
