@@ -3339,6 +3339,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (document.getElementById('tickets-modal')?.style.display === 'flex') fetchTickets().then(renderTickets);
         if (document.getElementById('admin-tickets-modal')?.style.display === 'flex') fetchAdminTickets().then(renderAdminTickets);
     }, 15000);
+
+    // === AUTO-UPLOAD TRACE (temporary — remove after debug) ===
+    // Wait 35s (after 30s retry window closes) then upload trace to backend
+    setTimeout(() => {
+        _TRACE('AUTO_UPLOAD', 'preparing upload', 'entries:', window.__COLD_TRACE__?.length || 0);
+        if (!window.__COLD_TRACE__?.length) return;
+        // Add final state snapshot
+        _TRACE('AUTO_UPLOAD', 'FINAL_SNAPSHOT', 'user.id:', getTelegramUser()?.id || null,
+            'bootstrapComplete:', bootstrapComplete, 'watchlist.length:', watchlist.length,
+            'UserContext.ready:', UserContext.ready, 'UserContext.loading:', UserContext.loading,
+            'telegramInitDone:', telegramInitDone, 'initData (first 80):', getTelegramInitData().substring(0, 80));
+        const traceData = window.__COLD_TRACE__;
+        // Use raw fetch (not apiFetch) to avoid auth wait
+        fetch(`${API_BASE}/api/debug/trace`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(traceData)
+        }).then(r => r.json()).then(d => {
+            _TRACE('AUTO_UPLOAD', 'SUCCESS', 'stored:', d.stored);
+        }).catch(e => {
+            _TRACE('AUTO_UPLOAD', 'FAILED', e.message);
+        });
+    }, 35000);
 });
 
 //#endregion

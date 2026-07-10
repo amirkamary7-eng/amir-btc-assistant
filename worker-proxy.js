@@ -2920,6 +2920,25 @@ export default {
         return handleHealth(env);
       }
 
+      // Temporary: cold-open trace collection (remove after debug)
+      if (request.method === 'POST' && url.pathname === '/api/debug/trace') {
+        try {
+          const body = await request.json();
+          // Store trace in a global variable (persists for the lifetime of this Worker instance)
+          if (!globalThis.__debugTraces) globalThis.__debugTraces = [];
+          globalThis.__debugTraces.push({ received: new Date().toISOString(), entries: body });
+          console.log('[DEBUG-TRACE] Received', body?.length, 'trace entries');
+          return jsonResponse({ ok: true, stored: globalThis.__debugTraces.length }, {}, env);
+        } catch (e) {
+          return jsonResponse({ ok: false, error: String(e) }, { status: 400 }, env);
+        }
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/debug/trace') {
+        const traces = globalThis.__debugTraces || [];
+        return jsonResponse({ ok: true, count: traces.length, traces }, {}, env);
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
         return await handleChartResolve(request, env);
       }
