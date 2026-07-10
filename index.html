@@ -98,12 +98,13 @@
     <header class="app-header">
         <div class="header-side header-left">
             <div class="live-indicator">
-                <span class="live-dot"></span>
+                <svg class="live-person-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 <span class="live-count">123</span>
                 <span class="live-label">آنلاین</span>
             </div>
         </div>
         <div class="header-brand">
+            <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9 7h4.5a2.5 2.5 0 0 1 0 5H9V7z" fill="currentColor"/><path d="M9 12h5a2.5 2.5 0 0 1 0 5H9V12z" fill="currentColor"/><path d="M13 7V5M11 7V5M13 17v2M11 17v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
             <span class="brand-text">AMIRBTC</span>
         </div>
         <div class="header-side header-right">
@@ -123,19 +124,39 @@
     <!-- #region DashboardPage -->
     <!-- این بخش ویترین اولیه برنامه شامل بنر، اسلایدر تحلیل، واچ‌لیست و اخبار مهم است. -->
     <section id="dashboard-page" class="page active">
-        <div class="hero-banner">
-            <div class="hero-inner">
-                <div class="hero-content">
-                    <span class="hero-badge" data-i18n="hero_badge">کانال تحلیلی</span>
-                    <h2>AMIRBTC</h2>
-                    <p data-i18n="hero_desc">سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار</p>
-                    <button class="hero-cta" data-i18n="hero_cta">عضویت رایگان</button>
+        <div class="hero-banner-slider" id="hero-banner-slider">
+            <div class="hero-slide active" data-slide="0">
+                <div class="hero-inner">
+                    <div class="hero-content">
+                        <span class="hero-badge" data-i18n="hero_badge">کانال تحلیلی</span>
+                        <h2>AMIRBTC</h2>
+                        <p data-i18n="hero_desc">سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار</p>
+                        <button class="hero-cta" data-i18n="hero_cta" onclick="window.open('https://t.me/amir_btc_2024','_blank')">عضویت رایگان</button>
+                    </div>
+                    <div class="hero-art">
+                        <img src="assets/amirbtc-logo.png" alt="AMIRBTC" class="hero-logo">
+                    </div>
                 </div>
-                <div class="hero-art">
-                    <img src="assets/amirbtc-logo.png" alt="AMIRBTC" class="hero-logo">
-                </div>
+                <div class="hero-glow"></div>
             </div>
-            <div class="hero-glow"></div>
+            <div class="hero-slide" data-slide="1">
+                <div class="hero-inner bitunix-slide">
+                    <div class="hero-content">
+                        <span class="hero-badge bitunix-badge">⚡ Exchange Partner</span>
+                        <h2>Bitunix</h2>
+                        <p>معاملات فیوچرز با بالاترین امنیت و کمترین کارمزد</p>
+                        <button class="hero-cta bitunix-cta" onclick="window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">شروع معامله</button>
+                    </div>
+                    <div class="hero-art">
+                        <div class="bitunix-logo-art">₿</div>
+                    </div>
+                </div>
+                <div class="hero-glow bitunix-glow"></div>
+            </div>
+            <div class="hero-slider-dots" id="hero-slider-dots">
+                <span class="hero-dot active" data-dot="0"></span>
+                <span class="hero-dot" data-dot="1"></span>
+            </div>
         </div>
 
         <div class="section-header">
@@ -177,7 +198,10 @@
     <!-- این بخش تب‌های بازار، جستجو و فهرست ارزها را نمایش می‌دهد. -->
     <section id="market-page" class="page">
         <div class="market-page-header">
-            <h2 data-i18n="market" style="margin:0">مارکت</h2>
+            <h2 class="market-page-title" data-i18n="market" style="margin:0">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
+                <span data-i18n="market">مارکت</span>
+            </h2>
             <button class="market-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             </button>
@@ -476,16 +500,20 @@
                     <span data-i18n="notif_center">مرکز اعلانات</span>
                 </h3>
                 <div style="display:flex; gap:8px; align-items:center;">
-                    <button class="mark-all-read-btn" onclick="markAllRead()" data-i18n="mark_all_read">همه خوانده شد</button>
                     <button class="modal-close-btn" onclick="closeNotifModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
             </div>
             <div id="notif-list" class="notif-list" style="margin-bottom: 15px;"></div>
-            <button class="clear-notif-btn" onclick="clearAllNotifications()">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                <span data-i18n="clear_all_notif">پاک کردن همه اعلانات</span>
-            </button>
-        </div>
+            <div style="display:flex; gap:8px;">
+                <button class="mark-all-read-btn" onclick="markAllRead()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span data-i18n="mark_all_read">همه خوانده شد</span>
+                </button>
+                <button class="clear-notif-btn" onclick="clearAllNotifications()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    <span data-i18n="clear_all_notif">پاک کردن همه اعلانات</span>
+                </button>
+            </div>
     </div>
 
     <!-- مودال تنظیمات -->
@@ -597,6 +625,9 @@
     <!-- ==================== اسکریپت‌های صفحه ==================== -->
     <!-- #region Scripts -->
     <!-- این بخش فایل‌های جاوااسکریپت لازم برای رفتار پویا و منطق برنامه را بارگذاری می‌کند. -->
+    <button class="scroll-top-btn" id="scroll-top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Scroll to top">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+    </button>
     <script src="notifications.js"></script>
     <script src="assistant.js"></script>
     <script src="app.js"></script>

@@ -24,7 +24,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
-body { background: var(--bg-primary); color: var(--text); padding-bottom: 85px; overflow-x: hidden; font-size: 14px; line-height: 1.5; }
+body { background: var(--bg-primary); color: var(--text); padding-bottom: 90px; overflow-x: hidden; font-size: 14px; line-height: 1.5; }
 
 body.user-loading .profile-loading-target.skeleton-text {
     color: transparent !important;
@@ -81,13 +81,25 @@ body.user-loading .profile-loading-target.skeleton-text {
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  gap: 5px;
 }
 .brand-text {
   font-size: 17px;
   font-weight: 800;
   letter-spacing: 2.5px;
   color: #ffffff;
-  text-shadow: 0 0 20px rgba(247, 147, 26, 0.15);
+  text-shadow: 0 0 20px rgba(247,147,26,0.4), 0 0 40px rgba(247,147,26,0.15);
+  animation: brand-glow 3s ease-in-out infinite;
+}
+@keyframes brand-glow {
+  0%, 100% { text-shadow: 0 0 20px rgba(247,147,26,0.4), 0 0 40px rgba(247,147,26,0.15); }
+  50% { text-shadow: 0 0 25px rgba(247,147,26,0.6), 0 0 50px rgba(247,147,26,0.25); }
+}
+.brand-icon {
+  width: 20px; height: 20px; flex-shrink: 0;
+  color: var(--accent);
+  filter: drop-shadow(0 0 6px rgba(247,147,26,0.5));
+  animation: brand-glow 3s ease-in-out infinite;
 }
 
 /* ── Live indicator (left) ──────────────────────────────── */
@@ -95,35 +107,20 @@ body.user-loading .profile-loading-target.skeleton-text {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(0, 200, 150, 0.08);
-  border: 1px solid rgba(0, 200, 150, 0.12);
+  background: rgba(0,200,150,0.06);
+  border: 1px solid rgba(0,200,150,0.15);
   border-radius: 20px;
-  padding: 5px 12px 5px 8px;
+  padding: 5px 10px 5px 6px;
 }
-.live-dot {
-  position: relative;
-  width: 8px;
-  height: 8px;
+.live-person-icon {
+  color: var(--green);
+  filter: drop-shadow(0 0 4px rgba(0,200,150,0.5));
+  animation: live-breathe 2.5s ease-in-out infinite;
   flex-shrink: 0;
 }
-.live-dot::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: #00c896;
-  border-radius: 50%;
-}
-.live-dot::after {
-  content: '';
-  position: absolute;
-  inset: -2px;
-  border-radius: 50%;
-  background: rgba(0, 200, 150, 0.35);
-  animation: live-pulse 2.5s ease-in-out infinite;
-}
-@keyframes live-pulse {
-  0%, 100% { opacity: 0.4; transform: scale(1); }
-  50% { opacity: 0; transform: scale(2); }
+@keyframes live-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
 }
 .live-count {
   font-size: 13px;
@@ -203,17 +200,36 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* #region Hero Banner */
 /* این بخش استایل‌های مرتبط با "Hero Banner" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.hero-banner { margin: 0 20px 16px; padding: 16px; background: linear-gradient(135deg, rgba(247,147,26,0.12), rgba(0,200,150,0.06)); border: 1px solid rgba(247,147,26,0.15); border-radius: var(--radius); position: relative; overflow: hidden; cursor: pointer; min-height: 130px; }
+.hero-banner-slider {
+  margin: 0 20px 16px; border-radius: var(--radius); position: relative; overflow: hidden;
+  min-height: 130px; border: 1px solid rgba(247,147,26,0.12);
+  background: var(--bg-card);
+}
+.hero-slide { display: none; padding: 16px; position: relative; }
+.hero-slide.active { display: block; animation: heroFadeIn 0.4s ease; }
+@keyframes heroFadeIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
 .hero-inner { display: flex; align-items: center; gap: 10px; position: relative; z-index: 1; }
 .hero-glow { position: absolute; top: -40%; right: -20%; width: 200px; height: 200px; background: radial-gradient(circle, rgba(247,147,26,0.08), transparent 70%); pointer-events: none; }
+.bitunix-glow { background: radial-gradient(circle, rgba(59,130,246,0.1), transparent 70%); }
 .hero-content { flex: 1; min-width: 0; position: relative; z-index: 1; }
 .hero-art { flex: 0 0 48%; max-width: 170px; display: flex; align-items: center; justify-content: center; position: relative; z-index: 1; }
-.hero-logo { width: 100%; height: auto; max-height: 140px; object-fit: contain; filter: drop-shadow(0 6px 24px rgba(247,147,26,0.35)); transition: transform 0.3s ease; }
-.hero-banner:active .hero-logo { transform: scale(0.97); }
+.hero-logo { width: 100%; height: auto; max-height: 140px; object-fit: contain; filter: drop-shadow(0 6px 24px rgba(247,147,26,0.35)); }
 .hero-badge { display: inline-block; background: rgba(247,147,26,0.15); color: var(--accent); font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 20px; margin-bottom: 6px; }
+.bitunix-badge { background: rgba(59,130,246,0.15); color: #60a5fa; }
 .hero-content h2 { font-size: 18px; font-weight: 800; margin: 4px 0; }
 .hero-content p { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.4; }
-.hero-cta { background: var(--accent); border: none; color: #000; font-weight: 700; padding: 8px 20px; border-radius: 10px; cursor: pointer; font-size: 13px; pointer-events: none; }
+.hero-cta { background: var(--accent); border: none; color: #000; font-weight: 700; padding: 8px 20px; border-radius: 10px; cursor: pointer; font-size: 13px; pointer-events: auto; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 16px rgba(247,147,26,0.3); }
+.hero-cta:active { transform: scale(0.96); }
+.bitunix-cta { background: #3b82f6; box-shadow: 0 4px 16px rgba(59,130,246,0.3); }
+.bitunix-logo-art {
+  font-size: 64px; font-weight: 900; color: var(--accent);
+  text-shadow: 0 0 30px rgba(247,147,26,0.4), 0 0 60px rgba(247,147,26,0.15);
+  animation: btcFloat 3s ease-in-out infinite;
+}
+@keyframes btcFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+.hero-slider-dots { position: absolute; bottom: 10px; left: 16px; display: flex; gap: 6px; z-index: 2; }
+.hero-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.2); transition: all 0.3s; cursor: pointer; }
+.hero-dot.active { background: var(--accent); width: 18px; border-radius: 4px; }
 .join-icon-wrap { margin-bottom: 15px; }
 .join-logo { width: 90px; height: auto; object-fit: contain; filter: drop-shadow(0 4px 16px rgba(247,147,26,0.3)); }
 
@@ -297,6 +313,18 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* ============================================================================ */
 .market-page-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 16px 10px; }
 .market-page-header h2 { font-size: 20px; font-weight: 700; }
+.market-page-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 22px; font-weight: 800;
+  background: linear-gradient(135deg, #fff 30%, var(--accent));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.market-page-title svg {
+  -webkit-text-fill-color: initial;
+  color: var(--accent);
+  filter: drop-shadow(0 0 8px rgba(247,147,26,0.4));
+}
 .market-refresh-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text-dim); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.25s; }
 .market-refresh-btn:active { transform: scale(0.9); }
 .market-refresh-btn.spinning svg { animation: spin 0.8s linear infinite; }
@@ -804,19 +832,23 @@ strong.down { color: var(--red); }
 .notif-date { font-size: 10px; color: var(--text-sub); text-align: right; }
 
 .mark-all-read-btn {
-    background: rgba(0, 200, 150, 0.1);
-    border: 1px solid rgba(0,200,150,0.3);
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(0, 200, 150, 0.08);
+    border: 1px solid rgba(0,200,150,0.2);
     color: var(--green);
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 10px;
+    padding: 6px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
     cursor: pointer;
-    transition: 0.2s;
+    transition: background 0.2s;
+    backdrop-filter: blur(8px);
 }
-.mark-all-read-btn:hover { background: rgba(0,200,150,0.2); }
+.mark-all-read-btn:hover { background: rgba(0,200,150,0.15); }
 
 .clear-notif-btn {
-    width: 100%;
+    flex: 1;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
     padding: 10px;
     background: rgba(255, 77, 77, 0.05);
     border: 1px solid rgba(255, 77, 77, 0.2);
@@ -826,10 +858,6 @@ strong.down { color: var(--red); }
     font-weight: 600;
     cursor: pointer;
     transition: 0.3s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
 }
 .clear-notif-btn:hover { background: rgba(255, 77, 77, 0.15); }
 
@@ -839,7 +867,7 @@ strong.down { color: var(--red); }
 /* #region منوی پایینی */
 /* این بخش استایل‌های مرتبط با "منوی پایینی" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 72px; background: rgba(11,18,32,0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; z-index: 1000; padding-bottom: env(safe-area-inset-bottom); }
+.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 72px; margin: 0 12px 10px; border-radius: 20px; background: rgba(17,24,39,0.75); backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-around; align-items: center; z-index: 1000; padding-bottom: env(safe-area-inset-bottom); }
 .nav-item { background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text-sub); cursor: pointer; transition: color 0.2s, transform 0.15s; padding: 4px 12px; position: relative; }
 .nav-item:active { transform: scale(0.9); }
 .nav-item svg { width: 24px; height: 24px; transition: transform 0.2s; }
@@ -851,11 +879,35 @@ strong.down { color: var(--red); }
 /* #endregion */
 
 /* ============================================================================ */
+/* #region Scroll-to-top button */
+/* ============================================================================ */
+.scroll-top-btn {
+  position: fixed; bottom: 90px; left: 20px; width: 42px; height: 42px;
+  border-radius: 50%; border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(17,24,39,0.85); backdrop-filter: blur(12px);
+  color: var(--text-dim); display: flex; align-items: center; justify-content: center;
+  cursor: pointer; z-index: 999; opacity: 0; pointer-events: none;
+  transform: translateY(10px); transition: opacity 0.25s, transform 0.25s, background 0.2s;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.scroll-top-btn.visible { opacity: 1; pointer-events: auto; transform: translateY(0); }
+.scroll-top-btn:active { background: rgba(247,147,26,0.15); color: var(--accent); }
+
+/* ============================================================================ */
 /* #region وضعیت خالی */
 /* این بخش استایل‌های مرتبط با "وضعیت خالی" را در خود نگه می‌دارد. */
 /* ============================================================================ */
 .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; font-size: 13px; }
 .empty-state svg { margin-bottom: 12px; opacity: 0.4; }
+.chart-loading-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 40px 20px; color: var(--text-dim); font-size: 13px;
+}
+.chart-spinner {
+  width: 32px; height: 32px; border: 3px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
 
 /* Loading skeleton for news list (§6.3) */
 .news-skeleton { display: flex; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
