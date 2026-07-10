@@ -298,11 +298,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* این بخش استایل‌های مرتبط با "اخبار مهم" را در خود نگه می‌دارد. */
 /* ============================================================================ */
 .important-news-list { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 8px; }
-.important-news-item { display: flex; gap: 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; cursor: pointer; }
+.important-news-item { display: flex; gap: 10px; background: rgba(255,255,255,0.03); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.06); border-left: 2px solid var(--accent); border-radius: 14px; padding: 14px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.2); transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; animation: newsFadeIn 0.4s ease both; }
+.important-news-item:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.12); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
 .important-news-img { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
 .important-news-content { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-.important-news-title { font-size: 13px; font-weight: 600; line-height: 1.3; }
-.important-news-source { font-size: 11px; color: var(--text-dim); }
+.important-news-title { font-size: 13px; font-weight: 700; line-height: 1.3; }
+.important-news-source { font-size: 11px; color: var(--text-sub); }
 
 /* #endregion */
 
@@ -522,14 +523,16 @@ strong.down { color: var(--red); }
 /* ============================================================================ */
 .news-tabs { display: flex; gap: 4px; padding: 0 20px 12px; overflow-x: auto; scrollbar-width: none; }
 .news-tabs::-webkit-scrollbar { display: none; }
-.news-tab { flex-shrink: 0; padding: 6px 14px; border: none; background: transparent; color: var(--text-dim); font-size: 13px; cursor: pointer; border-radius: 20px; }
+.news-tab { flex-shrink: 0; padding: 6px 14px; border: none; background: rgba(255,255,255,0.04); color: var(--text-dim); font-size: 13px; cursor: pointer; border-radius: 20px; transition: all 0.2s ease; }
 .news-tab.active { background: rgba(247,147,26,0.15); color: var(--accent); }
 .news-list { padding: 0 20px; }
-.news-item { display: flex; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; cursor: pointer; }
+.news-item { display: flex; gap: 12px; background: rgba(255,255,255,0.03); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 14px; margin-bottom: 10px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.2); transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; animation: newsFadeIn 0.4s ease both; }
+.news-item:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.12); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
 .news-img { width: 70px; height: 70px; border-radius: 10px; object-fit: cover; flex-shrink: 0; }
 .news-content { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-.news-title { font-weight: 600; font-size: 13px; line-height: 1.4; }
-.news-source { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.news-title { font-weight: 700; font-size: 13px; line-height: 1.4; }
+.news-source { font-size: 11px; color: var(--text-sub); margin-top: 4px; }
+@keyframes newsFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* #endregion */
 
@@ -537,7 +540,11 @@ strong.down { color: var(--red); }
 /* #region تقویم اقتصادی */
 /* این بخش استایل‌های کارت‌های رویداد و وضعیت‌های تقویم اقتصادی را تعریف می‌کند. */
 /* ============================================================================ */
-.eco-event-card { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); padding: 12px; margin-bottom: 8px; border-radius: 12px; border: 1px solid var(--border); }
+.cal-sub-tabs { display: flex; gap: 6px; padding: 0 20px 12px; }
+.cal-sub-tab { flex-shrink: 0; padding: 6px 16px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04); color: var(--text-dim); font-size: 12px; cursor: pointer; border-radius: 10px; transition: all 0.2s ease; }
+.cal-sub-tab.active { background: rgba(247,147,26,0.15); color: var(--accent); border-color: rgba(247,147,26,0.3); }
+.eco-event-card { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 12px; margin-bottom: 8px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 4px 16px rgba(0,0,0,0.2); transition: transform 0.2s ease, border-color 0.2s ease; }
+.eco-event-card:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.12); }
 .eco-event-left { display: flex; align-items: center; gap: 10px; }
 .eco-flag { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 24px; border-radius: 4px; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; color: #fff; flex-shrink: 0; }
 .eco-flag-us { background: linear-gradient(180deg, #b22234 40%, #fff 40%, #fff 60%, #b22234 60%); color: #3c3b6e; text-shadow: none; }
@@ -899,7 +906,7 @@ strong.down { color: var(--red); }
 }
 
 /* Loading skeleton for news list (§6.3) */
-.news-skeleton { display: flex; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+.news-skeleton { display: flex; gap: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 14px; margin-bottom: 10px; }
 .news-skeleton-img { width: 70px; height: 70px; border-radius: 10px; flex-shrink: 0; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
 .news-skeleton-content { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
 .news-skeleton-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
@@ -940,7 +947,7 @@ strong.down { color: var(--red); }
 
 /* Loading skeleton for dashboard important-news (race-condition fix) */
 .important-news-skeleton { display: flex; flex-direction: column; gap: 10px; }
-.important-news-skeleton-item { display: flex; gap: 12px; align-items: center; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+.important-news-skeleton-item { display: flex; gap: 12px; align-items: center; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; }
 .important-news-skeleton-img { width: 50px; height: 50px; border-radius: 10px; flex-shrink: 0; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
 .important-news-skeleton-text { display: flex; flex-direction: column; gap: 8px; flex: 1; }
 .important-news-skeleton-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }

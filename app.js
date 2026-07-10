@@ -335,6 +335,7 @@ let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
 let calendarEvents = [];
 let calendarLoading = false;
+let currentCalendarTab = 'today';
 let currentTvWidget = null; // P1-5: track TradingView widget for cleanup
 let currentTvInterval = localStorage.getItem('tv_interval') || '60';
 let currentTvChartInfo = null;
@@ -1856,7 +1857,11 @@ function renderNews(category) {
     else if (category === 'calendar') {
         // Show skeleton while loading
         if (calendarLoading) {
-            container.innerHTML = Array(5).fill(`
+            container.innerHTML = `<div class="cal-sub-tabs">
+                <button class="cal-sub-tab active">${t('cal_today')}</button>
+                <button class="cal-sub-tab">${t('cal_tomorrow')}</button>
+                <button class="cal-sub-tab">${t('cal_past')}</button>
+            </div>` + Array(5).fill(`
                 <div class="news-skeleton" style="height:56px;">
                     <div class="news-skeleton-content" style="width:100%;">
                         <div class="news-skeleton-line" style="width:70%;"></div>
@@ -1866,19 +1871,50 @@ function renderNews(category) {
             `).join('');
         }
         loadCalendarEvents().then(events => {
+            const subTabsHtml = `<div class="cal-sub-tabs">
+                <button class="cal-sub-tab${currentCalendarTab === 'today' ? ' active' : ''}" onclick="switchCalendarTab('today', this)">${t('cal_today')}</button>
+                <button class="cal-sub-tab${currentCalendarTab === 'tomorrow' ? ' active' : ''}" onclick="switchCalendarTab('tomorrow', this)">${t('cal_tomorrow')}</button>
+                <button class="cal-sub-tab${currentCalendarTab === 'past' ? ' active' : ''}" onclick="switchCalendarTab('past', this)">${t('cal_past')}</button>
+            </div>`;
+
             if (!events.length) {
-                container.innerHTML = `<div class="empty-state">${t('cal_empty')}</div>`;
+                container.innerHTML = subTabsHtml + `<div class="empty-state">${t('cal_empty')}</div>`;
                 return;
             }
-            const groups = groupCalendarEvents(events);
+
             const statusLabel = { past: t('cal_status_past'), live: t('cal_status_live'), upcoming: t('cal_status_upcoming') };
             const impactLabel = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
 
-            function renderCard(e, timePrefix) {
+            // Filter events by currentCalendarTab
+            const now = new Date();
+            const userTz = now.getTimezoneOffset();
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+
+            let filteredEvents = events.filter(e => {
+                if (!e.timestamp) return false;
+                const eventDate = new Date(e.timestamp);
+                if (isNaN(eventDate.getTime())) return false;
+                const eventLocal = new Date(eventDate.getTime() - userTz * 60000);
+                const eventDay = new Date(eventLocal.getFullYear(), eventLocal.getMonth(), eventLocal.getDate());
+                if (currentCalendarTab === 'today') return eventDay.getTime() === todayStart.getTime();
+                if (currentCalendarTab === 'tomorrow') return eventDay.getTime() === tomorrowStart.getTime();
+                if (currentCalendarTab === 'past') return eventDay < todayStart;
+                return true;
+            });
+
+            if (currentCalendarTab === 'past') {
+                filteredEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            }
+
+            if (!filteredEvents.length) {
+                container.innerHTML = subTabsHtml + `<div class="empty-state">${t('cal_empty')}</div>`;
+                return;
+            }
+
+            function renderCard(e) {
                 const ft = formatCalendarTime(e.timestamp);
-                const timeDisplay = ft.time || '';
-                const dayDisplay = timePrefix || (ft.dayStr ? `${ft.dayStr}` : '');
-                const timeText = dayDisplay ? `${dayDisplay} - ${timeDisplay}` : timeDisplay;
+                const timeText = ft.time || '';
                 return `
                 <div class="eco-event-card ${e.status || 'upcoming'}">
                     <div class="eco-event-left">
@@ -1895,20 +1931,7 @@ function renderNews(category) {
                 </div>`;
             }
 
-            function renderSection(title, events, timePrefix) {
-                if (!events.length) return '';
-                return `
-                <div class="cal-section">
-                    <div class="cal-section-header">${title}</div>
-                    ${events.map(e => renderCard(e, timePrefix)).join('')}
-                </div>`;
-            }
-
-            container.innerHTML =
-                renderSection(t('cal_today'), groups.today, '') +
-                renderSection(t('cal_tomorrow'), groups.tomorrow, '') +
-                renderSection(t('cal_day_after'), groups.dayAfter, '') +
-                renderSection(t('cal_past'), groups.past, '');
+            container.innerHTML = subTabsHtml + filteredEvents.map(e => renderCard(e)).join('');
         });
         return;
     }
@@ -1918,7 +1941,7 @@ function renderNews(category) {
     }
     displayedNews = filtered;
     container.innerHTML = filtered.map((n, i) => `
-        <div class="news-item" onclick="openNewsModal(${i})">
+        <div class="news-item" style="animation-delay:${i * 0.06}s" onclick="openNewsModal(${i})">
             <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2270%22 height=%2270%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="news-img">
             <div class="news-content">
                 <div class="news-title">${escapeHtml(n.title)}</div>
@@ -1939,7 +1962,64 @@ function renderNews(category) {
 function switchNewsTab(category, btn) {
     document.querySelectorAll('.news-tab').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
+    if (category === 'calendar') currentCalendarTab = 'today';
     renderNews(category);
+}
+function switchCalendarTab(tab, btn) {
+    currentCalendarTab = tab;
+    document.querySelectorAll('.cal-sub-tab').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    // Re-render calendar without re-fetching
+    const container = document.getElementById('news-list');
+    if (!container || !calendarEvents.length) return;
+    const statusLabel = { past: t('cal_status_past'), live: t('cal_status_live'), upcoming: t('cal_status_upcoming') };
+    const impactLabel = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
+    const now = new Date();
+    const userTz = now.getTimezoneOffset();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+
+    let filteredEvents = calendarEvents.filter(e => {
+        if (!e.timestamp) return false;
+        const eventDate = new Date(e.timestamp);
+        if (isNaN(eventDate.getTime())) return false;
+        const eventLocal = new Date(eventDate.getTime() - userTz * 60000);
+        const eventDay = new Date(eventLocal.getFullYear(), eventLocal.getMonth(), eventLocal.getDate());
+        if (tab === 'today') return eventDay.getTime() === todayStart.getTime();
+        if (tab === 'tomorrow') return eventDay.getTime() === tomorrowStart.getTime();
+        if (tab === 'past') return eventDay < todayStart;
+        return true;
+    });
+    if (tab === 'past') filteredEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    if (!filteredEvents.length) {
+        container.innerHTML = container.querySelector('.cal-sub-tabs')?.outerHTML + `<div class="empty-state">${t('cal_empty')}</div>`;
+        return;
+    }
+    function renderCard(e) {
+        const ft = formatCalendarTime(e.timestamp);
+        const timeText = ft.time || '';
+        return `
+        <div class="eco-event-card ${e.status || 'upcoming'}">
+            <div class="eco-event-left">
+                <span class="eco-flag-emoji">${e.flag || '🏳️'}</span>
+                <div>
+                    <div class="eco-event-title">${escapeHtml(e.title)}</div>
+                    <div class="eco-event-meta">${timeText} • ${e.country || ''}</div>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                <span class="eco-impact eco-impact-${e.impact || 'medium'}">${impactLabel[e.impact] || impactLabel.medium}</span>
+                <span class="eco-status eco-status-${e.status || 'upcoming'}">${statusLabel[e.status] || e.status}</span>
+            </div>
+        </div>`;
+    }
+    const subTabsHtml = container.querySelector('.cal-sub-tabs')?.outerHTML || `<div class="cal-sub-tabs">
+        <button class="cal-sub-tab${tab === 'today' ? ' active' : ''}" onclick="switchCalendarTab('today', this)">${t('cal_today')}</button>
+        <button class="cal-sub-tab${tab === 'tomorrow' ? ' active' : ''}" onclick="switchCalendarTab('tomorrow', this)">${t('cal_tomorrow')}</button>
+        <button class="cal-sub-tab${tab === 'past' ? ' active' : ''}" onclick="switchCalendarTab('past', this)">${t('cal_past')}</button>
+    </div>`;
+    container.innerHTML = subTabsHtml + filteredEvents.map(e => renderCard(e)).join('');
 }
 /**
  * اخبار مودال را باز می‌کند.
@@ -3194,7 +3274,7 @@ async function loadImportantNews() {
         }
         displayedNews = important;
         container.innerHTML = important.map((n, i) => `
-            <div class="important-news-item" onclick="openNewsModal(${i})">
+            <div class="important-news-item" style="animation-delay:${i * 0.06}s" onclick="openNewsModal(${i})">
                 <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="important-news-img">
                 <div class="important-news-content">
                     <div class="important-news-title">${escapeHtml(n.title)}</div>
@@ -3384,6 +3464,7 @@ window.switchTab = switchTab;
 window.switchMainTab = switchMainTab;
 window.switchSubTab = switchSubTab;
 window.switchNewsTab = switchNewsTab;
+window.switchCalendarTab = switchCalendarTab;
 window.toggleWatchlist = toggleWatchlist;
 window.showMiniToast = showMiniToast;
 window.updateDetailWatchBtn = updateDetailWatchBtn;
