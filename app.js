@@ -184,8 +184,14 @@ function canRunSessionRequests(userId = getUserId()) {
 async function waitForApiReady(maxWaitMs = 8000) {
     if (!API_BASE) throw new Error('API_BASE not configured');
     if (!isInTelegram()) return;
+    // If UserContext.init() already completed (success or timeout),
+    // do NOT re-wait — this prevents cascading 16s+ waits on every apiFetch call.
+    // Auth-gated endpoints will reject gracefully via their own try/catch.
+    if (UserContext.ready) return;
     const ready = await ensureTelegramAuthReady(maxWaitMs);
-    if (!ready) throw new Error('TELEGRAM_NOT_READY');
+    if (!ready) {
+        console.warn('Telegram auth not ready, proceeding without auth header');
+    }
 }
 
 /**
@@ -2401,7 +2407,7 @@ async function removeAlertFromServer(alert) {
  */
 async function loadAlertsFromServer() {
     const uid = getUserId();
-    if (!API_BASE || isGuestUserId(uid) || isPendingTelegramUserId(uid) || UserContext.isPending()) return;
+    if (!API_BASE || isGuestUserId(uid) || isPendingTelegramUserId(uid)) return;
     try {
         const data = await apiFetch('/api/alerts');
         alerts = (data.alerts || []).map(a => ({
@@ -2491,7 +2497,6 @@ async function triggerAlert(alert, currentPrice) {
     getTg()?.HapticFeedback?.notificationOccurred('warning');
     addNotification(t('price_alert'), msg.replace('🔔 ', ''), { sendToTelegram: true, playSound: true });
     getTg()?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
-    await notifyTelegram(msg);
     const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
     if (symbol === alert.symbol) renderActiveAlerts(symbol);
 }
@@ -2502,6 +2507,12 @@ async function triggerAlert(alert, currentPrice) {
  */
 async function checkAlerts() {
     const userId = getUserId();
+
+    // Retry loading alerts from server if user is now authenticated but alerts weren't loaded yet
+    if (alerts.length === 0 && !isGuestUserId(userId) && !isPendingTelegramUserId(userId) && getTelegramUser()?.id) {
+        await loadAlertsFromServer().catch(() => {});
+    }
+
     const userAlerts = alerts.filter(a => a.userId === userId);
     if (!userAlerts.length) return;
 
