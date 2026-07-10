@@ -637,21 +637,45 @@ function buildStartReplyPayload(env, chatId, isMember) {
   };
 }
 
-async function sendTelegramMessage(env, payload) {
-  const response = await fetch(buildTelegramApiUrl(env, 'sendMessage'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-    },
-    body: JSON.stringify(payload),
-  });
+async function sendTelegramMessage(env, payload, { retries = 1, timeoutMs = 8000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!response.ok) {
-    const responseText = await response.text();
-    throw new Error(`Telegram sendMessage failed: HTTP ${response.status} ${responseText}`);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(buildTelegramApiUrl(env, 'sendMessage'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      if (response.ok) {
+        clearTimeout(timer);
+        return response;
+      }
+
+      // Retry on 429 (rate limit) or 5xx (server error)
+      if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+        const retryAfter = parseInt(response.headers.get('Retry-After') || '2', 10);
+        await new Promise(r => setTimeout(r, Math.min(retryAfter, 5) * 1000));
+        continue;
+      }
+
+      const responseText = await response.text();
+      clearTimeout(timer);
+      throw new Error(`Telegram sendMessage failed: HTTP ${response.status} ${responseText}`);
+    } catch (err) {
+      if (err.name === 'AbortError' && attempt < retries) {
+        // Timeout — retry once more
+        continue;
+      }
+      clearTimeout(timer);
+      throw err;
+    }
   }
-
-  return response;
 }
 
 async function answerTelegramCallbackQuery(env, callbackQueryId, text = '', showAlert = false) {
@@ -1208,8 +1232,12 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
       await setCachedJoinStatus(env, uid, true);
       if (isDatabaseConfigured(env)) {
         await persistDbUserJoinState(env, uid, true);
-        // Process any pending referral reward now that the user has joined the channel
-        await processPendingReferralReward(env, uid, true);
+        // Process any pending referral reward — non-critical, don't let failure affect membership
+        try {
+          await processPendingReferralReward(env, uid, true);
+        } catch (refErr) {
+          console.warn(safeError('referral-reward-failed', refErr));
+        }
       }
       return result;
     }
@@ -2719,6 +2747,17 @@ async function handleTelegramWebhook(request, env) {
     syncMenuButton(env);
   } catch (error) {
     console.error(safeError('telegram-webhook-error', error));
+    // Attempt to notify the user that something went wrong
+    if (messageContext?.chatId) {
+      try {
+        await sendTelegramMessage(env, {
+          chat_id: messageContext.chatId,
+          text: '⚠️ خطای موقت در پردازش درخواست. لطفاً دوباره /start را بزنید.',
+        });
+      } catch (notifyErr) {
+        console.error(safeError('start-error-notify-failed', notifyErr));
+      }
+    }
   }
 
   return new Response(null, {
@@ -2918,34 +2957,6 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return handleHealth(env);
-      }
-
-      // Temporary: cold-open trace collection (remove after debug)
-      if (request.method === 'POST' && url.pathname === '/api/debug/trace') {
-        try {
-          const body = await request.json();
-          const key = `debug_trace_${Date.now()}`;
-          await env.APP_CACHE.put(key, JSON.stringify({ received: new Date().toISOString(), entries: body }), { expirationTtl: 3600 });
-          console.log('[DEBUG-TRACE] Stored to KV:', key, body?.length, 'entries');
-          return jsonResponse({ ok: true, key }, {}, env);
-        } catch (e) {
-          console.log('[DEBUG-TRACE] ERROR:', e.message);
-          return jsonResponse({ ok: false, error: String(e) }, { status: 400 }, env);
-        }
-      }
-
-      if (request.method === 'GET' && url.pathname === '/api/debug/trace') {
-        try {
-          const list = await env.APP_CACHE.list({ prefix: 'debug_trace_', limit: 20 });
-          const traces = [];
-          for (const key of list.keys) {
-            const val = await env.APP_CACHE.get(key.name);
-            if (val) traces.push(JSON.parse(val));
-          }
-          return jsonResponse({ ok: true, count: traces.length, traces }, {}, env);
-        } catch (e) {
-          return jsonResponse({ ok: false, error: String(e) }, { status: 500 }, env);
-        }
       }
 
       if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
