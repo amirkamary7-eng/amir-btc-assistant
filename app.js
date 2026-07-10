@@ -18,6 +18,7 @@ function getTg() {
 
 let telegramInitDone = false;
 let telegramAuthWaitPromise = null;
+let bootstrapComplete = false;
 
 /**
  * داده init data کاربر را تجزیه و مقدار قابل استفاده استخراج می‌کند.
@@ -213,6 +214,7 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
                     UserContext.loading = false;
                     UserContext._setLoadingUI(false);
                     loadUser();
+                    tryLateBootstrap();
                 }
             });
         } catch (e) {
@@ -635,6 +637,25 @@ async function bootstrapUser() {
     } catch (e) {
         console.warn('bootstrapUser:', e);
         applyLanguage();
+    }
+    if (!UserContext.isGuest() && !UserContext.isPending()) bootstrapComplete = true;
+}
+
+/**
+ * Retry bootstrap when Telegram user becomes available after cold open.
+ * Guards: only runs once (bootstrapComplete), only when user is authenticated.
+ */
+async function tryLateBootstrap() {
+    if (bootstrapComplete) return;
+    if (!getTelegramUser()?.id) return;
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) return;
+    bootstrapComplete = true;
+    try {
+        await bootstrapUser();
+        loadUser();
+    } catch (e) {
+        bootstrapComplete = false;
+        console.warn('tryLateBootstrap:', e);
     }
 }
 
@@ -3146,6 +3167,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     await bootstrapUser();
     loadUser();
     updateNotifBadge();
+
+    // Cold-open retry: if bootstrap was skipped (isPending), poll until
+    // Telegram initData arrives, then run bootstrap exactly once.
+    if (!bootstrapComplete && UserContext.isPending()) {
+        const bootstrapRetry = setInterval(() => {
+            if (bootstrapComplete) { clearInterval(bootstrapRetry); return; }
+            tryLateBootstrap();
+            if (bootstrapComplete) clearInterval(bootstrapRetry);
+        }, 2000);
+        setTimeout(() => clearInterval(bootstrapRetry), 30000); // stop after 30s
+    }
 
     // Phase A: Render analysis slider immediately from localStorage cache
     // analyses is already populated from localStorage at module load (line 260)
