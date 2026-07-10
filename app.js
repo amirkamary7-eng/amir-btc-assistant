@@ -55,6 +55,15 @@ function parseInitDataUser(initData) {
  * ورودی: بدون ورودی.
  * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
  */
+function _parseHashInitData() {
+    try {
+        const hash = location.hash.substring(1);
+        if (!hash) return '';
+        const params = new URLSearchParams(hash);
+        return params.get('tgWebAppData') || '';
+    } catch (e) { return ''; }
+}
+
 function getTelegramUser() {
     if (UserContext.user?.id) return UserContext.user;
     const tg = getTg();
@@ -68,6 +77,17 @@ function getTelegramUser() {
     if (fromInitData?.id) {
         UserContext.user = fromInitData;
         return fromInitData;
+    }
+    // Bypass SDK: parse location.hash directly.
+    // The Telegram SDK reads the hash only ONCE at load (line 8 of telegram-web-app.js).
+    // On cold open, the hash may arrive AFTER the SDK has already parsed an empty hash.
+    const hashData = _parseHashInitData();
+    if (hashData) {
+        const fromHash = parseInitDataUser(hashData);
+        if (fromHash?.id) {
+            UserContext.user = fromHash;
+            return fromHash;
+        }
     }
     return null;
 }
@@ -266,6 +286,24 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
         'final UserContext.user:', UserContext.user?.id || null);
     return UserContext.user;
 }
+
+// Safety net: if the URL hash is updated AFTER the SDK initialized (cold-open race),
+// detect it and trigger bootstrap. The Telegram SDK reads location.hash only once.
+window.addEventListener('hashchange', () => {
+    if (!bootstrapComplete && !getTelegramUser()?.id) {
+        const hashData = _parseHashInitData();
+        if (hashData) {
+            const user = parseInitDataUser(hashData);
+            if (user?.id) {
+                UserContext.user = user;
+                UserContext.loading = false;
+                UserContext._setLoadingUI(false);
+                loadUser();
+                tryLateBootstrap();
+            }
+        }
+    }
+});
 
 //#endregion
 
