@@ -3242,6 +3242,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     _TRACE('APP_START', 'API_BASE:', API_BASE);
     _TRACE('APP_START', 'Telegram.WebApp.initData (first 100):', (window.Telegram?.WebApp?.initData || '').substring(0, 100));
     _TRACE('APP_START', 'Telegram.WebApp.initDataUnsafe.user:', window.Telegram?.WebApp?.initDataUnsafe?.user || null);
+    _TRACE('APP_START', 'location.hash (first 200):', location.hash.substring(0, 200));
+    _TRACE('APP_START', 'location.href (first 200):', location.href.substring(0, 200));
+    _TRACE('APP_START', 'Telegram.WebApp.version:', window.Telegram?.WebApp?.version || null);
+    _TRACE('APP_START', 'Telegram.WebApp.platform:', window.Telegram?.WebApp?.platform || null);
+    _TRACE('APP_START', 'Telegram.WebApp.colorScheme:', window.Telegram?.WebApp?.colorScheme || null);
+    _TRACE('APP_START', 'Telegram.WebApp.initDataUnsafe FULL:', JSON.stringify(window.Telegram?.WebApp?.initDataUnsafe || {}).substring(0, 300));
 
     await UserContext.init();
     _TRACE('APP_START', 'after UserContext.init', 'ready:', UserContext.ready, 'user:', UserContext.user?.id || null, 'isPending:', UserContext.isPending());
