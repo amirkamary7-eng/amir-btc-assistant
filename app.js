@@ -3,6 +3,19 @@
 // با پاپ‌آپ جوین اجباری، ۱۰۰ ارز، تقویم اقتصادی، حذف همه نوتیف‌ها، و رفع تنظیمات
 // ============================================================
 
+// === COLD-OPEN INSTRUMENTATION (temporary — remove after debug) ===
+window.__COLD_TRACE__ = [];
+let __tryLateBootstrapCount = 0;
+function _TRACE(tag, ...args) {
+    const entry = { t: Date.now(), ms: Date.now() - (window.__COLD_TRACE_T0 || Date.now()), tag, data: args.map(a => {
+        try { return typeof a === 'object' ? JSON.parse(JSON.stringify(a)) : a; }
+        catch(_) { return String(a); }
+    })};
+    window.__COLD_TRACE__.push(entry);
+    console.log(`%c[COLD-TRACE][${tag}]`, 'color:#ff6600;font-weight:bold', ...args);
+}
+// === END INSTRUMENTATION ===
+
 /**
  * نمونه `Telegram.WebApp` را از شیء `window` بازیابی می‌کند.
  * ورودی: بدون ورودی.
@@ -201,14 +214,20 @@ async function waitForApiReady(maxWaitMs = 8000) {
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
 async function initTelegramWebApp(maxWaitMs = 8000) {
-    if (telegramInitDone && getTelegramUser()?.id) return getTelegramUser();
+    _TRACE('initTelegramWebApp', 'START', 'telegramInitDone:', telegramInitDone, 'maxWaitMs:', maxWaitMs);
+    if (telegramInitDone && getTelegramUser()?.id) {
+        _TRACE('initTelegramWebApp', 'EARLY_RETURN', 'user already available');
+        return getTelegramUser();
+    }
     const tg = getTg();
+    _TRACE('initTelegramWebApp', 'tg object:', !!tg);
     if (tg) {
         try {
             tg.ready();
             tg.expand();
             tg.onEvent?.('viewportChanged', () => {
                 const u = getTelegramUser();
+                _TRACE('initTelegramWebApp:viewportChanged', 'user.id:', u?.id || null, 'initData (first 80):', (tg.initData || '').substring(0, 80));
                 if (u?.id) {
                     UserContext.user = u;
                     UserContext.loading = false;
@@ -219,16 +238,20 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
             });
         } catch (e) {
             console.warn('initTelegramWebApp:', e);
+            _TRACE('initTelegramWebApp', 'ERROR', e.message);
         }
     }
+    let pollCount = 0;
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
+        pollCount++;
         const user = getTelegramUser();
         if (user?.id) {
             localStorage.removeItem('guest_id');
             telegramInitDone = true;
             UserContext.user = user;
             UserContext.loading = false;
+            _TRACE('initTelegramWebApp', 'POLL_SUCCESS', 'pollCount:', pollCount, 'elapsedMs:', Date.now() - start, 'user.id:', user.id);
             return user;
         }
         if (!getTg() && !getTelegramInitData()) break;
@@ -237,6 +260,10 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
     telegramInitDone = true;
     UserContext.loading = false;
     UserContext.user = getTelegramUser();
+    _TRACE('initTelegramWebApp', 'POLL_TIMEOUT', 'pollCount:', pollCount, 'elapsedMs:', Date.now() - start,
+        'final initData (first 100):', (getTelegramInitData() || '').substring(0, 100),
+        'final initDataUnsafe.user:', getTg()?.initDataUnsafe?.user || null,
+        'final UserContext.user:', UserContext.user?.id || null);
     return UserContext.user;
 }
 
@@ -459,6 +486,7 @@ const UserContext = {
     user: null,
 
     async init() {
+        _TRACE('UserContext.init', 'START');
         this.loading = true;
         this._setLoadingUI(true);
         await initTelegramWebApp();
@@ -466,6 +494,7 @@ const UserContext = {
         this.ready = true;
         this.loading = false;
         this._setLoadingUI(false);
+        _TRACE('UserContext.init', 'END', 'user.id:', this.user?.id || null, 'isPending:', this.isPending(), 'isAuthenticated:', this.isAuthenticated());
         return this.user;
     },
 
@@ -600,14 +629,21 @@ async function bootstrapUser() {
     currentLang = loadLangFromStorage();
     loadWatchlistFromStorage();
 
+    _TRACE('bootstrapUser', 'CHECK', 'API_BASE:', !!API_BASE, 'isGuest:', UserContext.isGuest(), 'isPending:', UserContext.isPending(), 'getUserId:', getUserId(), 'getTelegramUser.id:', getTelegramUser()?.id || null);
+
     if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) {
+        _TRACE('bootstrapUser', 'SKIPPED', 'reason:', !API_BASE ? 'NO_API_BASE' : UserContext.isGuest() ? 'IS_GUEST' : 'IS_PENDING');
         applyLanguage();
         return;
     }
 
+    _TRACE('bootstrapUser', 'EXECUTING', 'user_id:', getUserId(), 'username:', getTelegramUser()?.username || null);
+
     try {
         const u = getTelegramUser();
-        const data = await apiFetch('/api/users/bootstrap', {
+        const bootstrapUrl = '/api/users/bootstrap';
+        _TRACE('bootstrapUser:API', 'REQUEST_SENT', 'url:', bootstrapUrl, 'user_id:', getUserId());
+        const data = await apiFetch(bootstrapUrl, {
             method: 'POST',
             body: JSON.stringify({
                 user_id: getUserId(),
@@ -618,6 +654,7 @@ async function bootstrapUser() {
                 referrer_id: getReferrerId()
             })
         });
+        _TRACE('bootstrapUser:API', 'RESPONSE_OK', 'bot_username:', data.bot_username, 'user.lang:', data.user?.lang, 'watchlist.length:', data.watchlist?.length, 'watchlist:', data.watchlist);
         if (data.bot_username) {
             BOT_USERNAME = data.bot_username;
         }
@@ -635,6 +672,7 @@ async function bootstrapUser() {
         saveLangToStorage();
         applyLanguage();
     } catch (e) {
+        _TRACE('bootstrapUser:API', 'RESPONSE_ERROR', e.message);
         console.warn('bootstrapUser:', e);
         applyLanguage();
     }
@@ -646,15 +684,29 @@ async function bootstrapUser() {
  * Guards: only runs once (bootstrapComplete), only when user is authenticated.
  */
 async function tryLateBootstrap() {
-    if (bootstrapComplete) return;
-    if (!getTelegramUser()?.id) return;
-    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) return;
+    __tryLateBootstrapCount++;
+    _TRACE('tryLateBootstrap', `CALL #${__tryLateBootstrapCount}`, 'bootstrapComplete:', bootstrapComplete, 'user.id:', getTelegramUser()?.id || null, 'isGuest:', UserContext.isGuest(), 'isPending:', UserContext.isPending(), 'API_BASE:', !!API_BASE);
+
+    if (bootstrapComplete) {
+        _TRACE('tryLateBootstrap', 'RETURN', 'reason: bootstrapComplete already true');
+        return;
+    }
+    if (!getTelegramUser()?.id) {
+        _TRACE('tryLateBootstrap', 'RETURN', 'reason: no user.id');
+        return;
+    }
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) {
+        _TRACE('tryLateBootstrap', 'RETURN', 'reason:', !API_BASE ? 'NO_API_BASE' : UserContext.isGuest() ? 'IS_GUEST' : 'IS_PENDING');
+        return;
+    }
     bootstrapComplete = true;
+    _TRACE('tryLateBootstrap', 'EXECUTING bootstrap + loadUser', 'user.id:', getTelegramUser()?.id);
     try {
         await bootstrapUser();
         loadUser();
     } catch (e) {
         bootstrapComplete = false;
+        _TRACE('tryLateBootstrap', 'FAILED', e.message);
         console.warn('tryLateBootstrap:', e);
     }
 }
@@ -893,12 +945,25 @@ async function apiFetch(path, options = {}) {
     if (initData) headers['X-Telegram-Init-Data'] = initData;
     const url = `${API_BASE}${path}`;
     const res = await fetch(url, { headers, ...options });
+
+    // Instrument bootstrap endpoint
+    if (path === '/api/users/bootstrap') {
+        _TRACE('apiFetch:/api/users/bootstrap', 'STATUS:', res.status, 'ok:', res.ok, 'initData_length:', initData?.length || 0, 'initData_first80:', initData?.substring(0, 80) || 'EMPTY');
+    }
+
     if (!res.ok) {
         let detail = '';
         try { detail = await res.text(); } catch (_) {}
+        if (path === '/api/users/bootstrap') {
+            _TRACE('apiFetch:/api/users/bootstrap', 'ERROR_BODY', detail.substring(0, 300));
+        }
         throw new Error(detail || `HTTP ${res.status}`);
     }
-    return res.json();
+    const json = await res.json();
+    if (path === '/api/users/bootstrap') {
+        _TRACE('apiFetch:/api/users/bootstrap', 'SUCCESS_BODY', JSON.stringify(json).substring(0, 500));
+    }
+    return json;
 }
 
 /**
@@ -2685,15 +2750,19 @@ function markNotifRead(id) {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function loadUser() {
+    _TRACE('loadUser', 'CALLED', 'UserContext.loading:', UserContext.loading, 'isUserLoading:', isUserLoading(), 'UserContext.user:', UserContext.user?.id || null, 'getTelegramUser.id:', getTelegramUser()?.id || null, 'isPending:', UserContext.isPending(), 'isGuest:', UserContext.isGuest());
+
     if (UserContext.loading || isUserLoading()) {
         document.getElementById('profile-name').innerText = t('loading_user');
         document.getElementById('profile-username').innerText = '...';
         document.getElementById('profile-id-num').innerText = '...';
+        _TRACE('loadUser', 'BRANCH: still loading, showing placeholder');
         return;
     }
 
     const user = getTelegramUser();
     if (user) {
+        _TRACE('loadUser', 'BRANCH: authenticated user', 'user.id:', user.id, 'username:', user.username, 'name:', `${user.first_name || ''} ${user.last_name || ''}`.trim());
         document.getElementById('profile-name').innerText = `${user.first_name || ''} ${user.last_name || ''}`.trim() || t('guest');
         document.getElementById('profile-username').innerText = user.username ? `@${user.username}` : '@guest';
         document.getElementById('profile-id-num').innerText = user.id || '000000';
@@ -2701,11 +2770,13 @@ function loadUser() {
         document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}/app?startapp=ref_${user.id}`;
         loadReferralStats();
     } else if (UserContext.isPending()) {
+        _TRACE('loadUser', 'BRANCH: isPending (no user yet)', 'getUserId:', getUserId());
         document.getElementById('profile-name').innerText = t('loading_user');
         document.getElementById('profile-username').innerText = '...';
         document.getElementById('profile-id-num').innerText = '...';
         document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}/app`;
     } else if (UserContext.isGuest()) {
+        _TRACE('loadUser', 'BRANCH: isGuest', 'getUserId:', getUserId());
         document.getElementById('profile-name').innerText = t('guest');
         document.getElementById('profile-username').innerText = '@guest';
         document.getElementById('profile-id-num').innerText = getUserId().replace('guest_', '') || '000000';
@@ -2714,6 +2785,9 @@ function loadUser() {
         const refLinkInput = document.getElementById('ref-link');
         if (refLinkInput) refLinkInput.placeholder = 'Login required';
     }
+
+    _TRACE('loadUser', 'FINAL_STATE', 'UserContext.user:', UserContext.user?.id || null, 'BOT_USERNAME:', BOT_USERNAME);
+
     const adminBtn = document.getElementById('admin-add-btn');
     if (adminBtn) adminBtn.style.display = isAdmin() ? 'block' : 'none';
 }
@@ -3161,22 +3235,43 @@ function startPolling() {
 //#region راه‌اندازی برنامه
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
+    window.__COLD_TRACE_T0 = Date.now();
+    _TRACE('APP_START', 'DOMContentLoaded fired');
+    _TRACE('APP_START', 'window.Telegram exists:', !!window.Telegram);
+    _TRACE('APP_START', 'Telegram.WebApp exists:', !!window.Telegram?.WebApp);
+    _TRACE('APP_START', 'API_BASE:', API_BASE);
+    _TRACE('APP_START', 'Telegram.WebApp.initData (first 100):', (window.Telegram?.WebApp?.initData || '').substring(0, 100));
+    _TRACE('APP_START', 'Telegram.WebApp.initDataUnsafe.user:', window.Telegram?.WebApp?.initDataUnsafe?.user || null);
+
     await UserContext.init();
+    _TRACE('APP_START', 'after UserContext.init', 'ready:', UserContext.ready, 'user:', UserContext.user?.id || null, 'isPending:', UserContext.isPending());
     alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     await bootstrapUser();
+    _TRACE('APP_START', 'after bootstrapUser', 'bootstrapComplete:', bootstrapComplete, 'watchlist.length:', watchlist.length);
     loadUser();
     updateNotifBadge();
 
     // Cold-open retry: if bootstrap was skipped (isPending), poll until
     // Telegram initData arrives, then run bootstrap exactly once.
     if (!bootstrapComplete && UserContext.isPending()) {
+        _TRACE('APP_START', 'STARTING_RETRY_INTERVAL', 'will poll every 2s for 30s');
+        let retryCount = 0;
         const bootstrapRetry = setInterval(() => {
+            retryCount++;
+            _TRACE('APP_START:RETRY', `tick #${retryCount}`, 'bootstrapComplete:', bootstrapComplete, 'user.id:', getTelegramUser()?.id || null, 'initData (first 80):', getTelegramInitData().substring(0, 80));
             if (bootstrapComplete) { clearInterval(bootstrapRetry); return; }
             tryLateBootstrap();
             if (bootstrapComplete) clearInterval(bootstrapRetry);
         }, 2000);
-        setTimeout(() => clearInterval(bootstrapRetry), 30000); // stop after 30s
+        setTimeout(() => {
+            clearInterval(bootstrapRetry);
+            if (!bootstrapComplete) {
+                _TRACE('APP_START:RETRY', 'GAVE_UP_AFTER_30s', 'totalRetries:', retryCount, 'bootstrapComplete:', bootstrapComplete, 'user.id:', getTelegramUser()?.id || null);
+            }
+        }, 30000); // stop after 30s
+    } else {
+        _TRACE('APP_START', 'NO_RETRY_NEEDED', 'bootstrapComplete:', bootstrapComplete, 'isPending:', UserContext.isPending());
     }
 
     // Phase A: Render analysis slider immediately from localStorage cache
