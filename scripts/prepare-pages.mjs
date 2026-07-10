@@ -123,10 +123,12 @@ function replaceReferences(html, jsRenameMap, assetRenameMap) {
 
 async function injectApiBase(html) {
   const workerApiUrl = process.env.WORKER_API_URL?.trim();
-  const apiBaseScript = workerApiUrl
-    ? `<script>window.API_BASE = "${workerApiUrl}";</script>`
-    : '<script>window.API_BASE = window.API_BASE || window.location.origin;</script>';
-
+  if (!workerApiUrl) {
+    // No env var → preserve the hardcoded Worker URL already in index.html.
+    // Do NOT replace with window.location.origin (that breaks all API calls).
+    return html;
+  }
+  const apiBaseScript = `<script>window.API_BASE = "${workerApiUrl}";</script>`;
   return html.replace(
     /<script>window\.API_BASE = .*?<\/script>/,
     apiBaseScript,
