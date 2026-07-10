@@ -2924,19 +2924,28 @@ export default {
       if (request.method === 'POST' && url.pathname === '/api/debug/trace') {
         try {
           const body = await request.json();
-          // Store trace in a global variable (persists for the lifetime of this Worker instance)
-          if (!globalThis.__debugTraces) globalThis.__debugTraces = [];
-          globalThis.__debugTraces.push({ received: new Date().toISOString(), entries: body });
-          console.log('[DEBUG-TRACE] Received', body?.length, 'trace entries');
-          return jsonResponse({ ok: true, stored: globalThis.__debugTraces.length }, {}, env);
+          const key = `debug_trace_${Date.now()}`;
+          await env.APP_CACHE.put(key, JSON.stringify({ received: new Date().toISOString(), entries: body }), { expirationTtl: 3600 });
+          console.log('[DEBUG-TRACE] Stored to KV:', key, body?.length, 'entries');
+          return jsonResponse({ ok: true, key }, {}, env);
         } catch (e) {
+          console.log('[DEBUG-TRACE] ERROR:', e.message);
           return jsonResponse({ ok: false, error: String(e) }, { status: 400 }, env);
         }
       }
 
       if (request.method === 'GET' && url.pathname === '/api/debug/trace') {
-        const traces = globalThis.__debugTraces || [];
-        return jsonResponse({ ok: true, count: traces.length, traces }, {}, env);
+        try {
+          const list = await env.APP_CACHE.list({ prefix: 'debug_trace_', limit: 20 });
+          const traces = [];
+          for (const key of list.keys) {
+            const val = await env.APP_CACHE.get(key.name);
+            if (val) traces.push(JSON.parse(val));
+          }
+          return jsonResponse({ ok: true, count: traces.length, traces }, {}, env);
+        } catch (e) {
+          return jsonResponse({ ok: false, error: String(e) }, { status: 500 }, env);
+        }
       }
 
       if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
