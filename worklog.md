@@ -1,22 +1,20 @@
 ---
-Task ID: 1
+Task ID: priority-fix-batch
 Agent: main
-Task: Add cold-open instrumentation tracing for auth chain
+Task: Fix /start bot, UI freezing, slow loading, and visual issues
 
 Work Log:
-- Read full auth chain in app.js: UserContext.init → initTelegramWebApp → bootstrapUser → tryLateBootstrap → loadUser
-- Identified 6 instrumentation points requested by user
-- Added _TRACE() utility at top of app.js with window.__COLD_TRACE__ array storage
-- Instrumented: APP_START, UserContext.init, initTelegramWebApp, bootstrapUser, tryLateBootstrap, apiFetch:/api/users/bootstrap, loadUser, retry interval
-- Added /api/debug/trace POST/GET endpoints to worker-proxy.js for trace collection
-- Added auto-upload mechanism: 35s after DOMContentLoaded, trace posts to /api/debug/trace
-- Deployed via git push (GitHub Actions deploys both Worker + Pages)
-- Verified: build MREMKN1K-2e7168d live on Pages, trace endpoint live on Worker
+- Investigated /start bot command failure: found silent error swallowing in catch block (line 2720), no retry on Telegram API errors, processPendingReferralReward could corrupt membership result
+- Fixed worker-proxy.js: sendTelegramMessage already had retry (from previous session), added error notification in catch, wrapped processPendingReferralReward in try/catch, removed /api/debug/trace endpoints
+- Investigated UI freezing: 18 issues found (render-blocking tv.js, staggered animations, backdrop-filter overload, DOM-based escapeHtml, duplicate polling, _TRACE overhead, text-shadow animation)
+- Fixed app.js: removed ALL _TRACE instrumentation (-111 lines), replaced escapeHtml with string-replace, removed duplicate 10s analysis polling, guarded checkAlerts market re-render, lazy-loaded TradingView
+- Fixed style.css: removed per-coin staggered animations, replaced bottom-nav blur with opaque bg, reduced header blur, replaced brand-glow animation with static shadow, fixed market title, online indicator, coin rank layout
+- Fixed index.html: removed tv.js from head, removed no-cache meta tags, restructured online indicator HTML, changed market header icon
+- All 109 worker tests pass
+- 3 commits pushed: 5914b54 (worker fix), 8a589a6 (app.js perf), 452169f (css+html perf+ui)
 
 Stage Summary:
-- Commits: 7ca13eb (instrumentation), 2e7168d (auto-upload + trace endpoint)
-- 109/109 tests pass
-- All 6 requested trace points instrumented with detailed data capture
-- Trace auto-uploads 35s after page load to backend
-- GET /api/debug/trace returns collected traces
-- Awaiting user cold-open in Telegram to collect real trace data
+- /start fix: error notification + retry + referral isolation
+- Performance: ~500KB removed from critical path, 6+ continuous paint triggers eliminated
+- Visual: online indicator (green dot + person), market header (simple white + chart icon), coin rank (before icon)
+- Deployed via GitHub Actions (push to main)
