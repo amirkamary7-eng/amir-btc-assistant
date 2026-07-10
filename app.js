@@ -2278,7 +2278,7 @@ async function openCoinDetail(symbol) {
 
     const chartContainer = document.getElementById('detail-chart');
     document.querySelector('.chart-exchange-badge')?.remove();
-    chartContainer.innerHTML = '<div class="empty-state">Loading chart...</div>';
+    chartContainer.innerHTML = '<div class="chart-loading-state"><div class="chart-spinner"></div><span>در حال بارگذاری چارت...</span></div>';
 
     const chartInfo = await resolveChartSymbol(symbol);
     currentTvChartInfo = chartInfo;
@@ -2402,7 +2402,7 @@ function openForexDetail(symbol) {
 
     const chartContainer = document.getElementById('detail-chart');
     document.querySelector('.chart-exchange-badge')?.remove();
-    chartContainer.innerHTML = '<div class="empty-state">Loading chart...</div>';
+    chartContainer.innerHTML = '<div class="chart-loading-state"><div class="chart-spinner"></div><span>در حال بارگذاری چارت...</span></div>';
 
     // Build chart info — extract exchange from tvSymbol prefix
     const tvSym = pair.tvSymbol || `FX:${symbol}`;
@@ -3452,6 +3452,38 @@ document.addEventListener('DOMContentLoaded', async () => {
             _TRACE('AUTO_UPLOAD', 'FAILED', e.message);
         });
     }, 35000);
+
+    // Scroll-to-top button visibility
+    const scrollTopBtn = document.getElementById('scroll-top-btn');
+    if (scrollTopBtn) {
+        let scrollTicking = false;
+        window.addEventListener('scroll', () => {
+            if (!scrollTicking) {
+                requestAnimationFrame(() => {
+                    scrollTopBtn.classList.toggle('visible', window.scrollY > 400);
+                    scrollTicking = false;
+                });
+                scrollTicking = true;
+            }
+        }, { passive: true });
+    }
+
+    // Hero Banner Slider
+    (function initHeroSlider() {
+        const slides = document.querySelectorAll('.hero-slide');
+        const dots = document.querySelectorAll('.hero-dot');
+        if (slides.length < 2) return;
+        let current = 0;
+        function goTo(idx) {
+            slides.forEach(s => s.classList.remove('active'));
+            dots.forEach(d => d.classList.remove('active'));
+            current = ((idx % slides.length) + slides.length) % slides.length;
+            slides[current].classList.add('active');
+            dots[current].classList.add('active');
+        }
+        dots.forEach(d => d.addEventListener('click', () => goTo(Number(d.dataset.dot) + 1)));
+        setInterval(() => goTo(current + 1), 3000);
+    })();
 });
 
 //#endregion
