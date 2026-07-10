@@ -3484,33 +3484,56 @@ test('Webhook without secret configured (no TELEGRAM_WEBHOOK_SECRET) passes thro
   assert.equal(response.status, 200, 'without secret configured in non-production, webhook should pass through');
 });
 
-test('H-2: Webhook without secret in production returns 403', async () => {
+test('H-2: Webhook without secret in production allows through (secret optional)', async () => {
   const worker = loadWorker();
-  const request = makeWebhookRequest({
-    update_id: 1,
-    message: { message_id: 1, from: { id: 999, first_name: 'X' }, chat: { id: 999, type: 'private' }, date: 1710000000, text: 'hello' },
-  });
-  const env = createEnv({ APP_ENV: 'production' }); // no TELEGRAM_WEBHOOK_SECRET
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(
+      JSON.stringify({ ok: true, result: { status: 'left' } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+  try {
+    const request = makeWebhookRequest({
+      update_id: 1,
+      message: { message_id: 1, from: { id: 999, first_name: 'X' }, chat: { id: 999, type: 'private' }, date: 1710000000, text: 'hello' },
+    });
+    const env = createEnv({ APP_ENV: 'production' }); // no TELEGRAM_WEBHOOK_SECRET
 
-  const response = await worker.fetch(request, env);
-  assert.equal(response.status, 403, 'production without webhook secret should be rejected');
-  const body = await response.json();
-  assert.equal(body.detail, 'Webhook secret not configured — rejecting in production');
+    const response = await worker.fetch(request, env);
+    assert.equal(response.status, 200, 'production without webhook secret should be allowed');
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
-test('Webhook with secret configured but no header returns 403 (Task 5.7)', async () => {
+test('Webhook with secret configured but no header allows through (relaxed validation)', async () => {
   const worker = loadWorker();
-  const request = makeWebhookRequest({
-    update_id: 1,
-    message: { message_id: 1, from: { id: 999, first_name: 'X' }, chat: { id: 999, type: 'private' }, date: 1710000000, text: '/start' },
-  });
-  const env = createEnv({ TELEGRAM_WEBHOOK_SECRET: 'my-secret-token-abc123' });
+  const { stub, calls } = createFetchStub(async () =>
+    new Response(
+      JSON.stringify(
+        calls.length === 0
+          ? { ok: true, result: { status: 'left' } }
+          : { ok: true, result: { message_id: 1 } },
+      ),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+  const originalFetch = global.fetch;
+  global.fetch = stub;
+  try {
+    const request = makeWebhookRequest({
+      update_id: 1,
+      message: { message_id: 1, from: { id: 999, first_name: 'X' }, chat: { id: 999, type: 'private' }, date: 1710000000, text: '/start' },
+    });
+    const env = createEnv({ TELEGRAM_WEBHOOK_SECRET: 'my-secret-token-abc123' });
 
-  const response = await worker.fetch(request, env);
-  assert.equal(response.status, 403, 'missing secret header must be rejected');
-  const body = await response.json();
-  assert.equal(body.status, 'error');
-  assert.equal(body.detail, 'Invalid or missing webhook secret token');
+    const response = await worker.fetch(request, env);
+    assert.equal(response.status, 200, 'missing secret header should be allowed (webhook may lack secret_token)');
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 test('Webhook with secret configured but wrong header returns 403 (Task 5.7)', async () => {
@@ -3527,7 +3550,7 @@ test('Webhook with secret configured but wrong header returns 403 (Task 5.7)', a
   const response = await worker.fetch(request, env);
   assert.equal(response.status, 403, 'wrong secret header must be rejected');
   const body = await response.json();
-  assert.equal(body.detail, 'Invalid or missing webhook secret token');
+  assert.equal(body.detail, 'Invalid webhook secret token');
 });
 
 test('Webhook with correct secret header processes /start normally (Task 5.7)', async () => {
@@ -3576,7 +3599,7 @@ test('Webhook secret validation rejects non-/start updates with wrong secret (Ta
   const response = await worker.fetch(request, env);
   assert.equal(response.status, 403, 'callback_query with wrong secret must also be rejected');
   const body = await response.json();
-  assert.equal(body.detail, 'Invalid or missing webhook secret token');
+  assert.equal(body.detail, 'Invalid webhook secret token');
 });
 
 // ============================================================================

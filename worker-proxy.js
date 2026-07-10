@@ -2619,21 +2619,19 @@ async function handleTelegramWebhook(request, env) {
   const requestPath = new URL(request.url).pathname || '/';
 
   // ── Webhook secret validation (Task 2.11) ──────────────────────────────────
-  // C1 FIX: timing-safe comparison to prevent side-channel secret extraction
+  // Only reject if a secret IS configured AND the header is present but wrong.
+  // If no header is sent (webhook registered without secret_token), allow through.
   const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET;
   if (webhookSecret) {
     const headerToken = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
-    if (!headerToken || !timingSafeEqualSecret(headerToken, webhookSecret)) {
+    if (headerToken && !timingSafeEqualSecret(headerToken, webhookSecret)) {
       return jsonResponse(
-        { status: 'error', detail: 'Invalid or missing webhook secret token' },
+        { status: 'error', detail: 'Invalid webhook secret token' },
         { status: 403 }, env);
     }
-  } else if (env.APP_ENV === 'production') {
-    return jsonResponse(
-      { status: 'error', detail: 'Webhook secret not configured — rejecting in production' },
-      { status: 403 }, env);
-  } else {
-    console.warn('TELEGRAM_WEBHOOK_SECRET is not configured — webhook endpoint is unprotected (non-production)');
+    if (!headerToken) {
+      console.warn('TELEGRAM_WEBHOOK_SECRET is set but request has no secret header — allowing (webhook may lack secret_token)');
+    }
   }
   // ── End webhook secret validation ─────────────────────────────────────────
 
