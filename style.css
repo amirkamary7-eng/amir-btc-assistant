@@ -406,8 +406,11 @@ body.user-loading .profile-loading-target.skeleton-text {
 .coin-item:active { background: rgba(255,255,255,0.06); }
 .coin-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 0%; }
 .coin-identity { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.coin-sym-row { display: flex; align-items: center; gap: 6px; }
+.coin-rank-inline { font-size: 10px; color: var(--text-sub); font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0.7; }
 .coin-rank { font-size: 11px; color: var(--text-sub); width: 28px; flex-shrink: 0; text-align: center; font-variant-numeric: tabular-nums; }
 .coin-icon { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; }
+.coin-icon-placeholder { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; background: linear-gradient(135deg, rgba(247,147,26,0.15), rgba(255,255,255,0.05)); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
 .coin-sym { font-weight: 700; font-size: 14px; white-space: nowrap; direction: ltr; display: inline-block; }
 .coin-name { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 110px; }
 .coin-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
@@ -960,8 +963,15 @@ strong.down { color: var(--red); }
 }
 
 /* Load More button (Phase 7) */
-.load-more-btn { display: block; width: 100%; padding: 12px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--accent); font-size: 14px; cursor: pointer; transition: background 0.2s; }
-.load-more-btn:active { background: rgba(247,147,26,0.1); }
+.load-more-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: calc(100% - 32px); margin: 8px auto; padding: 12px;
+  border: 1px dashed rgba(247,147,26,0.3); border-radius: 14px;
+  background: rgba(247,147,26,0.04); color: var(--accent);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.load-more-btn:active { background: rgba(247,147,26,0.12); border-color: rgba(247,147,26,0.5); }
 
 /* FAB: Quick Add to Watchlist (P2-3) */
 .fab-add-watch {

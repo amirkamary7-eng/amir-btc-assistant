@@ -340,6 +340,9 @@ let tickets = [];
 let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
 let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
 let currentAlertDirection = 'above';
+const MARKET_DEFAULT_LIMIT = 100;
+const MARKET_LOAD_MORE_BATCH = 50;
+let marketVisibleCount = MARKET_DEFAULT_LIMIT;
 let lastMarketFetchTime = 0;
 let allCoins = [];
 let allForexPairs = []; // Forex data from /api/forex
@@ -1435,7 +1438,21 @@ function renderMarket() {
             filtered = filtered.filter(c => watchlist.includes(c.symbol));
             break;
         default:
-            filtered = filtered; // Show all loaded coins (up to 200 from backend)
+            // Performance: limit visible coins, show Load More button
+            if (filtered.length > MARKET_DEFAULT_LIMIT) {
+                const visible = filtered.slice(0, marketVisibleCount);
+                const hasMore = marketVisibleCount < filtered.length;
+                const totalLabel = currentMarketTab === 'watchlist' ? (t('watchlist') || 'Watchlist') : (t('tab_crypto') || 'Crypto');
+                let html = buildInfoBar(filtered.length, totalLabel) + visible.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
+                if (hasMore) {
+                    const remaining = filtered.length - marketVisibleCount;
+                    html += `<button class="load-more-btn" onclick="loadMoreCoins()">${t('load_more') || 'نمایش بیشتر'} (${remaining})</button>`;
+                }
+                list.innerHTML = html;
+            } else {
+                list.innerHTML = buildInfoBar(filtered.length, currentMarketTab === 'watchlist' ? (t('watchlist') || 'Watchlist') : (t('tab_crypto') || 'Crypto')) + filtered.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
+            }
+            return;
     }
     if (!filtered.length && allCoins.length) {
         const msg = t('no_data');
@@ -1465,6 +1482,15 @@ function renderMarket() {
 }
 
 /**
+ * Load more coins into the market list (appends next batch).
+ */
+function loadMoreCoins() {
+    marketVisibleCount += MARKET_LOAD_MORE_BATCH;
+    renderMarket();
+    // Remove the load-more-btn after re-render (renderMarket recreates it)
+}
+
+/**
  * Render a single market item (crypto or forex).
  */
 function renderMarketItem(item) {
@@ -1481,17 +1507,20 @@ function renderCryptoItem(c) {
     const safeName = escapeHtml(c.name);
     const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
     const priceStr = c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6);
+    const rankNum = Number(c.rank) || 0;
     return `
         <div class="coin-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
             <div class="coin-left">
-                <img src="${escapeHtml(icon)}" onerror="this.style.display='none'" class="coin-icon" alt="${safeSymbol}">
+                <img src="${escapeHtml(icon)}" onerror="this.outerHTML='<div class=\'coin-icon-placeholder\'><svg width=\'18\' height=\'18\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'rgba(255,255,255,0.4)\' stroke-width=\'1.5\'><circle cx=\'12\' cy=\'12\' r=\'10\'/><path d=\'M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8\'/><path d=\'M12 18V6\'/></svg></div>'" class="coin-icon" alt="${safeSymbol}">
                 <div class="coin-identity">
-                    <span class="coin-sym">${safeSymbol}</span>
+                    <div class="coin-sym-row">
+                        <span class="coin-sym">${safeSymbol}</span>
+                        <span class="coin-rank-inline">#${rankNum}</span>
+                    </div>
                     <span class="coin-name">${safeName}</span>
                 </div>
             </div>
             <div class="coin-right">
-                <span class="coin-rank">#${Number(c.rank) || 0}</span>
                 <div class="coin-price-data">
                     <div class="coin-price">$${priceStr}</div>
                     <div class="coin-change ${isPos ? 'up' : 'down'}">${isPos ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</div>
@@ -1616,6 +1645,8 @@ function switchSubTab(tab, btn) {
     currentSubTab = tab;
     // Sync legacy currentMarketTab
     currentMarketTab = tab === 'top' ? 'overview' : tab;
+    // Reset visible count when switching tabs
+    marketVisibleCount = MARKET_DEFAULT_LIMIT;
 
     // Update sub-tab active states
     document.querySelectorAll('.sub-tab-btn').forEach(b => {
