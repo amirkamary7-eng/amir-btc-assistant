@@ -5,9 +5,7 @@
 <head>
     <!-- ==================== Cache-Control (Telegram WebView bypass) ==================== -->
     <meta charset="UTF-8">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Amir BTC Assistant Pro</title>
 
@@ -82,7 +80,6 @@
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="style.css">
-    <script src="https://s3.tradingview.com/tv.js"></script>
     <!-- Build-time: prepare-pages.mjs replaces this with WORKER_API_URL if set -->
     <!-- Fallback: Production Worker URL — ensures Cloudflare Pages GitHub Integration also works -->
     <script>window.API_BASE = window.API_BASE || "https://amir-btc-assistant-api-production.amirkamari9939.workers.dev";</script>
@@ -98,8 +95,9 @@
     <header class="app-header">
         <div class="header-side header-left">
             <div class="live-indicator">
-                <svg class="live-person-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span class="online-dot"></span>
                 <span class="live-count">123</span>
+                <svg class="live-person-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 <span class="live-label">آنلاین</span>
             </div>
         </div>
@@ -199,7 +197,7 @@
     <section id="market-page" class="page">
         <div class="market-page-header">
             <h2 class="market-page-title" data-i18n="market" style="margin:0">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
                 <span data-i18n="market">مارکت</span>
             </h2>
             <button class="market-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">
