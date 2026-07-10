@@ -58,8 +58,8 @@ body.user-loading .profile-loading-target.skeleton-text {
   padding: 12px 16px;
   height: 56px;
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(11, 18, 32, 0.92) 100%);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   position: sticky;
   top: 0;
@@ -88,39 +88,38 @@ body.user-loading .profile-loading-target.skeleton-text {
   font-weight: 800;
   letter-spacing: 2.5px;
   color: #ffffff;
-  text-shadow: 0 0 20px rgba(247,147,26,0.4), 0 0 40px rgba(247,147,26,0.15);
-  animation: brand-glow 3s ease-in-out infinite;
+  text-shadow: 0 0 12px rgba(247,147,26,0.3);
 }
-@keyframes brand-glow {
-  0%, 100% { text-shadow: 0 0 20px rgba(247,147,26,0.4), 0 0 40px rgba(247,147,26,0.15); }
-  50% { text-shadow: 0 0 25px rgba(247,147,26,0.6), 0 0 50px rgba(247,147,26,0.25); }
-}
+
 .brand-icon {
   width: 20px; height: 20px; flex-shrink: 0;
   color: var(--accent);
   filter: drop-shadow(0 0 6px rgba(247,147,26,0.5));
-  animation: brand-glow 3s ease-in-out infinite;
 }
 
 /* ── Live indicator (left) ──────────────────────────────── */
 .live-indicator {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   background: rgba(0,200,150,0.06);
   border: 1px solid rgba(0,200,150,0.15);
   border-radius: 20px;
-  padding: 5px 10px 5px 6px;
+  padding: 5px 10px 5px 8px;
 }
-.live-person-icon {
-  color: var(--green);
-  filter: drop-shadow(0 0 4px rgba(0,200,150,0.5));
-  animation: live-breathe 2.5s ease-in-out infinite;
+.online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse-dot 2s infinite;
   flex-shrink: 0;
 }
-@keyframes live-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
+@keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.live-person-icon {
+  color: var(--green);
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 .live-count {
   font-size: 13px;
@@ -315,15 +314,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 .market-page-header h2 { font-size: 20px; font-weight: 700; }
 .market-page-title {
   display: flex; align-items: center; gap: 8px;
-  font-size: 22px; font-weight: 800;
-  background: linear-gradient(135deg, #fff 30%, var(--accent));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-size: 20px; font-weight: 700;
+  color: #fff;
 }
 .market-page-title svg {
-  -webkit-text-fill-color: initial;
   color: var(--accent);
-  filter: drop-shadow(0 0 8px rgba(247,147,26,0.4));
+  opacity: 0.85;
 }
 .market-refresh-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text-dim); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.25s; }
 .market-refresh-btn:active { transform: scale(0.9); }
@@ -424,19 +420,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 @keyframes coinFadeOut { to { opacity: 0; transform: translateY(6px); } }
 @keyframes coinFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .coin-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 8px; cursor: pointer; transition: background 0.15s; border-radius: 10px; }
-.coin-list.fade-in .coin-item { animation: coinItemIn 0.25s ease both; }
-.coin-list.fade-in .coin-item:nth-child(1) { animation-delay: 0s; }
-.coin-list.fade-in .coin-item:nth-child(2) { animation-delay: 0.02s; }
-.coin-list.fade-in .coin-item:nth-child(3) { animation-delay: 0.04s; }
-.coin-list.fade-in .coin-item:nth-child(n+4) { animation-delay: 0.05s; }
-@keyframes coinItemIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
 .coin-item:hover { background: rgba(255,255,255,0.03); }
 .coin-item:active { background: rgba(255,255,255,0.06); }
 .coin-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 0%; }
 .coin-identity { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-.coin-sym-row { display: flex; align-items: center; gap: 6px; }
-.coin-rank-inline { font-size: 10px; color: var(--text-sub); font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0.7; }
-.coin-rank { font-size: 11px; color: var(--text-sub); width: 28px; flex-shrink: 0; text-align: center; font-variant-numeric: tabular-nums; }
+.coin-rank { font-size: 11px; color: var(--text-sub); width: 22px; flex-shrink: 0; text-align: center; font-variant-numeric: tabular-nums; opacity: 0.6; }
 .coin-icon { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; }
 .coin-icon-placeholder { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; background: linear-gradient(135deg, rgba(247,147,26,0.15), rgba(255,255,255,0.05)); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
 .coin-sym { font-weight: 700; font-size: 14px; white-space: nowrap; direction: ltr; display: inline-block; }
@@ -867,7 +856,7 @@ strong.down { color: var(--red); }
 /* #region منوی پایینی */
 /* این بخش استایل‌های مرتبط با "منوی پایینی" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 72px; margin: 0 12px 10px; border-radius: 20px; background: rgba(17,24,39,0.75); backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-around; align-items: center; z-index: 1000; padding-bottom: env(safe-area-inset-bottom); }
+.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 72px; margin: 0 12px 10px; border-radius: 20px; background: rgba(11,18,32,0.92); box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-around; align-items: center; z-index: 1000; padding-bottom: env(safe-area-inset-bottom); }
 .nav-item { background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text-sub); cursor: pointer; transition: color 0.2s, transform 0.15s; padding: 4px 12px; position: relative; }
 .nav-item:active { transform: scale(0.9); }
 .nav-item svg { width: 24px; height: 24px; transition: transform 0.2s; }
