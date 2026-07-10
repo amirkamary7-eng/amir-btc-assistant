@@ -83,42 +83,46 @@ body.user-loading .profile-loading-target.skeleton-text {
   pointer-events: none;
 }
 .brand-text {
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: 2.5px;
   display: flex;
   align-items: center;
-  line-height: 1;
+  justify-content: center;
   direction: ltr;
 }
-.brand-amir-wrap {
+.brand-main-wrap {
   position: relative;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
+  line-height: 1;
 }
-.brand-btc-symbol {
-  position: absolute;
-  left: -10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 30px;
-  height: 30px;
-  color: #D4AF37;
-  opacity: 0.42;
-  pointer-events: none;
-  z-index: 0;
-}
-.brand-amir {
+.brand-amirbtc {
   position: relative;
   z-index: 1;
-  background: linear-gradient(135deg, #FFD700 0%, #F0C040 40%, #D4AF37 100%);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  line-height: 1;
+  white-space: nowrap;
+  background: linear-gradient(to bottom,
+    #C4A24A 0%,
+    #A89848 25%,
+    #5A9A8A 35%,
+    #2D8E7E 45%,
+    #2D8E7E 100%
+  );
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-.brand-btc {
-  color: #ffffff;
-  margin-right: 0;
+.brand-tagline {
+  position: relative;
+  z-index: 1;
+  font-size: 6.5px;
+  letter-spacing: 3.5px;
+  color: rgba(201,165,50,0.2);
+  margin-top: 1px;
+  font-family: serif;
+  white-space: nowrap;
 }
 
 /* ── Live indicator (left) ──────────────────────────────── */
