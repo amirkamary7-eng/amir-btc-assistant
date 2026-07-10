@@ -280,6 +280,21 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
     telegramInitDone = true;
     UserContext.loading = false;
     UserContext.user = getTelegramUser();
+
+    // Cold-open fix: if no user and hash is empty, the Telegram Client
+    // likely opened the WebView before computing initData. Reload once
+    // so the second load picks up the cached initData in the URL hash.
+    // The SDK reads location.hash once at init — a reload re-runs that.
+    const _RELOADED = '__tg_init_reloaded';
+    if (!UserContext.user?.id && isInTelegram() && !sessionStorage.getItem(_RELOADED)) {
+        sessionStorage.setItem(_RELOADED, '1');
+        _TRACE('initTelegramWebApp', 'COLD_OPEN_RELOAD', 'no user after poll, reloading in 1.5s');
+        setTimeout(() => location.reload(), 1500);
+    } else if (!UserContext.user?.id && isInTelegram()) {
+        sessionStorage.removeItem(_RELOADED);
+        _TRACE('initTelegramWebApp', 'COLD_OPEN_RELOAD_GIVEUP', 'still no user after reload');
+    }
+
     _TRACE('initTelegramWebApp', 'POLL_TIMEOUT', 'pollCount:', pollCount, 'elapsedMs:', Date.now() - start,
         'final initData (first 100):', (getTelegramInitData() || '').substring(0, 100),
         'final initDataUnsafe.user:', getTg()?.initDataUnsafe?.user || null,
