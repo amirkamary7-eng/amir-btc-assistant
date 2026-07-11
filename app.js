@@ -20,6 +20,7 @@ function getTg() {
 let telegramInitDone = false;
 let telegramAuthWaitPromise = null;
 let bootstrapComplete = false;
+let _coldOpenReloadTimer = null;
 
 /**
  * داده init data کاربر را تجزیه و مقدار قابل استفاده استخراج می‌کند.
@@ -132,7 +133,11 @@ function isUserLoading() {
  * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
  */
 function getTelegramInitData() {
-    return getTg()?.initData || '';
+    const tg = getTg();
+    if (tg?.initData) return tg.initData;
+    // Bypass SDK: on cold-open the SDK reads an empty hash at init.
+    // The hash may be populated later by the Telegram client.
+    return _parseHashInitData();
 }
 
 /**
@@ -233,6 +238,8 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
             tg.onEvent?.('viewportChanged', () => {
                 const u = getTelegramUser();
                 if (u?.id) {
+                    console.log('[BOOT] viewportChanged: user arrived, cancelling reload if pending');
+                    if (_coldOpenReloadTimer) { clearTimeout(_coldOpenReloadTimer); _coldOpenReloadTimer = null; }
                     UserContext.user = u;
                     UserContext.loading = false;
                     UserContext._setLoadingUI(false);
@@ -270,7 +277,12 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
     const _RELOADED = '__tg_init_reloaded';
     if (!UserContext.user?.id && isInTelegram() && !sessionStorage.getItem(_RELOADED)) {
         sessionStorage.setItem(_RELOADED, '1');
-        setTimeout(() => location.reload(), 1500);
+        console.warn('[BOOT] Cold-open: no user after polling. Reload in 3s unless user arrives.');
+        _coldOpenReloadTimer = setTimeout(() => {
+            _coldOpenReloadTimer = null;
+            console.warn('[BOOT] Cold-open reload triggered — initData never arrived');
+            location.reload();
+        }, 3000);
     } else if (!UserContext.user?.id && isInTelegram()) {
         sessionStorage.removeItem(_RELOADED);
     }
@@ -286,6 +298,8 @@ window.addEventListener('hashchange', () => {
         if (hashData) {
             const user = parseInitDataUser(hashData);
             if (user?.id) {
+                console.log('[BOOT] hashchange: user arrived, cancelling reload if pending');
+                if (_coldOpenReloadTimer) { clearTimeout(_coldOpenReloadTimer); _coldOpenReloadTimer = null; }
                 UserContext.user = user;
                 UserContext.loading = false;
                 UserContext._setLoadingUI(false);
@@ -484,12 +498,36 @@ function t(key) { return i18n[currentLang]?.[key] || i18n.fa[key] || key; }
 // ============================================================================
 
 function getReferrerId() {
+    // 1) Try initDataUnsafe (SDK-parsed)
     const tg = getTg();
     const startParam = tg?.initDataUnsafe?.start_param;
-    if (!startParam || !startParam.startsWith('ref_')) return null;
-    const id = startParam.slice(4);
-    // M-R7: only accept numeric Telegram IDs
-    return /^\d{1,20}$/.test(id) ? id : null;
+    if (startParam && startParam.startsWith('ref_')) {
+        const id = startParam.slice(4);
+        if (/^\d{1,20}$/.test(id)) {
+            console.log('[BOOT] getReferrerId from initDataUnsafe:', id);
+            return id;
+        }
+    }
+    // 2) Fallback: parse start_param from raw initData string
+    //    (same source getTelegramUser uses for the hash bypass)
+    const rawData = getTelegramInitData();
+    if (rawData) {
+        try {
+            const params = new URLSearchParams(rawData);
+            const sp = params.get('start_param');
+            if (sp && sp.startsWith('ref_')) {
+                const id = sp.slice(4);
+                if (/^\d{1,20}$/.test(id)) {
+                    console.log('[BOOT] getReferrerId from raw initData:', id);
+                    return id;
+                }
+            }
+        } catch (e) {
+            console.warn('[BOOT] getReferrerId parse error:', e);
+        }
+    }
+    console.log('[BOOT] getReferrerId: no valid referrer found');
+    return null;
 }
 /**
  * مقدار کاربر id را بازیابی می‌کند.
@@ -660,13 +698,27 @@ async function bootstrapUser() {
     currentLang = loadLangFromStorage();
     loadWatchlistFromStorage();
 
-    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) {
+    if (!API_BASE) {
+        console.log('[BOOT] bootstrapUser skipped: no API_BASE');
+        applyLanguage();
+        return;
+    }
+    if (UserContext.isGuest()) {
+        console.log('[BOOT] bootstrapUser skipped: guest user');
+        applyLanguage();
+        return;
+    }
+    if (UserContext.isPending()) {
+        console.log('[BOOT] bootstrapUser skipped: user isPending (no Telegram ID yet)');
         applyLanguage();
         return;
     }
 
     try {
         const u = getTelegramUser();
+        const referrerId = getReferrerId();
+        console.log('[BOOT] bootstrapUser START — user_id:', u?.id, 'referrer:', referrerId, 'initData length:', getTelegramInitData().length);
+
         const bootstrapUrl = '/api/users/bootstrap';
         const data = await apiFetch(bootstrapUrl, {
             method: 'POST',
@@ -676,9 +728,10 @@ async function bootstrapUser() {
                 first_name: u?.first_name || null,
                 last_name: u?.last_name || null,
                 lang: currentLang,
-                referrer_id: getReferrerId()
+                referrer_id: referrerId
             })
         });
+        console.log('[BOOT] bootstrapUser SUCCESS — watchlist:', JSON.stringify(data.watchlist), 'user:', JSON.stringify(data.user));
         if (data.bot_username) {
             BOT_USERNAME = data.bot_username;
         }
@@ -695,11 +748,14 @@ async function bootstrapUser() {
         }
         saveLangToStorage();
         applyLanguage();
+        // Only mark complete if the API call actually succeeded
+        bootstrapComplete = true;
     } catch (e) {
-        console.warn('bootstrapUser:', e);
+        console.error('[BOOT] bootstrapUser FAILED:', e);
+        // Do NOT set bootstrapComplete — let retry try again
         applyLanguage();
     }
-    if (!UserContext.isGuest() && !UserContext.isPending()) bootstrapComplete = true;
+    console.log('[BOOT] bootstrapUser DONE — bootstrapComplete:', bootstrapComplete);
 }
 
 /**
@@ -710,19 +766,28 @@ async function tryLateBootstrap() {
     if (bootstrapComplete) {
         return;
     }
-    if (!getTelegramUser()?.id) {
+    const user = getTelegramUser();
+    if (!user?.id) {
+        console.log('[BOOT] tryLateBootstrap: no user yet, skipping');
         return;
     }
     if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) {
+        console.log('[BOOT] tryLateBootstrap: blocked — API_BASE:', !!API_BASE, 'isGuest:', UserContext.isGuest(), 'isPending:', UserContext.isPending());
         return;
     }
-    bootstrapComplete = true;
+    // Cancel any pending cold-open reload — we have the user now
+    if (_coldOpenReloadTimer) {
+        clearTimeout(_coldOpenReloadTimer);
+        _coldOpenReloadTimer = null;
+        console.log('[BOOT] tryLateBootstrap: cancelled cold-open reload');
+    }
+    console.log('[BOOT] tryLateBootstrap: running bootstrap for user', user.id);
+    // Do NOT set bootstrapComplete here — let bootstrapUser set it on success only
     try {
         await bootstrapUser();
         loadUser();
     } catch (e) {
-        bootstrapComplete = false;
-        console.warn('tryLateBootstrap:', e);
+        console.error('[BOOT] tryLateBootstrap FAILED:', e);
     }
 }
 
@@ -959,12 +1024,19 @@ async function apiFetch(path, options = {}) {
     const initData = getTelegramInitData();
     if (initData) headers['X-Telegram-Init-Data'] = initData;
     const url = `${API_BASE}${path}`;
+    if (path === '/api/users/bootstrap') {
+        console.log('[BOOT] apiFetch bootstrap — initData length:', initData.length, 'hasAuthHeader:', !!initData, 'user_id:', getUserId());
+    }
     const res = await fetch(url, { headers, ...options });
 
     if (!res.ok) {
         let detail = '';
         try { detail = await res.text(); } catch (_) {}
-        throw new Error(detail || `HTTP ${res.status}`);
+        const err = new Error(detail || `HTTP ${res.status}`);
+        if (path === '/api/users/bootstrap') {
+            console.error('[BOOT] apiFetch bootstrap FAILED — status:', res.status, 'detail:', detail);
+        }
+        throw err;
     }
     const json = await res.json();
     return json;
@@ -3333,26 +3405,44 @@ function startPolling() {
 //#region راه‌اندازی برنامه
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
+    console.log('[BOOT] DOMContentLoaded — starting init');
     await UserContext.init();
+    console.log('[BOOT] UserContext.init done — user:', UserContext.user?.id || 'null', 'ready:', UserContext.ready);
+
     alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     await bootstrapUser();
     loadUser();
     updateNotifBadge();
 
-    // Cold-open retry: if bootstrap was skipped (isPending), poll until
-    // Telegram initData arrives, then run bootstrap exactly once.
+    // Cold-open retry: if bootstrap was skipped (isPending), poll every 500ms
+    // until Telegram initData arrives, then run bootstrap exactly once.
+    // 500ms ensures we fire BEFORE the 3s cold-open reload timer.
     if (!bootstrapComplete && UserContext.isPending()) {
+        console.log('[BOOT] Starting retry interval (500ms) — user is pending');
         let retryCount = 0;
         const bootstrapRetry = setInterval(() => {
             retryCount++;
-            if (bootstrapComplete) { clearInterval(bootstrapRetry); return; }
+            if (bootstrapComplete) {
+                console.log('[BOOT] Retry: bootstrapComplete, clearing interval after', retryCount, 'checks');
+                clearInterval(bootstrapRetry);
+                return;
+            }
+            console.log('[BOOT] Retry #' + retryCount + ': checking for user...');
             tryLateBootstrap();
-            if (bootstrapComplete) clearInterval(bootstrapRetry);
-        }, 2000);
+            if (bootstrapComplete) {
+                console.log('[BOOT] Retry: bootstrap succeeded on check #' + retryCount);
+                clearInterval(bootstrapRetry);
+            }
+        }, 500);
         setTimeout(() => {
+            if (!bootstrapComplete) {
+                console.warn('[BOOT] Retry: 30s timeout reached, clearing interval');
+            }
             clearInterval(bootstrapRetry);
         }, 30000); // stop after 30s
+    } else {
+        console.log('[BOOT] No retry needed — bootstrapComplete:', bootstrapComplete, 'isPending:', UserContext.isPending());
     }
 
     // Phase A: Render analysis slider immediately from localStorage cache
