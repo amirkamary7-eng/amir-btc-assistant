@@ -1537,21 +1537,38 @@ function renderMarketInsights() {
     var lEl = document.getElementById('sentiment-losers');
     if (lEl) lEl.querySelector('span').textContent = losers;
 
-    // --- Fear & Greed (calculated from existing data, no API call) ---
-    var avgChange = 0;
-    for (var j = 0; j < allCoins.length; j++) avgChange += (allCoins[j].changePercent24Hr || 0);
-    avgChange = allCoins.length > 0 ? avgChange / allCoins.length : 0;
-    var changeScore = Math.max(0, Math.min(100, 50 + avgChange * 8));
-    var ratioScore = total > 0 ? (gainers / total) * 100 : 50;
-    var fgIndex = Math.round(changeScore * 0.6 + ratioScore * 0.4);
-    fgIndex = Math.max(0, Math.min(100, fgIndex));
-
-    var fgLabel;
-    if (fgIndex >= 75) fgLabel = t('fg_extreme_greed');
-    else if (fgIndex >= 55) fgLabel = t('fg_greed');
-    else if (fgIndex >= 45) fgLabel = t('fg_neutral');
-    else if (fgIndex >= 25) fgLabel = t('fg_fear');
-    else fgLabel = t('fg_extreme_fear');
+    // --- Fear & Greed ---
+    // Use real data from Alternative.me (via globalMarketData.fearGreedValue) if available.
+    // Fall back to synthetic calculation ONLY if no real data exists.
+    var fgIndex, fgLabel, fgSource;
+    if (globalMarketData && globalMarketData.fearGreedValue > 0) {
+        fgIndex = globalMarketData.fearGreedValue;
+        fgSource = globalMarketData.fearGreedSource || 'real';
+        // Map Alternative.me classification to i18n key
+        var fgClass = (globalMarketData.fearGreedClassification || '').toLowerCase();
+        if (fgClass === 'extreme greed' || fgClass === 'extreme_greed') fgLabel = t('fg_extreme_greed');
+        else if (fgClass === 'greed') fgLabel = t('fg_greed');
+        else if (fgClass === 'neutral') fgLabel = t('fg_neutral');
+        else if (fgClass === 'fear') fgLabel = t('fg_fear');
+        else if (fgClass === 'extreme fear' || fgClass === 'extreme_fear') fgLabel = t('fg_extreme_fear');
+        else fgLabel = globalMarketData.fearGreedClassification || '--';
+        console.log('[FG] Real data from', fgSource, ':', fgIndex, fgLabel);
+    } else {
+        // Synthetic fallback — only when no real API data is available
+        var avgChange = 0;
+        for (var j = 0; j < allCoins.length; j++) avgChange += (allCoins[j].changePercent24Hr || 0);
+        avgChange = allCoins.length > 0 ? avgChange / allCoins.length : 0;
+        var changeScore = Math.max(0, Math.min(100, 50 + avgChange * 8));
+        var ratioScore = total > 0 ? (gainers / total) * 100 : 50;
+        fgIndex = Math.round(changeScore * 0.6 + ratioScore * 0.4);
+        fgIndex = Math.max(0, Math.min(100, fgIndex));
+        if (fgIndex >= 75) fgLabel = t('fg_extreme_greed');
+        else if (fgIndex >= 55) fgLabel = t('fg_greed');
+        else if (fgIndex >= 45) fgLabel = t('fg_neutral');
+        else if (fgIndex >= 25) fgLabel = t('fg_fear');
+        else fgLabel = t('fg_extreme_fear');
+        console.log('[FG] Synthetic fallback:', fgIndex, fgLabel);
+    }
 
     var fgValueEl = document.getElementById('fg-index-value');
     if (fgValueEl) fgValueEl.textContent = fgIndex;

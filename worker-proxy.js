@@ -2067,6 +2067,8 @@ function handleRoot(env) {
   }, {}, env);
 }
 
+// fetchGlobalData removed — caching is now handled inside fetchGlobalStats()
+
 function handleHealth(env) {
   const webAppUrl = resolveWebAppUrl(env);
   console.log(JSON.stringify({
@@ -2245,46 +2247,172 @@ const MARKET_GLOBAL_CACHE_TTL = 300; // 5 minutes — global stats change less f
 const MARKET_FETCH_LIMIT = 200;
 
 /**
- * Fetch CoinGecko /global data (total market cap, 24h volume, BTC dominance).
- * Returns { totalMarketCap, totalVolume, btcDominance } or null.
+ * Fetch Fear & Greed Index from Alternative.me (free, no API key required).
+ * Returns { value: number, classification: string } or null.
  */
-async function fetchGlobalStats() {
+async function fetchFearGreed() {
   try {
-    const { ok, body } = await fetchJson('https://api.coingecko.com/api/v3/global');
-    if (ok && body?.data) {
-      const d = body.data;
+    const { ok, body } = await fetchJson('https://api.alternative.me/fng/?limit=1');
+    if (ok && body?.data?.[0]) {
+      const d = body.data[0];
       return {
-        totalMarketCap: d.total_market_cap?.usd || 0,
-        totalVolume: d.total_volume?.usd || 0,
-        btcDominance: d.market_cap_percentage?.btc || 0,
+        value: parseInt(d.value, 10) || 0,
+        classification: d.value_classification || 'Neutral',
       };
     }
   } catch (e) {
-    console.warn('Market: /global fetch failed', e.message || e);
+    console.warn('Global: Alternative.me F&G failed', e.message || e);
   }
   return null;
 }
 
+/**
+ * Fetch global market stats with multi-source failover.
+ * Priority: CoinMarketCap (if key) → CoinGecko (if key or public) → CoinCap (partial)
+ * Also fetches Fear & Greed from Alternative.me in parallel.
+ *
+ * Returns { totalMarketCap, totalVolume, btcDominance, fearGreedValue, fearGreedClassification, source }
+ * or null if ALL sources fail.
+ */
+async function fetchGlobalStats(env) {
+  // ── Step 0: Check KV cache ──
+  try {
+    const raw = await readAppCache(env, 'market:global');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch {}
+
+  // ── Step 1: Fetch Fear & Greed in parallel (always from Alternative.me) ──
+  const fgPromise = fetchFearGreed();
+
+  // ── Step 2: Try data sources in priority order ──
+  let stats = null;
+
+  // Level 1: CoinMarketCap (requires CMC_PRO_API_KEY env var)
+  const cmcKey = env.CMC_PRO_API_KEY;
+  if (cmcKey) {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+      const res = await fetch('https://pro-api.coinmarketcap.com/v1/global-metrics/quotes/latest', {
+        headers: {
+          Accept: 'application/json',
+          'X-CMC_PRO_API_KEY': cmcKey,
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(tid);
+      if (res.ok) {
+        const body = await res.json();
+        if (body?.data) {
+          const q = body.data;
+          stats = {
+            totalMarketCap: q.quote?.USD?.total_market_cap || 0,
+            totalVolume: q.quote?.USD?.total_volume_24h || 0,
+            btcDominance: q.btc_dominance || 0,
+            source: 'coinmarketcap',
+          };
+          console.log('Global: CoinMarketCap success');
+        }
+      }
+    } catch (e) {
+      console.warn('Global: CoinMarketCap failed', e.message || e);
+    }
+  }
+
+  // Level 2: CoinGecko (public or with COINGECKO_API_KEY)
+  if (!stats) {
+    try {
+      const cgHeaders = { Accept: 'application/json' };
+      const cgKey = env.COINGECKO_API_KEY;
+      if (cgKey) cgHeaders['x-cg-pro-api-key'] = cgKey;
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+      const res = await fetch('https://api.coingecko.com/api/v3/global', {
+        headers: cgHeaders,
+        signal: controller.signal,
+      });
+      clearTimeout(tid);
+      if (res.ok) {
+        const body = await res.json();
+        if (body?.data) {
+          const d = body.data;
+          stats = {
+            totalMarketCap: d.total_market_cap?.usd || 0,
+            totalVolume: d.total_volume?.usd || 0,
+            btcDominance: d.market_cap_percentage?.btc || 0,
+            source: 'coingecko',
+          };
+          console.log('Global: CoinGecko success');
+        }
+      }
+    } catch (e) {
+      console.warn('Global: CoinGecko failed', e.message || e);
+    }
+  }
+
+  // Level 3: CoinCap /v2/global (if it exists) — attempt as last resort for mcap
+  if (!stats) {
+    try {
+      const { ok, body } = await fetchJson('https://api.coincap.io/v2/global');
+      if (ok && body?.data) {
+        const d = body.data;
+        stats = {
+          totalMarketCap: d.marketCapUsd || 0,
+          totalVolume: d.volumeUsd24Hr || 0,
+          btcDominance: d.btcDominance || 0,
+          source: 'coincap',
+        };
+        console.log('Global: CoinCap success');
+      }
+    } catch (e) {
+      console.warn('Global: CoinCap /v2/global failed', e.message || e);
+    }
+  }
+
+  // ── Step 3: Merge Fear & Greed ──
+  try {
+    const fg = await fgPromise;
+    if (fg) {
+      if (!stats) stats = {}; // FG available even if mcap sources all failed
+      stats.fearGreedValue = fg.value;
+      stats.fearGreedClassification = fg.classification;
+      stats.fearGreedSource = 'alternative.me';
+      console.log('Global: Fear & Greed =', fg.value, fg.classification);
+    }
+  } catch {}
+
+  // ── Step 4: Cache result ──
+  if (stats && (stats.totalMarketCap > 0 || stats.fearGreedValue > 0)) {
+    try {
+      await writeAppCache(env, 'market:global', JSON.stringify(stats), MARKET_GLOBAL_CACHE_TTL);
+    } catch {}
+  }
+
+  // Return null only if absolutely nothing was obtained
+  if (!stats || (stats.totalMarketCap === 0 && !stats.fearGreedValue)) return null;
+  return stats;
+}
+
 async function handleMarketData(env) {
-  // Check KV cache first
+  // Check KV cache first for coin data
   const cachedRaw = await readAppCache(env, 'market:data');
   if (cachedRaw) {
     try {
       const parsed = JSON.parse(cachedRaw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const globalData = await fetchGlobalData(env);
+        // Fetch global stats (uses its own cache internally)
+        const globalData = await fetchGlobalStats(env);
         return jsonResponse({ status: 'success', data: parsed, cached: true, global: globalData }, {}, env);
       }
     } catch {}
   }
 
   // Fetch global stats in parallel with market data (non-blocking)
-  const globalPromise = fetchGlobalStats().then(stats => {
-    if (stats) {
-      writeAppCache(env, 'market:global', JSON.stringify(stats), MARKET_GLOBAL_CACHE_TTL).catch(() => {});
-    }
-    return stats;
-  });
+  // fetchGlobalStats now handles its own caching, Fear & Greed, and multi-source failover
+  const globalPromise = fetchGlobalStats(env);
 
   // Primary: CoinGecko
   try {
@@ -2420,13 +2548,7 @@ async function handleMarketData(env) {
 /**
  * Read cached global stats from KV, or return null.
  */
-async function fetchGlobalData(env) {
-  try {
-    const raw = await readAppCache(env, 'market:global');
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return null;
-}
+// fetchGlobalData removed — caching is now handled inside fetchGlobalStats()
 
 // ============================================================================
 //#region Forex Data
