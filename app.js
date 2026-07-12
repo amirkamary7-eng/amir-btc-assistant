@@ -1025,27 +1025,41 @@ async function resolveChartSymbol(symbol) {
     const cached = Cache.get(cacheKey);
     if (cached) return cached;
 
-    // BUG 1 FIX: Priority order — prefer Binance/Bybit/OKX over MEXC/CoinEx
-    // Low-priority exchanges that should be overridden with Binance
-    var lowPriorityExchanges = ['mexc', 'coinex', 'bitget', 'hitbtc', 'bingx'];
+    // BUG 3 FIX: Smart exchange selection
+    // For coins known to be on Binance, use Binance directly (skip backend)
+    // For other coins, respect the backend's exchange resolution (no blind Binance override)
+    const BINANCE_KNOWN = new Set([
+        'BTC','ETH','BNB','SOL','XRP','ADA','DOGE','AVAX','DOT','MATIC','LINK','UNI','LTC','ATOM',
+        'ETC','FIL','APT','NEAR','ARB','OP','AAVE','MKR','SNX','GRT','INJ','SUI','SEI','TIA',
+        'JUP','WIF','PEPE','SHIB','FLOKI','BONK','RENDER','IMX','SAND','MANA','GALA','ENJ',
+        'AXS','APE','CRV','1INCH','COMP','DYDX','RUNE','THETA','FTM','ALGO','XLM','HBAR',
+        'VET','ICP','XTZ','EGLD','FLOW','MINA','NEO','KAVA','CELO','RSR','STX','ROSE',
+        'CFX','ACH','TRX','TON','KAS','PYTH','JTO','BLUR','PENDLE','ONDO','ENA','ETHFI',
+        'WBTC','STETH','USDT','USDC','BUSD','DAI','TUSD','FDUSD','PYUSD','RLC','WLD',
+        'ZEC','DASH','WAVES','ZIL','BCH','EOS','XTZ','IOTA','MIOTA','QTUM','ONT','ICX',
+        'ZRX','BATUS','OMG','IOST','VET','THETA','HOT','ZIL','ONT','IO','SAGA','TAO'
+    ]);
+
+    // For known Binance coins, return Binance directly without backend call
+    if (BINANCE_KNOWN.has(symbol)) {
+        var binanceResult = { found: true, tv_symbol: 'BINANCE:' + symbol + 'USDT', exchange: 'binance' };
+        Cache.set(cacheKey, binanceResult, 3600);
+        return binanceResult;
+    }
 
     if (API_BASE) {
         try {
             const data = await apiFetch(`/api/charts/resolve?symbol=${encodeURIComponent(symbol)}`);
             if (data.found && data.tv_symbol) {
-                var ex = (data.exchange || '').toLowerCase();
-                // Override low-priority exchanges with Binance
-                if (lowPriorityExchanges.indexOf(ex) !== -1) {
-                    var binanceResult = { found: true, tv_symbol: 'BINANCE:' + symbol + 'USDT', exchange: 'binance' };
-                    Cache.set(cacheKey, binanceResult, 3600);
-                    return binanceResult;
-                }
+                // Respect the backend's exchange resolution for unknown coins
+                // Backend already tries: Binance → Bybit → OKX → KuCoin → Gate → MEXC → CoinEx
                 Cache.set(cacheKey, data, 3600);
                 return data;
             }
         } catch (e) { console.warn('resolveChartSymbol:', e); }
     }
 
+    // Final fallback — try Binance first, then common exchanges
     const fallback = { found: true, tv_symbol: `BINANCE:${symbol}USDT`, exchange: 'binance' };
     Cache.set(cacheKey, fallback, 300);
     return fallback;
@@ -1343,17 +1357,36 @@ async function loadMarketData(force = false) {
             try {
                 const res = await apiFetch('/api/market');
                 if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
-                    // BUG 2 FIX: API returns mixed formats — most values are fractions (|v|<1)
-                    // but some outliers are already percentages (e.g. ISEK=48.5, CZ=1.72).
-                    // Only multiply by 100 when |value| < 1 to avoid double-multiplication.
-                    for (var ci = 0; ci < res.data.length; ci++) {
-                        var chg = res.data[ci].changePercent24Hr;
-                        if (typeof chg === 'number' && Math.abs(chg) < 1) {
-                            res.data[ci].changePercent24Hr = chg * 100;
+                    // BUG 2 FIX: Detect fraction vs percentage format using batch analysis.
+                    // CoinCap returns fractions (e.g. -0.0037 = -0.37%).
+                    // CoinGecko returns percentages (e.g. -0.34 = -0.34%).
+                    // Detection: count coins with |change| < 0.5 — fractions have >80% under 0.5.
+                    var smallCount = 0, totalCounted = 0;
+                    for (var di = 0; di < res.data.length; di++) {
+                        var dv = res.data[di].changePercent24Hr;
+                        if (typeof dv === 'number' && dv !== 0) {
+                            totalCounted++;
+                            if (Math.abs(dv) < 0.5) smallCount++;
                         }
                     }
+                    var isFractionFormat = totalCounted > 0 && (smallCount / totalCounted) > 0.7;
+                    console.log('[MARKET] Format detection:', isFractionFormat ? 'FRACTION (CoinCap)' : 'PERCENTAGE (CoinGecko)', 'small/total=', smallCount, '/', totalCounted);
+
+                    for (var ci = 0; ci < res.data.length; ci++) {
+                        var chg = res.data[ci].changePercent24Hr;
+                        if (typeof chg === 'number') {
+                            if (isFractionFormat) {
+                                res.data[ci].changePercent24Hr = chg * 100;
+                            }
+                        }
+                    }
+                    // Log key coins for QA verification
+                    ['BTC','ETH','SOL','XRP','DOGE'].forEach(function(s) {
+                        var c = res.data.find(function(x) { return x.symbol === s; });
+                        if (c) console.log('[MARKET]', s, 'raw→final:', chg, '→', c.changePercent24Hr);
+                    });
                     allCoins = res.data;
-                    if (res.global && typeof res.global === 'object') globalMarketData = res.global;
+                    if (res.global && typeof res.global === 'object' && res.global !== null) globalMarketData = res.global;
                 }
             } catch (e) {
                 console.warn('Backend /api/market failed:', e);
@@ -1369,6 +1402,7 @@ async function loadMarketData(force = false) {
         renderMarket();
         renderWatchlist();
         renderSummary();
+        renderMarketInsights();
     } catch (e) {
         console.error('❌ Market load error:', e);
         if (listEl && !allCoins.length) {
@@ -3115,15 +3149,26 @@ async function checkAlerts() {
         try {
             const res = await apiFetch('/api/market');
             if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
-                // BUG 2 FIX: Same conditional normalization — only multiply fractions (|v|<1)
+                // BUG 2 FIX: Same batch format detection as loadMarketData
+                var smallCount2 = 0, totalCounted2 = 0;
+                for (var di2 = 0; di2 < res.data.length; di2++) {
+                    var dv2 = res.data[di2].changePercent24Hr;
+                    if (typeof dv2 === 'number' && dv2 !== 0) {
+                        totalCounted2++;
+                        if (Math.abs(dv2) < 0.5) smallCount2++;
+                    }
+                }
+                var isFractionFormat2 = totalCounted2 > 0 && (smallCount2 / totalCounted2) > 0.7;
                 for (var ci2 = 0; ci2 < res.data.length; ci2++) {
                     var chg2 = res.data[ci2].changePercent24Hr;
-                    if (typeof chg2 === 'number' && Math.abs(chg2) < 1) {
-                        res.data[ci2].changePercent24Hr = chg2 * 100;
+                    if (typeof chg2 === 'number') {
+                        if (isFractionFormat2) {
+                            res.data[ci2].changePercent24Hr = chg2 * 100;
+                        }
                     }
                 }
                 allCoins = res.data;
-                if (res.global && typeof res.global === 'object') globalMarketData = res.global;
+                if (res.global && typeof res.global === 'object' && res.global !== null) globalMarketData = res.global;
                 Cache.set('market', allCoins, 120);
                 lastMarketFetchTime = Date.now();
             }
