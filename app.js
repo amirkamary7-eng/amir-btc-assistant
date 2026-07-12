@@ -364,7 +364,7 @@ let currentTvChartInfo = null;
 // ============================================================================
 const i18n = {
     fa: {
-        welcome: 'خوش آمدید،', dashboard: 'داشبورد', market: 'مارکت', analysis: 'تحلیل', news: 'اخبار',
+        welcome: 'خوش آمدید،', dashboard: 'داشبورد', market: 'بازار', analysis: 'تحلیل', news: 'اخبار',
         profile: 'پروفایل', watchlist: 'واچ‌لیست', settings: 'تنظیمات', referral: 'دعوت و پاداش',
         support: 'پشتیبانی و تیکت', about: 'درباره ما', language: 'زبان', search: 'جستجوی ارز...',
         no_data: 'داده‌ای موجود نیست', search_no_result: 'ارزی با این نام یافت نشد', search_results: 'نتیجه', join_channel: 'عضویت در کانال', copy: 'کپی', share: 'اشتراک‌گذاری',
@@ -1333,6 +1333,13 @@ async function loadMarketData(force = false) {
             try {
                 const res = await apiFetch('/api/market');
                 if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
+                    // BUG 2 FIX: API returns changePercent24Hr as decimal fraction (e.g. -0.0019 = -0.19%)
+                    // Multiply by 100 to convert to actual percentage for display
+                    for (var ci = 0; ci < res.data.length; ci++) {
+                        if (typeof res.data[ci].changePercent24Hr === 'number') {
+                            res.data[ci].changePercent24Hr = res.data[ci].changePercent24Hr * 100;
+                        }
+                    }
                     allCoins = res.data;
                     if (res.global) globalMarketData = res.global;
                 }
@@ -1412,9 +1419,12 @@ function renderSummary() {
     domEl?.classList.remove('loading');
 
     if (globalMarketData) {
-        mcapEl.textContent = '$' + formatLargeNumber(globalMarketData.totalMarketCap);
-        volEl.textContent = '$' + formatLargeNumber(globalMarketData.totalVolume);
-        domEl.textContent = globalMarketData.btcDominance.toFixed(1) + '%';
+        const mcapVal = globalMarketData.totalMarketCap;
+        const volVal = globalMarketData.totalVolume;
+        const domVal = globalMarketData.btcDominance;
+        mcapEl.textContent = (mcapVal > 0) ? '$' + formatLargeNumber(mcapVal) : '--';
+        volEl.textContent = (volVal > 0) ? '$' + formatLargeNumber(volVal) : '--';
+        domEl.textContent = (domVal > 0) ? domVal.toFixed(1) + '%' : '--';
     } else {
         // Fallback: compute from allCoins
         let totalMcap = 0;
@@ -1426,8 +1436,9 @@ function renderSummary() {
             totalVol += (c.volumeUsd24Hr || 0);
             if (c.symbol === 'BTC') btcMcap = c.marketCapUsd || 0;
         }
-        mcapEl.textContent = '$' + formatLargeNumber(totalMcap);
-        volEl.textContent = '$' + formatLargeNumber(totalVol);
+        // BUG 1 FIX: Show '--' for zero/missing data instead of $0 or fake values
+        mcapEl.textContent = totalMcap > 0 ? '$' + formatLargeNumber(totalMcap) : '--';
+        volEl.textContent = totalVol > 0 ? '$' + formatLargeNumber(totalVol) : '--';
         domEl.textContent = totalMcap > 0 ? ((btcMcap / totalMcap) * 100).toFixed(1) + '%' : '--';
     }
 }
@@ -1765,8 +1776,6 @@ function renderCryptoItem(c) {
     const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
     const priceStr = c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6);
     const rankNum = Number(c.rank) || 0;
-    const sparkPoints = generateSparklinePoints(c.changePercent24Hr, c.symbol);
-    const sparkColor = isPos ? 'var(--green)' : 'var(--red)';
     return `
         <div class="coin-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
             <div class="coin-left">
@@ -1776,11 +1785,6 @@ function renderCryptoItem(c) {
                     <span class="coin-sym">${safeSymbol}</span>
                     <span class="coin-name">${safeName}</span>
                 </div>
-            </div>
-            <div class="coin-center">
-                <svg class="coin-sparkline" viewBox="0 0 56 24" preserveAspectRatio="none">
-                    <polyline points="${sparkPoints}" fill="none" stroke="${sparkColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
             </div>
             <div class="coin-right">
                 <div class="coin-price-data">
@@ -1859,7 +1863,8 @@ function switchMainTab(tab, btn) {
     if (indicator) {
         indicator.classList.remove('pos-0', 'pos-1', 'pos-2');
         var idx = tab === 'crypto' ? 0 : (tab === 'forex' ? 1 : 2);
-        if (idx > 0) indicator.classList.add('pos-' + idx);
+        // BUG 3 FIX: Always set explicit position class, including pos-0
+        indicator.classList.add('pos-' + idx);
     }
 
     // Show/hide crypto sub-tabs
@@ -3112,6 +3117,12 @@ async function checkAlerts() {
         try {
             const res = await apiFetch('/api/market');
             if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
+                // BUG 2 FIX: Same normalization as loadMarketData
+                for (var ci2 = 0; ci2 < res.data.length; ci2++) {
+                    if (typeof res.data[ci2].changePercent24Hr === 'number') {
+                        res.data[ci2].changePercent24Hr = res.data[ci2].changePercent24Hr * 100;
+                    }
+                }
                 allCoins = res.data;
                 if (res.global) globalMarketData = res.global;
                 Cache.set('market', allCoins, 120);
