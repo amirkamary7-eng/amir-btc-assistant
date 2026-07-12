@@ -1025,10 +1025,21 @@ async function resolveChartSymbol(symbol) {
     const cached = Cache.get(cacheKey);
     if (cached) return cached;
 
+    // BUG 1 FIX: Priority order — prefer Binance/Bybit/OKX over MEXC/CoinEx
+    // Low-priority exchanges that should be overridden with Binance
+    var lowPriorityExchanges = ['mexc', 'coinex', 'bitget', 'hitbtc', 'bingx'];
+
     if (API_BASE) {
         try {
             const data = await apiFetch(`/api/charts/resolve?symbol=${encodeURIComponent(symbol)}`);
             if (data.found && data.tv_symbol) {
+                var ex = (data.exchange || '').toLowerCase();
+                // Override low-priority exchanges with Binance
+                if (lowPriorityExchanges.indexOf(ex) !== -1) {
+                    var binanceResult = { found: true, tv_symbol: 'BINANCE:' + symbol + 'USDT', exchange: 'binance' };
+                    Cache.set(cacheKey, binanceResult, 3600);
+                    return binanceResult;
+                }
                 Cache.set(cacheKey, data, 3600);
                 return data;
             }
@@ -1130,7 +1141,6 @@ function refreshUI() {
     renderWatchlist();
     renderSummary();
     renderMarketInsights();
-    renderTopMovers();
 
     // Defer non-critical renders to next frame to reduce main thread blocking
     requestAnimationFrame(() => {
@@ -1333,15 +1343,17 @@ async function loadMarketData(force = false) {
             try {
                 const res = await apiFetch('/api/market');
                 if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
-                    // BUG 2 FIX: API returns changePercent24Hr as decimal fraction (e.g. -0.0019 = -0.19%)
-                    // Multiply by 100 to convert to actual percentage for display
+                    // BUG 2 FIX: API returns mixed formats — most values are fractions (|v|<1)
+                    // but some outliers are already percentages (e.g. ISEK=48.5, CZ=1.72).
+                    // Only multiply by 100 when |value| < 1 to avoid double-multiplication.
                     for (var ci = 0; ci < res.data.length; ci++) {
-                        if (typeof res.data[ci].changePercent24Hr === 'number') {
-                            res.data[ci].changePercent24Hr = res.data[ci].changePercent24Hr * 100;
+                        var chg = res.data[ci].changePercent24Hr;
+                        if (typeof chg === 'number' && Math.abs(chg) < 1) {
+                            res.data[ci].changePercent24Hr = chg * 100;
                         }
                     }
                     allCoins = res.data;
-                    if (res.global) globalMarketData = res.global;
+                    if (res.global && typeof res.global === 'object') globalMarketData = res.global;
                 }
             } catch (e) {
                 console.warn('Backend /api/market failed:', e);
@@ -1526,28 +1538,10 @@ function renderMarketInsights() {
 
 /**
  * Render top 3 gainers and top 3 losers.
+ * NOTE: This section has been removed from the UI (BUG 4).
+ * Function kept as no-op for safety (no references from HTML remain).
  */
-function renderTopMovers() {
-    if (!allCoins.length) return;
-    var sorted = allCoins.slice().sort(function(a, b) { return b.changePercent24Hr - a.changePercent24Hr; });
-    var topGainers = sorted.slice(0, 3);
-    var topLosers = sorted.slice(-3).reverse();
-
-    function renderMoverItem(c, idx) {
-        var icon = c.image || 'https://assets.coincap.io/assets/icons/' + encodeURIComponent(c.symbol).toLowerCase() + '@2x.png';
-        var isPos = c.changePercent24Hr >= 0;
-        var chgStr = (isPos ? '+' : '') + c.changePercent24Hr.toFixed(2) + '%';
-        return '<div class="mover-item" onclick="openCoinDetail(\'' + escapeHtml(c.symbol) + '\')">' +
-            '<img src="' + escapeHtml(icon) + '" class="mover-icon" onerror="iconFallback(this)" data-symbol="' + escapeHtml(c.symbol) + '" alt="">' +
-            '<div class="mover-info"><span class="mover-sym">' + escapeHtml(c.symbol) + '</span>' +
-            '<span class="mover-change ' + (isPos ? 'up' : 'down') + '">' + chgStr + '</span></div></div>';
-    }
-
-    var gList = document.getElementById('top-gainers-list');
-    if (gList) gList.innerHTML = topGainers.map(renderMoverItem).join('');
-    var lList = document.getElementById('top-losers-list');
-    if (lList) lList.innerHTML = topLosers.map(renderMoverItem).join('');
-}
+function renderTopMovers() { return; }
 
 //#endregion
 
@@ -1877,10 +1871,14 @@ function switchMainTab(tab, btn) {
         }
     }
 
-    // Show/hide summary bar (only for crypto, not forex/watchlist in search mode)
-    const summaryBar = document.getElementById('market-summary-bar');
+    // Show/hide summary bar and insights (only for crypto, not forex/watchlist)
+    const summaryBar = document.getElementById('market-stats-row');
     if (summaryBar) {
-        summaryBar.style.display = (tab === 'forex') ? 'none' : '';
+        summaryBar.style.display = (tab === 'crypto') ? '' : 'none';
+    }
+    const insightsRow = document.getElementById('market-insights-row');
+    if (insightsRow) {
+        insightsRow.style.display = (tab === 'crypto') ? '' : 'none';
     }
 
     // Show/hide FAB (only on watchlist tab)
@@ -3117,14 +3115,15 @@ async function checkAlerts() {
         try {
             const res = await apiFetch('/api/market');
             if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
-                // BUG 2 FIX: Same normalization as loadMarketData
+                // BUG 2 FIX: Same conditional normalization — only multiply fractions (|v|<1)
                 for (var ci2 = 0; ci2 < res.data.length; ci2++) {
-                    if (typeof res.data[ci2].changePercent24Hr === 'number') {
-                        res.data[ci2].changePercent24Hr = res.data[ci2].changePercent24Hr * 100;
+                    var chg2 = res.data[ci2].changePercent24Hr;
+                    if (typeof chg2 === 'number' && Math.abs(chg2) < 1) {
+                        res.data[ci2].changePercent24Hr = chg2 * 100;
                     }
                 }
                 allCoins = res.data;
-                if (res.global) globalMarketData = res.global;
+                if (res.global && typeof res.global === 'object') globalMarketData = res.global;
                 Cache.set('market', allCoins, 120);
                 lastMarketFetchTime = Date.now();
             }
