@@ -2277,7 +2277,7 @@ async function fetchFearGreed() {
 async function fetchGlobalStats(env) {
   // ── Step 0: Check KV cache ──
   try {
-    const raw = await readAppCache(env, 'market:global');
+    const raw = await readAppCache(env, 'market:global:v2');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') return parsed;
@@ -2290,9 +2290,27 @@ async function fetchGlobalStats(env) {
   // ── Step 2: Try data sources in priority order ──
   let stats = null;
 
-  // Level 1: CoinMarketCap (requires CMC_PRO_API_KEY env var)
+  // Level 1: CoinPaprika global (free, no API key, reliable from CF Workers)
+  if (!stats) {
+    try {
+      const { ok, body } = await fetchJson('https://api.coinpaprika.com/v1/global');
+      if (ok && body) {
+        stats = {
+          totalMarketCap: body.market_cap_usd || 0,
+          totalVolume: body.volume_24h_usd || 0,
+          btcDominance: body.bitcoin_dominance_percentage || 0,
+          source: 'coinpaprika',
+        };
+        console.log('Global: CoinPaprika success — mcap:', stats.totalMarketCap, 'vol:', stats.totalVolume, 'btcDom:', stats.btcDominance);
+      }
+    } catch (e) {
+      console.warn('Global: CoinPaprika failed', e.message || e);
+    }
+  }
+
+  // Level 2: CoinMarketCap (requires CMC_PRO_API_KEY env var)
   const cmcKey = env.CMC_PRO_API_KEY;
-  if (cmcKey) {
+  if (!stats && cmcKey) {
     try {
       const controller = new AbortController();
       const tid = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
@@ -2322,7 +2340,7 @@ async function fetchGlobalStats(env) {
     }
   }
 
-  // Level 2: CoinGecko (public or with COINGECKO_API_KEY)
+  // Level 3: CoinGecko (public or with COINGECKO_API_KEY — often rate-limited from CF Workers)
   if (!stats) {
     try {
       const cgHeaders = { Accept: 'application/json' };
@@ -2353,24 +2371,8 @@ async function fetchGlobalStats(env) {
     }
   }
 
-  // Level 3: CoinCap /v2/global (if it exists) — attempt as last resort for mcap
-  if (!stats) {
-    try {
-      const { ok, body } = await fetchJson('https://api.coincap.io/v2/global');
-      if (ok && body?.data) {
-        const d = body.data;
-        stats = {
-          totalMarketCap: d.marketCapUsd || 0,
-          totalVolume: d.volumeUsd24Hr || 0,
-          btcDominance: d.btcDominance || 0,
-          source: 'coincap',
-        };
-        console.log('Global: CoinCap success');
-      }
-    } catch (e) {
-      console.warn('Global: CoinCap /v2/global failed', e.message || e);
-    }
-  }
+  // Level 4: Removed CoinCap /v2/global — endpoint does NOT exist in CoinCap API v2
+  // Level 4: Removed CryptoCompare — now requires API key
 
   // ── Step 3: Merge Fear & Greed ──
   try {
@@ -2387,7 +2389,7 @@ async function fetchGlobalStats(env) {
   // ── Step 4: Cache result ──
   if (stats && (stats.totalMarketCap > 0 || stats.fearGreedValue > 0)) {
     try {
-      await writeAppCache(env, 'market:global', JSON.stringify(stats), MARKET_GLOBAL_CACHE_TTL);
+      await writeAppCache(env, 'market:global:v2', JSON.stringify(stats), MARKET_GLOBAL_CACHE_TTL);
     } catch {}
   }
 
@@ -2397,15 +2399,15 @@ async function fetchGlobalStats(env) {
 }
 
 async function handleMarketData(env) {
-  // Check KV cache first for coin data
-  const cachedRaw = await readAppCache(env, 'market:data');
+  // Check KV cache first for coin data (v2 key — busts old incorrectly-normalized cache)
+  const cachedRaw = await readAppCache(env, 'market:data:v2');
   if (cachedRaw) {
     try {
       const parsed = JSON.parse(cachedRaw);
       if (Array.isArray(parsed) && parsed.length > 0) {
         // Fetch global stats (uses its own cache internally)
         const globalData = await fetchGlobalStats(env);
-        return jsonResponse({ status: 'success', data: parsed, cached: true, global: globalData }, {}, env);
+        return jsonResponse({ status: 'success', data: parsed, cached: true, global: globalData, dataSource: 'cache' }, {}, env);
       }
     } catch {}
   }
@@ -2434,8 +2436,8 @@ async function handleMarketData(env) {
           image: item.image || '',
         }));
       const global = await globalPromise;
-      await writeAppCache(env, 'market:data', JSON.stringify(data), MARKET_CACHE_TTL);
-      return jsonResponse({ status: 'success', data, cached: false, global }, {}, env);
+      await writeAppCache(env, 'market:data:v2', JSON.stringify(data), MARKET_CACHE_TTL);
+      return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'coingecko' }, {}, env);
     }
   } catch (e) {
     console.warn('Market: CoinGecko failed', e.message || e);
@@ -2451,15 +2453,17 @@ async function handleMarketData(env) {
         name: item.name || '',
         rank: parseInt(item.rank, 10) || 0,
         priceUsd: parseFloat(item.priceUsd) || 0,
-        changePercent24Hr: parseFloat(item.changePercent24Hr) || 0,
+        // CoinCap returns changePercent24Hr as a decimal fraction (e.g. -0.0034 = -0.34%).
+        // Normalize to percentage format (×100) so the frontend never needs heuristic detection.
+        changePercent24Hr: (parseFloat(item.changePercent24Hr) || 0) * 100,
         volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
         marketCapUsd: parseFloat(item.marketCapUsd) || 0,
         supply: parseFloat(item.supply) || 0,
         image: `https://assets.coincap.io/assets/icons/${String(item.symbol || '').toLowerCase()}@2x.png`,
       }));
       const global = await globalPromise;
-      await writeAppCache(env, 'market:data', JSON.stringify(data), MARKET_CACHE_TTL);
-      return jsonResponse({ status: 'success', data, cached: false, global }, {}, env);
+      await writeAppCache(env, 'market:data:v2', JSON.stringify(data), MARKET_CACHE_TTL);
+      return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'coincap' }, {}, env);
     }
   } catch (e) {
     console.warn('Market: CoinCap fallback failed', e.message || e);
@@ -2490,8 +2494,8 @@ async function handleMarketData(env) {
           };
         });
         const global = await globalPromise;
-        await writeAppCache(env, 'market:data', JSON.stringify(data), MARKET_CACHE_TTL);
-        return jsonResponse({ status: 'success', data, cached: false, global }, {}, env);
+        await writeAppCache(env, 'market:data:v2', JSON.stringify(data), MARKET_CACHE_TTL);
+        return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'binance' }, {}, env);
       }
     }
   } catch (e) {
@@ -2523,8 +2527,8 @@ async function handleMarketData(env) {
           };
         });
         const global = await globalPromise;
-        await writeAppCache(env, 'market:data', JSON.stringify(data), MARKET_CACHE_TTL);
-        return jsonResponse({ status: 'success', data, cached: false, global }, {}, env);
+        await writeAppCache(env, 'market:data:v2', JSON.stringify(data), MARKET_CACHE_TTL);
+        return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'mexc' }, {}, env);
       }
     }
   } catch (e) {
@@ -2537,7 +2541,7 @@ async function handleMarketData(env) {
       const parsed = JSON.parse(cachedRaw);
       if (Array.isArray(parsed) && parsed.length > 0) {
         const global = await globalPromise;
-        return jsonResponse({ status: 'success', data: parsed, cached: true, stale: true, global }, {}, env);
+        return jsonResponse({ status: 'success', data: parsed, cached: true, stale: true, global, dataSource: 'stale_cache' }, {}, env);
       }
     } catch {}
   }
