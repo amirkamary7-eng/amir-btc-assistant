@@ -200,7 +200,7 @@
     <section id="market-page" class="page">
         <div class="market-page-header">
             <h2 class="market-page-title" data-i18n="market" style="margin:0">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="6" x2="5" y2="14"/><rect x="3.5" y="8" width="3" height="3.5" rx="0.6"/><line x1="11" y1="5" x2="11" y2="14"/><rect x="9.5" y="7" width="3" height="4.5" rx="0.6"/><line x1="17" y1="4" x2="17" y2="12"/><rect x="15.5" y="5" width="3" height="4" rx="0.6"/><polyline points="2 18 10 12 18 7"/><polyline points="14 7 18 7 18 11"/></svg>
                 <span data-i18n="market">مارکت</span>
             </h2>
             <button class="market-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">
@@ -444,50 +444,92 @@
         </div>
     </div>
 
-    <!-- مودال جزئیات کوین -->
-    <div id="coin-detail-modal" class="modal" role="dialog" aria-modal="true" aria-label="Coin detail" onclick="if(event.target===this) closeCoinDetail()">
-        <div class="modal-box">
-            <div class="modal-header detail-modal-header">
-                <div class="detail-modal-identity">
-                    <img id="detail-coin-icon" class="detail-coin-icon" src="" alt="">
-                    <div>
-                        <h3 id="detail-coin-title">BTC / USDT</h3>
-                        <span id="detail-coin-rank" class="detail-coin-rank">#1</span>
-                    </div>
+    <!-- مودال جزئیات کوین (Full Screen) -->
+    <div id="coin-detail-modal" style="display:none" class="coin-detail-fullscreen" role="dialog" aria-modal="true" aria-label="Coin detail">
+        <!-- Top Bar: Back + Identity + Actions -->
+        <div class="detail-top-bar">
+            <button class="detail-back-btn" onclick="closeCoinDetail()" aria-label="Back">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            </button>
+            <div class="detail-modal-identity">
+                <img id="detail-coin-icon" class="detail-coin-icon" src="" alt="">
+                <div>
+                    <h3 id="detail-coin-title">BTC / USDT</h3>
+                    <span id="detail-coin-rank" class="detail-coin-rank">#1</span>
                 </div>
-                <div class="detail-modal-actions">
-                    <button class="detail-watch-btn" id="detail-watch-btn" onclick="toggleWatchlistFromDetail()" aria-label="Toggle watchlist">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            </div>
+            <div class="detail-modal-actions">
+                <button class="detail-watch-btn" id="detail-watch-btn" onclick="toggleWatchlistFromDetail()" aria-label="Toggle watchlist">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </button>
+                <button class="detail-close-btn" onclick="closeCoinDetail()" aria-label="Close">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+        </div>
+        <!-- Stats Grid -->
+        <div class="detail-stats" id="detail-stats"></div>
+        <!-- Timeframe Bar -->
+        <div class="tv-tf-bar" id="tv-tf-bar" role="group" aria-label="Chart timeframe">
+            <button type="button" class="tv-tf-btn" data-interval="1" onclick="switchTvTimeframe('1', this)" data-i18n="tf_1m">1m</button>
+            <button type="button" class="tv-tf-btn" data-interval="5" onclick="switchTvTimeframe('5', this)" data-i18n="tf_5m">5m</button>
+            <button type="button" class="tv-tf-btn" data-interval="15" onclick="switchTvTimeframe('15', this)" data-i18n="tf_15m">15m</button>
+            <button type="button" class="tv-tf-btn active" data-interval="60" onclick="switchTvTimeframe('60', this)" data-i18n="tf_1h">1H</button>
+            <button type="button" class="tv-tf-btn" data-interval="240" onclick="switchTvTimeframe('240', this)" data-i18n="tf_4h">4H</button>
+            <button type="button" class="tv-tf-btn" data-interval="D" onclick="switchTvTimeframe('D', this)" data-i18n="tf_1d">1D</button>
+            <button type="button" class="tv-tf-btn" data-interval="W" onclick="switchTvTimeframe('W', this)" data-i18n="tf_1w">1W</button>
+        </div>
+        <!-- Chart (55% vh) -->
+        <div id="detail-chart" class="detail-chart"></div>
+        <!-- Alert Section -->
+        <div class="alert-section">
+            <div class="alert-section-header">
+                <h4 data-i18n="price_alert">تنظیم هشدار قیمت</h4>
+                <span class="alert-hint" data-i18n="alert_bot_hint">اعلان در اپ + پیام تلگرام</span>
+            </div>
+            <div class="alert-form">
+                <div class="alert-direction-row">
+                    <button type="button" class="alert-dir-btn active" data-dir="above" onclick="selectAlertDirection('above', this)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                        <span data-i18n="alert_above">رشد به بالا</span>
                     </button>
-                    <button class="modal-close-btn" onclick="closeCoinDetail()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                    <button type="button" class="alert-dir-btn" data-dir="below" onclick="selectAlertDirection('below', this)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>
+                        <span data-i18n="alert_below">ریزش به پایین</span>
+                    </button>
+                    <button type="button" class="alert-dir-btn" data-dir="breakout" onclick="selectAlertDirection('breakout', this)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20 L22 20"/><path d="M12 10 L12 18"/><path d="M8 14 L12 10 L16 14"/><path d="M18 20 L18 12"/></svg>
+                        <span data-i18n="alert_breakout">شکست مقاومت</span>
+                    </button>
+                    <button type="button" class="alert-dir-btn" data-dir="breakdown" onclick="selectAlertDirection('breakdown', this)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4 L22 4"/><path d="M12 14 L12 6"/><path d="M8 10 L12 14 L16 10"/><path d="M18 4 L18 12"/></svg>
+                        <span data-i18n="alert_breakdown">شکست حمایت</span>
+                    </button>
+                    <button type="button" class="alert-dir-btn" data-dir="support_touch" onclick="selectAlertDirection('support_touch', this)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18 L22 18"/><path d="M10 14 L10 18"/><path d="M6 18 L6 16"/><path d="M14 18 L14 12"/><path d="M18 18 L18 15"/></svg>
+                        <span data-i18n="alert_support_touch">لمس حمایت</span>
+                    </button>
+                    <button type="button" class="alert-dir-btn" data-dir="resistance_touch" onclick="selectAlertDirection('resistance_touch', this)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6 L22 6"/><path d="M10 10 L10 6"/><path d="M6 6 L6 8"/><path d="M14 6 L14 12"/><path d="M18 6 L18 9"/></svg>
+                        <span data-i18n="alert_resistance_touch">لمس مقاومت</span>
+                    </button>
                 </div>
-            </div>
-            <div class="detail-stats" id="detail-stats"></div>
-            <div class="tv-tf-bar" id="tv-tf-bar" role="group" aria-label="Chart timeframe">
-                <button type="button" class="tv-tf-btn" data-interval="1" onclick="switchTvTimeframe('1', this)" data-i18n="tf_1m">1m</button>
-                <button type="button" class="tv-tf-btn" data-interval="5" onclick="switchTvTimeframe('5', this)" data-i18n="tf_5m">5m</button>
-                <button type="button" class="tv-tf-btn" data-interval="15" onclick="switchTvTimeframe('15', this)" data-i18n="tf_15m">15m</button>
-                <button type="button" class="tv-tf-btn active" data-interval="60" onclick="switchTvTimeframe('60', this)" data-i18n="tf_1h">1H</button>
-                <button type="button" class="tv-tf-btn" data-interval="240" onclick="switchTvTimeframe('240', this)" data-i18n="tf_4h">4H</button>
-                <button type="button" class="tv-tf-btn" data-interval="D" onclick="switchTvTimeframe('D', this)" data-i18n="tf_1d">1D</button>
-                <button type="button" class="tv-tf-btn" data-interval="W" onclick="switchTvTimeframe('W', this)" data-i18n="tf_1w">1W</button>
-            </div>
-            <div id="detail-chart" class="detail-chart"></div>
-            <div class="alert-section">
-                <div class="alert-section-header">
-                    <h4 data-i18n="price_alert">تنظیم هشدار قیمت</h4>
-                    <span class="alert-hint" data-i18n="alert_bot_hint">اعلان در اپ + پیام تلگرام</span>
-                </div>
-                <div class="alert-form">
-                    <div class="alert-direction-row">
-                        <button type="button" class="alert-dir-btn active" data-dir="above" onclick="selectAlertDirection('above', this)" data-i18n="alert_above">رشد به بالا</button>
-                        <button type="button" class="alert-dir-btn" data-dir="below" onclick="selectAlertDirection('below', this)" data-i18n="alert_below">ریزش به پایین</button>
-                    </div>
+                <div class="alert-price-wrapper">
+                    <span class="alert-price-prefix">$</span>
                     <input type="number" id="alert-price" placeholder="0.00" class="input-field alert-price-input" data-i18n-placeholder="alert_target">
-                    <button type="button" class="submit-btn alert-submit-btn" onclick="setPriceAlert()" data-i18n="set_alert">ثبت هشدار</button>
                 </div>
-                <div id="active-alerts" class="alert-list"></div>
+                <button type="button" class="submit-btn alert-submit-btn" onclick="setPriceAlert()" data-i18n="set_alert">ثبت هشدار</button>
             </div>
+            <div class="trend-strength-section" id="trend-strength-section">
+                <div class="trend-strength-header">
+                    <span data-i18n="trend_strength">قدرت روند</span>
+                </div>
+                <div class="trend-strength-bar">
+                    <div class="trend-strength-fill" id="trend-strength-fill"></div>
+                    <span class="trend-strength-label" id="trend-strength-label">--</span>
+                </div>
+            </div>
+            <div id="active-alerts" class="alert-list"></div>
         </div>
     </div>
 

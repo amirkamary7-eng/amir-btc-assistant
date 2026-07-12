@@ -342,6 +342,7 @@ let currentMainTab = 'crypto';   // crypto | forex | watchlist
 let currentSubTab = 'top';       // top | gainers | losers
 let searchTerm = '';
 let _lastMarketRenderKey = ''; // Track render state for price-only diffing
+let _currentDetailSymbol = ''; // Current coin detail symbol (reliable, locale-independent)
 let sliderInterval = null;
 let currentSlide = 0;
 let editingAnalysisId = null;
@@ -370,6 +371,12 @@ const i18n = {
         price_alert: 'هشدار قیمت', set_alert: 'ثبت هشدار', alert_target: 'قیمت هدف (USD)',
         alert_bot_hint: 'اعلان در اپ + پیام تلگرام', alert_empty: 'هیچ هشدار فعالی نیست',
         alert_registered: 'هشدار ثبت شد', alert_above: 'رشد به بالا', alert_below: 'ریزش به پایین',
+        alert_breakout: 'شکست مقاومت', alert_breakdown: 'شکست حمایت',
+        alert_support_touch: 'لمس حمایت', alert_resistance_touch: 'لمس مقاومت',
+        trend_strength: 'قدرت روند',
+        trend_strong_bullish: 'صعودی قوی', trend_bullish: 'صعودی',
+        trend_slightly_bullish: 'صعودی ضعیف', trend_slightly_bearish: 'نزولی ضعیف',
+        trend_bearish: 'نزولی', trend_strong_bearish: 'نزولی قوی',
         tab_crypto: 'کریپتو', tab_top_market: 'برترین‌ها', tab_forex: 'فارکس', tab_gainers: 'رشد', tab_losers: 'ریزش',
         analysis_title: 'تحلیل‌های بازار', new_analysis: 'تحلیل جدید',
         news_all: 'همه', news_crypto: 'کریپتو', news_economy: 'اقتصادی', news_forex: 'فارکس', news_calendar: 'تقویم',
@@ -428,6 +435,12 @@ const i18n = {
         price_alert: 'Price Alert', set_alert: 'Set Alert', alert_target: 'Target price (USD)',
         alert_bot_hint: 'In-app + Telegram message', alert_empty: 'No active alerts',
         alert_registered: 'Alert registered', alert_above: 'Rise above', alert_below: 'Drop below',
+        alert_breakout: 'Breakout', alert_breakdown: 'Breakdown',
+        alert_support_touch: 'Support Touch', alert_resistance_touch: 'Resistance Touch',
+        trend_strength: 'Trend Strength',
+        trend_strong_bullish: 'Strong Bullish', trend_bullish: 'Bullish',
+        trend_slightly_bullish: 'Slightly Bullish', trend_slightly_bearish: 'Slightly Bearish',
+        trend_bearish: 'Bearish', trend_strong_bearish: 'Strong Bearish',
         tab_crypto: 'Crypto', tab_top_market: 'Top Market', tab_forex: 'Forex', tab_gainers: 'Gainers', tab_losers: 'Losers',
         analysis_title: 'Market Analysis', new_analysis: 'New Analysis',
         news_all: 'All', news_crypto: 'Crypto', news_economy: 'Economy', news_forex: 'Forex', news_calendar: 'Calendar',
@@ -1168,6 +1181,22 @@ function escapeHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/**
+ * Professional icon fallback: replaces broken img with first-letter badge.
+ * Called via onerror="iconFallback(this)" on coin/forex images.
+ */
+window.iconFallback = function(imgEl) {
+    const symbol = (imgEl.dataset.symbol || imgEl.alt || 'X').charAt(0).toUpperCase();
+    const size = imgEl.classList.contains('detail-coin-icon') ? '40px' : (imgEl.classList.contains('watch-icon') ? '28px' : '32px');
+    const fontSize = imgEl.classList.contains('detail-coin-icon') ? '16px' : (imgEl.classList.contains('watch-icon') ? '11px' : '13px');
+    const div = document.createElement('div');
+    div.className = imgEl.className + ' coin-icon-fallback';
+    div.dataset.symbol = imgEl.dataset.symbol || '';
+    div.style.cssText = `width:${size};height:${size};min-width:${size};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:${fontSize};font-weight:700;color:var(--text-primary);background:var(--bg-secondary);border:1.5px solid var(--border);letter-spacing:-0.5px;`;
+    div.textContent = symbol;
+    imgEl.replaceWith(div);
+};
+
 //#endregion
 
 // ============================================================================
@@ -1591,7 +1620,7 @@ function renderCryptoItem(c) {
         <div class="coin-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
             <div class="coin-left">
                 <span class="coin-rank">${rankNum}</span>
-                <img src="${escapeHtml(icon)}" onerror="this.outerHTML='<div class=\'coin-icon-placeholder\'><svg width=\'18\' height=\'18\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'rgba(255,255,255,0.4)\' stroke-width=\'1.5\'><circle cx=\'12\' cy=\'12\' r=\'10\'/><path d=\'M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8\'/><path d=\'M12 18V6\'/></svg></div>'" class="coin-icon" alt="${safeSymbol}">
+                <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="coin-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">
                 <div class="coin-identity">
                     <span class="coin-sym">${safeSymbol}</span>
                     <span class="coin-name">${safeName}</span>
@@ -1860,7 +1889,7 @@ function renderWatchlist() {
         return `
         <div class="watch-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
             <span class="remove-watch" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-            <img src="${escapeHtml(icon)}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2228%22 height=%2228%22 viewBox=%220 0 24 24%22 fill=%22%2394a3b8%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22/%3E%3C/svg%3E'" class="watch-icon">
+            <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-icon" data-symbol="${safeSymbol}">
             <span class="watch-sym">${safeSymbol}</span>
             <span class="watch-price">$${c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6)}</span>
             <span class="watch-change ${c.changePercent24Hr >= 0 ? 'up' : 'down'}">${c.changePercent24Hr >= 0 ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</span>
@@ -2451,11 +2480,13 @@ async function openCoinDetail(symbol) {
     const icon = coin.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(coin.symbol).toLowerCase()}@2x.png`;
     const iconEl = document.getElementById('detail-coin-icon');
     if (iconEl) {
+        iconEl.dataset.symbol = symbol;
         iconEl.src = icon;
-        iconEl.onerror = function() { this.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="%2394a3b8"><circle cx="12" cy="12" r="10"/></svg>'); };
+        iconEl.onerror = function() { iconFallback(this); };
     }
 
     document.getElementById('detail-coin-title').innerText = currentLang === 'fa' && coin.name ? `${coin.name} (${symbol})` : `${symbol} / USDT`;
+    _currentDetailSymbol = symbol; // Store for reliable symbol access in alerts (locale-independent)
     const rankEl = document.getElementById('detail-coin-rank');
     if (rankEl) rankEl.innerText = `#${Number(coin.rank) || 0}`;
 
@@ -2464,6 +2495,12 @@ async function openCoinDetail(symbol) {
 
     const modal = document.getElementById('coin-detail-modal');
     modal.style.display = 'flex';
+    modal.classList.remove('slide-down');
+    modal.classList.add('slide-up');
+    modal.addEventListener('animationend', function handler() {
+        modal.classList.remove('slide-up');
+        modal.removeEventListener('animationend', handler);
+    });
 
     // Show alert section for crypto
     const alertSection = document.querySelector('.alert-section');
@@ -2490,6 +2527,7 @@ async function openCoinDetail(symbol) {
         <div><span>${t('supply')}</span><strong>${supplyStr}</strong></div>
     `;
     renderActiveAlerts(symbol);
+    updateTrendStrength(symbol);
 }
 /**
  * ویجت TradingView را با تنظیمات فعلی می‌سازد.
@@ -2578,7 +2616,14 @@ function closeCoinDetail() {
         currentTvWidget = null;
     }
     currentTvChartInfo = null;
-    document.getElementById('coin-detail-modal').style.display = 'none';
+    const modal = document.getElementById('coin-detail-modal');
+    modal.classList.remove('slide-up');
+    modal.classList.add('slide-down');
+    modal.addEventListener('animationend', function handler() {
+        modal.style.display = 'none';
+        modal.classList.remove('slide-down');
+        modal.removeEventListener('animationend', handler);
+    });
 }
 
 /**
@@ -2590,12 +2635,18 @@ function openForexDetail(symbol) {
 
     const modal = document.getElementById('coin-detail-modal');
     modal.style.display = 'flex';
+    modal.classList.remove('slide-down');
+    modal.classList.add('slide-up');
+    modal.addEventListener('animationend', function handler() {
+        modal.classList.remove('slide-up');
+        modal.removeEventListener('animationend', handler);
+    });
 
     document.getElementById('detail-coin-title').innerText = pair.name || symbol;
+    _currentDetailSymbol = symbol; // Store for alert reliability (even though forex has no alerts)
 
     const chartContainer = document.getElementById('detail-chart');
-    document.querySelector('.chart-exchange-badge')?.remove();
-    chartContainer.innerHTML = '<div class="chart-loading-state"><div class="chart-spinner"></div><span>در حال بارگذاری چارت...</span></div>';
+    chartContainer.innerHTML = '<div class="chart-loading-state"><div class="chart-spinner"></div></div>';
 
     // Build chart info — extract exchange from tvSymbol prefix
     const tvSym = pair.tvSymbol || `FX:${symbol}`;
@@ -2609,36 +2660,8 @@ function openForexDetail(symbol) {
     currentTvInterval = '60';
     updateTvTimeframeUI();
 
-    // Clear old widget
-    if (currentTvWidget) {
-        try { currentTvWidget.remove(); } catch {}
-        currentTvWidget = null;
-    }
-    document.querySelector('.chart-exchange-badge')?.remove();
-    chartContainer.innerHTML = '';
-
-    if (typeof TradingView !== 'undefined') {
-        // Show exchange badge
-        const badge = document.createElement('div');
-        badge.className = 'chart-exchange-badge';
-        badge.innerText = chartInfo.exchange.toUpperCase();
-        chartContainer.parentNode.insertBefore(badge, chartContainer);
-
-        currentTvWidget = new TradingView.widget({
-            width: '100%',
-            height: '100%',
-            symbol: chartInfo.tv_symbol,
-            interval: currentTvInterval,
-            theme: 'dark',
-            style: '1',
-            locale: 'en',
-            container_id: 'detail-chart',
-            hide_side_toolbar: true,
-            disabled_features: ['header_widget_dom_node']
-        });
-    } else {
-        chartContainer.innerHTML = `<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg><br>${t('chart_unavailable')}</div>`;
-    }
+    // Reuse centralized widget creation (fixes B3: was duplicated inline)
+    createTradingViewWidget(chartInfo);
 
     // Stats
     const cat = pair.category || 'major';
@@ -2680,6 +2703,30 @@ function selectAlertDirection(dir, btn) {
     if (btn) btn.classList.add('active');
 }
 
+/**
+ * قدرت روند را بر اساس تغییر ۲۴ ساعته محاسبه و نمایش می‌دهد.
+ */
+function updateTrendStrength(symbol) {
+    const fill = document.getElementById('trend-strength-fill');
+    const label = document.getElementById('trend-strength-label');
+    if (!fill || !label) return;
+    const coin = allCoins.find(c => c.symbol === symbol);
+    if (!coin) { fill.style.width = '50%'; fill.className = 'trend-strength-fill'; label.className = 'trend-strength-label'; label.textContent = '--'; return; }
+    const chg = coin.changePercent24Hr || 0;
+    let pct, labelKey, side;
+    if (chg > 5)       { pct = 85 + (Math.min(chg, 20) - 5) / 15 * 15; labelKey = 'trend_strong_bullish'; side = 'bullish'; }
+    else if (chg > 1)  { pct = 60 + (chg - 1) / 4 * 25; labelKey = 'trend_bullish'; side = 'bullish'; }
+    else if (chg > 0)  { pct = 50 + chg * 10; labelKey = 'trend_slightly_bullish'; side = 'bullish'; }
+    else if (chg > -1) { pct = 50 + chg * 10; labelKey = 'trend_slightly_bearish'; side = 'bearish'; }
+    else if (chg > -5) { pct = 15 + (chg + 5) / 4 * 25; labelKey = 'trend_bearish'; side = 'bearish'; }
+    else               { pct = Math.max(0, 15 + (Math.max(chg, -20) + 5) / 15 * 15); labelKey = 'trend_strong_bearish'; side = 'bearish'; }
+    pct = Math.round(Math.max(0, Math.min(100, pct)));
+    fill.style.width = pct + '%';
+    fill.className = 'trend-strength-fill ' + side;
+    label.className = 'trend-strength-label ' + side;
+    label.textContent = t(labelKey);
+}
+
 function renderActiveAlerts(symbol) {
     const container = document.getElementById('active-alerts');
     if (!container || !symbol) return;
@@ -2688,13 +2735,30 @@ function renderActiveAlerts(symbol) {
         container.innerHTML = `<div class="alert-empty">${t('alert_empty')}</div>`;
         return;
     }
+    const dirMap = {
+        above:          { icon: '🚀', label: t('alert_above'),          badge: 'bullish' },
+        below:          { icon: '📉', label: t('alert_below'),           badge: 'bearish' },
+        breakout:       { icon: '💥', label: t('alert_breakout'),        badge: 'bullish' },
+        breakdown:      { icon: '🔻', label: t('alert_breakdown'),       badge: 'bearish' },
+        support_touch:  { icon: '🛡️', label: t('alert_support_touch'),   badge: 'neutral' },
+        resistance_touch: { icon: '🚧', label: t('alert_resistance_touch'), badge: 'neutral' }
+    };
+    const opMap = { above: '≥', below: '≤', breakout: '↑', breakdown: '↓', support_touch: '=', resistance_touch: '=' };
     container.innerHTML = userAlerts.map(a => {
-        const dirSymbol = a.direction === 'below' ? '≤' : '≥';
+        const d = dirMap[a.direction] || dirMap.above;
+        const op = opMap[a.direction] || '≥';
+        const priceStr = a.price >= 1 ? Number(a.price).toFixed(2) : Number(a.price).toFixed(6);
         return `
         <div class="alert-item">
-            <div class="alert-item-info">
-                <span class="alert-item-symbol">${escapeHtml(a.symbol)}</span>
-                <span class="alert-item-target">${dirSymbol} $${a.price}</span>
+            <div class="alert-item-left">
+                <div class="alert-item-status-dot"></div>
+                <div class="alert-item-info">
+                    <div class="alert-item-top">
+                        <span class="alert-item-symbol">${escapeHtml(a.symbol)}</span>
+                        <span class="alert-item-badge ${d.badge}">${d.icon} ${d.label}</span>
+                    </div>
+                    <span class="alert-item-target">${op} $${priceStr}</span>
+                </div>
             </div>
             <button class="alert-remove-btn" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -2813,7 +2877,7 @@ async function notifyTelegram(message) {
 async function setPriceAlert() {
     const input = document.getElementById('alert-price');
     const price = parseFloat(input.value);
-    const symbol = document.getElementById('detail-coin-title').innerText.split(' ')[0];
+    const symbol = _currentDetailSymbol || document.getElementById('detail-coin-title').innerText.split(' ')[0];
     if (!price || price <= 0) { alert(t('invalid_price')); return; }
     const userId = getUserId();
     let newAlert = { id: Date.now().toString(), symbol, price, direction: currentAlertDirection, userId, createdAt: new Date().toISOString() };
@@ -2821,7 +2885,8 @@ async function setPriceAlert() {
     alerts.push(newAlert);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     input.value = '';
-    const dirSymbol = currentAlertDirection === 'below' ? '≤' : '≥';
+    const opMap = { above: '≥', below: '≤', breakout: '↑', breakdown: '↓', support_touch: '=', resistance_touch: '=' };
+    const dirSymbol = opMap[currentAlertDirection] || '≥';
     // Reset direction to default
     currentAlertDirection = 'above';
     document.querySelectorAll('.alert-dir-btn').forEach(b => b.classList.remove('active'));
@@ -2841,7 +2906,7 @@ async function removeAlert(id) {
     if (removed) await removeAlertFromServer(removed);
     alerts = alerts.filter(a => a.id !== id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
-    const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
+    const symbol = _currentDetailSymbol || document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
     if (symbol) renderActiveAlerts(symbol);
 }
 /**
@@ -2860,7 +2925,7 @@ async function triggerAlert(alert, currentPrice) {
     getTg()?.HapticFeedback?.notificationOccurred('warning');
     addNotification(t('price_alert'), msg.replace('🔔 ', ''), { sendToTelegram: true, playSound: true });
     getTg()?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
-    const symbol = document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
+    const symbol = _currentDetailSymbol;
     if (symbol === alert.symbol) renderActiveAlerts(symbol);
 }
 /**
@@ -3674,6 +3739,7 @@ window.closeCoinDetail = closeCoinDetail;
 window.setPriceAlert = setPriceAlert;
 window.selectAlertDirection = selectAlertDirection;
 window.removeAlert = removeAlert;
+window.updateTrendStrength = updateTrendStrength;
 window.toggleNotificationPanel = toggleNotificationPanel;
 window.closeNotifModal = closeNotifModal;
 window.markAllRead = markAllRead;
