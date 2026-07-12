@@ -2503,6 +2503,9 @@ async function handleMarketData(env) {
   }
 
   // Fallback 3: MEXC (free, no API key, rarely rate-limited)
+  // NOTE: MEXC priceChangePercent is a decimal FRACTION (like CoinCap), not a percentage.
+  // Proof: ETH priceChange=7.1, lastPrice=1821.13 → 7.1/1821.13=0.0039 → MEXC returns 0.0039.
+  // Must multiply by 100 to get percentage.
   try {
     const mexcRes = await fetchJson('https://api.mexc.com/api/v3/ticker/24hr');
     if (Array.isArray(mexcRes.body) && mexcRes.body.length > 0) {
@@ -2519,7 +2522,7 @@ async function handleMarketData(env) {
             name: sym,
             rank: index + 1,
             priceUsd: parseFloat(item.lastPrice) || 0,
-            changePercent24Hr: parseFloat(item.priceChangePercent) || 0,
+            changePercent24Hr: (parseFloat(item.priceChangePercent) || 0) * 100,
             volumeUsd24Hr: parseFloat(item.quoteVolume) || 0,
             marketCapUsd: 0,
             supply: 0,
