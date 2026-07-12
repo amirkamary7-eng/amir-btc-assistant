@@ -1214,7 +1214,6 @@ async function loadMarketData(force = false) {
                 renderMarket();
                 renderWatchlist();
                 renderSummary();
-                checkAlerts();
                 return;
             }
         }
@@ -1258,7 +1257,6 @@ async function loadMarketData(force = false) {
         renderMarket();
         renderWatchlist();
         renderSummary();
-        checkAlerts();
     } catch (e) {
         console.error('❌ Market load error:', e);
         if (listEl && !allCoins.length) {
@@ -2789,12 +2787,19 @@ async function checkAlerts() {
     const userAlerts = alerts.filter(a => a.userId === userId);
     if (!userAlerts.length) return;
 
-    // Refresh market data if stale (> 45s old) for better alert accuracy
+    // Refresh market data silently if stale (> 45s old) for better alert accuracy.
+    // Only updates allCoins + cache — no re-render. Rendering is handled by the 120s polling interval.
     const ALERT_FRESHNESS_THRESHOLD = 45000;
     if (Date.now() - lastMarketFetchTime > ALERT_FRESHNESS_THRESHOLD) {
-        const activePage = document.querySelector('.page.active')?.id;
-        if (activePage !== 'market-page' && activePage !== 'dashboard-page') return; // Skip heavy re-render
-        await loadMarketData(false).catch(() => {});
+        try {
+            const res = await apiFetch('/api/market');
+            if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
+                allCoins = res.data;
+                if (res.global) globalMarketData = res.global;
+                Cache.set('market', allCoins, 120);
+                lastMarketFetchTime = Date.now();
+            }
+        } catch (e) { /* silent — alerts will retry next cycle */ }
     }
 
     if (!allCoins.length) return;
