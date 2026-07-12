@@ -1025,44 +1025,25 @@ async function resolveChartSymbol(symbol) {
     const cached = Cache.get(cacheKey);
     if (cached) return cached;
 
-    // BUG 3 FIX: Smart exchange selection
-    // For coins known to be on Binance, use Binance directly (skip backend)
-    // For other coins, respect the backend's exchange resolution (no blind Binance override)
-    const BINANCE_KNOWN = new Set([
-        'BTC','ETH','BNB','SOL','XRP','ADA','DOGE','AVAX','DOT','MATIC','LINK','UNI','LTC','ATOM',
-        'ETC','FIL','APT','NEAR','ARB','OP','AAVE','MKR','SNX','GRT','INJ','SUI','SEI','TIA',
-        'JUP','WIF','PEPE','SHIB','FLOKI','BONK','RENDER','IMX','SAND','MANA','GALA','ENJ',
-        'AXS','APE','CRV','1INCH','COMP','DYDX','RUNE','THETA','FTM','ALGO','XLM','HBAR',
-        'VET','ICP','XTZ','EGLD','FLOW','MINA','NEO','KAVA','CELO','RSR','STX','ROSE',
-        'CFX','ACH','TRX','TON','KAS','PYTH','JTO','BLUR','PENDLE','ONDO','ENA','ETHFI',
-        'WBTC','STETH','USDT','USDC','BUSD','DAI','TUSD','FDUSD','PYUSD','RLC','WLD',
-        'ZEC','DASH','WAVES','ZIL','BCH','EOS','XTZ','IOTA','MIOTA','QTUM','ONT','ICX',
-        'ZRX','BATUS','OMG','IOST','VET','THETA','HOT','ZIL','ONT','IO','SAGA','TAO'
-    ]);
-
-    // For known Binance coins, return Binance directly without backend call
-    if (BINANCE_KNOWN.has(symbol)) {
-        var binanceResult = { found: true, tv_symbol: 'BINANCE:' + symbol + 'USDT', exchange: 'binance' };
-        Cache.set(cacheKey, binanceResult, 3600);
-        return binanceResult;
-    }
-
+    // FIX 2: Fully dynamic exchange resolution via backend.
+    // No hardcoded lists, no Binance override. Backend races all 7 exchanges:
+    // Binance → Bybit → OKX → KuCoin → Gate → MEXC → CoinEx
+    // First exchange that has the symbol wins. Results are cached 24h per symbol.
     if (API_BASE) {
         try {
             const data = await apiFetch(`/api/charts/resolve?symbol=${encodeURIComponent(symbol)}`);
             if (data.found && data.tv_symbol) {
-                // Respect the backend's exchange resolution for unknown coins
-                // Backend already tries: Binance → Bybit → OKX → KuCoin → Gate → MEXC → CoinEx
                 Cache.set(cacheKey, data, 3600);
                 return data;
             }
+            console.log('[CHART] Symbol not found on any exchange:', symbol);
         } catch (e) { console.warn('resolveChartSymbol:', e); }
     }
 
-    // Final fallback — try Binance first, then common exchanges
-    const fallback = { found: true, tv_symbol: `BINANCE:${symbol}USDT`, exchange: 'binance' };
-    Cache.set(cacheKey, fallback, 300);
-    return fallback;
+    // No chart available for this symbol
+    const notFound = { found: false, symbol: symbol, exchange: null, tv_symbol: null };
+    Cache.set(cacheKey, notFound, 300); // Short cache — retry sooner
+    return notFound;
 }
 
 /**
@@ -1357,33 +1338,13 @@ async function loadMarketData(force = false) {
             try {
                 const res = await apiFetch('/api/market');
                 if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
-                    // BUG 2 FIX: Detect fraction vs percentage format using batch analysis.
-                    // CoinCap returns fractions (e.g. -0.0037 = -0.37%).
-                    // CoinGecko returns percentages (e.g. -0.34 = -0.34%).
-                    // Detection: count coins with |change| < 0.5 — fractions have >80% under 0.5.
-                    var smallCount = 0, totalCounted = 0;
-                    for (var di = 0; di < res.data.length; di++) {
-                        var dv = res.data[di].changePercent24Hr;
-                        if (typeof dv === 'number' && dv !== 0) {
-                            totalCounted++;
-                            if (Math.abs(dv) < 0.5) smallCount++;
-                        }
-                    }
-                    var isFractionFormat = totalCounted > 0 && (smallCount / totalCounted) > 0.7;
-                    console.log('[MARKET] Format detection:', isFractionFormat ? 'FRACTION (CoinCap)' : 'PERCENTAGE (CoinGecko)', 'small/total=', smallCount, '/', totalCounted);
-
-                    for (var ci = 0; ci < res.data.length; ci++) {
-                        var chg = res.data[ci].changePercent24Hr;
-                        if (typeof chg === 'number') {
-                            if (isFractionFormat) {
-                                res.data[ci].changePercent24Hr = chg * 100;
-                            }
-                        }
-                    }
-                    // Log key coins for QA verification
+                    // FIX 1: No heuristic needed. Backend normalizes ALL sources to percentage format.
+                    // CoinCap fractions are ×100 in the backend; CoinGecko/Binance/MEXC already return percentages.
+                    // Log source and key coins for QA verification.
+                    console.log('[MARKET] dataSource:', res.dataSource || 'unknown', 'coins:', res.data.length);
                     ['BTC','ETH','SOL','XRP','DOGE'].forEach(function(s) {
                         var c = res.data.find(function(x) { return x.symbol === s; });
-                        if (c) console.log('[MARKET]', s, 'raw→final:', chg, '→', c.changePercent24Hr);
+                        if (c) console.log('[MARKET]', s, 'changePercent24Hr:', c.changePercent24Hr);
                     });
                     allCoins = res.data;
                     if (res.global && typeof res.global === 'object' && res.global !== null) globalMarketData = res.global;
@@ -1538,14 +1499,12 @@ function renderMarketInsights() {
     if (lEl) lEl.querySelector('span').textContent = losers;
 
     // --- Fear & Greed ---
-    // Use real data from Alternative.me (via globalMarketData.fearGreedValue) if available.
-    // Fall back to synthetic calculation ONLY if no real data exists.
-    var fgIndex, fgLabel, fgSource;
+    // FIX 4: Only show real data from Alternative.me. Hide the entire section if unavailable.
     if (globalMarketData && globalMarketData.fearGreedValue > 0) {
-        fgIndex = globalMarketData.fearGreedValue;
-        fgSource = globalMarketData.fearGreedSource || 'real';
-        // Map Alternative.me classification to i18n key
+        var fgIndex = globalMarketData.fearGreedValue;
+        var fgSource = globalMarketData.fearGreedSource || 'real';
         var fgClass = (globalMarketData.fearGreedClassification || '').toLowerCase();
+        var fgLabel;
         if (fgClass === 'extreme greed' || fgClass === 'extreme_greed') fgLabel = t('fg_extreme_greed');
         else if (fgClass === 'greed') fgLabel = t('fg_greed');
         else if (fgClass === 'neutral') fgLabel = t('fg_neutral');
@@ -1553,38 +1512,31 @@ function renderMarketInsights() {
         else if (fgClass === 'extreme fear' || fgClass === 'extreme_fear') fgLabel = t('fg_extreme_fear');
         else fgLabel = globalMarketData.fearGreedClassification || '--';
         console.log('[FG] Real data from', fgSource, ':', fgIndex, fgLabel);
+
+        // Show FG section (it may have been hidden on a previous load)
+        var fgCard = document.querySelector('.fear-greed-card');
+        if (fgCard) fgCard.style.display = '';
+
+        var fgValueEl = document.getElementById('fg-index-value');
+        if (fgValueEl) fgValueEl.textContent = fgIndex;
+
+        var fgArcEl = document.getElementById('fg-arc');
+        if (fgArcEl) {
+            var totalLen = 251.3;
+            var offset = totalLen - (totalLen * fgIndex / 100);
+            fgArcEl.setAttribute('stroke-dashoffset', offset.toFixed(1));
+        }
+
+        var fgTextEl = document.getElementById('fg-gauge-text');
+        if (fgTextEl) fgTextEl.textContent = fgIndex;
+        var fgLabelEl = document.getElementById('fg-gauge-label');
+        if (fgLabelEl) fgLabelEl.textContent = fgLabel;
     } else {
-        // Synthetic fallback — only when no real API data is available
-        var avgChange = 0;
-        for (var j = 0; j < allCoins.length; j++) avgChange += (allCoins[j].changePercent24Hr || 0);
-        avgChange = allCoins.length > 0 ? avgChange / allCoins.length : 0;
-        var changeScore = Math.max(0, Math.min(100, 50 + avgChange * 8));
-        var ratioScore = total > 0 ? (gainers / total) * 100 : 50;
-        fgIndex = Math.round(changeScore * 0.6 + ratioScore * 0.4);
-        fgIndex = Math.max(0, Math.min(100, fgIndex));
-        if (fgIndex >= 75) fgLabel = t('fg_extreme_greed');
-        else if (fgIndex >= 55) fgLabel = t('fg_greed');
-        else if (fgIndex >= 45) fgLabel = t('fg_neutral');
-        else if (fgIndex >= 25) fgLabel = t('fg_fear');
-        else fgLabel = t('fg_extreme_fear');
-        console.log('[FG] Synthetic fallback:', fgIndex, fgLabel);
+        // No real F&G data available — hide the entire section
+        console.log('[FG] No real data available, hiding section');
+        var fgCardHide = document.querySelector('.fear-greed-card');
+        if (fgCardHide) fgCardHide.style.display = 'none';
     }
-
-    var fgValueEl = document.getElementById('fg-index-value');
-    if (fgValueEl) fgValueEl.textContent = fgIndex;
-
-    var fgArcEl = document.getElementById('fg-arc');
-    if (fgArcEl) {
-        // Total arc length for half circle with r=80: π * 80 ≈ 251.3
-        var totalLen = 251.3;
-        var offset = totalLen - (totalLen * fgIndex / 100);
-        fgArcEl.setAttribute('stroke-dashoffset', offset.toFixed(1));
-    }
-
-    var fgTextEl = document.getElementById('fg-gauge-text');
-    if (fgTextEl) fgTextEl.textContent = fgIndex;
-    var fgLabelEl = document.getElementById('fg-gauge-label');
-    if (fgLabelEl) fgLabelEl.textContent = fgLabel;
 }
 
 /**
@@ -3166,24 +3118,7 @@ async function checkAlerts() {
         try {
             const res = await apiFetch('/api/market');
             if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
-                // BUG 2 FIX: Same batch format detection as loadMarketData
-                var smallCount2 = 0, totalCounted2 = 0;
-                for (var di2 = 0; di2 < res.data.length; di2++) {
-                    var dv2 = res.data[di2].changePercent24Hr;
-                    if (typeof dv2 === 'number' && dv2 !== 0) {
-                        totalCounted2++;
-                        if (Math.abs(dv2) < 0.5) smallCount2++;
-                    }
-                }
-                var isFractionFormat2 = totalCounted2 > 0 && (smallCount2 / totalCounted2) > 0.7;
-                for (var ci2 = 0; ci2 < res.data.length; ci2++) {
-                    var chg2 = res.data[ci2].changePercent24Hr;
-                    if (typeof chg2 === 'number') {
-                        if (isFractionFormat2) {
-                            res.data[ci2].changePercent24Hr = chg2 * 100;
-                        }
-                    }
-                }
+                // FIX 1: Backend already normalizes percentages. No heuristic needed.
                 allCoins = res.data;
                 if (res.global && typeof res.global === 'object' && res.global !== null) globalMarketData = res.global;
                 Cache.set('market', allCoins, 120);
@@ -3886,6 +3821,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Phase C: Load cached market data for instant watchlist render
+    // NOTE: Old localStorage cache may have incorrectly-normalized percentages (pre-FIX1).
+    // The stale data is acceptable for instant render — it will be replaced by fresh API data
+    // within seconds. The localStorage cache is overwritten after each successful API fetch.
     try {
         const cachedMarket = JSON.parse(localStorage.getItem('market_data_cache') || '[]');
         if (Array.isArray(cachedMarket) && cachedMarket.length) {
