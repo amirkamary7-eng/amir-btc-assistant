@@ -2277,7 +2277,7 @@ async function fetchFearGreed() {
 async function fetchGlobalStats(env) {
   // ── Step 0: Check KV cache ──
   try {
-    const raw = await readAppCache(env, 'market:global:v2');
+    const raw = await readAppCache(env, 'market:global:v3');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') return parsed;
@@ -2389,7 +2389,7 @@ async function fetchGlobalStats(env) {
   // ── Step 4: Cache result ──
   if (stats && (stats.totalMarketCap > 0 || stats.fearGreedValue > 0)) {
     try {
-      await writeAppCache(env, 'market:global:v2', JSON.stringify(stats), MARKET_GLOBAL_CACHE_TTL);
+      await writeAppCache(env, 'market:global:v3', JSON.stringify(stats), MARKET_GLOBAL_CACHE_TTL);
     } catch {}
   }
 
@@ -2435,7 +2435,19 @@ async function handleMarketData(env) {
           supply: item.circulating_supply || 0,
           image: item.image || '',
         }));
-      const global = await globalPromise;
+      let global = await globalPromise;
+      // Fallback: compute global stats from CoinGecko coin data if external sources failed
+      if ((!global || !global.totalMarketCap) && data.some(c => c.marketCapUsd > 0)) {
+        const totalMcap = data.reduce((s, c) => s + (c.marketCapUsd || 0), 0);
+        const totalVol = data.reduce((s, c) => s + (c.volumeUsd24Hr || 0), 0);
+        const btcMcap = (data.find(c => c.symbol === 'BTC') || {}).marketCapUsd || 0;
+        global = global || {};
+        global.totalMarketCap = totalMcap;
+        global.totalVolume = totalVol;
+        global.btcDominance = totalMcap > 0 ? (btcMcap / totalMcap) * 100 : 0;
+        global.source = 'calculated_top200';
+        console.log('Global: Computed from top-200 CoinGecko coins — mcap:', totalMcap, 'btcDom:', global.btcDominance);
+      }
       await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
       return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'coingecko' }, {}, env);
     }
@@ -2461,7 +2473,18 @@ async function handleMarketData(env) {
         supply: parseFloat(item.supply) || 0,
         image: `https://assets.coincap.io/assets/icons/${String(item.symbol || '').toLowerCase()}@2x.png`,
       }));
-      const global = await globalPromise;
+      let global = await globalPromise;
+      // Fallback: compute global stats from CoinCap coin data if external sources failed
+      if ((!global || !global.totalMarketCap) && data.some(c => c.marketCapUsd > 0)) {
+        const totalMcap = data.reduce((s, c) => s + (c.marketCapUsd || 0), 0);
+        const totalVol = data.reduce((s, c) => s + (c.volumeUsd24Hr || 0), 0);
+        const btcMcap = (data.find(c => c.symbol === 'BTC') || {}).marketCapUsd || 0;
+        global = global || {};
+        global.totalMarketCap = totalMcap;
+        global.totalVolume = totalVol;
+        global.btcDominance = totalMcap > 0 ? (btcMcap / totalMcap) * 100 : 0;
+        global.source = 'calculated_top200';
+      }
       await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
       return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'coincap' }, {}, env);
     }
