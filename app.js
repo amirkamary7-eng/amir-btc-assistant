@@ -3,53 +3,6 @@
 // با پاپ‌آپ جوین اجباری، ۱۰۰ ارز، تقویم اقتصادی، حذف همه نوتیف‌ها، و رفع تنظیمات
 // ============================================================
 
-// [PERF-INST] Temporary instrumentation — will be removed after measurement
-window.__PERF = {
-    checkAlerts: { count: 0, mtTime: [], staleFetchCount: 0 },
-    renderMarket: { count: 0, mtTime: [], callers: {} },
-    loadMarketData: { count: 0, mtTime: [] },
-    longTasks: [],
-    _start: performance.now(),
-    _log() {
-        const elapsed = ((performance.now() - this._start) / 1000).toFixed(1);
-        const ca = this.checkAlerts;
-        const rm = this.renderMarket;
-        const lt = this.longTasks;
-        const avg = arr => arr.length ? (arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(2) : 'N/A';
-        const max = arr => arr.length ? Math.max(...arr).toFixed(2) : 'N/A';
-        console.log(
-`╔══════════════════════════════════════════════════════════╗
-║  PERFORMANCE MEASUREMENT — Phase 1.1 After               ║
-║  Duration: ${elapsed}s                                     ║
-╠══════════════════════════════════════════════════════════╣
-║ checkAlerts executions:  ${String(ca.count).padStart(6)}                        ║
-║ checkAlerts avg MT (ms): ${String(avg(ca.mtTime)).padStart(6)}                     ║
-║ checkAlerts max MT (ms): ${String(max(ca.mtTime)).padStart(6)}                     ║
-║ checkAlerts stale fetches: ${String(ca.staleFetchCount).padStart(6)}                     ║
-╠══════════════════════════════════════════════════════════╣
-║ renderMarket executions: ${String(rm.count).padStart(6)}                         ║
-║ renderMarket avg MT (ms): ${String(avg(rm.mtTime)).padStart(6)}                      ║
-║ renderMarket max MT (ms): ${String(max(rm.mtTime)).padStart(6)}                      ║
-║ renderMarket callers: ${JSON.stringify(rm.callers).substring(0,60).padEnd(60)}╣
-╠══════════════════════════════════════════════════════════╣
-║ Long Tasks (>50ms):       ${String(lt.length).padStart(6)}                         ║
-║ Long Tasks total (ms):    ${String(lt.reduce((a,b)=>a+b.duration,0).toFixed(1)).padStart(6)}                     ║
-║ Long Tasks worst (ms):    ${String(lt.length ? Math.max(...lt.map(t=>t.duration)).toFixed(1) : 'N/A').padStart(6)}                     ║
-╚══════════════════════════════════════════════════════════╝`);
-    }
-};
-if (typeof PerformanceObserver !== 'undefined') {
-    try {
-        const po = new PerformanceObserver(list => {
-            list.getEntries().forEach(e => {
-                window.__PERF.longTasks.push({ duration: e.duration, name: e.name, start: e.startTime });
-            });
-        });
-        po.observe({ type: 'longtask', buffered: true });
-    } catch(e) {}
-}
-// [/PERF-INST]
-
 
 /**
  * نمونه `Telegram.WebApp` را از شیء `window` بازیابی می‌کند.
@@ -1411,14 +1364,10 @@ function formatLargeNumber(n) {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function renderMarket() {
-    // [PERF-INST]
-    const _rmCaller = (new Error().stack?.split('\n')[2]?.match(/at (\S+)/) || [,'unknown'])[1];
-    const _rmT0 = performance.now();
-    // [/PERF-INST]
-
-    try {
     const list = document.getElementById('coin-list');
     if (!list) return;
+
+    // Helper to build the info bar
     function buildInfoBar(count, label) {
         const now = new Date();
         const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
@@ -1546,18 +1495,6 @@ function renderMarket() {
         return;
     }
     list.innerHTML = buildInfoBar(filtered.length, currentMarketTab === 'watchlist' ? (t('watchlist') || 'Watchlist') : (t('tab_crypto') || 'Crypto')) + filtered.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
-    } finally {
-        // [PERF-INST]
-        if (window.__PERF && _rmT0) {
-            const dur = performance.now() - _rmT0;
-            if (dur > 0.1) { // skip trivial calls (list=null)
-                window.__PERF.renderMarket.count++;
-                window.__PERF.renderMarket.mtTime.push(+dur.toFixed(2));
-                window.__PERF.renderMarket.callers[_rmCaller] = (window.__PERF.renderMarket.callers[_rmCaller] || 0) + 1;
-            }
-        }
-        // [/PERF-INST]
-    }
 }
 
 /**
@@ -2840,10 +2777,6 @@ async function triggerAlert(alert, currentPrice) {
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
 async function checkAlerts() {
-    // [PERF-INST]
-    const _caT0 = performance.now();
-    // [/PERF-INST]
-
     const userId = getUserId();
 
     // Retry loading alerts from server if user is now authenticated but alerts weren't loaded yet
@@ -2852,23 +2785,12 @@ async function checkAlerts() {
     }
 
     const userAlerts = alerts.filter(a => a.userId === userId);
-
-    // [PERF-INST] record before early return
-    if (window.__PERF) {
-        window.__PERF.checkAlerts.count++;
-        window.__PERF.checkAlerts.mtTime.push(+(performance.now() - _caT0).toFixed(2));
-    }
-    // [/PERF-INST]
-
     if (!userAlerts.length) return;
 
     // Refresh market data silently if stale (> 45s old) for better alert accuracy.
     // Only updates allCoins + cache — no re-render. Rendering is handled by the 120s polling interval.
     const ALERT_FRESHNESS_THRESHOLD = 45000;
     if (Date.now() - lastMarketFetchTime > ALERT_FRESHNESS_THRESHOLD) {
-        // [PERF-INST]
-        if (window.__PERF) window.__PERF.checkAlerts.staleFetchCount++;
-        // [/PERF-INST]
         try {
             const res = await apiFetch('/api/market');
             if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
@@ -3686,12 +3608,5 @@ window.closeNewsModal = closeNewsModal;
 window.getUserId = getUserId;
 window.isInTelegram = isInTelegram;
 window.isGuestUserId = isGuestUserId;
-
-// [PERF-INST] Auto-dump at 60s, 180s, 300s
-[60, 180, 300].forEach(sec => {
-    setTimeout(() => { if (window.__PERF) window.__PERF._log(); }, sec * 1000);
-});
-// Expose for manual: window.__PERF._log()
-// [/PERF-INST]
 
 //#endregion
