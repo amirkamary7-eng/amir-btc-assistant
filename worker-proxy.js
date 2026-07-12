@@ -2400,7 +2400,7 @@ async function fetchGlobalStats(env) {
 
 async function handleMarketData(env) {
   // Check KV cache first for coin data (v2 key — busts old incorrectly-normalized cache)
-  const cachedRaw = await readAppCache(env, 'market:data:v2');
+  const cachedRaw = await readAppCache(env, 'market:data:v3');
   if (cachedRaw) {
     try {
       const parsed = JSON.parse(cachedRaw);
@@ -2436,7 +2436,7 @@ async function handleMarketData(env) {
           image: item.image || '',
         }));
       const global = await globalPromise;
-      await writeAppCache(env, 'market:data:v2', JSON.stringify(data), MARKET_CACHE_TTL);
+      await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
       return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'coingecko' }, {}, env);
     }
   } catch (e) {
@@ -2462,7 +2462,7 @@ async function handleMarketData(env) {
         image: `https://assets.coincap.io/assets/icons/${String(item.symbol || '').toLowerCase()}@2x.png`,
       }));
       const global = await globalPromise;
-      await writeAppCache(env, 'market:data:v2', JSON.stringify(data), MARKET_CACHE_TTL);
+      await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
       return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'coincap' }, {}, env);
     }
   } catch (e) {
@@ -2494,7 +2494,7 @@ async function handleMarketData(env) {
           };
         });
         const global = await globalPromise;
-        await writeAppCache(env, 'market:data:v2', JSON.stringify(data), MARKET_CACHE_TTL);
+        await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
         return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'binance' }, {}, env);
       }
     }
@@ -2530,7 +2530,7 @@ async function handleMarketData(env) {
           };
         });
         const global = await globalPromise;
-        await writeAppCache(env, 'market:data:v2', JSON.stringify(data), MARKET_CACHE_TTL);
+        await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
         return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'mexc' }, {}, env);
       }
     }
