@@ -329,7 +329,8 @@ let analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
 let tickets = [];
 let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
 let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
-let currentAlertDirection = 'above';
+let currentAlertDirection = 'cross';
+let _previousPrices = {}; // Symbol → price tracking for cross-check alerts
 const MARKET_DEFAULT_LIMIT = 100;
 const MARKET_LOAD_MORE_BATCH = 50;
 let marketVisibleCount = MARKET_DEFAULT_LIMIT;
@@ -373,6 +374,7 @@ const i18n = {
         alert_registered: 'هشدار ثبت شد', alert_above: 'رشد به بالا', alert_below: 'ریزش به پایین',
         alert_breakout: 'شکست مقاومت', alert_breakdown: 'شکست حمایت',
         alert_support_touch: 'لمس حمایت', alert_resistance_touch: 'لمس مقاومت',
+        current_price: 'قیمت فعلی',
         trend_strength: 'قدرت روند',
         trend_strong_bullish: 'صعودی قوی', trend_bullish: 'صعودی',
         trend_slightly_bullish: 'صعودی ضعیف', trend_slightly_bearish: 'نزولی ضعیف',
@@ -437,6 +439,7 @@ const i18n = {
         alert_registered: 'Alert registered', alert_above: 'Rise above', alert_below: 'Drop below',
         alert_breakout: 'Breakout', alert_breakdown: 'Breakdown',
         alert_support_touch: 'Support Touch', alert_resistance_touch: 'Resistance Touch',
+        current_price: 'Current',
         trend_strength: 'Trend Strength',
         trend_strong_bullish: 'Strong Bullish', trend_bullish: 'Bullish',
         trend_slightly_bullish: 'Slightly Bullish', trend_slightly_bearish: 'Slightly Bearish',
@@ -2476,7 +2479,7 @@ async function openCoinDetail(symbol) {
     const coin = allCoins.find(c => c.symbol === symbol);
     if (!coin) return;
 
-    // Update header with icon, title, rank, and watchlist state
+    // Update header with icon, title, price, and change
     const icon = coin.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(coin.symbol).toLowerCase()}@2x.png`;
     const iconEl = document.getElementById('detail-coin-icon');
     if (iconEl) {
@@ -2486,9 +2489,25 @@ async function openCoinDetail(symbol) {
     }
 
     document.getElementById('detail-coin-title').innerText = currentLang === 'fa' && coin.name ? `${coin.name} (${symbol})` : `${symbol} / USDT`;
-    _currentDetailSymbol = symbol; // Store for reliable symbol access in alerts (locale-independent)
-    const rankEl = document.getElementById('detail-coin-rank');
-    if (rankEl) rankEl.innerText = `#${Number(coin.rank) || 0}`;
+    _currentDetailSymbol = symbol;
+
+    // Price + change in header
+    const priceEl = document.getElementById('detail-coin-price');
+    const changeEl = document.getElementById('detail-coin-change');
+    if (priceEl) {
+        priceEl.textContent = '$' + (coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6));
+    }
+    if (changeEl) {
+        const chg = coin.changePercent24Hr || 0;
+        changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+        changeEl.className = 'detail-coin-change ' + (chg >= 0 ? 'up' : 'down');
+    }
+
+    // Current price in alert section
+    const alertPriceVal = document.getElementById('alert-current-price-value');
+    if (alertPriceVal) {
+        alertPriceVal.textContent = '$' + (coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6));
+    }
 
     // Update watchlist button state
     updateDetailWatchBtn(symbol);
@@ -2516,18 +2535,15 @@ async function openCoinDetail(symbol) {
     updateTvTimeframeUI();
     createTradingViewWidget(chartInfo);
 
-    const supplyStr = coin.supply ? formatLargeNumber(coin.supply) : '--';
+    // Extra info at bottom (compact: Volume, MCap, Rank, Supply)
     const rankVal = Number(coin.rank) || 0;
-    document.getElementById('detail-stats').innerHTML = `
-        <div><span>${t('price')}</span><strong>$${coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6)}</strong></div>
-        <div><span>${t('change_24h')}</span><strong class="${coin.changePercent24Hr >= 0 ? 'up' : 'down'}">${coin.changePercent24Hr >= 0 ? '+' : ''}${coin.changePercent24Hr.toFixed(2)}%</strong></div>
-        <div><span>${t('mcap')}</span><strong>$${formatLargeNumber(coin.marketCapUsd)}</strong></div>
-        <div><span>${t('volume_24h')}</span><strong>$${formatLargeNumber(coin.volumeUsd24Hr)}</strong></div>
-        <div><span>${t('rank')}</span><strong>#${rankVal}</strong></div>
-        <div><span>${t('supply')}</span><strong>${supplyStr}</strong></div>
-    `;
+    const supplyStr = coin.supply ? formatLargeNumber(coin.supply) : '--';
+    document.getElementById('detail-stats').innerHTML =
+        `<span class="info-item"><span class="info-label">${t('volume_24h')}</span><span class="info-value">$${formatLargeNumber(coin.volumeUsd24Hr)}</span></span>` +
+        `<span class="info-item"><span class="info-label">${t('mcap')}</span><span class="info-value">$${formatLargeNumber(coin.marketCapUsd)}</span></span>` +
+        `<span class="info-item"><span class="info-label">${t('rank')}</span><span class="info-value">#${rankVal}</span></span>` +
+        `<span class="info-item"><span class="info-label">${t('supply')}</span><span class="info-value">${supplyStr}</span></span>`;
     renderActiveAlerts(symbol);
-    updateTrendStrength(symbol);
 }
 /**
  * ویجت TradingView را با تنظیمات فعلی می‌سازد.
@@ -2643,7 +2659,13 @@ function openForexDetail(symbol) {
     });
 
     document.getElementById('detail-coin-title').innerText = pair.name || symbol;
-    _currentDetailSymbol = symbol; // Store for alert reliability (even though forex has no alerts)
+    _currentDetailSymbol = symbol;
+
+    // Price in header for forex
+    const priceEl = document.getElementById('detail-coin-price');
+    const changeEl = document.getElementById('detail-coin-change');
+    if (priceEl) priceEl.textContent = pair.price > 0 ? pair.price.toFixed(pair.category === 'metal' ? 2 : (pair.category === 'index' || pair.category === 'commodity' ? 0 : 4)) : '--';
+    if (changeEl) { changeEl.textContent = ''; changeEl.className = 'detail-coin-change'; }
 
     const chartContainer = document.getElementById('detail-chart');
     chartContainer.innerHTML = '<div class="chart-loading-state"><div class="chart-spinner"></div></div>';
@@ -2663,22 +2685,18 @@ function openForexDetail(symbol) {
     // Reuse centralized widget creation (fixes B3: was duplicated inline)
     createTradingViewWidget(chartInfo);
 
-    // Stats
+    // Extra info
     const cat = pair.category || 'major';
-    const decimals = cat === 'metal' ? 2 : (cat === 'index' || cat === 'commodity' ? 0 : 4);
-    const priceStr = pair.price > 0 ? pair.price.toFixed(decimals) : '--';
     const catLabels = { major: 'Major', cross: 'Cross', metal: 'Metal', index: 'Index', commodity: 'Commodity' };
     const catLabelFa = { major: 'جفت اصلی', cross: 'کراس', metal: 'فلز گران‌بها', index: 'شاخص', commodity: 'کامودیتی' };
     const catLabel = currentLang === 'fa' ? (catLabelFa[cat] || cat) : (catLabels[cat] || cat);
     const typeLabel = currentLang === 'fa'
         ? ({ major: 'فارکس', cross: 'فارکس', metal: 'فلز', index: 'شاخص', commodity: 'کامودیتی' }[cat] || 'بازار')
         : ({ major: 'Forex', cross: 'Forex', metal: 'Commodity', index: 'Index', commodity: 'Commodity' }[cat] || 'Market');
-    document.getElementById('detail-stats').innerHTML = `
-        <div><span>${t('price')}</span><strong>${priceStr}</strong></div>
-        <div><span>Category</span><strong>${catLabel}</strong></div>
-        <div><span>Symbol</span><strong>${escapeHtml(symbol)}</strong></div>
-        <div><span>Type</span><strong>${typeLabel}</strong></div>
-    `;
+    document.getElementById('detail-stats').innerHTML =
+        `<span class="info-item"><span class="info-label">Category</span><span class="info-value">${catLabel}</span></span>` +
+        `<span class="info-item"><span class="info-label">Symbol</span><span class="info-value">${escapeHtml(symbol)}</span></span>` +
+        `<span class="info-item"><span class="info-label">Type</span><span class="info-value">${typeLabel}</span></span>`;
 
     // Hide alert section for forex
     const alertSection = document.querySelector('.alert-section');
@@ -2735,18 +2753,7 @@ function renderActiveAlerts(symbol) {
         container.innerHTML = `<div class="alert-empty">${t('alert_empty')}</div>`;
         return;
     }
-    const dirMap = {
-        above:          { icon: '🚀', label: t('alert_above'),          badge: 'bullish' },
-        below:          { icon: '📉', label: t('alert_below'),           badge: 'bearish' },
-        breakout:       { icon: '💥', label: t('alert_breakout'),        badge: 'bullish' },
-        breakdown:      { icon: '🔻', label: t('alert_breakdown'),       badge: 'bearish' },
-        support_touch:  { icon: '🛡️', label: t('alert_support_touch'),   badge: 'neutral' },
-        resistance_touch: { icon: '🚧', label: t('alert_resistance_touch'), badge: 'neutral' }
-    };
-    const opMap = { above: '≥', below: '≤', breakout: '↑', breakdown: '↓', support_touch: '=', resistance_touch: '=' };
     container.innerHTML = userAlerts.map(a => {
-        const d = dirMap[a.direction] || dirMap.above;
-        const op = opMap[a.direction] || '≥';
         const priceStr = a.price >= 1 ? Number(a.price).toFixed(2) : Number(a.price).toFixed(6);
         return `
         <div class="alert-item">
@@ -2755,9 +2762,8 @@ function renderActiveAlerts(symbol) {
                 <div class="alert-item-info">
                     <div class="alert-item-top">
                         <span class="alert-item-symbol">${escapeHtml(a.symbol)}</span>
-                        <span class="alert-item-badge ${d.badge}">${d.icon} ${d.label}</span>
                     </div>
-                    <span class="alert-item-target">${op} $${priceStr}</span>
+                    <span class="alert-item-target">$${priceStr}</span>
                 </div>
             </div>
             <button class="alert-remove-btn" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)">
@@ -2880,21 +2886,15 @@ async function setPriceAlert() {
     const symbol = _currentDetailSymbol || document.getElementById('detail-coin-title').innerText.split(' ')[0];
     if (!price || price <= 0) { alert(t('invalid_price')); return; }
     const userId = getUserId();
-    let newAlert = { id: Date.now().toString(), symbol, price, direction: currentAlertDirection, userId, createdAt: new Date().toISOString() };
+    let newAlert = { id: Date.now().toString(), symbol, price, direction: 'cross', userId, createdAt: new Date().toISOString() };
     newAlert = await syncAlertToServer(newAlert);
     alerts.push(newAlert);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     input.value = '';
-    const opMap = { above: '≥', below: '≤', breakout: '↑', breakdown: '↓', support_touch: '=', resistance_touch: '=' };
-    const dirSymbol = opMap[currentAlertDirection] || '≥';
-    // Reset direction to default
-    currentAlertDirection = 'above';
-    document.querySelectorAll('.alert-dir-btn').forEach(b => b.classList.remove('active'));
-    const defaultBtn = document.querySelector('.alert-dir-btn[data-dir="above"]');
-    if (defaultBtn) defaultBtn.classList.add('active');
     renderActiveAlerts(symbol);
-    addNotification(t('price_alert'), `${symbol} ${dirSymbol} $${price}`);
-    getTg()?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${price}`, buttons: [{ type: 'ok' }] });
+    const priceStr = price >= 1 ? price.toFixed(2) : price.toFixed(6);
+    addNotification(t('price_alert'), `${symbol} → $${priceStr}`);
+    getTg()?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${priceStr}`, buttons: [{ type: 'ok' }] });
 }
 /**
  * هشدار را حذف می‌کند.
@@ -2965,10 +2965,38 @@ async function checkAlerts() {
     for (const alert of userAlerts) {
         const current = priceMap[alert.symbol];
         if (current == null) continue;
-        const dir = (alert.direction || 'above').toLowerCase();
-        const shouldTrigger = dir === 'below' ? current <= alert.price : current >= alert.price;
+
+        const target = alert.price;
+        const prev = _previousPrices[alert.symbol];
+
+        // Skip if no previous price — prevents false trigger on first load or after refresh
+        if (prev == null) continue;
+
+        // Tolerance: 0.01% of target (min $0.00001) to avoid floating-point noise
+        const tol = Math.max(Math.abs(target) * 0.0001, 0.00001);
+
+        // Detect actual price crossing through the target level
+        const crossedUp = prev < target && current >= (target - tol);
+        const crossedDown = prev > target && current <= (target + tol);
+
+        // Handle different alert directions for backward compatibility
+        const dir = (alert.direction || 'cross').toLowerCase();
+        let shouldTrigger = false;
+
+        if (dir === 'above') {
+            shouldTrigger = crossedUp;
+        } else if (dir === 'below') {
+            shouldTrigger = crossedDown;
+        } else {
+            // 'cross' or any new type: trigger on either direction
+            shouldTrigger = crossedUp || crossedDown;
+        }
+
         if (shouldTrigger) await triggerAlert(alert, current);
     }
+
+    // Update previous prices AFTER checking all alerts (prevents same-cycle re-trigger)
+    Object.assign(_previousPrices, priceMap);
 }
 
 //#endregion
