@@ -420,6 +420,11 @@ const i18n = {
         about_version: 'نسخه 1.0.0', about_desc: 'دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر.',
         official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
         summary_mcap: 'مارکت‌کپ کل', summary_volume: 'حجم ۲۴h', summary_btc_dom: 'سلطه BTC',
+        market_subtitle: 'داده‌های لحظه‌ای بازار ارزهای دیجیتال',
+        market_sentiment: 'وضعیت بازار',
+        top_gainers: 'بیشترین رشد', top_losers: 'بیشترین ریزش',
+        sentiment_bullish: 'صعودی', sentiment_neutral: 'خنثی', sentiment_bearish: 'نزولی',
+        fg_extreme_greed: 'طمع شدید', fg_greed: 'طمع', fg_neutral: 'خنثی', fg_fear: 'ترس', fg_extreme_fear: 'ترس شدید',
         price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h', rank: 'رتبه', supply: 'عرضه در گردش',
         view_source: 'مشاهده منبع', guest: 'کاربر میهمان', required_fields: 'فیلدهای الزامی را پر کنید',
         tf_1m: '1m', tf_5m: '5m', tf_15m: '15m', tf_1h: '1H', tf_4h: '4H', tf_1d: '1D', tf_1w: '1W',
@@ -487,6 +492,11 @@ const i18n = {
         about_desc: 'Smart trading assistant connected to global exchange APIs.',
         official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
         summary_mcap: 'Total Market Cap', summary_volume: '24h Volume', summary_btc_dom: 'BTC Dominance',
+        market_subtitle: 'Live Cryptocurrency Market Data',
+        market_sentiment: 'Market Sentiment',
+        top_gainers: 'Top Gainers', top_losers: 'Top Losers',
+        sentiment_bullish: 'Bullish', sentiment_neutral: 'Neutral', sentiment_bearish: 'Bearish',
+        fg_extreme_greed: 'Extreme Greed', fg_greed: 'Greed', fg_neutral: 'Neutral', fg_fear: 'Fear', fg_extreme_fear: 'Extreme Fear',
         price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume', rank: 'Rank', supply: 'Circulating Supply',
         view_source: 'View source', guest: 'Guest User', required_fields: 'Please fill required fields',
         tf_1m: '1m', tf_5m: '5m', tf_15m: '15m', tf_1h: '1H', tf_4h: '4H', tf_1d: '1D', tf_1w: '1W',
@@ -1119,6 +1129,8 @@ function refreshUI() {
     renderMarket();
     renderWatchlist();
     renderSummary();
+    renderMarketInsights();
+    renderTopMovers();
 
     // Defer non-critical renders to next frame to reduce main thread blocking
     requestAnimationFrame(() => {
@@ -1189,16 +1201,50 @@ function escapeHtml(str) {
  * Called via onerror="iconFallback(this)" on coin/forex images.
  */
 window.iconFallback = function(imgEl) {
-    const symbol = (imgEl.dataset.symbol || imgEl.alt || 'X').charAt(0).toUpperCase();
-    const size = imgEl.classList.contains('detail-coin-icon') ? '40px' : (imgEl.classList.contains('watch-icon') ? '28px' : '32px');
-    const fontSize = imgEl.classList.contains('detail-coin-icon') ? '16px' : (imgEl.classList.contains('watch-icon') ? '11px' : '13px');
+    const symbol = (imgEl.dataset.symbol || imgEl.alt || 'X').toUpperCase();
+    const letter = symbol.charAt(0);
+    // Generate a gradient index from the symbol hash
+    let hash = 0;
+    for (let i = 0; i < symbol.length; i++) hash = ((hash << 5) - hash) + symbol.charCodeAt(i);
+    const gradIdx = Math.abs(hash) % 10;
+    const size = imgEl.classList.contains('detail-coin-icon') ? '40px' : (imgEl.classList.contains('mover-icon') ? '26px' : '32px');
+    const fontSize = imgEl.classList.contains('detail-coin-icon') ? '16px' : (imgEl.classList.contains('mover-icon') ? '10px' : '13px');
     const div = document.createElement('div');
-    div.className = imgEl.className + ' coin-icon-fallback';
+    div.className = (imgEl.className || '') + ' coin-icon-fallback';
     div.dataset.symbol = imgEl.dataset.symbol || '';
-    div.style.cssText = `width:${size};height:${size};min-width:${size};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:${fontSize};font-weight:700;color:var(--text-primary);background:var(--bg-secondary);border:1.5px solid var(--border);letter-spacing:-0.5px;`;
-    div.textContent = symbol;
+    div.dataset.grad = String(gradIdx);
+    div.style.cssText = 'width:' + size + ';height:' + size + ';min-width:' + size + ';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:' + fontSize + ';';
+    div.textContent = letter;
     imgEl.replaceWith(div);
 };
+
+/**
+ * Generate SVG polyline points for a mini sparkline chart.
+ * Uses seeded random from symbol for deterministic output.
+ */
+function generateSparklinePoints(changePercent, symbol, width, height) {
+    width = width || 56;
+    height = height || 24;
+    let seed = 0;
+    for (let i = 0; i < symbol.length; i++) seed += symbol.charCodeAt(i) * (i + 1);
+    function sRand() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+
+    var points = [];
+    var steps = 16;
+    var midY = height / 2;
+    var amp = Math.min(height * 0.38, Math.abs(changePercent) * 0.6 + 1.5);
+    var dir = changePercent >= 0 ? -1 : 1;
+
+    for (var i = 0; i <= steps; i++) {
+        var x = (i / steps) * width;
+        var progress = i / steps;
+        var trend = dir * progress * amp;
+        var noise = (sRand() - 0.5) * amp * 0.5;
+        var y = Math.max(2, Math.min(height - 2, midY + trend + noise));
+        points.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    return points.join(' ');
+}
 
 //#endregion
 
@@ -1400,6 +1446,98 @@ function formatLargeNumber(n) {
     return sign + abs.toFixed(0);
 }
 
+/**
+ * Render market insights: sentiment bar + fear & greed gauge.
+ * Called from refreshUI after market data loads.
+ */
+function renderMarketInsights() {
+    if (!allCoins.length) return;
+
+    // --- Sentiment ---
+    var gainers = 0, losers = 0;
+    for (var i = 0; i < allCoins.length; i++) {
+        if (allCoins[i].changePercent24Hr > 0) gainers++;
+        else if (allCoins[i].changePercent24Hr < 0) losers++;
+    }
+    var total = gainers + losers;
+    var ratio = total > 0 ? gainers / total : 0.5;
+
+    var fillEl = document.getElementById('sentiment-fill');
+    if (fillEl) fillEl.style.width = (ratio * 100).toFixed(1) + '%';
+
+    var badgeEl = document.getElementById('sentiment-badge');
+    if (badgeEl) {
+        var sLabel, sClass;
+        if (ratio > 0.6) { sLabel = t('sentiment_bullish'); sClass = 'bullish'; }
+        else if (ratio >= 0.4) { sLabel = t('sentiment_neutral'); sClass = 'neutral'; }
+        else { sLabel = t('sentiment_bearish'); sClass = 'bearish'; }
+        badgeEl.textContent = sLabel;
+        badgeEl.className = 'sentiment-badge ' + sClass;
+    }
+
+    var gEl = document.getElementById('sentiment-gainers');
+    if (gEl) gEl.querySelector('span').textContent = gainers;
+    var lEl = document.getElementById('sentiment-losers');
+    if (lEl) lEl.querySelector('span').textContent = losers;
+
+    // --- Fear & Greed (calculated from existing data, no API call) ---
+    var avgChange = 0;
+    for (var j = 0; j < allCoins.length; j++) avgChange += (allCoins[j].changePercent24Hr || 0);
+    avgChange = allCoins.length > 0 ? avgChange / allCoins.length : 0;
+    var changeScore = Math.max(0, Math.min(100, 50 + avgChange * 8));
+    var ratioScore = total > 0 ? (gainers / total) * 100 : 50;
+    var fgIndex = Math.round(changeScore * 0.6 + ratioScore * 0.4);
+    fgIndex = Math.max(0, Math.min(100, fgIndex));
+
+    var fgLabel;
+    if (fgIndex >= 75) fgLabel = t('fg_extreme_greed');
+    else if (fgIndex >= 55) fgLabel = t('fg_greed');
+    else if (fgIndex >= 45) fgLabel = t('fg_neutral');
+    else if (fgIndex >= 25) fgLabel = t('fg_fear');
+    else fgLabel = t('fg_extreme_fear');
+
+    var fgValueEl = document.getElementById('fg-index-value');
+    if (fgValueEl) fgValueEl.textContent = fgIndex;
+
+    var fgArcEl = document.getElementById('fg-arc');
+    if (fgArcEl) {
+        // Total arc length for half circle with r=80: π * 80 ≈ 251.3
+        var totalLen = 251.3;
+        var offset = totalLen - (totalLen * fgIndex / 100);
+        fgArcEl.setAttribute('stroke-dashoffset', offset.toFixed(1));
+    }
+
+    var fgTextEl = document.getElementById('fg-gauge-text');
+    if (fgTextEl) fgTextEl.textContent = fgIndex;
+    var fgLabelEl = document.getElementById('fg-gauge-label');
+    if (fgLabelEl) fgLabelEl.textContent = fgLabel;
+}
+
+/**
+ * Render top 3 gainers and top 3 losers.
+ */
+function renderTopMovers() {
+    if (!allCoins.length) return;
+    var sorted = allCoins.slice().sort(function(a, b) { return b.changePercent24Hr - a.changePercent24Hr; });
+    var topGainers = sorted.slice(0, 3);
+    var topLosers = sorted.slice(-3).reverse();
+
+    function renderMoverItem(c, idx) {
+        var icon = c.image || 'https://assets.coincap.io/assets/icons/' + encodeURIComponent(c.symbol).toLowerCase() + '@2x.png';
+        var isPos = c.changePercent24Hr >= 0;
+        var chgStr = (isPos ? '+' : '') + c.changePercent24Hr.toFixed(2) + '%';
+        return '<div class="mover-item" onclick="openCoinDetail(\'' + escapeHtml(c.symbol) + '\')">' +
+            '<img src="' + escapeHtml(icon) + '" class="mover-icon" onerror="iconFallback(this)" data-symbol="' + escapeHtml(c.symbol) + '" alt="">' +
+            '<div class="mover-info"><span class="mover-sym">' + escapeHtml(c.symbol) + '</span>' +
+            '<span class="mover-change ' + (isPos ? 'up' : 'down') + '">' + chgStr + '</span></div></div>';
+    }
+
+    var gList = document.getElementById('top-gainers-list');
+    if (gList) gList.innerHTML = topGainers.map(renderMoverItem).join('');
+    var lList = document.getElementById('top-losers-list');
+    if (lList) lList.innerHTML = topLosers.map(renderMoverItem).join('');
+}
+
 //#endregion
 
 // ============================================================================
@@ -1436,7 +1574,15 @@ function renderMarket() {
             const priceEl = item.querySelector('.coin-price');
             if (priceEl) {
                 const newPrice = '$' + (coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6));
-                if (priceEl.textContent !== newPrice) priceEl.textContent = newPrice;
+                if (priceEl.textContent !== newPrice) {
+                    var oldPrice = parseFloat(priceEl.textContent.replace(/[$,]/g, '')) || 0;
+                    priceEl.textContent = newPrice;
+                    // Price flash animation
+                    priceEl.classList.remove('flash-up', 'flash-down');
+                    void priceEl.offsetWidth; // force reflow
+                    if (coin.priceUsd > oldPrice) priceEl.classList.add('flash-up');
+                    else if (coin.priceUsd < oldPrice) priceEl.classList.add('flash-down');
+                }
             }
             const changeEl = item.querySelector('.coin-change');
             if (changeEl && !item.dataset.forex) {
@@ -1619,6 +1765,8 @@ function renderCryptoItem(c) {
     const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
     const priceStr = c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6);
     const rankNum = Number(c.rank) || 0;
+    const sparkPoints = generateSparklinePoints(c.changePercent24Hr, c.symbol);
+    const sparkColor = isPos ? 'var(--green)' : 'var(--red)';
     return `
         <div class="coin-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
             <div class="coin-left">
@@ -1628,6 +1776,11 @@ function renderCryptoItem(c) {
                     <span class="coin-sym">${safeSymbol}</span>
                     <span class="coin-name">${safeName}</span>
                 </div>
+            </div>
+            <div class="coin-center">
+                <svg class="coin-sparkline" viewBox="0 0 56 24" preserveAspectRatio="none">
+                    <polyline points="${sparkPoints}" fill="none" stroke="${sparkColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
             </div>
             <div class="coin-right">
                 <div class="coin-price-data">
@@ -1694,12 +1847,20 @@ function switchMainTab(tab, btn) {
     }
 
     // Update main tab active states
-    document.querySelectorAll('.main-tab-btn').forEach(b => {
+    document.querySelectorAll('.seg-btn').forEach(b => {
         b.classList.remove('active');
         b.setAttribute('aria-selected', 'false');
     });
     btn.classList.add('active');
     btn.setAttribute('aria-selected', 'true');
+
+    // Update segmented indicator position
+    var indicator = document.getElementById('seg-indicator');
+    if (indicator) {
+        indicator.classList.remove('pos-0', 'pos-1', 'pos-2');
+        var idx = tab === 'crypto' ? 0 : (tab === 'forex' ? 1 : 2);
+        if (idx > 0) indicator.classList.add('pos-' + idx);
+    }
 
     // Show/hide crypto sub-tabs
     const subTabs = document.getElementById('market-sub-tabs');
