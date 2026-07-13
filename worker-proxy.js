@@ -1399,18 +1399,14 @@ async function fetchSpotPriceUsd(env, symbol) {
     }
   }
 
-  // P1-3: Parallel exchange resolution — race all exchanges, use first success
-  const raced = await Promise.any(
-    EXCHANGE_ORDER.map(async ([, exchangeKey]) => {
-      const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
-      if (price === null) throw new Error(`${exchangeKey}: no price`);
-      return { price, exchange: exchangeKey };
-    })
-  ).catch(() => null);
-
-  if (raced) {
-    await writeAppCache(env, cacheKey, raced.exchange, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
-    return { price: raced.price, exchange: raced.exchange, cached: false };
+  // CRITICAL FIX: Check exchanges SEQUENTIALLY in strict priority order.
+  // Previous Promise.any() raced all exchanges — fastest response won, ignoring priority.
+  for (const [, exchangeKey] of EXCHANGE_ORDER) {
+    const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
+    if (price !== null) {
+      await writeAppCache(env, cacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
+      return { price, exchange: exchangeKey, cached: false };
+    }
   }
 
   return null;
@@ -2025,26 +2021,20 @@ async function resolveChartExchange(env, rawSymbol) {
     }
   }
 
-  // Check all exchanges in parallel — first match wins
-  const checkPromises = EXCHANGE_ORDER.map(async ([tvName, key]) => {
+  // CRITICAL FIX: Check exchanges SEQUENTIALLY in strict priority order.
+  // Previous Promise.any() raced all exchanges — fastest response won, ignoring priority.
+  // Now: Binance > Bybit > OKX > KuCoin > Gate > MEXC > CoinEx (strict sequential).
+  for (const [tvName, key] of EXCHANGE_ORDER) {
     if (await exchangeHasSymbol(key, normalizedSymbol)) {
-      return { tvName, key };
+      await writeAppCache(env, cacheKey, key, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
+      return {
+        found: true,
+        symbol: normalizedSymbol,
+        exchange: key,
+        tv_symbol: `${tvName}:${normalizedSymbol}USDT`,
+        cached: false,
+      };
     }
-    throw new Error(`${key}: not found`);
-  });
-
-  try {
-    const winner = await Promise.any(checkPromises);
-    await writeAppCache(env, cacheKey, winner.key, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
-    return {
-      found: true,
-      symbol: normalizedSymbol,
-      exchange: winner.key,
-      tv_symbol: `${winner.tvName}:${normalizedSymbol}USDT`,
-      cached: false,
-    };
-  } catch {
-    // All exchanges rejected — symbol not found
   }
 
   return {
@@ -2246,6 +2236,33 @@ const MARKET_CACHE_TTL = 120; // 2 minutes — prices change frequently
 const MARKET_GLOBAL_CACHE_TTL = 300; // 5 minutes — global stats change less frequently
 const MARKET_FETCH_LIMIT = 200;
 
+// ============================================================================
+//#region Single Flight — Request Coalescing for Market Data
+// ============================================================================
+// Prevents cache stampede: when 100+ users refresh simultaneously,
+// only ONE actual upstream API call is made. All concurrent requests
+// share the same Promise until it resolves.
+// ============================================================================
+
+/** @type {Map<string, Promise<any>>} */
+const _inflightRequests = new Map();
+
+/**
+ * Single-flight helper: if an identical request is already in-flight,
+ * return the existing Promise instead of firing a new one.
+ * Automatically cleaned up after resolution.
+ */
+function singleFlight(key, fn) {
+  const existing = _inflightRequests.get(key);
+  if (existing) return existing;
+
+  const promise = fn().finally(() => {
+    _inflightRequests.delete(key);
+  });
+  _inflightRequests.set(key, promise);
+  return promise;
+}
+
 /**
  * Fetch Fear & Greed Index from Alternative.me (free, no API key required).
  * Returns { value: number, classification: string } or null.
@@ -2258,6 +2275,7 @@ async function fetchFearGreed() {
       return {
         value: parseInt(d.value, 10) || 0,
         classification: d.value_classification || 'Neutral',
+        timestamp: d.timestamp || null,
       };
     }
   } catch (e) {
@@ -2290,21 +2308,36 @@ async function fetchGlobalStats(env) {
   // ── Step 2: Try data sources in priority order ──
   let stats = null;
 
-  // Level 1: CoinPaprika global (free, no API key, reliable from CF Workers)
+  // ── Priority order: CoinGecko > CoinMarketCap > CoinPaprika ──
+
+  // Level 1: CoinGecko Global (most accurate, matches coin data source)
   if (!stats) {
     try {
-      const { ok, body } = await fetchJson('https://api.coinpaprika.com/v1/global');
-      if (ok && body) {
-        stats = {
-          totalMarketCap: body.market_cap_usd || 0,
-          totalVolume: body.volume_24h_usd || 0,
-          btcDominance: body.bitcoin_dominance_percentage || 0,
-          source: 'coinpaprika',
-        };
-        console.log('Global: CoinPaprika success — mcap:', stats.totalMarketCap, 'vol:', stats.totalVolume, 'btcDom:', stats.btcDominance);
+      const cgHeaders = { Accept: 'application/json' };
+      const cgKey = env.COINGECKO_API_KEY;
+      if (cgKey) cgHeaders['x-cg-pro-api-key'] = cgKey;
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+      const res = await fetch('https://api.coingecko.com/api/v3/global', {
+        headers: cgHeaders,
+        signal: controller.signal,
+      });
+      clearTimeout(tid);
+      if (res.ok) {
+        const body = await res.json();
+        if (body?.data) {
+          const d = body.data;
+          stats = {
+            totalMarketCap: d.total_market_cap?.usd || 0,
+            totalVolume: d.total_volume?.usd || 0,
+            btcDominance: d.market_cap_percentage?.btc || 0,
+            source: 'coingecko',
+          };
+          console.log('Global: CoinGecko success — mcap:', stats.totalMarketCap, 'vol:', stats.totalVolume, 'btcDom:', stats.btcDominance);
+        }
       }
     } catch (e) {
-      console.warn('Global: CoinPaprika failed', e.message || e);
+      console.warn('Global: CoinGecko failed', e.message || e);
     }
   }
 
@@ -2332,7 +2365,7 @@ async function fetchGlobalStats(env) {
             btcDominance: q.btc_dominance || 0,
             source: 'coinmarketcap',
           };
-          console.log('Global: CoinMarketCap success');
+          console.log('Global: CoinMarketCap success — mcap:', stats.totalMarketCap, 'btcDom:', stats.btcDominance);
         }
       }
     } catch (e) {
@@ -2340,39 +2373,23 @@ async function fetchGlobalStats(env) {
     }
   }
 
-  // Level 3: CoinGecko (public or with COINGECKO_API_KEY — often rate-limited from CF Workers)
+  // Level 3: CoinPaprika (free, no API key, reliable from CF Workers)
   if (!stats) {
     try {
-      const cgHeaders = { Accept: 'application/json' };
-      const cgKey = env.COINGECKO_API_KEY;
-      if (cgKey) cgHeaders['x-cg-pro-api-key'] = cgKey;
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
-      const res = await fetch('https://api.coingecko.com/api/v3/global', {
-        headers: cgHeaders,
-        signal: controller.signal,
-      });
-      clearTimeout(tid);
-      if (res.ok) {
-        const body = await res.json();
-        if (body?.data) {
-          const d = body.data;
-          stats = {
-            totalMarketCap: d.total_market_cap?.usd || 0,
-            totalVolume: d.total_volume?.usd || 0,
-            btcDominance: d.market_cap_percentage?.btc || 0,
-            source: 'coingecko',
-          };
-          console.log('Global: CoinGecko success');
-        }
+      const { ok, body } = await fetchJson('https://api.coinpaprika.com/v1/global');
+      if (ok && body) {
+        stats = {
+          totalMarketCap: body.market_cap_usd || 0,
+          totalVolume: body.volume_24h_usd || 0,
+          btcDominance: body.bitcoin_dominance_percentage || 0,
+          source: 'coinpaprika',
+        };
+        console.log('Global: CoinPaprika success — mcap:', stats.totalMarketCap, 'vol:', stats.totalVolume, 'btcDom:', stats.btcDominance);
       }
     } catch (e) {
-      console.warn('Global: CoinGecko failed', e.message || e);
+      console.warn('Global: CoinPaprika failed', e.message || e);
     }
   }
-
-  // Level 4: Removed CoinCap /v2/global — endpoint does NOT exist in CoinCap API v2
-  // Level 4: Removed CryptoCompare — now requires API key
 
   // ── Step 3: Merge Fear & Greed ──
   try {
@@ -2382,7 +2399,8 @@ async function fetchGlobalStats(env) {
       stats.fearGreedValue = fg.value;
       stats.fearGreedClassification = fg.classification;
       stats.fearGreedSource = 'alternative.me';
-      console.log('Global: Fear & Greed =', fg.value, fg.classification);
+      stats.fearGreedTimestamp = fg.timestamp;
+      console.log('Global: Fear & Greed =', fg.value, fg.classification, 'ts:', fg.timestamp);
     }
   } catch {}
 
@@ -2429,25 +2447,17 @@ async function handleMarketData(env) {
           name: item.name || '',
           rank: item.market_cap_rank || (index + 1),
           priceUsd: item.current_price || 0,
+          // CoinGecko returns price_change_percentage_24h as direct percentage (e.g. -1.85 = -1.85%).
+          // Field name is EXACTLY this — no confusion with 7d/ATH/ATL.
           changePercent24Hr: item.price_change_percentage_24h || 0,
           volumeUsd24Hr: item.total_volume || 0,
           marketCapUsd: item.market_cap || 0,
           supply: item.circulating_supply || 0,
           image: item.image || '',
-        }));
+        }))
+        // Filter out coins with absurd percentages (> 1000%) — likely bad data
+        .filter(c => Math.abs(c.changePercent24Hr) < 1000);
       let global = await globalPromise;
-      // Fallback: compute global stats from CoinGecko coin data if external sources failed
-      if ((!global || !global.totalMarketCap) && data.some(c => c.marketCapUsd > 0)) {
-        const totalMcap = data.reduce((s, c) => s + (c.marketCapUsd || 0), 0);
-        const totalVol = data.reduce((s, c) => s + (c.volumeUsd24Hr || 0), 0);
-        const btcMcap = (data.find(c => c.symbol === 'BTC') || {}).marketCapUsd || 0;
-        global = global || {};
-        global.totalMarketCap = totalMcap;
-        global.totalVolume = totalVol;
-        global.btcDominance = totalMcap > 0 ? (btcMcap / totalMcap) * 100 : 0;
-        global.source = 'calculated_top200';
-        console.log('Global: Computed from top-200 CoinGecko coins — mcap:', totalMcap, 'btcDom:', global.btcDominance);
-      }
       await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
       return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'coingecko' }, {}, env);
     }
@@ -2473,20 +2483,11 @@ async function handleMarketData(env) {
         supply: parseFloat(item.supply) || 0,
         image: `https://assets.coincap.io/assets/icons/${String(item.symbol || '').toLowerCase()}@2x.png`,
       }));
+      // Filter out coins with absurd percentages (> 1000%) — likely bad data
+      const filtered = data.filter(c => Math.abs(c.changePercent24Hr) < 1000);
       let global = await globalPromise;
-      // Fallback: compute global stats from CoinCap coin data if external sources failed
-      if ((!global || !global.totalMarketCap) && data.some(c => c.marketCapUsd > 0)) {
-        const totalMcap = data.reduce((s, c) => s + (c.marketCapUsd || 0), 0);
-        const totalVol = data.reduce((s, c) => s + (c.volumeUsd24Hr || 0), 0);
-        const btcMcap = (data.find(c => c.symbol === 'BTC') || {}).marketCapUsd || 0;
-        global = global || {};
-        global.totalMarketCap = totalMcap;
-        global.totalVolume = totalVol;
-        global.btcDominance = totalMcap > 0 ? (btcMcap / totalMcap) * 100 : 0;
-        global.source = 'calculated_top200';
-      }
-      await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
-      return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'coincap' }, {}, env);
+      await writeAppCache(env, 'market:data:v3', JSON.stringify(filtered), MARKET_CACHE_TTL);
+      return jsonResponse({ status: 'success', data: filtered, cached: false, global, dataSource: 'coincap' }, {}, env);
     }
   } catch (e) {
     console.warn('Market: CoinCap fallback failed', e.message || e);
@@ -2509,13 +2510,15 @@ async function handleMarketData(env) {
             name: sym,
             rank: index + 1,
             priceUsd: parseFloat(item.lastPrice) || 0,
+            // Binance Futures priceChangePercent is a direct percentage (e.g. -1.85 = -1.85%).
             changePercent24Hr: parseFloat(item.priceChangePercent) || 0,
             volumeUsd24Hr: parseFloat(item.quoteVolume) || 0,
             marketCapUsd: 0,
             supply: 0,
             image: `https://assets.coincap.io/assets/icons/${sym.toLowerCase()}@2x.png`,
           };
-        });
+        })
+        .filter(c => Math.abs(c.changePercent24Hr) < 1000);
         const global = await globalPromise;
         await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
         return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'binance' }, {}, env);
@@ -2526,9 +2529,9 @@ async function handleMarketData(env) {
   }
 
   // Fallback 3: MEXC (free, no API key, rarely rate-limited)
-  // NOTE: MEXC priceChangePercent is a decimal FRACTION (like CoinCap), not a percentage.
-  // Proof: ETH priceChange=7.1, lastPrice=1821.13 → 7.1/1821.13=0.0039 → MEXC returns 0.0039.
-  // Must multiply by 100 to get percentage.
+  // MEXC priceChangePercent is a decimal FRACTION, not a percentage.
+  // Verified: BTC priceChange=-1164.24, lastPrice=62746.43 → calc=-1.8555%, MEXC returns -0.018200.
+  // -0.018200 * 100 = -1.82% ≈ -1.8555% (diff from rounding). Confirmed: MUST multiply by 100.
   try {
     const mexcRes = await fetchJson('https://api.mexc.com/api/v3/ticker/24hr');
     if (Array.isArray(mexcRes.body) && mexcRes.body.length > 0) {
@@ -2545,13 +2548,15 @@ async function handleMarketData(env) {
             name: sym,
             rank: index + 1,
             priceUsd: parseFloat(item.lastPrice) || 0,
+            // MEXC priceChangePercent is fraction → multiply by 100 for percentage.
             changePercent24Hr: (parseFloat(item.priceChangePercent) || 0) * 100,
             volumeUsd24Hr: parseFloat(item.quoteVolume) || 0,
             marketCapUsd: 0,
             supply: 0,
             image: `https://assets.coincap.io/assets/icons/${sym.toLowerCase()}@2x.png`,
           };
-        });
+        })
+        .filter(c => Math.abs(c.changePercent24Hr) < 1000);
         const global = await globalPromise;
         await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
         return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'mexc' }, {}, env);
@@ -3122,7 +3127,10 @@ export default {
         if (await isMarketRateLimited(env, clientIp)) {
           return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
         }
-        return await handleMarketData(env);
+        // Single Flight: coalesce concurrent requests into one upstream call.
+        // KV cache is checked inside handleMarketData; this deduplicates the
+        // cache-miss path where actual API calls are made.
+        return singleFlight('market:data:fetch', () => handleMarketData(env));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/forex') {

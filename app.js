@@ -1026,9 +1026,9 @@ async function resolveChartSymbol(symbol) {
     if (cached) return cached;
 
     // FIX 2: Fully dynamic exchange resolution via backend.
-    // No hardcoded lists, no Binance override. Backend races all 7 exchanges:
-    // Binance → Bybit → OKX → KuCoin → Gate → MEXC → CoinEx
-    // First exchange that has the symbol wins. Results are cached 24h per symbol.
+    // Backend checks exchanges in STRICT priority order (sequential, not parallel):
+    // Binance > Bybit > OKX > KuCoin > Gate > MEXC > CoinEx
+    // Highest-priority exchange that has the symbol wins. Results cached 24h per symbol.
     if (API_BASE) {
         try {
             const data = await apiFetch(`/api/charts/resolve?symbol=${encodeURIComponent(symbol)}`);
@@ -1338,9 +1338,10 @@ async function loadMarketData(force = false) {
             try {
                 const res = await apiFetch('/api/market');
                 if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
-                    // FIX 1: No heuristic needed. Backend normalizes ALL sources to percentage format.
-                    // CoinCap fractions are ×100 in the backend; CoinGecko/Binance/MEXC already return percentages.
-                    // Log source and key coins for QA verification.
+                    // Backend normalizes ALL sources to percentage format:
+                    // CoinGecko/Binance Futures: already percentage (direct use)
+                    // CoinCap/MEXC: decimal fraction → ×100 in backend
+                    // No frontend heuristic needed.
                     console.log('[MARKET] dataSource:', res.dataSource || 'unknown', 'coins:', res.data.length);
                     ['BTC','ETH','SOL','XRP','DOGE'].forEach(function(s) {
                         var c = res.data.find(function(x) { return x.symbol === s; });
@@ -1358,7 +1359,7 @@ async function loadMarketData(force = false) {
         Cache.set('market', allCoins, 120);
         // Phase C: Persist market data to localStorage for instant watchlist render on cold start
         // Defer cache write off the critical render path (2-5ms saved per market load)
-        requestIdleCallback?.(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); } catch(_) {} }) ?? setTimeout(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); } catch(_) {} }, 200);
+        requestIdleCallback?.(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(3)); } catch(_) {} }) ?? setTimeout(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(3)); } catch(_) {} }, 200);
         lastMarketFetchTime = Date.now();
         renderMarket();
         renderWatchlist();
@@ -3821,15 +3822,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Phase C: Load cached market data for instant watchlist render
-    // NOTE: Old localStorage cache may have incorrectly-normalized percentages (pre-FIX1).
-    // The stale data is acceptable for instant render — it will be replaced by fresh API data
-    // within seconds. The localStorage cache is overwritten after each successful API fetch.
+    // NOTE: localStorage cache with old pre-fix percentages is invalidated
+    // by checking a version tag. Bump CACHE_VERSION to force fresh fetch.
+    const MARKET_CACHE_VERSION = 3; // Bump when percentage normalization changes
     try {
+        const cachedVersion = parseInt(localStorage.getItem('market_cache_version') || '0', 10);
         const cachedMarket = JSON.parse(localStorage.getItem('market_data_cache') || '[]');
-        if (Array.isArray(cachedMarket) && cachedMarket.length) {
+        if (Array.isArray(cachedMarket) && cachedMarket.length && cachedVersion >= MARKET_CACHE_VERSION) {
             allCoins = cachedMarket;
             renderWatchlist();
             renderSummary();
+        } else if (cachedVersion < MARKET_CACHE_VERSION) {
+            // Version mismatch — bust stale cache to prevent showing wrong percentages
+            localStorage.removeItem('market_data_cache');
         }
     } catch(_) {}
 
