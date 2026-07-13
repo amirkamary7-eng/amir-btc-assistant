@@ -1498,6 +1498,8 @@ function renderMarketInsights() {
     if (gEl) gEl.querySelector('span').textContent = gainers;
     var lEl = document.getElementById('sentiment-losers');
     if (lEl) lEl.querySelector('span').textContent = losers;
+    var rEl = document.getElementById('sentiment-ratio');
+    if (rEl) rEl.textContent = (ratio * 100).toFixed(0) + '%';
 
     // --- Fear & Greed ---
     // FIX 4: Only show real data from Alternative.me. Hide the entire section if unavailable.

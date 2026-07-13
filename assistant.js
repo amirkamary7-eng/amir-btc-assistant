@@ -119,6 +119,79 @@ const AssistantUI = {
         document.getElementById('ai-input')?.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); }
         });
+
+        // --- Draggable FAB ---
+        const fab = document.getElementById('ai-fab');
+        const root = document.getElementById('ai-assistant-root');
+        if (fab && root) {
+            // Restore saved position
+            const savedPos = localStorage.getItem('ai_fab_pos');
+            if (savedPos) {
+                try {
+                    const pos = JSON.parse(savedPos);
+                    root.style.right = 'auto';
+                    root.style.left = pos.x + 'px';
+                    root.style.bottom = pos.y + 'px';
+                    root.style.top = 'auto';
+                } catch(e) {}
+            }
+
+            let isDragging = false;
+            let hasMoved = false;
+            let startX, startY, startLeft, startBottom;
+
+            fab.addEventListener('pointerdown', (e) => {
+                isDragging = true;
+                hasMoved = false;
+                startX = e.clientX;
+                startY = e.clientY;
+                const rect = root.getBoundingClientRect();
+                startLeft = rect.left;
+                startBottom = window.innerHeight - rect.bottom;
+                fab.setPointerCapture(e.pointerId);
+                e.preventDefault();
+            });
+
+            fab.addEventListener('pointermove', (e) => {
+                if (!isDragging) return;
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                if (Math.abs(dx) > 5 || Math.abs(dy) > 5) hasMoved = true;
+                if (!hasMoved) return;
+
+                const newLeft = Math.max(0, Math.min(window.innerWidth - 60, startLeft + dx));
+                const newBottom = Math.max(80, Math.min(window.innerHeight - 80, startBottom - dy));
+                root.style.right = 'auto';
+                root.style.left = newLeft + 'px';
+                root.style.bottom = newBottom + 'px';
+                root.style.top = 'auto';
+            });
+
+            fab.addEventListener('pointerup', (e) => {
+                if (!isDragging) return;
+                isDragging = false;
+
+                if (hasMoved) {
+                    // Save position
+                    const rect = root.getBoundingClientRect();
+                    localStorage.setItem('ai_fab_pos', JSON.stringify({
+                        x: rect.left,
+                        y: window.innerHeight - rect.bottom
+                    }));
+                    // Prevent the click from opening the panel
+                    e.stopPropagation();
+                }
+                // If !hasMoved, the normal click handler will fire
+            });
+
+            fab.addEventListener('click', (e) => {
+                if (hasMoved) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    hasMoved = false;
+                }
+            }, true);
+        }
     },
 
     toggle(show) {
