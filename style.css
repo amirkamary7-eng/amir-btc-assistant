@@ -1477,106 +1477,46 @@ strong.down { color: var(--red); }
 /* #region Market Insights */
 /* ============================================================================ */
 .market-insights-row {
-    display: flex; flex-direction: column;
+    display: grid; grid-template-columns: 1fr 1fr;
     gap: 8px; padding: 4px 16px 8px;
 }
-
-/* === Sentiment Card V2 (Full-Width Redesign) === */
-.sentiment-card-v2 {
-    border-radius: 16px; overflow: hidden; position: relative;
-    background: linear-gradient(160deg, rgba(20,20,25,0.95), rgba(12,12,16,0.98));
-    border: 1px solid rgba(255,255,255,0.06);
-    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04);
-}
-/* Top gradient bar */
-.sc2-gradient-bar {
-    height: 4px; background: rgba(255,255,255,0.04);
-    position: relative; overflow: hidden;
-}
-.sc2-gradient-fill {
-    height: 100%; width: 50%;
-    background: linear-gradient(90deg, #ff4d4d 0%, #f7931a 35%, #00c896 70%, #00e6a8 100%);
-    border-radius: 0 2px 2px 0;
-    transition: width 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    position: relative;
-}
-.sc2-gradient-fill::after {
-    content: ''; position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%);
-    animation: shimmer-bar 2.5s ease-in-out infinite;
-}
-@keyframes shimmer-bar { 0%,100% { transform: translateX(-100%); } 50% { transform: translateX(100%); } }
-
-/* Header */
-.sc2-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 16px 0;
-}
-.sc2-time {
-    font-size: 10px; font-weight: 700; color: var(--text-dim);
-    background: rgba(255,255,255,0.06); padding: 3px 8px;
-    border-radius: 6px; letter-spacing: 0.5px;
-    direction: ltr;
-}
-.sc2-title {
-    font-size: 13px; font-weight: 700; color: var(--text);
-    letter-spacing: 0.2px;
-}
-
-/* Sentiment badge (shared with old) */
-.sentiment-badge {
-    font-size: 10px; font-weight: 700; padding: 3px 10px;
-    border-radius: 8px; letter-spacing: 0.5px; text-transform: uppercase;
-}
-.sentiment-badge.bullish { background: rgba(0,200,150,0.15); color: var(--green); box-shadow: 0 0 10px rgba(0,200,150,0.15); }
-.sentiment-badge.neutral { background: rgba(247,147,26,0.15); color: var(--accent); box-shadow: 0 0 10px rgba(247,147,26,0.15); }
-.sentiment-badge.bearish { background: rgba(255,77,77,0.15); color: var(--red); box-shadow: 0 0 10px rgba(255,77,77,0.15); }
-
-/* Stats row */
-.sc2-stats {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 16px 14px; gap: 8px;
-}
-.sc2-stat {
-    display: flex; flex-direction: column; align-items: center; gap: 2px;
-    min-width: 60px;
-}
-.sc2-stat-num {
-    font-size: 22px; font-weight: 800; line-height: 1;
-    font-variant-numeric: tabular-nums; direction: ltr;
-}
-.sc2-stat-arrow { flex-shrink: 0; }
-.sc2-arrow-up { color: var(--green); }
-.sc2-arrow-down { color: var(--red); }
-.sc2-gainers { color: var(--green); }
-.sc2-gainers .sc2-stat-num { color: var(--green); text-shadow: 0 0 20px rgba(0,200,150,0.3); }
-.sc2-losers { color: var(--red); }
-.sc2-losers .sc2-stat-num { color: var(--red); text-shadow: 0 0 20px rgba(255,77,77,0.3); }
-.sc2-stat-label {
-    font-size: 9.5px; font-weight: 600; color: var(--text-dim);
-    white-space: nowrap;
-}
-
-/* Mini sparkline chart */
-.sc2-chart {
-    flex: 1; height: 42px; position: relative;
-    margin: 0 4px;
-}
-.sc2-chart svg { width: 100%; height: 100%; display: block; }
-
-/* === Fear & Greed Card (kept as before) === */
 .insight-card {
-    border-radius: 14px; padding: 12px;
+    border-radius: 14px; padding: 10px 12px;
     background: linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
     border: 1px solid rgba(255,255,255,0.06);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-    transition: transform 0.2s, box-shadow 0.2s;
+    max-height: 180px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
 }
-.insight-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.2); }
-.ic-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.ic-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-shrink: 0; }
 .ic-title { font-size: 11px; color: var(--text-sub); font-weight: 600; letter-spacing: 0.2px; }
+
+/* Sentiment */
+.sentiment-badge {
+    font-size: 9px; font-weight: 700; padding: 2px 8px;
+    border-radius: 6px; letter-spacing: 0.3px; text-transform: uppercase;
+}
+.sentiment-badge.bullish { background: rgba(0,200,150,0.15); color: var(--green); }
+.sentiment-badge.neutral { background: rgba(247,147,26,0.15); color: var(--accent); }
+.sentiment-badge.bearish { background: rgba(255,77,77,0.15); color: var(--red); }
+.sentiment-body { display: flex; flex-direction: column; gap: 8px; flex: 1; justify-content: center; }
+.sc2-gradient-bar {
+    height: 6px; border-radius: 3px;
+    background: rgba(255,255,255,0.06);
+    overflow: hidden;
+}
+.sc2-gradient-fill {
+    height: 100%; width: 50%;
+    background: linear-gradient(90deg, #ff4d4d 0%, #f7931a 30%, #00c896 70%, #00e6a8 100%);
+    border-radius: 3px;
+    transition: width 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.sentiment-labels { display: flex; justify-content: space-between; align-items: center; }
+.sl-count { display: flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; }
+.sl-up { color: var(--green); }
+.sl-down { color: var(--red); }
 
 /* Fear & Greed */
 .fg-index-num {
@@ -1584,9 +1524,14 @@ strong.down { color: var(--red); }
     font-variant-numeric: tabular-nums;
     direction: ltr;
 }
-.fg-gauge-wrap { display: flex; justify-content: center; padding: 0 4px; }
-.fg-gauge { width: 100%; max-width: 180px; display: block; }
+.fg-gauge-wrap { display: flex; justify-content: center; align-items: center; flex: 1; min-height: 0; }
+.fg-gauge { width: 120px; height: auto; display: block; }
 #fg-arc { transition: stroke-dashoffset 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+
+/* Very small screens: stack vertically */
+@media (max-width: 320px) {
+    .market-insights-row { grid-template-columns: 1fr; }
+}
 
 /* ============================================================================ */
 /* #region Segmented Control Tabs */

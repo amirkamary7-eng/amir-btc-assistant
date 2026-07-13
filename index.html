@@ -269,41 +269,26 @@
             </div>
         </div>
 
-        <!-- Market Insights Row: Sentiment + Fear & Greed -->
+        <!-- Market Insights Row: Sentiment + Fear & Greed (compact side-by-side) -->
         <div class="market-insights-row" id="market-insights-row">
-            <div class="sentiment-card-v2" id="sentiment-card-v2">
-                <!-- Top gradient bar -->
-                <div class="sc2-gradient-bar">
-                    <div class="sc2-gradient-fill" id="sentiment-fill"></div>
-                </div>
-                <!-- Header row -->
-                <div class="sc2-header">
-                    <span class="sc2-time">24h</span>
-                    <span class="sc2-title" data-i18n="market_sentiment">وضعیت بازار</span>
+            <div class="insight-card sentiment-card">
+                <div class="ic-header">
+                    <span class="ic-title" data-i18n="market_sentiment">وضعیت بازار</span>
                     <span class="sentiment-badge" id="sentiment-badge">--</span>
                 </div>
-                <!-- Stats row: gainers & losers -->
-                <div class="sc2-stats">
-                    <div class="sc2-stat sc2-gainers">
-                        <span class="sc2-stat-num" id="sentiment-gainers">0</span>
-                        <svg class="sc2-stat-arrow sc2-arrow-up" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
-                        <span class="sc2-stat-label">افزایش یافته</span>
+                <div class="sentiment-body">
+                    <div class="sc2-gradient-bar">
+                        <div class="sc2-gradient-fill" id="sentiment-fill"></div>
                     </div>
-                    <!-- Mini sparkline -->
-                    <div class="sc2-chart">
-                        <svg id="sentiment-sparkline" viewBox="0 0 120 40" preserveAspectRatio="none" fill="none">
-                            <polyline id="sentiment-sparkline-path" points="" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                            <linearGradient id="spark-fill-grad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stop-color="var(--green)" stop-opacity="0.25"/>
-                                <stop offset="100%" stop-color="var(--green)" stop-opacity="0"/>
-                            </linearGradient>
-                            <polygon id="sentiment-sparkline-area" points="" fill="url(#spark-fill-grad)"/>
-                        </svg>
-                    </div>
-                    <div class="sc2-stat sc2-losers">
-                        <svg class="sc2-stat-arrow sc2-arrow-down" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-                        <span class="sc2-stat-num" id="sentiment-losers">0</span>
-                        <span class="sc2-stat-label">کاهش یافته</span>
+                    <div class="sentiment-labels">
+                        <span class="sl-count sl-up" id="sentiment-gainers">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
+                            <span>0</span>
+                        </span>
+                        <span class="sl-count sl-down" id="sentiment-losers">
+                            <span>0</span>
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -313,11 +298,11 @@
                     <span class="fg-index-num" id="fg-index-value">--</span>
                 </div>
                 <div class="fg-gauge-wrap">
-                    <svg class="fg-gauge" viewBox="0 0 200 115" fill="none">
-                        <path d="M 20 100 A 80 80 0 0 1 180 100" stroke="rgba(255,255,255,0.06)" stroke-width="12" stroke-linecap="round" fill="none"/>
-                        <path d="M 20 100 A 80 80 0 0 1 180 100" stroke="url(#fg-gradient)" stroke-width="12" stroke-linecap="round" fill="none" stroke-dasharray="251.3" stroke-dashoffset="251.3" id="fg-arc"/>
-                        <text x="100" y="85" text-anchor="middle" fill="var(--text)" font-size="28" font-weight="800" id="fg-gauge-text">--</text>
-                        <text x="100" y="105" text-anchor="middle" fill="var(--text-sub)" font-size="11" font-weight="500" id="fg-gauge-label">--</text>
+                    <svg class="fg-gauge" viewBox="0 0 120 70" fill="none">
+                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="rgba(255,255,255,0.06)" stroke-width="8" stroke-linecap="round" fill="none"/>
+                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="url(#fg-gradient)" stroke-width="8" stroke-linecap="round" fill="none" stroke-dasharray="150.8" stroke-dashoffset="150.8" id="fg-arc"/>
+                        <text x="60" y="50" text-anchor="middle" fill="var(--text)" font-size="20" font-weight="800" id="fg-gauge-text">--</text>
+                        <text x="60" y="64" text-anchor="middle" fill="var(--text-sub)" font-size="8.5" font-weight="500" id="fg-gauge-label">--</text>
                         <defs>
                             <linearGradient id="fg-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
                                 <stop offset="0%" stop-color="#ff4d4d"/>
