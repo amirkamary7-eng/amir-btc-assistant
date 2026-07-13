@@ -271,25 +271,39 @@
 
         <!-- Market Insights Row: Sentiment + Fear & Greed -->
         <div class="market-insights-row" id="market-insights-row">
-            <div class="insight-card sentiment-card">
-                <div class="ic-header">
-                    <span class="ic-title" data-i18n="market_sentiment">وضعیت بازار</span>
+            <div class="sentiment-card-v2" id="sentiment-card-v2">
+                <!-- Top gradient bar -->
+                <div class="sc2-gradient-bar">
+                    <div class="sc2-gradient-fill" id="sentiment-fill"></div>
+                </div>
+                <!-- Header row -->
+                <div class="sc2-header">
+                    <span class="sc2-time">24h</span>
+                    <span class="sc2-title" data-i18n="market_sentiment">وضعیت بازار</span>
                     <span class="sentiment-badge" id="sentiment-badge">--</span>
                 </div>
-                <div class="sentiment-body">
-                    <div class="sentiment-bar-track">
-                        <div class="sentiment-bar-fill" id="sentiment-fill"></div>
+                <!-- Stats row: gainers & losers -->
+                <div class="sc2-stats">
+                    <div class="sc2-stat sc2-gainers">
+                        <span class="sc2-stat-num" id="sentiment-gainers">0</span>
+                        <svg class="sc2-stat-arrow sc2-arrow-up" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+                        <span class="sc2-stat-label">افزایش یافته</span>
                     </div>
-                    <div class="sentiment-labels">
-                        <span class="sl-count sl-up" id="sentiment-gainers">
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
-                            <span>0</span>
-                        </span>
-                        <span class="sl-ratio" id="sentiment-ratio">50%</span>
-                        <span class="sl-count sl-down" id="sentiment-losers">
-                            <span>0</span>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
-                        </span>
+                    <!-- Mini sparkline -->
+                    <div class="sc2-chart">
+                        <svg id="sentiment-sparkline" viewBox="0 0 120 40" preserveAspectRatio="none" fill="none">
+                            <polyline id="sentiment-sparkline-path" points="" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                            <linearGradient id="spark-fill-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="var(--green)" stop-opacity="0.25"/>
+                                <stop offset="100%" stop-color="var(--green)" stop-opacity="0"/>
+                            </linearGradient>
+                            <polygon id="sentiment-sparkline-area" points="" fill="url(#spark-fill-grad)"/>
+                        </svg>
+                    </div>
+                    <div class="sc2-stat sc2-losers">
+                        <svg class="sc2-stat-arrow sc2-arrow-down" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        <span class="sc2-stat-num" id="sentiment-losers">0</span>
+                        <span class="sc2-stat-label">کاهش یافته</span>
                     </div>
                 </div>
             </div>

@@ -1474,16 +1474,21 @@ function renderMarketInsights() {
 
     // --- Sentiment ---
     var gainers = 0, losers = 0;
+    var changes = [];
     for (var i = 0; i < allCoins.length; i++) {
-        if (allCoins[i].changePercent24Hr > 0) gainers++;
-        else if (allCoins[i].changePercent24Hr < 0) losers++;
+        var ch = allCoins[i].changePercent24Hr;
+        changes.push(ch);
+        if (ch > 0) gainers++;
+        else if (ch < 0) losers++;
     }
     var total = gainers + losers;
     var ratio = total > 0 ? gainers / total : 0.5;
 
+    // Gradient fill bar (top bar width = ratio)
     var fillEl = document.getElementById('sentiment-fill');
     if (fillEl) fillEl.style.width = (ratio * 100).toFixed(1) + '%';
 
+    // Badge
     var badgeEl = document.getElementById('sentiment-badge');
     if (badgeEl) {
         var sLabel, sClass;
@@ -1494,12 +1499,14 @@ function renderMarketInsights() {
         badgeEl.className = 'sentiment-badge ' + sClass;
     }
 
+    // Gainers / Losers numbers (now direct textContent, no nested span)
     var gEl = document.getElementById('sentiment-gainers');
-    if (gEl) gEl.querySelector('span').textContent = gainers;
+    if (gEl) gEl.textContent = gainers;
     var lEl = document.getElementById('sentiment-losers');
-    if (lEl) lEl.querySelector('span').textContent = losers;
-    var rEl = document.getElementById('sentiment-ratio');
-    if (rEl) rEl.textContent = (ratio * 100).toFixed(0) + '%';
+    if (lEl) lEl.textContent = losers;
+
+    // --- Sparkline ---
+    renderSentimentSparkline(changes, ratio);
 
     // --- Fear & Greed ---
     // FIX 4: Only show real data from Alternative.me. Hide the entire section if unavailable.
@@ -1540,6 +1547,54 @@ function renderMarketInsights() {
         var fgCardHide = document.querySelector('.fear-greed-card');
         if (fgCardHide) fgCardHide.style.display = 'none';
     }
+}
+
+/**
+ * Render a mini sparkline in the sentiment card based on sorted 24h changes.
+ * Creates a distribution curve showing the market spread.
+ */
+function renderSentimentSparkline(changes, ratio) {
+    var pathEl = document.getElementById('sentiment-sparkline-path');
+    var areaEl = document.getElementById('sentiment-sparkline-area');
+    if (!pathEl || !areaEl) return;
+
+    // Sort changes ascending to create a distribution-like curve
+    var sorted = changes.slice().sort(function(a, b) { return a - b; });
+    var len = sorted.length;
+    if (len < 2) return;
+
+    var w = 120, h = 40, pad = 2;
+    var minVal = sorted[0], maxVal = sorted[len - 1];
+    var range = maxVal - minVal || 1;
+
+    var points = [];
+    // Sample up to 30 points for smooth curve
+    var step = Math.max(1, Math.floor(len / 30));
+    for (var i = 0; i < len; i += step) {
+        var x = pad + (i / (len - 1)) * (w - 2 * pad);
+        var y = pad + (1 - (sorted[i] - minVal) / range) * (h - 2 * pad);
+        points.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    // Always include last point
+    if (points.length > 0) {
+        var lastX = pad + (w - 2 * pad);
+        var lastY = pad + (1 - (sorted[len - 1] - minVal) / range) * (h - 2 * pad);
+        points.push(lastX.toFixed(1) + ',' + lastY.toFixed(1));
+    }
+
+    var ptsStr = points.join(' ');
+    pathEl.setAttribute('points', ptsStr);
+
+    // Area fill: same points + bottom-right + bottom-left
+    var areaPts = ptsStr + ' ' + (w - pad).toFixed(1) + ',' + h + ' ' + pad + ',' + h;
+    areaEl.setAttribute('points', areaPts);
+
+    // Color the sparkline based on market trend
+    var color = ratio >= 0.5 ? '#00c896' : '#ff4d4d';
+    pathEl.setAttribute('stroke', color);
+    // Update area gradient color
+    var gradStop = document.querySelector('#spark-fill-grad stop:first-child');
+    if (gradStop) gradStop.setAttribute('stop-color', color);
 }
 
 /**
