@@ -1,6 +1,6 @@
 {
         "$schema": "./node_modules/wrangler/config-schema.json",
-        "name": "amir-btc-assistant-api",
+        "name": "amir-btc-assistantnewgithub",
         "main": "worker-proxy.js",
         // IMPORTANT: Pin this date when upgrading nodejs_compat or Workers runtime.
 // Changing compatibility_date can break node:crypto, Pool, or other polyfilled APIs.
