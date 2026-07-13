@@ -3299,14 +3299,16 @@ test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → 
     assert.equal(cachedList1.length, 1, 'KV list must have 1 analysis after CREATE');
     assert.equal(cachedList1[0].id, createdId);
 
-    // ── Step 3: GET → should return cached data (no DB query for version match) ──
+    // ── Step 3: GET without version → must query DB (not serve stale KV cache) ──
+    // After the fix, a no-version GET always hits the DB to prevent KV eventual
+    // consistency from serving stale/empty data on cold open.
     res = await worker.fetch(new Request('https://worker.example/api/analyses'), env);
     assert.equal(res.status, 200);
     body = await res.json();
     assert.equal(body.status, 'success');
-    assert.equal(body.analyses.length, 1, 'GET should return cached analysis');
+    assert.equal(body.analyses.length, 1, 'GET without version should query DB and return analysis');
     assert.equal(body.analyses[0].coin, 'BTC');
-    assert.ok(body.version >= v0, 'cached version should be consistent');
+    assert.ok(body.version >= v0, 'DB-sourced version should be consistent');
 
     // ── Step 4: POST → create second analysis → version bumps ──
     res = await worker.fetch(
@@ -3398,6 +3400,76 @@ test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → 
     // ── Final: verify DB state matches expectations ──
     assert.equal(db.analyses.length, 1, 'DB should have exactly 1 analysis remaining');
     assert.equal(db.analyses[0].coin, 'ETH');
+
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+// ── Regression: POST → simulate stale KV → GET without version must return DB data ──
+test('GET without version ignores stale KV cache and returns fresh DB data (close+reopen bug)', async () => {
+  const db = { analyses: [] };
+  const analysesCache = createMemoryKv();
+  const now = new Date().toISOString();
+
+  const pgMock = createPgMock(async (sql, params) => {
+    if (sql.includes('INSERT INTO analyses')) {
+      const newRow = {
+        id: params[0], coin: params[1], timeframe: params[2],
+        image: params[3], text: params[4], author: params[5],
+        author_id: params[6], created_at: now, updated_at: now,
+      };
+      db.analyses.unshift(newRow);
+      return { rows: [newRow] };
+    }
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY')) {
+      return { rows: [...db.analyses] };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
+  const admin = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', admin);
+  const env = createEnv({ DATABASE_URL: 'postgres://db.example/app', APP_CACHE: analysesCache });
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => { throw new Error('no external fetch expected'); };
+
+  try {
+    // Step 1: Populate stale KV cache with empty analyses (simulates pre-creation state)
+    await analysesCache.put('analyses:version', '1000000000', 86400);
+    await analysesCache.put('analyses:list', '[]', 86400);
+
+    // Step 2: POST creates an analysis → DB has 1, KV updated
+    let res = await worker.fetch(
+      new Request('https://worker.example/api/analyses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
+        body: JSON.stringify({ coin: 'btc', timeframe: '4h', text: 'Important analysis', author: 'Admin' }),
+      }),
+      env,
+    );
+    assert.equal(res.status, 200);
+    const postBody = await res.json();
+    assert.equal(postBody.analysis.coin, 'BTC');
+
+    // Step 3: Simulate KV eventual consistency — overwrite with stale empty data
+    // This mimics the scenario where the GET request hits an edge that hasn't
+    // received the POST's KV write yet.
+    await analysesCache.put('analyses:version', '1000000000', 86400);
+    await analysesCache.put('analyses:list', '[]', 86400);
+
+    // Step 4: GET without version (fresh app open / close+reopen)
+    // BEFORE the fix: this would return [] from stale KV
+    // AFTER the fix: this queries DB and returns the actual analysis
+    res = await worker.fetch(new Request('https://worker.example/api/analyses'), env);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.status, 'success');
+    assert.equal(body.analyses.length, 1, 'GET without version must return DB data, not stale KV');
+    assert.equal(body.analyses[0].coin, 'BTC');
+    assert.equal(body.analyses[0].text, 'Important analysis');
 
   } finally {
     global.fetch = originalFetch;

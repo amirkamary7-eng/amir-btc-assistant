@@ -177,6 +177,8 @@ export function createAnalysisHandlers(deps) {
     }
 
     const cachedState = await readCachedAnalysesState(env);
+
+    // ── Path A: Client has a version and it matches cache → unchanged ──
     if (requestedVersion !== null && cachedState.version !== null && requestedVersion === cachedState.version) {
       return jsonResponse({
         status: 'success',
@@ -186,14 +188,12 @@ export function createAnalysisHandlers(deps) {
       }, {}, env);
     }
 
-    if (requestedVersion === null && cachedState.version !== null && cachedState.analyses !== null) {
-      return jsonResponse({
-        status: 'success',
-        analyses: cachedState.analyses,
-        version: cachedState.version,
-      }, {}, env);
-    }
-
+    // ── Path B: Stale client version (or no version) → must verify against DB ──
+    // When requestedVersion is null (fresh app open), we MUST query the DB.
+    // KV is eventually consistent (up to 60s propagation). Serving stale KV data
+    // on cold open causes analyses to disappear after close+reopen.
+    // When requestedVersion is provided but doesn't match, the client has stale
+    // data and needs a fresh response from DB.
     if (isDatabaseConfigured(env)) {
       try {
         const analyses = await analysisRepo.list(env);
