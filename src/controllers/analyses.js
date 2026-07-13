@@ -157,9 +157,8 @@ export function createAnalysisHandlers(deps) {
    * Flow:
    * 1. Parse optional ?version= query param
    * 2. If version provided and matches cache → 304-like (analyses: null, unchanged: true)
-   * 3. If no version and cache is warm → return cache directly
-   * 4. Otherwise → query DB, update cache, return fresh data
-   * 5. If DB not configured → return cache or empty fallback
+   * 3. Otherwise (no version or stale version) → query DB, update cache, return fresh data
+   * 4. If DB not configured → return cache or empty fallback
    */
   async function handleList(request, env) {
     const url = new URL(request.url);
@@ -197,9 +196,16 @@ export function createAnalysisHandlers(deps) {
     if (isDatabaseConfigured(env)) {
       try {
         const analyses = await analysisRepo.list(env);
-        // Always generate a fresh timestamp-based version when reading from DB.
-        // This prevents version reset to 1 when KV cache expires.
-        const version = generateVersion();
+
+        // Stable version: reuse cached version when data is unchanged to prevent
+        // cascading cache invalidations across concurrent users. Each concurrent
+        // fresh-open that generates a new timestamp would invalidate every other
+        // client's cached version, forcing redundant DB queries on their next poll.
+        const dataUnchanged = cachedState.analyses !== null &&
+          cachedState.version !== null &&
+          JSON.stringify(analyses) === JSON.stringify(cachedState.analyses);
+        const version = dataUnchanged ? cachedState.version : generateVersion();
+
         await updateAnalysesCache(env, analyses, version);
         return jsonResponse({
           status: 'success',

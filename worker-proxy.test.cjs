@@ -3476,6 +3476,57 @@ test('GET without version ignores stale KV cache and returns fresh DB data (clos
   }
 });
 
+// ── Stable version: concurrent fresh opens must NOT generate unique versions ──
+test('Concurrent GETs without version return the same version when data is unchanged', async () => {
+  const analysesCache = createMemoryKv();
+  const now = new Date().toISOString();
+  let dbCallCount = 0;
+
+  const pgMock = createPgMock(async (sql) => {
+    if (sql.includes('FROM analyses') && sql.includes('ORDER BY')) {
+      dbCallCount++;
+      return {
+        rows: [{
+          id: 'a1', coin: 'BTC', timeframe: '4h',
+          image: '', text: 'body', author: 'admin',
+          author_id: '123', created_at: now, updated_at: now,
+        }],
+      };
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+
+  const worker = loadWorker({ '@neondatabase/serverless': pgMock.module });
+  const env = createEnv({ DATABASE_URL: 'postgres://db.example/app', APP_CACHE: analysesCache });
+  const originalFetch = global.fetch;
+  global.fetch = async () => { throw new Error('no external fetch'); };
+
+  try {
+    // First GET (cold cache) → DB query → generates new version
+    const res1 = await worker.fetch(new Request('https://worker.example/api/analyses'), env);
+    const body1 = await res1.json();
+    assert.equal(body1.analyses.length, 1);
+    const v1 = body1.version;
+    assert.ok(typeof v1 === 'number' && v1 > 0, 'first version must be a positive timestamp');
+
+    // Second GET (no version param, simulates another user opening app)
+    // Data is identical → version must be STABLE (same as v1)
+    const res2 = await worker.fetch(new Request('https://worker.example/api/analyses'), env);
+    const body2 = await res2.json();
+    assert.equal(body2.analyses.length, 1);
+    assert.equal(body2.version, v1, 'version must be stable when data unchanged — prevents cascading invalidation');
+
+    // Third GET with matching version → unchanged
+    const res3 = await worker.fetch(new Request(`https://worker.example/api/analyses?version=${v1}`), env);
+    const body3 = await res3.json();
+    assert.equal(body3.unchanged, true, 'matching version should return unchanged');
+    assert.equal(dbCallCount, 2, 'should have exactly 2 DB queries (both without version), third hits Path A');
+
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('Non-admin cannot POST/PUT/DELETE analyses — all return 403 without DB touch (Task 5.6 auth boundary)', async () => {
   const dbTouched = { value: false };
   const analysesCache = createMemoryKv();
