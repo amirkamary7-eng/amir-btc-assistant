@@ -347,7 +347,7 @@ let _currentDetailSymbol = ''; // Current coin detail symbol (reliable, locale-i
 let sliderInterval = null;
 let currentSlide = 0;
 let editingAnalysisId = null;
-let analysisVersion = 0;
+let analysisVersion = null;
 let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
 let calendarEvents = [];
@@ -829,7 +829,7 @@ async function fetchAnalyses(force = false) {
         return false;
     }
     try {
-        const versionParam = force ? '' : (analysisVersion ? `?version=${analysisVersion}` : '');
+        const versionParam = force ? '' : (analysisVersion !== null ? `?version=${analysisVersion}` : '');
         const data = await apiFetch(`/api/analyses${versionParam}`);
         if (data.unchanged) return false;
         if (Array.isArray(data.analyses)) {
@@ -2484,19 +2484,36 @@ function renderAnalysisList() {
 function openAnalysisDetail(id) {
     const a = analyses.find(x => x.id === id);
     if (!a) return;
-    document.getElementById('analysis-detail-title').innerText = `${a.coin} (${a.timeframe})`;
-    document.getElementById('analysis-detail-image').src = a.image || 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop';
-    document.getElementById('analysis-detail-meta').innerText = `${a.author} • ${a.date}`;
+    const modal = document.getElementById('analysis-detail-modal');
+    document.getElementById('analysis-detail-coin').innerText = a.coin;
+    document.getElementById('analysis-detail-tf').innerText = a.timeframe || '1d';
+    const img = document.getElementById('analysis-detail-image');
+    img.src = a.image || '';
+    img.style.display = '';
+    document.getElementById('analysis-detail-author').innerText = a.author || '';
+    document.getElementById('analysis-detail-date').innerText = a.date || '';
     document.getElementById('analysis-detail-text').innerText = a.text;
-    document.getElementById('analysis-detail-modal').style.display = 'flex';
+    modal.classList.add('bs-open');
+    requestAnimationFrame(() => { modal.style.display = ''; });
 }
-/**
- * تحلیل جزئیات را می‌بندد.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
 function closeAnalysisDetail() {
-    document.getElementById('analysis-detail-modal').style.display = 'none';
+    const modal = document.getElementById('analysis-detail-modal');
+    modal.classList.remove('bs-open');
+    setTimeout(() => { modal.style.display = 'none'; }, 350);
+}
+function shareAnalysis() {
+    const a = analyses.find(x => x.id === document.getElementById('analysis-detail-coin')?.dataset?.id);
+    const coin = document.getElementById('analysis-detail-coin')?.innerText || '';
+    const text = document.getElementById('analysis-detail-text')?.innerText || '';
+    const shareText = `${coin}\n\n${text}`;
+    if (navigator.share) {
+        navigator.share({ title: coin, text: shareText }).catch(() => {});
+    } else if (navigator.clipboard) {
+        navigator.clipboard.writeText(shareText).then(() => {
+            const btn = document.querySelector('.bs-share-btn span');
+            if (btn) { const orig = btn.innerText; btn.innerText = 'کپی شد!'; setTimeout(() => btn.innerText = orig, 1500); }
+        });
+    }
 }
 
 //#endregion
@@ -3940,6 +3957,7 @@ window.closeAddAnalysisModal = closeAddAnalysisModal;
 window.submitAnalysis = submitAnalysis;
 window.openAnalysisDetail = openAnalysisDetail;
 window.closeAnalysisDetail = closeAnalysisDetail;
+window.shareAnalysis = shareAnalysis;
 window.deleteAnalysis = deleteAnalysis;
 window.openCoinDetail = openCoinDetail;
 window.closeCoinDetail = closeCoinDetail;

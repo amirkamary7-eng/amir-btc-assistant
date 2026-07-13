@@ -513,17 +513,36 @@
         </div>
     </div>
 
-    <!-- مودال نمایش تحلیل -->
-    <div id="analysis-detail-modal" class="modal full-modal" onclick="if(event.target===this) closeAnalysisDetail()">
-        <div class="modal-box modal-box-wide analysis-detail-box">
-            <div class="modal-header">
-                <h3 id="analysis-detail-title">تحلیل</h3>
-                <button class="modal-close-btn" onclick="closeAnalysisDetail()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    <!-- Analysis Detail Bottom Sheet -->
+    <div id="analysis-detail-modal" class="bs-overlay" onclick="if(event.target===this) closeAnalysisDetail()">
+        <div class="bs-sheet" id="analysis-detail-sheet">
+            <div class="bs-handle-bar"><div class="bs-handle"></div></div>
+            <div class="bs-header">
+                <div class="bs-header-info">
+                    <span id="analysis-detail-coin" class="bs-coin-badge"></span>
+                    <span id="analysis-detail-tf" class="bs-tf-badge"></span>
+                </div>
+                <button class="modal-close-btn" onclick="closeAnalysisDetail()" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
-            <img id="analysis-detail-image" src="" alt="" class="analysis-detail-img">
-            <div id="analysis-detail-meta" class="analysis-meta"></div>
-            <p id="analysis-detail-text" class="analysis-detail-text"></p>
-            <button class="submit-btn" onclick="closeAnalysisDetail()" data-i18n="close">بستن</button>
+            <div class="bs-image-wrap">
+                <img id="analysis-detail-image" src="" alt="" class="bs-image" onerror="this.style.display='none'">
+            </div>
+            <div class="bs-body">
+                <div class="bs-meta-row">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span id="analysis-detail-author"></span>
+                    <span class="bs-meta-dot"></span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    <span id="analysis-detail-date"></span>
+                </div>
+                <p id="analysis-detail-text" class="bs-text"></p>
+            </div>
+            <div class="bs-footer">
+                <button class="bs-share-btn" onclick="shareAnalysis()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                    <span data-i18n="share">اشتراک‌گذاری</span>
+                </button>
+            </div>
         </div>
     </div>
 

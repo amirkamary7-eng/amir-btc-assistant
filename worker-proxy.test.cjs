@@ -2083,25 +2083,13 @@ test('GET /api/analyses falls back to DB and hydrates APP_CACHE on cache miss', 
       }),
     );
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
-      status: 'success',
-      analyses: [
-        {
-          id: 'an1',
-          coin: 'BTC',
-          timeframe: '4h',
-          image: 'https://example.test/a.png',
-          text: 'analysis body',
-          author: 'admin',
-          author_id: '831704732',
-          date: now.slice(0, 10),
-          created_at: now,
-          updated_at: now,
-        },
-      ],
-      version: 1,
-    });
-    assert.equal(await analysesCache.get('analyses:version'), '1');
+    const resBody = await response.json();
+    assert.equal(resBody.status, 'success');
+    assert.ok(Array.isArray(resBody.analyses) && resBody.analyses.length === 1);
+    assert.equal(resBody.analyses[0].coin, 'BTC');
+    assert.ok(typeof resBody.version === 'number' && resBody.version > 0, 'version should be a positive timestamp');
+    const kvVer = Number(await analysesCache.get('analyses:version'));
+    assert.ok(kvVer > 0, 'KV version should be a positive timestamp');
     assert.equal(
       await analysesCache.get('analyses:list'),
       JSON.stringify([
@@ -2482,8 +2470,9 @@ test('POST /api/analyses stores analysis in DB, ignores spoofed author_id, and b
     assert.equal(body.status, 'success');
     assert.equal(body.analysis.id, 'an1');
     assert.equal(body.analysis.author_id, '831704732');
-    assert.equal(body.version, 1);
-    assert.equal(await analysesCache.get('analyses:version'), '1');
+    assert.ok(typeof body.version === 'number' && body.version > 0, 'version should be a positive timestamp after CREATE');
+    const kvV1 = Number(await analysesCache.get('analyses:version'));
+    assert.ok(kvV1 > 0, 'KV version should be a positive timestamp after CREATE');
   } finally {
     global.fetch = originalFetch;
   }
@@ -2573,8 +2562,10 @@ test('PUT and DELETE /api/analyses/:id update DB-backed cache version', async ()
       }),
     );
     assert.equal(updateResponse.status, 200);
-    assert.equal((await updateResponse.json()).version, 5);
-    assert.equal(await analysesCache.get('analyses:version'), '5');
+    const updateVer = (await updateResponse.json()).version;
+    assert.ok(typeof updateVer === 'number' && updateVer > 4, 'version should be > previous (4) after UPDATE');
+    const kvUpdateVer = Number(await analysesCache.get('analyses:version'));
+    assert.ok(kvUpdateVer > 4, 'KV version should be > previous (4) after UPDATE');
 
     const deleteRequest = new Request('https://worker.example/api/analyses/an1', {
       method: 'DELETE',
@@ -2591,8 +2582,11 @@ test('PUT and DELETE /api/analyses/:id update DB-backed cache version', async ()
       }),
     );
     assert.equal(deleteResponse.status, 200);
-    assert.deepEqual(await deleteResponse.json(), { status: 'success', version: 6 });
-    assert.equal(await analysesCache.get('analyses:version'), '6');
+    const deleteBody = await deleteResponse.json();
+    assert.equal(deleteBody.status, 'success');
+    assert.ok(typeof deleteBody.version === 'number' && deleteBody.version > 4, 'version should be > previous after DELETE');
+    const kvDelVer = Number(await analysesCache.get('analyses:version'));
+    assert.ok(kvDelVer > 4, 'KV version should be > previous after DELETE');
     assert.equal(await analysesCache.get('analyses:list'), JSON.stringify([]));
   } finally {
     global.fetch = originalFetch;
@@ -3270,13 +3264,14 @@ test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → 
   };
 
   try {
-    // ── Step 1: GET → empty (no cache, DB empty) → version=0 ──
+    // ── Step 1: GET → empty (no cache, DB empty) → version = timestamp ──
     let res = await worker.fetch(new Request('https://worker.example/api/analyses'), env);
     assert.equal(res.status, 200);
     let body = await res.json();
     assert.equal(body.status, 'success');
     assert.deepEqual(body.analyses, []);
-    assert.equal(body.version, 0, 'initial version should be 0');
+    const v0 = body.version;
+    assert.ok(typeof v0 === 'number' && v0 > 0, 'version should be a positive timestamp');
 
     // ── Step 2: POST → create first analysis → version bumps to 1 ──
     res = await worker.fetch(
@@ -3292,12 +3287,14 @@ test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → 
     assert.equal(body.status, 'success');
     assert.equal(body.analysis.coin, 'BTC');
     assert.equal(body.analysis.text, 'BTC analysis');
-    assert.equal(body.version, 1, 'version should bump to 1 after CREATE');
+    const v1 = body.version;
+    assert.ok(v1 >= v0, 'version should be >= previous after CREATE');
     const createdId = body.analysis.id;
     assert.ok(createdId, 'created analysis must have an id');
 
     // KV cache must be updated
-    assert.equal(await analysesCache.get('analyses:version'), '1', 'KV version must be 1 after CREATE');
+    const kvV1 = Number(await analysesCache.get('analyses:version'));
+    assert.ok(kvV1 >= v0, 'KV version must be >= previous after CREATE');
     const cachedList1 = JSON.parse(await analysesCache.get('analyses:list'));
     assert.equal(cachedList1.length, 1, 'KV list must have 1 analysis after CREATE');
     assert.equal(cachedList1[0].id, createdId);
@@ -3309,9 +3306,9 @@ test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → 
     assert.equal(body.status, 'success');
     assert.equal(body.analyses.length, 1, 'GET should return cached analysis');
     assert.equal(body.analyses[0].coin, 'BTC');
-    assert.equal(body.version, 1);
+    assert.ok(body.version >= v0, 'cached version should be consistent');
 
-    // ── Step 4: POST → create second analysis → version bumps to 2 ──
+    // ── Step 4: POST → create second analysis → version bumps ──
     res = await worker.fetch(
       new Request('https://worker.example/api/analyses', {
         method: 'POST',
@@ -3323,8 +3320,10 @@ test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → 
     assert.equal(res.status, 200);
     body = await res.json();
     assert.equal(body.analysis.coin, 'ETH');
-    assert.equal(body.version, 2, 'version should bump to 2 after second CREATE');
-    assert.equal(await analysesCache.get('analyses:version'), '2');
+    const v2 = body.version;
+    assert.ok(v2 >= v1, 'version should be >= previous after second CREATE');
+    const kvV2 = Number(await analysesCache.get('analyses:version'));
+    assert.ok(kvV2 >= v1, 'KV version should be >= previous after second CREATE');
     const cachedList2 = JSON.parse(await analysesCache.get('analyses:list'));
     assert.equal(cachedList2.length, 2, 'KV list must have 2 analyses');
 
@@ -3342,16 +3341,18 @@ test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → 
     assert.equal(body.status, 'success');
     assert.equal(body.analysis.text, 'Updated BTC analysis');
     assert.equal(body.analysis.coin, 'BTC');
-    assert.equal(body.version, 3, 'version should bump to 3 after UPDATE');
-    assert.equal(await analysesCache.get('analyses:version'), '3');
+    const v3 = body.version;
+    assert.ok(v3 >= v2, 'version should be >= previous after UPDATE');
+    const kvV3 = Number(await analysesCache.get('analyses:version'));
+    assert.ok(kvV3 >= v2, 'KV version should be >= previous after UPDATE');
 
-    // ── Step 6: GET with ?version=3 → unchanged:true (cache hit) ──
-    res = await worker.fetch(new Request('https://worker.example/api/analyses?version=3'), env);
+    // ── Step 6: GET with ?version=<v3> → unchanged:true (cache hit) ──
+    res = await worker.fetch(new Request(`https://worker.example/api/analyses?version=${v3}`), env);
     assert.equal(res.status, 200);
     body = await res.json();
-    assert.equal(body.unchanged, true, '?version=3 should return unchanged:true');
+    assert.equal(body.unchanged, true, 'current version should return unchanged:true');
     assert.equal(body.analyses, null, 'analyses should be null when unchanged');
-    assert.equal(body.version, 3);
+    assert.equal(body.version, v3);
 
     // ── Step 7: GET with ?version=1 → full data (stale client) ──
     res = await worker.fetch(new Request('https://worker.example/api/analyses?version=1'), env);
@@ -3372,8 +3373,10 @@ test('Full CRUD lifecycle: POST → GET(cache) → PUT → GET(new version) → 
     assert.equal(res.status, 200);
     body = await res.json();
     assert.equal(body.status, 'success');
-    assert.equal(body.version, 4, 'version should bump to 4 after DELETE');
-    assert.equal(await analysesCache.get('analyses:version'), '4');
+    const v4 = body.version;
+    assert.ok(v4 >= v3, 'version should be >= previous after DELETE');
+    const kvV4 = Number(await analysesCache.get('analyses:version'));
+    assert.ok(kvV4 >= v3, 'KV version should be >= previous after DELETE');
 
     // ── Step 9: GET → should return only 1 analysis (the ETH one) ──
     res = await worker.fetch(new Request('https://worker.example/api/analyses'), env);

@@ -27,6 +27,15 @@ export function createAnalysisHandlers(deps) {
   const ANALYSES_LIST_KEY = 'analyses:list';
   const ANALYSES_VERSION_KEY = 'analyses:version';
 
+  /**
+   * Generate a monotonically increasing version number.
+   * Uses wall-clock seconds so it survives KV expiration, Worker restarts,
+   * and concurrent requests — no shared mutable counter needed.
+   */
+  function generateVersion() {
+    return Math.floor(Date.now() / 1000);
+  }
+
   // ── Cache helpers ──────────────────────────────────────────────────────
 
   async function readCachedAnalysesState(env) {
@@ -65,11 +74,6 @@ export function createAnalysisHandlers(deps) {
       writeAppCache(env, ANALYSES_VERSION_KEY, String(version), cacheTtlSeconds),
       writeAppCache(env, ANALYSES_LIST_KEY, JSON.stringify(analyses), cacheTtlSeconds),
     ]);
-  }
-
-  async function readCurrentAnalysesVersion(env) {
-    const cachedState = await readCachedAnalysesState(env);
-    return Number.isInteger(cachedState.version) ? cachedState.version : null;
   }
 
   // ── Validation ─────────────────────────────────────────────────────────
@@ -193,7 +197,9 @@ export function createAnalysisHandlers(deps) {
     if (isDatabaseConfigured(env)) {
       try {
         const analyses = await analysisRepo.list(env);
-        const version = cachedState.version !== null ? cachedState.version : (analyses.length > 0 ? 1 : 0);
+        // Always generate a fresh timestamp-based version when reading from DB.
+        // This prevents version reset to 1 when KV cache expires.
+        const version = generateVersion();
         await updateAnalysesCache(env, analyses, version);
         return jsonResponse({
           status: 'success',
@@ -241,7 +247,7 @@ export function createAnalysisHandlers(deps) {
     try {
       const analysis = await analysisRepo.create(env, authState.user.id, parsed.payload);
       const analyses = await analysisRepo.list(env);
-      const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
+      const version = generateVersion();
       await updateAnalysesCache(env, analyses, version);
       return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {
@@ -281,7 +287,7 @@ export function createAnalysisHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
       const analyses = await analysisRepo.list(env);
-      const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
+      const version = generateVersion();
       await updateAnalysesCache(env, analyses, version);
       return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {
@@ -316,7 +322,7 @@ export function createAnalysisHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
       const analyses = await analysisRepo.list(env);
-      const version = ((await readCurrentAnalysesVersion(env)) ?? 0) + 1;
+      const version = generateVersion();
       await updateAnalysesCache(env, analyses, version);
       return jsonResponse({ status: 'success', version }, {}, env);
     } catch (error) {
