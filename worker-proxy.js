@@ -974,9 +974,9 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
     {
       sql: `
         INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
-        VALUES ($1, $2, 'referral_reward', $3, $4, NOW())
+        VALUES ($1, $2, $3, $4, $5, NOW())
       `,
-      params: [String(inviterId), Number(amount), `Invite reward for user ${String(inviteeId)}`, String(referralId)],
+      params: [String(inviterId), Number(amount), 'referral_reward', `Invite reward for user ${String(inviteeId)}`, String(referralId)],
     },
     {
       sql: alsoVerifyChannel
