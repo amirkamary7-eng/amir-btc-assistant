@@ -3149,6 +3149,32 @@ export default {
       // Requires Durable Object for true WebSocket, or simple SSE stream.
       // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
 
+      if (request.method === 'GET' && url.pathname === '/api/_diag/analyses-db') {
+        try {
+          const countResult = await queryDb(env, 'SELECT COUNT(*) as total FROM analyses');
+          const total = Number(countResult.rows[0]?.total || 0);
+          let rows = [];
+          if (total > 0) {
+            const allResult = await queryDb(env, 'SELECT id, coin, timeframe, author, author_id, created_at, updated_at FROM analyses ORDER BY created_at DESC LIMIT 10');
+            rows = allResult.rows;
+          }
+          const schemaResult = await queryDb(env, "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'analyses' ORDER BY ordinal_position");
+          // Check constraints and indexes
+          const constraintsResult = await queryDb(env, "
+            SELECT tc.constraint_name, tc.constraint_type, kcu.column_name
+            FROM information_schema.table_constraints tc
+            LEFT JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+            WHERE tc.table_name = 'analyses'
+            ORDER BY tc.constraint_type, kcu.column_name
+          ");
+          // Check all tables in public schema
+          const tablesResult = await queryDb(env, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name");
+          return jsonResponse({ db_row_count: total, rows, schema: schemaResult.rows, constraints: constraintsResult.rows, all_tables: tablesResult.rows.map(r => r.table_name), db_configured: isDatabaseConfigured(env) }, {}, env);
+        } catch (e) {
+          return jsonResponse({ error: e.message, stack: e.stack?.split('\n').slice(0, 5) }, { status: 500 }, env);
+        }
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
         return await analysisHandlers.handleList(request, env);
       }
