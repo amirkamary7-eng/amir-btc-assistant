@@ -1773,18 +1773,22 @@ async function fetchFarsiNews(env, categoryFilter) {
     });
 
     if (deduped.length > 0) {
-      // Cache the full (unfiltered) list
+      // Limit total cached articles to reduce payload size and KV storage
+      const MAX_NEWS_ARTICLES = 30;
+      const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
+
+      // Cache the full (unfiltered) trimmed list
       await writeAppCache(
         env,
         FARSI_NEWS_CACHE_KEY,
-        JSON.stringify(deduped),
+        JSON.stringify(trimmed),
         getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
       );
 
       // Apply category filter if requested
       const data = categoryFilter
-        ? deduped.filter((a) => a.category === categoryFilter)
-        : deduped;
+        ? trimmed.filter((a) => a.category === categoryFilter)
+        : trimmed;
 
       return {
         status: 'success',
