@@ -579,7 +579,9 @@ function isTelegramStartCommand(text) {
 
 function extractStartParam(text) {
   const match = /\/start(?:@\S+)?\s+(ref_\S+)/iu.exec(String(text || '').trim());
-  return match ? match[1] : null;
+  const result = match ? match[1] : null;
+  console.log(JSON.stringify({ scope: 'diag-extractStartParam', raw_text: String(text || '').trim(), extracted: result }));
+  return result;
 }
 
 function extractTelegramMessageContext(updatePayload) {
@@ -627,10 +629,12 @@ function buildStartReplyPayload(env, chatId, isMember, startParam) {
 
   // Build WebApp URL with startapp parameter if referral is present
   let webAppUrl = resolveWebAppUrl(env);
+  console.log(JSON.stringify({ scope: 'diag-buildStartReplyPayload', chatId, isMember, startParam, baseWebAppUrl: webAppUrl }));
   if (startParam) {
     const url = new URL(webAppUrl);
     url.searchParams.set('startapp', startParam);
     webAppUrl = url.toString();
+    console.log(JSON.stringify({ scope: 'diag-buildStartReplyPayload-startapp', finalUrl: webAppUrl }));
   }
 
   return {
@@ -973,7 +977,9 @@ async function ensureUserRow(env, userId) {
  * Solves H-R1 + H-R2: no possibility of double-reward or balance/rewarded drift.
  */
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
-  await queryDbTransaction(env, [
+  console.log(JSON.stringify({ scope: 'diag-creditReferralWithReward', inviterId, referralId, inviteeId, amount, alsoVerifyChannel }));
+  try {
+    await queryDbTransaction(env, [
     {
       sql: `
         INSERT INTO token_balances (user_id, balance, updated_at)
@@ -999,6 +1005,11 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       params: [referralId],
     },
   ]);
+  console.log(JSON.stringify({ scope: 'diag-creditReferralWithReward-SUCCESS' }));
+  } catch (err) {
+    console.error(JSON.stringify({ scope: 'diag-creditReferralWithReward-ERROR', error: err?.message, stack: err?.stack }));
+    throw err;
+  }
 }
 
 /**
@@ -1061,15 +1072,19 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
  *   also after channel join verification).
  */
 async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined, isNewUser) {
+  console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap', inviteeId, referrerId, channelJoined, isNewUser }));
+
   const normalizedReferrerId = normalizeOptionalString(referrerId);
 
   // M-R4: reject non-numeric referrer_id
   if (!normalizedReferrerId || !/^\d{1,20}$/.test(normalizedReferrerId) || normalizedReferrerId === String(inviteeId)) {
+    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'M-R4-invalid-or-self', normalizedReferrerId, inviteeId }));
     return null;
   }
 
   // Design: only new users can be referred
   if (!isNewUser) {
+    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'NOT-new-user' }));
     return null;
   }
 
@@ -1079,6 +1094,7 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     [normalizedReferrerId],
   );
   if (!inviterResult.rows[0]) {
+    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'inviter-not-found', normalizedReferrerId }));
     return null;
   }
 
@@ -1096,6 +1112,7 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   const existing = existingResult.rows[0] || null;
 
   if (existing) {
+    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-existing', referral_id: existing.id, rewarded: existing.rewarded }));
     // Race: another concurrent bootstrap already inserted the referral.
     // Delegate reward processing (idempotent — won't double-reward).
     await processPendingReferralReward(env, inviteeId, channelJoined);
@@ -1114,13 +1131,17 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     [normalizedReferrerId, String(inviteeId)],
   );
   const createdReferral = insertResult.rows[0] || null;
+  console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-INSERT', createdReferral, rowCount: insertResult.rowCount }));
   if (!createdReferral) {
     // Race lost — another request already inserted the referral.
+    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-race-lost' }));
     return { referral_id: null, already_exists: true, race_won: false };
   }
 
   // Delegate reward processing (idempotent — safe to call even if channel_joined=false)
+  console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-calling-reward', referral_id: createdReferral.id, channelJoined }));
   const rewardResult = await processPendingReferralReward(env, inviteeId, channelJoined);
+  console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-reward-result', rewardResult }));
 
   return { referral_id: createdReferral.id, rewarded: Boolean(rewardResult?.rewarded) };
 }
@@ -2849,6 +2870,8 @@ async function handleTelegramWebhook(request, env) {
 
       if (membership?.joined) {
         // User is a member → show WebApp button, answer callback with success
+        const callbackWebAppUrl = resolveWebAppUrl(env);
+        console.log(JSON.stringify({ scope: 'diag-callback-join-verify-SUCCESS', user_id: userId, webAppUrl: callbackWebAppUrl, note: 'NO-startapp-param-in-callback-URL' }));
         await answerTelegramCallbackQuery(env, callbackQuery.id, '✅ عضویت شما تأیید شد!', false);
         await editTelegramMessageReplyMarkup(env, chatId, messageId, {
           inline_keyboard: [
@@ -2856,7 +2879,7 @@ async function handleTelegramWebhook(request, env) {
               {
                 text: '🚀 باز کردن مینی‌اپ',
                 web_app: {
-                  url: resolveWebAppUrl(env),
+                  url: callbackWebAppUrl,
                 },
               },
             ],
@@ -2912,8 +2935,10 @@ async function handleTelegramWebhook(request, env) {
         result: membership,
       }),
     );
+    console.log(JSON.stringify({ scope: 'diag-start-handler', userId: messageContext.userId, startParam: messageContext.startParam, text: messageContext.text }));
     const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(membership?.joined), messageContext.startParam);
 
+    console.log(JSON.stringify({ scope: 'diag-start-reply-url', webAppUrl: replyPayload.reply_markup?.inline_keyboard?.[0]?.[0]?.web_app?.url || 'no-webapp-button' }));
     await sendTelegramMessage(env, replyPayload);
 
     // Sync the hamburger Menu Button URL with WEBAPP_URL (non-critical, fire-and-forget)

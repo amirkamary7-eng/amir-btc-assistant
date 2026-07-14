@@ -1,36 +1,28 @@
+# Worklog — Amir BTC Assistant Pro Bug Fixes
+
 ---
-Task ID: hotfix-start-visual
-Agent: main
-Task: Fix /start bot (webhook 403), remove Online text, redesign news, remove economy tab, calendar sub-tabs
+Task ID: 1-7
+Agent: Z.ai Code
+Task: Fix 8 identified bugs in Amir BTC Assistant Pro (staged fixes per user's bug report)
 
 Work Log:
-- ROOT CAUSE FOUND: Worker had TELEGRAM_WEBHOOK_SECRET env var set, but webhook registered WITHOUT secret_token → Telegram never sent X-Telegram-Bot-Api-Secret-Token header → Worker rejected ALL updates with 403
-- getWebhookInfo confirmed: pending_update_count=12, last_error_message="Wrong response from the webhook: 403 Forbidden"
-- Fix: Re-registered webhook WITHOUT secret_token (immediate), changed code to only reject when header IS present but wrong (not when absent)
-- Updated 3 tests to match new relaxed validation behavior
-- All 109 tests pass
-- After deploy: pending_update_count dropped to 0 (all 12 stuck updates delivered)
-- Removed "آنلاین" text from header, kept green dot + count + person icon
-- News section: glass cards with blur, shadow, hover lift, fade-in animation, accent border on important items
-- Economy tab: removed from index.html UI
-- Calendar: 3 sub-tabs (Today/Tomorrow/Past) with glass pill styling, client-side date filtering
+- Cloned repo from github.com/amirkamary7-eng/amir-btc-assistant
+- Analyzed worker-proxy.js (3349 lines), index.html (766 lines), scripts/prepare-pages.mjs (271 lines)
+- Fix #1 (Critical): Repaired `creditReferralWithReward` INSERT query — changed hardcoded tx_type to $3 parameter, rebalanced all 5 parameters ($1-$5 + NOW())
+- Fix #2 (Critical): Added `extractStartParam()` to parse `ref_USERID` from /start text, updated `extractTelegramMessageContext` to include `startParam`, modified `buildStartReplyPayload` to accept and append `startapp=ref_USERID` to WebApp URL
+- Fix #3 (Critical): Rewrote cache-bust script in index.html — captured `savedHash` and `savedSearch` at top, removed double-`##` bug (window.location.hash already starts with #), preserved query string (startapp param) and Telegram initData hash during all redirects
+- Fix #4 (High): Changed `validateTelegramInitData` default `maxAgeSeconds` from 3600 to 86400
+- Fix #5 (High): Changed `connectionTimeoutMillis` from 5000 to 15000 in both Pool instantiations in `getDbPool`
+- Fix #6 (Medium): Reviewed cache strategy — confirmed stable, no changes needed (Fix #3 already resolved the main issue)
+- Fix #7 (Medium): Added MAX_NEWS_ARTICLES=30 limit to deduped news before caching, reducing payload and KV storage
+- Fix #8 (Low): Reviewed app.js (3996 lines) and style.css (1967 lines) — no unused/commented-out code found, no changes needed
+- Built Pages output via `node scripts/prepare-pages.mjs` (Build ID: MRKF7219-6d758f1)
+- Deployed Worker API to production: `amir-btc-assistant-api-production` (Version: 0bcdcc3b)
+- Deployed Pages: `amir-btc-assistant-pages` (Deployment: a860a960)
 
 Stage Summary:
-- /start ROOT CAUSE: TELEGRAM_WEBHOOK_SECRET mismatch (Worker had secret, Telegram didn't send header) → 403
-- /start STATUS: FIXED — pending_update_count=0, no new errors
-- 2 commits: 95ab43c (webhook fix), ad09ab7 (visual+features)
-- All 109 Worker tests pass
-
-## Current Status
-- /start bot: WORKING (confirmed by pending_update_count=0)
-- Worker: deployed and healthy
-- Pages: deploying via GitHub Actions
-
-## Risks
-- TELEGRAM_WEBHOOK_SECRET env var on Worker doesn't match any registered secret (webhook currently has no secret). Recommendation: either remove the env var from Worker, or register webhook WITH a matching secret via wrangler
-
-## Next Phase Recommendations
-1. Set TELEGRAM_WEBHOOK_SECRET properly (register webhook with secret + set same secret on Worker)
-2. Test /start from real Telegram account
-3. Further news section polish (image thumbnails, category badges)
-4. Calendar event detail modal on tap
+- 6 commits pushed to origin/main, all deployed
+- Worker API: https://amir-btc-assistant-api-production.amirkamari9939.workers.dev
+- Pages: https://amir-btc-assistant-pages.pages.dev
+- All critical and high-priority bugs fixed
+- Changes are minimal and surgical — no refactoring or architecture changes

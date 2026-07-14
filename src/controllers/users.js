@@ -88,6 +88,9 @@ export function createUserHandlers(deps) {
         last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(tgUser?.last_name),
         lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
       });
+      const referrerId = normalizeOptionalString(payload.referrer_id);
+      console.log(JSON.stringify({ scope: 'diag-handleBootstrap', userId, referrer_id: referrerId, isNewUser }));
+
       await processReferralOnBootstrap(
         env,
         userId,
