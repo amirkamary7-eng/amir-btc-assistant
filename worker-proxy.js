@@ -824,7 +824,7 @@ function getDbPool(env) {
         connectionString: databaseUrl,
         max: 3,
         idleTimeoutMillis: 10000,
-        connectionTimeoutMillis: 5000,
+        connectionTimeoutMillis: 15000,
       }),
     );
   }
@@ -840,7 +840,7 @@ function getDbPool(env) {
         connectionString: databaseUrl,
         max: 3,
         idleTimeoutMillis: 10000,
-        connectionTimeoutMillis: 5000,
+        connectionTimeoutMillis: 15000,
       }),
     );
   }
