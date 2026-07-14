@@ -3159,19 +3159,45 @@ export default {
             rows = allResult.rows;
           }
           const schemaResult = await queryDb(env, "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'analyses' ORDER BY ordinal_position");
-          // Check constraints and indexes
-          const constraintsResult = await queryDb(env, "
-            SELECT tc.constraint_name, tc.constraint_type, kcu.column_name
-            FROM information_schema.table_constraints tc
-            LEFT JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
-            WHERE tc.table_name = 'analyses'
-            ORDER BY tc.constraint_type, kcu.column_name
-          ");
-          // Check all tables in public schema
+          const constraintsResult = await queryDb(env, "SELECT tc.constraint_name, tc.constraint_type, kcu.column_name FROM information_schema.table_constraints tc LEFT JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name WHERE tc.table_name = 'analyses' ORDER BY tc.constraint_type, kcu.column_name");
           const tablesResult = await queryDb(env, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name");
           return jsonResponse({ db_row_count: total, rows, schema: schemaResult.rows, constraints: constraintsResult.rows, all_tables: tablesResult.rows.map(r => r.table_name), db_configured: isDatabaseConfigured(env) }, {}, env);
         } catch (e) {
           return jsonResponse({ error: e.message, stack: e.stack?.split('\n').slice(0, 5) }, { status: 500 }, env);
+        }
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/_diag/analyses-db') {
+        try {
+          const testId = 'diag_' + Date.now().toString(36);
+          // Step 1: INSERT
+          const insertResult = await queryDb(env,
+            'INSERT INTO analyses (id, coin, timeframe, image, text, author, author_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) RETURNING id, coin, created_at',
+            [testId, 'BTC', '1d', '', 'Diagnostic test analysis', 'System', 'diag', ]
+          );
+          const inserted = insertResult.rows[0];
+          // Step 2: Immediate SELECT
+          const selectResult = await queryDb(env, 'SELECT id, coin, text, created_at FROM analyses WHERE id = $1', [testId]);
+          const selected = selectResult.rows[0];
+          // Step 3: Count
+          const countResult = await queryDb(env, 'SELECT COUNT(*) as total FROM analyses');
+          const total = Number(countResult.rows[0]?.total || 0);
+          // Step 4: DELETE the test row
+          await queryDb(env, 'DELETE FROM analyses WHERE id = $1', [testId]);
+          // Step 5: Count after delete
+          const countAfter = await queryDb(env, 'SELECT COUNT(*) as total FROM analyses');
+          const totalAfter = Number(countAfter.rows[0]?.total || 0);
+          return jsonResponse({
+            insert_ok: Boolean(inserted),
+            inserted,
+            select_ok: Boolean(selected),
+            selected,
+            count_before_delete: total,
+            count_after_delete: totalAfter,
+            db_configured: isDatabaseConfigured(env),
+          }, {}, env);
+        } catch (e) {
+          return jsonResponse({ error: e.message, stack: e.stack?.split('\n').slice(0, 10) }, { status: 500 }, env);
         }
       }
 
