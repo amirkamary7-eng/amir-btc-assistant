@@ -2913,7 +2913,9 @@ async function handleTelegramWebhook(request, env) {
         let callbackWebAppUrl = resolveWebAppUrl(env);
 
         // Retrieve pending referral from KV (stored during /start ref_xxx)
-        const pendingRef = await env.JOIN_CACHE.get(`pending_ref:${userId}`);
+        const pendingRef = (env.JOIN_CACHE && typeof env.JOIN_CACHE.get === 'function')
+          ? await env.JOIN_CACHE.get(`pending_ref:${userId}`)
+          : null;
         if (pendingRef) {
           const url = new URL(callbackWebAppUrl);
           url.searchParams.set('startapp', pendingRef);
@@ -2987,14 +2989,14 @@ async function handleTelegramWebhook(request, env) {
     await diagLog(env, { scope: 'diag-start-handler', userId: messageContext.userId, startParam: messageContext.startParam, text: messageContext.text });
 
     // Store pending referral in KV so check_join callback can retrieve it later
-    if (messageContext.startParam) {
+    if (messageContext.startParam && env.JOIN_CACHE && typeof env.JOIN_CACHE.put === 'function') {
       await env.JOIN_CACHE.put(`pending_ref:${messageContext.userId}`, messageContext.startParam, { expirationTtl: 600 });
       await diagLog(env, { scope: 'diag-start-stored-pending-ref', userId: messageContext.userId, startParam: messageContext.startParam });
     }
 
     // If no startParam in current /start, check KV for a previously stored one
     let effectiveStartParam = messageContext.startParam;
-    if (!effectiveStartParam) {
+    if (!effectiveStartParam && env.JOIN_CACHE && typeof env.JOIN_CACHE.get === 'function') {
       const storedRef = await env.JOIN_CACHE.get(`pending_ref:${messageContext.userId}`);
       if (storedRef) {
         effectiveStartParam = storedRef;
