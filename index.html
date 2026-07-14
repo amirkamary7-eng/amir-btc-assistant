@@ -419,7 +419,7 @@
         </div>
 
         <!-- AB Token Wallet Card -->
-        <div id="wallet-preview-card" class="wallet-preview-card skeleton-loading">
+        <div id="wallet-preview-card" class="wallet-preview-card skeleton-loading" onclick="if(window.WalletApp)WalletApp.openWallet()">
             <div class="wallet-watermark"><img src="assets/token-logo.png" alt=""></div>
         </div>
 
@@ -657,6 +657,7 @@
                     <span data-i18n="clear_all_notif">پاک کردن همه اعلانات</span>
                 </button>
             </div>
+    </div>
     </div>
 
     <!-- مودال تنظیمات -->

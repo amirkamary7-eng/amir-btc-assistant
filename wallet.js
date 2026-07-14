@@ -550,32 +550,21 @@ const WalletApp = (() => {
     if (data) {
       renderProfileCard(data);
     } else {
-      // API error — remove skeleton, show error state
+      // API error or transient failure — show fallback with safe defaults
+      // instead of a permanent "Unable to load" error state.
+      // New users or temporary DB issues should not break the UI.
       card.classList.remove('skeleton-loading');
-      card.innerHTML = `
-        <div class="wallet-watermark"><img src="${getTokenLogo()}" alt=""></div>
-        <div class="wallet-preview-top">
-          <div class="wallet-preview-logo"><img src="${getTokenLogo()}" alt="AB Token"></div>
-          <div class="wallet-preview-info">
-            <div class="wallet-preview-title">AB Token Wallet</div>
-            <div class="wallet-preview-subtitle">Amir BTC Assistant</div>
-          </div>
-        </div>
-        <div class="wallet-preview-balance">
-          <div class="balance-label">Current Balance</div>
-          <div class="balance-value" style="opacity:0.5;font-size:14px;">Unable to load</div>
-        </div>
-        <button class="wallet-open-btn" disabled style="opacity:0.5;cursor:default;">
-          Open Wallet
-          ${ICONS.arrowRight}
-        </button>
-      `;
+      const fallbackData = { balance: 0, tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 } };
+      renderProfileCard(fallbackData);
     }
   }
 
   function openWallet() {
     const page = document.getElementById('wallet-full-page');
     if (!page) return;
+    // Guard: if still in skeleton/pending state, ignore click to prevent dead state
+    const card = document.getElementById('wallet-preview-card');
+    if (card?.classList.contains('skeleton-loading')) return;
     page.innerHTML = buildWalletSkeleton();
     page.classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -609,22 +598,13 @@ const WalletApp = (() => {
       // Load referral stats
       loadWalletReferralStats();
     } else {
-      // API error — show error state instead of skeleton
-      const page = document.getElementById('wallet-full-page');
-      if (page) {
-        page.innerHTML = `
-          <div class="wallet-page-header">
-            <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="Back">${ICONS.back}</button>
-            <div class="wallet-page-header-info">
-              <div class="wallet-page-header-logo"><img src="${getTokenLogo()}" alt="AB"></div>
-              <div class="wallet-page-header-text">
-                <h2>AB Token Wallet</h2>
-                <span style="color:var(--text-secondary)">Unable to load wallet data</span>
-              </div>
-            </div>
-          </div>
-        `;
-      }
+      // API error — show fallback with safe defaults instead of permanent error state
+      const fallbackData = {
+        balance: 0,
+        tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 },
+        history: [],
+      };
+      renderWalletPage(fallbackData);
     }
 
     if (claimRes) {

@@ -3377,6 +3377,9 @@ function loadUser() {
         if (user.photo_url) document.getElementById('profile-avatar').src = user.photo_url;
         document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}?start=ref_${user.id}`;
         loadReferralStats();
+        // Fix: reload wallet card now that the user is confirmed — resolves race condition
+        // where loadProfileCard() ran earlier while UserContext was still pending
+        window.WalletApp?.loadProfileCard();
     } else if (UserContext.isPending()) {
         document.getElementById('profile-name').innerText = t('loading_user');
         document.getElementById('profile-username').innerText = '...';
