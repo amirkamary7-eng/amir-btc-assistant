@@ -153,6 +153,38 @@ async function writeAppCache(env, key, value, expirationTtl) {
   await env.APP_CACHE.put(key, value, { expirationTtl });
 }
 
+// ============================================================================
+// DIAG: Write diagnostic log entries to KV for retrieval via /api/_diag/referral-log
+// ============================================================================
+const DIAG_LOG_KEY = 'diag_referral_flow_log';
+const DIAG_LOG_MAX = 50;
+
+async function diagLog(env, entry) {
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
+  console.log(line);
+  try {
+    const existing = await env.APP_CACHE.get(DIAG_LOG_KEY);
+    let lines = existing ? existing.split('\n').filter(Boolean) : [];
+    lines.push(line);
+    if (lines.length > DIAG_LOG_MAX) lines = lines.slice(-DIAG_LOG_MAX);
+    await env.APP_CACHE.put(DIAG_LOG_KEY, lines.join('\n'), { expirationTtl: 600 });
+  } catch { /* KV write failure should not break the flow */ }
+}
+
+/** Fire-and-forget version for sync contexts (does not block caller) */
+function diagLogSync(env, entry) {
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
+  console.log(line);
+  if (env?.APP_CACHE?.put) {
+    env.APP_CACHE.get(DIAG_LOG_KEY).then(existing => {
+      let lines = existing ? existing.split('\n').filter(Boolean) : [];
+      lines.push(line);
+      if (lines.length > DIAG_LOG_MAX) lines = lines.slice(-DIAG_LOG_MAX);
+      return env.APP_CACHE.put(DIAG_LOG_KEY, lines.join('\n'), { expirationTtl: 600 });
+    }).catch(() => {});
+  }
+}
+
 async function readRateLimitCache(env, key) {
   if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.get !== 'function') {
     return null;
@@ -580,6 +612,8 @@ function isTelegramStartCommand(text) {
 function extractStartParam(text) {
   const match = /\/start(?:@\S+)?\s+(ref_\S+)/iu.exec(String(text || '').trim());
   const result = match ? match[1] : null;
+  // Note: no env available here — logged at call site via diag-start-handler
+  // console.log kept for wrangler-tail real-time viewing
   console.log(JSON.stringify({ scope: 'diag-extractStartParam', raw_text: String(text || '').trim(), extracted: result }));
   return result;
 }
@@ -629,12 +663,12 @@ function buildStartReplyPayload(env, chatId, isMember, startParam) {
 
   // Build WebApp URL with startapp parameter if referral is present
   let webAppUrl = resolveWebAppUrl(env);
-  console.log(JSON.stringify({ scope: 'diag-buildStartReplyPayload', chatId, isMember, startParam, baseWebAppUrl: webAppUrl }));
+  diagLogSync(env, { scope: 'diag-buildStartReplyPayload', chatId, isMember, startParam, baseWebAppUrl: webAppUrl });
   if (startParam) {
     const url = new URL(webAppUrl);
     url.searchParams.set('startapp', startParam);
     webAppUrl = url.toString();
-    console.log(JSON.stringify({ scope: 'diag-buildStartReplyPayload-startapp', finalUrl: webAppUrl }));
+    diagLogSync(env, { scope: 'diag-buildStartReplyPayload-startapp', finalUrl: webAppUrl });
   }
 
   return {
@@ -977,7 +1011,7 @@ async function ensureUserRow(env, userId) {
  * Solves H-R1 + H-R2: no possibility of double-reward or balance/rewarded drift.
  */
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
-  console.log(JSON.stringify({ scope: 'diag-creditReferralWithReward', inviterId, referralId, inviteeId, amount, alsoVerifyChannel }));
+  await diagLog(env, { scope: 'diag-creditReferralWithReward', inviterId, referralId, inviteeId, amount, alsoVerifyChannel });
   try {
     await queryDbTransaction(env, [
     {
@@ -1005,9 +1039,9 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       params: [referralId],
     },
   ]);
-  console.log(JSON.stringify({ scope: 'diag-creditReferralWithReward-SUCCESS' }));
+  await diagLog(env, { scope: 'diag-creditReferralWithReward-SUCCESS' });
   } catch (err) {
-    console.error(JSON.stringify({ scope: 'diag-creditReferralWithReward-ERROR', error: err?.message, stack: err?.stack }));
+    await diagLog(env, { scope: 'diag-creditReferralWithReward-ERROR', error: err?.message, stack: err?.stack });
     throw err;
   }
 }
@@ -1072,19 +1106,19 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
  *   also after channel join verification).
  */
 async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined, isNewUser) {
-  console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap', inviteeId, referrerId, channelJoined, isNewUser }));
+  await diagLog(env, { scope: 'diag-processReferralOnBootstrap', inviteeId, referrerId, channelJoined, isNewUser });
 
   const normalizedReferrerId = normalizeOptionalString(referrerId);
 
   // M-R4: reject non-numeric referrer_id
   if (!normalizedReferrerId || !/^\d{1,20}$/.test(normalizedReferrerId) || normalizedReferrerId === String(inviteeId)) {
-    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'M-R4-invalid-or-self', normalizedReferrerId, inviteeId }));
+    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'M-R4-invalid-or-self', normalizedReferrerId, inviteeId });
     return null;
   }
 
   // Design: only new users can be referred
   if (!isNewUser) {
-    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'NOT-new-user' }));
+    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'NOT-new-user' });
     return null;
   }
 
@@ -1094,7 +1128,7 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     [normalizedReferrerId],
   );
   if (!inviterResult.rows[0]) {
-    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'inviter-not-found', normalizedReferrerId }));
+    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'inviter-not-found', normalizedReferrerId });
     return null;
   }
 
@@ -1112,7 +1146,7 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   const existing = existingResult.rows[0] || null;
 
   if (existing) {
-    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-existing', referral_id: existing.id, rewarded: existing.rewarded }));
+    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-existing', referral_id: existing.id, rewarded: existing.rewarded });
     // Race: another concurrent bootstrap already inserted the referral.
     // Delegate reward processing (idempotent — won't double-reward).
     await processPendingReferralReward(env, inviteeId, channelJoined);
@@ -1131,17 +1165,17 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     [normalizedReferrerId, String(inviteeId)],
   );
   const createdReferral = insertResult.rows[0] || null;
-  console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-INSERT', createdReferral, rowCount: insertResult.rowCount }));
+  await diagLog(env, { scope: 'diag-processReferralOnBootstrap-INSERT', createdReferral, rowCount: insertResult.rowCount });
   if (!createdReferral) {
     // Race lost — another request already inserted the referral.
-    console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-race-lost' }));
+    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-race-lost' });
     return { referral_id: null, already_exists: true, race_won: false };
   }
 
   // Delegate reward processing (idempotent — safe to call even if channel_joined=false)
-  console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-calling-reward', referral_id: createdReferral.id, channelJoined }));
+  await diagLog(env, { scope: 'diag-processReferralOnBootstrap-calling-reward', referral_id: createdReferral.id, channelJoined });
   const rewardResult = await processPendingReferralReward(env, inviteeId, channelJoined);
-  console.log(JSON.stringify({ scope: 'diag-processReferralOnBootstrap-reward-result', rewardResult }));
+  await diagLog(env, { scope: 'diag-processReferralOnBootstrap-reward-result', rewardResult });
 
   return { referral_id: createdReferral.id, rewarded: Boolean(rewardResult?.rewarded) };
 }
@@ -2185,6 +2219,7 @@ const userHandlers = createUserHandlers({
   processReferralOnBootstrap,
   userRepo,
   watchlistRepo,
+  diagLog,
 });
 const notifyHandlers = createNotifyHandlers({
   jsonResponse,
@@ -2871,7 +2906,7 @@ async function handleTelegramWebhook(request, env) {
       if (membership?.joined) {
         // User is a member → show WebApp button, answer callback with success
         const callbackWebAppUrl = resolveWebAppUrl(env);
-        console.log(JSON.stringify({ scope: 'diag-callback-join-verify-SUCCESS', user_id: userId, webAppUrl: callbackWebAppUrl, note: 'NO-startapp-param-in-callback-URL' }));
+        await diagLog(env, { scope: 'diag-callback-join-verify-SUCCESS', user_id: userId, webAppUrl: callbackWebAppUrl, note: 'NO-startapp-param-in-callback-URL' });
         await answerTelegramCallbackQuery(env, callbackQuery.id, '✅ عضویت شما تأیید شد!', false);
         await editTelegramMessageReplyMarkup(env, chatId, messageId, {
           inline_keyboard: [
@@ -2935,10 +2970,11 @@ async function handleTelegramWebhook(request, env) {
         result: membership,
       }),
     );
-    console.log(JSON.stringify({ scope: 'diag-start-handler', userId: messageContext.userId, startParam: messageContext.startParam, text: messageContext.text }));
+    await diagLog(env, { scope: 'diag-start-handler', userId: messageContext.userId, startParam: messageContext.startParam, text: messageContext.text });
     const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(membership?.joined), messageContext.startParam);
 
-    console.log(JSON.stringify({ scope: 'diag-start-reply-url', webAppUrl: replyPayload.reply_markup?.inline_keyboard?.[0]?.[0]?.web_app?.url || 'no-webapp-button' }));
+    const finalWebAppUrl = (replyPayload.reply_markup && replyPayload.reply_markup.inline_keyboard && replyPayload.reply_markup.inline_keyboard[0] && replyPayload.reply_markup.inline_keyboard[0][0] && replyPayload.reply_markup.inline_keyboard[0][0].web_app) ? replyPayload.reply_markup.inline_keyboard[0][0].web_app.url : 'no-webapp-button';
+    await diagLog(env, { scope: 'diag-start-reply-url', webAppUrl: finalWebAppUrl });
     await sendTelegramMessage(env, replyPayload);
 
     // Sync the hamburger Menu Button URL with WEBAPP_URL (non-critical, fire-and-forget)
@@ -3241,6 +3277,19 @@ export default {
           }, {}, env);
         } catch (e) {
           return jsonResponse({ error: e.message, stack: e.stack?.split('\n').slice(0, 10) }, { status: 500 }, env);
+        }
+      }
+
+      // DIAG: Read referral flow logs from KV
+      if (request.method === 'GET' && url.pathname === '/api/_diag/referral-log') {
+        try {
+          const raw = await env.APP_CACHE.get(DIAG_LOG_KEY);
+          const lines = raw ? raw.split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return l; } }) : [];
+          return jsonResponse({ log_count: lines.length, logs: lines }, {
+            headers: { 'Cache-Control': 'no-store' },
+          }, env);
+        } catch (e) {
+          return jsonResponse({ error: e.message }, { status: 500 }, env);
         }
       }
 

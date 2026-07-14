@@ -22,6 +22,7 @@ export function createUserHandlers(deps) {
     processReferralOnBootstrap,
     userRepo,
     watchlistRepo,
+    diagLog,
   } = deps;
 
   /**
@@ -89,7 +90,7 @@ export function createUserHandlers(deps) {
         lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
       });
       const referrerId = normalizeOptionalString(payload.referrer_id);
-      console.log(JSON.stringify({ scope: 'diag-handleBootstrap', userId, referrer_id: referrerId, isNewUser }));
+      await diagLog(env, { scope: 'diag-handleBootstrap', userId, referrer_id: referrerId, isNewUser });
 
       await processReferralOnBootstrap(
         env,
