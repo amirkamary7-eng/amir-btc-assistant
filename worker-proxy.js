@@ -298,7 +298,7 @@ function timingSafeEqualSecret(a, b) {
   return timingSafeEqual(hashA, hashB);
 }
 
-function validateTelegramInitData(initData, botToken, maxAgeSeconds = 3600) {
+function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
   if (!initData || !botToken || botToken === 'REPLACE_WITH_TOKEN') {
     return null;
   }
