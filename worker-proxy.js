@@ -577,6 +577,11 @@ function isTelegramStartCommand(text) {
   return /^\/start(?:@\S+)?(?:\s|$)/u.test(String(text || '').trim());
 }
 
+function extractStartParam(text) {
+  const match = /\/start(?:@\S+)?\s+(ref_\S+)/iu.exec(String(text || '').trim());
+  return match ? match[1] : null;
+}
+
 function extractTelegramMessageContext(updatePayload) {
   const message = updatePayload?.message;
   const userId = message?.from?.id;
@@ -591,10 +596,11 @@ function extractTelegramMessageContext(updatePayload) {
     userId: String(userId),
     chatId,
     text: String(text || ''),
+    startParam: extractStartParam(text),
   };
 }
 
-function buildStartReplyPayload(env, chatId, isMember) {
+function buildStartReplyPayload(env, chatId, isMember, startParam) {
   if (!isMember) {
     return {
       chat_id: chatId,
@@ -619,6 +625,14 @@ function buildStartReplyPayload(env, chatId, isMember) {
     };
   }
 
+  // Build WebApp URL with startapp parameter if referral is present
+  let webAppUrl = resolveWebAppUrl(env);
+  if (startParam) {
+    const url = new URL(webAppUrl);
+    url.searchParams.set('startapp', startParam);
+    webAppUrl = url.toString();
+  }
+
   return {
     chat_id: chatId,
     text: '✅ خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
@@ -628,7 +642,7 @@ function buildStartReplyPayload(env, chatId, isMember) {
           {
             text: '🚀 باز کردن مینی‌اپ',
             web_app: {
-              url: resolveWebAppUrl(env),
+              url: webAppUrl,
             },
           },
         ],
@@ -2894,7 +2908,7 @@ async function handleTelegramWebhook(request, env) {
         result: membership,
       }),
     );
-    const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(membership?.joined));
+    const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(membership?.joined), messageContext.startParam);
 
     await sendTelegramMessage(env, replyPayload);
 
