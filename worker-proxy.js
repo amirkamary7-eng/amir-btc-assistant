@@ -1032,7 +1032,7 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
         INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
         VALUES ($1, $2, $3, $4, $5, NOW())
       `,
-      params: [String(inviterId), Number(amount), 'referral_reward', `Invite reward for user ${String(inviteeId)}`, Number(referralId)],
+      params: [String(inviterId), Number(amount), 'referral_reward', `Invite reward for user ${String(inviteeId)}`, String(referralId)],
     },
     {
       sql: alsoVerifyChannel
@@ -1904,7 +1904,23 @@ function parseEventTime(dateString, timeString) {
   // ── ISO 8601 support (e.g. "2026-07-05T21:00:00-04:00") ─────────
   if (dateString && /^\d{4}-\d{2}-\d{2}T/.test(dateString)) {
     const d = new Date(dateString);
-    return Number.isNaN(d.getTime()) ? null : d;
+    if (!Number.isNaN(d.getTime())) return d;
+    // ISO parse failed (malformed) — fall through to legacy parser
+  }
+
+  // ── Date-only ISO (e.g. "2026-07-05") ─────────────────────────────
+  if (dateString && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    const parts = dateString.split('-');
+    const year = Number(parts[0]);
+    const month = Number(parts[1]);
+    const day = Number(parts[2]);
+    if (year && month && day) {
+      const parsedTime = parseCalendarTimeParts(timeString);
+      if (parsedTime) {
+        return new Date(Date.UTC(year, month - 1, day, parsedTime.hour, parsedTime.minute, 0));
+      }
+      return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+    }
   }
 
   // ── Legacy MM-DD-YYYY + HH:MMam/pm format ───────────────────────
@@ -2043,13 +2059,19 @@ async function fetchCalendarEvents(env) {
       return left.timestamp.localeCompare(right.timestamp);
     });
 
-  await writeAppCache(
-    env,
-    CALENDAR_CACHE_KEY,
-    JSON.stringify(events),
-    getNumericEnv(env, 'CALENDAR_CACHE_TTL', 600),
-  );
+  // Only overwrite cache with valid (non-empty) data — preserve last good cache
+  // on API failure or empty feed to prevent calendar from going blank.
+  if (events.length > 0) {
+    await writeAppCache(
+      env,
+      CALENDAR_CACHE_KEY,
+      JSON.stringify(events),
+      getNumericEnv(env, 'CALENDAR_CACHE_TTL', 600),
+    );
+  }
 
+  // If new fetch yielded nothing but we had a (now-expired) cache, return empty
+  // so the frontend can show "no events" rather than stale data.
   return events;
 }
 

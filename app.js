@@ -980,9 +980,10 @@ async function loadCalendarEvents(force = false) {
  * زمان‌ها به منطقه زمانی کاربر تبدیل می‌شوند.
  */
 function groupCalendarEvents(events) {
+    const tz = 'Asia/Tehran';
     const now = new Date();
-    const userTz = now.getTimezoneOffset(); // minutes offset from UTC
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+    const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
     const tomorrowStart = new Date(todayStart.getTime() + 86400000);
     const dayAfterStart = new Date(todayStart.getTime() + 2 * 86400000);
 
@@ -998,8 +999,9 @@ function groupCalendarEvents(events) {
             return;
         }
 
-        const eventLocal = new Date(eventDate.getTime() - userTz * 60000);
-        const eventDay = new Date(eventLocal.getFullYear(), eventLocal.getMonth(), eventLocal.getDate());
+        // Convert event UTC to Tehran date for grouping
+        const eventParts = eventDate.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+        const eventDay = new Date(Date.UTC(Number(eventParts[0]), Number(eventParts[1]) - 1, Number(eventParts[2])));
 
         if (eventDay.getTime() === todayStart.getTime()) {
             groups.today.push(e);
@@ -1025,17 +1027,15 @@ function formatCalendarTime(timestamp) {
     if (!timestamp) return '';
     const d = new Date(timestamp);
     if (isNaN(d.getTime())) return '';
-    const now = new Date();
-    const userTz = now.getTimezoneOffset();
-    const local = new Date(d.getTime() - userTz * 60000);
-    const hh = String(local.getHours()).padStart(2, '0');
-    const mm = String(local.getMinutes()).padStart(2, '0');
-    const day = local.getDate();
+    const tz = 'Asia/Tehran';
+    const hh = d.toLocaleString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+    const day = d.toLocaleString('en-GB', { timeZone: tz, day: 'numeric' });
     const monthNames = currentLang === 'fa'
         ? ['ژانویه','فوریه','مارس','آوریل','مه','ژوئن','ژوئیه','اوت','سپتامبر','اکتبر','نوامبر','دسامبر']
         : ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const monthName = monthNames[local.getMonth()];
-    return { time: `${hh}:${mm}`, dayStr: `${day} ${monthName}` };
+    const monthIndex = Number(d.toLocaleString('en-GB', { timeZone: tz, month: 'numeric' })) - 1;
+    const monthName = monthNames[monthIndex] || '';
+    return { time: hh, dayStr: `${day} ${monthName}` };
 }
 
 /**

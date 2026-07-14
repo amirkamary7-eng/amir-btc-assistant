@@ -517,10 +517,59 @@ const WalletApp = (() => {
   // Public Actions
   // =============================================
   async function loadProfileCard() {
+    const card = document.getElementById('wallet-preview-card');
+    if (!card) return;
+
+    // Guest or pending users — show access-denied state, not skeleton
+    const uid = window.getUserId?.();
+    if (window.isGuestUserId?.(uid) || window.isPendingTelegramUserId?.(uid) || window.UserContext?.isPending?.()) {
+      card.classList.remove('skeleton-loading');
+      card.innerHTML = `
+        <div class="wallet-watermark"><img src="${getTokenLogo()}" alt=""></div>
+        <div class="wallet-preview-top">
+          <div class="wallet-preview-logo"><img src="${getTokenLogo()}" alt="AB Token"></div>
+          <div class="wallet-preview-info">
+            <div class="wallet-preview-title">AB Token Wallet</div>
+            <div class="wallet-preview-subtitle">Amir BTC Assistant</div>
+          </div>
+        </div>
+        <div class="wallet-preview-balance">
+          <div class="balance-label">Current Balance</div>
+          <div class="balance-value" style="opacity:0.5;font-size:14px;">Login to view wallet</div>
+        </div>
+        <button class="wallet-open-btn" disabled style="opacity:0.5;cursor:default;">
+          Open Wallet
+          ${ICONS.arrowRight}
+        </button>
+      `;
+      return;
+    }
+
     renderProfileCardSkeleton();
     const data = await fetchWallet();
     if (data) {
       renderProfileCard(data);
+    } else {
+      // API error — remove skeleton, show error state
+      card.classList.remove('skeleton-loading');
+      card.innerHTML = `
+        <div class="wallet-watermark"><img src="${getTokenLogo()}" alt=""></div>
+        <div class="wallet-preview-top">
+          <div class="wallet-preview-logo"><img src="${getTokenLogo()}" alt="AB Token"></div>
+          <div class="wallet-preview-info">
+            <div class="wallet-preview-title">AB Token Wallet</div>
+            <div class="wallet-preview-subtitle">Amir BTC Assistant</div>
+          </div>
+        </div>
+        <div class="wallet-preview-balance">
+          <div class="balance-label">Current Balance</div>
+          <div class="balance-value" style="opacity:0.5;font-size:14px;">Unable to load</div>
+        </div>
+        <button class="wallet-open-btn" disabled style="opacity:0.5;cursor:default;">
+          Open Wallet
+          ${ICONS.arrowRight}
+        </button>
+      `;
     }
   }
 
@@ -559,6 +608,23 @@ const WalletApp = (() => {
       }
       // Load referral stats
       loadWalletReferralStats();
+    } else {
+      // API error — show error state instead of skeleton
+      const page = document.getElementById('wallet-full-page');
+      if (page) {
+        page.innerHTML = `
+          <div class="wallet-page-header">
+            <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="Back">${ICONS.back}</button>
+            <div class="wallet-page-header-info">
+              <div class="wallet-page-header-logo"><img src="${getTokenLogo()}" alt="AB"></div>
+              <div class="wallet-page-header-text">
+                <h2>AB Token Wallet</h2>
+                <span style="color:var(--text-secondary)">Unable to load wallet data</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
     }
 
     if (claimRes) {
