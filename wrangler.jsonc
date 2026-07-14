@@ -21,7 +21,8 @@
         },
         "triggers": {
                 "crons": [
-                        "*/5 * * * *"
+                        "*/5 * * * *",
+                        "*/15 * * * *"
                 ]
         },
         // ============================================================================
@@ -70,7 +71,8 @@
                         "name": "amir-btc-assistant-api-staging",
                         "triggers": {
                                 "crons": [
-                                        "*/5 * * * *"
+                                        "*/5 * * * *",
+                                        "*/15 * * * *"
                                 ]
                         },
                         // ============================================================================
@@ -115,14 +117,16 @@
                                 "AI_DAILY_IMAGE_LIMIT": 3,
                                 "AI_COOLDOWN_SECONDS": 4,
                                 "REFERRAL_TOKENS_PER_INVITE": 3,
-                                "BOT_USERNAME": "Amir_BTC_AssistantBot"
+                                "BOT_USERNAME": "Amir_BTC_AssistantBot",
+                                "CMC_API_KEY": "REPLACE_WITH_YOUR_CMC_API_KEY"
                         }
                 },
                 "production": {
                         "name": "amir-btc-assistant-api-production",
                         "triggers": {
                                 "crons": [
-                                        "*/5 * * * *"
+                                        "*/5 * * * *",
+                                        "*/15 * * * *"
                                 ]
                         },
                         "kv_namespaces": [
@@ -155,7 +159,8 @@
                                 "AI_DAILY_IMAGE_LIMIT": 3,
                                 "AI_COOLDOWN_SECONDS": 4,
                                 "REFERRAL_TOKENS_PER_INVITE": 3,
-                                "BOT_USERNAME": "Amir_BTC_AssistantBot"
+                                "BOT_USERNAME": "Amir_BTC_AssistantBot",
+                                "CMC_API_KEY": "REPLACE_WITH_YOUR_CMC_API_KEY"
                         }
                 }
         }

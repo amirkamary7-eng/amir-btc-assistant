@@ -18,6 +18,7 @@ import { createNotifyHandlers } from './src/controllers/notify.js';
 import { createAssistantHandlers } from './src/controllers/assistant.js';
 import { createAnalysisRepository } from './src/repositories/analyses.js';
 import { createAnalysisHandlers } from './src/controllers/analyses.js';
+import { createMarketOverviewService } from './src/services/market_overview_service.js';
 
 /**
  * Cloudflare Worker Shell
@@ -2294,6 +2295,9 @@ const analysisHandlers = createAnalysisHandlers({
 });
 //#endregion
 
+// ── Market Overview Service (CMC) — all CMC calls centralized here ──
+const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCache, fetchJson });
+
 async function handleChartResolve(request, env) {
   const url = new URL(request.url);
   const rawSymbol = url.searchParams.get('symbol');
@@ -2448,39 +2452,7 @@ async function fetchGlobalStats(env) {
     }
   }
 
-  // Level 2: CoinMarketCap (requires CMC_PRO_API_KEY env var)
-  const cmcKey = env.CMC_PRO_API_KEY;
-  if (!stats && cmcKey) {
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
-      const res = await fetch('https://pro-api.coinmarketcap.com/v1/global-metrics/quotes/latest', {
-        headers: {
-          Accept: 'application/json',
-          'X-CMC_PRO_API_KEY': cmcKey,
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(tid);
-      if (res.ok) {
-        const body = await res.json();
-        if (body?.data) {
-          const q = body.data;
-          stats = {
-            totalMarketCap: q.quote?.USD?.total_market_cap || 0,
-            totalVolume: q.quote?.USD?.total_volume_24h || 0,
-            btcDominance: q.btc_dominance || 0,
-            source: 'coinmarketcap',
-          };
-          console.log('Global: CoinMarketCap success — mcap:', stats.totalMarketCap, 'btcDom:', stats.btcDominance);
-        }
-      }
-    } catch (e) {
-      console.warn('Global: CoinMarketCap failed', e.message || e);
-    }
-  }
-
-  // Level 3: CoinPaprika (free, no API key, reliable from CF Workers)
+  // Level 2: CoinPaprika (free, no API key, reliable from CF Workers)
   if (!stats) {
     try {
       const { ok, body } = await fetchJson('https://api.coinpaprika.com/v1/global');
@@ -3260,6 +3232,27 @@ export default {
         return await handleCalendarEvents(env);
       }
 
+      // ── Market Overview (CMC-powered, no auth required) ──
+      if (request.method === 'GET' && url.pathname === '/api/market/overview') {
+        const overview = await marketOverviewSvc.getCachedOverview(env);
+        if (overview) {
+          return jsonResponse({ status: 'success', ...overview }, {}, env);
+        }
+        return jsonResponse({ status: 'error', message: 'Market overview unavailable' }, { status: 503 }, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/market/overview/usage') {
+        // Admin-only: CMC usage monitoring
+        const authState = authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+        if (!isAdminTelegramId(env, authState.user.id)) {
+          return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
+        }
+        const usage = await marketOverviewSvc.getUsageLog(env);
+        const keyInfo = env.CMC_API_KEY ? await marketOverviewSvc.fetchCMCKeyInfo(env.CMC_API_KEY) : null;
+        return jsonResponse({ status: 'success', usage, keyInfo }, {}, env);
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/market') {
         const clientIp = request.headers.get('cf-connecting-ip') || 'unknown';
         if (await isMarketRateLimited(env, clientIp)) {
@@ -3501,6 +3494,10 @@ export default {
 
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(runScheduledAlertsBaseline(controller, env));
+    // Refresh CMC Market Overview every 15 minutes
+    if (env.CMC_API_KEY) {
+      ctx.waitUntil(marketOverviewSvc.refreshOverview(env));
+    }
   },
 };
 //#endregion

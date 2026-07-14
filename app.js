@@ -1322,6 +1322,24 @@ async function fetchWithProxy(url, options = {}) {
  * ورودی: پارامترهای `force = false` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
+/**
+ * بارگذاری داده‌های Market Overview از CMC (بدون نیاز به auth).
+ * فقط totalMarketCap, totalVolume, btcDominance, ethDominance, fearGreed, marketStatus.
+ * داده از کش Worker خوانده می‌شود — مستقیم به CoinMarketCap وصل نمی‌شود.
+ */
+async function loadMarketOverview() {
+    if (!API_BASE || globalMarketData?.source === 'coinmarketcap') return; // already fresh from CMC
+    try {
+        const res = await apiFetch('/api/market/overview');
+        if (res.status === 'success' && (res.totalMarketCap > 0 || res.fearGreedValue > 0)) {
+            globalMarketData = res;
+            console.log('[OVERVIEW] CMC data loaded — mcap:', res.totalMarketCap, 'fg:', res.fearGreedValue);
+        }
+    } catch (e) {
+        console.warn('[OVERVIEW] Failed to load CMC overview:', e);
+    }
+}
+
 async function loadMarketData(force = false) {
     const listEl = document.getElementById('coin-list');
     const refreshBtn = document.getElementById('market-refresh-btn');
@@ -1356,10 +1374,13 @@ async function loadMarketData(force = false) {
             `).join('');
         }
 
-        // Primary: backend /api/market (P0-2)
+        // Primary: backend /api/market (coin list) + CMC overview (parallel)
         if (API_BASE) {
+            // Fetch CMC overview in parallel — no dependency on coin list
+            const overviewPromise = loadMarketOverview();
             try {
                 const res = await apiFetch('/api/market');
+                await overviewPromise; // wait for overview too
                 if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
                     // Backend normalizes ALL sources to percentage format:
                     // CoinGecko/Binance Futures: already percentage (direct use)
