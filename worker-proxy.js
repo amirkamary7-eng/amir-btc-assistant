@@ -6,6 +6,8 @@ import { createWatchlistRepository } from './src/repositories/watchlist.js';
 import { createWatchlistHandlers } from './src/controllers/watchlist.js';
 import { createReferralRepository } from './src/repositories/referrals.js';
 import { createReferralHandlers } from './src/controllers/referrals.js';
+import { createWalletRepository } from './src/repositories/wallet.js';
+import { createWalletHandlers } from './src/controllers/wallet.js';
 import { createSessionRepository } from './src/repositories/sessions.js';
 import { createSessionHandlers } from './src/controllers/sessions.js';
 import { createTicketRepository } from './src/repositories/tickets.js';
@@ -1030,13 +1032,13 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
         INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
         VALUES ($1, $2, $3, $4, $5, NOW())
       `,
-      params: [String(inviterId), Number(amount), 'referral_reward', `Invite reward for user ${String(inviteeId)}`, String(referralId)],
+      params: [String(inviterId), Number(amount), 'referral_reward', `Invite reward for user ${String(inviteeId)}`, Number(referralId)],
     },
     {
       sql: alsoVerifyChannel
         ? 'UPDATE referrals SET channel_verified = TRUE, rewarded = TRUE WHERE id = $1'
         : 'UPDATE referrals SET rewarded = TRUE WHERE id = $1',
-      params: [referralId],
+      params: [Number(referralId)],
     },
   ]);
   await diagLog(env, { scope: 'diag-creditReferralWithReward-SUCCESS' });
@@ -1084,7 +1086,7 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
   await creditReferralWithReward(
     env,
     String(pending.inviter_id),
-    String(pending.id),
+    Number(pending.id),
     inviteeId,
     rewardAmount,
     true, // alsoVerifyChannel
@@ -2181,6 +2183,15 @@ const referralHandlers = createReferralHandlers({
   safeError,
   isDatabaseConfigured,
   referralRepo,
+});
+const walletRepo = createWalletRepository({ queryDb });
+const walletHandlers = createWalletHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  walletRepo,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({
@@ -3422,6 +3433,27 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/tokens') {
         return referralHandlers.handleTokens(request, env);
+      }
+
+      // Wallet API Routes
+      if (request.method === 'GET' && url.pathname === '/api/wallet') {
+        return walletHandlers.handleGetWallet(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/wallet/history') {
+        return walletHandlers.handleGetHistory(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/wallet/claim') {
+        return walletHandlers.handleGetClaimStatus(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/wallet/claim') {
+        return walletHandlers.handleClaimDaily(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/wallet/referral-stats') {
+        return walletHandlers.handleReferralStats(request, env);
       }
 
       if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {

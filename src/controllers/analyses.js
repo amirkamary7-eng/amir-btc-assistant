@@ -218,9 +218,15 @@ export function createAnalysisHandlers(deps) {
       }
     }
 
+    // DB not configured AND no cache — return error so frontend preserves its cache
+    if (cachedState.analyses === null) {
+      return jsonResponse(
+        { status: 'error', message: 'Database unavailable', analyses: null },
+        { status: 503 }, env);
+    }
     return jsonResponse({
       status: 'success',
-      analyses: cachedState.analyses ?? [],
+      analyses: cachedState.analyses,
       version: cachedState.version ?? 0,
     }, {}, env);
   }

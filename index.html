@@ -89,6 +89,7 @@
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="wallet.css">
     <!-- Build-time: prepare-pages.mjs replaces this with WORKER_API_URL if set -->
     <!-- Fallback: Production Worker URL — ensures Cloudflare Pages GitHub Integration also works -->
     <script>window.API_BASE = window.API_BASE || "https://amir-btc-assistant-api-production.amirkamari9939.workers.dev";</script>
@@ -415,6 +416,11 @@
                 <span class="online-dot"></span>
                 <span id="online-count">0</span> <span data-i18n="online_users">کاربر آنلاین</span>
             </div>
+        </div>
+
+        <!-- AB Token Wallet Card -->
+        <div id="wallet-preview-card" class="wallet-preview-card skeleton-loading">
+            <div class="wallet-watermark"><img src="assets/token-logo.png" alt=""></div>
         </div>
 
         <div class="referral-card">
@@ -767,8 +773,12 @@
     </button>
     <script src="notifications.js"></script>
     <script src="assistant.js"></script>
+    <script src="wallet.js"></script>
     <script src="app.js"></script>
     <!-- #endregion -->
     <!-- #endregion -->
+
+    <!-- AB Token Wallet Full Page -->
+    <div id="wallet-full-page" class="wallet-full-page"></div>
 </body>
 </html>

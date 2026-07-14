@@ -347,7 +347,7 @@ let _currentDetailSymbol = ''; // Current coin detail symbol (reliable, locale-i
 let sliderInterval = null;
 let currentSlide = 0;
 let editingAnalysisId = null;
-let analysisVersion = null;
+let analysisVersion = localStorage.getItem('analysisVersion') ? Number(localStorage.getItem('analysisVersion')) : null;
 let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
 let calendarEvents = [];
@@ -552,6 +552,22 @@ function getReferrerId() {
         } catch (e) {
             console.warn('[BOOT] getReferrerId parse error:', e);
         }
+    }
+    // 3) Fallback: URL query params (startapp, tgWebAppStartParam)
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        for (const key of ['startapp', 'tgWebAppStartParam']) {
+            const val = urlParams.get(key);
+            if (val && val.startsWith('ref_')) {
+                const id = val.slice(4);
+                if (/^\d{1,20}$/.test(id)) {
+                    console.log('[BOOT] getReferrerId from URL param', key + ':', id);
+                    return id;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('[BOOT] getReferrerId URL search parse error:', e);
     }
     console.log('[BOOT] getReferrerId: no valid referrer found');
     return null;
@@ -833,9 +849,16 @@ async function fetchAnalyses(force = false) {
         const data = await apiFetch(`/api/analyses${versionParam}`);
         if (data.unchanged) return false;
         if (Array.isArray(data.analyses)) {
+            // Preserve existing analyses if API returns empty but we had valid data
+            // (e.g. DB cold start, temporary unavailability that didn't throw)
+            if (data.analyses.length === 0 && analyses.length > 0) {
+                console.warn('fetchAnalyses: API returned empty but we have cached data — preserving cache');
+                return false;
+            }
             analyses = data.analyses;
             analysisVersion = data.version || 0;
             localStorage.setItem('analyses', JSON.stringify(analyses));
+            localStorage.setItem('analysisVersion', String(analysisVersion));
             return true;
         }
     } catch (e) {
@@ -3704,6 +3727,7 @@ function switchTab(pageId, btn) {
         loadUser();
         loadReferralStats();
         fetchOnlineCount();
+        if (window.WalletApp) WalletApp.loadProfileCard();
         tabLoaded.profile = true;
     }
 }
@@ -3992,5 +4016,11 @@ window.closeNewsModal = closeNewsModal;
 window.getUserId = getUserId;
 window.isInTelegram = isInTelegram;
 window.isGuestUserId = isGuestUserId;
+window.apiFetch = apiFetch;
+window.getTelegramInitData = getTelegramInitData;
+window.getTg = getTg;
+window.getTelegramUser = getTelegramUser;
+window.UserContext = UserContext;
+Object.defineProperty(window, 'BOT_USERNAME', { get: () => BOT_USERNAME });
 
 //#endregion
