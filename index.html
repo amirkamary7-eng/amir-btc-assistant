@@ -23,12 +23,20 @@
       var STORAGE_KEY = 'app_build_id';
       var FORCE_BUST_KEY = 'app_cache_bust';
 
+      // Capture hash and search immediately — before anything can alter them.
+      // window.location.hash already includes the leading '#', so never prepend another one.
+      // Also preserve query string (e.g. startapp=ref_xxx) for referral tracking.
+      var savedHash = window.location.hash || '';
+      var savedSearch = window.location.search || '';
+
       // Step 1: Check if a forced cache-bust is pending (set by previous session)
       var pendingBust = sessionStorage.getItem(FORCE_BUST_KEY);
       if (pendingBust) {
         sessionStorage.removeItem(FORCE_BUST_KEY);
         // Append a unique query string to bust any intermediate cache
-        window.location.replace(window.location.pathname + '?_cb=' + Date.now() + '#' + window.location.hash);
+        // Preserve original search params (startapp) and hash (Telegram initData)
+        var bustUrl = window.location.pathname + savedSearch + (savedSearch ? '&' : '?') + '_cb=' + Date.now() + savedHash;
+        window.location.replace(bustUrl);
         return;
       }
 
@@ -38,8 +46,9 @@
       if (storedBuildId && storedBuildId !== BUILD_ID) {
         // Build ID changed → new deploy detected from injected value
         localStorage.setItem(STORAGE_KEY, BUILD_ID);
-        // Hard reload to get fresh assets
-        window.location.replace(window.location.pathname + '?_v=' + BUILD_ID + '#' + window.location.hash);
+        // Hard reload to get fresh assets — preserve search and hash
+        var versionUrl = window.location.pathname + savedSearch + (savedSearch ? '&' : '?') + '_v=' + BUILD_ID + savedHash;
+        window.location.replace(versionUrl);
         return;
       }
 
