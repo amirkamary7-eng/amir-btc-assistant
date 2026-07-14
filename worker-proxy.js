@@ -2905,8 +2905,17 @@ async function handleTelegramWebhook(request, env) {
 
       if (membership?.joined) {
         // User is a member → show WebApp button, answer callback with success
-        const callbackWebAppUrl = resolveWebAppUrl(env);
-        await diagLog(env, { scope: 'diag-callback-join-verify-SUCCESS', user_id: userId, webAppUrl: callbackWebAppUrl, note: 'NO-startapp-param-in-callback-URL' });
+        let callbackWebAppUrl = resolveWebAppUrl(env);
+
+        // Retrieve pending referral from KV (stored during /start ref_xxx)
+        const pendingRef = await env.JOIN_CACHE.get(`pending_ref:${userId}`);
+        if (pendingRef) {
+          const url = new URL(callbackWebAppUrl);
+          url.searchParams.set('startapp', pendingRef);
+          callbackWebAppUrl = url.toString();
+        }
+
+        await diagLog(env, { scope: 'diag-callback-join-verify-SUCCESS', user_id: userId, webAppUrl: callbackWebAppUrl, had_pending_ref: Boolean(pendingRef) });
         await answerTelegramCallbackQuery(env, callbackQuery.id, '✅ عضویت شما تأیید شد!', false);
         await editTelegramMessageReplyMarkup(env, chatId, messageId, {
           inline_keyboard: [
@@ -2971,7 +2980,24 @@ async function handleTelegramWebhook(request, env) {
       }),
     );
     await diagLog(env, { scope: 'diag-start-handler', userId: messageContext.userId, startParam: messageContext.startParam, text: messageContext.text });
-    const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(membership?.joined), messageContext.startParam);
+
+    // Store pending referral in KV so check_join callback can retrieve it later
+    if (messageContext.startParam) {
+      await env.JOIN_CACHE.put(`pending_ref:${messageContext.userId}`, messageContext.startParam, { expirationTtl: 600 });
+      await diagLog(env, { scope: 'diag-start-stored-pending-ref', userId: messageContext.userId, startParam: messageContext.startParam });
+    }
+
+    // If no startParam in current /start, check KV for a previously stored one
+    let effectiveStartParam = messageContext.startParam;
+    if (!effectiveStartParam) {
+      const storedRef = await env.JOIN_CACHE.get(`pending_ref:${messageContext.userId}`);
+      if (storedRef) {
+        effectiveStartParam = storedRef;
+        await diagLog(env, { scope: 'diag-start-recovered-pending-ref', userId: messageContext.userId, storedRef });
+      }
+    }
+
+    const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(membership?.joined), effectiveStartParam);
 
     const finalWebAppUrl = (replyPayload.reply_markup && replyPayload.reply_markup.inline_keyboard && replyPayload.reply_markup.inline_keyboard[0] && replyPayload.reply_markup.inline_keyboard[0][0] && replyPayload.reply_markup.inline_keyboard[0][0].web_app) ? replyPayload.reply_markup.inline_keyboard[0][0].web_app.url : 'no-webapp-button';
     await diagLog(env, { scope: 'diag-start-reply-url', webAppUrl: finalWebAppUrl });

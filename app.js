@@ -3331,13 +3331,13 @@ function loadUser() {
         document.getElementById('profile-username').innerText = user.username ? `@${user.username}` : '@guest';
         document.getElementById('profile-id-num').innerText = user.id || '000000';
         if (user.photo_url) document.getElementById('profile-avatar').src = user.photo_url;
-        document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}/app?startapp=ref_${user.id}`;
+        document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}?start=ref_${user.id}`;
         loadReferralStats();
     } else if (UserContext.isPending()) {
         document.getElementById('profile-name').innerText = t('loading_user');
         document.getElementById('profile-username').innerText = '...';
         document.getElementById('profile-id-num').innerText = '...';
-        document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}/app`;
+        document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}?start=ref_`;
     } else if (UserContext.isGuest()) {
         document.getElementById('profile-name').innerText = t('guest');
         document.getElementById('profile-username').innerText = '@guest';
