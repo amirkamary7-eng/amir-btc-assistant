@@ -4772,6 +4772,31 @@ test('Unhandled route error returns JSON 500 (not crash)', async () => {
 
 
 // ============================================================================
+// Diagnostic endpoints — blocked in production, available in development
+// ============================================================================
+
+test('Diagnostic endpoints return 404 in production', async () => {
+  const worker = loadWorker();
+  const prodEnv = createEnv({ APP_ENV: 'production' });
+
+  const endpoints = [
+    'GET /api/_diag/analyses-db',
+    'POST /api/_diag/analyses-db',
+    'GET /api/_diag/referral-log',
+  ];
+
+  for (const desc of endpoints) {
+    const [method, path] = desc.split(' ');
+    const response = await worker.fetch(
+      new Request(`https://w.example${path}`, { method }),
+      prodEnv,
+    );
+    assert.equal(response.status, 404, `${desc} should be 404 in production`);
+  }
+});
+
+
+// ============================================================================
 // C-1 + C-3: Production auth — no ?user_id= or body.user_id fallback
 // ============================================================================
 

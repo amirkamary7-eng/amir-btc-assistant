@@ -3307,6 +3307,11 @@ export default {
       // Requires Durable Object for true WebSocket, or simple SSE stream.
       // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
 
+      // Diagnostic endpoints — development only, block in production
+      if (/^\/api\/_diag\//.test(url.pathname) && !isDevMode(env)) {
+        return jsonResponse({ detail: 'Not found' }, { status: 404 }, env);
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/_diag/analyses-db') {
         try {
           const countResult = await queryDb(env, 'SELECT COUNT(*) as total FROM analyses');
