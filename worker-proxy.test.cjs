@@ -4844,6 +4844,45 @@ test('AI rate limit: fresh user is not blocked', async () => {
   }
 });
 
+test('AI providers pass AbortSignal to external fetch calls (timeout wiring)', async () => {
+  const worker = loadWorker();
+  const fakeUser = { id: 888, first_name: 'Timeout' };
+  const fakeInitData = buildInitData('test-bot-token', fakeUser);
+
+  const request = new Request('https://w.example/api/assistant/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Telegram-Init-Data': fakeInitData,
+    },
+    body: JSON.stringify({ message: 'test timeout signal' }),
+  });
+
+  const capturedInits = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    capturedInits.push({ url: String(url), signal: init?.signal });
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    await worker.fetch(request, createEnv({
+      RATE_LIMITS: createMemoryKv(),
+      APP_CACHE: createMemoryKv(),
+      JOIN_CACHE: createMemoryKv(),
+      SESSION_CACHE: createMemoryKv(),
+      GEMINI_API_KEY: 'gemini-key',
+    }));
+
+    assert.equal(capturedInits.length, 1, 'should call Gemini once');
+    assert.ok(capturedInits[0].signal instanceof AbortSignal, 'Gemini fetch must include AbortSignal');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 
 // ============================================================================
 // P2-3: Global Error Handler — returns 500 for unexpected errors

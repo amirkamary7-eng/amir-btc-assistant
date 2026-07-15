@@ -1719,10 +1719,14 @@ async function translateToFarsi(text, env) {
   // ── Fallback: Google Translate (unofficial) ───────────────────────
   try {
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=fa&dt=t&q=${encodeURIComponent(text)}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
     const response = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) return text;
 
@@ -2034,13 +2038,17 @@ async function fetchCalendarFeed() {
 
   for (const url of urls) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
       const response = await fetch(url, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
           'User-Agent': 'Mozilla/5.0',
         },
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         continue;
