@@ -104,7 +104,7 @@ export function createAnalysisHandlers(deps) {
       { name: 'coin', required: true, minLength: 1, maxLength: 16 },
       { name: 'timeframe', required: false, defaultValue: '1d', maxLength: 16 },
       { name: 'image', required: false, defaultValue: '', maxLength: 512 },
-      { name: 'text', required: true, minLength: 1 },
+      { name: 'text', required: true, minLength: 1, maxLength: 50000 },
       ...(requireAuthor ? [{ name: 'author', required: true, minLength: 1, maxLength: 128 }] : []),
     ];
 

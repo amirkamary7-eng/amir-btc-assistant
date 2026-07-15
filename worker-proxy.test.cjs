@@ -2452,6 +2452,43 @@ test('initData with recent auth_date still works after max_age reduction (Task 4
   }
 });
 
+test('POST /api/analyses rejects text field exceeding 50000 characters', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('DB should not be reached for validation failure');
+  };
+
+  try {
+    const oversizedText = 'x'.repeat(50001);
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({
+        coin: 'btc',
+        timeframe: '4h',
+        image: '',
+        text: oversizedText,
+        author: 'Desk',
+      }),
+    });
+
+    const response = await worker.fetch(request, createEnv({ DATABASE_URL: 'postgres://x/db' }));
+    assert.equal(response.status, 422);
+    const body = await response.json();
+    assert.deepEqual(body.detail[0].loc, ['body', 'text']);
+    assert.equal(body.detail[0].type, 'string_too_long');
+    assert.equal(body.detail[0].ctx.max_length, 50000);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('POST /api/analyses stores analysis in DB, ignores spoofed author_id, and bumps cache version', async () => {
   const now = new Date().toISOString();
   const analysesCache = createMemoryKv();
