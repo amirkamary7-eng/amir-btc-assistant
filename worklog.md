@@ -101,3 +101,67 @@ Stage Summary:
 - Root cause: Missing authentication headers and API_BASE prefix on all wallet API calls
 - Fix: Use the existing apiFetch() utility (which all other app features already use)
 - NOTE: Cannot fully E2E test locally — requires Telegram WebApp environment + Cloudflare Worker backend
+
+---
+Task ID: 12
+Agent: Z.ai Code
+Task: Pre-deploy hardening — review Telegram API failure behavior in requireChannelJoin/resolveChannelMembership
+
+Work Log:
+- Read `requireChannelJoin()` (worker-proxy.js:424-440) and `resolveChannelMembership()` (worker-proxy.js:1299-1369)
+- Read `checkChannelMembership()` (worker-proxy.js:1260-1297) and `getChatMemberDebugPayload()` (worker-proxy.js:1215-1258)
+- Traced all 5 failure scenarios:
+  1. Cache hit → ALLOWED (Telegram irrelevant)
+  2. Cache miss + DB says joined → ALLOWED (Telegram irrelevant)
+  3. Cache miss + DB says false + Telegram fails → BLOCKED (correct: no evidence of membership)
+  4. Cache miss + DB down + Telegram fails → BLOCKED (correct: app inoperable anyway)
+  5. forceRefresh + Telegram fails + DB says joined → ALLOWED (DB fallback works)
+- Confirmed `resolveChannelMembership` already implements 3-tier fallback: KV Cache → DB → Telegram API, with DB+Cache fallback on API error (lines 1341-1355)
+- Decision: **NO CHANGE** — deny-by-default is correct because only users with zero evidence of membership are blocked
+
+Verification:
+- 111/111 tests pass (no code changes → no regression risk)
+- Manual code review of all 6 call sites of resolveChannelMembership confirmed consistency
+
+Stage Summary:
+- No code modified
+- Design validated: 3-tier fallback chain prevents false blocking of known members during Telegram outages
+- Deny-by-default only affects users with no membership evidence in any data source
+- Project is ready for deployment
+
+---
+Task ID: 13
+Agent: Z.ai Code
+Task: Deploy Phase 2 (e668c41) to Cloudflare Production
+
+Work Log:
+- git status: clean (only worklog.md uncommitted — non-functional)
+- git log: HEAD = e668c41 feat(security): mandatory channel join verification
+- npm install: @neondatabase/serverless resolved
+- Worker deploy: `npx wrangler deploy --env production` → SUCCESS
+- Pages build: `node scripts/prepare-pages.mjs` → Build ID: MRLSGKJV-e668c41
+- Pages deploy: `npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages` → SUCCESS
+- Smoke tests: 9/9 passed
+
+Deployment Details:
+- Worker Version ID: 38a576dc-9000-4fc7-83c8-989f63fef8cf
+- Worker URL: https://amir-btc-assistant-api-production.amirkamari9939.workers.dev
+- Pages Deployment ID: 08fa39c7-002a-4283-a513-c9f51413e9b4
+- Pages URL: https://amir-btc-assistant-pages.pages.dev
+- Deploy Time: 2026-07-15T07:58:59Z
+
+Smoke Test Results:
+1. GET /api/health → 200 ok, bot_configured, database_ready ✅
+2. GET /api/watchlist (no auth) → 401 ✅
+3. GET /api/wallet (no auth) → 401 ✅
+4. GET /api/analyses (public) → 200 success ✅
+5. Pages HTML → 200 ✅
+6. join-lock-overlay in HTML → FOUND ✅
+7. recheckJoinMembership in hashed JS → FOUND ✅
+8. POST /api/users/check-join (no auth) → 401 "Missing Telegram init data" ✅
+9. POST /api/users/bootstrap (no auth) → 401 ✅
+
+Stage Summary:
+- Phase 2 deployed to production (Worker + Pages)
+- All smoke tests pass
+- WARNING: ai binding not in env.production (non-blocking, Phase 3 concern)
