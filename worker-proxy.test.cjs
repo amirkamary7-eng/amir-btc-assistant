@@ -632,6 +632,69 @@ test('POST /api/notify returns standardized success payload when Telegram send s
   }
 });
 
+test('POST /api/notify returns 429 when daily rate limit (5/day) is exceeded', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 54321, first_name: 'RateLimitUser' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+
+  // Pre-fill daily counter to 5 (the limit)
+  const today = new Date().toISOString().slice(0, 10);
+  await rateLimits.put(`notify:54321:${today}`, '5');
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(JSON.stringify({ ok: true }), { status: 200 });
+
+  try {
+    const request = new Request('https://worker.example/api/notify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ message: 'should be blocked' }),
+    });
+    const response = await worker.fetch(request, createEnv({ RATE_LIMITS: rateLimits }));
+    assert.equal(response.status, 429);
+    const body = await response.json();
+    assert.equal(body.reason, 'rate_limited');
+    assert.equal(body.retry_after, 86400);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('POST /api/notify returns 429 when burst guard lock is active', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 54322, first_name: 'BurstUser' };
+  const initData = buildInitData('test-bot-token', authUser);
+  const rateLimits = createMemoryKv();
+
+  // Pre-fill burst lock
+  await rateLimits.put('notify:lock:54322', '1');
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(JSON.stringify({ ok: true }), { status: 200 });
+
+  try {
+    const request = new Request('https://worker.example/api/notify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ message: 'should be blocked by burst guard' }),
+    });
+    const response = await worker.fetch(request, createEnv({ RATE_LIMITS: rateLimits }));
+    assert.equal(response.status, 429);
+    const body = await response.json();
+    assert.equal(body.reason, 'rate_limited');
+    assert.equal(body.retry_after, 2);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('POST / accepts Telegram webhook payloads as a compatibility alias', async () => {
   const worker = loadWorker();
   const { stub, calls } = createFetchStub(async () =>
