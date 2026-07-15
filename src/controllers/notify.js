@@ -56,6 +56,11 @@ export function createNotifyHandlers(deps) {
         buildBodyFieldValidationError('message', 'string_too_short', 'String should have at least 1 character', message, { min_length: 1 }),
         { status: 422 }, env);
     }
+    if (message.length > 4096) {
+      return jsonResponse(
+        buildBodyFieldValidationError('message', 'string_too_long', 'String should have at most 4096 characters', message, { max_length: 4096 }),
+        { status: 422 }, env);
+    }
 
     if (!isBotConfigured(env)) {
       return jsonResponse({ status: 'skipped', sent: false, reason: 'bot_not_configured' }, { status: 200 }, env);
