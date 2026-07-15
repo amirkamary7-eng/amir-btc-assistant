@@ -15,6 +15,8 @@ import { createTicketHandlers } from './src/controllers/tickets.js';
 import { createUserRepository } from './src/repositories/users.js';
 import { createUserHandlers } from './src/controllers/users.js';
 import { createNotifyHandlers } from './src/controllers/notify.js';
+import { createNotificationRepository } from './src/repositories/notifications.js';
+import { createNotificationHandlers } from './src/controllers/notifications.js';
 import { createAssistantHandlers } from './src/controllers/assistant.js';
 import { createAnalysisRepository } from './src/repositories/analyses.js';
 import { createAnalysisHandlers } from './src/controllers/analyses.js';
@@ -2300,6 +2302,15 @@ const notifyHandlers = createNotifyHandlers({
   isBotConfigured,
   sendTelegramMessage,
 });
+const notificationRepo = createNotificationRepository({ queryDb });
+const notificationHandlers = createNotificationHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  notificationRepo,
+});
 const assistantHandlers = createAssistantHandlers({
   jsonResponse,
   optionalTelegramAuth,
@@ -3390,7 +3401,7 @@ export default {
       // Unprotected routes (health, market, charts, calendar, public analyses, bootstrap) are above this line.
       let _protectedUser = null;
       let _joinBlocked = null;
-      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify)/;
+      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications)/;
       const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
 
       if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
@@ -3452,6 +3463,19 @@ export default {
       if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
         const alertId = url.pathname.split('/')[3] || '';
         return await alertHandlers.handleDelete(request, env, alertId);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/notifications') {
+        return await notificationHandlers.handleList(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/notifications/read-all') {
+        return await notificationHandlers.handleMarkAllRead(request, env);
+      }
+
+      if (request.method === 'POST' && /^\/api\/notifications\/[^/]+\/read$/u.test(url.pathname)) {
+        const notificationId = url.pathname.split('/')[3] || '';
+        return await notificationHandlers.handleMarkRead(request, env, notificationId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {

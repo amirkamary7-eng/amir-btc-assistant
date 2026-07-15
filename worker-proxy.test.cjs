@@ -5584,3 +5584,187 @@ test('5.4 — prompt without history has no History delimiter section', async ()
   }
 });
 
+
+
+// ── Phase 1: Notification Storage Infrastructure ────────────────────────────
+
+test('GET /api/notifications returns 401 without auth', async () => {
+  const worker = loadWorker();
+  const response = await worker.fetch(
+    new Request('https://worker.example/api/notifications'),
+    createEnv(),
+  );
+  assert.equal(response.status, 401);
+});
+
+test('GET /api/notifications returns notifications for authenticated user', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 60001, first_name: 'NotifUser' };
+  const initData = buildInitData('test-bot-token', authUser);
+
+  const pgModule = {
+    Pool: class Pool {
+      async query(sql, params) {
+        const sqlStr = String(sql);
+        if (sqlStr.includes('SELECT COUNT(*)')) {
+          return { rows: [{ count: 2 }] };
+        }
+        if (sqlStr.includes('SELECT') && sqlStr.includes('notifications')) {
+          return {
+            rows: [
+              { id: 'n1', user_id: '60001', type: 'analysis', title: 'New Analysis', message: 'BTC analysis', metadata: null, read_status: false, created_at: '2025-01-01T00:00:00Z' },
+              { id: 'n2', user_id: '60001', type: 'price_alert', title: 'Price Alert', message: 'BTC hit target', metadata: { symbol: 'BTC' }, read_status: true, created_at: '2025-01-02T00:00:00Z' },
+            ],
+          };
+        }
+        return { rows: [] };
+      }
+    },
+  };
+  const workerWithMock = loadWorker({ '@neondatabase/serverless': pgModule });
+
+  const response = await workerWithMock.fetch(
+    new Request('https://worker.example/api/notifications', {
+      headers: { 'X-Telegram-Init-Data': initData },
+    }),
+    createEnv({ APP_ENV: 'development', DATABASE_URL: 'postgres://x/db' }),
+  );
+
+  assert.equal(response.status, 200);
+  const json = await response.json();
+  assert.equal(json.status, 'success');
+  assert.ok(Array.isArray(json.notifications), 'notifications is array');
+  assert.equal(json.notifications.length, 2, 'Two notifications returned');
+  assert.equal(json.unread_count, 2, 'Unread count returned');
+
+  const n1 = json.notifications[0];
+  assert.equal(n1.type, 'analysis');
+  assert.equal(n1.title, 'New Analysis');
+  assert.equal(n1.read, false, 'read_status mapped to read boolean');
+  assert.ok(n1.created_at, 'created_at present');
+
+  const n2 = json.notifications[1];
+  assert.equal(n2.type, 'price_alert');
+  assert.deepEqual(n2.metadata, { symbol: 'BTC' }, 'metadata parsed from JSON');
+  assert.equal(n2.read, true);
+});
+
+test('GET /api/notifications respects limit param', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 60002, first_name: 'LimitUser' };
+  const initData = buildInitData('test-bot-token', authUser);
+
+  const pgModule = {
+    Pool: class Pool {
+      async query(sql, params) {
+        const sqlStr = String(sql);
+        if (sqlStr.includes('SELECT COUNT(*)')) {
+          return { rows: [{ count: 0 }] };
+        }
+        if (sqlStr.includes('LIMIT')) {
+          assert.equal(params[1], 5, 'Limit param passed to query');
+          return { rows: [] };
+        }
+        return { rows: [] };
+      }
+    },
+  };
+  const workerWithMock = loadWorker({ '@neondatabase/serverless': pgModule });
+
+  const response = await workerWithMock.fetch(
+    new Request('https://worker.example/api/notifications?limit=5', {
+      headers: { 'X-Telegram-Init-Data': initData },
+    }),
+    createEnv({ APP_ENV: 'development', DATABASE_URL: 'postgres://x/db' }),
+  );
+
+  assert.equal(response.status, 200);
+});
+
+test('POST /api/notifications/read-all marks all as read', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 60003, first_name: 'ReadAllUser' };
+  const initData = buildInitData('test-bot-token', authUser);
+
+  const pgModule = {
+    Pool: class Pool {
+      async query(sql) {
+        if (String(sql).includes('UPDATE notifications')) {
+          return { rowCount: 3 };
+        }
+        return { rows: [] };
+      }
+    },
+  };
+  const workerWithMock = loadWorker({ '@neondatabase/serverless': pgModule });
+
+  const response = await workerWithMock.fetch(
+    new Request('https://worker.example/api/notifications/read-all', {
+      method: 'POST',
+      headers: { 'X-Telegram-Init-Data': initData },
+    }),
+    createEnv({ APP_ENV: 'development', DATABASE_URL: 'postgres://x/db' }),
+  );
+
+  assert.equal(response.status, 200);
+  const json = await response.json();
+  assert.equal(json.status, 'success');
+  assert.equal(json.marked_read, 3);
+});
+
+test('POST /api/notifications/:id/read marks single as read', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 60004, first_name: 'ReadOneUser' };
+  const initData = buildInitData('test-bot-token', authUser);
+
+  const pgModule = {
+    Pool: class Pool {
+      async query(sql, params) {
+        if (String(sql).includes('UPDATE notifications')) {
+          assert.equal(params[1], '60004', 'User ID passed for ownership check');
+          return { rowCount: 1 };
+        }
+        return { rows: [] };
+      }
+    },
+  };
+  const workerWithMock = loadWorker({ '@neondatabase/serverless': pgModule });
+
+  const response = await workerWithMock.fetch(
+    new Request('https://worker.example/api/notifications/notif-123/read', {
+      method: 'POST',
+      headers: { 'X-Telegram-Init-Data': initData },
+    }),
+    createEnv({ APP_ENV: 'development', DATABASE_URL: 'postgres://x/db' }),
+  );
+
+  assert.equal(response.status, 200);
+  const json = await response.json();
+  assert.equal(json.status, 'success');
+  assert.equal(json.marked_read, true);
+});
+
+test('POST /api/notifications/:id/read returns 404 for non-existent', async () => {
+  const worker = loadWorker();
+  const authUser = { id: 60005, first_name: 'Read404User' };
+  const initData = buildInitData('test-bot-token', authUser);
+
+  const pgModule = {
+    Pool: class Pool {
+      async query() {
+        return { rowCount: 0 };
+      }
+    },
+  };
+  const workerWithMock = loadWorker({ '@neondatabase/serverless': pgModule });
+
+  const response = await workerWithMock.fetch(
+    new Request('https://worker.example/api/notifications/nonexistent/read', {
+      method: 'POST',
+      headers: { 'X-Telegram-Init-Data': initData },
+    }),
+    createEnv({ APP_ENV: 'development', DATABASE_URL: 'postgres://x/db' }),
+  );
+
+  assert.equal(response.status, 404);
+});
