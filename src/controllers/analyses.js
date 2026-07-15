@@ -22,6 +22,10 @@ export function createAnalysisHandlers(deps) {
     readAppCache,
     writeAppCache,
     analysisRepo,
+    notificationRepo,
+    sendTelegramMessage,
+    resolveWebAppUrl,
+    queryDb,
   } = deps;
 
   const ANALYSES_LIST_KEY = 'analyses:list';
@@ -231,6 +235,57 @@ export function createAnalysisHandlers(deps) {
     }, {}, env);
   }
 
+  // ── Phase 2: New analysis notification ──────────────────────────────────
+
+  /**
+   * Notify all channel-joined users about a new analysis.
+   * Creates in-app notifications + sends Telegram messages.
+   * Errors are caught by caller — never blocks analysis creation.
+   */
+  async function notifyNewAnalysis(env, analysis) {
+    if (!notificationRepo || !sendTelegramMessage || !queryDb) return;
+
+    const coinLabel = String(analysis.coin || '').toUpperCase() || 'Crypto';
+    const title = `📊 تحلیل جدید: ${coinLabel}`;
+    const message = `تحلیل جدید منتشر شد. آماده مشاهده است.`;
+
+    // Fetch all joined users
+    const usersResult = await queryDb(
+      env,
+      `SELECT telegram_id FROM users WHERE channel_joined = TRUE`,
+    );
+    const userIds = usersResult.rows.map((r) => String(r.telegram_id));
+    if (userIds.length === 0) return;
+
+    // Create in-app notifications (bulk)
+    await notificationRepo.createBulk(env, userIds, 'analysis', title, message, {
+      analysis_id: analysis.id,
+      coin: analysis.coin,
+    });
+
+    // Send Telegram messages with Mini App button
+    const webAppUrl = resolveWebAppUrl ? resolveWebAppUrl(env, { cacheBust: true }) : '';
+    if (!webAppUrl) return;
+
+    for (const uid of userIds) {
+      try {
+        await sendTelegramMessage(env, {
+          chat_id: Number(uid),
+          text: `${title}\n${message}`,
+          disable_web_page_preview: true,
+          reply_markup: {
+            inline_keyboard: [[{
+              text: 'مشاهده تحلیل 🚀',
+              web_app: { url: webAppUrl },
+            }]],
+          },
+        });
+      } catch {
+        // Individual send failure — skip, don't block other users
+      }
+    }
+  }
+
   /**
    * POST /api/analyses — Create a new analysis (admin only).
    */
@@ -261,6 +316,12 @@ export function createAnalysisHandlers(deps) {
       const analyses = await analysisRepo.list(env);
       const version = generateVersion();
       await updateAnalysesCache(env, analyses, version);
+
+      // Phase 2 — notify joined users about new analysis (non-blocking)
+      notifyNewAnalysis(env, analysis).catch((err) => {
+        console.warn(safeError('notify-new-analysis', err));
+      });
+
       return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {
       console.warn(safeError('create-analysis', error));

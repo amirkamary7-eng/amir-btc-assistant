@@ -2336,6 +2336,10 @@ const analysisHandlers = createAnalysisHandlers({
   readAppCache,
   writeAppCache,
   analysisRepo,
+  notificationRepo,
+  sendTelegramMessage,
+  resolveWebAppUrl,
+  queryDb,
 });
 //#endregion
 

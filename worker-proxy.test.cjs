@@ -5768,3 +5768,89 @@ test('POST /api/notifications/:id/read returns 404 for non-existent', async () =
 
   assert.equal(response.status, 404);
 });
+
+// ── Phase 2: New Analysis Telegram Notification ─────────────────────────
+
+test('POST /api/analyses creates notification and sends Telegram after analysis', async () => {
+  const worker = loadWorker();
+  const adminUser = { id: 831704732, first_name: 'Amir' };
+  const initData = buildInitData('test-bot-token', adminUser);
+
+  let telegramPayloads = [];
+  let dbQueries = [];
+
+  const pgModule = {
+    Pool: class Pool {
+      async query(sql, params) {
+        dbQueries.push({ sql: String(sql).slice(0, 80), params: params || [] });
+        if (String(sql).includes('INSERT INTO analyses')) {
+          return { rows: [{ id: 'a1', coin: 'BTC', timeframe: '1d' }] };
+        }
+        if (String(sql).includes('SELECT') && String(sql).includes('analyses')) {
+          return { rows: [] };
+        }
+        if (String(sql).includes('SELECT') && String(sql).includes('channel_joined')) {
+          return { rows: [{ telegram_id: '111' }, { telegram_id: '222' }] };
+        }
+        if (String(sql).includes('INSERT INTO notifications')) {
+          return { rowCount: 2 };
+        }
+        return { rows: [] };
+      }
+    },
+  };
+
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init = {}) => {
+    if (String(url).includes('api.telegram.org')) {
+      const body = JSON.parse(await new Response(init.body).text());
+      telegramPayloads.push(body);
+      return new Response('{"ok":true}', { status: 200 });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    const workerWithMock = loadWorker({
+      '@neondatabase/serverless': pgModule,
+    });
+    const request = new Request('https://worker.example/api/analyses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': initData,
+      },
+      body: JSON.stringify({ coin: 'BTC', timeframe: '1d', text: 'Analysis text here', author: 'Amir' }),
+    });
+
+    const response = await workerWithMock.fetch(request, createEnv({
+      APP_ENV: 'development',
+      DATABASE_URL: 'postgres://x/db',
+      ADMIN_TELEGRAM_ID: '831704732',
+      WEBAPP_URL: 'https://example.com/app',
+      TELEGRAM_BOT_TOKEN: 'test-bot-token',
+    }));
+
+    assert.equal(response.status, 200);
+    const json = await response.json();
+    assert.equal(json.status, 'success');
+    assert.ok(json.analysis, 'Analysis created');
+
+    // Wait for fire-and-forget notification to complete
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Verify notification was created for joined users
+    const notifQuery = dbQueries.find(q => q.sql.includes('INSERT INTO notifications'));
+    assert.ok(notifQuery, 'Notification bulk insert was called');
+
+    // Verify Telegram messages were sent
+    assert.ok(telegramPayloads.length >= 1, 'At least one Telegram message sent');
+    const tgMsg = telegramPayloads[0];
+    assert.ok(tgMsg.text.includes('تحلیل جدید'), 'Telegram message contains analysis title');
+    assert.ok(tgMsg.reply_markup?.inline_keyboard, 'Telegram message has inline keyboard');
+    assert.equal(tgMsg.reply_markup.inline_keyboard[0][0].text, 'مشاهده تحلیل 🚀', 'Button text correct');
+    assert.ok(tgMsg.reply_markup.inline_keyboard[0][0].web_app?.url, 'Button has web_app URL');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
