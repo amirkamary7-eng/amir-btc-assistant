@@ -29,6 +29,9 @@ export function createNotificationRepository(deps) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `);
+      // Performance indexes — all queries filter by user_id
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)`);
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read_status = FALSE`);
       _tableEnsured = true;
     } catch (error) {
       // If table already exists (race condition), that's fine

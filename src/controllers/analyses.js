@@ -289,7 +289,7 @@ export function createAnalysisHandlers(deps) {
   /**
    * POST /api/analyses — Create a new analysis (admin only).
    */
-  async function handleCreate(request, env) {
+  async function handleCreate(request, env, ctx) {
     const authState = authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
@@ -317,10 +317,19 @@ export function createAnalysisHandlers(deps) {
       const version = generateVersion();
       await updateAnalysesCache(env, analyses, version);
 
-      // Phase 2 — notify joined users about new analysis (non-blocking)
-      notifyNewAnalysis(env, analysis).catch((err) => {
-        console.warn(safeError('notify-new-analysis', err));
-      });
+      // Phase 2 — notify joined users about new analysis (non-blocking, in waitUntil)
+      if (ctx && typeof ctx.waitUntil === 'function') {
+        ctx.waitUntil(
+          notifyNewAnalysis(env, analysis).catch((err) => {
+            console.warn(safeError('notify-new-analysis', err));
+          }),
+        );
+      } else {
+        // Fallback if ctx not available (shouldn't happen in Worker)
+        notifyNewAnalysis(env, analysis).catch((err) => {
+          console.warn(safeError('notify-new-analysis', err));
+        });
+      }
 
       return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {

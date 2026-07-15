@@ -3363,7 +3363,7 @@ async function runScheduledAlertsBaseline(controller, env) {
 //#region ورودی اصلی Worker
 // ============================================================================
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
@@ -3533,7 +3533,7 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/analyses') {
-        return await analysisHandlers.handleCreate(request, env);
+        return await analysisHandlers.handleCreate(request, env, ctx);
       }
 
       if (request.method === 'PUT' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
