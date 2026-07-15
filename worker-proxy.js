@@ -3085,6 +3085,96 @@ async function handleTelegramWebhook(request, env) {
 // ============================================================================
 //#region زمان‌بندی پایه Worker
 // ============================================================================
+// ── Phase 3: Calendar Alerts for high-impact events ───────────────────
+
+const CALENDAR_ALERT_SENT_PREFIX = 'cal_alert:';
+
+async function runCalendarAlertsCheck(env) {
+  if (!env.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
+  if (!notificationRepo) return;
+
+  try {
+    const events = await fetchCalendarEvents(env);
+    const now = Date.now();
+    const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+    const alertedCount = { sent: 0, skipped: 0 };
+
+    for (const event of events) {
+      // Only high-impact events
+      if (event.impact !== 'high') continue;
+
+      const eventTs = event.timestamp ? new Date(event.timestamp).getTime() : 0;
+      if (!eventTs) continue;
+
+      const timeUntil = eventTs - now;
+      // Only alert if event is within the next 10 minutes and hasn't passed
+      if (timeUntil < 0 || timeUntil > WINDOW_MS) continue;
+
+      // Dedup key: title + date + country
+      const eventKey = `${String(event.title || '').slice(0, 60)}|${String(event.date || '')}|${String(event.country || '')}`;
+      const dedupKey = `${CALENDAR_ALERT_SENT_PREFIX}${eventKey}`;
+
+      // Check if already sent
+      const alreadySent = await readAppCache(env, dedupKey);
+      if (alreadySent) {
+        alertedCount.skipped++;
+        continue;
+      }
+
+      // Mark as sent (TTL: 2 hours covers the full event window)
+      await writeAppCache(env, dedupKey, '1', 7200);
+
+      // Fetch joined users
+      const usersResult = await queryDb(
+        env,
+        `SELECT telegram_id FROM users WHERE channel_joined = TRUE`,
+      );
+      const userIds = usersResult.rows.map((r) => String(r.telegram_id));
+      if (userIds.length === 0) continue;
+
+      const title = `🔔 رویداد مهم تقویم: ${event.title}`;
+      const message = `${event.country} ${event.flag} — ${event.time || ''}`;
+      const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
+
+      // Create in-app notifications
+      await notificationRepo.createBulk(env, userIds, 'calendar_alert', title, message, {
+        event_title: event.title,
+        event_date: event.date,
+        event_time: event.time,
+        event_country: event.country,
+      });
+
+      // Send Telegram messages
+      if (webAppUrl) {
+        for (const uid of userIds) {
+          try {
+            await sendTelegramMessage(env, {
+              chat_id: Number(uid),
+              text: `${title}\n${message}`,
+              disable_web_page_preview: true,
+              reply_markup: {
+                inline_keyboard: [[{
+                  text: 'Open Amir BTC Assistant 🚀',
+                  web_app: { url: webAppUrl },
+                }]],
+              },
+            });
+          } catch {
+            // Individual send failure — skip
+          }
+        }
+      }
+      alertedCount.sent++;
+    }
+
+    if (alertedCount.sent > 0 || alertedCount.skipped > 0) {
+      console.log(JSON.stringify({ scope: 'calendar-alerts-check', ...alertedCount }));
+    }
+  } catch (error) {
+    console.warn(safeError('calendar-alerts-check', error));
+  }
+}
+
 async function runScheduledAlertsBaseline(controller, env) {
   const payload = {
     status: 'ok',
@@ -3590,6 +3680,8 @@ export default {
     if (env.CMC_API_KEY) {
       ctx.waitUntil(marketOverviewSvc.refreshOverview(env));
     }
+    // Phase 3 — Check for upcoming high-impact calendar events
+    ctx.waitUntil(runCalendarAlertsCheck(env));
   },
 };
 //#endregion
