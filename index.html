@@ -781,5 +781,64 @@
 
     <!-- AB Token Wallet Full Page -->
     <div id="wallet-full-page" class="wallet-full-page"></div>
+
+    <!-- Full-Screen Membership Lock -->
+    <div id="join-lock-overlay" class="join-lock-overlay" style="display:none;">
+        <div class="join-lock-card">
+            <div class="join-lock-icon">🔒</div>
+            <h2 class="join-lock-title" data-i18n="join_lock_title">عضویت در کانال الزامی است</h2>
+            <p class="join-lock-desc" data-i18n="join_lock_desc">برای استفاده از Amir BTC Assistant ابتدا باید عضو کانال رسمی شوید.</p>
+            <a id="join-lock-channel-btn" class="join-lock-btn join-lock-btn-primary" href="https://t.me/amir_btc_2024" target="_blank" data-i18n="join_lock_channel_btn">عضویت در کانال</a>
+            <button id="join-lock-verify-btn" class="join-lock-btn join-lock-btn-secondary" data-i18n="join_lock_verify_btn">بررسی عضویت</button>
+            <button id="join-lock-bot-btn" class="join-lock-btn join-lock-btn-ghost" data-i18n="join_lock_bot_btn">بازگشت به ربات</button>
+            <p id="join-lock-error" class="join-lock-error" style="display:none;"></p>
+        </div>
+    </div>
+
+    <style>
+        .join-lock-overlay {
+            position: fixed; inset: 0; z-index: 99999;
+            background: var(--bg-primary, #0f0f1a);
+            display: flex; align-items: center; justify-content: center;
+            padding: 24px;
+        }
+        .join-lock-card {
+            background: var(--bg-secondary, #1a1a2e);
+            border-radius: 20px; padding: 36px 28px; text-align: center;
+            max-width: 340px; width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        .join-lock-icon { font-size: 48px; margin-bottom: 16px; }
+        .join-lock-title {
+            font-size: 20px; font-weight: 700; margin: 0 0 12px;
+            color: var(--text-primary, #fff);
+        }
+        .join-lock-desc {
+            font-size: 14px; line-height: 1.6; margin: 0 0 28px;
+            color: var(--text-secondary, rgba(255,255,255,0.6));
+        }
+        .join-lock-btn {
+            display: block; width: 100%; padding: 14px 20px;
+            border-radius: 14px; font-size: 15px; font-weight: 600;
+            border: none; cursor: pointer; text-decoration: none;
+            text-align: center; margin-bottom: 12px;
+            transition: transform 0.15s, opacity 0.15s;
+        }
+        .join-lock-btn:active { transform: scale(0.97); }
+        .join-lock-btn-primary {
+            background: var(--accent, #f7931a); color: #fff;
+        }
+        .join-lock-btn-secondary {
+            background: rgba(247,147,26,0.15); color: var(--accent, #f7931a);
+            border: 1.5px solid var(--accent, #f7931a);
+        }
+        .join-lock-btn-ghost {
+            background: transparent; color: var(--text-secondary, rgba(255,255,255,0.5));
+            font-size: 13px; font-weight: 500; padding: 10px;
+        }
+        .join-lock-error {
+            color: #ef4444; font-size: 13px; margin-top: 8px;
+        }
+    </style>
 </body>
 </html>

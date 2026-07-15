@@ -401,6 +401,11 @@ const i18n = {
         join_open_bot: 'باز کردن ربات تلگرام',
         loading_user: 'در حال بارگذاری...',
         join_db_error: 'خطا در اتصال به سرور. لطفاً چند لحظه بعد دوباره تلاش کنید.',
+        join_lock_title: 'عضویت در کانال الزامی است',
+        join_lock_desc: 'برای استفاده از Amir BTC Assistant ابتدا باید عضو کانال رسمی شوید.',
+        join_lock_channel_btn: 'عضویت در کانال',
+        join_lock_verify_btn: 'بررسی عضویت',
+        join_lock_bot_btn: 'بازگشت به ربات',
         edit_analysis: 'ویرایش تحلیل', update_analysis: 'ذخیره تغییرات',
         share_ref_text: 'به Amir BTC Assistant بپیوندید و از تحلیل‌های حرفه‌ای بازار استفاده کنید!',
         chart_unavailable: 'نمودار در دسترس نیست', close: 'بستن',
@@ -471,6 +476,11 @@ const i18n = {
         join_open_bot: 'Open Telegram Bot',
         loading_user: 'Loading...',
         join_db_error: 'Server connection error. Please try again in a moment.',
+        join_lock_title: 'Channel Membership Required',
+        join_lock_desc: 'To use Amir BTC Assistant, you must join our official channel first.',
+        join_lock_channel_btn: 'Join Channel',
+        join_lock_verify_btn: 'Verify Membership',
+        join_lock_bot_btn: 'Back to Bot',
         edit_analysis: 'Edit Analysis', update_analysis: 'Save Changes',
         share_ref_text: 'Join Amir BTC Assistant and get professional market analysis!',
         chart_unavailable: 'Chart unavailable', close: 'Close',
@@ -791,6 +801,14 @@ async function bootstrapUser() {
         }
         saveLangToStorage();
         applyLanguage();
+
+        // ── Membership lock gate ──
+        if (data.channel_joined === false) {
+            showJoinLock();
+        } else {
+            hideJoinLock();
+        }
+
         // Only mark complete if the API call actually succeeded
         bootstrapComplete = true;
     } catch (e) {
@@ -4046,5 +4064,58 @@ window.getTg = getTg;
 window.getTelegramUser = getTelegramUser;
 window.UserContext = UserContext;
 Object.defineProperty(window, 'BOT_USERNAME', { get: () => BOT_USERNAME });
+
+// ============================================================================
+//#region Join Lock Screen
+// ============================================================================
+
+let _joinLockShown = false;
+
+function showJoinLock() {
+    if (_joinLockShown) return;
+    _joinLockShown = true;
+    const overlay = document.getElementById('join-lock-overlay');
+    if (overlay) {
+        overlay.style.display = 'flex';
+        applyLanguage();
+    }
+    document.getElementById('join-lock-verify-btn')?.addEventListener('click', recheckJoinMembership);
+    document.getElementById('join-lock-bot-btn')?.addEventListener('click', () => {
+        const tg = getTg();
+        if (tg?.close) { tg.close(); }
+        else { window.location.href = 'https://t.me/Amir_BTC_AssistantBot'; }
+    });
+}
+
+function hideJoinLock() {
+    if (!_joinLockShown) return;
+    _joinLockShown = false;
+    const overlay = document.getElementById('join-lock-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+async function recheckJoinMembership() {
+    const btn = document.getElementById('join-lock-verify-btn');
+    const errEl = document.getElementById('join-lock-error');
+    if (btn) { btn.disabled = true; btn.textContent = '...'; }
+    if (errEl) errEl.style.display = 'none';
+    try {
+        const data = await apiFetch('/api/users/check-join', { method: 'POST' });
+        if (data.channel_joined === true) {
+            hideJoinLock();
+            refreshUI();
+            getTg()?.showPopup?.({ title: '✅', message: currentLang === 'fa' ? 'عضویت تأیید شد!' : 'Membership verified!', buttons: [{ type: 'ok' }] });
+        } else {
+            if (errEl) { errEl.textContent = currentLang === 'fa' ? 'هنوز عضو کانال نشده‌اید.' : 'Not a channel member yet.'; errEl.style.display = 'block'; }
+        }
+    } catch (e) {
+        if (errEl) { errEl.textContent = currentLang === 'fa' ? 'خطا در بررسی. دوباره تلاش کنید.' : 'Error checking. Try again.'; errEl.style.display = 'block'; }
+    }
+    if (btn) { btn.disabled = false; applyLanguage(); }
+}
+
+window.showJoinLock = showJoinLock;
+window.hideJoinLock = hideJoinLock;
+window.recheckJoinMembership = recheckJoinMembership;
 
 //#endregion

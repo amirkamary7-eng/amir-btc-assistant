@@ -4821,6 +4821,9 @@ test('C-1: optionalTelegramAuth accepts valid initData in production', async () 
     SESSION_CACHE: kv,
   });
 
+  // Seed join cache so the production join gate passes (test is about auth, not membership)
+  await kv.put('join:555', '1');
+
   const response = await worker.fetch(
     new Request('https://w.example/api/watchlist', {
       headers: { 'X-Telegram-Init-Data': fakeInitData },

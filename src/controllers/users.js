@@ -20,6 +20,7 @@ export function createUserHandlers(deps) {
     normalizeOptionalString,
     isDevMode,
     processReferralOnBootstrap,
+    resolveChannelMembership,
     userRepo,
     watchlistRepo,
     diagLog,
@@ -101,11 +102,22 @@ export function createUserHandlers(deps) {
       );
       const freshUserRow = await userRepo.getById(env, userId);
       const watchlist = await watchlistRepo.getSymbols(env, userId);
+
+      // Real-time channel membership check for the frontend lock screen
+      let channelJoined = Boolean(freshUserRow?.channel_joined);
+      if (!channelJoined && tgUser?.id) {
+        try {
+          const membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: true });
+          channelJoined = Boolean(membership?.joined);
+        } catch { /* use DB value */ }
+      }
+
       return jsonResponse({
         status: 'success',
         user: userRepo.normalizeRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
         watchlist,
         bot_username: String(env.BOT_USERNAME || ''),
+        channel_joined: channelJoined,
       }, {}, env);
     } catch (error) {
       console.warn(safeError('bootstrap-user', error));

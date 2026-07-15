@@ -416,6 +416,30 @@ function authenticateTelegramRequest(request, env) {
 }
 
 /**
+ * Enforce channel membership for protected API endpoints.
+ * Returns a 403 Response if the user is NOT a channel member, or null if allowed.
+ * Must be called AFTER authenticateTelegramRequest succeeds.
+ * Caller is responsible for only calling this in production.
+ */
+async function requireChannelJoin(user, env) {
+  if (!user || !user.id) {
+    return jsonResponse({ detail: 'Authentication required' }, { status: 401 }, env);
+  }
+  if (isAdminTelegramId(env, user.id)) {
+    return null; // Admin always passes
+  }
+  try {
+    const membership = await resolveChannelMembership(env, String(user.id), { forceRefresh: false });
+    if (membership?.joined) {
+      return null; // Member — allowed
+    }
+  } catch {
+    // On error, deny access for security
+  }
+  return jsonResponse({ detail: 'Channel membership required', code: 'CHANNEL_JOIN_REQUIRED' }, { status: 403 }, env);
+}
+
+/**
  * Optional Telegram auth — tries initData, falls back to a raw user_id.
  * Returns { user, authMethod, error }.
  *   - On initData success: { user, authMethod: 'init_data', error: null }
@@ -2251,6 +2275,7 @@ const userHandlers = createUserHandlers({
   normalizeOptionalString,
   isDevMode,
   processReferralOnBootstrap,
+  resolveChannelMembership,
   userRepo,
   watchlistRepo,
   diagLog,
@@ -3347,6 +3372,22 @@ export default {
         }
       }
 
+      // ── Auth + Channel Join gate for protected routes (PRODUCTION ONLY) ──
+      // Evaluated once; reused by all protected handlers below.
+      // Unprotected routes (health, market, charts, calendar, public analyses, bootstrap) are above this line.
+      let _protectedUser = null;
+      let _joinBlocked = null;
+      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify)/;
+      const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
+
+      if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
+        const _authState = authenticateTelegramRequest(request, env);
+        if (_authState.error) return _authState.error;
+        _protectedUser = _authState.user;
+        _joinBlocked = await requireChannelJoin(_protectedUser, env);
+        if (_joinBlocked) return _joinBlocked;
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
         return await analysisHandlers.handleList(request, env);
       }
@@ -3430,6 +3471,14 @@ export default {
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
         return await userHandlers.handleBootstrap(request, env);
+      }
+
+      // Recheck channel membership (used by frontend lock screen "Verify" button)
+      if (request.method === 'POST' && url.pathname === '/api/users/check-join') {
+        const authState = authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+        const membership = await resolveChannelMembership(env, String(authState.user.id), { forceRefresh: true });
+        return jsonResponse({ status: 'success', channel_joined: Boolean(membership?.joined) }, {}, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/watchlist') {
