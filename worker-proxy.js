@@ -3294,11 +3294,22 @@ async function runScheduledAlertsBaseline(controller, env) {
         const chatIdValue = Number(userId);
         const chatId = Number.isFinite(chatIdValue) ? chatIdValue : userId;
         const text = `🔔 هشدار قیمت فعال شد\n${symbol} — قیمت فعلی: ${Number(currentPrice).toFixed(6)}\nهدف: ${Number(targetPrice).toFixed(6)}`;
-        await sendTelegramMessage(env, {
+        const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
+        const tgPayload = {
           chat_id: chatId,
           text,
           disable_web_page_preview: true,
-        });
+        };
+        // Phase 5 — add Mini App button
+        if (webAppUrl) {
+          tgPayload.reply_markup = {
+            inline_keyboard: [[{
+              text: 'Open Amir BTC Assistant 🚀',
+              web_app: { url: webAppUrl },
+            }]],
+          };
+        }
+        await sendTelegramMessage(env, tgPayload);
 
         // Phase 4 — create in-app notification for triggered alert
         if (notificationRepo) {
