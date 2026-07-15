@@ -31,6 +31,15 @@ export function createNotifyHandlers(deps) {
       return authState.error;
     }
 
+    // Burst guard: prevent concurrent requests from overshooting daily limit.
+    // A short-lived lock ensures only 1 request per user processes at a time.
+    const burstKey = `notify:lock:${authState.user.id}`;
+    const burstLocked = await readRateLimitCache(env, burstKey);
+    if (burstLocked) {
+      return jsonResponse({ status: 'error', reason: 'rate_limited', retry_after: 2 }, { status: 429 }, env);
+    }
+    await writeRateLimitCache(env, burstKey, '1', 2);
+
     // Rate limit: max 5 notifies per user per day
     const notifyKey = `notify:${authState.user.id}:${getTodayIsoDate()}`;
     const rawNotifyCount = await readRateLimitCache(env, notifyKey);
