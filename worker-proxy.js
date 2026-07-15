@@ -3300,6 +3300,17 @@ async function runScheduledAlertsBaseline(controller, env) {
           disable_web_page_preview: true,
         });
 
+        // Phase 4 — create in-app notification for triggered alert
+        if (notificationRepo) {
+          notificationRepo.create(env, userId, 'price_alert', `🔔 هشدار ${symbol}`, text, {
+            alert_id: alertId,
+            symbol,
+            target_price: targetPrice,
+            direction,
+            current_price: currentPrice,
+          }).catch(() => {});
+        }
+
         await queryDb(
           env,
           `
