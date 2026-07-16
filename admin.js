@@ -96,12 +96,21 @@ function adminPagination(containerId, currentPage, totalPages, loadFn) {
 async function initAdminPanel() {
     try {
         const data = await apiFetch('/api/admin/is-admin');
+        console.log('[ADMIN] is-admin response:', JSON.stringify(data));
         _adminData = data || { is_admin: false, role: '', permissions: [] };
         if (data && data.is_admin) {
-            document.getElementById('admin-entry-btn').style.display = 'block';
+            const btn = document.getElementById('admin-entry-btn');
+            if (btn) {
+                btn.style.display = 'block';
+                console.log('[ADMIN] Entry button shown — role:', data.role, 'is_super:', data.is_super);
+            } else {
+                console.error('[ADMIN] admin-entry-btn element not found in DOM');
+            }
+        } else {
+            console.log('[ADMIN] User is not admin — is_admin:', data?.is_admin, 'role:', data?.role);
         }
     } catch (e) {
-        console.warn('initAdminPanel error:', e);
+        console.warn('[ADMIN] initAdminPanel error:', e.message || e);
     }
 }
 

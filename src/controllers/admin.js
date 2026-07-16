@@ -41,8 +41,8 @@ export function createAdminHandlers(deps) {
       return { error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env), admin: null };
     }
 
-    // 3. Check super admin (env var) — always full access
-    const isSuper = adminRepo.isSuperAdmin(env, String(authState.user.id));
+    // 3. Determine super admin status: env var OR DB role
+    const isSuper = adminRepo.isSuperAdmin(env, String(authState.user.id)) || admin.role === 'super_admin';
     if (isSuper) return { error: null, admin: { ...admin, is_super: true } };
 
     // 4. Check permission if required
@@ -111,10 +111,12 @@ export function createAdminHandlers(deps) {
       await ensureSuperAdminExists(env);
 
       const admin = await adminRepo.getAdminByTelegramId(env, String(auth.user.id));
-      const isSuper = adminRepo.isSuperAdmin(env, String(auth.user.id));
+      const isSuperEnv = adminRepo.isSuperAdmin(env, String(auth.user.id));
+      // Super admin: either from env var OR from DB role
+      const isSuper = isSuperEnv || (admin && admin.role === 'super_admin');
 
       // If user is env super admin but not in DB yet, treat as admin
-      if (!admin && isSuper) {
+      if (!admin && isSuperEnv) {
         return jsonResponse({
           is_admin: true,
           role: 'super_admin',
@@ -127,7 +129,7 @@ export function createAdminHandlers(deps) {
         is_admin: Boolean(admin && admin.active),
         role: admin ? admin.role : null,
         permissions: admin ? admin.permissions : [],
-        is_super: isSuper,
+        is_super: Boolean(isSuper),
       }, {}, env);
     } catch (error) {
       console.warn(safeError('is-admin-check', error));
@@ -271,8 +273,9 @@ export function createAdminHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'Admin not found' }, { status: 404 }, env);
       }
 
-      // Cannot modify super admin
-      if (adminRepo.isSuperAdmin(env, String(targetAdmin.telegram_id))) {
+      // Cannot modify super admin (env var or DB role)
+      const targetIsSuper = adminRepo.isSuperAdmin(env, String(targetAdmin.telegram_id)) || targetAdmin.role === 'super_admin';
+      if (targetIsSuper) {
         return jsonResponse({ detail: 'Cannot modify super admin' }, { status: 403 }, env);
       }
 
@@ -320,8 +323,9 @@ export function createAdminHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'Admin not found' }, { status: 404 }, env);
       }
 
-      // Cannot delete super admin
-      if (adminRepo.isSuperAdmin(env, String(targetAdmin.telegram_id))) {
+      // Cannot delete super admin (env var or DB role)
+      const targetIsSuper = adminRepo.isSuperAdmin(env, String(targetAdmin.telegram_id)) || targetAdmin.role === 'super_admin';
+      if (targetIsSuper) {
         return jsonResponse({ detail: 'Cannot delete super admin' }, { status: 403 }, env);
       }
 

@@ -23,6 +23,24 @@ export function createAdminRepository(deps) {
     return { offset: (p - 1) * l, limit: l, page: p };
   }
 
+  /**
+   * Normalize permissions from DB JSONB to a flat string array.
+   * Handles both formats:
+   *   - Array:  ["*", "manage_admins"]
+   *   - Object: {"all": true} or {"manage_admins": true}
+   */
+  function normalizePermissions(raw) {
+    if (Array.isArray(raw)) return raw;
+    if (raw && typeof raw === 'object') {
+      // Object like {"all": true} → treat as full access
+      if (raw.all === true || raw['*'] === true) return ['*'];
+      // Object like {"manage_admins": true, "view_users": true} → extract keys
+      const keys = Object.keys(raw).filter((k) => raw[k] === true);
+      return keys.length > 0 ? keys : ['*'];
+    }
+    return [];
+  }
+
   // ---------------------------------------------------------------------------
   // 1. getAdminByTelegramId
   // ---------------------------------------------------------------------------
@@ -44,7 +62,7 @@ export function createAdminRepository(deps) {
       id: row.id,
       telegram_id: String(row.telegram_id),
       role: normalizeOptionalString(row.role) || 'admin',
-      permissions: Array.isArray(row.permissions) ? row.permissions : [],
+      permissions: normalizePermissions(row.permissions),
       active: Boolean(row.active),
       created_at: isoDate(row.created_at),
       created_by: normalizeOptionalString(row.created_by),
@@ -72,7 +90,7 @@ export function createAdminRepository(deps) {
       id: row.id,
       telegram_id: String(row.telegram_id),
       role: normalizeOptionalString(row.role) || 'admin',
-      permissions: Array.isArray(row.permissions) ? row.permissions : [],
+      permissions: normalizePermissions(row.permissions),
       active: Boolean(row.active),
       created_at: isoDate(row.created_at),
       created_by: normalizeOptionalString(row.created_by),
