@@ -57,7 +57,7 @@ export function createUserHandlers(deps) {
     }
 
     // Auth: prefer initData, fall back to ?user_id= query param, then body.user_id
-    const auth = optionalTelegramAuth(request, env);
+    const auth = await optionalTelegramAuth(request, env);
     let userId;
     let tgUser = null; // Telegram user object (may have username, first_name, …)
 
@@ -129,7 +129,7 @@ export function createUserHandlers(deps) {
    * GET /api/users/me — Return the authenticated user's profile with watchlist.
    */
   async function handleMe(request, env) {
-    const auth = optionalTelegramAuth(request, env);
+    const auth = await optionalTelegramAuth(request, env);
     if (!auth.user) {
       return auth.error;
     }
@@ -168,7 +168,7 @@ export function createUserHandlers(deps) {
    * PUT /api/users/me/settings — Update the authenticated user's language setting.
    */
   async function handleMeSettings(request, env) {
-    const auth = optionalTelegramAuth(request, env);
+    const auth = await optionalTelegramAuth(request, env);
     if (!auth.user) {
       return auth.error;
     }

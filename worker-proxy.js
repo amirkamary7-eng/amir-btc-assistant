@@ -337,10 +337,19 @@ function timingSafeEqualSecret(a, b) {
   return timingSafeEqual(hashA, hashB);
 }
 
-function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
+async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
   if (!initData || !botToken || botToken === 'REPLACE_WITH_TOKEN') {
     return null;
   }
+
+  // --- Log raw initData AS RECEIVED from header, before any processing ---
+  console.log("[TG-HASH-FIX] raw header initData:", {
+    length: initData.length,
+    first80: initData.slice(0, 80),
+    last80: initData.slice(-80),
+    hasPercent: initData.includes('%'),
+    fieldList: initData.split('&').map(s => s.split('=')[0])
+  });
 
   try {
     const pairs = parseTelegramInitDataPairs(initData.trim());
@@ -363,82 +372,73 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
       return null;
     }
 
-    // --- Detailed token and secret_key diagnostics ---
-    const secretKey = createHmac('sha256', 'WebAppData').update(botToken).digest();
-    const secretKeyHex = Array.from(new Uint8Array(secretKey)).map(b => b.toString(16).padStart(2, '0')).join('');
-
-    console.log("[TG-HASH-FIX] token info:", {
+    // --- Signature field analysis ---
+    const sigPair = pairs.find(([k]) => k === 'signature');
+    const userPair = pairs.find(([k]) => k === 'user');
+    console.log("[TG-HASH-FIX] field analysis:", {
+      signature: sigPair ? { length: sigPair[1].length, isHex: /^[0-9a-f]+$/.test(sigPair[1]), prefix: sigPair[1].slice(0, 20) } : 'ABSENT',
+      userEncoded: userPair ? userPair[1].includes('%') : null,
+      userStart: userPair ? userPair[1].slice(0, 30) : null,
       tokenLength: botToken.length,
       tokenFirst8: botToken.slice(0, 8),
       tokenLast4: botToken.slice(-4)
     });
 
-    // --- Signature field analysis ---
-    const sigPair = pairs.find(([k]) => k === 'signature');
-    console.log("[TG-HASH-FIX] signature field:", {
-      exists: !!sigPair,
-      length: sigPair ? sigPair[1].length : 0,
-      isHexLike: sigPair ? /^[0-9a-f]+$/.test(sigPair[1]) : false,
-      prefix: sigPair ? sigPair[1].slice(0, 16) : null,
-      suffix: sigPair ? sigPair[1].slice(-8) : null
-    });
+    // --- Build standard data_check_string (raw values, no hash, no signature) ---
+    const stdPairs = checkPairs.filter(([k]) => k !== 'signature').sort(([a], [b]) => a.localeCompare(b));
+    const stdDCS = stdPairs.map(([k, v]) => `${k}=${v}`).join('\n');
 
-    // --- Check if user value is URL-encoded or decoded ---
-    const userPair = pairs.find(([k]) => k === 'user');
-    const userValueIsEncoded = userPair ? userPair[1].includes('%') : false;
-    console.log("[TG-HASH-FIX] user value encoding:", {
-      isURLEncoded: userValueIsEncoded,
-      startsWith: userPair ? userPair[1].slice(0, 20) : null
-    });
+    // --- TEST 1: node:crypto createHmac (current method) ---
+    const secretKey = createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const hash1 = createHmac('sha256', secretKey).update(stdDCS).digest('hex');
 
-    // --- Run 3 tests ---
-    const testCases = [];
-
-    // Test A: raw values, all fields except hash+signature
-    const pairsA = checkPairs.filter(([k]) => k !== 'signature').sort(([a], [b]) => a.localeCompare(b));
-    const dcsA = pairsA.map(([k, v]) => `${k}=${v}`).join('\n');
-    const hashA = createHmac('sha256', secretKey).update(dcsA).digest('hex');
-    testCases.push({ name: "A: raw, no hash+signature", dcs: dcsA, hash: hashA, match: hashA === receivedHash });
-
-    // Test B: DECODED values, all fields except hash+signature
-    const pairsB = checkPairs.filter(([k]) => k !== 'signature').sort(([a], [b]) => a.localeCompare(b));
-    const dcsB = pairsB.map(([k, v]) => `${k}=${decodeTelegramValue(v)}`).join('\n');
-    const hashB = createHmac('sha256', secretKey).update(dcsB).digest('hex');
-    testCases.push({ name: "B: decoded, no hash+signature", dcs: dcsB, hash: hashB, match: hashB === receivedHash });
-
-    // Test C: decoded values, ONLY auth_date+query_id+user
-    const pairsC = checkPairs.filter(([k]) => ['auth_date', 'query_id', 'user'].includes(k)).sort(([a], [b]) => a.localeCompare(b));
-    const dcsC = pairsC.map(([k, v]) => `${k}=${decodeTelegramValue(v)}`).join('\n');
-    const hashC = createHmac('sha256', secretKey).update(dcsC).digest('hex');
-    testCases.push({ name: "C: decoded, auth_date+query_id+user only", dcs: dcsC, hash: hashC, match: hashC === receivedHash });
-
-    // Test D: raw values, ALL fields except hash (includes signature)
-    const pairsD = checkPairs.slice().sort(([a], [b]) => a.localeCompare(b));
-    const dcsD = pairsD.map(([k, v]) => `${k}=${v}`).join('\n');
-    const hashD = createHmac('sha256', secretKey).update(dcsD).digest('hex');
-    testCases.push({ name: "D: raw, all except hash (inc. signature)", dcs: dcsD, hash: hashD, match: hashD === receivedHash });
-
-    // Test E: check if receivedHash equals signature
-    testCases.push({
-      name: "E: signature === receivedHash?",
-      dcs: null,
-      hash: null,
-      match: sigPair ? sigPair[1] === receivedHash : false
-    });
-
-    for (const tc of testCases) {
-      console.log("[TG-HASH-FIX] " + tc.name + ":", {
-        match: tc.match,
-        dcsLength: tc.dcs ? tc.dcs.length : null,
-        dcsStart: tc.dcs ? tc.dcs.slice(0, 60) : null,
-        computedHash: tc.hash,
-        receivedHash
-      });
+    // --- TEST 2: Web Crypto API (completely independent implementation) ---
+    let hash2 = 'webcrypto-unavailable';
+    try {
+      const enc = new TextEncoder();
+      const keyData = await crypto.subtle.importKey(
+        'raw', enc.encode('WebAppData'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+      );
+      const sig1 = await crypto.subtle.sign('HMAC', keyData, enc.encode(botToken));
+      const secretKeyWC = await crypto.subtle.importKey(
+        'raw', sig1, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+      );
+      const sig2 = await crypto.subtle.sign('HMAC', secretKeyWC, enc.encode(stdDCS));
+      hash2 = Array.from(new Uint8Array(sig2)).map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      hash2 = 'error: ' + e.message;
     }
 
-    const anyMatch = testCases.find(tc => tc.match);
-    if (!anyMatch) {
-      console.log("[TG-HASH-RESULT]", { valid: false, reason: "all 5 HMAC tests failed" });
+    // --- TEST 3: Telegram Login widget algorithm (SHA256, not HMAC) ---
+    let hash3 = 'n/a';
+    try {
+      const { createHash } = await import('node:crypto');
+      const sha256token = createHash('sha256').update(botToken).digest('hex');
+      const loginDCS = stdPairs.map(([k, v]) => {
+        const dv = decodeTelegramValue(v);
+        return `${k}=${dv}`;
+      }).sort((a, b) => a.localeCompare(b)).join('\n');
+      hash3 = createHash('sha256').update(loginDCS + sha256token).digest('hex');
+    } catch (e) {
+      hash3 = 'error: ' + e.message;
+    }
+
+    console.log("[TG-HASH-FIX] test results:", {
+      receivedHash,
+      "test1_nodeCrypto": hash1,
+      "test1_match": hash1 === receivedHash,
+      "test2_webCrypto": hash2,
+      "test2_match": hash2 === receivedHash,
+      "test3_loginSHA256": hash3,
+      "test3_match": hash3 === receivedHash,
+      "webCrypto_equals_nodeCrypto": hash2 === hash1,
+      stdDCS_length: stdDCS.length,
+      stdDCS_first60: stdDCS.slice(0, 60)
+    });
+
+    const hashMatch = (hash1 === receivedHash) || (hash2 === receivedHash) || (hash3 === receivedHash);
+    if (!hashMatch) {
+      console.log("[TG-HASH-RESULT]", { valid: false, reason: "all 3 crypto implementations failed" });
       return null;
     }
 
@@ -466,7 +466,7 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
   }
 }
 
-function authenticateTelegramRequest(request, env) {
+async function authenticateTelegramRequest(request, env) {
   const initData = getTelegramInitData(request);
   if (!initData) {
     return {
@@ -482,7 +482,7 @@ function authenticateTelegramRequest(request, env) {
     };
   }
 
-  const user = validateTelegramInitData(initData, String(env.TELEGRAM_BOT_TOKEN || ''));
+  const user = await validateTelegramInitData(initData, String(env.TELEGRAM_BOT_TOKEN || ''));
   if (!user || !user.id) {
     return {
       error: jsonResponse({ detail: 'Invalid Telegram init data' }, { status: 401 }, env),
@@ -524,8 +524,8 @@ async function requireChannelJoin(user, env) {
  *   - On fallback success: { user, authMethod: 'fallback', error: null }
  *   - On both fail:     { user: null, authMethod: null, error: <original auth Response> }
  */
-function optionalTelegramAuth(request, env) {
-  const authState = authenticateTelegramRequest(request, env);
+async function optionalTelegramAuth(request, env) {
+  const authState = await authenticateTelegramRequest(request, env);
   if (authState.user) {
     return { user: authState.user, authMethod: 'init_data', error: null };
   }
@@ -3498,7 +3498,7 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/market/overview/usage') {
         // Admin-only: CMC usage monitoring
-        const authState = authenticateTelegramRequest(request, env);
+        const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
         if (!isAdminTelegramId(env, authState.user.id)) {
           return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
@@ -3679,7 +3679,7 @@ export default {
       const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
 
       if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
-        const _authState = authenticateTelegramRequest(request, env);
+        const _authState = await authenticateTelegramRequest(request, env);
         if (_authState.error) return _authState.error;
         _protectedUser = _authState.user;
         _joinBlocked = await requireChannelJoin(_protectedUser, env);
@@ -3786,7 +3786,7 @@ export default {
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
       if (request.method === 'POST' && url.pathname === '/api/users/check-join') {
-        const authState = authenticateTelegramRequest(request, env);
+        const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
         const membership = await resolveChannelMembership(env, String(authState.user.id), { forceRefresh: true });
         return jsonResponse({ status: 'success', channel_joined: Boolean(membership?.joined) }, {}, env);

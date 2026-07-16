@@ -102,7 +102,7 @@ export function createAdminHandlers(deps) {
     }
 
     const _rawInit = request.headers.get('X-Telegram-Init-Data') || '';
-    const auth = optionalTelegramAuth(request, env);
+    const auth = await optionalTelegramAuth(request, env);
     if (!auth.user) {
       console.log('[IS-ADMIN-DIAG] auth failed — authMethod:', auth.authMethod, 'initDataLen:', _rawInit.length, 'initDataStart40:', _rawInit.substring(0, 40));
       const diag = {

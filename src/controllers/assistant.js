@@ -371,7 +371,7 @@ export function createAssistantHandlers(deps) {
    * GET /api/assistant/limits — Return current AI rate limit status.
    */
   async function handleGetLimits(request, env) {
-    const auth = optionalTelegramAuth(request, env);
+    const auth = await optionalTelegramAuth(request, env);
     if (!auth.user) {
       return auth.error;
     }
@@ -393,7 +393,7 @@ export function createAssistantHandlers(deps) {
    * POST /api/assistant/chat — Send message to AI with provider fallback chain.
    */
   async function handlePostChat(request, env) {
-    const auth = optionalTelegramAuth(request, env);
+    const auth = await optionalTelegramAuth(request, env);
     if (!auth.user) {
       return auth.error;
     }

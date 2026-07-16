@@ -188,4 +188,29 @@ Stage Summary:
 - Deploy: Cloudflare Pages — https://25d1ec17.amir-btc-assistant-pages.pages.dev
 - Deployment ID: 25d1ec17-9f58-4fac-9d44-06e0d5020d25
 - Status: success (production)
-- Smoke test: ✅ Dashboard, ✅ Settings menu, ✅ Notification Settings modal, ✅ Toggle interaction, ✅ Back navigation, ✅ Zero JS errors, ✅ i18n (fa)
+
+---
+Task ID: 7
+Agent: Z.ai Code
+Task: Add diagnostic console.log tracing to admin.js (no logic changes)
+
+Work Log:
+- Added 7 diagnostic console.log statements to `/admin.js` — ZERO logic changes
+  1. `console.log("ADMIN_JS_LOADED")` — at file top, proves file is loaded
+  2. `console.log("INIT_ADMIN_PANEL_START")` — at start of initAdminPanel()
+  3. `console.log("TG_USER", getTelegramUser())` — before guard check
+  4. `console.log("ADMIN_API_RESPONSE", data)` — after API call
+  5. `console.log("ADMIN_BUTTON_ELEMENT", btn)` — after getElementById
+  6. `console.log("DISPLAY_STYLE", btn.style.display)` — inline style
+  7. `console.log("COMPUTED_STYLE", getComputedStyle(btn).display)` — computed style
+- Rebuilt pages-dist: `admin.52650282.js`
+- Committed as `779306e` — "debug: add diagnostic logs to trace admin panel loading chain"
+- Pushed to origin/main → CI/CD auto-triggered
+- Verified deployment: version.json → `MRNDNE10-779306e`
+- Verified all 7 keywords present in deployed `admin.52650282.js`
+
+Stage Summary:
+- ✅ Diagnostic-only commit deployed (no business logic changed)
+- ✅ All 7 log keywords confirmed in production JS
+- ⏳ Awaiting user to open Mini App in Telegram and report console output
+- Purpose: Identify exact breakpoint in the chain (JS load → function call → user → API → DOM)

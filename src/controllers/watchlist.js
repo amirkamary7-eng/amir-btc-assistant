@@ -26,7 +26,7 @@ export function createWatchlistHandlers(deps) {
    * GET /api/watchlist — Return the authenticated user's watchlist symbols.
    */
   async function handleGet(request, env) {
-    const auth = optionalTelegramAuth(request, env);
+    const auth = await optionalTelegramAuth(request, env);
     if (!auth.user) {
       return auth.error;
     }
@@ -53,7 +53,7 @@ export function createWatchlistHandlers(deps) {
    * Accepts { symbols: string[] } and stores up to 7 deduplicated, uppercase symbols.
    */
   async function handlePut(request, env) {
-    const auth = optionalTelegramAuth(request, env);
+    const auth = await optionalTelegramAuth(request, env);
     if (!auth.user) {
       return auth.error;
     }
