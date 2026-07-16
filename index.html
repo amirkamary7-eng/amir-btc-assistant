@@ -418,6 +418,16 @@
             </div>
         </div>
 
+        <!-- R4: Admin Control Center — only visible to database-verified admins -->
+        <div id="admin-entry-btn" class="admin-entry-card" style="display:none;" onclick="openAdminPanel()">
+            <div class="admin-entry-icon">👑</div>
+            <div class="admin-entry-text">
+                <div class="admin-entry-title">Admin Control Center</div>
+                <div class="admin-entry-sub" data-i18n="admin_control_desc">مدیریت و کنترل سیستم</div>
+            </div>
+            <svg class="admin-entry-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+
         <!-- AB Token Wallet Card -->
         <div id="wallet-preview-card" class="wallet-preview-card skeleton-loading" onclick="if(window.WalletApp)WalletApp.openWallet()">
             <div class="wallet-watermark"><img src="assets/token-logo.png" alt=""></div>
@@ -894,9 +904,197 @@
     <script src="notifications.js"></script>
     <script src="assistant.js"></script>
     <script src="wallet.js"></script>
+    <script src="admin.js"></script>
     <script src="app.js"></script>
     <!-- #endregion -->
     <!-- #endregion -->
+
+    <!-- R4: Admin Control Center — Full Panel -->
+    <div id="admin-panel" class="admin-panel" style="display:none;">
+        <div class="admin-panel-backdrop" onclick="closeAdminPanel()"></div>
+        <div class="admin-panel-container" dir="ltr">
+            <!-- Header -->
+            <div class="admin-header">
+                <button class="admin-back-btn" onclick="closeAdminPanel()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <h2>Admin Control Center</h2>
+            </div>
+
+            <!-- Sidebar Navigation -->
+            <div class="admin-sidebar" id="admin-sidebar">
+                <button class="admin-nav-item active" data-admin-section="dashboard" onclick="switchAdminSection('dashboard', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                    <span>Dashboard</span>
+                </button>
+                <button class="admin-nav-item" data-admin-section="admins" onclick="switchAdminSection('admins', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>Admins</span>
+                </button>
+                <button class="admin-nav-item" data-admin-section="users" onclick="switchAdminSection('users', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span>Users</span>
+                </button>
+                <button class="admin-nav-item" data-admin-section="tickets" onclick="switchAdminSection('tickets', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span>Tickets</span>
+                </button>
+                <button class="admin-nav-item" data-admin-section="broadcast" onclick="switchAdminSection('broadcast', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    <span>Broadcast</span>
+                </button>
+                <button class="admin-nav-item" data-admin-section="rewards" onclick="switchAdminSection('rewards', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
+                    <span>Rewards</span>
+                </button>
+                <button class="admin-nav-item" data-admin-section="transactions" onclick="switchAdminSection('transactions', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                    <span>Transactions</span>
+                </button>
+                <button class="admin-nav-item" data-admin-section="referrals" onclick="switchAdminSection('referrals', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                    <span>Referrals</span>
+                </button>
+                <button class="admin-nav-item" data-admin-section="system-health" onclick="switchAdminSection('system-health', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    <span>Health</span>
+                </button>
+                <button class="admin-nav-item" data-admin-section="logs" onclick="switchAdminSection('logs', this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    <span>Logs</span>
+                </button>
+            </div>
+
+            <!-- Content Area -->
+            <div class="admin-content" id="admin-content">
+
+                <!-- Dashboard Section -->
+                <div class="admin-section active" id="admin-section-dashboard">
+                    <h3 class="admin-section-title">Dashboard</h3>
+                    <div class="admin-stats-grid" id="admin-stats-grid"></div>
+                    <h4 class="admin-subtitle">Recent Activity</h4>
+                    <div class="admin-activity-list" id="admin-activity-list"></div>
+                </div>
+
+                <!-- Admin Management Section -->
+                <div class="admin-section" id="admin-section-admins">
+                    <div class="admin-section-header">
+                        <h3 class="admin-section-title">Admin Management</h3>
+                        <button class="admin-btn admin-btn-accent" onclick="openAddAdminForm()">+ Add Admin</button>
+                    </div>
+                    <div id="admin-add-form" style="display:none;" class="admin-form-card">
+                        <input type="text" id="admin-new-telegram-id" placeholder="Telegram ID" class="admin-input">
+                        <select id="admin-new-role" class="admin-input">
+                            <option value="admin">Admin</option>
+                            <option value="moderator">Moderator</option>
+                            <option value="viewer">Viewer</option>
+                        </select>
+                        <div class="admin-perm-checks" id="admin-new-permissions">
+                            <label><input type="checkbox" value="analysis"> Analysis</label>
+                            <label><input type="checkbox" value="tickets"> Tickets</label>
+                            <label><input type="checkbox" value="broadcast"> Broadcast</label>
+                            <label><input type="checkbox" value="rewards"> Rewards</label>
+                            <label><input type="checkbox" value="users"> Users</label>
+                            <label><input type="checkbox" value="wallet"> Wallet</label>
+                        </div>
+                        <div class="admin-form-actions">
+                            <button class="admin-btn admin-btn-accent" onclick="submitAddAdmin()">Add</button>
+                            <button class="admin-btn admin-btn-ghost" onclick="closeAddAdminForm()">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="admin-list" id="admin-list"></div>
+                </div>
+
+                <!-- Users Section -->
+                <div class="admin-section" id="admin-section-users">
+                    <h3 class="admin-section-title">Users</h3>
+                    <input type="text" id="admin-user-search" placeholder="Search by ID, username, name..." class="admin-input admin-search-input" oninput="debounceAdminUserSearch()">
+                    <div class="admin-list" id="admin-users-list"></div>
+                    <div class="admin-pagination" id="admin-users-pagination"></div>
+                </div>
+
+                <!-- Tickets Section -->
+                <div class="admin-section" id="admin-section-tickets">
+                    <h3 class="admin-section-title">Ticket Center</h3>
+                    <div class="admin-filters">
+                        <button class="admin-filter-btn active" onclick="filterAdminTickets('all', this)">All</button>
+                        <button class="admin-filter-btn" onclick="filterAdminTickets('open', this)">Open</button>
+                        <button class="admin-filter-btn" onclick="filterAdminTickets('answered', this)">Answered</button>
+                        <button class="admin-filter-btn" onclick="filterAdminTickets('closed', this)">Closed</button>
+                    </div>
+                    <div class="admin-list" id="admin-tickets-list"></div>
+                    <div class="admin-pagination" id="admin-tickets-pagination"></div>
+                </div>
+
+                <!-- Broadcast Section -->
+                <div class="admin-section" id="admin-section-broadcast">
+                    <h3 class="admin-section-title">Broadcast Center</h3>
+                    <div class="admin-form-card">
+                        <select id="admin-broadcast-target" class="admin-input" onchange="toggleBroadcastTargetId()">
+                            <option value="all">All Users</option>
+                            <option value="active">Active Users (today)</option>
+                            <option value="token_holders">Token Holders</option>
+                            <option value="specific">Specific User</option>
+                        </select>
+                        <input type="text" id="admin-broadcast-target-id" placeholder="Telegram ID (for specific)" class="admin-input" style="display:none;">
+                        <textarea id="admin-broadcast-content" placeholder="Message content..." class="admin-input admin-textarea" rows="4"></textarea>
+                        <button class="admin-btn admin-btn-accent" onclick="sendBroadcast()" style="width:100%;">Send Broadcast</button>
+                    </div>
+                    <h4 class="admin-subtitle" style="margin-top:16px;">History</h4>
+                    <div class="admin-list" id="admin-broadcasts-list"></div>
+                </div>
+
+                <!-- Rewards Section -->
+                <div class="admin-section" id="admin-section-rewards">
+                    <h3 class="admin-section-title">Rewards</h3>
+                    <div class="admin-filters">
+                        <button class="admin-filter-btn active" onclick="filterAdminRewards('all', this)">All</button>
+                        <button class="admin-filter-btn" onclick="filterAdminRewards('pending', this)">Pending</button>
+                        <button class="admin-filter-btn" onclick="filterAdminRewards('approved', this)">Approved</button>
+                        <button class="admin-filter-btn" onclick="filterAdminRewards('delivered', this)">Delivered</button>
+                    </div>
+                    <div class="admin-list" id="admin-rewards-list"></div>
+                </div>
+
+                <!-- Transactions Section -->
+                <div class="admin-section" id="admin-section-transactions">
+                    <h3 class="admin-section-title">Wallet & Transactions</h3>
+                    <div class="admin-filters-row">
+                        <input type="text" id="admin-tx-user-id" placeholder="User ID" class="admin-input" style="flex:1;">
+                        <select id="admin-tx-type" class="admin-input" style="flex:1;">
+                            <option value="">All Types</option>
+                            <option value="daily_claim">Daily Claim</option>
+                            <option value="referral">Referral</option>
+                            <option value="admin_grant">Admin Grant</option>
+                            <option value="wheel">Wheel</option>
+                        </select>
+                    </div>
+                    <div class="admin-list" id="admin-transactions-list"></div>
+                    <div class="admin-pagination" id="admin-transactions-pagination"></div>
+                </div>
+
+                <!-- Referrals Section -->
+                <div class="admin-section" id="admin-section-referrals">
+                    <h3 class="admin-section-title">Referral System</h3>
+                    <input type="text" id="admin-referral-search" placeholder="Search by user ID..." class="admin-input admin-search-input" oninput="debounceAdminReferralSearch()">
+                    <div class="admin-list" id="admin-referrals-list"></div>
+                </div>
+
+                <!-- System Health Section -->
+                <div class="admin-section" id="admin-section-system-health">
+                    <h3 class="admin-section-title">System Health</h3>
+                    <div class="admin-stats-grid" id="admin-health-grid"></div>
+                </div>
+
+                <!-- Security Logs Section -->
+                <div class="admin-section" id="admin-section-logs">
+                    <h3 class="admin-section-title">Security Logs</h3>
+                    <div class="admin-list" id="admin-logs-list"></div>
+                    <div class="admin-pagination" id="admin-logs-pagination"></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- AB Token Wallet Full Page -->
     <div id="wallet-full-page" class="wallet-full-page"></div>

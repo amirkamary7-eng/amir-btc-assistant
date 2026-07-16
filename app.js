@@ -4107,6 +4107,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadAlertsFromServer().then(() => checkAlerts());
     startPolling();
 
+    // R4: Initialize admin panel — check if user is admin and show entry button
+    if (typeof initAdminPanel === 'function') {
+        initAdminPanel();
+    }
+
     setInterval(() => {
         if (document.getElementById('tickets-modal')?.style.display === 'flex') fetchTickets().then(renderTickets);
         if (document.getElementById('admin-tickets-modal')?.style.display === 'flex') fetchAdminTickets().then(renderAdminTickets);

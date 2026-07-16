@@ -16,6 +16,7 @@ const hashedFiles = [
   'notifications.js',
   'wallet.js',
   'wallet.css',
+  'admin.js',
 ];
 
 // ============================================================================

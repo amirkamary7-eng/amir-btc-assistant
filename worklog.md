@@ -165,3 +165,27 @@ Stage Summary:
 - Phase 2 deployed to production (Worker + Pages)
 - All smoke tests pass
 - WARNING: ai binding not in env.production (non-blocking, Phase 3 concern)
+---
+Task ID: 8
+Agent: Z.ai Code
+Task: Add Notification Settings UI to Amir BTC Assistant Mini App
+
+Work Log:
+- Discovered /home/z/my-project was the WRONG project (Next.js scaffold, not the actual Amir BTC Assistant)
+- Cloned correct project from GitHub to /home/z/amir-btc-assistant
+- Verified all key files: worker-proxy.js, src/controllers/, src/repositories/, worker-proxy.test.cjs, wrangler.jsonc
+- Analyzed frontend architecture: Vanilla JS + HTML + CSS (NOT React/Next.js)
+- Designed notification settings modal matching existing dark theme + glassmorphism design system
+- Added HTML modal to index.html (119 lines): status card, 5 toggle categories, subscription CTA
+- Added CSS to style.css (143 lines): toggle switch, icon colors, shimmer animation, responsive
+- Added JS to app.js (104 lines): open/close functions, localStorage persistence, i18n keys (fa/en)
+- All 133 backend tests pass (no regression)
+- Changes limited to exactly 3 files: index.html, style.css, app.js
+- No changes to: Auth, Telegram WebApp, Referral, Wallet, Watchlist, Analysis, AI Assistant, Backend API
+
+Stage Summary:
+- Commit: 82209fb — "feat(ui): add notification settings interface"
+- Deploy: Cloudflare Pages — https://25d1ec17.amir-btc-assistant-pages.pages.dev
+- Deployment ID: 25d1ec17-9f58-4fac-9d44-06e0d5020d25
+- Status: success (production)
+- Smoke test: ✅ Dashboard, ✅ Settings menu, ✅ Notification Settings modal, ✅ Toggle interaction, ✅ Back navigation, ✅ Zero JS errors, ✅ i18n (fa)

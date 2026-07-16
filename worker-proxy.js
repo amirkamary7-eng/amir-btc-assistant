@@ -20,6 +20,8 @@ import { createNotificationHandlers } from './src/controllers/notifications.js';
 import { createAssistantHandlers } from './src/controllers/assistant.js';
 import { createAnalysisRepository } from './src/repositories/analyses.js';
 import { createAnalysisHandlers } from './src/controllers/analyses.js';
+import { createAdminRepository } from './src/repositories/admin.js';
+import { createAdminHandlers } from './src/controllers/admin.js';
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 
 /**
@@ -2341,6 +2343,23 @@ const analysisHandlers = createAnalysisHandlers({
   resolveWebAppUrl,
   queryDb,
 });
+const adminRepo = createAdminRepository({ queryDb, normalizeOptionalString });
+const adminHandlers = createAdminHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  optionalTelegramAuth,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  buildBodyFieldValidationError,
+  isDatabaseConfigured,
+  isAdminTelegramId,
+  getAdminIds,
+  sendTelegramMessage,
+  normalizeOptionalString,
+  adminRepo,
+  diagLog,
+});
 //#endregion
 
 // ── Market Overview Service (CMC) — all CMC calls centralized here ──
@@ -3413,6 +3432,71 @@ export default {
         const usage = await marketOverviewSvc.getUsageLog(env);
         const keyInfo = env.CMC_API_KEY ? await marketOverviewSvc.fetchCMCKeyInfo(env.CMC_API_KEY) : null;
         return jsonResponse({ status: 'success', usage, keyInfo }, {}, env);
+      }
+
+      // ── Admin Panel API Routes (R4) ──
+      if (url.pathname === '/api/admin/is-admin' && request.method === 'GET') {
+        return await adminHandlers.handleIsAdmin(request, env);
+      }
+      if (url.pathname === '/api/admin/dashboard' && request.method === 'GET') {
+        return await adminHandlers.handleDashboard(request, env);
+      }
+      if (url.pathname === '/api/admin/admins' && request.method === 'GET') {
+        return await adminHandlers.handleListAdmins(request, env);
+      }
+      if (url.pathname === '/api/admin/admins' && request.method === 'POST') {
+        return await adminHandlers.handleAddAdmin(request, env);
+      }
+      if (/^\/api\/admin\/admins\/\d+$/.test(url.pathname) && request.method === 'PUT') {
+        const adminId = url.pathname.split('/').pop();
+        return await adminHandlers.handleUpdateAdmin(request, env, adminId);
+      }
+      if (/^\/api\/admin\/admins\/\d+$/.test(url.pathname) && request.method === 'DELETE') {
+        const adminId = url.pathname.split('/').pop();
+        return await adminHandlers.handleDeleteAdmin(request, env, adminId);
+      }
+      if (url.pathname === '/api/admin/users' && request.method === 'GET') {
+        return await adminHandlers.handleListUsers(request, env);
+      }
+      if (/^\/api\/admin\/users\/[^/]+\/stats$/.test(url.pathname) && request.method === 'GET') {
+        const userId = decodeURIComponent(url.pathname.split('/')[4]);
+        return await adminHandlers.handleUserDetail(request, env, userId);
+      }
+      if (url.pathname === '/api/admin/tickets' && request.method === 'GET') {
+        return await adminHandlers.handleListTickets(request, env);
+      }
+      if (/^\/api\/admin\/tickets\/[^/]+\/reply$/.test(url.pathname) && request.method === 'POST') {
+        const ticketId = url.pathname.split('/')[4];
+        return await adminHandlers.handleReplyTicket(request, env, ticketId);
+      }
+      if (/^\/api\/admin\/tickets\/[^/]+\/status$/.test(url.pathname) && request.method === 'PUT') {
+        const ticketId = url.pathname.split('/')[4];
+        return await adminHandlers.handleUpdateTicketStatus(request, env, ticketId);
+      }
+      if (url.pathname === '/api/admin/broadcasts' && request.method === 'POST') {
+        return await adminHandlers.handleCreateBroadcast(request, env);
+      }
+      if (url.pathname === '/api/admin/broadcasts' && request.method === 'GET') {
+        return await adminHandlers.handleListBroadcasts(request, env);
+      }
+      if (url.pathname === '/api/admin/rewards' && request.method === 'GET') {
+        return await adminHandlers.handleListRewards(request, env);
+      }
+      if (/^\/api\/admin\/rewards\/\d+\/status$/.test(url.pathname) && request.method === 'PUT') {
+        const rewardId = url.pathname.split('/')[4];
+        return await adminHandlers.handleUpdateReward(request, env, rewardId);
+      }
+      if (url.pathname === '/api/admin/transactions' && request.method === 'GET') {
+        return await adminHandlers.handleListTransactions(request, env);
+      }
+      if (url.pathname === '/api/admin/referrals' && request.method === 'GET') {
+        return await adminHandlers.handleListReferrals(request, env);
+      }
+      if (url.pathname === '/api/admin/system-health' && request.method === 'GET') {
+        return await adminHandlers.handleSystemHealth(request, env);
+      }
+      if (url.pathname === '/api/admin/logs' && request.method === 'GET') {
+        return await adminHandlers.handleLogs(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/market') {
