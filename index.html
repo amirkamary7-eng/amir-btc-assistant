@@ -412,20 +412,14 @@
             <h3 class="profile-name profile-loading-target" id="profile-name" data-i18n="guest">کاربر میهمان</h3>
             <span class="profile-username profile-loading-target" id="profile-username">@guest</span>
             <span class="profile-id">ID: <span class="profile-loading-target" id="profile-id-num">000000</span></span>
+            <div id="admin-entry-btn" class="admin-entry-btn" style="display:none;" onclick="openAdminPanel()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <span>Admin Console</span>
+            </div>
             <div class="online-badge" id="online-badge" style="display:none;">
                 <span class="online-dot"></span>
                 <span id="online-count">0</span> <span data-i18n="online_users">کاربر آنلاین</span>
             </div>
-        </div>
-
-        <!-- R4: Admin Control Center — only visible to database-verified admins -->
-        <div id="admin-entry-btn" class="admin-entry-card" style="display:none;" onclick="openAdminPanel()">
-            <div class="admin-entry-icon">👑</div>
-            <div class="admin-entry-text">
-                <div class="admin-entry-title">Admin Control Center</div>
-                <div class="admin-entry-sub" data-i18n="admin_control_desc">مدیریت و کنترل سیستم</div>
-            </div>
-            <svg class="admin-entry-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
 
         <!-- AB Token Wallet Card -->

@@ -2111,21 +2111,20 @@ strong.down { color: var(--red); }
 /* R4: Admin Panel Styles */
 /* ============================================================================ */
 
-/* Admin Entry Card (Profile button) */
-.admin-entry-card {
-    display: flex; align-items: center; gap: 12px;
-    background: linear-gradient(135deg, rgba(255,138,0,0.12) 0%, rgba(255,138,0,0.04) 100%);
-    border: 1px solid rgba(255,138,0,0.2);
-    border-radius: 16px; padding: 14px 16px; margin: 12px 0;
-    cursor: pointer; transition: all 0.25s ease;
-    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+/* Admin Entry Button (inside profile card) */
+.admin-entry-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 12px; padding: 6px 16px; height: 32px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.3px;
+    color: #1a1200;
+    background: linear-gradient(135deg, #f7931a 0%, #e8a838 50%, #f7c948 100%);
+    border: 1px solid rgba(247,201,72,0.6);
+    border-radius: 20px; cursor: pointer;
+    box-shadow: 0 2px 12px rgba(247,147,26,0.25), inset 0 1px 0 rgba(255,255,255,0.3);
+    transition: all 0.2s ease;
 }
-.admin-entry-card:active { transform: scale(0.97); }
-.admin-entry-icon { font-size: 28px; }
-.admin-entry-text { flex: 1; }
-.admin-entry-title { font-size: 15px; font-weight: 700; color: var(--accent); }
-.admin-entry-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
-.admin-entry-arrow { color: var(--text-sub); }
+.admin-entry-btn:active { transform: scale(0.95); box-shadow: 0 1px 6px rgba(247,147,26,0.2); }
+.admin-entry-btn svg { opacity: 0.85; }
 
 /* Admin Panel Overlay */
 .admin-panel {

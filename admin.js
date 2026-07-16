@@ -2,7 +2,6 @@
    Admin Control Center — Frontend Logic (Vanilla JS)
    Uses global apiFetch() and API_BASE from app.js
    ============================================================ */
-console.log("ADMIN_JS_LOADED");
 
 // ─── State ──────────────────────────────────────────────────
 let _adminPanelOpen = false;
@@ -95,64 +94,19 @@ function adminPagination(containerId, currentPage, totalPages, loadFn) {
 // ─── Initialize ─────────────────────────────────────────────
 
 async function initAdminPanel() {
-    console.log("INIT_ADMIN_PANEL_START");
     try {
-        console.log("TG_USER", getTelegramUser());
-
-        // ─── INITDATA FORENSICS ───
-        const tg = window.Telegram?.WebApp;
-        const sdkInitData = tg?.initData || '';
-        const hashData = (function() {
-            try {
-                const h = location.hash.substring(1);
-                if (!h) return '';
-                return new URLSearchParams(h).get('tgWebAppData') || '';
-            } catch(e) { return ''; }
-        })();
-        const finalInitData = getTelegramInitData();
-        console.log('[INITDATA-FX] tg.initData length:', sdkInitData.length, 'value:', sdkInitData);
-        console.log('[INITDATA-FX] _parseHashInitData length:', hashData.length, 'value:', hashData);
-        console.log('[INITDATA-FX] location.hash length:', location.hash.length, 'value:', location.hash.substring(0, 120) + (location.hash.length > 120 ? '...' : ''));
-        console.log('[INITDATA-FX] getTelegramInitData() length:', finalInitData.length, 'value:', finalInitData);
-        console.log('[INITDATA-FX] source:', sdkInitData ? 'SDK' : (hashData ? 'HASH_FALLBACK' : 'NONE'));
-        // Check if hash field exists in the initData
-        if (finalInitData) {
-            const hasHash = finalInitData.includes('hash=');
-            const hasAuthDate = finalInitData.includes('auth_date=');
-            const hasUser = finalInitData.includes('user=');
-            const hashValue = (function() {
-                try {
-                    const params = new URLSearchParams(finalInitData);
-                    return params.get('hash') || 'MISSING';
-                } catch(e) { return 'PARSE_ERROR'; }
-            })();
-            console.log('[INITDATA-FX] fields — hasUser:', hasUser, 'hasAuthDate:', hasAuthDate, 'hasHash:', hasHash, 'hashValue:', hashValue);
-        }
-        // ─── END INITDATA FORENSICS ───
-
         // Skip if no Telegram user is available yet (cold-open scenario)
-        // — will be re-called from tryLateBootstrap once user arrives
         if (typeof getTelegramUser === 'function' && !getTelegramUser()?.id) {
-            console.log('[ADMIN] Skipped — no Telegram user yet (will retry after bootstrap)');
             return;
         }
 
         const data = await apiFetch('/api/admin/is-admin');
-        console.log("ADMIN_API_RESPONSE", data);
         _adminData = data || { is_admin: false, role: '', permissions: [] };
         if (data && data.is_admin) {
             const btn = document.getElementById('admin-entry-btn');
-            console.log("ADMIN_BUTTON_ELEMENT", btn);
             if (btn) {
-                btn.style.display = 'flex';
-                console.log("DISPLAY_STYLE", btn.style.display);
-                console.log("COMPUTED_STYLE", getComputedStyle(btn).display);
-                console.log('[ADMIN] Entry button shown — role:', data.role, 'is_super:', data.is_super, 'reason:', data.reason);
-            } else {
-                console.error('[ADMIN] admin-entry-btn element not found in DOM');
+                btn.style.display = 'inline-flex';
             }
-        } else {
-            console.log('[ADMIN] User is not admin — is_admin:', data?.is_admin, 'role:', data?.role, 'reason:', data?.reason, 'auth_method:', data?.auth_method);
         }
     } catch (e) {
         console.warn('[ADMIN] initAdminPanel error:', e.message || e);
