@@ -98,12 +98,21 @@ export function createAdminHandlers(deps) {
 
   async function handleIsAdmin(request, env) {
     if (!isDatabaseConfigured(env)) {
-      return jsonResponse({ is_admin: false, role: null, permissions: [], is_super: false }, {}, env);
+      return jsonResponse({ is_admin: false, reason: 'no_database', role: null, permissions: [], is_super: false }, {}, env);
     }
 
     const auth = optionalTelegramAuth(request, env);
     if (!auth.user) {
-      return jsonResponse({ is_admin: false, role: null, permissions: [], is_super: false }, {}, env);
+      // Diagnostic: help frontend understand WHY auth failed
+      const diag = {
+        is_admin: false,
+        reason: auth.authMethod === null ? 'no_init_data' : 'auth_failed',
+        auth_method: auth.authMethod,
+        role: null,
+        permissions: [],
+        is_super: false,
+      };
+      return jsonResponse(diag, {}, env);
     }
 
     try {
@@ -119,6 +128,7 @@ export function createAdminHandlers(deps) {
       if (!admin && isSuperEnv) {
         return jsonResponse({
           is_admin: true,
+          reason: 'env_super_admin',
           role: 'super_admin',
           permissions: ['*'],
           is_super: true,
@@ -127,6 +137,7 @@ export function createAdminHandlers(deps) {
 
       return jsonResponse({
         is_admin: Boolean(admin && admin.active),
+        reason: admin ? (admin.active ? 'db_admin' : 'admin_inactive') : 'not_in_admins_table',
         role: admin ? admin.role : null,
         permissions: admin ? admin.permissions : [],
         is_super: Boolean(isSuper),

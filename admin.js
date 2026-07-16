@@ -108,13 +108,13 @@ async function initAdminPanel() {
         if (data && data.is_admin) {
             const btn = document.getElementById('admin-entry-btn');
             if (btn) {
-                btn.style.display = 'block';
-                console.log('[ADMIN] Entry button shown — role:', data.role, 'is_super:', data.is_super);
+                btn.style.display = 'flex';
+                console.log('[ADMIN] Entry button shown — role:', data.role, 'is_super:', data.is_super, 'reason:', data.reason);
             } else {
                 console.error('[ADMIN] admin-entry-btn element not found in DOM');
             }
         } else {
-            console.log('[ADMIN] User is not admin — is_admin:', data?.is_admin, 'role:', data?.role);
+            console.log('[ADMIN] User is not admin — is_admin:', data?.is_admin, 'role:', data?.role, 'reason:', data?.reason, 'auth_method:', data?.auth_method);
         }
     } catch (e) {
         console.warn('[ADMIN] initAdminPanel error:', e.message || e);
