@@ -338,6 +338,16 @@ function timingSafeEqualSecret(a, b) {
 }
 
 function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
+  console.log("[TG-VALIDATE-DIAG]", {
+    tokenExists: !!botToken,
+    tokenLength: botToken ? botToken.length : 0,
+    tokenStart: botToken ? botToken.slice(0, 8) : null,
+    initDataLength: initData ? initData.length : 0,
+    hasHash: initData ? initData.includes("hash=") : false,
+    hasAuthDate: initData ? initData.includes("auth_date=") : false,
+    hasUser: initData ? initData.includes("user=") : false,
+    initDataStart: initData ? initData.slice(0, 60) : null
+  });
   if (!initData || !botToken || botToken === 'REPLACE_WITH_TOKEN') {
     return null;
   }
