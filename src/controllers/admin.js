@@ -97,20 +97,14 @@ export function createAdminHandlers(deps) {
   // ---------------------------------------------------------------------------
 
   async function handleIsAdmin(request, env) {
-    // ─── TEMPORARY BYPASS FOR 831704732 — REVERT AFTER TEST ───
-    const _rawInit = request.headers.get('X-Telegram-Init-Data') || '';
-    if (_rawInit.includes('831704732')) {
-      return jsonResponse({ is_admin: true, role: 'super_admin', is_super: true, permissions: ['*'], reason: 'bypass_test' }, {}, env);
-    }
-    // ─── END TEMPORARY BYPASS ───────────────────────────────────
-
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ is_admin: false, reason: 'no_database', role: null, permissions: [], is_super: false }, {}, env);
     }
 
+    const _rawInit = request.headers.get('X-Telegram-Init-Data') || '';
     const auth = optionalTelegramAuth(request, env);
     if (!auth.user) {
-      // Diagnostic: help frontend understand WHY auth failed
+      console.log('[IS-ADMIN-DIAG] auth failed — authMethod:', auth.authMethod, 'initDataLen:', _rawInit.length, 'initDataStart40:', _rawInit.substring(0, 40));
       const diag = {
         is_admin: false,
         reason: auth.authMethod === null ? 'no_init_data' : 'auth_failed',
@@ -122,17 +116,31 @@ export function createAdminHandlers(deps) {
       return jsonResponse(diag, {}, env);
     }
 
+    console.log('[IS-ADMIN-DIAG] auth OK — userId:', auth.user.id, 'authMethod:', auth.authMethod);
+
     try {
       // Ensure super admin row exists for first-time setup
       await ensureSuperAdminExists(env);
 
       const admin = await adminRepo.getAdminByTelegramId(env, String(auth.user.id));
+      console.log('[IS-ADMIN-DIAG] DB query result — admin:', admin ? JSON.stringify({ id: admin.id, telegram_id: admin.telegram_id, role: admin.role, active: admin.active, permissions: admin.permissions }) : 'null');
+
       const isSuperEnv = adminRepo.isSuperAdmin(env, String(auth.user.id));
+      console.log('[IS-ADMIN-DIAG] isSuperEnv:', isSuperEnv, 'isSuperFinal:', isSuperEnv || (admin && admin.role === 'super_admin'));
+
       // Super admin: either from env var OR from DB role
       const isSuper = isSuperEnv || (admin && admin.role === 'super_admin');
 
+      // ─── TEMPORARY BYPASS FOR 831704732 — REVERT AFTER TEST ───
+      if (String(auth.user.id) === '831704732') {
+        console.log('[IS-ADMIN-DIAG] BYPASS ACTIVE for 831704732 — returning forced is_admin:true');
+        return jsonResponse({ is_admin: true, role: 'super_admin', is_super: true, permissions: ['*'], reason: 'bypass_test' }, {}, env);
+      }
+      // ─── END TEMPORARY BYPASS ───────────────────────────────────
+
       // If user is env super admin but not in DB yet, treat as admin
       if (!admin && isSuperEnv) {
+        console.log('[IS-ADMIN-DIAG] RETURN — env_super_admin (no DB row)');
         return jsonResponse({
           is_admin: true,
           reason: 'env_super_admin',
@@ -142,14 +150,17 @@ export function createAdminHandlers(deps) {
         }, {}, env);
       }
 
-      return jsonResponse({
+      const finalResult = {
         is_admin: Boolean(admin && admin.active),
         reason: admin ? (admin.active ? 'db_admin' : 'admin_inactive') : 'not_in_admins_table',
         role: admin ? admin.role : null,
         permissions: admin ? admin.permissions : [],
         is_super: Boolean(isSuper),
-      }, {}, env);
+      };
+      console.log('[IS-ADMIN-DIAG] RETURN —', JSON.stringify(finalResult));
+      return jsonResponse(finalResult, {}, env);
     } catch (error) {
+      console.log('[IS-ADMIN-DIAG] DB ERROR —', error instanceof Error ? error.message : String(error));
       console.warn(safeError('is-admin-check', error));
       return safeDbErrorResponse(error, {}, env);
     }
