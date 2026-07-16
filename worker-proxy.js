@@ -383,33 +383,39 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
       return null;
     }
 
-    const dataCheckString = checkPairs
-      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-      .map(([key, rawValue]) => `${key}=${rawValue}`)
-      .join('\n');
-
-    // [TG-HASH-CHECK] 2) After building data_check_string
-    console.log("[TG-HASH-CHECK] 2) after data_check_string:", {
-      dataCheckStringLength: dataCheckString.length,
-      dataCheckStringStart: dataCheckString.slice(0, 80),
-      sortedFieldOrder: checkPairs.sort(([a], [b]) => a.localeCompare(b)).map(([k]) => k)
-    });
-
     const secretKey = createHmac('sha256', 'WebAppData').update(botToken).digest();
-    const computedHash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-    const hashMatch = safeCompareStrings(computedHash, receivedHash);
 
-    // [TG-HASH-CHECK] 3) Before hash comparison
-    console.log("[TG-HASH-CHECK] 3) hash comparison:", {
-      receivedHashLength: receivedHash.length,
-      receivedHashStart: receivedHash.slice(0, 10) + "..." + receivedHash.slice(-6),
-      computedHashLength: computedHash.length,
-      computedHashStart: computedHash.slice(0, 10) + "..." + computedHash.slice(-6),
-      hashMatch
+    // === [TG-HASH-FIX] Test A: ALL fields except hash (current behavior, includes signature) ===
+    const checkPairsA = checkPairs.slice().sort(([a], [b]) => a.localeCompare(b));
+    const dcsA = checkPairsA.map(([k, v]) => `${k}=${v}`).join('\n');
+    const hashA = createHmac('sha256', secretKey).update(dcsA).digest('hex');
+    const matchA = safeCompareStrings(hashA, receivedHash);
+
+    // === [TG-HASH-FIX] Test B: exclude both hash AND signature ===
+    const checkPairsB = checkPairs.filter(([k]) => k !== 'signature').sort(([a], [b]) => a.localeCompare(b));
+    const dcsB = checkPairsB.map(([k, v]) => `${k}=${v}`).join('\n');
+    const hashB = createHmac('sha256', secretKey).update(dcsB).digest('hex');
+    const matchB = safeCompareStrings(hashB, receivedHash);
+
+    console.log("[TG-HASH-FIX] Test A (all except hash):", {
+      fieldsUsed: checkPairsA.map(([k]) => k),
+      dataCheckString: dcsA,
+      algorithmUsed: "HMAC_SHA256(WebAppData, token) -> HMAC_SHA256(secret, dcs)",
+      hashMatch: matchA
     });
+    console.log("[TG-HASH-FIX] Test B (exclude hash+signature):", {
+      fieldsUsed: checkPairsB.map(([k]) => k),
+      dataCheckString: dcsB,
+      algorithmUsed: "HMAC_SHA256(WebAppData, token) -> HMAC_SHA256(secret, dcs)",
+      hashMatch: matchB
+    });
+
+    // Use whichever matches (prefer A, fallback B)
+    const hashMatch = matchA || matchB;
+    const dataCheckString = matchA ? dcsA : dcsB;
 
     if (!hashMatch) {
-      console.log("[TG-HASH-RESULT]", { valid: false, reason: "HMAC mismatch" });
+      console.log("[TG-HASH-RESULT]", { valid: false, reason: "HMAC mismatch on both tests" });
       return null;
     }
 
