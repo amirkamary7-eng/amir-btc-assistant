@@ -436,7 +436,18 @@ const i18n = {
         invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.',
         online_users: 'کاربر آنلاین', cal_status_past: 'گذشته', cal_status_live: 'زنده', cal_status_upcoming: 'آینده',
         price_reached: 'قیمت به', ai_title: 'دستیار هوشمند', ai_messages_today: 'پیام امروز',
-        ai_cooldown: 'لطفاً چند ثانیه صبر کنید', ai_limit: 'محدودیت روزانه', ai_error: 'دستیار در دسترس نیست'
+        ai_cooldown: 'لطفاً چند ثانیه صبر کنید', ai_limit: 'محدودیت روزانه', ai_error: 'دستیار در دسترس نیست',
+        notif_settings: 'اعلانات',
+        ns_smart_desc: 'دریافت به‌روزرسانی‌های مهم بازار، تحلیل‌ها و هشدارها از طریق تلگرام.',
+        ns_categories: 'دسته‌بندی اعلانات',
+        ns_analysis: 'تحلیل‌ها', ns_analysis_desc: 'اعلان انتشار تحلیل جدید بازار',
+        ns_calendar: 'تقویم اقتصادی', ns_calendar_desc: 'هشدار رویدادهای مهم اقتصادی',
+        ns_price_alert: 'هشدار قیمت', ns_price_alert_desc: 'اعلان هنگام فعال شدن هشدار قیمت',
+        ns_market: 'حرکات بازار', ns_market_desc: 'اعلان نوسانات و تحرکات مهم بازار',
+        ns_news: 'اخبار فوری', ns_news_desc: 'اخبار مهم و فوری بازار کریپتو',
+        ns_sub_title: 'اشتراک اعلانات', ns_sub_desc: 'برای دریافت هشدارها از طریق تلگرام اشتراک فعال کنید.',
+        ns_sub_activate: 'فعال‌سازی',
+        ns_active: 'فعال', ns_inactive: 'غیرفعال'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -513,7 +524,18 @@ const i18n = {
         invalid_price: 'Enter a valid price', copied: 'Copied!', copy_ref_msg: 'Referral link copied.',
         online_users: 'users online', cal_status_past: 'Past', cal_status_live: 'Live', cal_status_upcoming: 'Upcoming',
         price_reached: 'Price reached', ai_title: 'AI Assistant', ai_messages_today: 'messages today',
-        ai_cooldown: 'Please wait a few seconds', ai_limit: 'Daily limit reached', ai_error: 'Assistant unavailable'
+        ai_cooldown: 'Please wait a few seconds', ai_limit: 'Daily limit reached', ai_error: 'Assistant unavailable',
+        notif_settings: 'Notifications',
+        ns_smart_desc: 'Receive important market updates, analyses, and alerts directly through Telegram.',
+        ns_categories: 'NOTIFICATION CATEGORIES',
+        ns_analysis: 'Analysis', ns_analysis_desc: 'Get notified when a new market analysis is published',
+        ns_calendar: 'Economic Calendar', ns_calendar_desc: 'Alerts for important economic events',
+        ns_price_alert: 'Price Alerts', ns_price_alert_desc: 'Get notified when your price alerts trigger',
+        ns_market: 'Market Moves', ns_market_desc: 'Important market movements and volatility alerts',
+        ns_news: 'Breaking News', ns_news_desc: 'Major crypto news and urgent developments',
+        ns_sub_title: 'Notification Subscription', ns_sub_desc: 'Activate your subscription to receive alerts through Telegram.',
+        ns_sub_activate: 'Activate',
+        ns_active: 'Active', ns_inactive: 'Inactive'
     }
 };
 /**
@@ -3507,6 +3529,80 @@ function openAboutModal() {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function closeAboutModal() { document.getElementById('about-modal').style.display = 'none'; }
+
+// ============================================================================
+//#region Notification Settings
+// ============================================================================
+
+const NS_DEFAULT_PREFS = { analysis: true, calendar: true, price_alert: true, market: false, news: false };
+
+function getNotifPrefs() {
+    try {
+        const key = 'notif_prefs_' + getUserId();
+        const stored = localStorage.getItem(key);
+        if (stored) return { ...NS_DEFAULT_PREFS, ...JSON.parse(stored) };
+    } catch (e) { /* ignore */ }
+    return { ...NS_DEFAULT_PREFS };
+}
+
+function saveNotifPrefs(prefs) {
+    try {
+        const key = 'notif_prefs_' + getUserId();
+        localStorage.setItem(key, JSON.stringify(prefs));
+    } catch (e) { /* ignore */ }
+}
+
+function openNotifSettingsModal() {
+    closeSettingsModal();
+    const modal = document.getElementById('notif-settings-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    renderNotifSettings();
+}
+
+function closeNotifSettingsModal() {
+    document.getElementById('notif-settings-modal').style.display = 'none';
+    openSettingsModal();
+}
+
+function renderNotifSettings() {
+    const prefs = getNotifPrefs();
+    // Set toggle states
+    document.querySelectorAll('.ns-toggle-switch input[data-pref]').forEach(input => {
+        const key = input.getAttribute('data-pref');
+        input.checked = !!prefs[key];
+    });
+    // Update status badge
+    const anyEnabled = Object.values(prefs).some(v => v);
+    const dot = document.getElementById('ns-status-dot');
+    const text = document.getElementById('ns-status-text');
+    if (dot) { dot.classList.toggle('inactive', !anyEnabled); }
+    if (text) {
+        text.textContent = anyEnabled ? t('ns_active') : t('ns_inactive');
+        text.classList.toggle('inactive', !anyEnabled);
+    }
+}
+
+function handleNotifPrefChange(input) {
+    const key = input.getAttribute('data-pref');
+    if (!key) return;
+    const prefs = getNotifPrefs();
+    prefs[key] = input.checked;
+    saveNotifPrefs(prefs);
+    renderNotifSettings();
+}
+
+function handleNotifSubscription() {
+    const tg = getTg();
+    if (tg?.openTelegramLink) {
+        tg.openTelegramLink('https://t.me/Amir_BTC_AssistantBot');
+    } else {
+        window.open('https://t.me/Amir_BTC_AssistantBot', '_blank');
+    }
+}
+
+// #endregion
+
 /**
  * مدیر تیکت‌ها مودال را باز می‌کند.
  * ورودی: بدون ورودی.
@@ -4048,6 +4144,10 @@ window.openTicketsModal = openTicketsModal;
 window.closeTicketsModal = closeTicketsModal;
 window.openAboutModal = openAboutModal;
 window.closeAboutModal = closeAboutModal;
+window.openNotifSettingsModal = openNotifSettingsModal;
+window.closeNotifSettingsModal = closeNotifSettingsModal;
+window.handleNotifPrefChange = handleNotifPrefChange;
+window.handleNotifSubscription = handleNotifSubscription;
 window.openAdminTicketsModal = openAdminTicketsModal;
 window.closeAdminTicketsModal = closeAdminTicketsModal;
 window.replyToTicket = replyToTicket;

@@ -683,10 +683,129 @@
                     <span data-i18n="admin_tickets">مدیریت تیکت‌ها</span>
                     <span class="setting-arrow">›</span>
                 </div>
+                <div class="setting-item" onclick="openNotifSettingsModal()">
+                    <span data-i18n="notif_settings">اعلانات</span>
+                    <span class="setting-arrow">›</span>
+                </div>
                 <div class="setting-item" onclick="openAboutModal()">
                     <span data-i18n="about">درباره ما</span>
                     <span class="setting-arrow">›</span>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال تنظیمات اعلانات -->
+    <div id="notif-settings-modal" class="modal" onclick="if(event.target===this) closeNotifSettingsModal()">
+        <div class="modal-box full-modal-box">
+            <div class="modal-header">
+                <h3 class="modal-title-with-icon">
+                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span data-i18n="notif_settings">اعلانات</span>
+                </h3>
+                <button class="modal-close-btn" onclick="closeNotifSettingsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+
+            <!-- Smart Notifications Status -->
+            <div class="ns-status-card">
+                <div class="ns-status-info">
+                    <div class="ns-status-badge-wrap">
+                        <span class="ns-status-dot" id="ns-status-dot"></span>
+                        <span class="ns-status-text" id="ns-status-text"></span>
+                    </div>
+                    <p class="ns-status-desc" data-i18n="ns_smart_desc">دریافت به‌روزرسانی‌های مهم بازار، تحلیل‌ها و هشدارها از طریق تلگرام.</p>
+                </div>
+            </div>
+
+            <!-- Section Label -->
+            <div class="ns-section-label" data-i18n="ns_categories">دسته‌بندی اعلانات</div>
+
+            <!-- Toggle Items -->
+            <div class="ns-toggle-list">
+                <div class="ns-toggle-item" data-key="analysis">
+                    <div class="ns-toggle-icon ns-icon-analysis">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    </div>
+                    <div class="ns-toggle-info">
+                        <span class="ns-toggle-title" data-i18n="ns_analysis">تحلیل‌ها</span>
+                        <span class="ns-toggle-desc" data-i18n="ns_analysis_desc">اعلان انتشار تحلیل جدید بازار</span>
+                    </div>
+                    <label class="ns-toggle-switch">
+                        <input type="checkbox" data-pref="analysis" onchange="handleNotifPrefChange(this)">
+                        <span class="ns-toggle-track"><span class="ns-toggle-thumb"></span></span>
+                    </label>
+                </div>
+
+                <div class="ns-toggle-item" data-key="calendar">
+                    <div class="ns-toggle-icon ns-icon-calendar">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    </div>
+                    <div class="ns-toggle-info">
+                        <span class="ns-toggle-title" data-i18n="ns_calendar">تقویم اقتصادی</span>
+                        <span class="ns-toggle-desc" data-i18n="ns_calendar_desc">هشدار رویدادهای مهم اقتصادی</span>
+                    </div>
+                    <label class="ns-toggle-switch">
+                        <input type="checkbox" data-pref="calendar" onchange="handleNotifPrefChange(this)">
+                        <span class="ns-toggle-track"><span class="ns-toggle-thumb"></span></span>
+                    </label>
+                </div>
+
+                <div class="ns-toggle-item" data-key="price_alert">
+                    <div class="ns-toggle-icon ns-icon-price">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    </div>
+                    <div class="ns-toggle-info">
+                        <span class="ns-toggle-title" data-i18n="ns_price_alert">هشدار قیمت</span>
+                        <span class="ns-toggle-desc" data-i18n="ns_price_alert_desc">اعلان هنگام فعال شدن هشدار قیمت</span>
+                    </div>
+                    <label class="ns-toggle-switch">
+                        <input type="checkbox" data-pref="price_alert" onchange="handleNotifPrefChange(this)">
+                        <span class="ns-toggle-track"><span class="ns-toggle-thumb"></span></span>
+                    </label>
+                </div>
+
+                <div class="ns-toggle-item" data-key="market">
+                    <div class="ns-toggle-icon ns-icon-market">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                    </div>
+                    <div class="ns-toggle-info">
+                        <span class="ns-toggle-title" data-i18n="ns_market">حرکات بازار</span>
+                        <span class="ns-toggle-desc" data-i18n="ns_market_desc">اعلان نوسانات و تحرکات مهم بازار</span>
+                    </div>
+                    <label class="ns-toggle-switch">
+                        <input type="checkbox" data-pref="market" onchange="handleNotifPrefChange(this)">
+                        <span class="ns-toggle-track"><span class="ns-toggle-thumb"></span></span>
+                    </label>
+                </div>
+
+                <div class="ns-toggle-item" data-key="news">
+                    <div class="ns-toggle-icon ns-icon-news">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    </div>
+                    <div class="ns-toggle-info">
+                        <span class="ns-toggle-title" data-i18n="ns_news">اخبار فوری</span>
+                        <span class="ns-toggle-desc" data-i18n="ns_news_desc">اخبار مهم و فوری بازار کریپتو</span>
+                    </div>
+                    <label class="ns-toggle-switch">
+                        <input type="checkbox" data-pref="news" onchange="handleNotifPrefChange(this)">
+                        <span class="ns-toggle-track"><span class="ns-toggle-thumb"></span></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Subscription Card -->
+            <div class="ns-subscription-card">
+                <div class="ns-sub-left">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#fff;opacity:0.9"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    <div>
+                        <div class="ns-sub-title" data-i18n="ns_sub_title">اشتراک اعلانات</div>
+                        <div class="ns-sub-desc" data-i18n="ns_sub_desc">برای دریافت هشدارها از طریق تلگرام اشتراک فعال کنید.</div>
+                    </div>
+                </div>
+                <button class="ns-sub-btn" onclick="handleNotifSubscription()" id="ns-sub-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span data-i18n="ns_sub_activate">فعال‌سازی</span>
+                </button>
             </div>
         </div>
     </div>
