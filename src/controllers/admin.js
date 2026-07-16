@@ -32,7 +32,7 @@ export function createAdminHandlers(deps) {
 
   async function requireAdmin(request, env, requiredPermission = null) {
     // 1. Authenticate via Telegram
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return { error: authState.error, admin: null };
 
     // 2. Check admin status in DATABASE (admins table)

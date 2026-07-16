@@ -21,6 +21,10 @@ let telegramInitDone = false;
 let telegramAuthWaitPromise = null;
 let bootstrapComplete = false;
 let _coldOpenReloadTimer = null;
+let _bootstrapPromise = null;
+let _adminPanelInitialized = false;
+
+function $(id) { return document.getElementById(id); }
 
 /**
  * داده init data کاربر را تجزیه و مقدار قابل استفاده استخراج می‌کند.
@@ -848,9 +852,13 @@ async function bootstrapUser() {
  * Guards: only runs once (bootstrapComplete), only when user is authenticated.
  */
 async function tryLateBootstrap() {
-    if (bootstrapComplete) {
-        return;
-    }
+    if (_bootstrapPromise) return _bootstrapPromise;
+    if (bootstrapComplete) return;
+    _bootstrapPromise = _doBootstrap().finally(() => { _bootstrapPromise = null; });
+    return _bootstrapPromise;
+}
+
+async function _doBootstrap() {
     const user = getTelegramUser();
     if (!user?.id) {
         console.log('[BOOT] tryLateBootstrap: no user yet, skipping');
@@ -872,7 +880,8 @@ async function tryLateBootstrap() {
         await bootstrapUser();
         loadUser();
         // R4-fix: Re-check admin status now that we have a valid user with initData
-        if (bootstrapComplete && typeof initAdminPanel === 'function') {
+        if (bootstrapComplete && typeof initAdminPanel === 'function' && !_adminPanelInitialized) {
+            _adminPanelInitialized = true;
             initAdminPanel();
         }
     } catch (e) {
@@ -983,6 +992,8 @@ function updateOnlineBadge(count) {
     } else {
         badge.style.display = 'none';
     }
+    const liveCountEl = document.getElementById('live-count');
+    if (liveCountEl) liveCountEl.innerText = count > 0 ? count : '—';
 }
 
 /**
@@ -995,9 +1006,9 @@ async function loadReferralStats() {
     if (!API_BASE || isGuestUserId(uid) || isPendingTelegramUserId(uid) || UserContext.isPending()) return;
     try {
         const data = await apiFetch('/api/referrals/stats');
-        document.getElementById('ref-total').innerText = data.total ?? 0;
-        document.getElementById('ref-active').innerText = data.active ?? 0;
-        document.getElementById('ref-reward').innerText = `${data.tokens ?? 0} AB`;
+        const rt = $('ref-total'); if (rt) rt.innerText = data.total ?? 0;
+        const ra = $('ref-active'); if (ra) ra.innerText = data.active ?? 0;
+        const rr = $('ref-reward'); if (rr) rr.innerText = `${data.tokens ?? 0} AB`;
     } catch (e) { console.warn('loadReferralStats:', e); }
 }
 
@@ -1139,7 +1150,7 @@ async function apiFetch(path, options = {}) {
     if (initData) headers['X-Telegram-Init-Data'] = initData;
     const url = `${API_BASE}${path}`;
     if (path === '/api/admin/is-admin') {
-        console.log('[ADMIN-FETCH] path:', path, 'initDataLen:', initData.length, 'initDataValue:', initData);
+        console.log('[API] GET', path, 'initDataLen:', initData.length);
     }
     if (path === '/api/users/bootstrap') {
         console.log('[BOOT] apiFetch bootstrap — initData length:', initData.length, 'hasAuthHeader:', !!initData, 'user_id:', getUserId());
@@ -2131,7 +2142,8 @@ function showMiniToast(msg) {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function renderWatchlist() {
-    const grid = document.getElementById('watchlist-grid');
+    const grid = $('watchlist-grid');
+    if (!grid) return;
     const watchCoins = allCoins.filter(c => watchlist.includes(c.symbol));
     if (!watchCoins.length) {
         grid.innerHTML = `
@@ -2510,12 +2522,12 @@ function switchCalendarTab(tab, btn) {
 function openNewsModal(idx) {
     const n = displayedNews[idx];
     if (!n) return;
-    document.getElementById('news-modal-title').innerText = n.title;
-    document.getElementById('news-modal-image').src = n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
-    document.getElementById('news-modal-body').innerText = n.body || t('news_unavailable');
-    document.getElementById('news-modal-link').href = n.url || '#';
-    document.getElementById('news-modal-link').innerText = t('view_source');
-    document.getElementById('news-modal').style.display = 'flex';
+    const el = (id) => $(id);
+    const titleEl = el('news-modal-title'); if (titleEl) titleEl.innerText = n.title;
+    const imgEl = el('news-modal-image'); if (imgEl) imgEl.src = n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
+    const bodyEl = el('news-modal-body'); if (bodyEl) bodyEl.innerText = n.body || t('news_unavailable');
+    const linkEl = el('news-modal-link'); if (linkEl) { linkEl.href = n.url || '#'; linkEl.innerText = t('view_source'); }
+    const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
 }
 /**
  * اخبار مودال را می‌بندد.
@@ -2571,7 +2583,8 @@ function renderAnalysisSlider() {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function renderAnalysisList() {
-    const grid = document.getElementById('analysis-grid');
+    const grid = $('analysis-grid');
+    if (!grid) return;
     if (!analyses.length) {
         grid.innerHTML = `<div class="empty-state">${t('no_analysis_list')}</div>`;
         return;
@@ -2600,15 +2613,15 @@ function renderAnalysisList() {
 function openAnalysisDetail(id) {
     const a = analyses.find(x => x.id === id);
     if (!a) return;
-    const modal = document.getElementById('analysis-detail-modal');
-    document.getElementById('analysis-detail-coin').innerText = a.coin;
-    document.getElementById('analysis-detail-tf').innerText = a.timeframe || '1d';
-    const img = document.getElementById('analysis-detail-image');
-    img.src = a.image || '';
-    img.style.display = '';
-    document.getElementById('analysis-detail-author').innerText = a.author || '';
-    document.getElementById('analysis-detail-date').innerText = a.date || '';
-    document.getElementById('analysis-detail-text').innerText = a.text;
+    const modal = $('analysis-detail-modal');
+    if (!modal) return;
+    const coinEl = $('analysis-detail-coin'); if (coinEl) coinEl.innerText = a.coin;
+    const tfEl = $('analysis-detail-tf'); if (tfEl) tfEl.innerText = a.timeframe || '1d';
+    const img = $('analysis-detail-image');
+    if (img) { img.src = a.image || ''; img.style.display = ''; }
+    const authorEl = $('analysis-detail-author'); if (authorEl) authorEl.innerText = a.author || '';
+    const dateEl = $('analysis-detail-date'); if (dateEl) dateEl.innerText = a.date || '';
+    const textEl = $('analysis-detail-text'); if (textEl) textEl.innerText = a.text;
     modal.classList.add('bs-open');
     requestAnimationFrame(() => { modal.style.display = ''; });
 }
@@ -2905,11 +2918,12 @@ function updateTvTimeframeUI() {
  * Update the watchlist button in the detail modal.
  */
 function updateDetailWatchBtn(symbol) {
-    const btn = document.getElementById('detail-watch-btn');
+    const btn = $('detail-watch-btn');
     if (!btn) return;
     const inWatch = watchlist.includes(symbol);
     btn.classList.toggle('active', inWatch);
-    btn.querySelector('svg').setAttribute('fill', inWatch ? 'currentColor' : 'none');
+    const svg = btn.querySelector('svg');
+    if (svg) svg.setAttribute('fill', inWatch ? 'currentColor' : 'none');
     btn.dataset.symbol = symbol;
 }
 
@@ -3332,7 +3346,8 @@ function addNotification(title, body, options = true) {
  */
 function updateNotifBadge() {
     const unread = notifications.filter(n => !n.read).length;
-    const badge = document.getElementById('notif-badge');
+    const badge = $('notif-badge');
+    if (!badge) return;
     if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread; }
     else { badge.style.display = 'none'; }
 }
@@ -3422,35 +3437,35 @@ function markNotifRead(id) {
  */
 function loadUser() {
     if (UserContext.loading || isUserLoading()) {
-        document.getElementById('profile-name').innerText = t('loading_user');
-        document.getElementById('profile-username').innerText = '...';
-        document.getElementById('profile-id-num').innerText = '...';
+        const pn = $('profile-name'); if (pn) pn.innerText = t('loading_user');
+        const pu = $('profile-username'); if (pu) pu.innerText = '...';
+        const pi = $('profile-id-num'); if (pi) pi.innerText = '...';
         return;
     }
 
     const user = getTelegramUser();
     if (user) {
-        document.getElementById('profile-name').innerText = `${user.first_name || ''} ${user.last_name || ''}`.trim() || t('guest');
-        document.getElementById('profile-username').innerText = user.username ? `@${user.username}` : '@guest';
-        document.getElementById('profile-id-num').innerText = user.id || '000000';
-        if (user.photo_url) document.getElementById('profile-avatar').src = user.photo_url;
-        document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}?start=ref_${user.id}`;
+        const pn = $('profile-name'); if (pn) pn.innerText = `${user.first_name || ''} ${user.last_name || ''}`.trim() || t('guest');
+        const pu = $('profile-username'); if (pu) pu.innerText = user.username ? `@${user.username}` : '@guest';
+        const pi = $('profile-id-num'); if (pi) pi.innerText = user.id || '000000';
+        if (user.photo_url) { const pa = $('profile-avatar'); if (pa) pa.src = user.photo_url; }
+        const rl = $('ref-link'); if (rl) rl.value = `https://t.me/${BOT_USERNAME}?start=ref_${user.id}`;
         loadReferralStats();
         // Fix: reload wallet card now that the user is confirmed — resolves race condition
         // where loadProfileCard() ran earlier while UserContext was still pending
         window.WalletApp?.loadProfileCard();
     } else if (UserContext.isPending()) {
-        document.getElementById('profile-name').innerText = t('loading_user');
-        document.getElementById('profile-username').innerText = '...';
-        document.getElementById('profile-id-num').innerText = '...';
-        document.getElementById('ref-link').value = `https://t.me/${BOT_USERNAME}?start=ref_`;
+        const pn = $('profile-name'); if (pn) pn.innerText = t('loading_user');
+        const pu = $('profile-username'); if (pu) pu.innerText = '...';
+        const pi = $('profile-id-num'); if (pi) pi.innerText = '...';
+        const rl = $('ref-link'); if (rl) rl.value = `https://t.me/${BOT_USERNAME}?start=ref_`;
     } else if (UserContext.isGuest()) {
-        document.getElementById('profile-name').innerText = t('guest');
-        document.getElementById('profile-username').innerText = '@guest';
-        document.getElementById('profile-id-num').innerText = getUserId().replace('guest_', '') || '000000';
+        const pn = $('profile-name'); if (pn) pn.innerText = t('guest');
+        const pu = $('profile-username'); if (pu) pu.innerText = '@guest';
+        const pi = $('profile-id-num'); if (pi) pi.innerText = getUserId().replace('guest_', '') || '000000';
         // M-R5: guest users should not have a working referral link
-        document.getElementById('ref-link').value = '';
-        const refLinkInput = document.getElementById('ref-link');
+        const rl = $('ref-link'); if (rl) rl.value = '';
+        const refLinkInput = $('ref-link');
         if (refLinkInput) refLinkInput.placeholder = 'Login required';
     }
 
@@ -4018,7 +4033,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Cold-open retry: if bootstrap was skipped (isPending), poll every 500ms
     // until Telegram initData arrives, then run bootstrap exactly once.
     // 500ms ensures we fire BEFORE the 3s cold-open reload timer.
-    if (!bootstrapComplete && UserContext.isPending()) {
+    if (bootstrapComplete) {
+        console.log('[BOOT] Bootstrap already complete, skipping retry interval');
+    } else if (UserContext.isPending()) {
         console.log('[BOOT] Starting retry interval (500ms) — user is pending');
         let retryCount = 0;
         const bootstrapRetry = setInterval(() => {
@@ -4071,8 +4088,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const cachedMarket = JSON.parse(localStorage.getItem('market_data_cache') || '[]');
         if (Array.isArray(cachedMarket) && cachedMarket.length && cachedVersion >= MARKET_CACHE_VERSION) {
             allCoins = cachedMarket;
-            renderWatchlist();
-            renderSummary();
+            // renderWatchlist/renderSummary skipped here — loadMarketData(true) below calls them
         } else if (cachedVersion < MARKET_CACHE_VERSION) {
             // Version mismatch — bust stale cache to prevent showing wrong percentages
             localStorage.removeItem('market_data_cache');
@@ -4107,7 +4123,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     tabLoaded.dashboard = true;
     loadMarketData(true);
-    fetchAnalyses().then(() => renderAnalysisSlider());
+    fetchAnalyses().then(changed => { if (changed) renderAnalysisSlider(); });
     // Delay important news to reduce startup concurrent connections (news is below the fold)
     setTimeout(() => loadImportantNews(), 2000);
 
@@ -4115,14 +4131,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     startPolling();
 
     // R4: Initialize admin panel — check if user is admin and show entry button
-    if (typeof initAdminPanel === 'function') {
+    if (typeof initAdminPanel === 'function' && !_adminPanelInitialized) {
+        _adminPanelInitialized = true;
         initAdminPanel();
     }
 
-    setInterval(() => {
+    _pollingIntervals.push(setInterval(() => {
         if (document.getElementById('tickets-modal')?.style.display === 'flex') fetchTickets().then(renderTickets);
         if (document.getElementById('admin-tickets-modal')?.style.display === 'flex') fetchAdminTickets().then(renderAdminTickets);
-    }, 15000);
+    }, 15000));
 
     // Scroll-to-top button visibility
     const scrollTopBtn = document.getElementById('scroll-top-btn');
@@ -4153,7 +4170,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             dots[current].classList.add('active');
         }
         dots.forEach(d => d.addEventListener('click', () => goTo(Number(d.dataset.dot) + 1)));
-        setInterval(() => goTo(current + 1), 3000);
+        _pollingIntervals.push(setInterval(() => goTo(current + 1), 3000));
     })();
 });
 

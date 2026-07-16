@@ -39,10 +39,6 @@ body.user-loading .profile-loading-target.skeleton-text {
     min-width: 80px;
     display: inline-block;
 }
-@keyframes skeleton-shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-}
 
 ::-webkit-scrollbar { width: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -180,15 +176,7 @@ body.user-loading .profile-loading-target.skeleton-text {
   border-radius: 20px;
   padding: 5px 10px 5px 8px;
 }
-.online-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--green);
-  animation: pulse-dot 2s infinite;
-  flex-shrink: 0;
-}
-@keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
 .live-person-icon {
   color: var(--green);
   flex-shrink: 0;
@@ -390,21 +378,7 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* #region صفحه مارکت */
 /* این بخش استایل‌های مرتبط با "صفحه مارکت" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.market-page-header { display: flex; justify-content: space-between; align-items: center; padding: 18px 16px 14px; background: rgba(11,15,20,0.92); backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4); border-bottom: 1px solid rgba(255,255,255,0.05); position: sticky; top: 0; z-index: 20; }
-.market-page-header h2 { font-size: 20px; font-weight: 700; }
-.market-page-title {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 20px; font-weight: 700;
-  color: #fff;
-}
-.market-page-title svg {
-  color: var(--accent);
-  opacity: 1;
-  filter: drop-shadow(0 0 4px rgba(255,138,0,0.35));
-}
-.market-refresh-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: rgba(21,28,36,0.9); color: var(--text-dim); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.25s; }
-.market-refresh-btn:active { transform: scale(0.9); }
-.market-refresh-btn.spinning svg { animation: spin 0.8s linear infinite; }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 .search-bar { padding: 0 16px 12px; position: relative; }
 .search-input { width: 100%; padding: 14px 14px 14px 44px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08); background: rgba(21,28,36,0.9); color: var(--text); font-size: 14px; outline: none; transition: border-color var(--transition), box-shadow var(--transition); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
@@ -494,10 +468,7 @@ body.user-loading .profile-loading-target.skeleton-text {
 .coin-list.fade-in { animation: coinFadeIn 0.18s ease forwards; }
 @keyframes coinFadeOut { to { opacity: 0; transform: translateY(6px); } }
 @keyframes coinFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-.coin-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 10px; cursor: pointer; transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease; border-radius: 18px; position: relative; margin-bottom: 2px; }
-.coin-item:hover { background: rgba(16,23,34,0.6); box-shadow: 0 0 20px rgba(0,0,0,0.15); }
-.coin-item:active { transform: scale(0.99); }
-.coin-item + .coin-item { border-top: none; }
+
 .coin-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 0%; }
 .coin-identity { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .coin-rank { font-size: 10px; color: var(--text-sub); width: 20px; flex-shrink: 0; text-align: center; font-variant-numeric: tabular-nums; opacity: 0.35; font-weight: 500; }
@@ -508,9 +479,7 @@ body.user-loading .profile-loading-target.skeleton-text {
 .coin-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .coin-price-data { display: flex; flex-direction: column; align-items: flex-end; direction: ltr; }
 .coin-price { font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, 'SF Mono', 'Roboto Mono', monospace; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 14px; letter-spacing: -0.3px; transition: color 0.3s ease, text-shadow 0.3s ease; }
-.coin-change { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; font-variant-numeric: tabular-nums; min-width: 66px; text-align: center; white-space: nowrap; letter-spacing: 0.15px; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
-.coin-change.up { color: var(--green); background: rgba(0,200,150,0.12); box-shadow: inset 0 0 0 0.5px rgba(0,200,150,0.2); }
-.coin-change.down { color: var(--red); background: rgba(255,77,77,0.12); box-shadow: inset 0 0 0 0.5px rgba(255,77,77,0.2); }
+
 strong.up { color: var(--green); }
 strong.down { color: var(--red); }
 .watch-star { cursor: pointer; opacity: 0.3; transition: opacity 0.25s, transform 0.2s, background 0.25s, filter 0.25s; display: inline-flex; padding: 5px; margin: -5px; align-items: center; justify-content: center; color: var(--text-secondary); border-radius: 8px; background: rgba(16,23,34,0.8); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(8px); }
@@ -558,7 +527,7 @@ strong.down { color: var(--red); }
 /* ============================================================================ */
 .analysis-header { display: flex; justify-content: space-between; align-items: center; padding: 0 20px 14px; }
 .analysis-header h2 { font-size: 18px; }
-.admin-btn {
+.analysis-admin-btn {
     background: #FF8A00;
     border: 1px solid rgba(255,138,0,0.3);
     color: #000;
@@ -614,8 +583,6 @@ strong.down { color: var(--red); }
 .bs-share-btn:hover { background: rgba(255,138,0,0.18); }
 .bs-share-btn:active { transform: scale(0.98); }
 @keyframes bs-fade-in { from { opacity: 0; } to { opacity: 1; } }
-.modal-box-wide { max-width: 520px; }
-
 /* #endregion */
 
 /* ============================================================================ */
@@ -680,7 +647,7 @@ strong.down { color: var(--red); }
 /* #region پروفایل */
 /* این بخش استایل‌های مرتبط با "پروفایل" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.profile-card { border-radius: 18px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.06); padding: 24px 20px; margin: 0 20px 16px; text-align: center; position: relative; background: var(--bg-card); box-shadow: 0 8px 24px rgba(0,0,0,0.25); }
+.profile-card { border-radius: 18px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.06); padding: 24px 20px; margin: 0 20px 16px; text-align: center; position: relative; background: var(--bg-card); box-shadow: 0 8px 24px rgba(0,0,0,0.25); min-height: 210px; }
 .profile-settings { position: absolute; top: 16px; right: 16px; cursor: pointer; }
 .profile-avatar { width: 80px; height: 80px; margin: 0 auto 10px; border-radius: 50%; border: 2px solid var(--accent); overflow: hidden; }
 .profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
