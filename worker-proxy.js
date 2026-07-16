@@ -370,41 +370,75 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
     console.log("[TG-HASH-FIX] token info:", {
       tokenLength: botToken.length,
       tokenFirst8: botToken.slice(0, 8),
-      tokenLast4: botToken.slice(-4),
-      tokenHasLeadingSpace: botToken[0] === ' ',
-      tokenHasTrailingSpace: botToken[botToken.length - 1] === ' ',
-      tokenHasNewline: botToken.includes('\n'),
-      tokenHasCarriageReturn: botToken.includes('\r'),
-      tokenHasTab: botToken.includes('\t')
+      tokenLast4: botToken.slice(-4)
     });
 
-    console.log("[TG-HASH-FIX] secret_key info:", {
-      secretKeyLength: secretKey.byteLength,
-      secretKeyFirst16hex: secretKeyHex.slice(0, 16),
-      algorithm: "HMAC_SHA256(key='WebAppData', message=botToken)"
+    // --- Signature field analysis ---
+    const sigPair = pairs.find(([k]) => k === 'signature');
+    console.log("[TG-HASH-FIX] signature field:", {
+      exists: !!sigPair,
+      length: sigPair ? sigPair[1].length : 0,
+      isHexLike: sigPair ? /^[0-9a-f]+$/.test(sigPair[1]) : false,
+      prefix: sigPair ? sigPair[1].slice(0, 16) : null,
+      suffix: sigPair ? sigPair[1].slice(-8) : null
     });
 
-    // --- Build raw data_check_string: only auth_date, query_id, user (no signature, no hash) ---
-    const rawPairs = parseTelegramInitDataPairs(initData.trim());
-    const allowedKeys = new Set(['auth_date', 'query_id', 'user']);
-    const rawCheckPairs = rawPairs
-      .filter(([k]) => allowedKeys.has(k))
-      .sort(([a], [b]) => a.localeCompare(b));
-    const rawDataCheckString = rawCheckPairs.map(([k, v]) => `${k}=${v}`).join('\n');
-
-    const computedHash = createHmac('sha256', secretKey).update(rawDataCheckString).digest('hex');
-    const hashMatch = safeCompareStrings(computedHash, receivedHash);
-
-    console.log("[TG-HASH-FIX] raw test:", {
-      rawDataCheckString,
-      rawLength: rawDataCheckString.length,
-      computedHash,
-      receivedHash,
-      hashMatch
+    // --- Check if user value is URL-encoded or decoded ---
+    const userPair = pairs.find(([k]) => k === 'user');
+    const userValueIsEncoded = userPair ? userPair[1].includes('%') : false;
+    console.log("[TG-HASH-FIX] user value encoding:", {
+      isURLEncoded: userValueIsEncoded,
+      startsWith: userPair ? userPair[1].slice(0, 20) : null
     });
 
-    if (!hashMatch) {
-      console.log("[TG-HASH-RESULT]", { valid: false, reason: "HMAC mismatch" });
+    // --- Run 3 tests ---
+    const testCases = [];
+
+    // Test A: raw values, all fields except hash+signature
+    const pairsA = checkPairs.filter(([k]) => k !== 'signature').sort(([a], [b]) => a.localeCompare(b));
+    const dcsA = pairsA.map(([k, v]) => `${k}=${v}`).join('\n');
+    const hashA = createHmac('sha256', secretKey).update(dcsA).digest('hex');
+    testCases.push({ name: "A: raw, no hash+signature", dcs: dcsA, hash: hashA, match: hashA === receivedHash });
+
+    // Test B: DECODED values, all fields except hash+signature
+    const pairsB = checkPairs.filter(([k]) => k !== 'signature').sort(([a], [b]) => a.localeCompare(b));
+    const dcsB = pairsB.map(([k, v]) => `${k}=${decodeTelegramValue(v)}`).join('\n');
+    const hashB = createHmac('sha256', secretKey).update(dcsB).digest('hex');
+    testCases.push({ name: "B: decoded, no hash+signature", dcs: dcsB, hash: hashB, match: hashB === receivedHash });
+
+    // Test C: decoded values, ONLY auth_date+query_id+user
+    const pairsC = checkPairs.filter(([k]) => ['auth_date', 'query_id', 'user'].includes(k)).sort(([a], [b]) => a.localeCompare(b));
+    const dcsC = pairsC.map(([k, v]) => `${k}=${decodeTelegramValue(v)}`).join('\n');
+    const hashC = createHmac('sha256', secretKey).update(dcsC).digest('hex');
+    testCases.push({ name: "C: decoded, auth_date+query_id+user only", dcs: dcsC, hash: hashC, match: hashC === receivedHash });
+
+    // Test D: raw values, ALL fields except hash (includes signature)
+    const pairsD = checkPairs.slice().sort(([a], [b]) => a.localeCompare(b));
+    const dcsD = pairsD.map(([k, v]) => `${k}=${v}`).join('\n');
+    const hashD = createHmac('sha256', secretKey).update(dcsD).digest('hex');
+    testCases.push({ name: "D: raw, all except hash (inc. signature)", dcs: dcsD, hash: hashD, match: hashD === receivedHash });
+
+    // Test E: check if receivedHash equals signature
+    testCases.push({
+      name: "E: signature === receivedHash?",
+      dcs: null,
+      hash: null,
+      match: sigPair ? sigPair[1] === receivedHash : false
+    });
+
+    for (const tc of testCases) {
+      console.log("[TG-HASH-FIX] " + tc.name + ":", {
+        match: tc.match,
+        dcsLength: tc.dcs ? tc.dcs.length : null,
+        dcsStart: tc.dcs ? tc.dcs.slice(0, 60) : null,
+        computedHash: tc.hash,
+        receivedHash
+      });
+    }
+
+    const anyMatch = testCases.find(tc => tc.match);
+    if (!anyMatch) {
+      console.log("[TG-HASH-RESULT]", { valid: false, reason: "all 5 HMAC tests failed" });
       return null;
     }
 
