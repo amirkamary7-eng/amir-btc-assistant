@@ -2,6 +2,7 @@
    Admin Control Center — Frontend Logic (Vanilla JS)
    Uses global apiFetch() and API_BASE from app.js
    ============================================================ */
+console.log("ADMIN_JS_LOADED");
 
 // ─── State ──────────────────────────────────────────────────
 let _adminPanelOpen = false;
@@ -94,7 +95,9 @@ function adminPagination(containerId, currentPage, totalPages, loadFn) {
 // ─── Initialize ─────────────────────────────────────────────
 
 async function initAdminPanel() {
+    console.log("INIT_ADMIN_PANEL_START");
     try {
+        console.log("TG_USER", getTelegramUser());
         // Skip if no Telegram user is available yet (cold-open scenario)
         // — will be re-called from tryLateBootstrap once user arrives
         if (typeof getTelegramUser === 'function' && !getTelegramUser()?.id) {
@@ -103,12 +106,15 @@ async function initAdminPanel() {
         }
 
         const data = await apiFetch('/api/admin/is-admin');
-        console.log('[ADMIN] is-admin response:', JSON.stringify(data));
+        console.log("ADMIN_API_RESPONSE", data);
         _adminData = data || { is_admin: false, role: '', permissions: [] };
         if (data && data.is_admin) {
             const btn = document.getElementById('admin-entry-btn');
+            console.log("ADMIN_BUTTON_ELEMENT", btn);
             if (btn) {
                 btn.style.display = 'flex';
+                console.log("DISPLAY_STYLE", btn.style.display);
+                console.log("COMPUTED_STYLE", getComputedStyle(btn).display);
                 console.log('[ADMIN] Entry button shown — role:', data.role, 'is_super:', data.is_super, 'reason:', data.reason);
             } else {
                 console.error('[ADMIN] admin-entry-btn element not found in DOM');
