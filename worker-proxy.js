@@ -368,7 +368,18 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
       }
     }
 
+    // [TG-HASH-CHECK] 1) Before building data_check_string
+    console.log("[TG-HASH-CHECK] 1) before data_check_string:", {
+      initDataLength: initData.length,
+      fieldsCount: pairs.length,
+      fieldNames: pairs.map(([k]) => k),
+      hasHash: !!receivedHash,
+      hasAuthDate: !!decoded.auth_date,
+      hasUser: !!decoded.user
+    });
+
     if (!receivedHash) {
+      console.log("[TG-HASH-RESULT]", { valid: false, reason: "no hash in initData" });
       return null;
     }
 
@@ -377,9 +388,28 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
       .map(([key, rawValue]) => `${key}=${rawValue}`)
       .join('\n');
 
+    // [TG-HASH-CHECK] 2) After building data_check_string
+    console.log("[TG-HASH-CHECK] 2) after data_check_string:", {
+      dataCheckStringLength: dataCheckString.length,
+      dataCheckStringStart: dataCheckString.slice(0, 80),
+      sortedFieldOrder: checkPairs.sort(([a], [b]) => a.localeCompare(b)).map(([k]) => k)
+    });
+
     const secretKey = createHmac('sha256', 'WebAppData').update(botToken).digest();
     const computedHash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-    if (!safeCompareStrings(computedHash, receivedHash)) {
+    const hashMatch = safeCompareStrings(computedHash, receivedHash);
+
+    // [TG-HASH-CHECK] 3) Before hash comparison
+    console.log("[TG-HASH-CHECK] 3) hash comparison:", {
+      receivedHashLength: receivedHash.length,
+      receivedHashStart: receivedHash.slice(0, 10) + "..." + receivedHash.slice(-6),
+      computedHashLength: computedHash.length,
+      computedHashStart: computedHash.slice(0, 10) + "..." + computedHash.slice(-6),
+      hashMatch
+    });
+
+    if (!hashMatch) {
+      console.log("[TG-HASH-RESULT]", { valid: false, reason: "HMAC mismatch" });
       return null;
     }
 
@@ -387,17 +417,22 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
     if (Number.isFinite(authDate)) {
       const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
       if (ageSeconds > maxAgeSeconds) {
+        console.log("[TG-HASH-RESULT]", { valid: false, reason: "auth_date expired", ageSeconds, maxAgeSeconds });
         return null;
       }
     }
 
     if (!decoded.user) {
+      console.log("[TG-HASH-RESULT]", { valid: false, reason: "no user in initData" });
       return null;
     }
 
     const user = JSON.parse(decoded.user);
-    return user && user.id ? user : null;
-  } catch {
+    const result = user && user.id ? user : null;
+    console.log("[TG-HASH-RESULT]", { valid: !!result, reason: result ? "OK" : "user parse failed" });
+    return result;
+  } catch (e) {
+    console.log("[TG-HASH-RESULT]", { valid: false, reason: "exception: " + (e.message || e) });
     return null;
   }
 }
