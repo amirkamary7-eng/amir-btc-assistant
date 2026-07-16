@@ -384,30 +384,22 @@ function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
       algorithm: "HMAC_SHA256(key='WebAppData', message=botToken)"
     });
 
-    // --- Build data_check_string (exclude hash, keep all others) ---
-    const sortedPairs = checkPairs.slice().sort(([a], [b]) => a.localeCompare(b));
-    const dataCheckString = sortedPairs.map(([k, v]) => `${k}=${v}`).join('\n');
+    // --- Build raw data_check_string: only auth_date, query_id, user (no signature, no hash) ---
+    const rawPairs = parseTelegramInitDataPairs(initData.trim());
+    const allowedKeys = new Set(['auth_date', 'query_id', 'user']);
+    const rawCheckPairs = rawPairs
+      .filter(([k]) => allowedKeys.has(k))
+      .sort(([a], [b]) => a.localeCompare(b));
+    const rawDataCheckString = rawCheckPairs.map(([k, v]) => `${k}=${v}`).join('\n');
 
-    console.log("[TG-HASH-FIX] data_check_string:", {
-      length: dataCheckString.length,
-      fields: sortedPairs.map(([k, v]) => ({ key: k, valueLength: v.length, valueFirst30: v.slice(0, 30) })),
-      fullString: dataCheckString,
-      newlineCount: (dataCheckString.match(/\n/g) || []).length
-    });
-
-    // --- Compute and compare ---
-    const computedHash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+    const computedHash = createHmac('sha256', secretKey).update(rawDataCheckString).digest('hex');
     const hashMatch = safeCompareStrings(computedHash, receivedHash);
 
-    console.log("[TG-HASH-FIX] hash comparison:", {
-      receivedHash: receivedHash,
-      computedHash: computedHash,
-      receivedLength: receivedHash.length,
-      computedLength: computedHash.length,
-      receivedPrefix: receivedHash.slice(0, 16),
-      computedPrefix: computedHash.slice(0, 16),
-      receivedSuffix: receivedHash.slice(-8),
-      computedSuffix: computedHash.slice(-8),
+    console.log("[TG-HASH-FIX] raw test:", {
+      rawDataCheckString,
+      rawLength: rawDataCheckString.length,
+      computedHash,
+      receivedHash,
       hashMatch
     });
 
