@@ -343,204 +343,52 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
   }
 
   try {
-    const NL = '\n';
-    const CR = '\r';
-
-    // ========================
-    // 1) RAW INPUT
-    // ========================
-    const firstChar = initData.charCodeAt(0);
-    const lastChar = initData.charCodeAt(initData.length - 1);
-    console.log("[TG-FULL-DIAG] 1) RAW INPUT:", {
-      rawInitDataLength: initData.length,
-      rawInitDataPrefix: initData.slice(0, 200),
-      rawInitDataSuffix: initData.slice(-200),
-      hasNewline: initData.includes(NL),
-      hasCarriageReturn: initData.includes(CR),
-      hasSpace: initData.includes(' '),
-      firstCharCode: firstChar,
-      lastCharCode: lastChar,
-      firstCharDesc: firstChar < 32 || firstChar > 126 ? 'NON-ASCII/control' : 'OK',
-      lastCharDesc: lastChar < 32 || lastChar > 126 ? 'NON-ASCII/control' : 'OK'
-    });
-
-    // ========================
-    // 2) BOT TOKEN
-    // ========================
-    const tokenCharCodes = Array.from(botToken).map(c => c.charCodeAt(0));
-    const tokenBeforeTrim = botToken;
-    const tokenAfterTrim = botToken.trim();
-    console.log("[TG-FULL-DIAG] 2) BOT TOKEN:", {
-      typeofToken: typeof botToken,
-      tokenLength: botToken.length,
-      tokenFirst10: botToken.slice(0, 10),
-      tokenLast10: botToken.slice(-10),
-      tokenCharCodes,
-      trimChanged: tokenBeforeTrim !== tokenAfterTrim,
-      beforeTrimLength: tokenBeforeTrim.length,
-      afterTrimLength: tokenAfterTrim.length
-    });
-
-    // ========================
-    // 3) PARSED FIELDS
-    // ========================
     const pairs = parseTelegramInitDataPairs(initData.trim());
-    const fieldDetails = {};
-    for (const [k, v] of pairs) {
-      fieldDetails[k] = {
-        valueLength: v.length,
-        valuePrefix: v.slice(0, 60),
-        valueSuffix: v.slice(-30)
-      };
-    }
-    console.log("[TG-FULL-DIAG] 3) PARSED FIELDS:", fieldDetails);
 
-    // ========================
-    // 4) HASH SOURCE
-    // ========================
+    // Extract the received hash
     const hashPair = pairs.find(([k]) => k === 'hash');
-    let hashA = hashPair ? hashPair[1] : null;
-    let hashB = null;
-    const regexMatch = initData.match(/hash=([^&]+)/);
-    if (regexMatch) hashB = regexMatch[1];
-    console.log("[TG-FULL-DIAG] 4) HASH SOURCE:", {
-      hash_from_parser: hashA ? hashA.slice(0, 20) + '...' + hashA.slice(-8) : null,
-      hash_from_regex: hashB ? hashB.slice(0, 20) + '...' + hashB.slice(-8) : null,
-      hashA_length: hashA ? hashA.length : 0,
-      hashB_length: hashB ? hashB.length : 0,
-      hashA_equals_hashB: hashA === hashB
-    });
-    const receivedHash = hashA;
+    if (!hashPair || !hashPair[1]) return null;
+    const receivedHash = hashPair[1];
 
-    if (!receivedHash) {
-      console.log("[TG-FULL-DIAG-RESULT]", { token_valid_format: true, hash_found: false, secret_method_match: 'none', best_matching_test: 'none', final_reason: 'hash_not_found' });
+    // Build data-check-string per Telegram Bot API spec:
+    // - Exclude 'hash' field
+    // - Sort remaining fields alphabetically by key
+    // - Decode all values before joining
+    // - Join with '\n'
+    const dataCheckString = pairs
+      .filter(([k]) => k !== 'hash')
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => k + '=' + decodeTelegramValue(v))
+      .join('\n');
+
+    // secret_key = HMAC-SHA256(key='WebAppData', message=botToken)
+    const secretKey = createHmac('sha256', 'WebAppData').update(botToken).digest();
+
+    // hash = HMAC-SHA256(key=secretKey, message=data_check_string)
+    const computedHash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+    if (!safeCompareStrings(computedHash, receivedHash)) {
+      console.error('[TG-AUTH] Hash mismatch — validation failed');
       return null;
     }
 
-    // ========================
-    // 5) HMAC SECRET KEY
-    // ========================
-    const secretM1 = createHmac('sha256', 'WebAppData').update(botToken).digest();
-    const secretM1Hex = Array.from(new Uint8Array(secretM1)).map(b => b.toString(16).padStart(2, '0')).join('');
-    const secretM2 = createHmac('sha256', botToken).update('WebAppData').digest();
-    const secretM2Hex = Array.from(new Uint8Array(secretM2)).map(b => b.toString(16).padStart(2, '0')).join('');
-    console.log("[TG-FULL-DIAG] 5) HMAC SECRET KEY:", {
-      method1: "HMAC_SHA256(key='WebAppData', msg=token)",
-      method1_hex_first32: secretM1Hex.slice(0, 32),
-      method1_length: secretM1.byteLength,
-      method2: "HMAC_SHA256(key=token, msg='WebAppData')",
-      method2_hex_first32: secretM2Hex.slice(0, 32),
-      method2_length: secretM2.byteLength,
-      methods_differ: secretM1Hex !== secretM2Hex
-    });
-
-    // ========================
-    // 6) DATA CHECK STRING MATRIX
-    // ========================
-    const allPairsNoHash = pairs.filter(([k]) => k !== 'hash');
-    const noHashNoSig = pairs.filter(([k]) => k !== 'hash' && k !== 'signature');
-    const onlyStandard = pairs.filter(([k]) => ['auth_date', 'query_id', 'user'].includes(k));
-
-    const matrix = [
-      { name: 'Test1: all-except-hash, sorted, raw', ps: allPairsNoHash.slice().sort(([a],[b])=>a.localeCompare(b)), dec: false },
-      { name: 'Test2: all-except-hash, sorted, decoded', ps: allPairsNoHash.slice().sort(([a],[b])=>a.localeCompare(b)), dec: true },
-      { name: 'Test3: no-hash-no-sig, sorted, raw', ps: noHashNoSig.slice().sort(([a],[b])=>a.localeCompare(b)), dec: false },
-      { name: 'Test4: no-hash-no-sig, sorted, decoded', ps: noHashNoSig.slice().sort(([a],[b])=>a.localeCompare(b)), dec: true },
-      { name: 'Test5: auth+query+user only, sorted, raw', ps: onlyStandard.slice().sort(([a],[b])=>a.localeCompare(b)), dec: false },
-      { name: 'Test6: original order, no-hash, raw', ps: allPairsNoHash, dec: false }
-    ];
-
-    let bestMatch = 'none';
-    let bestTest = 'none';
-
-    for (const tc of matrix) {
-      const dcs = tc.ps.map(([k,v]) => k + '=' + (tc.dec ? decodeTelegramValue(v) : v)).join(NL);
-      const h1 = createHmac('sha256', secretM1).update(dcs).digest('hex');
-      const h2 = createHmac('sha256', secretM2).update(dcs).digest('hex');
-      const m1 = h1 === receivedHash;
-      const m2 = h2 === receivedHash;
-      if (m1) { bestMatch = 'method1'; bestTest = tc.name; }
-      if (m2) { bestMatch = 'method2'; bestTest = tc.name; }
-      console.log("[TG-FULL-DIAG] 6) " + tc.name + ":", {
-        fieldOrder: tc.ps.map(([k]) => k),
-        dcsLength: dcs.length,
-        dcsPrefix200: dcs.slice(0, 200),
-        m1_hash: h1,
-        m2_hash: h2,
-        m1_match: m1,
-        m2_match: m2
-      });
+    // Check auth_date freshness
+    const authDateValue = pairs.find(([k]) => k === 'auth_date');
+    if (authDateValue) {
+      const authDate = Number(decodeTelegramValue(authDateValue[1]));
+      if (Number.isFinite(authDate)) {
+        const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
+        if (ageSeconds > maxAgeSeconds) return null;
+      }
     }
 
-    // WebCrypto cross-check
-    if (bestMatch === 'none') {
-      const wcDcs = noHashNoSig.slice().sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>k+'='+v).join(NL);
-      const enc = new TextEncoder();
-      const wk = await crypto.subtle.importKey('raw', enc.encode('WebAppData'), {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
-      const ws = await crypto.subtle.sign('HMAC', wk, enc.encode(botToken));
-      const wk2 = await crypto.subtle.importKey('raw', ws, {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
-      const ws2 = await crypto.subtle.sign('HMAC', wk2, enc.encode(wcDcs));
-      const wcHex = Array.from(new Uint8Array(ws2)).map(b=>b.toString(16).padStart(2,'0')).join('');
-      const ncHex = createHmac('sha256', secretM1).update(wcDcs).digest('hex');
-      console.log("[TG-FULL-DIAG] 6) WebCrypto cross-check:", {
-        webCrypto_hash: wcHex,
-        nodeCrypto_hash: ncHex,
-        webCrypto_equals_nodeCrypto: wcHex === ncHex,
-        webCrypto_match_received: wcHex === receivedHash
-      });
-    }
-
-    // ========================
-    // 7) ENCODING CHECK
-    // ========================
-    const uPair = pairs.find(([k]) => k === 'user');
-    if (uPair) {
-      console.log("[TG-FULL-DIAG] 7) ENCODING CHECK:", {
-        user_raw_value: uPair[1],
-        user_decoded_value: decodeTelegramValue(uPair[1]),
-        raw_has_percent: uPair[1].includes('%'),
-        raw_starts_brace: uPair[1].startsWith('{'),
-        raw_starts_percent7B: uPair[1].startsWith('%7B') || uPair[1].startsWith('%7b')
-      });
-    }
-
-    // ========================
-    // 8) FINAL VERDICT
-    // ========================
-    const tokenOk = typeof botToken === 'string' && botToken.length >= 30 && /^[0-9:A-Za-z_-]+$/.test(botToken);
-    let finalReason = 'unknown';
-    if (!tokenOk) finalReason = 'wrong_bot_token';
-    else if (bestMatch === 'method2') finalReason = 'wrong_secret_generation';
-    else if (bestMatch === 'none' && uPair && !uPair[1].includes('%')) finalReason = 'wrong_encoding';
-    else if (bestMatch === 'none') finalReason = 'telegram_signature_format_changed';
-
-    console.log("[TG-FULL-DIAG-RESULT]", {
-      token_valid_format: tokenOk,
-      hash_found: true,
-      hash_length: receivedHash.length,
-      secret_method_match: bestMatch,
-      best_matching_test: bestTest,
-      final_reason: finalReason
-    });
-
-    if (bestMatch === 'none') {
-      return null;
-    }
-
-    const decoded = {};
-    for (const [key, rawValue] of pairs) {
-      decoded[key] = decodeTelegramValue(rawValue);
-    }
-    const authDate = Number(decoded.auth_date);
-    if (Number.isFinite(authDate)) {
-      const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
-      if (ageSeconds > maxAgeSeconds) return null;
-    }
-    if (!decoded.user) return null;
-    const user = JSON.parse(decoded.user);
+    // Parse user
+    const userPair = pairs.find(([k]) => k === 'user');
+    if (!userPair) return null;
+    const user = JSON.parse(decodeTelegramValue(userPair[1]));
     return user && user.id ? user : null;
   } catch (e) {
-    console.log("[TG-FULL-DIAG] EXCEPTION:", e.message, e.stack);
+    console.error('[TG-AUTH] validateTelegramInitData exception:', e.message);
     return null;
   }
 }
