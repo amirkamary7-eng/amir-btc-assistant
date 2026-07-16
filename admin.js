@@ -98,6 +98,38 @@ async function initAdminPanel() {
     console.log("INIT_ADMIN_PANEL_START");
     try {
         console.log("TG_USER", getTelegramUser());
+
+        // ─── INITDATA FORENSICS ───
+        const tg = window.Telegram?.WebApp;
+        const sdkInitData = tg?.initData || '';
+        const hashData = (function() {
+            try {
+                const h = location.hash.substring(1);
+                if (!h) return '';
+                return new URLSearchParams(h).get('tgWebAppData') || '';
+            } catch(e) { return ''; }
+        })();
+        const finalInitData = getTelegramInitData();
+        console.log('[INITDATA-FX] tg.initData length:', sdkInitData.length, 'value:', sdkInitData);
+        console.log('[INITDATA-FX] _parseHashInitData length:', hashData.length, 'value:', hashData);
+        console.log('[INITDATA-FX] location.hash length:', location.hash.length, 'value:', location.hash.substring(0, 120) + (location.hash.length > 120 ? '...' : ''));
+        console.log('[INITDATA-FX] getTelegramInitData() length:', finalInitData.length, 'value:', finalInitData);
+        console.log('[INITDATA-FX] source:', sdkInitData ? 'SDK' : (hashData ? 'HASH_FALLBACK' : 'NONE'));
+        // Check if hash field exists in the initData
+        if (finalInitData) {
+            const hasHash = finalInitData.includes('hash=');
+            const hasAuthDate = finalInitData.includes('auth_date=');
+            const hasUser = finalInitData.includes('user=');
+            const hashValue = (function() {
+                try {
+                    const params = new URLSearchParams(finalInitData);
+                    return params.get('hash') || 'MISSING';
+                } catch(e) { return 'PARSE_ERROR'; }
+            })();
+            console.log('[INITDATA-FX] fields — hasUser:', hasUser, 'hasAuthDate:', hasAuthDate, 'hasHash:', hasHash, 'hashValue:', hashValue);
+        }
+        // ─── END INITDATA FORENSICS ───
+
         // Skip if no Telegram user is available yet (cold-open scenario)
         // — will be re-called from tryLateBootstrap once user arrives
         if (typeof getTelegramUser === 'function' && !getTelegramUser()?.id) {

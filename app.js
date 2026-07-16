@@ -1138,6 +1138,9 @@ async function apiFetch(path, options = {}) {
     const initData = getTelegramInitData();
     if (initData) headers['X-Telegram-Init-Data'] = initData;
     const url = `${API_BASE}${path}`;
+    if (path === '/api/admin/is-admin') {
+        console.log('[ADMIN-FETCH] path:', path, 'initDataLen:', initData.length, 'initDataValue:', initData);
+    }
     if (path === '/api/users/bootstrap') {
         console.log('[BOOT] apiFetch bootstrap — initData length:', initData.length, 'hasAuthHeader:', !!initData, 'user_id:', getUserId());
     }
