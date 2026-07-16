@@ -871,6 +871,10 @@ async function tryLateBootstrap() {
     try {
         await bootstrapUser();
         loadUser();
+        // R4-fix: Re-check admin status now that we have a valid user with initData
+        if (bootstrapComplete && typeof initAdminPanel === 'function') {
+            initAdminPanel();
+        }
     } catch (e) {
         console.error('[BOOT] tryLateBootstrap FAILED:', e);
     }

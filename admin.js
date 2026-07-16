@@ -95,6 +95,13 @@ function adminPagination(containerId, currentPage, totalPages, loadFn) {
 
 async function initAdminPanel() {
     try {
+        // Skip if no Telegram user is available yet (cold-open scenario)
+        // — will be re-called from tryLateBootstrap once user arrives
+        if (typeof getTelegramUser === 'function' && !getTelegramUser()?.id) {
+            console.log('[ADMIN] Skipped — no Telegram user yet (will retry after bootstrap)');
+            return;
+        }
+
         const data = await apiFetch('/api/admin/is-admin');
         console.log('[ADMIN] is-admin response:', JSON.stringify(data));
         _adminData = data || { is_admin: false, role: '', permissions: [] };
