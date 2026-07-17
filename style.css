@@ -28,7 +28,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
-body { background: var(--bg-primary); color: var(--text); padding-bottom: 90px; overflow-x: hidden; font-size: 14px; line-height: 1.5; }
+body { background: var(--bg-primary); color: var(--text); padding-bottom: 90px; overflow-x: hidden; font-size: 14px; line-height: 1.5; padding-top: env(safe-area-inset-top, 0px); }
 
 body.user-loading .profile-loading-target.skeleton-text {
     color: transparent !important;

@@ -1610,9 +1610,9 @@ function renderMarketInsights() {
 
     // Gainers / Losers numbers (nested span inside)
     var gEl = document.getElementById('sentiment-gainers');
-    if (gEl) gEl.querySelector('span').textContent = gainers;
+    if (gEl) { var gs = gEl.querySelector('span'); if (gs) gs.textContent = gainers; }
     var lEl = document.getElementById('sentiment-losers');
-    if (lEl) lEl.querySelector('span').textContent = losers;
+    if (lEl) { var ls = lEl.querySelector('span'); if (ls) ls.textContent = losers; }
 
     // --- Fear & Greed ---
     // FIX 4: Only show real data from Alternative.me. Hide the entire section if unavailable.
@@ -2269,6 +2269,7 @@ async function loadNews(force = false, append = false) {
         }
         // Show skeleton loader while fetching (§6.3) — only on initial load
         const container = document.getElementById('news-list');
+        if (!container) return;
         const activeTab = document.querySelector('.news-tab.active')?.dataset?.news || 'all';
         if (!append && activeTab !== 'calendar') {
             container.innerHTML = Array(4).fill(`
@@ -2328,6 +2329,7 @@ function loadMoreNews() {
  */
 function renderNews(category) {
     const container = document.getElementById('news-list');
+    if (!container) return;
     let filtered = newsCache;
     if (category === 'crypto') filtered = filtered.filter(n => n.category === 'crypto');
     else if (category === 'economy') filtered = filtered.filter(n => n.category === 'economy');
@@ -2612,6 +2614,7 @@ function openAnalysisDetail(id) {
 }
 function closeAnalysisDetail() {
     const modal = document.getElementById('analysis-detail-modal');
+    if (!modal) return;
     modal.classList.remove('bs-open');
     setTimeout(() => { modal.style.display = 'none'; }, 350);
 }
@@ -2815,6 +2818,7 @@ async function openCoinDetail(symbol) {
     updateDetailWatchBtn(symbol);
 
     const modal = document.getElementById('coin-detail-modal');
+    if (!modal) return;
     modal.style.display = 'flex';
     modal.classList.remove('slide-down');
     modal.classList.add('slide-up');
@@ -2981,6 +2985,7 @@ function openForexDetail(symbol) {
     if (!pair) return;
 
     const modal = document.getElementById('coin-detail-modal');
+    if (!modal) return;
     modal.style.display = 'flex';
     modal.classList.remove('slide-down');
     modal.classList.add('slide-up');
@@ -3205,6 +3210,7 @@ async function notifyTelegram(message) {
  */
 async function setPriceAlert() {
     const input = document.getElementById('alert-price');
+    if (!input) return;
     const price = parseFloat(input.value);
     const symbol = _currentDetailSymbol || document.getElementById('detail-coin-title').innerText.split(' ')[0];
     if (!price || price <= 0) { alert(t('invalid_price')); return; }
@@ -3406,6 +3412,7 @@ function clearAllNotifications() {
  */
 function renderNotifications() {
     const container = document.getElementById('notif-list');
+    if (!container) return;
     if (!notifications.length) {
         container.innerHTML = `<div class="empty-state">${t('no_notif')}</div>`;
         return;
