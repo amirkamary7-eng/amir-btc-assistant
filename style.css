@@ -596,7 +596,7 @@ strong.down { color: var(--red); }
 /* Category Tabs */
 .news-tabs-wrapper {
     position: sticky;
-    top: 0;
+    top: 56px;
     z-index: 10;
     background: var(--bg-primary);
     padding: 12px 0 8px;
@@ -1551,7 +1551,7 @@ strong.down { color: var(--red); }
 @keyframes detailSlideDown { from { transform: translateY(0); } to { transform: translateY(100%); } }
 
 .coin-detail-fullscreen {
-    position: fixed; inset: 0; z-index: 1000;
+    position: fixed; inset: 0; z-index: 1001;
     background: var(--bg-primary);
     overflow-y: auto; overflow-x: hidden;
     display: flex; flex-direction: column;
@@ -2641,7 +2641,7 @@ strong.down { color: var(--red); }
     align-items: center;
     justify-content: center;
     box-shadow: 0 6px 24px rgba(255, 138, 0, 0.4);
-    z-index: 100;
+    z-index: 1001;
     cursor: pointer;
     border: none;
     font-size: 22px;

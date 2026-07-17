@@ -4483,11 +4483,10 @@ function switchTab(pageId, btn) {
 
     if (pageId === 'dashboard-page') {
         if (!tabLoaded.dashboard) {
-            loadUser();
-            loadMarketData();
-            fetchAnalyses().then(() => { renderAnalysisSlider(); });
+            // Data is still loading from startup — just render what we have
+            renderWatchlist();
+            renderAnalysisSlider();
             loadImportantNews();
-            tabLoaded.dashboard = true;
         } else {
             renderWatchlist();
             renderAnalysisSlider();
@@ -4545,10 +4544,11 @@ async function loadImportantNews() {
             container.innerHTML = `<div class="empty-state">${t('no_news')}</div>`;
             return;
         }
-        displayedNews = important;
+        // Store in a separate array for dashboard to avoid race with News page's displayedNews
+        _dashboardDisplayedNews = important;
         container.innerHTML = important.map((n, i) => `
-            <div class="important-news-item" style="animation-delay:${i * 0.06}s" onclick="openNewsModal(${i})">
-                <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="important-news-img">
+            <div class="important-news-item" style="animation-delay:${i * 0.06}s" onclick="openDashboardNewsModal(${i})">
+                <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="important-news-img" onerror="newsImageFallback(this)">
                 <div class="important-news-content">
                     <div class="important-news-title">${escapeHtml(n.title)}</div>
                     <div class="important-news-source">${escapeHtml(n.source)}</div>
@@ -4556,6 +4556,24 @@ async function loadImportantNews() {
             </div>
         `).join('');
     } catch (e) {}
+}
+
+// Separate news array for dashboard — isolated from News page's displayedNews
+let _dashboardDisplayedNews = [];
+
+function openDashboardNewsModal(idx) {
+    const n = _dashboardDisplayedNews[idx];
+    if (!n) return;
+    openNewsModalWith(n);
+}
+
+function openNewsModalWith(n) {
+    const el = (id) => $(id);
+    const titleEl = el('news-modal-title'); if (titleEl) titleEl.innerText = n.title;
+    const imgEl = el('news-modal-image'); if (imgEl) { imgEl.src = n.image || getAmirbtcFallbackSvg(400, 250, 'AMIRBTC'); imgEl.onerror = function() { newsImageFallback(this); }; }
+    const bodyEl = el('news-modal-body'); if (bodyEl) bodyEl.innerText = n.body || n.summary || t('news_unavailable');
+    const linkEl = el('news-modal-link'); if (linkEl) { linkEl.href = n.url || '#'; linkEl.innerText = t('view_source'); }
+    const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
 }
 
 //#endregion
@@ -4684,12 +4702,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         newsContainer.innerHTML = '<div class="important-news-skeleton">' + Array(3).fill('<div class="important-news-skeleton-item"><div class="important-news-skeleton-img"></div><div class="important-news-skeleton-text"><div class="important-news-skeleton-line"></div><div class="important-news-skeleton-line"></div></div></div>').join('') + '</div>';
     }
 
-    tabLoaded.dashboard = true;
+    // tabLoaded.dashboard is set AFTER initial data loads succeed.
+    // This ensures revisiting the dashboard retries if initial loads failed.
+    const _dashboardReady = { market: false, analyses: false, news: false };
+    function _checkDashboardReady() {
+        if (_dashboardReady.market && _dashboardReady.analyses && _dashboardReady.news) {
+            tabLoaded.dashboard = true;
+        }
+    }
 
     // ── Phase 2: Bootstrap (authenticated data load) ──
     // Public data (market, analyses, news) loads immediately.
     // Authenticated data (alerts, bootstrap, admin) waits for auth.
-    loadMarketData(true);
+    loadMarketData(true).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
     fetchAnalyses().then(changed => {
         if (changed) {
             renderAnalysisSlider();
@@ -4698,8 +4723,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         // Check for deep link after first load
         checkAnalysisDeepLink();
-    });
-    setTimeout(() => loadImportantNews(), 2000);
+    }).finally(() => { _dashboardReady.analyses = true; _checkDashboardReady(); });
+    setTimeout(() => {
+        loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
+    }, 2000);
 
     // Authenticated bootstrap — runs once user is available
     await bootstrapUser();
@@ -4799,10 +4826,11 @@ window.openAddAnalysisModal = openAddAnalysisModal;
 window.openEditAnalysisModal = openEditAnalysisModal;
 window.closeAddAnalysisModal = closeAddAnalysisModal;
 window.submitAnalysis = submitAnalysis;
-window.openAnalysisDetail = openAnalysisDetail;
-window.closeAnalysisDetail = closeAnalysisDetail;
-window.shareAnalysis = shareAnalysis;
-window.deleteAnalysis = deleteAnalysis;
+window.openAnalysisDetailPage = openAnalysisDetailPage;
+window.closeAnalysisDetailPage = closeAnalysisDetailPage;
+window.startDeleteAnalysis = startDeleteAnalysis;
+window.openDashboardNewsModal = openDashboardNewsModal;
+window.openNewsModalWith = openNewsModalWith;
 window.openCoinDetail = openCoinDetail;
 window.closeCoinDetail = closeCoinDetail;
 window.setPriceAlert = setPriceAlert;

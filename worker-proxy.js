@@ -1862,7 +1862,7 @@ async function fetchFarsiNews(env, categoryFilter) {
   // Fetch ALL sources in parallel
   const sources = await fetchAllNewsRss();
   if (sources.length === 0) {
-    return { status: 'success', source: 'rss_unavailable', data: [] };
+    return { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
   }
 
   try {
@@ -1917,7 +1917,7 @@ async function fetchFarsiNews(env, categoryFilter) {
     // Parse/translate failure
   }
 
-  return { status: 'success', source: 'rss_unavailable', data: [] };
+  return { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
 }
 
 function parseCalendarDate(dateString) {
@@ -3815,32 +3815,32 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/stats') {
-        return referralHandlers.handleStats(request, env);
+        return await referralHandlers.handleStats(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/tokens') {
-        return referralHandlers.handleTokens(request, env);
+        return await referralHandlers.handleTokens(request, env);
       }
 
       // Wallet API Routes
       if (request.method === 'GET' && url.pathname === '/api/wallet') {
-        return walletHandlers.handleGetWallet(request, env);
+        return await walletHandlers.handleGetWallet(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/history') {
-        return walletHandlers.handleGetHistory(request, env);
+        return await walletHandlers.handleGetHistory(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/claim') {
-        return walletHandlers.handleGetClaimStatus(request, env);
+        return await walletHandlers.handleGetClaimStatus(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/wallet/claim') {
-        return walletHandlers.handleClaimDaily(request, env);
+        return await walletHandlers.handleClaimDaily(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/referral-stats') {
-        return walletHandlers.handleReferralStats(request, env);
+        return await walletHandlers.handleReferralStats(request, env);
       }
 
       if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {

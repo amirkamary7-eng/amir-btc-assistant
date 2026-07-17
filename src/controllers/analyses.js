@@ -182,6 +182,7 @@ export function createAnalysisHandlers(deps) {
         unchanged: true,
         featured,
         stats,
+        pagination: null,
       }, {}, env);
     }
 
@@ -217,6 +218,7 @@ export function createAnalysisHandlers(deps) {
           analyses: listResult.analyses,
           pagination: listResult.pagination,
           version,
+          unchanged: false,
         }, {}, env);
       } catch (error) {
         console.warn(safeError('list-analyses', error));
@@ -234,6 +236,8 @@ export function createAnalysisHandlers(deps) {
       stats: { active: cachedState.analyses.length, today: 0, total: cachedState.analyses.length },
       analyses: cachedState.analyses,
       version: cachedState.version ?? 0,
+      pagination: null,
+      unchanged: false,
     }, {}, env);
   }
 

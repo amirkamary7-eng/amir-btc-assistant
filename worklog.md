@@ -207,5 +207,46 @@ Stage Summary:
 - Build: MROZ2PTJ-2730d3d (app.91aff4ce.js, style.75147a2f.css)
 - Deploy: BLOCKED — CLOUDFLARE_API_TOKEN not available in session
 - Deploy commands ready:
+
+---
+Task ID: Critical Root Cause Investigation & Fix
+Agent: Z.ai Code
+Task: 12-phase root cause analysis, fix, and validation of AMIRBTC Mini App instability
+
+Work Log:
+- Phase 1: Read entire app.js (4903 lines), index.html (1251 lines), style.css (3485 lines)
+- Phase 1: Read entire src/controllers/analyses.js (448 lines)
+- Launched parallel sub-agents: worker-proxy.js deep audit, CSS/HTML structure audit
+- Identified 7 root causes across frontend, backend, and CSS
+
+ROOT CAUSES FOUND:
+1. **Analysis API response format mismatch** (CRITICAL): Backend returned inconsistent shapes — missing `pagination` field on unchanged response, missing `unchanged: false` on fresh data response, missing both on cache-fallback. Frontend accessed `response.pagination.hasMore` causing crashes/empty analysis page.
+2. **News tabs sticky position wrong** (CRITICAL): `.news-tabs-wrapper` had `top: 0` but the app header is 56px sticky. News category tabs disappeared behind header when scrolling.
+3. **Analysis FAB hidden behind bottom nav** (CRITICAL): `.analysis-fab` had `z-index: 100` but `.bottom-nav` has `z-index: 1000`. Admin button was completely invisible/unclickable.
+4. **`tabLoaded.dashboard = true` set prematurely** (HIGH): Set before async data loads (market/analyses/news). If any load failed, dashboard would show stale/empty data forever with no retry on tab revisit.
+5. **`displayedNews` race condition** (HIGH): Dashboard's `loadImportantNews()` shared global `displayedNews` with News page. Background `loadNews(true)` refresh from News cache could overwrite `displayedNews` while dashboard was using it, causing wrong articles to open from dashboard news items.
+6. **Missing `await` on 7 handler calls** (MEDIUM): Referral and wallet handlers in worker-proxy.js lacked `await`. Errors produced generic 500 instead of clean JSON errors.
+7. **Missing `category_counts` in farsi-news fallback** (MEDIUM): When RSS sources unavailable, response lacked `category_counts`, causing news badges to show undefined/wrong counts.
+8. **Dead window references** (LOW): `window.openAnalysisDetail`, `window.closeAnalysisDetail`, `window.deleteAnalysis` referenced non-existent functions (actual names: `openAnalysisDetailPage`, `closeAnalysisDetailPage`, `startDeleteAnalysis`).
+
+FIXES APPLIED:
+- src/controllers/analyses.js: Added `pagination: null` to unchanged response, `unchanged: false` to fresh and cache-fallback responses
+- style.css: Changed `.news-tabs-wrapper` top from `0` to `56px`, `.analysis-fab` z-index from `100` to `1001`, `.coin-detail-fullscreen` z-index from `1000` to `1001`
+- app.js: Replaced premature `tabLoaded.dashboard = true` with deferred `_dashboardReady` pattern that only sets true after all 3 data loads complete
+- app.js: Created separate `_dashboardDisplayedNews` array + `openDashboardNewsModal()` + `openNewsModalWith()` to isolate dashboard news from News page's `displayedNews`
+- app.js: Fixed dead window references to point to correct function names, registered new functions
+- app.js: Removed duplicate data loading from `switchTab('dashboard-page')` when `!tabLoaded.dashboard` (data loads from startup, not from tab switch)
+- worker-proxy.js: Added `await` to 7 handler calls (referrals: stats, tokens; wallet: get, history, claim status, claim daily, referral stats)
+- worker-proxy.js: Added `category_counts` to both RSS-unavailable fallback returns
+
+Build: MRP1K7X1-ad9282f (app.f5605d2c.js, style.d83a926e.css)
+Syntax verification: app.js OK, worker-proxy.js OK, built app.f5605d2c.js OK
+
+Stage Summary:
+- 8 root causes identified and fixed
+- No new features added
+- No redesigns performed
+- Build successful, syntax clean
+- Deploy: NOT performed (credentials from previous session expired, user should deploy manually)
   - Pages: `npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages`
   - Worker: `npx wrangler deploy --env production`
