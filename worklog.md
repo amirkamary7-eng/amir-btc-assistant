@@ -155,3 +155,57 @@ Stage Summary:
 - Production status: All public endpoints 200, all auth endpoints return 401 correctly
 - KV daily write limit is a recurring operational issue (free tier limit)
 - D1 migration: Feasible but HIGH effort (80+ queries need rewriting)
+
+---
+Task ID: Emergency Production Fix — App Frozen
+Agent: Main Orchestrator
+Task: Investigate and fix production Mini App freeze (no data loading, no tab navigation, no referral/admin/join)
+
+Work Log:
+- Opened production URL in agent-browser
+- Captured console logs: only Telegram WebView init events, NO app.js logs
+- Checked network: all JS/CSS files loaded with HTTP 200
+- Evaluated JS state: `typeof loadInitialData === 'function'` → false (app.js NOT executing)
+- Downloaded deployed app.75e67068.js (181,563 bytes, actual JS not HTML)
+- Ran `node --check` on deployed file: **SyntaxError: Unexpected token '}' at line 1030**
+- Root cause: Previous session's Python dead-removal script removed `groupCalendarEvents` function signature but left orphaned body code (forEach callback + closing braces)
+- Reverted app.js to last known good state: `git checkout 5325998 -- app.js`
+- Verified syntax: `node --check app.js` → OK
+- Rebuilt pages: `MROVIAWR-2730d3d`
+- Deployed pages + verified version alignment (Pages=2730d3d, Git=2730d3d)
+- Re-verified in browser: all 5 tabs work, 200 coins, 30 news, 0 errors, 0 failed requests
+- Verified all API endpoints: 8 public → 200, 7 auth-protected → 401, 3 admin → 401
+- Verified backend code paths for referral, admin, join verification, token rewards — all correct
+
+Stage Summary:
+- ROOT CAUSE: SyntaxError in app.js from improper dead code removal (previous session)
+- FIX: Reverted app.js to commit 5325998 state, rebuilt and redeployed
+- IMPACT: Single syntax error prevented ENTIRE app.js from parsing, causing ALL reported symptoms
+- Deploy: Pages MROVIAWR-2730d3d, Worker c4116578, Commit 2730d3d
+- Verification: All features working, zero console errors, zero network failures
+
+---
+Task ID: Analysis Module v1
+Agent: Z.ai Code
+Task: Complete Analysis Module implementation per design spec
+
+Work Log:
+- Explored full codebase: DB schema, existing analysis CRUD, admin auth, routing, caching, deep links, share
+- Added 6 new DB columns via idempotent `ensureSchema()`: title, support_level, current_price, resistance_level, views_count, featured
+- Rewrote src/repositories/analyses.js: added getFeatured, getStats, list (paginated), getById, incrementViews, setFeatured, listAll, updated create/update with new fields
+- Rewrote src/controllers/analyses.js: 6 endpoints (GET list, GET detail, POST view, POST/PUT/DELETE admin), cache invalidation, deep link support, double-confirm delete
+- Updated worker-proxy.js routing: public GET /api/analyses, /api/analyses/:id, /api/analyses/:id/view + admin /api/admin/analyses routes + legacy compat routes
+- Rewrote index.html analysis section: featured card, stats bar, analysis list with 3-col layout, detail page, image viewer overlay, admin form modal with all fields, delete confirm dialog (2-step), admin floating button
+- Rewrote app.js analysis module (~400 lines): fetchAnalyses with pagination, renderAnalysisFeatured, renderAnalysisStats, renderAnalysisList (3-col cards), openAnalysisDetailPage (full page with server-side view tracking), image viewer (zoom/pan/drag), deep link handler (startapp=analysis_ID), Telegram share with deep link, admin CRUD with double-confirm delete, infinite scroll
+- Added ~830 lines of CSS: featured card, stats bar, analysis cards v2, detail page, image viewer, admin form, responsive breakpoints
+- Verified app.js syntax (node --check), built Pages successfully
+
+Stage Summary:
+- Files modified: src/repositories/analyses.js, src/controllers/analyses.js, worker-proxy.js, index.html, app.js, style.css
+- New API endpoints: GET /api/analyses/:id, POST /api/analyses/:id/view, POST/PUT/DELETE /api/admin/analyses, GET /api/analyses (now with featured, stats, pagination)
+- DB migration: automatic on first API call (ADD COLUMN IF NOT EXISTS)
+- Build: MROZ2PTJ-2730d3d (app.91aff4ce.js, style.75147a2f.css)
+- Deploy: BLOCKED — CLOUDFLARE_API_TOKEN not available in session
+- Deploy commands ready:
+  - Pages: `npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages`
+  - Worker: `npx wrangler deploy --env production`

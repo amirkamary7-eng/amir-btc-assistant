@@ -1807,10 +1807,30 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
       category: category || 'crypto',
       image: items[i].image,
       url: items[i].url,
+      sentiment: classifySentiment(items[i].title, items[i].description),
     });
   }
 
   return articles.filter((item) => item.title || item.description);
+}
+
+function classifySentiment(title, description) {
+  const text = `${title} ${description}`.toLowerCase();
+  const bullish = ['رشد', 'صعود', 'موفق', 'بهبود', 'رکورد', 'پامپ', 'بالا', 'bullish', ' ATH', 'رالی', ' approvals', 'ETF', 'adopt', 'فیض', 'profit', 'surge', 'jump', 'rally', 'gain', 'recovery', 'positive', 'approve'];
+  const bearish = ['سقوط', 'نزول', 'هک', 'کلاهبردی', 'کاهش', 'ریزش', '跌破', 'دانش', 'ban', 'bearish', 'hack', 'crash', 'drop', 'fall', 'decline', 'loss', 'scam', 'fraud', 'warning', 'risk', 'fear', 'sell-off', 'plunge', 'sanction', 'تحریم'];
+  const breaking = ['فوری', 'breaking', 'urgent', 'breaking:', 'flash'];
+  
+  // Check breaking first
+  if (breaking.some(w => text.includes(w))) return 'breaking';
+  // Count matches
+  const bullScore = bullish.filter(w => text.includes(w)).length;
+  const bearScore = bearish.filter(w => text.includes(w)).length;
+  if (bullScore > bearScore && bullScore > 0) return 'bullish';
+  if (bearScore > bullScore && bearScore > 0) return 'bearish';
+  // Check for macro keywords
+  const macro = ['نرخ بهره', 'CPI', 'PPI', 'NFP', 'FOMC', 'تورم', 'inflation', 'interest rate', 'GDP', 'employment', 'unemployment'];
+  if (macro.some(w => text.includes(w))) return 'macro';
+  return 'neutral';
 }
 
 async function fetchFarsiNews(env, categoryFilter) {
@@ -1827,7 +1847,13 @@ async function fetchFarsiNews(env, categoryFilter) {
       const data = categoryFilter
         ? parsed.filter((a) => a.category === categoryFilter)
         : parsed;
-      return { status: 'success', source: 'cache', data };
+      const categoryCounts = {
+        all: parsed.length,
+        crypto: parsed.filter(a => a.category === 'crypto').length,
+        forex: parsed.filter(a => a.category === 'forex').length,
+        economy: parsed.filter(a => a.category === 'economy').length,
+      };
+      return { status: 'success', source: 'cache', data, category_counts: categoryCounts };
     } catch {
       // Corrupt cache — fall through to live fetch
     }
@@ -1868,6 +1894,13 @@ async function fetchFarsiNews(env, categoryFilter) {
         getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
       );
 
+      const categoryCounts = {
+        all: trimmed.length,
+        crypto: trimmed.filter(a => a.category === 'crypto').length,
+        forex: trimmed.filter(a => a.category === 'forex').length,
+        economy: trimmed.filter(a => a.category === 'economy').length,
+      };
+
       // Apply category filter if requested
       const data = categoryFilter
         ? trimmed.filter((a) => a.category === categoryFilter)
@@ -1877,6 +1910,7 @@ async function fetchFarsiNews(env, categoryFilter) {
         status: 'success',
         source: `${sources.map((s) => s.sourceName).join(', ')}_live`,
         data,
+        category_counts: categoryCounts,
       };
     }
   } catch {
@@ -2400,9 +2434,30 @@ async function handleChartResolve(request, env) {
 
 async function handleCalendarEvents(env) {
   const events = await fetchCalendarEvents(env);
+
+  // Compute category counts from cached news
+  let category_counts = { all: 0, crypto: 0, forex: 0, economy: 0 };
+  try {
+    const cachedNews = await readAppCache(env, FARSI_NEWS_CACHE_KEY);
+    if (cachedNews) {
+      const parsed = JSON.parse(cachedNews);
+      if (Array.isArray(parsed)) {
+        category_counts = {
+          all: parsed.length,
+          crypto: parsed.filter(a => a.category === 'crypto').length,
+          forex: parsed.filter(a => a.category === 'forex').length,
+          economy: parsed.filter(a => a.category === 'economy').length,
+        };
+      }
+    }
+  } catch {
+    // Ignore — category counts are supplementary
+  }
+
   return jsonResponse({
     status: 'success',
     events,
+    category_counts,
   }, {}, env);
 }
 
@@ -3612,22 +3667,51 @@ export default {
         if (_joinBlocked) return _joinBlocked;
       }
 
+      // ── Analyses: Public endpoints ──
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
         return await analysisHandlers.handleList(request, env);
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/analyses') {
+      // GET /api/analyses/:id (detail) — must be before PUT/DELETE pattern
+      if (request.method === 'GET' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
+        const analysisId = url.pathname.split('/')[3] || '';
+        return await analysisHandlers.handleGetDetail(request, env, analysisId);
+      }
+
+      // POST /api/analyses/:id/view (increment views)
+      if (request.method === 'POST' && /^\/api\/analyses\/[^/]+\/view$/u.test(url.pathname)) {
+        const analysisId = url.pathname.split('/')[3] || '';
+        return await analysisHandlers.handleIncrementView(request, env, analysisId);
+      }
+
+      // ── Analyses: Admin endpoints (new paths) ──
+      if (request.method === 'POST' && url.pathname === '/api/admin/analyses') {
         return await analysisHandlers.handleCreate(request, env, ctx);
+      }
+
+      if (request.method === 'PUT' && /^\/api\/admin\/analyses\/[^/]+$/u.test(url.pathname)) {
+        const analysisId = url.pathname.split('/')[4] || '';
+        return await analysisHandlers.handleUpdate(request, env, analysisId);
+      }
+
+      if (request.method === 'DELETE' && /^\/api\/admin\/analyses\/[^/]+$/u.test(url.pathname)) {
+        const analysisId = url.pathname.split('/')[4] || '';
+        return await analysisHandlers.handleDelete(request, env, analysisId);
+      }
+
+      // ── Analyses: Legacy admin paths (backward compat) ──
+      if (request.method === 'POST' && url.pathname === '/api/analyses') {
+        return await analysisHandlers.handleCreateLegacy(request, env, ctx);
       }
 
       if (request.method === 'PUT' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
-        return await analysisHandlers.handleUpdate(request, env, analysisId);
+        return await analysisHandlers.handleUpdateLegacy(request, env, analysisId);
       }
 
       if (request.method === 'DELETE' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
-        return await analysisHandlers.handleDelete(request, env, analysisId);
+        return await analysisHandlers.handleDeleteLegacy(request, env, analysisId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/tickets') {

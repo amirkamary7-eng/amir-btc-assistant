@@ -332,6 +332,14 @@ let sliderInterval = null;
 let currentSlide = 0;
 let editingAnalysisId = null;
 let analysisVersion = localStorage.getItem('analysisVersion') ? Number(localStorage.getItem('analysisVersion')) : null;
+let analysisFeatured = null;
+let analysisStats = null;
+let analysisPagination = null;
+let analysisListPage = 1;
+let analysisListLoading = false;
+let currentAnalysisDetail = null;
+let deletingAnalysisId = null;
+const ANALYSIS_PAGE_SIZE = 20;
 let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
 let calendarEvents = [];
@@ -402,8 +410,9 @@ const i18n = {
         ticket_error: 'خطا در ارسال تیکت. لطفاً دوباره تلاش کنید.',
         ticket_reply_error: 'خطا در ارسال پاسخ. لطفاً دوباره تلاش کنید.',
         ticket_sent: 'تیکت با موفقیت ارسال شد', ticket_admin: 'ادمین', ticket_you: 'شما',
-        cal_today: 'امروز', cal_tomorrow: 'فردا', cal_day_after: 'پس‌فردا', cal_past: 'گذشته',
+        cal_today: 'امروز', cal_tomorrow: 'فردا', cal_day_after: 'پس‌فردا', cal_past: 'گذشته', cal_week: 'این هفته', cal_all: 'همه',
         cal_impact_high: 'بالا', cal_impact_med: 'متوسط', cal_impact_low: 'کم',
+        cal_forecast: 'پیش‌بینی', cal_previous: 'قبلی', cal_actual: 'واقعی',
         cal_cpi: 'نرخ تورم (CPI)', cal_fed: 'سخنرانی رئیس فدرال رزرو', cal_pmi: 'شاخص مدیران خرید (PMI)',
         cal_loading: 'در حال بارگذاری تقویم...', cal_empty: 'رویدادی موجود نیست',
         about_version: 'نسخه 1.0.0', about_desc: 'دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر.',
@@ -489,8 +498,9 @@ const i18n = {
         ticket_error: 'Failed to submit ticket. Please try again.',
         ticket_reply_error: 'Failed to send reply. Please try again.',
         ticket_sent: 'Ticket submitted successfully', ticket_admin: 'Admin', ticket_you: 'You',
-        cal_today: 'Today', cal_tomorrow: 'Tomorrow', cal_day_after: 'Day After', cal_past: 'Past',
+        cal_today: 'Today', cal_tomorrow: 'Tomorrow', cal_day_after: 'Day After', cal_past: 'Past', cal_week: 'This Week', cal_all: 'All',
         cal_impact_high: 'High', cal_impact_med: 'Medium', cal_impact_low: 'Low',
+        cal_forecast: 'Forecast', cal_previous: 'Previous', cal_actual: 'Actual',
         cal_cpi: 'Inflation Rate (CPI)', cal_fed: 'Fed Chair Speech', cal_pmi: 'Purchasing Managers Index (PMI)',
         cal_loading: 'Loading calendar...', cal_empty: 'No events available',
         about_version: 'Version 1.0.0',
@@ -865,53 +875,622 @@ async function _doBootstrap() {
  * ورودی: پارامترهای `force = false` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
-async function fetchAnalyses(force = false) {
+// ============================================================================
+//#region تحلیل‌ها — Analysis Module v2
+// ============================================================================
+
+async function fetchAnalyses(force = false, append = false) {
     if (!API_BASE) {
         analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
         return false;
     }
+    if (analysisListLoading) return false;
     try {
-        const versionParam = force ? '' : (analysisVersion !== null ? `?version=${analysisVersion}` : '');
-        const data = await apiFetch(`/api/analyses${versionParam}`);
-        if (data.unchanged) return false;
-        if (Array.isArray(data.analyses)) {
-            // Preserve existing analyses if API returns empty but we had valid data
-            // (e.g. DB cold start, temporary unavailability that didn't throw)
-            if (data.analyses.length === 0 && analyses.length > 0) {
-                console.warn('fetchAnalyses: API returned empty but we have cached data — preserving cache');
+        analysisListLoading = true;
+        const page = append ? analysisListPage : 1;
+        let url = `/api/analyses?page=${page}&limit=${ANALYSIS_PAGE_SIZE}`;
+        if (!force && !append && analysisVersion !== null) url += `&version=${analysisVersion}`;
+        const data = await apiFetch(url);
+        if (data.unchanged && !append) return false;
+
+        if (append && Array.isArray(data.analyses)) {
+            analyses = analyses.concat(data.analyses);
+        } else if (Array.isArray(data.analyses)) {
+            if (data.analyses.length === 0 && analyses.length > 0 && !force) {
+                console.warn('fetchAnalyses: API returned empty but we have cached data — preserving');
                 return false;
             }
             analyses = data.analyses;
-            analysisVersion = data.version || 0;
-            localStorage.setItem('analyses', JSON.stringify(analyses));
-            localStorage.setItem('analysisVersion', String(analysisVersion));
-            return true;
         }
+
+        if (data.featured) analysisFeatured = data.featured;
+        else if (force) analysisFeatured = null;
+        if (data.stats) analysisStats = data.stats;
+        if (data.pagination) analysisPagination = data.pagination;
+
+        analysisVersion = data.version || 0;
+        analysisListPage = data.pagination?.hasMore ? (data.pagination.page + 1) : page;
+        localStorage.setItem('analyses', JSON.stringify(analyses));
+        localStorage.setItem('analysisVersion', String(analysisVersion));
+        return true;
     } catch (e) {
         console.warn('fetchAnalyses:', e);
         if (!analyses.length) analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
+    } finally {
+        analysisListLoading = false;
     }
     return false;
 }
 
-/**
- * تحلیل to سرور را ذخیره می‌کند.
- * ورودی: پارامترهای `payload, method, analysisId` را دریافت می‌کند.
- * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
- */
 async function saveAnalysisToServer(payload, method, analysisId) {
     if (!API_BASE || !isAdmin()) return null;
+    const basePath = '/api/admin/analyses';
     if (method === 'POST') {
-        return apiFetch('/api/analyses', { method: 'POST', body: JSON.stringify(payload) });
+        return apiFetch(basePath, { method: 'POST', body: JSON.stringify(payload) });
     }
     if (method === 'PUT') {
-        return apiFetch(`/api/analyses/${analysisId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        return apiFetch(`${basePath}/${analysisId}`, { method: 'PUT', body: JSON.stringify(payload) });
     }
     if (method === 'DELETE') {
-        return apiFetch(`/api/analyses/${analysisId}`, { method: 'DELETE' });
+        return apiFetch(`${basePath}/${analysisId}`, { method: 'DELETE' });
     }
     return null;
 }
+
+function timeAgo(dateStr) {
+    if (!dateStr) return '';
+    const now = Date.now();
+    const d = new Date(dateStr).getTime();
+    const diff = Math.floor((now - d) / 1000);
+    if (diff < 60) return 'لحظاتی پیش';
+    if (diff < 3600) return Math.floor(diff / 60) + ' دقیقه پیش';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' ساعت پیش';
+    if (diff < 604800) return Math.floor(diff / 86400) + ' روز پیش';
+    return new Date(dateStr).toLocaleDateString('fa-IR');
+}
+
+function truncateText(text, maxLen) {
+    if (!text || text.length <= maxLen) return text || '';
+    return text.substring(0, maxLen) + '...';
+}
+
+function getAnalysisDeepLink(analysisId) {
+    const tg = window.Telegram?.WebApp;
+    const botName = tg?.initDataUnsafe?.user ? (window.BOT_USERNAME || 'AmirBTCAssistantBot') : 'AmirBTCAssistantBot';
+    return `https://t.me/${botName}?startapp=analysis_${analysisId}`;
+}
+
+// ── Render: Featured Card ──
+function renderAnalysisFeatured() {
+    const section = $('analysis-featured-section');
+    if (!section) return;
+    if (!analysisFeatured) { section.style.display = 'none'; return; }
+    const a = analysisFeatured;
+    section.style.display = '';
+    section.innerHTML = `
+        <div class="featured-card" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')">
+            <div class="featured-badge">🔥 تحلیل ویژه امروز</div>
+            <div class="featured-body">
+                <div class="featured-info">
+                    <div class="featured-coin-row">
+                        <span class="featured-coin">${escapeHtml(a.coin)}</span>
+                        <span class="featured-tf">${escapeHtml(a.timeframe || '1D')}</span>
+                    </div>
+                    <div class="featured-snippet">${escapeHtml(truncateText(a.content || a.text || '', 120))}</div>
+                    <div class="featured-meta">
+                        <span>👁 ${a.views_count || 0} بازدید</span>
+                        <span>⏰ ${timeAgo(a.created_at)}</span>
+                    </div>
+                </div>
+                ${a.image ? `<img src="${escapeHtml(a.image)}" class="featured-image" loading="lazy" onerror="newsImageFallback(this)">` : ''}
+            </div>
+            <div class="featured-cta">مشاهده تحلیل</div>
+        </div>
+    `;
+}
+
+// ── Render: Stats Bar ──
+function renderAnalysisStats() {
+    const bar = $('analysis-stats-bar');
+    if (!bar) return;
+    if (!analysisStats) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    bar.innerHTML = `
+        <div class="stats-bar">
+            <div class="stat-item"><span class="stat-value">${analysisStats.active}</span><span class="stat-label">تحلیل فعال</span></div>
+            <div class="stat-divider"></div>
+            <div class="stat-item"><span class="stat-value">${analysisStats.today}</span><span class="stat-label">جدید امروز</span></div>
+            <div class="stat-divider"></div>
+            <div class="stat-item"><span class="stat-value">${analysisStats.total}</span><span class="stat-label">کل تحلیل‌ها</span></div>
+        </div>
+    `;
+}
+
+// ── Render: Analysis List ──
+function renderAnalysisList() {
+    const container = $('analysis-list-container');
+    const emptyState = $('analysis-empty-state');
+    if (!container) return;
+
+    if (!analyses.length) {
+        container.innerHTML = '';
+        if (emptyState) emptyState.style.display = '';
+        return;
+    }
+    if (emptyState) emptyState.style.display = 'none';
+
+    const isAdminUser = isAdmin();
+    container.innerHTML = analyses.map((a, i) => `
+        <div class="analysis-card-v2" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')" style="animation-delay:${i * 0.04}s">
+            <div class="acv-image-col">
+                ${a.image ? `<img src="${escapeHtml(a.image)}" class="acv-thumb" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="newsImageFallback(this)">` : `<div class="acv-no-img">${escapeHtml(a.coin)}</div>`}
+            </div>
+            <div class="acv-info-col">
+                <div class="acv-coin-row">
+                    <span class="acv-coin">${escapeHtml(a.coin)}</span>
+                    <span class="acv-tf">${escapeHtml(a.timeframe || '1D')}</span>
+                    ${a.featured ? '<span class="acv-featured-badge">⭐ ویژه</span>' : ''}
+                </div>
+                <p class="acv-snippet">${escapeHtml(truncateText(a.content || a.text || '', 100))}</p>
+            </div>
+            <div class="acv-levels-col">
+                ${a.resistance_level ? `<div class="acv-level acv-resistance"><span class="acv-level-label">مقاومت</span><span class="acv-level-value">${escapeHtml(a.resistance_level)}</span></div>` : ''}
+                ${a.current_price ? `<div class="acv-level acv-current"><span class="acv-level-label">قیمت فعلی</span><span class="acv-level-value">${escapeHtml(a.current_price)}</span></div>` : ''}
+                ${a.support_level ? `<div class="acv-level acv-support"><span class="acv-level-label">حمایت</span><span class="acv-level-value">${escapeHtml(a.support_level)}</span></div>` : ''}
+            </div>
+            <div class="acv-footer-row">
+                <span class="acv-views">👁 ${a.views_count || 0} بازدید</span>
+                <span class="acv-time">⏰ ${timeAgo(a.created_at)}</span>
+                ${isAdminUser ? `<div class="acv-admin-actions" onclick="event.stopPropagation()">
+                    <button class="acv-edit-btn" onclick="openEditAnalysisModal('${escapeHtml(a.id)}')">✏️ ویرایش</button>
+                    <button class="acv-delete-btn" onclick="startDeleteAnalysis('${escapeHtml(a.id)}')">🗑 حذف</button>
+                </div>` : `<button class="acv-share-btn" onclick="event.stopPropagation();shareAnalysisById('${escapeHtml(a.id)}')">🔗 اشتراک‌گذاری</button>`}
+            </div>
+        </div>
+    `).join('');
+
+    // Setup infinite scroll
+    setupAnalysisInfiniteScroll();
+}
+
+function setupAnalysisInfiniteScroll() {
+    const trigger = $('analysis-load-trigger');
+    if (!trigger) return;
+    if (window._analysisObserver) window._analysisObserver.disconnect();
+    window._analysisObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && analysisPagination?.hasMore && !analysisListLoading) {
+            loadMoreAnalyses();
+        }
+    }, { rootMargin: '300px' });
+    window._analysisObserver.observe(trigger);
+}
+
+async function loadMoreAnalyses() {
+    if (analysisListLoading || !analysisPagination?.hasMore) return;
+    const changed = await fetchAnalyses(false, true);
+    if (changed) renderAnalysisList();
+}
+
+// ── Analysis Detail Page ──
+async function openAnalysisDetailPage(id) {
+    currentAnalysisDetail = null;
+    const a = analyses.find(x => x.id === id);
+    if (!a) return;
+
+    // Fetch fresh detail from server (for full content + increment view)
+    try {
+        if (API_BASE) {
+            const [detailRes, viewRes] = await Promise.all([
+                apiFetch(`/api/analyses/${id}`),
+                apiFetch(`/api/analyses/${id}/view`, { method: 'POST' }).catch(() => null),
+            ]);
+            if (detailRes.analysis) {
+                currentAnalysisDetail = detailRes.analysis;
+                // Update local cache with new view count
+                const localIdx = analyses.findIndex(x => x.id === id);
+                if (localIdx >= 0 && detailRes.analysis.views_count !== undefined) {
+                    analyses[localIdx].views_count = detailRes.analysis.views_count;
+                }
+            } else {
+                currentAnalysisDetail = a;
+            }
+        } else {
+            currentAnalysisDetail = a;
+        }
+    } catch {
+        currentAnalysisDetail = a;
+    }
+
+    renderAnalysisDetailPage();
+    // Navigate to detail page
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const page = $('analysis-detail-page');
+    if (page) page.classList.add('active');
+    // Hide bottom nav on detail page
+    const nav = document.querySelector('.bottom-nav');
+    if (nav) nav.style.display = 'none';
+    window.scrollTo(0, 0);
+}
+
+function renderAnalysisDetailPage() {
+    const a = currentAnalysisDetail;
+    if (!a) return;
+
+    const coinEl = $('adp-coin'); if (coinEl) coinEl.innerText = a.coin;
+    const tfEl = $('adp-tf'); if (tfEl) tfEl.innerText = a.timeframe || '1D';
+    const viewsEl = $('adp-views'); if (viewsEl) viewsEl.innerText = `👁 ${a.views_count || 0}`;
+
+    // Admin actions
+    const adminActions = $('adp-admin-actions');
+    if (adminActions) adminActions.style.display = isAdmin() ? '' : 'none';
+
+    // Title
+    const titleEl = $('adp-title');
+    if (titleEl) titleEl.innerText = a.title || `${a.coin} — ${a.timeframe || '1D'}`;
+
+    // Image
+    const imgWrap = $('adp-image-wrap');
+    const img = $('adp-image');
+    if (a.image) {
+        if (imgWrap) imgWrap.style.display = '';
+        if (img) { img.src = a.image; img.style.display = ''; img.onerror = function() { newsImageFallback(this); }; }
+    } else {
+        if (imgWrap) imgWrap.style.display = 'none';
+    }
+
+    // Price levels
+    const levelsEl = $('adp-levels');
+    if (levelsEl) {
+        if (a.support_level || a.current_price || a.resistance_level) {
+            levelsEl.style.display = '';
+            levelsEl.innerHTML = `
+                ${a.resistance_level ? `<div class="adp-level adp-resistance"><span class="adp-level-label">مقاومت</span><span class="adp-level-value">${escapeHtml(a.resistance_level)}</span></div>` : ''}
+                ${a.current_price ? `<div class="adp-level adp-current"><span class="adp-level-label">قیمت فعلی</span><span class="adp-level-value">${escapeHtml(a.current_price)}</span></div>` : ''}
+                ${a.support_level ? `<div class="adp-level adp-support"><span class="adp-level-label">حمایت</span><span class="adp-level-value">${escapeHtml(a.support_level)}</span></div>` : ''}
+            `;
+        } else {
+            levelsEl.style.display = 'none';
+        }
+    }
+
+    // Content (escaped for XSS safety)
+    const contentEl = $('adp-content');
+    if (contentEl) {
+        const text = a.content || a.text || '';
+        contentEl.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+    }
+
+    // Meta
+    const authorEl = $('adp-author'); if (authorEl) authorEl.innerText = a.author || '';
+    const dateEl = $('adp-date'); if (dateEl) dateEl.innerText = a.date || '';
+}
+
+function closeAnalysisDetailPage() {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const page = $('analysis-page');
+    if (page) page.classList.add('active');
+    // Restore bottom nav
+    const nav = document.querySelector('.bottom-nav');
+    if (nav) nav.style.display = '';
+    currentAnalysisDetail = null;
+    // Re-render list to update view counts
+    renderAnalysisList();
+}
+
+// ── Share ──
+function shareCurrentAnalysis() {
+    if (!currentAnalysisDetail) return;
+    shareAnalysisById(currentAnalysisDetail.id);
+}
+
+function shareAnalysisById(id) {
+    const a = analyses.find(x => x.id === id) || currentAnalysisDetail;
+    if (!a) return;
+    const deepLink = getAnalysisDeepLink(id);
+    const text = `${a.coin} (${a.timeframe || '1D'})\n\n${truncateText(a.content || a.text || '', 200)}`;
+
+    const tg = window.Telegram?.WebApp;
+    if (tg?.openTelegramLink) {
+        tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(deepLink)}&text=${encodeURIComponent(text)}`);
+    } else if (navigator.share) {
+        navigator.share({ title: `${a.coin} Analysis`, text: text + '\n\n' + deepLink, url: deepLink }).catch(() => {});
+    } else if (navigator.clipboard) {
+        navigator.clipboard.writeText(text + '\n\n' + deepLink).then(() => {
+            showToast('لینک تحلیل کپی شد!');
+        });
+    }
+}
+
+// ── Image Viewer (Fullscreen Zoom) ──
+let ivScale = 1;
+let ivTransX = 0, ivTransY = 0;
+let ivDragging = false, ivStartX = 0, ivStartY = 0, ivStartTransX = 0, ivStartTransY = 0;
+
+function openImageViewer() {
+    if (!currentAnalysisDetail?.image) return;
+    const overlay = $('image-viewer-overlay');
+    const img = $('iv-image');
+    if (!overlay || !img) return;
+    img.src = currentAnalysisDetail.image;
+    img.onerror = function() { newsImageFallback(this); };
+    overlay.style.display = '';
+    ivReset();
+    document.body.style.overflow = 'hidden';
+}
+
+function closeImageViewer(event) {
+    if (event && event.target !== event.currentTarget && !event.target.closest('.iv-close-btn')) return;
+    const overlay = $('image-viewer-overlay');
+    if (overlay) overlay.style.display = 'none';
+    document.body.style.overflow = '';
+    ivReset();
+}
+
+function ivZoom(direction) {
+    ivScale = direction > 0 ? Math.min(ivScale * 1.3, 5) : Math.max(ivScale / 1.3, 1);
+    if (ivScale <= 1) { ivTransX = 0; ivTransY = 0; }
+    applyImageViewerTransform();
+}
+
+function ivReset() {
+    ivScale = 1; ivTransX = 0; ivTransY = 0;
+    applyImageViewerTransform();
+}
+
+function applyImageViewerTransform() {
+    const img = $('iv-image');
+    if (img) {
+        img.style.transform = `translate(${ivTransX}px, ${ivTransY}px) scale(${ivScale})`;
+        img.style.transition = ivDragging ? 'none' : 'transform 0.2s ease';
+    }
+}
+
+// Touch/drag handlers for image viewer
+(function() {
+    document.addEventListener('touchstart', function(e) {
+        const overlay = $('image-viewer-overlay');
+        if (!overlay || overlay.style.display === 'none') return;
+        if (ivScale <= 1) return;
+        if (e.touches.length !== 1) return;
+        ivDragging = true;
+        ivStartX = e.touches[0].clientX;
+        ivStartY = e.touches[0].clientY;
+        ivStartTransX = ivTransX;
+        ivStartTransY = ivTransY;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', function(e) {
+        if (!ivDragging) return;
+        ivTransX = ivStartTransX + (e.touches[0].clientX - ivStartX);
+        ivTransY = ivStartTransY + (e.touches[0].clientY - ivStartY);
+        applyImageViewerTransform();
+    }, { passive: true });
+
+    document.addEventListener('touchend', function() { ivDragging = false; }, { passive: true });
+
+    // Mouse drag for desktop
+    document.addEventListener('mousedown', function(e) {
+        const overlay = $('image-viewer-overlay');
+        if (!overlay || overlay.style.display === 'none') return;
+        if (ivScale <= 1) return;
+        const viewport = $('iv-viewport');
+        if (!viewport || !viewport.contains(e.target)) return;
+        ivDragging = true;
+        ivStartX = e.clientX; ivStartY = e.clientY;
+        ivStartTransX = ivTransX; ivStartTransY = ivTransY;
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!ivDragging) return;
+        ivTransX = ivStartTransX + (e.clientX - ivStartX);
+        ivTransY = ivStartTransY + (e.clientY - ivStartY);
+        applyImageViewerTransform();
+    });
+
+    document.addEventListener('mouseup', function() { ivDragging = false; });
+
+    // Mouse wheel zoom
+    document.addEventListener('wheel', function(e) {
+        const overlay = $('image-viewer-overlay');
+        if (!overlay || overlay.style.display === 'none') return;
+        e.preventDefault();
+        ivZoom(e.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+})();
+
+// ── Deep Link Handler ──
+function checkAnalysisDeepLink() {
+    const tg = window.Telegram?.WebApp;
+    let startParam = tg?.initDataUnsafe?.start_param;
+
+    if (!startParam) {
+        // Fallback: parse from URL query
+        const urlParams = new URLSearchParams(window.location.search);
+        startParam = urlParams.get('startapp') || urlParams.get('tgWebAppStartParam');
+    }
+
+    if (startParam && startParam.startsWith('analysis_')) {
+        const analysisId = startParam.replace('analysis_', '');
+        if (analysisId && /^[a-zA-Z0-9]+$/.test(analysisId)) {
+            // Load analyses first, then open the detail
+            fetchAnalyses(true).then(() => {
+                openAnalysisDetailPage(analysisId);
+            });
+            return true;
+        }
+    }
+    return false;
+}
+
+// ── Admin: Create / Edit ──
+function openAddAnalysisModal() {
+    if (!isAdmin()) return;
+    editingAnalysisId = null;
+    document.getElementById('analysis-modal-title').innerText = 'تحلیل جدید';
+    document.getElementById('analysis-submit-btn').innerText = 'انتشار تحلیل';
+    ['analysis-title', 'analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text', 'analysis-support', 'analysis-current-price', 'analysis-resistance'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const featuredEl = document.getElementById('analysis-featured');
+    if (featuredEl) featuredEl.checked = false;
+    document.getElementById('add-analysis-modal').style.display = 'flex';
+}
+
+function openEditAnalysisModal(id) {
+    if (!isAdmin()) return;
+    const a = analyses.find(x => x.id === id);
+    if (!a) return;
+    editingAnalysisId = id;
+    document.getElementById('analysis-modal-title').innerText = 'ویرایش تحلیل';
+    document.getElementById('analysis-submit-btn').innerText = 'ذخیره تغییرات';
+    document.getElementById('analysis-title').value = a.title || '';
+    document.getElementById('analysis-coin').value = a.coin || '';
+    document.getElementById('analysis-timeframe').value = a.timeframe || '';
+    document.getElementById('analysis-image').value = a.image || '';
+    document.getElementById('analysis-text').value = a.content || a.text || '';
+    document.getElementById('analysis-support').value = a.support_level || '';
+    document.getElementById('analysis-current-price').value = a.current_price || '';
+    document.getElementById('analysis-resistance').value = a.resistance_level || '';
+    const featuredEl = document.getElementById('analysis-featured');
+    if (featuredEl) featuredEl.checked = Boolean(a.featured);
+    document.getElementById('add-analysis-modal').style.display = 'flex';
+}
+
+function closeAddAnalysisModal() {
+    document.getElementById('add-analysis-modal').style.display = 'none';
+    editingAnalysisId = null;
+}
+
+function submitAnalysis() {
+    const title = document.getElementById('analysis-title').value.trim();
+    const coin = document.getElementById('analysis-coin').value.trim().toUpperCase();
+    const timeframe = document.getElementById('analysis-timeframe').value.trim() || '1D';
+    let image = document.getElementById('analysis-image').value.trim();
+    const text = document.getElementById('analysis-text').value.trim();
+    const support_level = document.getElementById('analysis-support').value.trim();
+    const current_price = document.getElementById('analysis-current-price').value.trim();
+    const resistance_level = document.getElementById('analysis-resistance').value.trim();
+    const featured = document.getElementById('analysis-featured')?.checked || false;
+
+    if (!coin || !text) { showToast('نام ارز و متن تحلیل الزامی است.'); return; }
+
+    const author = getTelegramUser()?.first_name || 'مدیر';
+    const payload = { coin, timeframe, image, text, author, title, support_level, current_price, resistance_level, featured };
+
+    (async () => {
+        try {
+            if (editingAnalysisId) {
+                await saveAnalysisToServer(payload, 'PUT', editingAnalysisId);
+                showToast('تحلیل ویرایش شد.');
+            } else {
+                await saveAnalysisToServer(payload, 'POST');
+                showToast('تحلیل منتشر شد.');
+            }
+            await fetchAnalyses(true);
+            renderAnalysisFeatured();
+            renderAnalysisStats();
+            renderAnalysisList();
+            renderAnalysisSlider();
+            closeAddAnalysisModal();
+        } catch (e) {
+            console.error('submitAnalysis:', e);
+            showToast('خطا در ذخیره تحلیل.');
+        }
+    })();
+}
+
+// ── Admin: Delete (Double Confirm) ──
+function startDeleteAnalysis(id) {
+    if (!isAdmin()) return;
+    deletingAnalysisId = id;
+    document.getElementById('delete-confirm-step1').style.display = '';
+    document.getElementById('delete-confirm-step2').style.display = 'none';
+    document.getElementById('delete-confirm-dialog').style.display = 'flex';
+}
+
+function confirmDeleteStep2() {
+    document.getElementById('delete-confirm-step1').style.display = 'none';
+    document.getElementById('delete-confirm-step2').style.display = '';
+}
+
+function cancelDeleteAnalysis() {
+    document.getElementById('delete-confirm-dialog').style.display = 'none';
+    deletingAnalysisId = null;
+}
+
+function executeDeleteAnalysis() {
+    if (!deletingAnalysisId) return;
+    const id = deletingAnalysisId;
+    cancelDeleteAnalysis();
+    (async () => {
+        try {
+            await saveAnalysisToServer(null, 'DELETE', id);
+            showToast('تحلیل حذف شد.');
+            // If we're on the detail page of the deleted analysis, go back
+            if (currentAnalysisDetail?.id === id) {
+                closeAnalysisDetailPage();
+            }
+            await fetchAnalyses(true);
+            renderAnalysisFeatured();
+            renderAnalysisStats();
+            renderAnalysisList();
+            renderAnalysisSlider();
+        } catch (e) {
+            console.error('deleteAnalysis:', e);
+            showToast('خطا در حذف تحلیل.');
+        }
+    })();
+}
+
+function editCurrentAnalysis() {
+    if (!currentAnalysisDetail?.id) return;
+    openEditAnalysisModal(currentAnalysisDetail.id);
+}
+
+function deleteCurrentAnalysis() {
+    if (!currentAnalysisDetail?.id) return;
+    startDeleteAnalysis(currentAnalysisDetail.id);
+}
+
+// Keep old name for backward compat in dashboard
+function shareAnalysis() { shareCurrentAnalysis(); }
+
+// ── Dashboard Slider (kept for dashboard page) ──
+function renderAnalysisSlider() {
+    const track = document.getElementById('slider-track');
+    const dots = document.getElementById('slider-dots');
+    if (!track) return;
+    if (!analyses.length) {
+        track.innerHTML = `<div class="slide-empty">تحلیلی موجود نیست</div>`;
+        if (dots) dots.innerHTML = '';
+        return;
+    }
+    const showSlide = (idx) => {
+        const a = analyses[idx];
+        track.innerHTML = `
+            <div class="slide-item" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')">
+                <img src="${escapeHtml(a.image || '')}" class="slide-img" loading="lazy" onerror="newsImageFallback(this)">
+                <div class="slide-overlay">
+                    <h4>${escapeHtml(a.coin)} (${escapeHtml(a.timeframe || '1D')})</h4>
+                    <p>${escapeHtml(truncateText(a.content || a.text || '', 80))}</p>
+                    <span class="slide-author">${escapeHtml(a.author || '')} • ${escapeHtml(a.date || '')}</span>
+                </div>
+            </div>
+        `;
+        if (dots) dots.innerHTML = analyses.map((_, i) => `<span class="dot ${i === idx ? 'active' : ''}"></span>`).join('');
+    };
+    if (currentSlide >= analyses.length) currentSlide = 0;
+    showSlide(currentSlide);
+    clearInterval(sliderInterval);
+    sliderInterval = setInterval(() => {
+        currentSlide = (currentSlide + 1) % analyses.length;
+        showSlide(currentSlide);
+    }, 5000);
+}
+
+//#endregion
 
 /**
  * عملیات مربوط به sendSessionHeartbeat را انجام می‌دهد.
@@ -1173,14 +1752,6 @@ async function checkBackendHealth() {
  * ورودی: بدون ورودی.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
-async function fetchOnlineCount() {
-    if (!canRunSessionRequests()) return;
-    try {
-        const data = await apiFetch('/api/sessions/online');
-        updateOnlineBadge(data.count);
-    } catch (_) {}
-}
-
 function updateLangChecks() {
     const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
     const fa = document.getElementById('lang-fa-check');
@@ -1315,6 +1886,48 @@ window.iconFallback = function(imgEl) {
     div.style.cssText = 'width:' + size + ';height:' + size + ';min-width:' + size + ';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:' + fontSize + ';';
     div.textContent = letter;
     imgEl.replaceWith(div);
+};
+
+/**
+ * Premium AMIRBTC fallback image — dark theme, gold accent, crypto style.
+ * Used for news thumbnails, analysis images, hero images, and modal images.
+ * Returns a data URI SVG string.
+ */
+function getAmirbtcFallbackSvg(width, height, text) {
+    const w = width || 400;
+    const h = height || 220;
+    const label = text || 'AMIRBTC';
+    return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}' viewBox='0 0 ${w} ${h}'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%230B0F14'/%3E%3Cstop offset='100%25' stop-color='%23151C24'/%3E%3C/linearGradient%3E%3ClinearGradient id='acc' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23FF8A00'/%3E%3Cstop offset='100%25' stop-color='%23FFD700'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='${w}' height='${h}' fill='url(%23bg)' rx='12'/%3E%3Crect x='${w/2-40}' y='${h/2-40}' width='80' height='80' rx='16' fill='none' stroke='url(%23acc)' stroke-width='2' opacity='0.3'/%3E%3Ctext x='${w/2}' y='${h/2+6}' fill='url(%23acc)' font-family='sans-serif' font-size='24' font-weight='bold' text-anchor='middle'%3E₿%3C/text%3E%3Ctext x='${w/2}' y='${h/2+40}' fill='%2364748b' font-family='sans-serif' font-size='11' text-anchor='middle'%3E${encodeURIComponent(label)}%3C/text%3E%3C/svg%3E`;
+}
+
+/**
+ * Global news/analysis image fallback handler.
+ * Replaces broken images with the premium AMIRBTC fallback SVG.
+ * Usage: onerror="newsImageFallback(this)"
+ */
+window.newsImageFallback = function(imgEl) {
+    if (imgEl._fallbackApplied) return;
+    imgEl._fallbackApplied = true;
+    // Determine size from class or default
+    const isHero = imgEl.classList.contains('news-hero-image');
+    const isThumb = imgEl.classList.contains('news-card-thumb');
+    const isSlide = imgEl.classList.contains('slide-img');
+    const isFeatured = imgEl.classList.contains('featured-image');
+    const isModal = imgEl.id === 'news-modal-image';
+    const isAnalysisThumb = imgEl.classList.contains('acv-thumb');
+    const isViewer = imgEl.id === 'iv-image';
+
+    let w = 400, h = 220, label = 'AMIRBTC';
+    if (isHero) { w = 400; h = 220; }
+    else if (isThumb) { w = 220; h = 220; }
+    else if (isSlide) { w = 200; h = 170; label = 'No Chart'; }
+    else if (isFeatured) { w = 300; h = 200; }
+    else if (isModal) { w = 400; h = 250; }
+    else if (isAnalysisThumb) { w = 120; h = 120; label = (imgEl.alt || 'A').charAt(0); }
+    else if (isViewer) { w = 800; h = 600; label = 'Image Unavailable'; }
+
+    imgEl.src = getAmirbtcFallbackSvg(w, h, label);
+    imgEl.style.objectFit = 'cover';
 };
 
 /**
@@ -2244,8 +2857,12 @@ let newsCache = [];
 let newsPage = 1;
 let newsHasMore = false;
 let newsTotalCount = 0;
+let categoryCounts = { all: 0, crypto: 0, forex: 0 };
 
 let displayedNews = [];
+let newsLoadObserver = null;
+let calCountdownInterval = null;
+let currentCalCountry = 'all';
 
 // ============================================================================
 // NOTE (Phase 5): translateText, translateArticles, detectNewsCategory,
@@ -2253,6 +2870,51 @@ let displayedNews = [];
 // Backend now handles: multi-source RSS, translation (CF Workers AI), categories.
 // Frontend only calls /api/farsi-news and uses the 'category' field directly.
 // ============================================================================
+
+function sentimentBadge(sentiment) {
+    const s = (sentiment || '').toLowerCase();
+    const map = {
+        bullish: '<span class="news-card-sentiment sentiment-bullish">🟢 Bullish</span>',
+        bearish: '<span class="news-card-sentiment sentiment-bearish">🔴 Bearish</span>',
+        macro: '<span class="news-card-sentiment sentiment-macro">🟡 Macro</span>',
+        neutral: '<span class="news-card-sentiment sentiment-neutral">⚪ Neutral</span>',
+        breaking: '<span class="news-card-sentiment sentiment-breaking">🚨 Breaking</span>',
+    };
+    return map[s] || map.neutral;
+}
+
+function sentimentBadgeHero(sentiment) {
+    const s = (sentiment || '').toLowerCase();
+    const map = {
+        bullish: '<span class="news-hero-sentiment sentiment-bullish">🟢 Bullish</span>',
+        bearish: '<span class="news-hero-sentiment sentiment-bearish">🔴 Bearish</span>',
+        macro: '<span class="news-hero-sentiment sentiment-macro">🟡 Macro</span>',
+        neutral: '<span class="news-hero-sentiment sentiment-neutral">⚪ Neutral</span>',
+        breaking: '<span class="news-hero-sentiment sentiment-breaking">🚨 Breaking</span>',
+    };
+    return map[s] || map.neutral;
+}
+
+function updateNewsBadges() {
+    const el = (id) => document.getElementById(id);
+    const bAll = el('badge-all'); if (bAll) bAll.textContent = categoryCounts.all || '';
+    const bCrypto = el('badge-crypto'); if (bCrypto) bCrypto.textContent = categoryCounts.crypto || '';
+    const bForex = el('badge-forex'); if (bForex) bForex.textContent = categoryCounts.forex || '';
+    const bCal = el('badge-calendar'); if (bCal) bCal.textContent = calendarEvents.length || '';
+}
+
+function setupInfiniteScroll() {
+    if (newsLoadObserver) newsLoadObserver.disconnect();
+    const trigger = document.getElementById('news-load-trigger');
+    if (!trigger) return;
+    newsLoadObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && newsHasMore) {
+            loadMoreNews();
+        }
+    }, { rootMargin: '200px' });
+    newsLoadObserver.observe(trigger);
+}
+
 /**
  * اخبار را از کش یا منابع راه‌دور دریافت می‌کند و فهرست خبرها را برای نمایش آماده می‌سازد.
  * ورودی: پارامترهای `force = false` را دریافت می‌کند.
@@ -2265,25 +2927,27 @@ async function loadNews(force = false, append = false) {
             if (cached) {
                 newsCache = cached;
                 renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
-                // Stale-While-Revalidate: show cached, refresh in background
                 loadNews(true);
                 return;
             }
         }
-        // Show skeleton loader while fetching (§6.3) — only on initial load
         const container = document.getElementById('news-list');
         if (!container) return;
         const activeTab = document.querySelector('.news-tab.active')?.dataset?.news || 'all';
         if (!append && activeTab !== 'calendar') {
-            container.innerHTML = Array(4).fill(`
-                <div class="news-skeleton">
-                    <div class="news-skeleton-img"></div>
-                    <div class="news-skeleton-content">
-                        <div class="news-skeleton-line"></div>
-                        <div class="news-skeleton-line"></div>
+            container.innerHTML = `
+                <div class="skeleton-hero"></div>
+                ${Array(4).fill(`
+                <div class="skeleton-card">
+                    <div class="skeleton-card-thumb"></div>
+                    <div class="skeleton-card-body">
+                        <div class="skeleton-line w-30"></div>
+                        <div class="skeleton-line w-90"></div>
+                        <div class="skeleton-line w-70"></div>
+                        <div class="skeleton-line w-50"></div>
                     </div>
-                </div>
-            `).join('');
+                </div>`).join('')}
+            `;
         }
 
         const page = append ? newsPage + 1 : 1;
@@ -2292,16 +2956,22 @@ async function loadNews(force = false, append = false) {
         let total = 0;
 
         try {
-            const json = await apiFetch(`/api/farsi-news?page=${page}&limit=30`);
+            const json = await apiFetch(`/api/farsi-news?page=${page}&limit=20`);
             if (json.data?.length) {
                 articles = json.data.map(a => ({
                     title: a.title, body: a.description, source: a.source,
                     image: a.image, url: a.url, time: a.time_ago,
-                    category: a.category || 'crypto'
+                    category: a.category || 'crypto',
+                    sentiment: a.sentiment || 'neutral',
+                    summary: a.summary || ''
                 }));
             }
             hasMore = json.pagination?.hasMore || false;
             total = json.pagination?.total || 0;
+            if (json.categoryCounts) {
+                categoryCounts = json.categoryCounts;
+                updateNewsBadges();
+            }
         } catch (e) { console.warn('Farsi news API error:', e); }
 
         if (append) {
@@ -2313,11 +2983,20 @@ async function loadNews(force = false, append = false) {
         newsHasMore = hasMore;
         newsTotalCount = total;
 
+        // Infer counts from cache if API didn't provide
+        if (!categoryCounts.all) {
+            categoryCounts.all = newsCache.length;
+            categoryCounts.crypto = newsCache.filter(n => n.category === 'crypto').length;
+            categoryCounts.forex = newsCache.filter(n => n.category === 'forex').length;
+            updateNewsBadges();
+        }
+
         Cache.set('news', newsCache, 300);
         renderNews(activeTab);
     } catch (e) {
         console.error('News error:', e);
-        document.getElementById('news-list').innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
+        const container = document.getElementById('news-list');
+        if (container) container.innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
     }
 }
 
@@ -2325,6 +3004,7 @@ function loadMoreNews() {
     if (!newsHasMore) return;
     loadNews(false, true);
 }
+
 /**
  * اخبار را در رابط کاربری رندر می‌کند.
  * ورودی: پارامترهای `category` را دریافت می‌کند.
@@ -2333,110 +3013,313 @@ function loadMoreNews() {
 function renderNews(category) {
     const container = document.getElementById('news-list');
     if (!container) return;
+
+    // Clear any existing countdown interval
+    if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+
     let filtered = newsCache;
     if (category === 'crypto') filtered = filtered.filter(n => n.category === 'crypto');
     else if (category === 'economy') filtered = filtered.filter(n => n.category === 'economy');
     else if (category === 'forex') filtered = filtered.filter(n => n.category === 'forex');
     else if (category === 'calendar') {
-        // Show skeleton while loading
-        if (calendarLoading) {
-            container.innerHTML = `<div class="cal-sub-tabs">
-                <button class="cal-sub-tab active">${t('cal_today')}</button>
-                <button class="cal-sub-tab">${t('cal_tomorrow')}</button>
-                <button class="cal-sub-tab">${t('cal_past')}</button>
-            </div>` + Array(5).fill(`
-                <div class="news-skeleton" style="height:56px;">
-                    <div class="news-skeleton-content" style="width:100%;">
-                        <div class="news-skeleton-line" style="width:70%;"></div>
-                        <div class="news-skeleton-line" style="width:50%;"></div>
-                    </div>
-                </div>
-            `).join('');
-        }
-        loadCalendarEvents().then(events => {
-            const subTabsHtml = `<div class="cal-sub-tabs">
-                <button class="cal-sub-tab${currentCalendarTab === 'today' ? ' active' : ''}" onclick="switchCalendarTab('today', this)">${t('cal_today')}</button>
-                <button class="cal-sub-tab${currentCalendarTab === 'tomorrow' ? ' active' : ''}" onclick="switchCalendarTab('tomorrow', this)">${t('cal_tomorrow')}</button>
-                <button class="cal-sub-tab${currentCalendarTab === 'past' ? ' active' : ''}" onclick="switchCalendarTab('past', this)">${t('cal_past')}</button>
-            </div>`;
-
-            if (!events.length) {
-                container.innerHTML = subTabsHtml + `<div class="empty-state">${t('cal_empty')}</div>`;
-                return;
-            }
-
-            const statusLabel = { past: t('cal_status_past'), live: t('cal_status_live'), upcoming: t('cal_status_upcoming') };
-            const impactLabel = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
-
-            // Filter events by currentCalendarTab
-            const now = new Date();
-            const userTz = now.getTimezoneOffset();
-            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-
-            let filteredEvents = events.filter(e => {
-                if (!e.timestamp) return false;
-                const eventDate = new Date(e.timestamp);
-                if (isNaN(eventDate.getTime())) return false;
-                const eventLocal = new Date(eventDate.getTime() - userTz * 60000);
-                const eventDay = new Date(eventLocal.getFullYear(), eventLocal.getMonth(), eventLocal.getDate());
-                if (currentCalendarTab === 'today') return eventDay.getTime() === todayStart.getTime();
-                if (currentCalendarTab === 'tomorrow') return eventDay.getTime() === tomorrowStart.getTime();
-                if (currentCalendarTab === 'past') return eventDay < todayStart;
-                return true;
-            });
-
-            if (currentCalendarTab === 'past') {
-                filteredEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            }
-
-            if (!filteredEvents.length) {
-                container.innerHTML = subTabsHtml + `<div class="empty-state">${t('cal_empty')}</div>`;
-                return;
-            }
-
-            function renderCard(e) {
-                const ft = formatCalendarTime(e.timestamp);
-                const timeText = ft.time || '';
-                return `
-                <div class="eco-event-card ${e.status || 'upcoming'}">
-                    <div class="eco-event-left">
-                        <span class="eco-flag-emoji">${e.flag || '🏳️'}</span>
-                        <div>
-                            <div class="eco-event-title">${escapeHtml(e.title)}</div>
-                            <div class="eco-event-meta">${timeText} • ${e.country || ''}</div>
-                        </div>
-                    </div>
-                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-                        <span class="eco-impact eco-impact-${e.impact || 'medium'}">${impactLabel[e.impact] || impactLabel.medium}</span>
-                        <span class="eco-status eco-status-${e.status || 'upcoming'}">${statusLabel[e.status] || e.status}</span>
-                    </div>
-                </div>`;
-            }
-
-            container.innerHTML = subTabsHtml + filteredEvents.map(e => renderCard(e)).join('');
-        });
+        renderCalendar();
         return;
     }
+
     if (!filtered.length) {
         container.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
         return;
     }
+
     displayedNews = filtered;
-    container.innerHTML = filtered.map((n, i) => `
-        <div class="news-item" style="animation-delay:${i * 0.06}s" onclick="openNewsModal(${i})">
-            <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2270%22 height=%2270%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="news-img">
-            <div class="news-content">
-                <div class="news-title">${escapeHtml(n.title)}</div>
-                <div class="news-source">${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</div>
+    const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22220%22 height=%22220%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
+
+    let html = '';
+    const heroItem = filtered[0];
+    const heroImg = heroItem.image || placeholderImg;
+
+    // Hero card
+    if (category === 'all' && heroImg && !heroImg.includes('data:image/svg')) {
+        html += `
+        <div class="news-hero" onclick="openNewsModal(0)">
+            <img class="news-hero-image" src="${escapeHtml(heroImg)}" loading="eager" alt="" onerror="newsImageFallback(this)">
+            <div class="news-hero-overlay">
+                ${sentimentBadgeHero(heroItem.sentiment)}
+                <div class="news-hero-title">${escapeHtml(heroItem.title)}</div>
+                <div class="news-hero-meta">${escapeHtml(heroItem.source)} • ${escapeHtml(heroItem.time || '')}</div>
             </div>
-        </div>
-    `).join('') + (newsHasMore && category === 'all' ? `
-        <button class="load-more-btn" onclick="loadMoreNews()">
-            ${t('load_more') || 'نمایش بیشتر'}
-        </button>
-    ` : '');
+        </div>`;
+    }
+
+    // News cards (skip first if used as hero)
+    const startIdx = (category === 'all' && heroImg && !heroImg.includes('data:image/svg')) ? 1 : 0;
+    for (let i = startIdx; i < filtered.length; i++) {
+        const n = filtered[i];
+        const idx = i;
+        const delay = (i - startIdx) * 0.06;
+        html += `
+        <div class="news-card" style="animation-delay:${delay}s" onclick="openNewsModal(${idx})">
+            <div class="news-card-body">
+                ${sentimentBadge(n.sentiment)}
+                <div class="news-card-title">${escapeHtml(n.title)}</div>
+                ${n.summary ? `<div class="news-card-summary">${escapeHtml(n.summary)}</div>` : ''}
+                <div class="news-card-meta">${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</div>
+            </div>
+            <img class="news-card-thumb" src="${escapeHtml(n.image || placeholderImg)}" loading="lazy" alt="" onerror="newsImageFallback(this)">
+        </div>`;
+    }
+
+    // Infinite scroll trigger
+    if (newsHasMore && (category === 'all' || category === 'crypto' || category === 'forex')) {
+        html += `<div class="news-load-trigger" id="news-load-trigger"></div>`;
+    }
+
+    container.innerHTML = html;
+    setupInfiniteScroll();
 }
+
+// ============================================================================
+// Calendar Rendering
+// ============================================================================
+
+const MAJOR_EVENTS = ['CPI', 'NFP', 'FOMC', 'GDP', 'Retail Sales', 'PMI', 'Interest Rate', 'Employment', 'Unemployment'];
+
+function isMajorEvent(title) {
+    if (!title) return false;
+    const t = title.toUpperCase();
+    return MAJOR_EVENTS.some(k => t.includes(k));
+}
+
+function getTimeGroup(hour) {
+    if (hour < 12) return 'morning';
+    if (hour < 17) return 'afternoon';
+    return 'evening';
+}
+
+const timeGroupLabels = {
+    fa: { morning: 'صبح', afternoon: 'بعدازظهر', evening: 'عصر/شب' },
+    en: { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening' }
+};
+
+function formatCountdown(ms) {
+    if (ms <= 0) return '';
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+}
+
+function renderCalendar() {
+    const container = document.getElementById('news-list');
+    if (!container) return;
+
+    // Update calendar badge
+    const bCal = document.getElementById('badge-calendar');
+    if (bCal) bCal.textContent = calendarEvents.length || '';
+
+    if (calendarLoading) {
+        container.innerHTML = `
+            <div class="cal-nav">
+                <button class="cal-nav-btn active">${t('cal_today')}</button>
+                <button class="cal-nav-btn">${t('cal_tomorrow')}</button>
+                <button class="cal-nav-btn">${t('cal_week')}</button>
+            </div>
+            ${Array(4).fill(`
+                <div class="skeleton-card" style="height:100px;">
+                    <div class="skeleton-card-body" style="width:100%;">
+                        <div class="skeleton-line w-70"></div>
+                        <div class="skeleton-line w-90"></div>
+                        <div class="skeleton-line w-50"></div>
+                    </div>
+                </div>
+            `).join('')}`;
+        return;
+    }
+
+    loadCalendarEvents().then(events => {
+        if (!events.length) {
+            container.innerHTML = `
+                <div class="cal-nav">
+                    <button class="cal-nav-btn active">${t('cal_today')}</button>
+                    <button class="cal-nav-btn">${t('cal_tomorrow')}</button>
+                    <button class="cal-nav-btn">${t('cal_week')}</button>
+                </div>
+                <div class="empty-state">${t('cal_empty')}</div>`;
+            return;
+        }
+
+        // Filter by tab
+        const now = new Date();
+        const tz = 'Asia/Tehran';
+        const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+        const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
+        const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+        const weekEnd = new Date(todayStart.getTime() + 7 * 86400000);
+
+        let filteredEvents = events.filter(e => {
+            if (!e.timestamp) return false;
+            const eventDate = new Date(e.timestamp);
+            if (isNaN(eventDate.getTime())) return false;
+            const eventParts = eventDate.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+            const eventDay = new Date(Date.UTC(Number(eventParts[0]), Number(eventParts[1]) - 1, Number(eventParts[2])));
+            if (currentCalendarTab === 'today') return eventDay.getTime() === todayStart.getTime();
+            if (currentCalendarTab === 'tomorrow') return eventDay.getTime() === tomorrowStart.getTime();
+            if (currentCalendarTab === 'week') return eventDay >= todayStart && eventDay < weekEnd;
+            return true;
+        });
+
+        if (currentCalendarTab === 'past') {
+            filteredEvents = events.filter(e => {
+                if (!e.timestamp) return false;
+                const eventDate = new Date(e.timestamp);
+                if (isNaN(eventDate.getTime())) return false;
+                const eventParts = eventDate.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+                const eventDay = new Date(Date.UTC(Number(eventParts[0]), Number(eventParts[1]) - 1, Number(eventParts[2])));
+                return eventDay < todayStart;
+            });
+            filteredEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        }
+
+        // Country filter
+        const countries = [...new Set(filteredEvents.map(e => e.country).filter(Boolean))];
+        if (currentCalCountry && currentCalCountry !== 'all') {
+            filteredEvents = filteredEvents.filter(e => e.country === currentCalCountry);
+        }
+
+        // Build navigation tabs
+        const navHtml = `<div class="cal-nav">
+            <button class="cal-nav-btn${currentCalendarTab === 'today' ? ' active' : ''}" onclick="switchCalendarTab('today', this)">${t('cal_today')}</button>
+            <button class="cal-nav-btn${currentCalendarTab === 'tomorrow' ? ' active' : ''}" onclick="switchCalendarTab('tomorrow', this)">${t('cal_tomorrow')}</button>
+            <button class="cal-nav-btn${currentCalendarTab === 'week' ? ' active' : ''}" onclick="switchCalendarTab('week', this)">${t('cal_week')}</button>
+        </div>`;
+
+        // Country filter buttons
+        let countryHtml = '';
+        if (countries.length > 1) {
+            countryHtml = `<div class="cal-country-filter">
+                <button class="cal-country-btn${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">${t('cal_all') || 'همه'}</button>
+                ${countries.map(c => {
+                    const flag = filteredEvents.find(e => e.country === c)?.flag || '';
+                    return `<button class="cal-country-btn${currentCalCountry === c ? ' active' : ''}" onclick="filterCalCountry('${escapeHtml(c)}', this)">${flag} ${escapeHtml(c)}</button>`;
+                }).join('')}
+            </div>`;
+        }
+
+        if (!filteredEvents.length) {
+            container.innerHTML = navHtml + countryHtml + `<div class="empty-state">${t('cal_empty')}</div>`;
+            return;
+        }
+
+        // Sort by time
+        filteredEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        // Group by time period
+        const groups = {};
+        filteredEvents.forEach(e => {
+            const d = new Date(e.timestamp);
+            const hour = Number(d.toLocaleString('en-GB', { timeZone: tz, hour: 'numeric', hour12: false }));
+            const group = getTimeGroup(hour);
+            if (!groups[group]) groups[group] = [];
+            groups[group].push(e);
+        });
+
+        const lang = currentLang || 'fa';
+        const labels = timeGroupLabels[lang] || timeGroupLabels.fa;
+        const impactIcons = { high: '🔴', medium: '🟡', low: '🟢' };
+        const impactLabels = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
+        const statusLabel = { past: t('cal_status_past'), live: t('cal_status_live'), upcoming: t('cal_status_upcoming') };
+
+        let eventsHtml = '';
+        const groupOrder = ['morning', 'afternoon', 'evening'];
+        groupOrder.forEach(g => {
+            if (!groups[g]) return;
+            eventsHtml += `<div class="cal-time-group-label">${labels[g]}</div>`;
+            groups[g].forEach(e => {
+                const ft = formatCalendarTime(e.timestamp);
+                const timeText = ft.time || '';
+                const isMajor = isMajorEvent(e.title);
+                const isPast = e.status === 'past';
+                const isLive = e.status === 'live';
+
+                // Surprise indicator
+                let surpriseHtml = '';
+                if (e.actual && e.forecast) {
+                    const actualVal = parseFloat(e.actual);
+                    const forecastVal = parseFloat(e.forecast);
+                    if (!isNaN(actualVal) && !isNaN(forecastVal)) {
+                        const diff = actualVal - forecastVal;
+                        // Determine better/worse based on context
+                        const isPositiveGood = !e.title?.toUpperCase().includes('UNEMPLOYMENT');
+                        const isBetter = isPositiveGood ? diff > 0 : diff < 0;
+                        const cls = Math.abs(diff) < 0.01 ? 'surprise-expected' : (isBetter ? 'surprise-better' : 'surprise-worse');
+                        const icon = Math.abs(diff) < 0.01 ? '➖' : (isBetter ? '📈' : '📉');
+                        surpriseHtml = `<span class="cal-event-surprise ${cls}">${icon}</span>`;
+                    }
+                }
+
+                eventsHtml += `
+                <div class="cal-event${isPast ? ' past' : ''}${isLive ? ' live' : ''}">
+                    ${isMajor ? '<span class="cal-event-major">🔥 Major</span>' : ''}
+                    <div class="cal-event-header">
+                        <span class="cal-event-impact impact-${e.impact || 'medium'}">${impactIcons[e.impact] || '🟡'} ${impactLabels[e.impact] || impactLabels.medium}</span>
+                        ${e.status ? `<span class="eco-status eco-status-${e.status}">${statusLabel[e.status] || e.status}</span>` : ''}
+                    </div>
+                    <div class="cal-event-title">${escapeHtml(e.title)}</div>
+                    <div class="cal-event-country">${e.flag || ''} ${escapeHtml(e.country || '')}</div>
+                    <div class="cal-event-details">
+                        ${e.forecast ? `<span class="cal-event-stat"><strong>${t('cal_forecast') || 'پیش‌بینی'}:</strong> ${escapeHtml(e.forecast)}</span>` : ''}
+                        ${e.previous ? `<span class="cal-event-stat"><strong>${t('cal_previous') || 'قبلی'}:</strong> ${escapeHtml(e.previous)}</span>` : ''}
+                        ${e.actual ? `<span class="cal-event-stat"><strong>${t('cal_actual') || 'واقعی'}:</strong> <span class="cal-event-actual">${escapeHtml(e.actual)}</span> ${surpriseHtml}</span>` : ''}
+                    </div>
+                    <div class="cal-event-footer">
+                        <span class="cal-event-time">${timeText}</span>
+                        ${!isPast && !isLive ? `<span class="cal-event-countdown" data-ts="${e.timestamp}">--</span>` : ''}
+                        <button class="cal-event-reminder" onclick="toggleCalReminder(this)">🔔</button>
+                    </div>
+                </div>`;
+            });
+        });
+
+        container.innerHTML = navHtml + countryHtml + eventsHtml;
+
+        // Start countdown for nearest upcoming event
+        startCalCountdown();
+    });
+}
+
+function startCalCountdown() {
+    if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+    const updateCountdowns = () => {
+        const now = Date.now();
+        document.querySelectorAll('.cal-event-countdown[data-ts]').forEach(el => {
+            const ts = parseInt(el.dataset.ts);
+            const diff = new Date(ts).getTime() - now;
+            if (diff <= 0) {
+                el.textContent = '• Live';
+                el.removeAttribute('data-ts');
+            } else {
+                el.textContent = formatCountdown(diff);
+            }
+        });
+    };
+    updateCountdowns();
+    calCountdownInterval = setInterval(updateCountdowns, 1000);
+}
+
+function toggleCalReminder(btn) {
+    btn.classList.toggle('active');
+    btn.textContent = btn.classList.contains('active') ? '🔔' : '🔕';
+}
+
+function filterCalCountry(country, btn) {
+    currentCalCountry = country;
+    document.querySelectorAll('.cal-country-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    renderCalendar();
+}
+
 /**
  * نمایش یا وضعیت اخبار تب را تعویض می‌کند.
  * ورودی: پارامترهای `category, btn` را دریافت می‌کند.
@@ -2445,65 +3328,21 @@ function renderNews(category) {
 function switchNewsTab(category, btn) {
     document.querySelectorAll('.news-tab').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    if (category === 'calendar') currentCalendarTab = 'today';
+    if (category === 'calendar') {
+        currentCalendarTab = 'today';
+        currentCalCountry = 'all';
+    }
     renderNews(category);
 }
+
 function switchCalendarTab(tab, btn) {
     currentCalendarTab = tab;
-    document.querySelectorAll('.cal-sub-tab').forEach(b => b.classList.remove('active'));
+    currentCalCountry = 'all';
+    document.querySelectorAll('.cal-nav-btn').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    // Re-render calendar without re-fetching
-    const container = document.getElementById('news-list');
-    if (!container || !calendarEvents.length) return;
-    const statusLabel = { past: t('cal_status_past'), live: t('cal_status_live'), upcoming: t('cal_status_upcoming') };
-    const impactLabel = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
-    const now = new Date();
-    const userTz = now.getTimezoneOffset();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-
-    let filteredEvents = calendarEvents.filter(e => {
-        if (!e.timestamp) return false;
-        const eventDate = new Date(e.timestamp);
-        if (isNaN(eventDate.getTime())) return false;
-        const eventLocal = new Date(eventDate.getTime() - userTz * 60000);
-        const eventDay = new Date(eventLocal.getFullYear(), eventLocal.getMonth(), eventLocal.getDate());
-        if (tab === 'today') return eventDay.getTime() === todayStart.getTime();
-        if (tab === 'tomorrow') return eventDay.getTime() === tomorrowStart.getTime();
-        if (tab === 'past') return eventDay < todayStart;
-        return true;
-    });
-    if (tab === 'past') filteredEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-    if (!filteredEvents.length) {
-        container.innerHTML = container.querySelector('.cal-sub-tabs')?.outerHTML + `<div class="empty-state">${t('cal_empty')}</div>`;
-        return;
-    }
-    function renderCard(e) {
-        const ft = formatCalendarTime(e.timestamp);
-        const timeText = ft.time || '';
-        return `
-        <div class="eco-event-card ${e.status || 'upcoming'}">
-            <div class="eco-event-left">
-                <span class="eco-flag-emoji">${e.flag || '🏳️'}</span>
-                <div>
-                    <div class="eco-event-title">${escapeHtml(e.title)}</div>
-                    <div class="eco-event-meta">${timeText} • ${e.country || ''}</div>
-                </div>
-            </div>
-            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-                <span class="eco-impact eco-impact-${e.impact || 'medium'}">${impactLabel[e.impact] || impactLabel.medium}</span>
-                <span class="eco-status eco-status-${e.status || 'upcoming'}">${statusLabel[e.status] || e.status}</span>
-            </div>
-        </div>`;
-    }
-    const subTabsHtml = container.querySelector('.cal-sub-tabs')?.outerHTML || `<div class="cal-sub-tabs">
-        <button class="cal-sub-tab${tab === 'today' ? ' active' : ''}" onclick="switchCalendarTab('today', this)">${t('cal_today')}</button>
-        <button class="cal-sub-tab${tab === 'tomorrow' ? ' active' : ''}" onclick="switchCalendarTab('tomorrow', this)">${t('cal_tomorrow')}</button>
-        <button class="cal-sub-tab${tab === 'past' ? ' active' : ''}" onclick="switchCalendarTab('past', this)">${t('cal_past')}</button>
-    </div>`;
-    container.innerHTML = subTabsHtml + filteredEvents.map(e => renderCard(e)).join('');
+    renderCalendar();
 }
+
 /**
  * اخبار مودال را باز می‌کند.
  * ورودی: پارامترهای `idx` را دریافت می‌کند.
@@ -2514,7 +3353,7 @@ function openNewsModal(idx) {
     if (!n) return;
     const el = (id) => $(id);
     const titleEl = el('news-modal-title'); if (titleEl) titleEl.innerText = n.title;
-    const imgEl = el('news-modal-image'); if (imgEl) imgEl.src = n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
+    const imgEl = el('news-modal-image'); if (imgEl) { imgEl.src = n.image || getAmirbtcFallbackSvg(400, 250, 'AMIRBTC'); imgEl.onerror = function() { newsImageFallback(this); }; }
     const bodyEl = el('news-modal-body'); if (bodyEl) bodyEl.innerText = n.body || t('news_unavailable');
     const linkEl = el('news-modal-link'); if (linkEl) { linkEl.href = n.url || '#'; linkEl.innerText = t('view_source'); }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
@@ -2526,242 +3365,6 @@ function openNewsModal(idx) {
  */
 function closeNewsModal() {
     document.getElementById('news-modal').style.display = 'none';
-}
-
-//#endregion
-
-// ============================================================================
-//#region اسلایدر و فهرست تحلیل‌ها
-// ============================================================================
-/**
- * تحلیل اسلایدر را در رابط کاربری رندر می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function renderAnalysisSlider() {
-    const track = document.getElementById('slider-track');
-    const dots = document.getElementById('slider-dots');
-    if (!analyses.length) {
-        track.innerHTML = `<div class="slide-empty">${t('no_analysis')}</div>`;
-        return;
-    }
-    const showSlide = (idx) => {
-        const a = analyses[idx];
-        track.innerHTML = `
-            <div class="slide-item" onclick="openAnalysisDetail('${a.id}')">
-                <img src="${a.image || 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop'}" class="slide-img" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22170%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2217%22 rx=%224%22/%3E%3Ctext x=%225%22 y=%2212%22 fill=%22%2364748b%22 font-size=%228%22%3ENo Image%3C/text%3E%3C/svg%3E'">
-                <div class="slide-overlay">
-                    <h4>${a.coin} (${a.timeframe})</h4>
-                    <p>${a.text.substring(0, 80)}...</p>
-                    <span class="slide-author">${a.author} • ${a.date}</span>
-                </div>
-            </div>
-        `;
-        dots.innerHTML = analyses.map((_, i) => `<span class="dot ${i === idx ? 'active' : ''}"></span>`).join('');
-    };
-    if (currentSlide >= analyses.length) currentSlide = 0;
-    showSlide(currentSlide);
-    clearInterval(sliderInterval);
-    sliderInterval = setInterval(() => {
-        currentSlide = (currentSlide + 1) % analyses.length;
-        showSlide(currentSlide);
-    }, 5000);
-}
-/**
- * تحلیل list را در رابط کاربری رندر می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function renderAnalysisList() {
-    const grid = $('analysis-grid');
-    if (!grid) return;
-    if (!analyses.length) {
-        grid.innerHTML = `<div class="empty-state">${t('no_analysis_list')}</div>`;
-        return;
-    }
-    const isAdminUser = isAdmin();
-    grid.innerHTML = analyses.map(a => `
-        <div class="analysis-card" onclick="openAnalysisDetail('${a.id}')">
-            <img src="${a.image || 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop'}" class="analysis-cover" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Ctext x=%224%22 y=%2214%22 fill=%22%2364748b%22 font-size=%228%22%3ENo Image%3C/text%3E%3C/svg%3E'">
-            <div class="analysis-body">
-                <h4>${a.coin} <span class="tf-badge">${a.timeframe}</span></h4>
-                <p>${a.text.substring(0, 100)}...</p>
-                <div class="analysis-meta">${a.author} • ${a.date}</div>
-                ${isAdminUser ? `<div class="analysis-admin-actions" onclick="event.stopPropagation()">
-                    <button class="edit-analysis-btn" onclick="openEditAnalysisModal('${a.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> ${t('edit_analysis')}</button>
-                    <button class="delete-analysis-btn" onclick="deleteAnalysis('${a.id}', event)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> ${t('delete')}</button>
-                </div>` : ''}
-            </div>
-        </div>
-    `).join('');
-}
-/**
- * تحلیل جزئیات را باز می‌کند.
- * ورودی: پارامترهای `id` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function openAnalysisDetail(id) {
-    const a = analyses.find(x => x.id === id);
-    if (!a) return;
-    const modal = $('analysis-detail-modal');
-    if (!modal) return;
-    const coinEl = $('analysis-detail-coin'); if (coinEl) coinEl.innerText = a.coin;
-    const tfEl = $('analysis-detail-tf'); if (tfEl) tfEl.innerText = a.timeframe || '1d';
-    const img = $('analysis-detail-image');
-    if (img) { img.src = a.image || ''; img.style.display = ''; }
-    const authorEl = $('analysis-detail-author'); if (authorEl) authorEl.innerText = a.author || '';
-    const dateEl = $('analysis-detail-date'); if (dateEl) dateEl.innerText = a.date || '';
-    const textEl = $('analysis-detail-text'); if (textEl) textEl.innerText = a.text;
-    modal.classList.add('bs-open');
-    requestAnimationFrame(() => { modal.style.display = ''; });
-}
-function closeAnalysisDetail() {
-    const modal = document.getElementById('analysis-detail-modal');
-    if (!modal) return;
-    modal.classList.remove('bs-open');
-    setTimeout(() => { modal.style.display = 'none'; }, 350);
-}
-function shareAnalysis() {
-    const a = analyses.find(x => x.id === document.getElementById('analysis-detail-coin')?.dataset?.id);
-    const coin = document.getElementById('analysis-detail-coin')?.innerText || '';
-    const text = document.getElementById('analysis-detail-text')?.innerText || '';
-    const shareText = `${coin}\n\n${text}`;
-    if (navigator.share) {
-        navigator.share({ title: coin, text: shareText }).catch(() => {});
-    } else if (navigator.clipboard) {
-        navigator.clipboard.writeText(shareText).then(() => {
-            const btn = document.querySelector('.bs-share-btn span');
-            if (btn) { const orig = btn.innerText; btn.innerText = 'کپی شد!'; setTimeout(() => btn.innerText = orig, 1500); }
-        });
-    }
-}
-
-//#endregion
-
-// ============================================================================
-//#region مدیریت تحلیل مدیر
-// ============================================================================
-/**
- * بررسی می‌کند که آیا مدیر برقرار است یا خیر.
- * ورودی: بدون ورودی.
- * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
- */
-function isAdmin() {
-    return isCurrentUserAdmin;
-}
-/**
- * add تحلیل مودال را باز می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function openAddAnalysisModal() {
-    if (!isAdmin()) { alert('فقط مدیران مجاز به افزودن تحلیل هستند.'); return; }
-    editingAnalysisId = null;
-    document.getElementById('analysis-modal-title').innerText = t('new_analysis');
-    document.getElementById('analysis-submit-btn').innerText = t('new_analysis');
-    ['analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
-    document.getElementById('add-analysis-modal').style.display = 'flex';
-}
-/**
- * edit تحلیل مودال را باز می‌کند.
- * ورودی: پارامترهای `id` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function openEditAnalysisModal(id) {
-    if (!isAdmin()) return;
-    const a = analyses.find(x => x.id === id);
-    if (!a) return;
-    editingAnalysisId = id;
-    document.getElementById('analysis-modal-title').innerText = t('edit_analysis');
-    document.getElementById('analysis-submit-btn').innerText = t('update_analysis');
-    document.getElementById('analysis-coin').value = a.coin;
-    document.getElementById('analysis-timeframe').value = a.timeframe;
-    document.getElementById('analysis-image').value = a.image || '';
-    document.getElementById('analysis-text').value = a.text;
-    document.getElementById('add-analysis-modal').style.display = 'flex';
-}
-/**
- * add تحلیل مودال را می‌بندد.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function closeAddAnalysisModal() {
-    document.getElementById('add-analysis-modal').style.display = 'none';
-    editingAnalysisId = null;
-}
-/**
- * فرم یا داده تحلیل را ارسال می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function submitAnalysis() {
-    const coin = document.getElementById('analysis-coin').value.trim().toUpperCase();
-    const timeframe = document.getElementById('analysis-timeframe').value.trim() || '1d';
-    let image = document.getElementById('analysis-image').value.trim();
-    const text = document.getElementById('analysis-text').value.trim();
-    if (!coin || !text) { alert('نام ارز و متن تحلیل الزامی است.'); return; }
-    if (!image) image = 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?q=80&w=600&auto=format&fit=crop';
-
-    const author = getTelegramUser()?.first_name || 'مدیر';
-    const payload = { coin, timeframe, image, text, author, author_id: getUserId() };
-
-    (async () => {
-        try {
-            if (editingAnalysisId) {
-                await saveAnalysisToServer(payload, 'PUT', editingAnalysisId);
-                addNotification(t('edit_analysis'), `${coin} (${timeframe})`, { sendToTelegram: true });
-            } else {
-                await saveAnalysisToServer(payload, 'POST');
-                addNotification('تحلیل جدید', `تحلیل ${coin} منتشر شد.`, { sendToTelegram: true });
-            }
-            await fetchAnalyses(true);
-            renderAnalysisSlider();
-            renderAnalysisList();
-            closeAddAnalysisModal();
-            ['analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.value = '';
-            });
-        } catch (e) {
-            console.error('submitAnalysis:', e);
-            if (editingAnalysisId) {
-                const idx = analyses.findIndex(a => a.id === editingAnalysisId);
-                if (idx >= 0) analyses[idx] = { ...analyses[idx], coin, timeframe, image, text, date: new Date().toLocaleDateString('fa-IR') };
-            } else {
-                analyses.unshift({ id: Date.now().toString(), coin, timeframe, image, text, date: new Date().toLocaleDateString('fa-IR'), author });
-            }
-            localStorage.setItem('analyses', JSON.stringify(analyses));
-            renderAnalysisSlider();
-            renderAnalysisList();
-            closeAddAnalysisModal();
-        }
-    })();
-}
-/**
- * تحلیل را حذف می‌کند.
- * ورودی: پارامترهای `id, event` را دریافت می‌کند.
- * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
- */
-function deleteAnalysis(id, event) {
-    if (event) event.stopPropagation();
-    if (!isAdmin()) return;
-    if (confirm('آیا از حذف این تحلیل مطمئن هستید؟')) {
-        (async () => {
-            try {
-                await saveAnalysisToServer(null, 'DELETE', id);
-                await fetchAnalyses(true);
-            } catch (e) {
-                analyses = analyses.filter(a => a.id !== id);
-                localStorage.setItem('analyses', JSON.stringify(analyses));
-            }
-            renderAnalysisSlider();
-            renderAnalysisList();
-            addNotification('تحلیل حذف شد', 'یک تحلیل توسط مدیر حذف گردید.', { sendToTelegram: false });
-        })();
-    }
 }
 
 //#endregion
@@ -3420,9 +4023,9 @@ function renderNotifications() {
         return;
     }
     container.innerHTML = notifications.slice(0, 20).map(n => `
-        <div class="notif-item ${n.read ? 'read' : 'unread'}" onclick="markNotifRead('${n.id}')">
-            <div class="notif-title">${n.title}</div>
-            <div class="notif-body">${n.body}</div>
+        <div class="notif-item ${n.read ? 'read' : 'unread'}" onclick="markNotifRead('${escapeHtml(n.id)}')">
+            <div class="notif-title">${escapeHtml(n.title)}</div>
+            <div class="notif-body">${escapeHtml(n.body)}</div>
             <div class="notif-date">${new Date(n.date).toLocaleDateString('fa-IR')}</div>
         </div>
     `).join('');
@@ -3483,8 +4086,8 @@ function loadUser() {
         if (refLinkInput) refLinkInput.placeholder = 'Login required';
     }
 
-    const adminBtn = document.getElementById('admin-add-btn');
-    if (adminBtn) adminBtn.style.display = isAdmin() ? 'block' : 'none';
+    const adminFab = document.getElementById('analysis-fab');
+    if (adminFab) adminFab.style.display = isAdmin() ? '' : 'none';
 }
 /**
  * ارجاع لینک را کپی می‌کند.
@@ -3898,12 +4501,19 @@ function switchTab(pageId, btn) {
         }
     } else if (pageId === 'analysis-page') {
         if (!tabLoaded.analysis) {
-            fetchAnalyses(true).then(() => renderAnalysisList());
+            fetchAnalyses(true).then(() => {
+                renderAnalysisFeatured();
+                renderAnalysisStats();
+                renderAnalysisList();
+            });
             tabLoaded.analysis = true;
         } else {
+            renderAnalysisFeatured();
+            renderAnalysisStats();
             renderAnalysisList();
         }
-        document.getElementById('admin-add-btn').style.display = isAdmin() ? 'block' : 'none';
+        const adminFab = document.getElementById('analysis-fab');
+        if (adminFab) adminFab.style.display = isAdmin() ? '' : 'none';
     } else if (pageId === 'news-page') {
         if (!tabLoaded.news) {
             loadNews();
@@ -4080,7 +4690,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Public data (market, analyses, news) loads immediately.
     // Authenticated data (alerts, bootstrap, admin) waits for auth.
     loadMarketData(true);
-    fetchAnalyses().then(changed => { if (changed) renderAnalysisSlider(); });
+    fetchAnalyses().then(changed => {
+        if (changed) {
+            renderAnalysisSlider();
+            renderAnalysisFeatured();
+            renderAnalysisStats();
+        }
+        // Check for deep link after first load
+        checkAnalysisDeepLink();
+    });
     setTimeout(() => loadImportantNews(), 2000);
 
     // Authenticated bootstrap — runs once user is available
