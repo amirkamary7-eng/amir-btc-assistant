@@ -301,7 +301,6 @@ let ADMIN_ID = null; // Set dynamically from bootstrap API response
 let isCurrentUserAdmin = false;
 let BOT_USERNAME = 'Amir_BTC_AssistantBot'; // Fallback — overridden by bootstrap API (H-R4)
 const MAX_WATCHLIST = 7;
-const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
 
 
@@ -1012,25 +1011,6 @@ async function loadCalendarEvents(force = false) {
  * رویداد تقویم را به بخش‌های امروز/فردا/پس‌فردا/گذشته گروه‌بندی و مرتب می‌کند.
  * زمان‌ها به منطقه زمانی کاربر تبدیل می‌شوند.
  */
-function groupCalendarEvents(events) {
-    const tz = 'Asia/Tehran';
-    const now = new Date();
-    const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
-    const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
-    const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-    const dayAfterStart = new Date(todayStart.getTime() + 2 * 86400000);
-
-    const groups = { today: [], tomorrow: [], dayAfter: [], past: [] };
-
-    events.forEach(e => {
-        let eventDate = null;
-        if (e.timestamp) {
-            eventDate = new Date(e.timestamp);
-        }
-        if (!eventDate || isNaN(eventDate.getTime())) {
-            groups.past.push(e);
-            return;
-        }
 
         // Convert event UTC to Tehran date for grouping
         const eventParts = eventDate.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
@@ -1316,36 +1296,6 @@ window.iconFallback = function(imgEl) {
     div.textContent = letter;
     imgEl.replaceWith(div);
 };
-
-/**
- * Generate SVG polyline points for a mini sparkline chart.
- * Uses seeded random from symbol for deterministic output.
- */
-function generateSparklinePoints(changePercent, symbol, width, height) {
-    width = width || 56;
-    height = height || 24;
-    let seed = 0;
-    for (let i = 0; i < symbol.length; i++) seed += symbol.charCodeAt(i) * (i + 1);
-    function sRand() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
-
-    var points = [];
-    var steps = 16;
-    var midY = height / 2;
-    var amp = Math.min(height * 0.38, Math.abs(changePercent) * 0.6 + 1.5);
-    var dir = changePercent >= 0 ? -1 : 1;
-
-    for (var i = 0; i <= steps; i++) {
-        var x = (i / steps) * width;
-        var progress = i / steps;
-        var trend = dir * progress * amp;
-        var noise = (sRand() - 0.5) * amp * 0.5;
-        var y = Math.max(2, Math.min(height - 2, midY + trend + noise));
-        points.push(x.toFixed(1) + ',' + y.toFixed(1));
-    }
-    return points.join(' ');
-}
-
-//#endregion
 
 // ============================================================================
 //#region پروکسی و منابع داده بازار
@@ -1663,32 +1613,6 @@ function renderMarketInsights() {
  * NOTE: This section has been removed from the UI (BUG 4).
  * Function kept as no-op for safety (no references from HTML remain).
  */
-function renderTopMovers() { return; }
-
-//#endregion
-
-// ============================================================================
-//#region فهرست و تب‌های بازار
-// ============================================================================
-/**
- * بازار را در رابط کاربری رندر می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function renderMarket() {
-    const list = document.getElementById('coin-list');
-    if (!list) return;
-
-    // Price-only diffing: if the list is already rendered with the same tab/filter/search,
-    // just update prices and change percentages — avoid full innerHTML rebuild (~30-60ms → ~3-5ms)
-    const renderKey = `${currentMarketTab}|${searchTerm}|${watchlist.length}|${marketVisibleCount}`;
-    if (!searchTerm && currentMarketTab !== 'forex' && _lastMarketRenderKey === renderKey && list.querySelector('.coin-item')) {
-        // Update info bar timestamp
-        const timeEl = list.querySelector('.coin-list-time');
-        if (timeEl) {
-            const now = new Date();
-            timeEl.textContent = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-        }
         // Update prices in-place
         const items = list.querySelectorAll('.coin-item');
         for (let i = 0; i < items.length; i++) {

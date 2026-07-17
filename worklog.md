@@ -88,3 +88,47 @@ Stage Summary:
 - Bug found and fixed: missing `await` in alerts controller (would cause 500 on every alert request)
 - Health endpoint: renamed `redis_ready` → `cache_ready`
 - Bootstrap API: now returns `is_admin: true/false` field
+
+---
+Task ID: 2
+Agent: Z.ai Code
+Task: Production bug triage — trace, diagnose, fix, deploy, verify
+
+Work Log:
+- Used agent-browser to open production app (amir-btc-assistant-pages.pages.dev)
+- Captured all network requests: /api/market 500, /api/analyses 503, /api/farsi-news empty
+- Captured console errors: "Backend /api/market failed: Internal server error", "Market load error: No market data", "fetchAnalyses: Database unavailable"
+- Discovered production Worker was running OLD code (health returned `redis_ready` not `cache_ready`)
+- Used `wrangler tail --format json` to capture Worker exception:
+  **ROOT CAUSE: `KV put() limit exceeded for the day.`**
+- Cloudflare KV free tier daily write limit (1000 writes) was exhausted
+- ALL `writeAppCache`, `writeRateLimitCache`, `writeSessionCache`, `deleteRateLimitCache`, `deleteSessionCache` calls threw unhandled exceptions
+- This caused /api/market 500 (KV write after successful CoinGecko/MEXC fetch), /api/farsi-news empty (KV write failure propagated), cascading UI failures
+
+Fix Applied:
+- Wrapped 5 KV helper functions in try-catch blocks (writeAppCache, writeRateLimitCache, deleteRateLimitCache, writeSessionCache, deleteSessionCache)
+- Wrapped direct JOIN_CACHE.put in try-catch (telegram-start handler)
+- Added AI binding to production environment in wrangler.jsonc
+- Set CMC_API_KEY as Cloudflare secret (was removed from vars in previous session but never set as secret)
+- Deployed Worker v37e639dd then v01df106a with fixes
+- Built and deployed Pages frontend (build MROSGVSG-7a42f39)
+
+Verification (post-fix, agent-browser):
+- /api/market: 200, 200 coins from MEXC, global stats from CoinPaprika
+- /api/market/overview: 200, CMC data with mcap $2.17T
+- /api/farsi-news: 200, 30 articles from 8 RSS sources, translated to Farsi
+- /api/forex: 200, 26 pairs
+- /api/analyses: 200, empty array (DB has no analyses, but connection works)
+- Dashboard: $2.28T mcap, $415B volume, 55.4% BTC dom, Fear & Greed 27 (Fear), sentiment bar bearish
+- News feed: 30 Farsi-translated articles rendering with images
+- Zero console errors
+- 42/97 coin icons use letter-badge fallback (MEXC obscure tokens)
+- Mobile viewport (390x844) verified responsive
+
+Stage Summary:
+- Root cause: KV daily write limit exceeded → unhandled exceptions in all cache-write paths
+- Impact: /api/market 500, /api/farsi-news empty, dashboard empty, news not loading, app unstable
+- Fix: try-catch on all KV write operations (6 functions + 1 direct write)
+- Deploy: Worker + Pages both redeployed, CMC_API_KEY secret set
+- All 5 user-reported issues resolved
+- Git push: 5325998 (force-push after remote divergence)

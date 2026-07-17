@@ -218,18 +218,6 @@ async function writeRateLimitCache(env, key, value, expirationTtl) {
   }
 }
 
-async function deleteRateLimitCache(env, key) {
-  if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.delete !== 'function') {
-    return;
-  }
-
-  try {
-    await env.RATE_LIMITS.delete(key);
-  } catch (e) {
-    console.warn('deleteRateLimitCache failed:', e.message || e);
-  }
-}
-
 async function readSessionCache(env, key) {
   if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.get !== 'function') {
     return null;
@@ -616,20 +604,6 @@ async function setCachedJoinStatus(env, userId, joined) {
   }
 }
 
-async function invalidateJoinCache(env, userId) {
-  const hadCachedValue = (await getCachedJoinStatus(env, userId)) !== null;
-
-  if (env.JOIN_CACHE && typeof env.JOIN_CACHE.delete === 'function') {
-    try {
-      await env.JOIN_CACHE.delete(getJoinCacheKey(userId));
-    } catch (error) {
-      console.warn(safeError('join-cache-delete', error));
-    }
-  }
-
-  return hadCachedValue;
-}
-
 function getTodayIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -877,10 +851,6 @@ async function isMarketRateLimited(env, ip) {
   }
   await writeRateLimitCache(env, key, '1', MARKET_RATE_LIMIT_WINDOW);
   return false;
-}
-
-function parseBooleanQueryParam(value) {
-  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
 }
 
 function getAdminIds(env) {

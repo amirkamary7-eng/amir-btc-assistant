@@ -22,7 +22,7 @@ export function createSessionHandlers(deps) {
    * Generates a session_id if not provided, updates KV, and returns online count.
    */
   async function handleHeartbeat(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -64,7 +64,7 @@ export function createSessionHandlers(deps) {
    * GET /api/sessions/online — Return the current online user count.
    */
   async function handleOnline(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -95,7 +95,7 @@ export function createSessionHandlers(deps) {
    * Removes KV entries and updates the online count.
    */
   async function handleEnd(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
