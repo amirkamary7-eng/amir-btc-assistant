@@ -218,12 +218,10 @@ async function writeHeadersFile() {
     '  Cache-Control: public, max-age=31536000, immutable',
     '',
     '# ============================================================',
-    '# Catch-all: no cache for anything else (safety net)',
+    '# NOTE: No catch-all rule. Cloudflare Pages merges matching rules,',
+    '# so a /* catch-all would poison immutable headers on hashed assets.',
+    '# All file types are explicitly covered above.',
     '# ============================================================',
-    '/*',
-    '  Cache-Control: no-store, no-cache, must-revalidate',
-    '  Pragma: no-cache',
-    '  Expires: 0',
     '',
   ].join('\n');
 
