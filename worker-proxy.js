@@ -2193,6 +2193,35 @@ function handleRoot(env) {
 
 // fetchGlobalData removed — caching is now handled inside fetchGlobalStats()
 
+// ============================================================================
+//#region Database Index Auto-Creation (stabilization)
+// ============================================================================
+// Runs once on first health-check request. Idempotent (IF NOT EXISTS).
+let _indexesEnsured = false;
+const STABILIZATION_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_watchlist_items_user_id ON watchlist_items (user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_price_alerts_user_status ON price_alerts (user_id, status)',
+  'CREATE INDEX IF NOT EXISTS idx_price_alerts_dedup ON price_alerts (user_id, symbol, price, direction)',
+  'CREATE INDEX IF NOT EXISTS idx_token_transactions_user_created ON token_transactions (user_id, created_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_sessions_last_heartbeat ON sessions (last_heartbeat)',
+  'CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets (user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications (user_id, is_read, created_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_referrals_invitee ON referrals (invitee_id)',
+];
+
+async function ensureStabilizationIndexes(env) {
+  if (_indexesEnsured || !isDatabaseConfigured(env)) return;
+  _indexesEnsured = true;
+  try {
+    for (const sql of STABILIZATION_INDEXES) {
+      await queryDb(env, sql);
+    }
+    console.log(JSON.stringify({ scope: 'stabilization-indexes', count: STABILIZATION_INDEXES.length }));
+  } catch (e) {
+    console.warn(safeError('stabilization-indexes', e));
+  }
+}
+
 function handleHealth(env) {
   const webAppUrl = resolveWebAppUrl(env);
   console.log(JSON.stringify({
@@ -3781,6 +3810,7 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
+    ctx.waitUntil(ensureStabilizationIndexes(env));
     ctx.waitUntil(runScheduledAlertsBaseline(controller, env));
     // Refresh CMC Market Overview every 15 minutes
     if (env.CMC_API_KEY) {

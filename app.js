@@ -20,7 +20,6 @@ function getTg() {
 let telegramInitDone = false;
 let telegramAuthWaitPromise = null;
 let bootstrapComplete = false;
-let _coldOpenReloadTimer = null;
 let _bootstrapPromise = null;
 let _adminPanelInitialized = false;
 
@@ -242,8 +241,6 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
             tg.onEvent?.('viewportChanged', () => {
                 const u = getTelegramUser();
                 if (u?.id) {
-                    console.log('[BOOT] viewportChanged: user arrived, cancelling reload if pending');
-                    if (_coldOpenReloadTimer) { clearTimeout(_coldOpenReloadTimer); _coldOpenReloadTimer = null; }
                     UserContext.user = u;
                     UserContext.loading = false;
                     UserContext._setLoadingUI(false);
@@ -268,29 +265,11 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
             return user;
         }
         if (!getTg() && !getTelegramInitData()) break;
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise(r => setTimeout(r, 100));
     }
     telegramInitDone = true;
     UserContext.loading = false;
     UserContext.user = getTelegramUser();
-
-    // Cold-open fix: if no user and hash is empty, the Telegram Client
-    // likely opened the WebView before computing initData. Reload once
-    // so the second load picks up the cached initData in the URL hash.
-    // The SDK reads location.hash once at init — a reload re-runs that.
-    const _RELOADED = '__tg_init_reloaded';
-    if (!UserContext.user?.id && isInTelegram() && !sessionStorage.getItem(_RELOADED)) {
-        sessionStorage.setItem(_RELOADED, '1');
-        console.warn('[BOOT] Cold-open: no user after polling. Reload in 3s unless user arrives.');
-        _coldOpenReloadTimer = setTimeout(() => {
-            _coldOpenReloadTimer = null;
-            console.warn('[BOOT] Cold-open reload triggered — initData never arrived');
-            location.reload();
-        }, 3000);
-    } else if (!UserContext.user?.id && isInTelegram()) {
-        sessionStorage.removeItem(_RELOADED);
-    }
-
     return UserContext.user;
 }
 
@@ -302,8 +281,6 @@ window.addEventListener('hashchange', () => {
         if (hashData) {
             const user = parseInitDataUser(hashData);
             if (user?.id) {
-                console.log('[BOOT] hashchange: user arrived, cancelling reload if pending');
-                if (_coldOpenReloadTimer) { clearTimeout(_coldOpenReloadTimer); _coldOpenReloadTimer = null; }
                 UserContext.user = user;
                 UserContext.loading = false;
                 UserContext._setLoadingUI(false);
@@ -852,39 +829,30 @@ async function bootstrapUser() {
  * Guards: only runs once (bootstrapComplete), only when user is authenticated.
  */
 async function tryLateBootstrap() {
-    if (_bootstrapPromise) return _bootstrapPromise;
     if (bootstrapComplete) return;
+    // Don't retry if last attempt failed recently — prevent retry storm
+    if (_bootstrapFailedAt && (Date.now() - _bootstrapFailedAt) < 5000) return;
+    if (_bootstrapPromise) return _bootstrapPromise;
     _bootstrapPromise = _doBootstrap().finally(() => { _bootstrapPromise = null; });
     return _bootstrapPromise;
 }
 
+let _bootstrapFailedAt = 0;
+
 async function _doBootstrap() {
     const user = getTelegramUser();
-    if (!user?.id) {
-        console.log('[BOOT] tryLateBootstrap: no user yet, skipping');
-        return;
-    }
-    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) {
-        console.log('[BOOT] tryLateBootstrap: blocked — API_BASE:', !!API_BASE, 'isGuest:', UserContext.isGuest(), 'isPending:', UserContext.isPending());
-        return;
-    }
-    // Cancel any pending cold-open reload — we have the user now
-    if (_coldOpenReloadTimer) {
-        clearTimeout(_coldOpenReloadTimer);
-        _coldOpenReloadTimer = null;
-        console.log('[BOOT] tryLateBootstrap: cancelled cold-open reload');
-    }
-    console.log('[BOOT] tryLateBootstrap: running bootstrap for user', user.id);
-    // Do NOT set bootstrapComplete here — let bootstrapUser set it on success only
+    if (!user?.id) return;
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) return;
     try {
         await bootstrapUser();
+        _bootstrapFailedAt = 0;
         loadUser();
-        // R4-fix: Re-check admin status now that we have a valid user with initData
         if (bootstrapComplete && typeof initAdminPanel === 'function' && !_adminPanelInitialized) {
             _adminPanelInitialized = true;
             initAdminPanel();
         }
     } catch (e) {
+        _bootstrapFailedAt = Date.now();
         console.error('[BOOT] tryLateBootstrap FAILED:', e);
     }
 }
@@ -948,7 +916,6 @@ async function saveAnalysisToServer(payload, method, analysisId) {
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
 async function sendSessionHeartbeat() {
-    // R3-2: Skip heartbeat when app is not visible
     if (!_appVisible) return;
     const uid = getUserId();
     if (!canRunSessionRequests(uid)) return;
@@ -961,6 +928,10 @@ async function sendSessionHeartbeat() {
             localStorage.setItem('app_session_id', sessionId);
         }
         updateOnlineBadge(data.online_count);
+        // First successful heartbeat = auth confirmed → load alerts lazily
+        if (!alerts.length || alerts.every(a => !a.serverId)) {
+            loadAlertsFromServer().catch(() => {});
+        }
     } catch (e) { console.warn('heartbeat:', e); }
 }
 
@@ -1195,11 +1166,18 @@ async function checkBackendHealth() {
 }
 
 /**
-/**
- * زبان وضعیت انتخاب را به‌روزرسانی می‌کند.
+ * آنلاین count را از منبع داده دریافت می‌کند.
  * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
+async function fetchOnlineCount() {
+    if (!canRunSessionRequests()) return;
+    try {
+        const data = await apiFetch('/api/sessions/online');
+        updateOnlineBadge(data.count);
+    } catch (_) {}
+}
+
 function updateLangChecks() {
     const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
     const fa = document.getElementById('lang-fa-check');
@@ -1213,9 +1191,15 @@ function updateLangChecks() {
  * ورودی: بدون ورودی.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
-// Cached i18n element references — avoids repeated querySelectorAll (5-15ms → 1-3ms per call)
+// Cached i18n element references — invalidated when new elements are rendered.
+// Set to null whenever dynamic content is rendered so next applyLanguage() re-queries.
 let _i18nElements = null;
 let _i18nPlaceholderElements = null;
+
+function invalidateI18nCache() {
+    _i18nElements = null;
+    _i18nPlaceholderElements = null;
+}
 
 function applyLanguage() {
     if (!_i18nElements) {
@@ -1236,6 +1220,7 @@ function applyLanguage() {
  */
 function refreshUI() {
     // Critical path: language, user info, and visible market data
+    invalidateI18nCache();
     applyLanguage();
     loadUser();
     renderMarket();
@@ -2869,12 +2854,22 @@ async function openCoinDetail(symbol) {
  */
 function createTradingViewWidget(chartInfo) {
     const chartContainer = document.getElementById('detail-chart');
+    if (!chartContainer) return;
+
+    // Clean up previous widget completely
     if (currentTvWidget) {
         try { currentTvWidget.remove(); } catch {}
         currentTvWidget = null;
     }
     document.querySelector('.chart-exchange-badge')?.remove();
+    // Remove all TradingView artifacts before creating new widget
+    chartContainer.querySelectorAll('iframe').forEach(iframe => {
+        iframe.src = 'about:blank';
+        iframe.remove();
+    });
+    chartContainer.querySelectorAll('script').forEach(s => s.remove());
     chartContainer.innerHTML = '';
+
     if (typeof TradingView !== 'undefined' && chartInfo && chartInfo.found) {
         if (chartInfo.exchange) {
             const badge = document.createElement('div');
@@ -2892,10 +2887,12 @@ function createTradingViewWidget(chartInfo) {
             locale: 'en',
             container_id: 'detail-chart',
             hide_side_toolbar: true,
-            disabled_features: ['header_widget_dom_node']
+            disabled_features: ['header_widget_dom_node'],
+            // Enable auto-resize to prevent layout issues
+            autosize: true,
         });
     } else {
-        chartContainer.innerHTML = `<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg><br>${t('chart_unavailable')}</div>`;
+        chartContainer.innerHTML = '<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg><br>' + t('chart_unavailable') + '</div>';
     }
 }
 /**
@@ -2946,8 +2943,24 @@ function toggleWatchlistFromDetail() {
 function closeCoinDetail() {
     document.querySelector('.chart-exchange-badge')?.remove();
     if (currentTvWidget) {
-        try { currentTvWidget.remove(); } catch {}
+        try {
+            // TradingView creates an iframe inside the container.
+            // Remove the widget, then explicitly destroy any remaining iframes.
+            currentTvWidget.remove();
+        } catch {}
         currentTvWidget = null;
+    }
+    // Ensure ALL iframes and TradingView artifacts are removed
+    const chartContainer = document.getElementById('detail-chart');
+    if (chartContainer) {
+        // Remove all iframes (TradingView may create multiple)
+        chartContainer.querySelectorAll('iframe').forEach(iframe => {
+            iframe.src = 'about:blank';
+            iframe.remove();
+        });
+        // Remove any script elements injected by TradingView
+        chartContainer.querySelectorAll('script').forEach(s => s.remove());
+        chartContainer.innerHTML = '';
     }
     currentTvChartInfo = null;
     const modal = document.getElementById('coin-detail-modal');
@@ -3025,14 +3038,6 @@ document.addEventListener('keydown', (e) => {
         if (document.getElementById('coin-detail-modal').style.display === 'flex') closeCoinDetail();
     }
 });
-/**
- * فعال هشدارها را در رابط کاربری رندر می‌کند.
- * ورودی: پارامترهای `symbol` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-/**
- * جهت هشدار را انتخاب و UI را بروزرسانی می‌کند.
- */
 function selectAlertDirection(dir, btn) {
     currentAlertDirection = dir;
     document.querySelectorAll('.alert-dir-btn').forEach(b => b.classList.remove('active'));
@@ -4020,129 +4025,98 @@ function startPolling() {
 //#region راه‌اندازی برنامه
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('[BOOT] DOMContentLoaded — starting init');
+    // ── Phase 0: Telegram SDK init + user resolution ──
     await UserContext.init();
-    console.log('[BOOT] UserContext.init done — user:', UserContext.user?.id || 'null', 'ready:', UserContext.ready);
 
-    alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
-    localStorage.setItem('price_alerts', JSON.stringify(alerts));
-    await bootstrapUser();
+    // ── Phase 1: Apply language + render UI from cache immediately ──
+    applyLanguage();
     loadUser();
     updateNotifBadge();
+    alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
+    localStorage.setItem('price_alerts', JSON.stringify(alerts));
 
-    // Cold-open retry: if bootstrap was skipped (isPending), poll every 500ms
-    // until Telegram initData arrives, then run bootstrap exactly once.
-    // 500ms ensures we fire BEFORE the 3s cold-open reload timer.
-    if (bootstrapComplete) {
-        console.log('[BOOT] Bootstrap already complete, skipping retry interval');
-    } else if (UserContext.isPending()) {
-        console.log('[BOOT] Starting retry interval (500ms) — user is pending');
-        let retryCount = 0;
-        const bootstrapRetry = setInterval(() => {
-            retryCount++;
-            if (bootstrapComplete) {
-                console.log('[BOOT] Retry: bootstrapComplete, clearing interval after', retryCount, 'checks');
-                clearInterval(bootstrapRetry);
-                return;
-            }
-            console.log('[BOOT] Retry #' + retryCount + ': checking for user...');
-            tryLateBootstrap();
-            if (bootstrapComplete) {
-                console.log('[BOOT] Retry: bootstrap succeeded on check #' + retryCount);
-                clearInterval(bootstrapRetry);
-            }
-        }, 500);
-        setTimeout(() => {
-            if (!bootstrapComplete) {
-                console.warn('[BOOT] Retry: 30s timeout reached, clearing interval');
-            }
-            clearInterval(bootstrapRetry);
-        }, 30000); // stop after 30s
-    } else {
-        console.log('[BOOT] No retry needed — bootstrapComplete:', bootstrapComplete, 'isPending:', UserContext.isPending());
-    }
-
-    // Phase A: Render analysis slider immediately from localStorage cache
-    // analyses is already populated from localStorage at module load (line 260)
+    // Analysis slider from localStorage cache
     if (analyses.length) {
         renderAnalysisSlider();
     } else {
-        // Show skeleton for analysis slider when no cache
-        document.getElementById('slider-track').innerHTML = `
-            <div class="slider-skeleton">
-                <div class="slider-skeleton-img"></div>
-                <div class="slider-skeleton-text">
-                    <div class="slider-skeleton-line"></div>
-                    <div class="slider-skeleton-line"></div>
-                    <div class="slider-skeleton-line"></div>
-                </div>
-            </div>`;
+        const st = $('slider-track');
+        if (st) st.innerHTML = '<div class="slider-skeleton"><div class="slider-skeleton-img"></div><div class="slider-skeleton-text"><div class="slider-skeleton-line"></div><div class="slider-skeleton-line"></div><div class="slider-skeleton-line"></div></div></div>';
     }
 
     // Phase C: Load cached market data for instant watchlist render
-    // NOTE: localStorage cache with old pre-fix percentages is invalidated
-    // by checking a version tag. Bump CACHE_VERSION to force fresh fetch.
-    const MARKET_CACHE_VERSION = 3; // Bump when percentage normalization changes
+    const MARKET_CACHE_VERSION = 3;
     try {
         const cachedVersion = parseInt(localStorage.getItem('market_cache_version') || '0', 10);
         const cachedMarket = JSON.parse(localStorage.getItem('market_data_cache') || '[]');
         if (Array.isArray(cachedMarket) && cachedMarket.length && cachedVersion >= MARKET_CACHE_VERSION) {
             allCoins = cachedMarket;
-            // renderWatchlist/renderSummary skipped here — loadMarketData(true) below calls them
         } else if (cachedVersion < MARKET_CACHE_VERSION) {
-            // Version mismatch — bust stale cache to prevent showing wrong percentages
             localStorage.removeItem('market_data_cache');
         }
     } catch(_) {}
 
-    // Phase B: Show skeleton for watchlist and important-news while loading (only if not already rendered by Phase C)
-    const watchGrid = document.getElementById('watchlist-grid');
+    // Skeletons for watchlist and news
+    const watchGrid = $('watchlist-grid');
     if (watchGrid && !watchGrid.children.length) {
-        watchGrid.innerHTML = `<div class="watchlist-skeleton">${
-            Array(4).fill(`<div class="watchlist-skeleton-item">
-                <div class="watchlist-skeleton-icon"></div>
-                <div class="watchlist-skeleton-lines">
-                    <div class="watchlist-skeleton-line"></div>
-                    <div class="watchlist-skeleton-line"></div>
-                </div>
-            </div>`).join('')
-        }</div>`;
+        watchGrid.innerHTML = '<div class="watchlist-skeleton">' + Array(4).fill('<div class="watchlist-skeleton-item"><div class="watchlist-skeleton-icon"></div><div class="watchlist-skeleton-lines"><div class="watchlist-skeleton-line"></div><div class="watchlist-skeleton-line"></div></div></div>').join('') + '</div>';
     }
-    const newsContainer = document.getElementById('important-news');
+    const newsContainer = $('important-news');
     if (newsContainer && !newsContainer.children.length) {
-        newsContainer.innerHTML = `<div class="important-news-skeleton">${
-            Array(3).fill(`<div class="important-news-skeleton-item">
-                <div class="important-news-skeleton-img"></div>
-                <div class="important-news-skeleton-text">
-                    <div class="important-news-skeleton-line"></div>
-                    <div class="important-news-skeleton-line"></div>
-                </div>
-            </div>`).join('')
-        }</div>`;
+        newsContainer.innerHTML = '<div class="important-news-skeleton">' + Array(3).fill('<div class="important-news-skeleton-item"><div class="important-news-skeleton-img"></div><div class="important-news-skeleton-text"><div class="important-news-skeleton-line"></div><div class="important-news-skeleton-line"></div></div></div>').join('') + '</div>';
     }
 
     tabLoaded.dashboard = true;
+
+    // ── Phase 2: Bootstrap (authenticated data load) ──
+    // Public data (market, analyses, news) loads immediately.
+    // Authenticated data (alerts, bootstrap, admin) waits for auth.
     loadMarketData(true);
     fetchAnalyses().then(changed => { if (changed) renderAnalysisSlider(); });
-    // Delay important news to reduce startup concurrent connections (news is below the fold)
     setTimeout(() => loadImportantNews(), 2000);
 
-    loadAlertsFromServer().then(() => checkAlerts());
+    // Authenticated bootstrap — runs once user is available
+    await bootstrapUser();
+    loadUser();
+
+    // If user is pending (in Telegram but no initData yet), set up a single
+    // observer that will bootstrap exactly once when the user arrives.
+    // No polling interval, no reload loop.
+    if (!bootstrapComplete && UserContext.isPending()) {
+        const _bootObserver = new MutationObserver(() => {
+            if (getTelegramUser()?.id && !bootstrapComplete) {
+                _bootObserver.disconnect();
+                tryLateBootstrap();
+            }
+        });
+        // Watch for profile-name being updated (happens in loadUser when user arrives)
+        const pn = $('profile-name');
+        if (pn) _bootObserver.observe(pn, { childList: true });
+        // Safety: disconnect after 30s regardless
+        setTimeout(() => _bootObserver.disconnect(), 30000);
+    }
+
+    // ── Phase 3: Authenticated data loads ──
+    // Alerts load on first successful heartbeat (after bootstrap) — no race, no polling
+    if (bootstrapComplete) {
+        loadAlertsFromServer().then(() => checkAlerts());
+    }
+
     startPolling();
 
-    // R4: Initialize admin panel — check if user is admin and show entry button
+    // Admin panel
     if (typeof initAdminPanel === 'function' && !_adminPanelInitialized) {
         _adminPanelInitialized = true;
         initAdminPanel();
     }
 
+    // Ticket polling (only when modals are open)
     _pollingIntervals.push(setInterval(() => {
         if (document.getElementById('tickets-modal')?.style.display === 'flex') fetchTickets().then(renderTickets);
         if (document.getElementById('admin-tickets-modal')?.style.display === 'flex') fetchAdminTickets().then(renderAdminTickets);
     }, 15000));
 
-    // Scroll-to-top button visibility
-    const scrollTopBtn = document.getElementById('scroll-top-btn');
+    // Scroll-to-top button
+    const scrollTopBtn = $('scroll-top-btn');
     if (scrollTopBtn) {
         let scrollTicking = false;
         window.addEventListener('scroll', () => {
