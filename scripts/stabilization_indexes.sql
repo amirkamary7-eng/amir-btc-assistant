@@ -14,14 +14,20 @@ CREATE INDEX IF NOT EXISTS idx_price_alerts_dedup ON price_alerts (user_id, symb
 -- 4. Token transactions: wallet history (user_id, created_at DESC)
 CREATE INDEX IF NOT EXISTS idx_token_transactions_user_created ON token_transactions (user_id, created_at DESC);
 
--- 5. Sessions: online count + cleanup (last_heartbeat)
-CREATE INDEX IF NOT EXISTS idx_sessions_last_heartbeat ON sessions (last_heartbeat);
+-- 5. [REMOVED] Sessions: online count uses KV cache only. No SQL queries hit this table.
+-- CREATE INDEX IF NOT EXISTS idx_sessions_last_heartbeat ON sessions (last_heartbeat);
 
 -- 6. Tickets: user's ticket list
 CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets (user_id);
 
--- 7. Notifications: user's notifications
-CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications (user_id, is_read, created_at DESC);
+-- 7. [REMOVED] Notifications: column is `read_status`, not `is_read`.
+--    Runtime ensureTable() in src/repositories/notifications.js already creates:
+--    - idx_notifications_user_created ON notifications(user_id, created_at DESC)
+--    - idx_notifications_user_unread ON notifications(user_id) WHERE read_status = FALSE
+-- CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications (user_id, is_read, created_at DESC);
 
--- 8. Referrals: lookup by invitee_id (channel verification flow)
+-- 8. Referrals: lookup by invitee_id (channel verification + reward flow in worker-proxy.js)
 CREATE INDEX IF NOT EXISTS idx_referrals_invitee ON referrals (invitee_id);
+
+-- 9. [NEW] Referrals: lookup by inviter_id (stats page, wallet referral history in src/repositories/referrals.js)
+CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals (inviter_id);

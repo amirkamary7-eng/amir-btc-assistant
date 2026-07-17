@@ -2203,10 +2203,14 @@ const STABILIZATION_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_price_alerts_user_status ON price_alerts (user_id, status)',
   'CREATE INDEX IF NOT EXISTS idx_price_alerts_dedup ON price_alerts (user_id, symbol, price, direction)',
   'CREATE INDEX IF NOT EXISTS idx_token_transactions_user_created ON token_transactions (user_id, created_at DESC)',
-  'CREATE INDEX IF NOT EXISTS idx_sessions_last_heartbeat ON sessions (last_heartbeat)',
+  // sessions table: orphaned — repository uses KV cache only, zero SQL queries exist.
+  // 'CREATE INDEX IF NOT EXISTS idx_sessions_last_heartbeat ON sessions (last_heartbeat)',
   'CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets (user_id)',
-  'CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications (user_id, is_read, created_at DESC)',
+  // notifications: column is read_status (not is_read). Runtime ensureTable() in notifications.js
+  // already creates idx_notifications_user_created and idx_notifications_user_unread.
+  // 'CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications (user_id, is_read, created_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_referrals_invitee ON referrals (invitee_id)',
+  'CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals (inviter_id)',
 ];
 
 async function ensureStabilizationIndexes(env) {
