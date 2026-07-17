@@ -937,8 +937,11 @@ async function saveAnalysisToServer(payload, method, analysisId) {
     return null;
 }
 
+function isAdmin() {
+    return isCurrentUserAdmin;
+}
+
 function timeAgo(dateStr) {
-    if (!dateStr) return '';
     const now = Date.now();
     const d = new Date(dateStr).getTime();
     const diff = Math.floor((now - d) / 1000);
