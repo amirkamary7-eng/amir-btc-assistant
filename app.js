@@ -816,6 +816,7 @@ async function bootstrapUser() {
 
         // Admin status from server
         isCurrentUserAdmin = Boolean(data.is_admin);
+        console.log('[Analysis] Bootstrap admin check — is_admin:', data.is_admin, 'isCurrentUserAdmin:', isCurrentUserAdmin, 'userId:', data.user?.id);
         if (data.user?.id) {
             ADMIN_ID = String(data.user.id);
         }
@@ -923,18 +924,37 @@ async function fetchAnalyses(force = false, append = false) {
 }
 
 async function saveAnalysisToServer(payload, method, analysisId) {
-    if (!API_BASE || !isAdmin()) return null;
+    console.log('[Analysis] saveAnalysisToServer called — method:', method, 'id:', analysisId || 'new');
+    if (!API_BASE) {
+        console.error('[Analysis] saveAnalysisToServer ABORTED — API_BASE is empty');
+        showToast('API در دسترس نیست.');
+        return null;
+    }
+    if (!isAdmin()) {
+        console.error('[Analysis] saveAnalysisToServer ABORTED — user is not admin. isCurrentUserAdmin:', isCurrentUserAdmin);
+        showToast('دسترسی ادمین وجود ندارد.');
+        return null;
+    }
     const basePath = '/api/admin/analyses';
-    if (method === 'POST') {
-        return apiFetch(basePath, { method: 'POST', body: JSON.stringify(payload) });
+    console.log('[Analysis] Sending', method, 'to', basePath + (analysisId ? '/' + analysisId : ''));
+    try {
+        let result;
+        if (method === 'POST') {
+            result = await apiFetch(basePath, { method: 'POST', body: JSON.stringify(payload) });
+        } else if (method === 'PUT') {
+            result = await apiFetch(`${basePath}/${analysisId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        } else if (method === 'DELETE') {
+            result = await apiFetch(`${basePath}/${analysisId}`, { method: 'DELETE' });
+        } else {
+            console.error('[Analysis] saveAnalysisToServer — unknown method:', method);
+            return null;
+        }
+        console.log('[Analysis] saveAnalysisToServer SUCCESS — response:', result);
+        return result;
+    } catch (err) {
+        console.error('[Analysis] saveAnalysisToServer FETCH ERROR:', err);
+        throw err;
     }
-    if (method === 'PUT') {
-        return apiFetch(`${basePath}/${analysisId}`, { method: 'PUT', body: JSON.stringify(payload) });
-    }
-    if (method === 'DELETE') {
-        return apiFetch(`${basePath}/${analysisId}`, { method: 'DELETE' });
-    }
-    return null;
 }
 
 function isAdmin() {
@@ -1328,7 +1348,11 @@ function checkAnalysisDeepLink() {
 
 // ── Admin: Create / Edit ──
 function openAddAnalysisModal() {
-    if (!isAdmin()) return;
+    console.log('[Analysis] openAddAnalysisModal — isAdmin():', isAdmin(), 'isCurrentUserAdmin:', isCurrentUserAdmin, 'API_BASE:', API_BASE ? 'set' : 'EMPTY');
+    if (!isAdmin()) {
+        console.warn('[Analysis] openAddAnalysisModal blocked — not admin');
+        return;
+    }
     editingAnalysisId = null;
     document.getElementById('analysis-modal-title').innerText = 'تحلیل جدید';
     document.getElementById('analysis-submit-btn').innerText = 'انتشار تحلیل';
@@ -1367,30 +1391,72 @@ function closeAddAnalysisModal() {
 }
 
 function submitAnalysis() {
-    const title = document.getElementById('analysis-title').value.trim();
-    const coin = document.getElementById('analysis-coin').value.trim().toUpperCase();
-    const timeframe = document.getElementById('analysis-timeframe').value.trim() || '1D';
-    let image = document.getElementById('analysis-image').value.trim();
-    const text = document.getElementById('analysis-text').value.trim();
-    const support_level = document.getElementById('analysis-support').value.trim();
-    const current_price = document.getElementById('analysis-current-price').value.trim();
-    const resistance_level = document.getElementById('analysis-resistance').value.trim();
-    const featured = document.getElementById('analysis-featured')?.checked || false;
+    console.log('[Analysis] submitAnalysis() called — editingAnalysisId:', editingAnalysisId);
 
-    if (!coin || !text) { showToast('نام ارز و متن تحلیل الزامی است.'); return; }
+    const titleEl = document.getElementById('analysis-title');
+    const coinEl = document.getElementById('analysis-coin');
+    const tfEl = document.getElementById('analysis-timeframe');
+    const imgEl = document.getElementById('analysis-image');
+    const textEl = document.getElementById('analysis-text');
+    const supEl = document.getElementById('analysis-support');
+    const priceEl = document.getElementById('analysis-current-price');
+    const resEl = document.getElementById('analysis-resistance');
+    const featEl = document.getElementById('analysis-featured');
+
+    console.log('[Analysis] Form elements found:', !!titleEl, !!coinEl, !!textEl);
+
+    const title = titleEl ? titleEl.value.trim() : '';
+    const coin = coinEl ? coinEl.value.trim().toUpperCase() : '';
+    const timeframe = tfEl ? tfEl.value.trim() : '' || '1D';
+    let image = imgEl ? imgEl.value.trim() : '';
+    const text = textEl ? textEl.value.trim() : '';
+    const support_level = supEl ? supEl.value.trim() : '';
+    const current_price = priceEl ? priceEl.value.trim() : '';
+    const resistance_level = resEl ? resEl.value.trim() : '';
+    const featured = featEl ? featEl.checked : false;
+
+    console.log('[Analysis] Form values — coin:', coin, 'textLen:', text.length, 'featured:', featured);
+
+    if (!coin || !text) {
+        console.warn('[Analysis] Validation failed — coin:', coin, 'text:', text);
+        showToast('نام ارز و متن تحلیل الزامی است.');
+        return;
+    }
 
     const author = getTelegramUser()?.first_name || 'مدیر';
     const payload = { coin, timeframe, image, text, author, title, support_level, current_price, resistance_level, featured };
+    console.log('[Analysis] Payload ready —', JSON.stringify(payload).substring(0, 200));
+
+    // Disable button to prevent double-submit
+    const btn = document.getElementById('analysis-submit-btn');
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
 
     (async () => {
         try {
+            let result;
             if (editingAnalysisId) {
-                await saveAnalysisToServer(payload, 'PUT', editingAnalysisId);
-                showToast('تحلیل ویرایش شد.');
+                console.log('[Analysis] Updating existing analysis:', editingAnalysisId);
+                result = await saveAnalysisToServer(payload, 'PUT', editingAnalysisId);
             } else {
-                await saveAnalysisToServer(payload, 'POST');
-                showToast('تحلیل منتشر شد.');
+                console.log('[Analysis] Creating new analysis');
+                result = await saveAnalysisToServer(payload, 'POST');
             }
+
+            if (!result) {
+                console.error('[Analysis] saveAnalysisToServer returned null — nothing was saved');
+                showToast('خطا: پاسخی از سرور دریافت نشد.');
+                return;
+            }
+
+            if (result.status === 'success') {
+                showToast(editingAnalysisId ? 'تحلیل ویرایش شد.' : 'تحلیل منتشر شد.');
+                console.log('[Analysis] Save successful, refreshing...');
+            } else {
+                console.warn('[Analysis] Unexpected response status:', result.status, result);
+                showToast(result.detail || result.message || 'خطا در ذخیره تحلیل.');
+                return;
+            }
+
             await fetchAnalyses(true);
             renderAnalysisFeatured();
             renderAnalysisStats();
@@ -1398,8 +1464,10 @@ function submitAnalysis() {
             renderAnalysisSlider();
             closeAddAnalysisModal();
         } catch (e) {
-            console.error('submitAnalysis:', e);
-            showToast('خطا در ذخیره تحلیل.');
+            console.error('[Analysis] submitAnalysis ERROR:', e);
+            showToast('خطا در ذخیره تحلیل: ' + (e.message || 'Unknown error'));
+        } finally {
+            if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
         }
     })();
 }
@@ -4090,7 +4158,11 @@ function loadUser() {
     }
 
     const adminFab = document.getElementById('analysis-fab');
-    if (adminFab) adminFab.style.display = isAdmin() ? '' : 'none';
+    if (adminFab) {
+        const show = isAdmin();
+        adminFab.style.display = show ? '' : 'none';
+        console.log('[Analysis] loadUser FAB — show:', show, 'isCurrentUserAdmin:', isCurrentUserAdmin);
+    }
 }
 /**
  * ارجاع لینک را کپی می‌کند.

@@ -1508,7 +1508,9 @@ strong.down { color: var(--red); }
 .trend-strength-label.bullish { color: var(--green); }
 .trend-strength-label.bearish { color: var(--red); }
 
-.input-field { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text); margin-bottom: 10px; outline: none; }
+.input-field { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text); margin-bottom: 10px; outline: none; box-sizing: border-box; }
+.analysis-form-fields .input-field { margin-bottom: 0; height: 44px; }
+.analysis-form-fields textarea.input-field { height: auto; min-height: 100px; resize: vertical; }
 .submit-btn { width: 100%; padding: 12px; background: #FF8A00; border: none; color: #000; font-weight: 700; border-radius: 14px; cursor: pointer; box-shadow: 0 0 16px rgba(255,138,0,0.25); }
 
 /* #endregion */
@@ -2612,12 +2614,13 @@ strong.down { color: var(--red); }
 .analysis-page-header {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 12px;
-    padding: 16px 16px 12px;
+    padding: 16px 20px 12px;
 }
 
 .analysis-list-container {
-    padding: 0 16px;
+    padding: 0 16px 120px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
 }
@@ -2630,44 +2633,52 @@ strong.down { color: var(--red); }
 
 .analysis-fab {
     position: fixed;
-    bottom: 24px;
-    right: 20px;
-    width: 56px;
-    height: 56px;
+    bottom: 90px;
+    right: 16px;
+    width: 58px;
+    height: 58px;
     border-radius: 50%;
     background: var(--accent);
     color: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 6px 24px rgba(255, 138, 0, 0.4);
+    box-shadow: 0 4px 16px rgba(255, 138, 0, 0.35);
     z-index: 1001;
     cursor: pointer;
     border: none;
-    font-size: 22px;
+    font-size: 24px;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .analysis-fab:active {
     transform: scale(0.92);
-    box-shadow: 0 3px 12px rgba(255, 138, 0, 0.3);
+    box-shadow: 0 2px 8px rgba(255, 138, 0, 0.25);
 }
 
 .analysis-empty-state {
     text-align: center;
-    opacity: 0.5;
-    padding: 60px 20px;
+    padding: 80px 20px 40px;
     color: var(--text-dim);
 }
 
-.analysis-empty-state svg {
-    margin-bottom: 12px;
-    opacity: 0.6;
+.analysis-empty-state .empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.7;
 }
 
-.analysis-empty-state p {
-    font-size: 14px;
-    line-height: 1.6;
+.analysis-empty-state .empty-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-sub);
+    margin-bottom: 6px;
+}
+
+.analysis-empty-state .empty-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
 }
 
 /* #endregion */
@@ -3383,14 +3394,14 @@ strong.down { color: var(--red); }
 
 .analysis-form-modal {
     max-width: 480px;
-    max-height: 85vh;
+    max-height: 90vh;
 }
 
 .analysis-form-fields {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    max-height: 60vh;
+    gap: 12px;
+    max-height: 65vh;
     overflow-y: auto;
     padding: 4px 0;
     -webkit-overflow-scrolling: touch;
@@ -3414,6 +3425,10 @@ strong.down { color: var(--red); }
     gap: 10px;
 }
 
+.analysis-form-fields .af-row + .af-row {
+    margin-top: 0;
+}
+
 .af-row-3col {
     flex-wrap: nowrap;
 }
@@ -3422,7 +3437,7 @@ strong.down { color: var(--red); }
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
 }
 
 .af-field-half {
@@ -3437,27 +3452,33 @@ strong.down { color: var(--red); }
     font-size: 12px;
     font-weight: 600;
     color: var(--text-sub);
+    padding-right: 2px;
 }
 
 .af-field-checkbox {
-    justify-content: flex-end;
+    justify-content: center;
     align-items: center;
+    padding: 8px 0;
 }
 
 .af-checkbox-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     font-size: 13px;
+    font-weight: 600;
     color: #fff;
     cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .af-checkbox-label input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     accent-color: var(--accent);
     cursor: pointer;
+    flex-shrink: 0;
 }
 
 /* Responsive: stack 3-col rows on small screens */

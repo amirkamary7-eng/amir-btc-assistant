@@ -375,9 +375,10 @@
         <div id="analysis-stats-bar" style="display:none;"></div>
         <div class="analysis-list-container" id="analysis-list-container"></div>
         <div id="analysis-load-trigger" class="analysis-load-trigger"></div>
-        <div id="analysis-empty-state" style="display:none;">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
-            <p>هیچ تحلیلی ثبت نشده است.</p>
+        <div id="analysis-empty-state" class="analysis-empty-state" style="display:none;">
+            <div class="empty-icon">📈</div>
+            <p class="empty-title">هنوز تحلیلی منتشر نشده است</p>
+            <p class="empty-desc">اولین تحلیل را منتشر کنید</p>
         </div>
         <!-- Admin Floating Button -->
         <button type="button" id="analysis-fab" class="analysis-fab" style="display:none;" onclick="openAddAnalysisModal()" aria-label="افزودن تحلیل">
@@ -606,25 +607,29 @@
             </div>
             <div class="analysis-form-fields">
                 <div class="af-row">
-                    <div class="af-field af-field-half"><label>عنوان</label><input type="text" id="analysis-title" placeholder="عنوان تحلیل" class="input-field"></div>
+                    <div class="af-field"><label>عنوان</label><input type="text" id="analysis-title" placeholder="عنوان تحلیل" class="input-field"></div>
                 </div>
                 <div class="af-row">
-                    <div class="af-field af-field-third"><label>نماد</label><input type="text" id="analysis-coin" placeholder="BTC" class="input-field" style="text-transform:uppercase"></div>
-                    <div class="af-field af-field-third"><label>تایم فریم</label><input type="text" id="analysis-timeframe" placeholder="4H" class="input-field"></div>
-                    <div class="af-field af-field-third af-field-checkbox">
+                    <div class="af-field af-field-half"><label>نماد</label><input type="text" id="analysis-coin" placeholder="BTC" class="input-field" style="text-transform:uppercase"></div>
+                    <div class="af-field af-field-half"><label>تایم فریم</label><input type="text" id="analysis-timeframe" placeholder="4H" class="input-field"></div>
+                </div>
+                <div class="af-row">
+                    <div class="af-field"><label>لینک تصویر چارت</label><input type="text" id="analysis-image" placeholder="https://..." class="input-field"></div>
+                </div>
+                <div class="af-row">
+                    <div class="af-field"><label>قیمت فعلی</label><input type="text" id="analysis-current-price" placeholder="64200" class="input-field"></div>
+                </div>
+                <div class="af-row">
+                    <div class="af-field af-field-half"><label>حمایت</label><input type="text" id="analysis-support" placeholder="61700" class="input-field"></div>
+                    <div class="af-field af-field-half"><label>مقاومت</label><input type="text" id="analysis-resistance" placeholder="65000" class="input-field"></div>
+                </div>
+                <div class="af-row">
+                    <div class="af-field af-field-checkbox">
                         <label class="af-checkbox-label">
                             <input type="checkbox" id="analysis-featured">
                             <span>⭐ تحلیل ویژه</span>
                         </label>
                     </div>
-                </div>
-                <div class="af-row">
-                    <div class="af-field"><label>لینک تصویر چارت</label><input type="text" id="analysis-image" placeholder="https://..." class="input-field" accept="image/*"></div>
-                </div>
-                <div class="af-row af-row-3col">
-                    <div class="af-field"><label>حمایت</label><input type="text" id="analysis-support" placeholder="61700" class="input-field"></div>
-                    <div class="af-field"><label>قیمت فعلی</label><input type="text" id="analysis-current-price" placeholder="64200" class="input-field"></div>
-                    <div class="af-field"><label>مقاومت</label><input type="text" id="analysis-resistance" placeholder="65000" class="input-field"></div>
                 </div>
                 <div class="af-row">
                     <div class="af-field"><label>متن تحلیل</label><textarea id="analysis-text" placeholder="سناریوی اصلی: ...&#10;سناریوی جایگزین: ..." class="input-field" rows="5"></textarea></div>
