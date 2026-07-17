@@ -157,7 +157,12 @@ async function writeAppCache(env, key, value, expirationTtl) {
     return;
   }
 
-  await env.APP_CACHE.put(key, value, { expirationTtl });
+  try {
+    await env.APP_CACHE.put(key, value, { expirationTtl });
+  } catch (e) {
+    // KV write limit exceeded or transient error — degrade gracefully
+    console.warn('writeAppCache failed:', e.message || e);
+  }
 }
 
 // ============================================================================
@@ -205,7 +210,12 @@ async function writeRateLimitCache(env, key, value, expirationTtl) {
     return;
   }
 
-  await env.RATE_LIMITS.put(key, value, { expirationTtl });
+  try {
+    await env.RATE_LIMITS.put(key, value, { expirationTtl });
+  } catch (e) {
+    // KV write limit exceeded — degrade gracefully
+    console.warn('writeRateLimitCache failed:', e.message || e);
+  }
 }
 
 async function deleteRateLimitCache(env, key) {
@@ -213,7 +223,11 @@ async function deleteRateLimitCache(env, key) {
     return;
   }
 
-  await env.RATE_LIMITS.delete(key);
+  try {
+    await env.RATE_LIMITS.delete(key);
+  } catch (e) {
+    console.warn('deleteRateLimitCache failed:', e.message || e);
+  }
 }
 
 async function readSessionCache(env, key) {
@@ -229,7 +243,12 @@ async function writeSessionCache(env, key, value, expirationTtl) {
     return;
   }
 
-  await env.SESSION_CACHE.put(key, value, { expirationTtl });
+  try {
+    await env.SESSION_CACHE.put(key, value, { expirationTtl });
+  } catch (e) {
+    // KV write limit exceeded — degrade gracefully
+    console.warn('writeSessionCache failed:', e.message || e);
+  }
 }
 
 async function deleteSessionCache(env, key) {
@@ -237,7 +256,11 @@ async function deleteSessionCache(env, key) {
     return;
   }
 
-  await env.SESSION_CACHE.delete(key);
+  try {
+    await env.SESSION_CACHE.delete(key);
+  } catch (e) {
+    console.warn('deleteSessionCache failed:', e.message || e);
+  }
 }
 
 function buildFastApiValidationError(type, msg, input, ctx) {
@@ -3060,7 +3083,11 @@ async function handleTelegramWebhook(request, env) {
 
     // Store pending referral in KV so check_join callback can retrieve it later
     if (messageContext.startParam && env.JOIN_CACHE && typeof env.JOIN_CACHE.put === 'function') {
-      await env.JOIN_CACHE.put(`pending_ref:${messageContext.userId}`, messageContext.startParam, { expirationTtl: 600 });
+      try {
+        await env.JOIN_CACHE.put(`pending_ref:${messageContext.userId}`, messageContext.startParam, { expirationTtl: 600 });
+      } catch (e) {
+        console.warn('JOIN_CACHE put pending_ref failed:', e.message || e);
+      }
       await diagLog(env, { scope: 'diag-start-stored-pending-ref', userId: messageContext.userId, startParam: messageContext.startParam });
     }
 

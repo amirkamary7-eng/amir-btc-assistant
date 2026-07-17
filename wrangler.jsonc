@@ -122,6 +122,9 @@
                 },
                 "production": {
                         "name": "amir-btc-assistant-api-production",
+                        "ai": {
+                                "binding": "AI"
+                        },
                         "triggers": {
                                 "crons": [
                                         "*/5 * * * *",
