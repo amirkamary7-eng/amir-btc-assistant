@@ -16,13 +16,12 @@
 - `telegram_auth`: نیازمند هدر `X-Telegram-Init-Data`
 - `admin_auth`: نیازمند Telegram auth + ادمین بودن
 
-## وابستگی‌های مشترک API
+## Runtime
 
-- احراز هویت تلگرام: `backend/services/telegram_auth.py`
-- دیتابیس: `backend/database.py`
-- مدل‌ها: `backend/models.py`
-- کش: `backend/redis_client.py`
-- Bot/Webhook: `main.py`
+- **Platform:** Cloudflare Workers + Pages
+- **Database:** PostgreSQL (Supabase) via `@neondatabase/serverless`
+- **Cache:** Cloudflare KV (4 namespaces)
+- **AI:** Gemini / OpenRouter / DeepSeek
 
 ---
 
@@ -36,7 +35,7 @@
   - `status`
   - `message`
 - وابستگی:
-  - FastAPI app
+  - Worker runtime
 - کاربرد:
   - تست سریع در دسترس بودن سرویس
 
@@ -50,9 +49,9 @@
   - `database_ready`
   - `redis_ready`
 - وابستگی:
-  - `backend/config.py`
-  - `backend/database.py`
-  - `backend/redis_client.py`
+  - Worker env vars
+  - PostgreSQL
+  - Cloudflare KV
 
 ---
 
@@ -77,7 +76,7 @@
   - RSS خارجی
   - `deep_translator`
   - cache داخلی
-  - Redis/in-memory cache
+  - Cloudflare KV
 - ریسک مهاجرت:
   - external fetch
   - caching behavior
@@ -101,7 +100,7 @@
   - Telegram initData auth
   - `backend/services/join_service.py`
   - `backend/services/user_service.py`
-  - Redis/in-memory cache
+  - Cloudflare KV
   - Telegram Bot API `getChatMember`
   - DB
 - نکته:
@@ -154,8 +153,7 @@
   - `watchlist`
 - وابستگی:
   - DB
-  - `backend/services/user_service.py`
-  - referral bootstrap
+  - referral logic in Worker
 - کاربرد:
   - ایجاد/به‌روزرسانی کاربر بعد از ورود به Mini App
 
@@ -204,7 +202,6 @@
   - `symbols[]`
 - وابستگی:
   - DB
-  - `backend/services/user_service.py`
 
 ### `PUT /api/watchlist`
 
@@ -252,7 +249,7 @@
   - `unchanged` در صورت برابر بودن version
 - وابستگی:
   - DB
-  - analysis cache/versioning
+  - Cloudflare KV cache
 
 ### `POST /api/analyses`
 
@@ -312,9 +309,8 @@
   - `status`
   - `events[]`
 - وابستگی:
-  - `backend/services/calendar_service.py`
   - ForexFactory
-  - cache
+  - Cloudflare KV cache
 
 ---
 
@@ -333,7 +329,6 @@
   - `tokens`
 - وابستگی:
   - DB
-  - `backend/services/referral_service.py`
 
 ### `GET /api/referrals/tokens`
 
@@ -365,7 +360,7 @@
   - `last_seen`
   - `online_count`
 - وابستگی:
-  - Redis/in-memory cache
+  - Cloudflare KV
   - `backend/services/session_service.py`
 
 ### `GET /api/sessions/online`
@@ -376,7 +371,7 @@
   - `status`
   - `count`
 - وابستگی:
-  - session cache
+  - Cloudflare KV
 
 ### `POST /api/sessions/end`
 
@@ -387,7 +382,7 @@
   - `status`
   - `online_count`
 - وابستگی:
-  - session cache
+  - Cloudflare KV
 
 ---
 
@@ -402,8 +397,8 @@
   - `status`
   - داده‌های rate limit
 - وابستگی:
-  - `backend/services/ai_service.py`
-  - cache/rate-limits
+  - AI providers (Gemini/OpenRouter/DeepSeek)
+  - Cloudflare KV rate-limits
 
 ### `POST /api/assistant/chat`
 
@@ -423,8 +418,7 @@
   - `503` برای failure provider
 - وابستگی:
   - AI providers
-  - rate limiting
-  - cache
+  - Cloudflare KV rate-limits
 
 ---
 
@@ -442,7 +436,7 @@
   - `status`
   - `ticket`
 - وابستگی:
-  - فایل `data/tickets.json`
+  - فایل PostgreSQL (tickets table)
   - Telegram notification to admin/user
 - نکته:
   - state فعلی file-based است
@@ -456,7 +450,7 @@
   - `status`
   - `tickets[]`
 - وابستگی:
-  - `data/tickets.json`
+  - PostgreSQL (tickets table)
 
 ### `GET /api/tickets/all`
 
@@ -467,7 +461,7 @@
   - `status`
   - `tickets[]`
 - وابستگی:
-  - `data/tickets.json`
+  - PostgreSQL (tickets table)
 
 ### `POST /api/tickets/{ticket_id}/reply`
 
@@ -481,7 +475,7 @@
 - خطا:
   - `404 Not found`
 - وابستگی:
-  - `data/tickets.json`
+  - PostgreSQL (tickets table)
   - Telegram message to user
 
 ### `DELETE /api/tickets/{ticket_id}`
@@ -496,7 +490,7 @@
   - `404 Not found`
   - `403 Forbidden`
 - وابستگی:
-  - `data/tickets.json`
+  - PostgreSQL (tickets table)
 
 ---
 
@@ -530,7 +524,7 @@
   - `status`
   - `alert`
 - وابستگی:
-  - فایل `data/alerts.json`
+  - فایل PostgreSQL (price_alerts table)
   - Telegram notifications
 
 ### `GET /api/alerts`
@@ -542,7 +536,7 @@
   - `status`
   - `alerts[]`
 - وابستگی:
-  - `data/alerts.json`
+  - PostgreSQL (price_alerts table)
 
 ### `DELETE /api/alerts/{alert_id}`
 
@@ -555,7 +549,7 @@
   - `404 Not found`
   - `403 Forbidden`
 - وابستگی:
-  - `data/alerts.json`
+  - PostgreSQL (price_alerts table)
 
 ### وابستگی غیرمستقیم هشدارها
 
@@ -575,9 +569,8 @@
 - خروجی:
   - `200 OK`
 - وابستگی:
-  - `python-telegram-bot`
-  - Telegram webhook registration
-  - runtime اصلی `main.py`
+  - Cloudflare Worker
+  - Worker webhook handler
 
 ---
 
@@ -607,7 +600,7 @@
 | مسیر | Method | Auth | Storage/Dependency |
 |---|---|---|---|
 | `/` | GET | public | app runtime |
-| `/api/health` | GET | public | config + db + redis |
+| `/api/health` | GET | public | env vars + DB + KV |
 | `/api/farsi-news` | GET | public | RSS + translator + cache |
 | `/api/check-join` | GET | telegram_auth | cache + DB + Telegram API |
 | `/api/debug/check-join` | GET | telegram_auth | Telegram API |
@@ -625,18 +618,18 @@
 | `/api/calendar/events` | GET | public | ForexFactory + cache |
 | `/api/referrals/stats` | GET | telegram_auth | DB |
 | `/api/referrals/tokens` | GET | telegram_auth | DB |
-| `/api/sessions/heartbeat` | POST | telegram_auth | Redis/in-memory |
-| `/api/sessions/online` | GET | telegram_auth | Redis/in-memory |
-| `/api/sessions/end` | POST | telegram_auth | Redis/in-memory |
+| `/api/sessions/heartbeat` | POST | telegram_auth | Cloudflare KV |
+| `/api/sessions/online` | GET | telegram_auth | Cloudflare KV |
+| `/api/sessions/end` | POST | telegram_auth | Cloudflare KV |
 | `/api/assistant/limits` | GET | telegram_auth | cache |
 | `/api/assistant/chat` | POST | telegram_auth | AI providers + cache |
-| `/api/tickets` | POST | telegram_auth | `tickets.json` |
-| `/api/tickets` | GET | telegram_auth | `tickets.json` |
-| `/api/tickets/all` | GET | admin_auth | `tickets.json` |
-| `/api/tickets/{id}/reply` | POST | admin_auth | `tickets.json` + Telegram |
-| `/api/tickets/{id}` | DELETE | telegram_auth | `tickets.json` |
+| `/api/tickets` | POST | telegram_auth | PostgreSQL (tickets table) |
+| `/api/tickets` | GET | telegram_auth | PostgreSQL (tickets table) |
+| `/api/tickets/all` | GET | admin_auth | PostgreSQL (tickets table) |
+| `/api/tickets/{id}/reply` | POST | admin_auth | PostgreSQL (tickets table) + Telegram |
+| `/api/tickets/{id}` | DELETE | telegram_auth | PostgreSQL (tickets table) |
 | `/api/notify` | POST | telegram_auth | Telegram Bot API |
-| `/api/alerts` | POST | telegram_auth | `alerts.json` |
-| `/api/alerts` | GET | telegram_auth | `alerts.json` |
-| `/api/alerts/{id}` | DELETE | telegram_auth | `alerts.json` |
-| `/telegram` | POST | public | Telegram webhook runtime |
+| `/api/alerts` | POST | telegram_auth | PostgreSQL (price_alerts table) |
+| `/api/alerts` | GET | telegram_auth | PostgreSQL (price_alerts table) |
+| `/api/alerts/{id}` | DELETE | telegram_auth | PostgreSQL (price_alerts table) |
+| `/telegram` | POST | public | Worker webhook handler |

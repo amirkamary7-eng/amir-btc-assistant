@@ -26,7 +26,7 @@ export function createAlertHandlers(deps) {
    * POST /api/alerts — Create or reactivate a price alert.
    */
   async function handleCreate(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -64,7 +64,7 @@ export function createAlertHandlers(deps) {
    * GET /api/alerts — List active price alerts for the authenticated user.
    */
   async function handleList(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -90,7 +90,7 @@ export function createAlertHandlers(deps) {
    * DELETE /api/alerts/:id — Remove a price alert (ownership-enforced).
    */
   async function handleDelete(request, env, alertId) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }

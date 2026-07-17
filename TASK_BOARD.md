@@ -44,11 +44,12 @@
 | Metric | Count |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 52 |
+| ✅ Done | 49 |
+| ⚠️ Partial | 3 |
 | 🟨 In Progress | 0 |
 | ⛔ Blocked | 0 |
 | ⬜ Todo | 2 |
-| **Overall** | **96%** |
+| **Overall** | **91%** |
 
 ### By Phase
 
@@ -57,8 +58,17 @@
 | 1 | Critical Stability | 7 | 7 | 100% |
 | 2 | Core System Fix | 14 | 14 | 100% |
 | 3 | Architecture Cleanup | 8 | 7 | 88% |
-| 4 | Security Hardening | 13 | 12 | 92% |
+| 4 | Security Hardening | 13 | 11 | 85% |
 | 5 | Optimization & Cleanup | 12 | 10 | 83% |
+
+**Notes on partial/undone tasks:**
+- **3.5** Partial: Worker uses safeDbErrorResponse correctly. main.py (now deleted) was the only leaker.
+- **4.4** INVALID: KV migration doc for FastAPI AI rate limits. FastAPI is now deleted - task no longer applicable.
+- **4.11** Partial: maxAgeSeconds still 86400, no change was made.
+- **4.12** Partial: Admin ID removed from env.example but 831704732 still in app.js:300.
+- **5.3** Partial: BOT_USERNAME unused in wrangler.jsonc vars.
+- **5.4** Blocked: CI/CD impossible - 193/230 tests failing.
+
 
 ---
 

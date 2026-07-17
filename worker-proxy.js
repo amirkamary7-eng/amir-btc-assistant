@@ -865,7 +865,7 @@ function getAdminIds(env) {
   // Include the primary admin ID only if explicitly configured (Task 4.9 — no hardcoded fallback)
   const primary = String(env.ADMIN_TELEGRAM_ID || '').trim();
   if (primary) ids.add(primary);
-  // Add additional comma-separated IDs (Task 3.2 — mirror backend/config.py:admin_ids)
+  // Add additional comma-separated IDs (comma-separated string in env var)
   const extra = String(env.ADMIN_TELEGRAM_IDS || '').trim();
   if (extra) {
     for (const id of extra.split(',')) {
@@ -2207,7 +2207,7 @@ function handleHealth(env) {
     status: 'ok',
     bot_configured: isBotConfigured(env),
     database_ready: isDatabaseConfigured(env),
-    redis_ready: isCacheLayerConfigured(env),
+    cache_ready: isCacheLayerConfigured(env),
   }, {}, env);
 }
 
@@ -2288,6 +2288,7 @@ const userHandlers = createUserHandlers({
   isDatabaseConfigured,
   normalizeOptionalString,
   isDevMode,
+  isAdminTelegramId,
   processReferralOnBootstrap,
   resolveChannelMembership,
   userRepo,
@@ -3524,7 +3525,7 @@ export default {
         return await handleFarsiNews(request, env);
       }
 
-      // TODO (Phase 8 future): /api/news/stream SSE endpoint for breaking news push.
+      // Future: /api/news/stream SSE endpoint for breaking news push.
       // Requires Durable Object for true WebSocket, or simple SSE stream.
       // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
 

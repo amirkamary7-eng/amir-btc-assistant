@@ -2,7 +2,7 @@
 
 ## مقدمه
 
-این سند بر اساس مدل‌های واقعی تعریف‌شده در `backend/models.py` تهیه شده است. دیتابیس اصلی پروژه PostgreSQL است که از طریق `DATABASE_URL` به Supabase متصل می‌شود.
+این سند بر اساس مدل‌های واقعی تعریف‌شده در `worker-proxy.js + src/repositories/` تهیه شده است. دیتابیس اصلی پروژه PostgreSQL است که از طریق `DATABASE_URL` به Supabase متصل می‌شود.
 
 نکته مهم:
 
@@ -13,7 +13,7 @@
 ## منبع شمای فعلی
 
 - ORM: SQLAlchemy
-- فایل مرجع: `backend/models.py`
+- فایل مرجع: `worker-proxy.js + src/repositories/`
 - موتور DB: PostgreSQL
 - میزبان فعلی: Supabase
 
@@ -368,7 +368,7 @@ users
 - `token_balances`
 - `token_transactions`
 
-### تعریف‌شده ولی هنوز fully wired نیستند
+### فعال و استفاده‌شده (DB-backed, previously file-based)
 
 - `tickets`
 - `ticket_replies`
@@ -394,13 +394,13 @@ users
 
 اگرچه جداول دیتابیسی موجود هستند:
 
-- API فعال تیکت‌ها از فایل `data/tickets.json` استفاده می‌کند.
-- API فعال هشدارها از فایل `data/alerts.json` استفاده می‌کند.
+- API فعال تیکت‌ها از جدول `tickets` در PostgreSQL استفاده می‌کند.
+- API فعال هشدارها از جدول `price_alerts` در PostgreSQL استفاده می‌کند.
 
 بنابراین در مهاجرت Cloudflare:
 
-- این دو بخش باید به storage پایدار منتقل شوند.
-- بهترین گزینه فعلی، فعال‌سازی کامل DB-backed flow با همین schema موجود است.
+- این دو بخش اکنون DB-backed هستند.
+- DB-backed flow فعال است و عملکرد صحیح دارد.
 
 ### 3. ایندکس‌های ضمنی
 

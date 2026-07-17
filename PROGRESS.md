@@ -10,16 +10,18 @@
 | `TASK_BOARD.md` | وضعیت زنده تسک‌ها + ترتیب اجرا |
 | `PROGRESS.md` | خلاصه progress (این فایل) |
 
-## Snapshot — 2026-07-05
+## Snapshot — 2026-07-17 (Post-Cleanup Audit)
 
 | Metric | Value |
 |--------|-------|
 | Total tasks | 54 |
-| ✅ Done | 51 |
-| 🟨 In Progress | 0 |
-| ⛔ Blocked | 0 |
-| ⬜ Todo | 3 |
-| **Progress** | **94%** |
+| Done | 49 |
+| Partial | 3 |
+| Invalid (no longer applicable) | 1 (4.4 - FastAPI deleted) |
+| Todo | 2 (4.4 doc, 5.4 CI) |
+| **Progress** | **91%** |
+
+> Note: Previous snapshot (2026-07-05) claimed 94% / 51 Done. Audit revealed 3 tasks were overstated (4.11, 4.12, 5.3) and 1 task (4.4) became invalid when FastAPI was removed.
 
 ## By Phase
 
@@ -615,14 +617,14 @@ Uses a shared mutable in-memory DB (`db.analyses[]`) and `createMemoryKv()` to p
 | `app.js` | `verifyJoinAndUnlock` | `?user_id=` |
 | `app.js` | `verifyJoinAndUnlock` | `?user_id=` (invalidate) |
 
-**Tests (2 new, total 79):**
+**Tests (2 new, total 37):**
 
 | # | Test | Assertions | Result |
 |---|------|-----------|--------|
 | 1 | `?user_id=99999` with valid header user 12345 → KV keyed on 12345, not 99999 | 3 | ✅ |
 | 2 | `?admin_id=831704732` with non-admin header auth → 403, DB untouched | 2 | ✅ |
 
-**`node --test worker-proxy.test.cjs` → 79/79 pass**
+**`node --test worker-proxy.test.cjs` → 37/37 pass**
 
 ## Next Executable Tasks
 

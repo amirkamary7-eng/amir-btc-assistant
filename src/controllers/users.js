@@ -19,6 +19,7 @@ export function createUserHandlers(deps) {
     isDatabaseConfigured,
     normalizeOptionalString,
     isDevMode,
+    isAdminTelegramId,
     processReferralOnBootstrap,
     resolveChannelMembership,
     userRepo,
@@ -118,6 +119,7 @@ export function createUserHandlers(deps) {
         watchlist,
         bot_username: String(env.BOT_USERNAME || ''),
         channel_joined: channelJoined,
+        is_admin: isAdminTelegramId(env, userId),
       }, {}, env);
     } catch (error) {
       console.warn(safeError('bootstrap-user', error));

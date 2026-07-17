@@ -297,7 +297,8 @@ window.addEventListener('hashchange', () => {
 //#region پیکربندی و وضعیت سراسری برنامه
 // ============================================================================
 
-const ADMIN_ID = '831704732';
+let ADMIN_ID = null; // Set dynamically from bootstrap API response
+let isCurrentUserAdmin = false;
 let BOT_USERNAME = 'Amir_BTC_AssistantBot'; // Fallback — overridden by bootstrap API (H-R4)
 const MAX_WATCHLIST = 7;
 const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
@@ -546,7 +547,6 @@ function getReferrerId() {
     if (startParam && startParam.startsWith('ref_')) {
         const id = startParam.slice(4);
         if (/^\d{1,20}$/.test(id)) {
-            console.log('[BOOT] getReferrerId from initDataUnsafe:', id);
             return id;
         }
     }
@@ -560,7 +560,6 @@ function getReferrerId() {
             if (sp && sp.startsWith('ref_')) {
                 const id = sp.slice(4);
                 if (/^\d{1,20}$/.test(id)) {
-                    console.log('[BOOT] getReferrerId from raw initData:', id);
                     return id;
                 }
             }
@@ -576,7 +575,6 @@ function getReferrerId() {
             if (val && val.startsWith('ref_')) {
                 const id = val.slice(4);
                 if (/^\d{1,20}$/.test(id)) {
-                    console.log('[BOOT] getReferrerId from URL param', key + ':', id);
                     return id;
                 }
             }
@@ -584,7 +582,6 @@ function getReferrerId() {
     } catch (e) {
         console.warn('[BOOT] getReferrerId URL search parse error:', e);
     }
-    console.log('[BOOT] getReferrerId: no valid referrer found');
     return null;
 }
 /**
@@ -806,6 +803,12 @@ async function bootstrapUser() {
         }
         saveLangToStorage();
         applyLanguage();
+
+        // Admin status from server
+        isCurrentUserAdmin = Boolean(data.is_admin);
+        if (data.user?.id) {
+            ADMIN_ID = String(data.user.id);
+        }
 
         // ── Membership lock gate ──
         if (data.channel_joined === false) {
@@ -2644,8 +2647,7 @@ function shareAnalysis() {
  * خروجی: یک مقدار بولی `true/false` برمی‌گرداند.
  */
 function isAdmin() {
-    const user = getTelegramUser();
-    return user && String(user.id) === ADMIN_ID;
+    return isCurrentUserAdmin;
 }
 /**
  * add تحلیل مودال را باز می‌کند.

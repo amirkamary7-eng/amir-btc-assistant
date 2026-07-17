@@ -11,7 +11,7 @@
 | **Production فقط دستی** | هیچ سیستم خودکاری حق deploy به production ندارد |
 | **Staging از GitHub** | هر push به main → تست → deploy به staging |
 | **main محافظت‌شده** | direct push ممنوع، فقط از طریق PR |
-| **تست اجباری** | بدون pass شدن ۷۹ تست، staging هم deploy نمی‌شود |
+| **تست اجباری** | without passing test suite، staging هم deploy نمی‌شود |
 
 ---
 
@@ -20,9 +20,9 @@
 ```
 GitHub push → main
     │
-    ├── npm test (79/79) ──→ FAIL → stops here, no deploy
+    ├── npm test ──→ FAIL → stops here, no deploy
     │
-    └── npm test (79/79) ──→ PASS → wrangler deploy --env staging
+    └── npm test ──→ PASS → wrangler deploy --env staging
                                           │
                                           └── amir-btc-assistant-api-staging (خودکار)
 
@@ -55,7 +55,7 @@ Local (only by operator)
 
 | اسکریپت | عملکرد | خطر |
 |---------|--------|------|
-| `npm test` | اجرای ۷۹ تست | امن |
+| `npm test` | run test suite | امن |
 | `npm run cf:dev` | اجرای محلی | امن |
 | `npm run cf:deploy:staging` | deploy به staging | امن |
 | `npm run cf:deploy:production` | **هشدار تعاملی + تأیید** | نیاز به تأیید دستی |
