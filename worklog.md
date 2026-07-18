@@ -404,3 +404,100 @@ Stage Summary:
 - All features scoped to Analysis module ONLY
 - Production verified end-to-end via agent-browser
 - VLM ratings: card design 8/10, visual hierarchy 7/10
+
+---
+Task ID: Analysis Module Enhancement Phase 3
+Agent: Z.ai Code (cron-triggered)
+Task: QA current state, fix bugs, add bookmark/copy/sentiment/read-time features
+
+Work Log:
+- Read worklog.md — Phase 2 added search/filter/sort, skeleton, reading progress
+- QA via agent-browser: found CRITICAL bug — featured card click didn't open detail
+- Also found: showToast() was called 18 times but NEVER DEFINED in the codebase
+
+BUGS FIXED (2 critical):
+
+1. Featured card click → detail page failed (CRITICAL):
+   - Root cause: openAnalysisDetailPage() used analyses.find(x => x.id === id)
+   - But featured analysis is excluded from the analyses array (list excludes featured)
+   - So clicking the featured card returned undefined → function returned early
+   - Fix: now also checks analysisFeatured variable as fallback:
+     analyses.find(x => x.id === id) || (analysisFeatured?.id === id ? analysisFeatured : null)
+   - Also added: updates featured cache view count, shows toast if not found
+
+2. showToast() undefined (CRITICAL, pre-existing):
+   - showToast was called 18 times across app.js but never defined
+   - Every call threw ReferenceError, which:
+     - Broke bookmark toggle (localStorage.setItem never reached after showToast)
+     - Broke copy-to-clipboard toast
+     - Broke analysis save success/error toasts (silently caught by try-catch)
+   - Fix: defined showToast() as alias for existing showMiniToast()
+   - Added Telegram HapticFeedback notificationOccurred('success') for tactile feedback
+   - Reordered toggleAnalysisBookmark: localStorage.setItem BEFORE showToast (defensive)
+
+NEW FEATURES IMPLEMENTED (5 additions):
+
+1. Bookmark/Save Feature (app.js + index.html + style.css):
+   - Bookmark button on each card (30px icon-only, touch-friendly)
+   - Dedicated bookmark button on detail page (48px, turns orange when saved)
+   - Persists to localStorage (analysisBookmarks array)
+   - '🔖 ذخیره‌شده' chip in timeframe filter row shows saved items only
+   - Chip shows live count: '🔖 ذخیره‌شده (3)'
+   - Bookmarked cards get accent border + ::before strip
+   - Saved filter includes featured analysis if it's bookmarked
+
+2. Copy to Clipboard (app.js + index.html + style.css):
+   - Copy button on detail page footer (48px icon button)
+   - Copies formatted text: coin, title, content, price levels, AMIRBTC tag
+   - Fallback to execCommand('copy') for older WebViews
+   - Toast confirmation: 'متن تحلیل کپی شد.'
+
+3. Read Time Estimate (app.js):
+   - estimateReadTime() based on word count (~200 wpm for Persian)
+   - Shown on card footer: '📖 3 دقیقه'
+   - Shown on detail page header: '👁 5 · 📖 3 دقیقه'
+
+4. Sentiment Badge (app.js + style.css):
+   - getSentiment() compares current_price position within support-resistance range
+   - Bullish (top 33% of range): green badge '📈 صعودی'
+   - Bearish (bottom 33%): red badge '📉 نزولی'
+   - Neutral (middle 33%): gray badge '➡️ خنثی'
+   - Shown on card coin row AND detail page title
+   - Returns null if any price level is missing (no badge shown)
+
+5. Enhanced Detail Footer (index.html + style.css):
+   - 3-button layout: bookmark (48px) + copy (48px) + share (flex)
+   - Icon buttons use card-style bg with border
+   - Saved state: bookmark turns orange with accent bg
+   - Active: scale(0.92) + bg highlight
+
+STYLING IMPROVEMENTS:
+- Card footer redesigned: left (views/time/readtime) + right (bookmark/edit/delete/share)
+- All action buttons are now icon-only (30px square) for compact mobile layout
+- Sentiment badges: color-coded with border (green/red/gray)
+- Bookmarked cards: accent border + visible ::before strip
+- Detail footer: flex layout with gap, 48px icon buttons + flexible share button
+
+VERIFICATION (agent-browser on production):
+- Featured card click → detail opens: ✓ (bug fixed, BTC detail shows correctly)
+- Bookmark toggle on detail: ✓ localStorage saves ["3815905cdf07"]
+- Bookmark button "saved" class: ✓ orange highlight
+- Saved chip count: ✓ '🔖 ذخیره‌شده (1)'
+- Saved chip filter: ✓ shows 1 card (the bookmarked featured analysis)
+- Copy button: ✓ toast 'متن تحلیل کپی شد.' appears
+- showToast defined: ✓ true (was false/undefined before)
+- Sentiment badge: ✓ '📈 صعودی' (bullish) or '➡️ خنثی' (neutral) based on price position
+- Read time: ✓ '📖 1 دقیقه' shown on card and detail
+- Console errors: ✓ zero
+
+DEPLOY:
+- Git push: cd36f2c → origin/main ✓
+- Pages: build MRQ4Z8KG deployed ✓
+- Worker: NOT redeployed (all changes are client-side)
+
+Stage Summary:
+- 2 critical bugs fixed: featured card click + showToast undefined
+- 5 new features: bookmark, copy, read time, sentiment, enhanced footer
+- All features scoped to Analysis module ONLY (showToast fix benefits entire app)
+- Production verified end-to-end via agent-browser
+- Zero console errors

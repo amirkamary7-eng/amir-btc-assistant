@@ -1421,6 +1421,87 @@ function initAnalysisToolbar() {
     }
     // Initialize saved chip count
     updateSavedChipCount();
+    // Initialize pull-to-refresh
+    initPullToRefresh();
+}
+
+/**
+ * Initialize pull-to-refresh on the analysis page.
+ * Detects when user pulls down at the top of the page and triggers a refresh.
+ */
+function initPullToRefresh() {
+    if (window._ptrInitialized) return;
+    window._ptrInitialized = true;
+
+    let startY = 0;
+    let pulling = false;
+    let pullDistance = 0;
+    const threshold = 70;
+
+    const ptrEl = () => document.getElementById('analysis-ptr');
+    const ptrText = () => document.getElementById('analysis-ptr-text');
+    const analysisPage = () => document.getElementById('analysis-page');
+
+    window.addEventListener('touchstart', (e) => {
+        // Only trigger on analysis page, when scrolled to top
+        if (!analysisPage()?.classList.contains('active')) return;
+        if (window.scrollY > 0) return;
+        startY = e.touches[0].clientY;
+        pulling = true;
+        pullDistance = 0;
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+        if (!pulling) return;
+        const currentY = e.touches[0].clientY;
+        pullDistance = Math.max(0, currentY - startY);
+        const ptr = ptrEl();
+        if (!ptr) return;
+        if (pullDistance > 10) {
+            ptr.classList.add('active');
+            ptr.style.height = Math.min(pullDistance, threshold) + 'px';
+            const text = ptrText();
+            if (text) {
+                text.textContent = pullDistance >= threshold ? 'رها کنید برای refresh' : 'برای refresh پایین بکشید';
+            }
+        }
+    }, { passive: true });
+
+    window.addEventListener('touchend', async () => {
+        if (!pulling) return;
+        pulling = false;
+        const ptr = ptrEl();
+        if (!ptr) return;
+
+        if (pullDistance >= threshold) {
+            // Trigger refresh
+            ptr.classList.remove('active');
+            ptr.classList.add('refreshing');
+            ptr.style.height = '';
+            const text = ptrText();
+            if (text) text.textContent = 'در حال به‌روزرسانی...';
+            try {
+                await fetchAnalyses(true);
+                renderAnalysisFeatured();
+                renderAnalysisStats();
+                renderAnalysisList();
+                renderAnalysisSlider();
+                showToast('تحلیل‌ها به‌روز شد.');
+            } catch (e) {
+                showToast('خطا در به‌روزرسانی.');
+            } finally {
+                setTimeout(() => {
+                    ptr.classList.remove('refreshing');
+                    const text2 = ptrText();
+                    if (text2) text2.textContent = 'برای refresh پایین بکشید';
+                }, 600);
+            }
+        } else {
+            ptr.classList.remove('active');
+            ptr.style.height = '';
+        }
+        pullDistance = 0;
+    }, { passive: true });
 }
 
 function setupAnalysisInfiniteScroll() {
@@ -1501,6 +1582,12 @@ function renderAnalysisDetailPage() {
     const readTime = estimateReadTime(a.content || a.text);
     const viewsEl = $('adp-views'); if (viewsEl) viewsEl.innerText = `👁 ${a.views_count || 0} · 📖 ${readTime} دقیقه`;
 
+    // Coin avatar (gradient circle with coin symbol)
+    const avatarEl = $('adp-coin-avatar');
+    if (avatarEl) {
+        avatarEl.innerHTML = escapeHtml(a.coin || '?');
+    }
+
     // Admin actions
     const adminActions = $('adp-admin-actions');
     if (adminActions) adminActions.style.display = isAdmin() ? '' : 'none';
@@ -1538,6 +1625,9 @@ function renderAnalysisDetailPage() {
         }
     }
 
+    // Price range visualizer (only if all 3 levels are present and numeric)
+    renderPriceRangeVisualizer(a);
+
     // Content (escaped for XSS safety)
     const contentEl = $('adp-content');
     if (contentEl) {
@@ -1560,8 +1650,73 @@ function renderAnalysisDetailPage() {
 }
 
 /**
- * Render up to 3 related analyses (same coin or same timeframe, excluding current).
+ * Render the price range visualizer bar.
+ * Shows a horizontal track from support to resistance with a marker at current price.
+ * Only renders if all 3 values are present and numeric.
  */
+function renderPriceRangeVisualizer(a) {
+    const rangeEl = $('adp-price-range');
+    if (!rangeEl) return;
+
+    const support = parseFloat(a.support_level);
+    const resistance = parseFloat(a.resistance_level);
+    const current = parseFloat(a.current_price);
+
+    // Hide if any value is missing or non-numeric, or if range is invalid
+    if (!isFinite(support) || !isFinite(resistance) || !isFinite(current) || resistance <= support) {
+        rangeEl.style.display = 'none';
+        return;
+    }
+
+    // Clamp current to [support, resistance]
+    const clampedCurrent = Math.max(support, Math.min(resistance, current));
+    const position = ((clampedCurrent - support) / (resistance - support)) * 100; // 0-100
+
+    rangeEl.style.display = '';
+
+    // Update labels with actual values
+    const supportLabel = $('adp-pr-support');
+    const resistanceLabel = $('adp-pr-resistance');
+    if (supportLabel) supportLabel.textContent = `حمایت ${formatPrice(support)}`;
+    if (resistanceLabel) resistanceLabel.textContent = `مقاومت ${formatPrice(resistance)}`;
+
+    // Set fill width and marker position (start at 0, then animate)
+    const fill = $('adp-pr-fill');
+    const marker = $('adp-pr-marker');
+    const markerLabel = $('adp-pr-marker-label');
+
+    if (fill) {
+        fill.style.width = '0%';
+        // Trigger animation on next frame
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                fill.style.width = position + '%';
+            });
+        });
+    }
+    if (marker) {
+        marker.style.left = '0%';
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                marker.style.left = position + '%';
+            });
+        });
+    }
+    if (markerLabel) {
+        markerLabel.textContent = formatPrice(current);
+    }
+}
+
+/**
+ * Format a price number with appropriate decimals.
+ */
+function formatPrice(n) {
+    if (!isFinite(n)) return '';
+    if (n >= 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    if (n >= 1) return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    return n.toLocaleString('en-US', { maximumFractionDigits: 6 });
+}
+
 function renderRelatedAnalyses(current) {
     const relatedSection = $('adp-related');
     const relatedList = $('adp-related-list');
