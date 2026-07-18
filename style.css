@@ -3058,49 +3058,180 @@ strong.down { color: var(--red); }
 .featured-card {
     position: relative;
     overflow: hidden;
-    background: var(--bg-card);
-    border-radius: 18px;
-    padding: 16px;
+    background: linear-gradient(165deg, var(--bg-card) 0%, rgba(255, 138, 0, 0.04) 100%);
+    border-radius: 20px;
     margin: 0 16px 16px;
     cursor: pointer;
-    border: none;
-    transition: transform 0.2s ease;
+    border: 1px solid rgba(255, 138, 0, 0.15);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 138, 0, 0.05);
 }
 
 .featured-card::before {
     content: '';
     position: absolute;
-    inset: 0;
-    border-radius: 18px;
-    padding: 1px;
-    background: linear-gradient(135deg, rgba(255,138,0,0.5), rgba(255,138,0,0.05), rgba(255,138,0,0.3));
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
+    top: 0;
+    right: 0;
+    width: 120px;
+    height: 120px;
+    background: radial-gradient(circle at top right, rgba(255, 138, 0, 0.15), transparent 70%);
     pointer-events: none;
+    z-index: 0;
 }
 
 .featured-card:active {
     transform: scale(0.985);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Header row: badge + sentiment */
+.featured-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 0;
+    position: relative;
+    z-index: 1;
 }
 
 .featured-badge {
-    display: inline-block;
-    background: rgba(255, 138, 0, 0.1);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: linear-gradient(135deg, rgba(255, 138, 0, 0.15), rgba(255, 100, 0, 0.08));
     color: var(--accent);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    padding: 4px 12px;
+    padding: 5px 12px;
     border-radius: 20px;
-    margin-bottom: 12px;
     letter-spacing: 0.2px;
+    border: 1px solid rgba(255, 138, 0, 0.2);
 }
 
-.featured-body {
+.featured-sentiment {
+    font-size: 10px;
+    padding: 3px 9px;
+    border-radius: 6px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.featured-sentiment-bullish {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--green);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.featured-sentiment-bearish {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.featured-sentiment-neutral {
+    background: rgba(156, 163, 175, 0.12);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.2);
+}
+
+/* Image with overlay (Binance-style) */
+.featured-image-wrap {
+    position: relative;
+    height: 140px;
+    margin: 10px 16px 0;
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--bg-primary);
+}
+
+.featured-image-bg {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.featured-image-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.7) 100%);
+}
+
+.featured-image-content {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px 14px;
+    z-index: 1;
+}
+
+.featured-coin-row {
     display: flex;
-    flex-direction: row-reverse;
-    gap: 14px;
-    align-items: flex-start;
+    align-items: center;
+    gap: 10px;
+}
+
+.featured-coin-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, rgba(255, 138, 0, 0.3), rgba(255, 138, 0, 0.1));
+    border: 1.5px solid rgba(255, 138, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+    color: #fff;
+    text-shadow: 0 0 6px rgba(255, 138, 0, 0.5);
+    flex-shrink: 0;
+}
+
+.featured-coin-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.featured-coin {
+    font-size: 18px;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.featured-tf {
+    font-size: 10px;
+    background: rgba(255, 138, 0, 0.25);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: 700;
+    width: fit-content;
+    backdrop-filter: blur(4px);
+}
+
+.featured-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    margin-top: 6px;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Fallback body (no image) */
+.featured-body {
+    padding: 12px 16px 0;
+    position: relative;
+    z-index: 1;
 }
 
 .featured-info {
@@ -3108,32 +3239,18 @@ strong.down { color: var(--red); }
     min-width: 0;
 }
 
-.featured-coin-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.featured-coin {
-    font-size: 18px;
-    font-weight: 800;
-    color: #fff;
-}
-
-.featured-tf {
-    font-size: 11px;
-    background: rgba(255, 138, 0, 0.15);
-    color: var(--accent);
-    padding: 2px 8px;
-    border-radius: 6px;
-    font-weight: 700;
+/* Content section */
+.featured-content {
+    padding: 12px 16px 14px;
+    position: relative;
+    z-index: 1;
 }
 
 .featured-snippet {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-sub);
     line-height: 1.5;
-    margin-top: 6px;
+    margin-bottom: 10px;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -3141,31 +3258,90 @@ strong.down { color: var(--red); }
     text-overflow: ellipsis;
 }
 
-.featured-meta {
-    display: flex;
-    gap: 16px;
-    margin-top: 8px;
-    font-size: 11px;
-    color: var(--text-dim);
+/* Mini price bar on featured card */
+.featured-price-bar {
+    position: relative;
+    height: 28px;
+    margin-bottom: 10px;
 }
 
-.featured-image {
-    width: 100px;
-    height: 100px;
-    border-radius: 14px;
-    object-fit: cover;
-    flex-shrink: 0;
-    background: var(--bg-primary);
+.featured-price-track {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 4px;
+    transform: translateY(-50%);
+    border-radius: 2px;
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.2), rgba(255, 138, 0, 0.2), rgba(239, 68, 68, 0.2));
+}
+
+.featured-price-fill {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: 4px;
+    transform: translateY(-50%);
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--green), var(--accent));
+    transition: width 0.5s ease;
+}
+
+.featured-price-marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 2px rgba(255, 138, 0, 0.3);
+    transition: left 0.5s ease;
+}
+
+.featured-price-labels {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.fpl-support {
+    color: var(--green);
+}
+
+.fpl-current {
+    color: var(--accent);
+}
+
+.fpl-resistance {
+    color: var(--red);
+}
+
+.featured-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: var(--text-dim);
+    flex-wrap: wrap;
+}
+
+.fm-dot {
+    opacity: 0.5;
 }
 
 .featured-cta {
-    margin-top: 12px;
-    font-size: 12px;
+    margin-right: 0;
+    margin-left: auto;
+    font-size: 11px;
     font-weight: 700;
     color: var(--accent);
-    display: flex;
-    align-items: center;
-    gap: 4px;
 }
 
 /* #endregion */
@@ -3257,7 +3433,7 @@ strong.down { color: var(--red); }
 
 .analysis-card-v2 {
     display: flex;
-    align-items: stretch;
+    flex-direction: column;
     background: linear-gradient(165deg, var(--bg-card) 0%, rgba(255, 138, 0, 0.02) 100%);
     border-radius: 18px;
     border: 1px solid var(--border);
@@ -3268,6 +3444,12 @@ strong.down { color: var(--red); }
     animation: analysisFadeIn 0.4s ease both;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     position: relative;
+}
+
+/* Main row: image + info (horizontal) */
+.acv-main-row {
+    display: flex;
+    align-items: stretch;
 }
 
 .analysis-card-v2::before {
@@ -3466,6 +3648,73 @@ strong.down { color: var(--red); }
 
 .acv-support .acv-level-value {
     color: var(--green);
+}
+
+/* ── Mini Price Bar (compact, on analysis cards) ── */
+.acv-mini-price {
+    position: relative;
+    height: 24px;
+    margin: 0 12px 6px;
+    padding: 0 4px;
+}
+
+.acv-mp-track {
+    position: absolute;
+    top: 50%;
+    left: 4px;
+    right: 4px;
+    height: 3px;
+    transform: translateY(-50%);
+    border-radius: 2px;
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.25), rgba(255, 138, 0, 0.25), rgba(239, 68, 68, 0.25));
+}
+
+.acv-mp-fill {
+    position: absolute;
+    top: 50%;
+    left: 4px;
+    height: 3px;
+    transform: translateY(-50%);
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--green), var(--accent));
+}
+
+.acv-mp-marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 1.5px solid #fff;
+    box-shadow: 0 0 0 1.5px rgba(255, 138, 0, 0.3);
+}
+
+.acv-mp-label {
+    position: absolute;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.acv-mp-support {
+    bottom: 0;
+    left: 0;
+    color: var(--green);
+}
+
+.acv-mp-current {
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--accent);
+}
+
+.acv-mp-resistance {
+    bottom: 0;
+    right: 0;
+    color: var(--red);
 }
 
 .acv-footer-row {

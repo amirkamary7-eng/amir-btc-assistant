@@ -1102,25 +1102,79 @@ function renderAnalysisFeatured() {
     if (!section) return;
     if (!analysisFeatured) { section.style.display = 'none'; return; }
     const a = analysisFeatured;
+    const sentiment = getSentiment(a);
+    const readTime = estimateReadTime(a.content || a.text);
+    const sentimentBadge = sentiment ? `<span class="featured-sentiment featured-sentiment-${sentiment}">${sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی'}</span>` : '';
+
+    // Calculate price position for mini-bar
+    let priceBarHtml = '';
+    const support = parseFloat(a.support_level);
+    const resistance = parseFloat(a.resistance_level);
+    const current = parseFloat(a.current_price);
+    if (isFinite(support) && isFinite(resistance) && isFinite(current) && resistance > support) {
+        const pos = Math.max(0, Math.min(100, ((current - support) / (resistance - support)) * 100));
+        priceBarHtml = `
+            <div class="featured-price-bar">
+                <div class="featured-price-track"></div>
+                <div class="featured-price-fill" style="width:${pos}%"></div>
+                <div class="featured-price-marker" style="left:${pos}%"></div>
+                <div class="featured-price-labels">
+                    <span class="fpl-support">${escapeHtml(a.support_level)}</span>
+                    <span class="fpl-current">${escapeHtml(a.current_price)}</span>
+                    <span class="fpl-resistance">${escapeHtml(a.resistance_level)}</span>
+                </div>
+            </div>
+        `;
+    }
+
     section.style.display = '';
     section.innerHTML = `
         <div class="featured-card" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')">
-            <div class="featured-badge">🔥 تحلیل ویژه امروز</div>
-            <div class="featured-body">
-                <div class="featured-info">
-                    <div class="featured-coin-row">
-                        <span class="featured-coin">${escapeHtml(a.coin)}</span>
-                        <span class="featured-tf">${escapeHtml(a.timeframe || '1D')}</span>
-                    </div>
-                    <div class="featured-snippet">${escapeHtml(truncateText(a.content || a.text || '', 120))}</div>
-                    <div class="featured-meta">
-                        <span>👁 ${a.views_count || 0} بازدید</span>
-                        <span>⏰ ${timeAgo(a.created_at)}</span>
+            <div class="featured-header">
+                <div class="featured-badge">🔥 تحلیل ویژه امروز</div>
+                ${sentimentBadge}
+            </div>
+            ${a.image ? `
+                <div class="featured-image-wrap">
+                    <img src="${escapeHtml(a.image)}" class="featured-image-bg" loading="lazy" onerror="this.style.display='none'">
+                    <div class="featured-image-overlay"></div>
+                    <div class="featured-image-content">
+                        <div class="featured-coin-row">
+                            <span class="featured-coin-avatar">${escapeHtml(a.coin)}</span>
+                            <div class="featured-coin-info">
+                                <span class="featured-coin">${escapeHtml(a.coin)}</span>
+                                <span class="featured-tf">${escapeHtml(a.timeframe || '1D')}</span>
+                            </div>
+                        </div>
+                        ${a.title ? `<div class="featured-title">${escapeHtml(truncateText(a.title, 70))}</div>` : ''}
                     </div>
                 </div>
-                ${a.image ? `<img src="${escapeHtml(a.image)}" class="featured-image" loading="lazy" onerror="newsImageFallback(this)">` : ''}
+            ` : `
+                <div class="featured-body">
+                    <div class="featured-info">
+                        <div class="featured-coin-row">
+                            <span class="featured-coin-avatar">${escapeHtml(a.coin)}</span>
+                            <div class="featured-coin-info">
+                                <span class="featured-coin">${escapeHtml(a.coin)}</span>
+                                <span class="featured-tf">${escapeHtml(a.timeframe || '1D')}</span>
+                            </div>
+                        </div>
+                        ${a.title ? `<div class="featured-title">${escapeHtml(truncateText(a.title, 70))}</div>` : ''}
+                    </div>
+                </div>
+            `}
+            <div class="featured-content">
+                <div class="featured-snippet">${escapeHtml(truncateText(a.content || a.text || '', 110))}</div>
+                ${priceBarHtml}
+                <div class="featured-meta">
+                    <span class="fm-views">👁 ${a.views_count || 0}</span>
+                    <span class="fm-dot">·</span>
+                    <span class="fm-time">⏰ ${timeAgo(a.created_at)}</span>
+                    <span class="fm-dot">·</span>
+                    <span class="fm-read">📖 ${readTime} دقیقه</span>
+                    <span class="featured-cta">مشاهده ←</span>
+                </div>
             </div>
-            <div class="featured-cta">مشاهده تحلیل</div>
         </div>
     `;
 }
@@ -1298,26 +1352,44 @@ function renderAnalysisList() {
         const readTime = estimateReadTime(a.content || a.text);
         const bookmarked = isAnalysisBookmarked(a.id);
         const sentimentBadge = sentiment ? `<span class="acv-sentiment acv-sentiment-${sentiment}">${sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی'}</span>` : '';
+
+        // Mini price bar (only if all 3 levels are numeric)
+        let miniPriceBar = '';
+        const sNum = parseFloat(a.support_level);
+        const rNum = parseFloat(a.resistance_level);
+        const cNum = parseFloat(a.current_price);
+        if (isFinite(sNum) && isFinite(rNum) && isFinite(cNum) && rNum > sNum) {
+            const pos = Math.max(0, Math.min(100, ((cNum - sNum) / (rNum - sNum)) * 100));
+            miniPriceBar = `
+                <div class="acv-mini-price">
+                    <div class="acv-mp-track"></div>
+                    <div class="acv-mp-fill" style="width:${pos}%"></div>
+                    <div class="acv-mp-marker" style="left:${pos}%"></div>
+                    <span class="acv-mp-label acv-mp-support">${escapeHtml(a.support_level)}</span>
+                    <span class="acv-mp-label acv-mp-current">${escapeHtml(a.current_price)}</span>
+                    <span class="acv-mp-label acv-mp-resistance">${escapeHtml(a.resistance_level)}</span>
+                </div>
+            `;
+        }
+
         return `
         <div class="analysis-card-v2 ${bookmarked ? 'acv-bookmarked' : ''}" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')" style="animation-delay:${Math.min(i, 8) * 0.04}s">
-            <div class="acv-image-col">
-                ${a.image ? `<img src="${escapeHtml(a.image)}" class="acv-thumb" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="newsImageFallback(this)">` : `<div class="acv-no-img">${escapeHtml(a.coin)}</div>`}
-            </div>
-            <div class="acv-info-col">
-                <div class="acv-coin-row">
-                    <span class="acv-coin">${escapeHtml(a.coin)}</span>
-                    <span class="acv-tf">${escapeHtml(a.timeframe || '1D')}</span>
-                    ${a.featured ? '<span class="acv-featured-badge">⭐ ویژه</span>' : ''}
-                    ${sentimentBadge}
+            <div class="acv-main-row">
+                <div class="acv-image-col">
+                    ${a.image ? `<img src="${escapeHtml(a.image)}" class="acv-thumb" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="newsImageFallback(this)">` : `<div class="acv-no-img">${escapeHtml(a.coin)}</div>`}
                 </div>
-                ${a.title ? `<div class="acv-title">${escapeHtml(truncateText(a.title, 60))}</div>` : ''}
-                <p class="acv-snippet">${escapeHtml(truncateText(a.content || a.text || '', 90))}</p>
+                <div class="acv-info-col">
+                    <div class="acv-coin-row">
+                        <span class="acv-coin">${escapeHtml(a.coin)}</span>
+                        <span class="acv-tf">${escapeHtml(a.timeframe || '1D')}</span>
+                        ${a.featured ? '<span class="acv-featured-badge">⭐ ویژه</span>' : ''}
+                        ${sentimentBadge}
+                    </div>
+                    ${a.title ? `<div class="acv-title">${escapeHtml(truncateText(a.title, 60))}</div>` : ''}
+                    <p class="acv-snippet">${escapeHtml(truncateText(a.content || a.text || '', 90))}</p>
+                </div>
             </div>
-            <div class="acv-levels-col">
-                ${a.resistance_level ? `<div class="acv-level acv-resistance"><span class="acv-level-label">مقاومت</span><span class="acv-level-value">${escapeHtml(a.resistance_level)}</span></div>` : ''}
-                ${a.current_price ? `<div class="acv-level acv-current"><span class="acv-level-label">قیمت فعلی</span><span class="acv-level-value">${escapeHtml(a.current_price)}</span></div>` : ''}
-                ${a.support_level ? `<div class="acv-level acv-support"><span class="acv-level-label">حمایت</span><span class="acv-level-value">${escapeHtml(a.support_level)}</span></div>` : ''}
-            </div>
+            ${miniPriceBar}
             <div class="acv-footer-row">
                 <div class="acv-footer-left">
                     <span class="acv-views">👁 ${a.views_count || 0}</span>
@@ -1573,6 +1645,32 @@ async function openAnalysisDetailPage(id) {
     window.scrollTo(0, 0);
 }
 
+/**
+ * Animate a count-up effect for the view count badge.
+ * Goes from 0 to target over ~800ms using requestAnimationFrame.
+ */
+function animateViewCount(el, target, readTime) {
+    if (!el) return;
+    const duration = 800;
+    const startTime = performance.now();
+    const targetNum = Math.max(0, Number(target) || 0);
+
+    function update(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / duration);
+        // Ease-out cubic for smooth deceleration
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const current = Math.round(targetNum * eased);
+        el.innerText = `👁 ${current} · 📖 ${readTime} دقیقه`;
+        if (progress < 1) {
+            requestAnimationFrame(update);
+        } else {
+            el.innerText = `👁 ${targetNum} · 📖 ${readTime} دقیقه`;
+        }
+    }
+    requestAnimationFrame(update);
+}
+
 function renderAnalysisDetailPage() {
     const a = currentAnalysisDetail;
     if (!a) return;
@@ -1580,7 +1678,8 @@ function renderAnalysisDetailPage() {
     const coinEl = $('adp-coin'); if (coinEl) coinEl.innerText = a.coin;
     const tfEl = $('adp-tf'); if (tfEl) tfEl.innerText = a.timeframe || '1D';
     const readTime = estimateReadTime(a.content || a.text);
-    const viewsEl = $('adp-views'); if (viewsEl) viewsEl.innerText = `👁 ${a.views_count || 0} · 📖 ${readTime} دقیقه`;
+    // Animated view count (count-up effect)
+    animateViewCount($('adp-views'), a.views_count || 0, readTime);
 
     // Coin avatar (gradient circle with coin symbol)
     const avatarEl = $('adp-coin-avatar');
