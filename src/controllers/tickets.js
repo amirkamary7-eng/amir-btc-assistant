@@ -29,7 +29,7 @@ export function createTicketHandlers(deps) {
    * Notifies all admins and the ticket owner via Telegram.
    */
   async function handleCreate(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -96,7 +96,7 @@ export function createTicketHandlers(deps) {
    * GET /api/tickets — List tickets for the authenticated user.
    */
   async function handleList(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -122,7 +122,7 @@ export function createTicketHandlers(deps) {
    * GET /api/tickets/all — List all tickets (admin only).
    */
   async function handleListAll(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -152,7 +152,7 @@ export function createTicketHandlers(deps) {
    * Notifies the ticket owner via Telegram.
    */
   async function handleReply(request, env, ticketId) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -215,7 +215,7 @@ export function createTicketHandlers(deps) {
    * DELETE /api/tickets/:id — Delete a ticket (owner or admin).
    */
   async function handleDelete(request, env, ticketId) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }

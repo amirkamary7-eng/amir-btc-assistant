@@ -292,7 +292,6 @@ const AssistantUI = {
 
         try {
             const payload = {
-                user_id: getUserId(),
                 message: fullMessage,
                 history: this.history.slice(-6),
                 image: this.pendingImage || null

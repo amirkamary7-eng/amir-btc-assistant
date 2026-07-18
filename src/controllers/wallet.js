@@ -20,7 +20,7 @@ export function createWalletHandlers(deps) {
    * GET /api/wallet — Full wallet state: balance, tier, recent transactions.
    */
   async function handleGetWallet(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -42,7 +42,7 @@ export function createWalletHandlers(deps) {
    * Query params: offset (default 0), limit (default 20).
    */
   async function handleGetHistory(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'success', total: 0, offset: 0, limit: 20, hasMore: false, transactions: [] }, {}, env);
@@ -63,7 +63,7 @@ export function createWalletHandlers(deps) {
    * GET /api/wallet/claim — Get daily claim status.
    */
   async function handleGetClaimStatus(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'success', claimed_today: false, daily_reward: 10 }, {}, env);
@@ -81,7 +81,7 @@ export function createWalletHandlers(deps) {
    * POST /api/wallet/claim — Claim daily reward.
    */
   async function handleClaimDaily(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
@@ -103,7 +103,7 @@ export function createWalletHandlers(deps) {
    * GET /api/wallet/referral-stats — Referral stats for wallet page.
    */
   async function handleReferralStats(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'success', invited: 0, active: 0, earned: 0, total_rewards: 0 }, {}, env);

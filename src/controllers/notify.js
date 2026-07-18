@@ -26,7 +26,7 @@ export function createNotifyHandlers(deps) {
    * Rate limited to 5 sends per user per day.
    */
   async function handlePost(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }

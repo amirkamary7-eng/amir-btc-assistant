@@ -21,7 +21,7 @@ export function createReferralHandlers(deps) {
    * Returns zeroed defaults when the database is not configured.
    */
   async function handleStats(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -42,7 +42,7 @@ export function createReferralHandlers(deps) {
    * Returns empty defaults when the database is not configured.
    */
   async function handleTokens(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }

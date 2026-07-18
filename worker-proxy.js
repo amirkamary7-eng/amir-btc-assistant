@@ -141,7 +141,8 @@ function isAlertsCronEnabled(env) {
  * never be active in production to prevent user impersonation.
  */
 function isDevMode(env) {
-  return String(env.APP_ENV || '').trim().toLowerCase() !== 'production';
+  const v = String(env.APP_ENV || '').trim().toLowerCase();
+  return v === 'development' || v === 'staging';
 }
 
 async function readAppCache(env, key) {
@@ -2272,7 +2273,7 @@ const referralHandlers = createReferralHandlers({
   isDatabaseConfigured,
   referralRepo,
 });
-const walletRepo = createWalletRepository({ queryDb });
+const walletRepo = createWalletRepository({ queryDb, queryDbTransaction });
 const walletHandlers = createWalletHandlers({
   jsonResponse,
   authenticateTelegramRequest,

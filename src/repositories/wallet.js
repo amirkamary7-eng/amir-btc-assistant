@@ -7,7 +7,7 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createWalletRepository(deps) {
-  const { queryDb } = deps;
+  const { queryDb, queryDbTransaction } = deps;
 
   /**
    * Membership tier thresholds (AB tokens)
@@ -133,39 +133,92 @@ export function createWalletRepository(deps) {
   }
 
   /**
-   * Claim daily reward: atomically check + insert in a single transaction.
-   * Uses a conditional CTE to prevent double-claim without needing a UNIQUE constraint.
+   * Claim daily reward: fully atomic via advisory lock inside a single transaction.
+   *
+   * Uses pg_advisory_xact_lock(key) to serialize concurrent claims for the
+   * *same user on the same day*. The lock key is derived from user_id + date
+   * so different users or different days never block each other.
+   *
+   * The advisory lock is automatically released when the transaction ends
+   * (COMMIT or ROLLBACK), so no manual cleanup is needed.
+   *
+   * All 4 steps run inside a single BEGIN...COMMIT via queryDbTransaction:
+   *   1. Acquire advisory lock (blocks if another claim for same user+date is in progress)
+   *   2. Check if already claimed today
+   *   3. UPSERT balance (conditional: only if not already claimed)
+   *   4. INSERT transaction record (conditional: only if not already claimed, RETURNING id)
+   *
+   * Steps 3 and 4 use WHERE NOT EXISTS as a safety net, even though the advisory
+   * lock guarantees no concurrent modification can occur between steps.
    */
   async function claimDailyReward(env, userId, amount) {
-    const result = await queryDb(env, `
-      WITH claim_check AS (
-        SELECT 1 AS already_claimed
-        FROM token_transactions
-        WHERE user_id = $1 AND tx_type = 'daily_claim'
-        AND created_at >= CURRENT_DATE
-        LIMIT 1
-      ),
-      inserted AS (
-        INSERT INTO token_balances (user_id, balance, updated_at)
-        SELECT $1, $2, NOW()
-        WHERE NOT EXISTS (SELECT 1 FROM claim_check)
-        ON CONFLICT (user_id) DO UPDATE
-        SET balance = token_balances.balance + EXCLUDED.balance, updated_at = NOW()
-        RETURNING 1
-      )
-      INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
-      SELECT $1, $2, 'daily_claim', 'Daily check-in reward', $3, NOW()
-      WHERE NOT EXISTS (SELECT 1 FROM claim_check)
-      RETURNING id
-    `, [String(userId), Number(amount), `daily_${new Date().toISOString().slice(0, 10)}`]);
+    if (!queryDbTransaction) {
+      throw new Error('queryDbTransaction not available');
+    }
 
-    // If no row returned, either already claimed or another issue
-    if (!result.rows.length || !result.rows[0]?.id) {
-      // Re-check if it was because already claimed
-      const alreadyClaimed = await getDailyClaimStatus(env, userId);
-      if (alreadyClaimed) {
-        throw Object.assign(new Error('ALREADY_CLAIMED'), { code: 'ALREADY_CLAIMED' });
-      }
+    const uid = String(userId);
+    const refId = `daily_${new Date().toISOString().slice(0, 10)}`;
+
+    // Compute a stable 64-bit advisory lock key from user_id + today's date.
+    // md5 produces a 32-char hex string; we take the first 16 chars as a bigint.
+    const lockKeyResult = await queryDb(env,
+      `SELECT (('x' || SUBSTRING(MD5($1 || CURRENT_DATE::text), 1, 16))::bit(64)::bigint) AS lock_key`,
+      [uid],
+    );
+    const lockKey = lockKeyResult.rows[0]?.lock_key;
+    if (lockKey == null) {
+      throw new Error('Failed to compute advisory lock key');
+    }
+
+    // Single transaction: lock -> check -> upsert balance -> insert tx record
+    const results = await queryDbTransaction(env, [
+      // Step 1: Acquire per-user, per-day advisory lock
+      {
+        sql: `SELECT pg_advisory_xact_lock($1)`,
+        params: [lockKey],
+      },
+      // Step 2: Check if already claimed today
+      {
+        sql: `SELECT id FROM token_transactions
+              WHERE user_id = $1 AND tx_type = 'daily_claim'
+              AND created_at >= CURRENT_DATE
+              LIMIT 1`,
+        params: [uid],
+      },
+      // Step 3: UPSERT balance — conditional on not already claimed
+      {
+        sql: `INSERT INTO token_balances (user_id, balance, updated_at)
+              SELECT $1, $2, NOW()
+              WHERE NOT EXISTS (
+                SELECT 1 FROM token_transactions
+                WHERE user_id = $1 AND tx_type = 'daily_claim'
+                AND created_at >= CURRENT_DATE
+              )
+              ON CONFLICT (user_id) DO UPDATE
+              SET balance = token_balances.balance + EXCLUDED.balance, updated_at = NOW()`,
+        params: [uid, Number(amount)],
+      },
+      // Step 4: INSERT transaction record — conditional, returns id on success
+      {
+        sql: `INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
+              SELECT $1, $2, 'daily_claim', 'Daily check-in reward', $3, NOW()
+              WHERE NOT EXISTS (
+                SELECT 1 FROM token_transactions
+                WHERE user_id = $1 AND tx_type = 'daily_claim'
+                AND created_at >= CURRENT_DATE
+              )
+              RETURNING id`,
+        params: [uid, Number(amount), refId],
+      },
+    ]);
+
+    // Step 2 result: if rows exist, already claimed before this transaction
+    if (results[1].rows.length > 0) {
+      throw Object.assign(new Error('ALREADY_CLAIMED'), { code: 'ALREADY_CLAIMED' });
+    }
+
+    // Step 4 result: if RETURNING returned rows, insert succeeded
+    if (!results[3].rows.length || !results[3].rows[0]?.id) {
       throw new Error('Failed to claim daily reward');
     }
 

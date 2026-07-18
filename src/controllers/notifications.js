@@ -21,7 +21,7 @@ export function createNotificationHandlers(deps) {
    * Query params: ?limit=N (default 50, max 100)
    */
   async function handleList(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -56,7 +56,7 @@ export function createNotificationHandlers(deps) {
    * POST /api/notifications/read-all — Mark all notifications as read.
    */
   async function handleMarkAllRead(request, env) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
@@ -81,7 +81,7 @@ export function createNotificationHandlers(deps) {
    * POST /api/notifications/:id/read — Mark a single notification as read.
    */
   async function handleMarkRead(request, env, notificationId) {
-    const authState = authenticateTelegramRequest(request, env);
+    const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) {
       return authState.error;
     }
