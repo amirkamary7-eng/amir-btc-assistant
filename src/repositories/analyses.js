@@ -70,13 +70,15 @@ export function createAnalysisRepository(deps) {
    * Get stats: active count, today count, total count.
    */
   async function getStats(env) {
-    const [totalRes, todayRes] = await Promise.all([
+    const [totalRes, activeRes, todayRes] = await Promise.all([
       queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses`),
+      queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured IS NOT TRUE OR featured = FALSE`),
       queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE created_at >= CURRENT_DATE`),
     ]);
     const total = Number(totalRes.rows[0]?.cnt || 0);
+    const active = Number(activeRes.rows[0]?.cnt || 0);
     const today = Number(todayRes.rows[0]?.cnt || 0);
-    return { active: total, today, total };
+    return { active, today, total };
   }
 
   /**

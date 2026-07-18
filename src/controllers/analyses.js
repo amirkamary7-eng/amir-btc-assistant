@@ -33,6 +33,7 @@ export function createAnalysisHandlers(deps) {
   const ANALYSES_LIST_KEY = 'analyses:list';
   const ANALYSES_VERSION_KEY = 'analyses:version';
   const ANALYSES_FEATURED_KEY = 'analyses:featured';
+  const ANALYSES_STATS_KEY = 'analyses:stats';
   const DETAIL_CACHE_PREFIX = 'analysis:detail:';
 
   function generateVersion() {
@@ -77,6 +78,8 @@ export function createAnalysisHandlers(deps) {
     try { await env.APP_CACHE?.delete?.(ANALYSES_LIST_KEY); } catch {}
     // Delete featured cache
     try { await env.APP_CACHE?.delete?.(ANALYSES_FEATURED_KEY); } catch {}
+    // Delete stats cache
+    try { await env.APP_CACHE?.delete?.(ANALYSES_STATS_KEY); } catch {}
     return version;
   }
 
@@ -158,13 +161,13 @@ export function createAnalysisHandlers(deps) {
 
     const cachedState = await readCachedAnalysesState(env);
 
-    // Version match → unchanged (but always return featured + stats fresh for accuracy)
+    // Version match → unchanged (but return cached featured + stats for accuracy)
     if (requestedVersion !== null && cachedState.version !== null && requestedVersion === cachedState.version) {
-      // Still fetch fresh featured + stats
       let featured = null;
       let stats = { active: 0, today: 0, total: 0 };
       if (isDatabaseConfigured(env)) {
         try {
+          // Try cached featured
           const cachedFeatured = await readAppCache(env, ANALYSES_FEATURED_KEY);
           if (cachedFeatured) {
             try { featured = JSON.parse(cachedFeatured); } catch { featured = null; }
@@ -173,7 +176,15 @@ export function createAnalysisHandlers(deps) {
             featured = await analysisRepo.getFeatured(env);
             if (featured) await writeAppCache(env, ANALYSES_FEATURED_KEY, JSON.stringify(featured), 300);
           }
-          stats = await analysisRepo.getStats(env);
+          // Try cached stats
+          const cachedStats = await readAppCache(env, ANALYSES_STATS_KEY);
+          if (cachedStats) {
+            try { stats = JSON.parse(cachedStats); } catch { stats = { active: 0, today: 0, total: 0 }; }
+          }
+          if (!cachedStats) {
+            stats = await analysisRepo.getStats(env);
+            await writeAppCache(env, ANALYSES_STATS_KEY, JSON.stringify(stats), 60);
+          }
         } catch {}
       }
       return jsonResponse({
@@ -204,13 +215,13 @@ export function createAnalysisHandlers(deps) {
           await writeAppCache(env, ANALYSES_FEATURED_KEY, JSON.stringify(featured), 300);
         }
 
-        // For the full-list cache (used by dashboard slider), update it
-        const allAnalyses = await analysisRepo.listAll(env);
-        const dataUnchanged = cachedState.analyses !== null &&
-          cachedState.version !== null &&
-          JSON.stringify(allAnalyses) === JSON.stringify(cachedState.analyses);
-        const version = dataUnchanged ? cachedState.version : generateVersion();
-        await updateAnalysesCache(env, allAnalyses, version);
+        // Cache stats (short TTL — invalidated on CRUD)
+        await writeAppCache(env, ANALYSES_STATS_KEY, JSON.stringify(stats), 60);
+
+        // Generate version — avoids expensive listAll() + JSON.stringify comparison
+        const version = generateVersion();
+        // Cache the paginated list (used for version checking, not listAll)
+        await updateAnalysesCache(env, listResult.analyses, version);
 
         return jsonResponse({
           status: 'success',
@@ -317,12 +328,18 @@ export function createAnalysisHandlers(deps) {
       const analysis = await analysisRepo.create(env, authResult.user.id, parsed.payload);
       const version = await invalidateAnalysesCache(env);
 
+      // Fetch fresh stats + featured (KV may be stale on other instances)
+      const [stats, featured] = await Promise.all([
+        analysisRepo.getStats(env),
+        analysisRepo.getFeatured(env),
+      ]);
+
       // Notify joined users (non-blocking)
       const notify = notifyNewAnalysis(env, analysis, ctx);
       if (ctx?.waitUntil) ctx.waitUntil(notify.catch(() => {}));
       else notify.catch(() => {});
 
-      return jsonResponse({ status: 'success', analysis, version }, {}, env);
+      return jsonResponse({ status: 'success', analysis, version, stats, featured }, {}, env);
     } catch (error) {
       console.warn(safeError('create-analysis', error));
       return safeDbErrorResponse(error, {}, env);
@@ -351,7 +368,14 @@ export function createAnalysisHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
       const version = await invalidateAnalysesCache(env);
-      return jsonResponse({ status: 'success', analysis, version }, {}, env);
+
+      // Fetch fresh stats + featured (KV may be stale on other instances)
+      const [stats, featured] = await Promise.all([
+        analysisRepo.getStats(env),
+        analysisRepo.getFeatured(env),
+      ]);
+
+      return jsonResponse({ status: 'success', analysis, version, stats, featured }, {}, env);
     } catch (error) {
       console.warn(safeError('update-analysis', error));
       return safeDbErrorResponse(error, {}, env);
@@ -377,7 +401,14 @@ export function createAnalysisHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
       const version = await invalidateAnalysesCache(env);
-      return jsonResponse({ status: 'success', version }, {}, env);
+
+      // Fetch fresh stats + featured (KV may be stale on other instances)
+      const [stats, featured] = await Promise.all([
+        analysisRepo.getStats(env),
+        analysisRepo.getFeatured(env),
+      ]);
+
+      return jsonResponse({ status: 'success', version, stats, featured }, {}, env);
     } catch (error) {
       console.warn(safeError('delete-analysis', error));
       return safeDbErrorResponse(error, {}, env);
