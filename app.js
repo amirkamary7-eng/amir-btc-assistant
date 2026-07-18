@@ -822,7 +822,9 @@ async function bootstrapUser() {
         applyLanguage();
 
         // Admin status from server — persist to localStorage for session stability
-        isCurrentUserAdmin = Boolean(data.is_admin);
+        const newAdminStatus = Boolean(data.is_admin);
+        const adminChanged = newAdminStatus !== isCurrentUserAdmin;
+        isCurrentUserAdmin = newAdminStatus;
         localStorage.setItem('is_admin', isCurrentUserAdmin ? '1' : '0');
         if (data.user?.id) {
             ADMIN_ID = String(data.user.id);
@@ -830,6 +832,11 @@ async function bootstrapUser() {
         }
         // Update FAB visibility now that admin status is known
         updateAnalysisFabVisibility();
+        // If admin status changed, re-render analysis list to show/hide admin buttons
+        if (adminChanged) {
+            console.log('[BOOT] Admin status changed:', newAdminStatus, '— re-rendering analysis UI');
+            renderAnalysisList();
+        }
 
         // ── Membership lock gate ──
         if (data.channel_joined === false) {
@@ -998,6 +1005,9 @@ async function saveAnalysisToServer(payload, method, analysisId) {
 }
 
 function isAdmin() {
+    // CRITICAL: Never return true before bootstrap completes.
+    // This prevents non-admin users from seeing admin UI due to stale localStorage.
+    if (!bootstrapComplete) return false;
     return isCurrentUserAdmin;
 }
 
@@ -1100,88 +1110,204 @@ function getAnalysisDeepLink(analysisId) {
     return `https://t.me/${botName}?startapp=analysis_${analysisId}`;
 }
 
-// ── Render: Featured Card ──
-function renderAnalysisFeatured() {
-    const section = $('analysis-featured-section');
-    if (!section) return;
-    if (!analysisFeatured) { section.style.display = 'none'; return; }
-    const a = analysisFeatured;
+// ── SVG Icon Constants (professional, reusable) ──
+const SVG_EYE = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const SVG_CLOCK = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+const SVG_BOOK = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>';
+const SVG_EDIT = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+const SVG_DELETE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+const SVG_SHARE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>';
+const SVG_ARROW_LEFT = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>';
+const SVG_CHART = '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>';
+
+// ── Render: Featured Slider ──
+let currentFeaturedSlide = 0;
+let featuredSlideInterval = null;
+let featuredSlides = [];
+
+function buildFeaturedPriceBoxes(a) {
+    const sNum = parseFloat(a.support_level);
+    const rNum = parseFloat(a.resistance_level);
+    const cNum = parseFloat(a.current_price);
+    if (!isFinite(sNum) && !isFinite(rNum) && !isFinite(cNum)) return '';
+    return `
+        <div class="fs-price-boxes">
+            <div class="price-box price-box-resistance">
+                <span class="price-box-label">مقاومت</span>
+                <span class="price-box-value">${escapeHtml(a.resistance_level || '—')}</span>
+            </div>
+            <div class="price-box price-box-current">
+                <span class="price-box-label">قیمت فعلی</span>
+                <span class="price-box-value">${escapeHtml(a.current_price || '—')}</span>
+            </div>
+            <div class="price-box price-box-support">
+                <span class="price-box-label">حمایت</span>
+                <span class="price-box-value">${escapeHtml(a.support_level || '—')}</span>
+            </div>
+        </div>
+    `;
+}
+
+function renderFeaturedSlideHTML(a) {
     const sentiment = getSentiment(a);
     const readTime = estimateReadTime(a.content || a.text);
-    const sentimentBadge = sentiment ? `<span class="featured-sentiment featured-sentiment-${sentiment}">${sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی'}</span>` : '';
+    const sentimentClass = sentiment || 'neutral';
+    const sentimentText = sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی';
+    const sentimentHTML = sentiment ? `<span class="fs-sentiment-badge ${sentimentClass}">${sentimentText}</span>` : '';
+    const featuredHTML = a.featured ? `<span class="fs-featured-badge">⭐ ویژه</span>` : '';
 
-    // Calculate price position for mini-bar
-    let priceBarHtml = '';
-    const support = parseFloat(a.support_level);
-    const resistance = parseFloat(a.resistance_level);
-    const current = parseFloat(a.current_price);
-    if (isFinite(support) && isFinite(resistance) && isFinite(current) && resistance > support) {
-        const pos = Math.max(0, Math.min(100, ((current - support) / (resistance - support)) * 100));
-        priceBarHtml = `
-            <div class="featured-price-bar">
-                <div class="featured-price-track"></div>
-                <div class="featured-price-fill" style="width:${pos}%"></div>
-                <div class="featured-price-marker" style="left:${pos}%"></div>
-                <div class="featured-price-labels">
-                    <span class="fpl-support">${escapeHtml(a.support_level)}</span>
-                    <span class="fpl-current">${escapeHtml(a.current_price)}</span>
-                    <span class="fpl-resistance">${escapeHtml(a.resistance_level)}</span>
+    const imageSection = a.image
+        ? `<div class="fs-card-image-wrap">
+                <img src="${escapeHtml(a.image)}" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="this.parentElement.parentElement.innerHTML='<div class=\'fs-card-no-image\'><div class=\'fs-card-no-image-text\'>${escapeHtml(a.coin)}</div></div>'">
+                <div class="fs-card-image-overlay"></div>
+                <div class="fs-card-image-content">
+                    ${sentimentHTML}
+                    ${featuredHTML}
+                    <div class="fs-coin-row">
+                        <span class="fs-coin-avatar">${escapeHtml(a.coin)}</span>
+                        <div class="fs-coin-info">
+                            <span class="fs-coin-name">${escapeHtml(a.coin)}</span>
+                            <span class="fs-tf-badge">${escapeHtml(a.timeframe || '1D')}</span>
+                        </div>
+                    </div>
+                    ${a.title ? `<div class="fs-card-title">${escapeHtml(truncateText(a.title, 70))}</div>` : ''}
                 </div>
-            </div>
-        `;
-    }
+           </div>`
+        : `<div class="fs-card-no-image">
+                ${sentimentHTML}
+                ${featuredHTML}
+                <div class="fs-card-no-image-text">${escapeHtml(a.coin)}</div>
+           </div>`;
 
-    section.style.display = '';
-    section.innerHTML = `
-        <div class="featured-card" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')">
-            <div class="featured-header">
-                <div class="featured-badge">🔥 تحلیل ویژه امروز</div>
-                ${sentimentBadge}
-            </div>
-            ${a.image ? `
-                <div class="featured-image-wrap">
-                    <img src="${escapeHtml(a.image)}" class="featured-image-bg" loading="lazy" onerror="this.style.display='none'">
-                    <div class="featured-image-overlay"></div>
-                    <div class="featured-image-content">
-                        <div class="featured-coin-row">
-                            <span class="featured-coin-avatar">${escapeHtml(a.coin)}</span>
-                            <div class="featured-coin-info">
-                                <span class="featured-coin">${escapeHtml(a.coin)}</span>
-                                <span class="featured-tf">${escapeHtml(a.timeframe || '1D')}</span>
-                            </div>
-                        </div>
-                        ${a.title ? `<div class="featured-title">${escapeHtml(truncateText(a.title, 70))}</div>` : ''}
-                    </div>
-                </div>
-            ` : `
-                <div class="featured-body">
-                    <div class="featured-info">
-                        <div class="featured-coin-row">
-                            <span class="featured-coin-avatar">${escapeHtml(a.coin)}</span>
-                            <div class="featured-coin-info">
-                                <span class="featured-coin">${escapeHtml(a.coin)}</span>
-                                <span class="featured-tf">${escapeHtml(a.timeframe || '1D')}</span>
-                            </div>
-                        </div>
-                        ${a.title ? `<div class="featured-title">${escapeHtml(truncateText(a.title, 70))}</div>` : ''}
-                    </div>
-                </div>
-            `}
-            <div class="featured-content">
-                <div class="featured-snippet">${escapeHtml(truncateText(a.content || a.text || '', 110))}</div>
-                ${priceBarHtml}
-                <div class="featured-meta">
-                    <span class="fm-views">👁 ${a.views_count || 0}</span>
-                    <span class="fm-dot">·</span>
-                    <span class="fm-time">⏰ ${timeAgo(a.created_at)}</span>
-                    <span class="fm-dot">·</span>
-                    <span class="fm-read">📖 ${readTime} دقیقه</span>
-                    <span class="featured-cta">مشاهده ←</span>
+    return `
+        <div class="fs-card" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')">
+            ${imageSection}
+            <div class="fs-card-content">
+                <div class="fs-card-snippet">${escapeHtml(truncateText(a.content || a.text || '', 120))}</div>
+                ${buildFeaturedPriceBoxes(a)}
+                <div class="fs-card-meta">
+                    <span class="fs-meta-item">${SVG_EYE} ${a.views_count || 0}</span>
+                    <span class="fs-meta-item">${SVG_CLOCK} ${timeAgo(a.created_at)}</span>
+                    <span class="fs-meta-item">${SVG_BOOK} ${readTime} دقیقه</span>
+                    <span class="fs-card-cta">مشاهده ←</span>
                 </div>
             </div>
         </div>
     `;
 }
+
+function renderAnalysisFeatured() {
+    const section = $('analysis-featured-section');
+    const container = $('featured-slides-container');
+    const dotsEl = $('featured-slider-dots');
+    if (!section || !container) return;
+
+    // Build slides: featured first, then up to 4 recent
+    featuredSlides = [];
+    if (analysisFeatured) {
+        featuredSlides.push(analysisFeatured);
+    }
+    const recentIds = new Set(featuredSlides.map(a => a.id));
+    const recent = analyses.filter(a => !recentIds.has(a.id)).slice(0, 4);
+    featuredSlides = featuredSlides.concat(recent);
+
+    if (!featuredSlides.length) {
+        section.style.display = 'none';
+        clearInterval(featuredSlideInterval);
+        return;
+    }
+
+    section.style.display = '';
+    if (currentFeaturedSlide >= featuredSlides.length) currentFeaturedSlide = 0;
+
+    // Render current slide
+    container.innerHTML = `<div class="featured-slide active">${renderFeaturedSlideHTML(featuredSlides[currentFeaturedSlide])}</div>`;
+
+    // Render dots
+    if (dotsEl) {
+        dotsEl.innerHTML = featuredSlides.map((_, i) =>
+            `<span class="fs-dot ${i === currentFeaturedSlide ? 'active' : ''}" data-idx="${i}"></span>`
+        ).join('');
+
+        // Dot click handler
+        dotsEl.onclick = (e) => {
+            const dot = e.target.closest('.fs-dot');
+            if (!dot) return;
+            const idx = parseInt(dot.dataset.idx);
+            if (!isNaN(idx) && idx !== currentFeaturedSlide) {
+                currentFeaturedSlide = idx;
+                showFeaturedSlide();
+                resetFeaturedAutoSlide();
+            }
+        };
+    }
+
+    // Auto-slide
+    resetFeaturedAutoSlide();
+
+    // Touch swipe support
+    initFeaturedSwipe(container);
+}
+
+function showFeaturedSlide() {
+    const container = $('featured-slides-container');
+    const dotsEl = $('featured-slider-dots');
+    if (!container || !featuredSlides.length) return;
+
+    container.innerHTML = `<div class="featured-slide active">${renderFeaturedSlideHTML(featuredSlides[currentFeaturedSlide])}</div>`;
+
+    // Update dots
+    if (dotsEl) {
+        dotsEl.querySelectorAll('.fs-dot').forEach((dot, i) => {
+            dot.classList.toggle('active', i === currentFeaturedSlide);
+        });
+    }
+}
+
+function resetFeaturedAutoSlide() {
+    clearInterval(featuredSlideInterval);
+    if (featuredSlides.length > 1) {
+        featuredSlideInterval = setInterval(() => {
+            currentFeaturedSlide = (currentFeaturedSlide + 1) % featuredSlides.length;
+            showFeaturedSlide();
+        }, 8000);
+    }
+}
+
+function initFeaturedSwipe(container) {
+    let startX = 0;
+    let startY = 0;
+    let swiping = false;
+
+    container.ontouchstart = (e) => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        swiping = true;
+    };
+
+    container.ontouchend = (e) => {
+        if (!swiping) return;
+        swiping = false;
+        const endX = e.changedTouches[0].clientX;
+        const endY = e.changedTouches[0].clientY;
+        const diffX = endX - startX;
+        const diffY = endY - startY;
+
+        // Only trigger if horizontal swipe is dominant and sufficient
+        if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+            if (diffX > 0) {
+                // Swipe right (RTL: go to next)
+                currentFeaturedSlide = (currentFeaturedSlide + 1) % featuredSlides.length;
+            } else {
+                // Swipe left (RTL: go to previous)
+                currentFeaturedSlide = (currentFeaturedSlide - 1 + featuredSlides.length) % featuredSlides.length;
+            }
+            showFeaturedSlide();
+            resetFeaturedAutoSlide();
+        }
+    };
+}
+
 
 // ── Render: Stats Bar ──
 function renderAnalysisStats() {
@@ -1338,61 +1464,82 @@ function renderAnalysisList() {
         const sentiment = getSentiment(a);
         const readTime = estimateReadTime(a.content || a.text);
         const bookmarked = isAnalysisBookmarked(a.id);
-        const sentimentBadge = sentiment ? `<span class="acv-sentiment acv-sentiment-${sentiment}">${sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی'}</span>` : '';
+        const sentimentClass = sentiment || 'neutral';
+        const sentimentText = sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی';
+        const sentimentBadge = sentiment ? `<span class="acv-sentiment acv-sentiment-${sentimentClass}">${sentimentText}</span>` : '';
 
-        // Mini price bar (only if all 3 levels are numeric)
-        let miniPriceBar = '';
+        // Price boxes
+        let priceBoxes = '';
         const sNum = parseFloat(a.support_level);
         const rNum = parseFloat(a.resistance_level);
         const cNum = parseFloat(a.current_price);
-        if (isFinite(sNum) && isFinite(rNum) && isFinite(cNum) && rNum > sNum) {
-            const pos = Math.max(0, Math.min(100, ((cNum - sNum) / (rNum - sNum)) * 100));
-            miniPriceBar = `
-                <div class="acv-mini-price">
-                    <div class="acv-mp-track"></div>
-                    <div class="acv-mp-fill" style="width:${pos}%"></div>
-                    <div class="acv-mp-marker" style="left:${pos}%"></div>
-                    <span class="acv-mp-label acv-mp-support">${escapeHtml(a.support_level)}</span>
-                    <span class="acv-mp-label acv-mp-current">${escapeHtml(a.current_price)}</span>
-                    <span class="acv-mp-label acv-mp-resistance">${escapeHtml(a.resistance_level)}</span>
+        if (isFinite(sNum) || isFinite(rNum) || isFinite(cNum)) {
+            priceBoxes = `
+                <div class="acv-price-boxes">
+                    <div class="price-box price-box-resistance">
+                        <span class="price-box-label">مقاومت</span>
+                        <span class="price-box-value">${escapeHtml(a.resistance_level || '—')}</span>
+                    </div>
+                    <div class="price-box price-box-current">
+                        <span class="price-box-label">قیمت</span>
+                        <span class="price-box-value">${escapeHtml(a.current_price || '—')}</span>
+                    </div>
+                    <div class="price-box price-box-support">
+                        <span class="price-box-label">حمایت</span>
+                        <span class="price-box-value">${escapeHtml(a.support_level || '—')}</span>
+                    </div>
                 </div>
             `;
         }
 
+        // Image section
+        const imageSection = a.image
+            ? `<div class="acv-image-section">
+                    <img src="${escapeHtml(a.image)}" class="acv-hero-image" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="this.outerHTML='<div class=\'acv-no-image-placeholder\'>${escapeHtml(a.coin)}</div>'">
+                    <div class="acv-image-overlay">
+                        <div class="acv-coin-badge">${escapeHtml(a.coin)}</div>
+                        <div class="acv-tf-badge">${escapeHtml(a.timeframe || '1D')}</div>
+                        ${a.featured ? '<div class="acv-featured-star">⭐</div>' : ''}
+                    </div>
+               </div>`
+            : `<div class="acv-image-section">
+                    <div class="acv-no-image-placeholder">${escapeHtml(a.coin)}</div>
+                    <div class="acv-image-overlay" style="background:none;">
+                        <div class="acv-coin-badge" style="position:absolute;bottom:10px;">${escapeHtml(a.coin)}</div>
+                        <div class="acv-tf-badge" style="position:absolute;bottom:10px;left:12px;">${escapeHtml(a.timeframe || '1D')}</div>
+                        ${a.featured ? '<div class="acv-featured-star" style="position:absolute;bottom:10px;right:12px;">⭐</div>' : ''}
+                    </div>
+               </div>`;
+
         return `
         <div class="analysis-card-v2 ${bookmarked ? 'acv-bookmarked' : ''}" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')" style="animation-delay:${Math.min(i, 8) * 0.04}s">
-            <div class="acv-main-row">
-                <div class="acv-image-col">
-                    ${a.image ? `<img src="${escapeHtml(a.image)}" class="acv-thumb" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="newsImageFallback(this)">` : `<div class="acv-no-img">${escapeHtml(a.coin)}</div>`}
+            ${imageSection}
+            <div class="acv-content-section">
+                <div class="acv-title-row">
+                    <span class="acv-coin-name">${escapeHtml(a.coin)}</span>
+                    <span class="acv-timeframe">${escapeHtml(a.timeframe || '1D')}</span>
+                    ${sentimentBadge}
                 </div>
-                <div class="acv-info-col">
-                    <div class="acv-coin-row">
-                        <span class="acv-coin">${escapeHtml(a.coin)}</span>
-                        <span class="acv-tf">${escapeHtml(a.timeframe || '1D')}</span>
-                        ${a.featured ? '<span class="acv-featured-badge">⭐ ویژه</span>' : ''}
-                        ${sentimentBadge}
-                    </div>
-                    ${a.title ? `<div class="acv-title">${escapeHtml(truncateText(a.title, 60))}</div>` : ''}
-                    <p class="acv-snippet">${escapeHtml(truncateText(a.content || a.text || '', 90))}</p>
-                </div>
+                ${a.title ? `<h3 class="acv-card-title">${escapeHtml(truncateText(a.title, 60))}</h3>` : ''}
+                <p class="acv-card-snippet">${escapeHtml(truncateText(a.content || a.text || '', 120))}</p>
             </div>
-            ${miniPriceBar}
+            ${priceBoxes}
             <div class="acv-footer-row">
-                <div class="acv-footer-left">
-                    <span class="acv-views">👁 ${a.views_count || 0}</span>
-                    <span class="acv-time">⏰ ${timeAgo(a.created_at)}</span>
-                    <span class="acv-readtime">📖 ${readTime} دقیقه</span>
+                <div class="acv-meta-icons">
+                    <span class="acv-meta-item">${SVG_EYE} ${a.views_count || 0}</span>
+                    <span class="acv-meta-item">${SVG_CLOCK} ${timeAgo(a.created_at)}</span>
+                    <span class="acv-meta-item">${SVG_BOOK} ${readTime} دقیقه</span>
                 </div>
-                <div class="acv-footer-right" onclick="event.stopPropagation()">
+                <div class="acv-action-btns" onclick="event.stopPropagation()">
                     <button class="acv-bookmark-btn ${bookmarked ? 'saved' : ''}" onclick="toggleAnalysisBookmark('${escapeHtml(a.id)}', event)" aria-label="ذخیره">
                         ${bookmarked
                             ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="currentColor" stroke-width="1.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'
                             : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'}
                     </button>
                     ${isAdminUser
-                        ? `<button class="acv-edit-btn" onclick="openEditAnalysisModal('${escapeHtml(a.id)}')">✏️</button>
-                           <button class="acv-delete-btn" onclick="startDeleteAnalysis('${escapeHtml(a.id)}')">🗑</button>`
-                        : `<button class="acv-share-btn" onclick="shareAnalysisById('${escapeHtml(a.id)}')">🔗</button>`}
+                        ? `<button class="acv-edit-btn" onclick="openEditAnalysisModal('${escapeHtml(a.id)}')">${SVG_EDIT}</button>
+                           <button class="acv-delete-btn" onclick="startDeleteAnalysis('${escapeHtml(a.id)}')">${SVG_DELETE}</button>`
+                        : `<button class="acv-share-btn" onclick="shareAnalysisById('${escapeHtml(a.id)}')">${SVG_SHARE}</button>`}
                 </div>
             </div>
         </div>
@@ -1634,11 +1781,11 @@ function animateViewCount(el, target, readTime) {
         // Ease-out cubic for smooth deceleration
         const eased = 1 - Math.pow(1 - progress, 3);
         const current = Math.round(targetNum * eased);
-        el.innerText = `👁 ${current} · 📖 ${readTime} دقیقه`;
+        el.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> ${current} <span style="margin:0 4px;opacity:0.4">·</span> <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> ${readTime} دقیقه`;
         if (progress < 1) {
             requestAnimationFrame(update);
         } else {
-            el.innerText = `👁 ${targetNum} · 📖 ${readTime} دقیقه`;
+            el.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> ${targetNum} <span style="margin:0 4px;opacity:0.4">·</span> <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> ${readTime} دقیقه`;
         }
     }
     requestAnimationFrame(update);
@@ -1815,7 +1962,7 @@ function renderRelatedAnalyses(current) {
                 <div class="adp-related-meta">
                     <span>${escapeHtml(r.timeframe || '1D')}</span>
                     <span>·</span>
-                    <span>👁 ${r.views_count || 0}</span>
+                    <span><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;opacity:0.7"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> ${r.views_count || 0}</span>
                     <span>·</span>
                     <span>${timeAgo(r.created_at)}</span>
                 </div>
@@ -2213,6 +2360,7 @@ function submitAnalysis() {
                     renderAnalysisStats();
                     renderAnalysisList();
                     renderAnalysisSlider();
+                    updateAnalysisFabVisibility();
                 }).catch(() => {});
             } catch (e) {
                 console.error('[ANALYSIS] save error:', e.message);
@@ -2291,6 +2439,7 @@ function executeDeleteAnalysis() {
                 renderAnalysisStats();
                 renderAnalysisList();
                 renderAnalysisSlider();
+                updateAnalysisFabVisibility();
             }).catch(() => {});
         } catch (e) {
             console.error('deleteAnalysis:', e);
