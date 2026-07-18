@@ -344,6 +344,7 @@ const ANALYSIS_PAGE_SIZE = 20;
 let analysisSearchQuery = '';
 let analysisSortMode = 'newest';
 let analysisTimeframeFilter = 'all';
+let analysisCategoryFilter = 'all'; // all, crypto, forex
 let analysisShowSavedOnly = false;
 // ── Bookmarked analysis IDs (persisted in localStorage) ──
 let analysisBookmarks = JSON.parse(localStorage.getItem('analysisBookmarks') || '[]');
@@ -1421,8 +1422,11 @@ function getFilteredAnalyses() {
         if (analysisFeatured && analysisBookmarks.includes(analysisFeatured.id) && !list.find(a => a.id === analysisFeatured.id)) {
             list.unshift(analysisFeatured);
         }
+    } else if (analysisCategoryFilter !== 'all') {
+        // Category filter (crypto/forex)
+        list = list.filter(a => (a.category || 'crypto') === analysisCategoryFilter);
     } else if (analysisTimeframeFilter !== 'all') {
-        // Category filter (crypto/forex) — not timeframe anymore
+        // Legacy timeframe filter (maps to category)
         list = list.filter(a => (a.category || 'crypto') === analysisTimeframeFilter);
     }
 
@@ -1459,6 +1463,11 @@ function showAnalysisSkeleton() {
                     <div class="skel-line short"></div>
                     <div class="skel-line long"></div>
                     <div class="skel-line medium"></div>
+                    <div style="display:flex;gap:8px;margin-top:2px;">
+                        <div class="skel-line xshort"></div>
+                        <div class="skel-line xshort"></div>
+                        <div class="skel-line xshort"></div>
+                    </div>
                 </div>
             </div>
         `).join('');
@@ -1593,6 +1602,7 @@ function renderAnalysisList() {
 function resetAnalysisFilters() {
     analysisSearchQuery = '';
     analysisTimeframeFilter = 'all';
+    analysisCategoryFilter = 'all';
     analysisShowSavedOnly = false;
     const searchInput = $('analysis-search-input');
     if (searchInput) searchInput.value = '';
@@ -1642,9 +1652,11 @@ function initAnalysisToolbar() {
             const tf = chip.dataset.tf;
             if (tf === 'saved') {
                 analysisShowSavedOnly = true;
+                analysisCategoryFilter = 'all';
                 analysisTimeframeFilter = 'all';
             } else {
                 analysisShowSavedOnly = false;
+                analysisCategoryFilter = tf;
                 analysisTimeframeFilter = tf;
             }
             renderAnalysisList();
