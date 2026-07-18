@@ -1045,22 +1045,27 @@ function getSentiment(a) {
  */
 function toggleAnalysisBookmark(id, event) {
     if (event) event.stopPropagation();
+    if (!id) return;
     const idx = analysisBookmarks.indexOf(id);
     if (idx >= 0) {
         analysisBookmarks.splice(idx, 1);
+        // Save FIRST, then notify
+        localStorage.setItem('analysisBookmarks', JSON.stringify(analysisBookmarks));
+        updateSavedChipCount();
+        renderAnalysisList();
+        if (currentAnalysisDetail && currentAnalysisDetail.id === id) {
+            updateDetailBookmarkButton(id);
+        }
         showToast('از ذخیره‌شده‌ها حذف شد.');
     } else {
         analysisBookmarks.push(id);
+        localStorage.setItem('analysisBookmarks', JSON.stringify(analysisBookmarks));
+        updateSavedChipCount();
+        renderAnalysisList();
+        if (currentAnalysisDetail && currentAnalysisDetail.id === id) {
+            updateDetailBookmarkButton(id);
+        }
         showToast('در ذخیره‌شده‌ها اضافه شد.');
-    }
-    localStorage.setItem('analysisBookmarks', JSON.stringify(analysisBookmarks));
-    // Update bookmark chip count
-    updateSavedChipCount();
-    // Re-render to update bookmark icons
-    renderAnalysisList();
-    // If on detail page, update the bookmark button
-    if (currentAnalysisDetail && currentAnalysisDetail.id === id) {
-        updateDetailBookmarkButton(id);
     }
 }
 
@@ -3277,6 +3282,16 @@ function showMiniToast(msg) {
     toast.classList.add('toast-show');
     clearTimeout(toast._timer);
     toast._timer = setTimeout(() => toast.classList.remove('toast-show'), 1200);
+}
+
+/**
+ * showToast — alias for showMiniToast. Used throughout the analysis module
+ * and other sections. Shows a brief non-blocking toast at the bottom of the screen.
+ */
+function showToast(msg) {
+    showMiniToast(msg);
+    // Also trigger haptic feedback if available
+    try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch {}
 }
 /**
  * واچ‌لیست را در رابط کاربری رندر می‌کند.
