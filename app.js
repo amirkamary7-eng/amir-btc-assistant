@@ -816,7 +816,6 @@ async function bootstrapUser() {
 
         // Admin status from server
         isCurrentUserAdmin = Boolean(data.is_admin);
-        console.log('[ANALYSIS]', 'Bootstrap admin — is_admin:', data.is_admin, '→ isCurrentUserAdmin:', isCurrentUserAdmin, 'userId:', data.user?.id);
         if (data.user?.id) {
             ADMIN_ID = String(data.user.id);
         }
@@ -924,30 +923,23 @@ async function fetchAnalyses(force = false, append = false) {
 }
 
 async function saveAnalysisToServer(payload, method, analysisId) {
-    console.log('[ANALYSIS]', 'saveAnalysisToServer', { method, analysisId: analysisId || 'new' });
-
     // ── Step 1: Check API_BASE ──
     if (!API_BASE) {
-        console.error('[ANALYSIS]', 'BLOCKED — API_BASE is empty');
         showToast('API در دسترس نیست.');
         return null;
     }
-    console.log('[ANALYSIS]', 'API_BASE OK:', API_BASE);
 
     // ── Step 2: Check Admin ──
     if (!isAdmin()) {
-        console.error('[ANALYSIS]', 'BLOCKED — not admin, isCurrentUserAdmin:', isCurrentUserAdmin);
         showToast('دسترسی ادمین وجود ندارد.');
         return null;
     }
-    console.log('[ANALYSIS]', 'Admin check PASSED');
 
     // ── Step 3: Build URL ──
     const basePath = '/api/admin/analyses';
     const url = method === 'DELETE' || method === 'PUT'
         ? `${basePath}/${analysisId}`
         : basePath;
-    console.log('[ANALYSIS]', 'Request URL:', url);
 
     // ── Step 4: Build body & headers ──
     const body = JSON.stringify(payload);
@@ -955,18 +947,13 @@ async function saveAnalysisToServer(payload, method, analysisId) {
     const initData = getTelegramInitData();
     if (initData) {
         headers['X-Telegram-Init-Data'] = initData;
-        console.log('[ANALYSIS]', 'InitData header set, length:', initData.length);
-    } else {
-        console.error('[ANALYSIS]', 'WARNING — InitData is EMPTY, auth will fail');
     }
 
     // ── Step 5: Fetch with timeout ──
-    console.log('[ANALYSIS]', 'Calling fetch...');
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 20000);
         const fullUrl = `${API_BASE}${url}`;
-        console.log('[ANALYSIS]', 'Full URL:', fullUrl);
         const res = await fetch(fullUrl, {
             method,
             headers,
@@ -974,22 +961,19 @@ async function saveAnalysisToServer(payload, method, analysisId) {
             signal: controller.signal,
         });
         clearTimeout(timeoutId);
-        console.log('[ANALYSIS]', 'Response status:', res.status, res.statusText);
 
         // ── Step 6: Handle response ──
         const responseText = await res.text();
-        console.log('[ANALYSIS]', 'Response body (first 300):', responseText.substring(0, 300));
 
         if (!res.ok) {
-            console.error('[ANALYSIS]', 'HTTP ERROR', res.status, responseText.substring(0, 200));
+            console.error('[ANALYSIS] HTTP ERROR', res.status, responseText.substring(0, 200));
             throw new Error(`HTTP ${res.status}: ${responseText.substring(0, 100)}`);
         }
 
         const result = JSON.parse(responseText);
-        console.log('[ANALYSIS]', 'SUCCESS — status:', result.status);
         return result;
     } catch (err) {
-        console.error('[ANALYSIS]', 'FETCH EXCEPTION:', err.name, err.message);
+        console.error('[ANALYSIS] fetch exception:', err.name, err.message);
         throw err;
     }
 }
@@ -1074,7 +1058,20 @@ function renderAnalysisList() {
 
     if (!analyses.length) {
         container.innerHTML = '';
-        if (emptyState) emptyState.style.display = '';
+        if (emptyState) {
+            // Different copy for admin vs regular user
+            const adminUser = isAdmin();
+            const titleEl = $('aes-title');
+            const descEl  = $('aes-desc');
+            if (adminUser) {
+                if (titleEl) titleEl.textContent = 'هنوز تحلیلی منتشر نشده است';
+                if (descEl)  descEl.textContent  = 'برای انتشار اولین تحلیل روی دکمه + کلیک کنید';
+            } else {
+                if (titleEl) titleEl.textContent = 'هنوز تحلیلی منتشر نشده است';
+                if (descEl)  descEl.textContent  = 'به‌زودی تحلیل‌های جدید در این بخش نمایش داده می‌شوند';
+            }
+            emptyState.style.display = '';
+        }
         return;
     }
     if (emptyState) emptyState.style.display = 'none';
@@ -1385,11 +1382,7 @@ function checkAnalysisDeepLink() {
 
 // ── Admin: Create / Edit ──
 function openAddAnalysisModal() {
-    console.log('[ANALYSIS]', 'openAddAnalysisModal — isAdmin():', isAdmin(), 'isCurrentUserAdmin:', isCurrentUserAdmin, 'API_BASE:', API_BASE ? 'SET' : 'EMPTY');
-    if (!isAdmin()) {
-        console.warn('[ANALYSIS]', 'openAddAnalysisModal BLOCKED — not admin');
-        return;
-    }
+    if (!isAdmin()) return;
     editingAnalysisId = null;
     document.getElementById('analysis-modal-title').innerText = 'تحلیل جدید';
     document.getElementById('analysis-submit-btn').innerText = 'انتشار تحلیل';
@@ -1428,9 +1421,6 @@ function closeAddAnalysisModal() {
 }
 
 function submitAnalysis() {
-    console.log('[ANALYSIS]', '▶ submitAnalysis CLICKED — editingAnalysisId:', editingAnalysisId);
-    console.trace('[ANALYSIS]', 'Call stack:');
-
     try {
         // ── Step 1: Read form elements ──
         const titleEl = document.getElementById('analysis-title');
@@ -1443,8 +1433,6 @@ function submitAnalysis() {
         const resEl   = document.getElementById('analysis-resistance');
         const featEl  = document.getElementById('analysis-featured');
 
-        console.log('[ANALYSIS]', 'DOM elements:', { title: !!titleEl, coin: !!coinEl, text: !!textEl, featured: !!featEl });
-
         // ── Step 2: Read values ──
         const title          = titleEl ? titleEl.value.trim() : '';
         const coin           = coinEl  ? coinEl.value.trim().toUpperCase() : '';
@@ -1456,75 +1444,57 @@ function submitAnalysis() {
         const resistance_level = resEl  ? resEl.value.trim() : '';
         const featured       = featEl  ? featEl.checked : false;
 
-        console.log('[ANALYSIS]', 'Form values:', { coin, textLen: text.length, timeframe, featured, titleLen: title.length });
-
         // ── Step 3: Validate ──
         if (!coin || !text) {
-            console.warn('[ANALYSIS]', 'VALIDATION FAILED — coin:', coin ? 'SET' : 'EMPTY', 'text:', text ? 'SET' : 'EMPTY');
             showToast('نام ارز و متن تحلیل الزامی است.');
             return;
         }
-        console.log('[ANALYSIS]', 'Validation PASSED');
 
         // ── Step 4: Build payload ──
         const author = getTelegramUser()?.first_name || 'مدیر';
         const payload = { coin, timeframe, image, text, author, title, support_level, current_price, resistance_level, featured };
-        console.log('[ANALYSIS]', 'Payload built, author:', author, 'bodySize:', JSON.stringify(payload).length);
 
         // ── Step 5: Disable button ──
         const btn = document.getElementById('analysis-submit-btn');
         if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.innerText = '⏳ در حال ارسال...'; }
-        console.log('[ANALYSIS]', 'Button disabled, starting async save...');
 
         // ── Step 6: Async save ──
         (async () => {
             try {
-                console.log('[ANALYSIS]', 'Async IIFE started');
                 let result;
                 if (editingAnalysisId) {
-                    console.log('[ANALYSIS]', 'Mode: UPDATE, id:', editingAnalysisId);
                     result = await saveAnalysisToServer(payload, 'PUT', editingAnalysisId);
                 } else {
-                    console.log('[ANALYSIS]', 'Mode: CREATE (new analysis)');
                     result = await saveAnalysisToServer(payload, 'POST');
                 }
-                console.log('[ANALYSIS]', 'saveAnalysisToServer returned:', result ? 'non-null' : 'NULL');
 
                 if (!result) {
-                    console.error('[ANALYSIS]', '❌ NULL result — save was aborted (check above logs)');
                     showToast('خطا: پاسخی از سرور دریافت نشد.');
                     return;
                 }
 
                 if (result.status === 'success') {
-                    console.log('[ANALYSIS]', '✅ Save SUCCESS — analysis saved to DB');
                     showToast(editingAnalysisId ? 'تحلیل ویرایش شد.' : 'تحلیل منتشر شد.');
                 } else {
-                    console.error('[ANALYSIS]', '❌ Unexpected response:', JSON.stringify(result).substring(0, 200));
                     showToast(result.detail || result.message || 'خطا در ذخیره تحلیل.');
                     return;
                 }
 
-                console.log('[ANALYSIS]', 'Refreshing analysis list...');
                 await fetchAnalyses(true);
                 renderAnalysisFeatured();
                 renderAnalysisStats();
                 renderAnalysisList();
                 renderAnalysisSlider();
                 closeAddAnalysisModal();
-                console.log('[ANALYSIS]', '✅ COMPLETE — UI refreshed, modal closed');
             } catch (e) {
-                console.error('[ANALYSIS]', '❌ ASYNC ERROR:', e.name, e.message);
-                console.error('[ANALYSIS]', 'Stack:', e.stack);
+                console.error('[ANALYSIS] save error:', e.message);
                 showToast('خطا در ذخیره تحلیل: ' + (e.message || 'Unknown'));
             } finally {
                 if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerText = editingAnalysisId ? 'ذخیره تغییرات' : 'انتشار تحلیل'; }
             }
         })();
     } catch (syncErr) {
-        // Catch any synchronous error (e.g. DOM element access failure)
-        console.error('[ANALYSIS]', '❌ SYNC ERROR (before async):', syncErr.name, syncErr.message);
-        console.error('[ANALYSIS]', 'Stack:', syncErr.stack);
+        console.error('[ANALYSIS] submit sync error:', syncErr.message);
         showToast('خطای غیرمنتظره: ' + (syncErr.message || 'Unknown'));
     }
 }
@@ -4216,10 +4186,20 @@ function loadUser() {
 
     const adminFab = document.getElementById('analysis-fab');
     if (adminFab) {
-        const show = isAdmin();
+        // FAB shows only when on analysis page AND user is admin
+        const onAnalysisTab = (document.getElementById('analysis-page')?.classList.contains('active')) === true;
+        const show = isAdmin() && onAnalysisTab;
         adminFab.style.display = show ? '' : 'none';
-        console.log('[ANALYSIS]', 'FAB visibility — show:', show, 'isCurrentUserAdmin:', isCurrentUserAdmin);
     }
+}
+
+// Update analysis FAB visibility based on current tab + admin status.
+// Called from switchTab() and updateProfileUI().
+function updateAnalysisFabVisibility() {
+    const fab = document.getElementById('analysis-fab');
+    if (!fab) return;
+    const onAnalysisTab = (document.getElementById('analysis-page')?.classList.contains('active')) === true;
+    fab.style.display = (isAdmin() && onAnalysisTab) ? '' : 'none';
 }
 /**
  * ارجاع لینک را کپی می‌کند.
@@ -4613,6 +4593,12 @@ function switchTab(pageId, btn) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     if (btn) btn.classList.add('active');
 
+    // Hide analysis overlays on every tab switch; analysis-page branch re-shows them.
+    const _aes = document.getElementById('analysis-empty-state');
+    if (_aes) _aes.style.display = 'none';
+    const _fab = document.getElementById('analysis-fab');
+    if (_fab) _fab.style.display = 'none';
+
     if (pageId === 'dashboard-page') {
         if (!tabLoaded.dashboard) {
             // Data is still loading from startup — just render what we have
@@ -4643,9 +4629,13 @@ function switchTab(pageId, btn) {
             renderAnalysisStats();
             renderAnalysisList();
         }
-        const adminFab = document.getElementById('analysis-fab');
-        if (adminFab) adminFab.style.display = isAdmin() ? '' : 'none';
+        updateAnalysisFabVisibility();
     } else if (pageId === 'news-page') {
+        // Leaving analysis page — hide FAB and empty state
+        const fab = document.getElementById('analysis-fab');
+        if (fab) fab.style.display = 'none';
+        const aes = document.getElementById('analysis-empty-state');
+        if (aes) aes.style.display = 'none';
         if (!tabLoaded.news) {
             loadNews();
             tabLoaded.news = true;

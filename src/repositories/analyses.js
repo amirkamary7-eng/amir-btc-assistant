@@ -176,10 +176,14 @@ export function createAnalysisRepository(deps) {
     if (payload.featured) {
       await queryDb(env, `UPDATE analyses SET featured = FALSE WHERE featured = TRUE`);
     }
+    // NOTE: column count (14) MUST match value count (14).
+    //   $12 = author_id, then NOW() for created_at, NOW() for updated_at.
+    //   Previous bug: only 13 values (missing $12) caused
+    //   "INSERT has more target columns than expressions" → publish silently failed.
     const result = await queryDb(
       env,
       `INSERT INTO analyses (id, title, coin, timeframe, image, text, support_level, current_price, resistance_level, featured, author, author_id, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
        RETURNING id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, author, author_id, created_at, updated_at`,
       [
         String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 12),
