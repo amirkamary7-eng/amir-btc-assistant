@@ -340,6 +340,10 @@ let analysisListLoading = false;
 let currentAnalysisDetail = null;
 let deletingAnalysisId = null;
 const ANALYSIS_PAGE_SIZE = 20;
+// ── Filter / Sort / Search state (client-side, applied in renderAnalysisList) ──
+let analysisSearchQuery = '';
+let analysisSortMode = 'newest';
+let analysisTimeframeFilter = 'all';
 let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
 let calendarEvents = [];
@@ -885,19 +889,26 @@ async function fetchAnalyses(force = false, append = false) {
         return false;
     }
     if (analysisListLoading) return false;
+    // Show skeleton on first load (no cached data yet)
+    const showSkel = force && !append && !analyses.length;
+    if (showSkel) showAnalysisSkeleton();
     try {
         analysisListLoading = true;
         const page = append ? analysisListPage : 1;
         let url = `/api/analyses?page=${page}&limit=${ANALYSIS_PAGE_SIZE}`;
         if (!force && !append && analysisVersion !== null) url += `&version=${analysisVersion}`;
         const data = await apiFetch(url);
-        if (data.unchanged && !append) return false;
+        if (data.unchanged && !append) {
+            hideAnalysisSkeleton();
+            return false;
+        }
 
         if (append && Array.isArray(data.analyses)) {
             analyses = analyses.concat(data.analyses);
         } else if (Array.isArray(data.analyses)) {
             if (data.analyses.length === 0 && analyses.length > 0 && !force) {
                 console.warn('fetchAnalyses: API returned empty but we have cached data — preserving');
+                hideAnalysisSkeleton();
                 return false;
             }
             analyses = data.analyses;
@@ -918,6 +929,7 @@ async function fetchAnalyses(force = false, append = false) {
         if (!analyses.length) analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
     } finally {
         analysisListLoading = false;
+        hideAnalysisSkeleton();
     }
     return false;
 }
@@ -1041,25 +1053,119 @@ function renderAnalysisStats() {
     bar.style.display = '';
     bar.innerHTML = `
         <div class="stats-bar">
-            <div class="stat-item"><span class="stat-value">${analysisStats.active}</span><span class="stat-label">تحلیل فعال</span></div>
+            <div class="stat-item active">
+                <div class="stat-icon">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
+                </div>
+                <span class="stat-value">${analysisStats.active}</span>
+                <span class="stat-label">تحلیل فعال</span>
+            </div>
             <div class="stat-divider"></div>
-            <div class="stat-item"><span class="stat-value">${analysisStats.today}</span><span class="stat-label">جدید امروز</span></div>
+            <div class="stat-item today">
+                <div class="stat-icon">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+                </div>
+                <span class="stat-value">${analysisStats.today}</span>
+                <span class="stat-label">جدید امروز</span>
+            </div>
             <div class="stat-divider"></div>
-            <div class="stat-item"><span class="stat-value">${analysisStats.total}</span><span class="stat-label">کل تحلیل‌ها</span></div>
+            <div class="stat-item total">
+                <div class="stat-icon">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/></svg>
+                </div>
+                <span class="stat-value">${analysisStats.total}</span>
+                <span class="stat-label">کل تحلیل‌ها</span>
+            </div>
         </div>
     `;
 }
 
 // ── Render: Analysis List ──
+
+/**
+ * Apply client-side search + timeframe filter + sort to the analyses array.
+ * Returns a new filtered+sorted array (does not mutate `analyses`).
+ */
+function getFilteredAnalyses() {
+    let list = analyses.slice();
+
+    // Timeframe filter
+    if (analysisTimeframeFilter !== 'all') {
+        const tf = analysisTimeframeFilter.toUpperCase();
+        list = list.filter(a => (a.timeframe || '1D').toUpperCase() === tf);
+    }
+
+    // Search query (coin or title)
+    if (analysisSearchQuery) {
+        const q = analysisSearchQuery.trim().toLowerCase();
+        if (q) {
+            list = list.filter(a => {
+                const coin = (a.coin || '').toLowerCase();
+                const title = (a.title || '').toLowerCase();
+                const text = (a.content || a.text || '').toLowerCase();
+                return coin.includes(q) || title.includes(q) || text.includes(q);
+            });
+        }
+    }
+
+    // Sort
+    switch (analysisSortMode) {
+        case 'oldest':
+            list.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+            break;
+        case 'views':
+            list.sort((a, b) => (b.views_count || 0) - (a.views_count || 0));
+            break;
+        case 'featured':
+            list.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0));
+            break;
+        case 'newest':
+        default:
+            list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            break;
+    }
+
+    return list;
+}
+
+/**
+ * Render 3 skeleton cards while data is loading.
+ */
+function showAnalysisSkeleton() {
+    const skel = $('analysis-skeleton-container');
+    const list = $('analysis-list-container');
+    if (skel) {
+        skel.innerHTML = Array(3).fill(0).map(() => `
+            <div class="skel-card">
+                <div class="skel-img"></div>
+                <div class="skel-body">
+                    <div class="skel-line short"></div>
+                    <div class="skel-line long"></div>
+                    <div class="skel-line medium"></div>
+                </div>
+            </div>
+        `).join('');
+        skel.style.display = '';
+    }
+    if (list) list.innerHTML = '';
+}
+
+function hideAnalysisSkeleton() {
+    const skel = $('analysis-skeleton-container');
+    if (skel) skel.style.display = 'none';
+}
+
 function renderAnalysisList() {
     const container = $('analysis-list-container');
     const emptyState = $('analysis-empty-state');
     if (!container) return;
 
+    hideAnalysisSkeleton();
+
+    // Case 1: No analyses at all (DB is empty)
     if (!analyses.length) {
         container.innerHTML = '';
         if (emptyState) {
-            // Different copy for admin vs regular user
             const adminUser = isAdmin();
             const titleEl = $('aes-title');
             const descEl  = $('aes-desc');
@@ -1076,9 +1182,30 @@ function renderAnalysisList() {
     }
     if (emptyState) emptyState.style.display = 'none';
 
+    // Apply filter + sort
+    const filtered = getFilteredAnalyses();
+
+    // Case 2: Analyses exist but filter returned nothing
+    if (!filtered.length) {
+        container.innerHTML = `
+            <div class="analysis-no-results">
+                <div class="anr-icon">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/><line x1="8" y1="8" x2="8" y2="8" stroke-width="2.5"/></svg>
+                </div>
+                <p class="anr-title">نتیجه‌ای یافت نشد</p>
+                <p class="anr-desc">با فیلترهای فعلی هیچ تحلیلی پیدا نشد. فیلترها را تغییر دهید یا همه تحلیل‌ها را ببینید.</p>
+                <button type="button" class="anr-reset-btn" onclick="resetAnalysisFilters()">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 1 0 9-9"/><polyline points="3 4 3 12 11 12"/></svg>
+                    پاک کردن فیلترها
+                </button>
+            </div>
+        `;
+        return;
+    }
+
     const isAdminUser = isAdmin();
-    container.innerHTML = analyses.map((a, i) => `
-        <div class="analysis-card-v2" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')" style="animation-delay:${i * 0.04}s">
+    container.innerHTML = filtered.map((a, i) => `
+        <div class="analysis-card-v2" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')" style="animation-delay:${Math.min(i, 8) * 0.04}s">
             <div class="acv-image-col">
                 ${a.image ? `<img src="${escapeHtml(a.image)}" class="acv-thumb" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="newsImageFallback(this)">` : `<div class="acv-no-img">${escapeHtml(a.coin)}</div>`}
             </div>
@@ -1088,7 +1215,8 @@ function renderAnalysisList() {
                     <span class="acv-tf">${escapeHtml(a.timeframe || '1D')}</span>
                     ${a.featured ? '<span class="acv-featured-badge">⭐ ویژه</span>' : ''}
                 </div>
-                <p class="acv-snippet">${escapeHtml(truncateText(a.content || a.text || '', 100))}</p>
+                ${a.title ? `<div class="acv-title">${escapeHtml(truncateText(a.title, 60))}</div>` : ''}
+                <p class="acv-snippet">${escapeHtml(truncateText(a.content || a.text || '', 90))}</p>
             </div>
             <div class="acv-levels-col">
                 ${a.resistance_level ? `<div class="acv-level acv-resistance"><span class="acv-level-label">مقاومت</span><span class="acv-level-value">${escapeHtml(a.resistance_level)}</span></div>` : ''}
@@ -1108,6 +1236,74 @@ function renderAnalysisList() {
 
     // Setup infinite scroll
     setupAnalysisInfiniteScroll();
+}
+
+/**
+ * Reset all filters (search, sort, timeframe) and re-render.
+ */
+function resetAnalysisFilters() {
+    analysisSearchQuery = '';
+    analysisSortMode = 'newest';
+    analysisTimeframeFilter = 'all';
+    const searchInput = $('analysis-search-input');
+    if (searchInput) searchInput.value = '';
+    const sortSelect = $('analysis-sort-select');
+    if (sortSelect) sortSelect.value = 'newest';
+    const clearBtn = $('analysis-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    document.querySelectorAll('.tf-chip').forEach(c => c.classList.toggle('active', c.dataset.tf === 'all'));
+    renderAnalysisList();
+}
+
+/**
+ * Initialize toolbar event listeners (search input, sort select, timeframe chips).
+ * Called once on DOMContentLoaded.
+ */
+function initAnalysisToolbar() {
+    const searchInput = $('analysis-search-input');
+    const clearBtn = $('analysis-search-clear');
+    const sortSelect = $('analysis-sort-select');
+    const chipsContainer = $('analysis-tf-chips');
+
+    if (searchInput) {
+        let debounceTimer = null;
+        searchInput.addEventListener('input', (e) => {
+            const val = e.target.value;
+            if (clearBtn) clearBtn.style.display = val ? '' : 'none';
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                analysisSearchQuery = val;
+                renderAnalysisList();
+            }, 250);
+        });
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            if (searchInput) { searchInput.value = ''; searchInput.focus(); }
+            clearBtn.style.display = 'none';
+            analysisSearchQuery = '';
+            renderAnalysisList();
+        });
+    }
+
+    if (sortSelect) {
+        sortSelect.addEventListener('change', (e) => {
+            analysisSortMode = e.target.value;
+            renderAnalysisList();
+        });
+    }
+
+    if (chipsContainer) {
+        chipsContainer.addEventListener('click', (e) => {
+            const chip = e.target.closest('.tf-chip');
+            if (!chip) return;
+            document.querySelectorAll('.tf-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+            analysisTimeframeFilter = chip.dataset.tf;
+            renderAnalysisList();
+        });
+    }
 }
 
 function setupAnalysisInfiniteScroll() {
@@ -1220,6 +1416,76 @@ function renderAnalysisDetailPage() {
     // Meta
     const authorEl = $('adp-author'); if (authorEl) authorEl.innerText = a.author || '';
     const dateEl = $('adp-date'); if (dateEl) dateEl.innerText = a.date || '';
+
+    // Related analyses (same coin, exclude current, max 3)
+    renderRelatedAnalyses(a);
+
+    // Reset + activate reading progress bar
+    setupReadingProgress();
+}
+
+/**
+ * Render up to 3 related analyses (same coin or same timeframe, excluding current).
+ */
+function renderRelatedAnalyses(current) {
+    const relatedSection = $('adp-related');
+    const relatedList = $('adp-related-list');
+    if (!relatedSection || !relatedList) return;
+
+    const related = analyses
+        .filter(x => x.id !== current.id && (
+            x.coin === current.coin || x.timeframe === current.timeframe
+        ))
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+        .slice(0, 3);
+
+    if (!related.length) {
+        relatedSection.style.display = 'none';
+        return;
+    }
+
+    relatedSection.style.display = '';
+    relatedList.innerHTML = related.map(r => `
+        <div class="adp-related-item" onclick="openAnalysisDetailPage('${escapeHtml(r.id)}')">
+            <div class="adp-related-coin">${escapeHtml(r.coin)}</div>
+            <div class="adp-related-info">
+                <div class="adp-related-title">${escapeHtml(r.title || `${r.coin} — ${r.timeframe || '1D'}`)}</div>
+                <div class="adp-related-meta">
+                    <span>${escapeHtml(r.timeframe || '1D')}</span>
+                    <span>·</span>
+                    <span>👁 ${r.views_count || 0}</span>
+                    <span>·</span>
+                    <span>${timeAgo(r.created_at)}</span>
+                </div>
+            </div>
+            <svg class="adp-related-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+    `).join('');
+}
+
+/**
+ * Wire up scroll-based reading progress bar on the detail page.
+ * Idempotent — safe to call multiple times.
+ */
+function setupReadingProgress() {
+    const bar = $('adp-progress-bar');
+    if (!bar) return;
+    // Reset
+    bar.style.width = '0%';
+    // Remove old listener if any
+    if (window._adpScrollHandler) {
+        window.removeEventListener('scroll', window._adpScrollHandler, { passive: true });
+    }
+    const handler = () => {
+        const scrollTop = window.scrollY;
+        const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+        if (docHeight <= 0) { bar.style.width = '0%'; return; }
+        const pct = Math.min(100, Math.max(0, (scrollTop / docHeight) * 100));
+        bar.style.width = pct + '%';
+    };
+    window._adpScrollHandler = handler;
+    window.addEventListener('scroll', handler, { passive: true });
+    handler();
 }
 
 function closeAnalysisDetailPage() {
@@ -1229,6 +1495,13 @@ function closeAnalysisDetailPage() {
     // Restore bottom nav
     const nav = document.querySelector('.bottom-nav');
     if (nav) nav.style.display = '';
+    // Clean up reading progress bar
+    if (window._adpScrollHandler) {
+        window.removeEventListener('scroll', window._adpScrollHandler, { passive: true });
+        window._adpScrollHandler = null;
+    }
+    const bar = $('adp-progress-bar');
+    if (bar) bar.style.width = '0%';
     currentAnalysisDetail = null;
     // Re-render list to update view counts
     renderAnalysisList();
@@ -2782,6 +3055,8 @@ document.addEventListener('DOMContentLoaded', () => {
         searchTerm = e.target.value.toLowerCase().trim();
         renderMarket();
     });
+    // Initialize analysis toolbar (search, sort, timeframe chips)
+    initAnalysisToolbar();
 });
 
 //#endregion
@@ -4951,6 +5226,8 @@ window.submitAnalysis = submitAnalysis;
 window.openAnalysisDetailPage = openAnalysisDetailPage;
 window.closeAnalysisDetailPage = closeAnalysisDetailPage;
 window.startDeleteAnalysis = startDeleteAnalysis;
+window.resetAnalysisFilters = resetAnalysisFilters;
+window.initAnalysisToolbar = initAnalysisToolbar;
 window.openDashboardNewsModal = openDashboardNewsModal;
 window.openNewsModalWith = openNewsModalWith;
 window.openCoinDetail = openCoinDetail;

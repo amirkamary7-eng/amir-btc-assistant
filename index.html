@@ -371,8 +371,42 @@
                 <span>تحلیل‌های بازار</span>
             </h2>
         </div>
+
+        <!-- Search & Filter Bar -->
+        <div class="analysis-toolbar" id="analysis-toolbar">
+            <div class="at-search-wrap">
+                <svg class="at-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+                <input type="text" id="analysis-search-input" class="at-search-input" placeholder="جستجوی ارز یا عنوان..." autocomplete="off" />
+                <button type="button" id="analysis-search-clear" class="at-search-clear" style="display:none;" aria-label="پاک کردن">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="at-sort-wrap">
+                <select id="analysis-sort-select" class="at-sort-select" aria-label="مرتب‌سازی">
+                    <option value="newest">🆕 جدیدترین</option>
+                    <option value="oldest">📅 قدیمی‌ترین</option>
+                    <option value="views">🔥 پر بازدید</option>
+                    <option value="featured">⭐ ویژه‌ها</option>
+                </select>
+                <svg class="at-sort-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+        </div>
+
+        <!-- Timeframe Filter Chips -->
+        <div class="analysis-tf-chips" id="analysis-tf-chips">
+            <button type="button" class="tf-chip active" data-tf="all">همه</button>
+            <button type="button" class="tf-chip" data-tf="1H">1H</button>
+            <button type="button" class="tf-chip" data-tf="4H">4H</button>
+            <button type="button" class="tf-chip" data-tf="1D">1D</button>
+            <button type="button" class="tf-chip" data-tf="1W">1W</button>
+        </div>
+
         <div id="analysis-featured-section" style="display:none;"></div>
         <div id="analysis-stats-bar" style="display:none;"></div>
+
+        <!-- Skeleton Loading Container -->
+        <div id="analysis-skeleton-container" class="analysis-skeleton-container" style="display:none;"></div>
+
         <div class="analysis-list-container" id="analysis-list-container"></div>
         <div id="analysis-load-trigger" class="analysis-load-trigger"></div>
     </section>
@@ -408,6 +442,8 @@
     <!-- ==================== صفحه جزئیات تحلیل ==================== -->
     <!-- #region AnalysisDetailPage -->
     <section id="analysis-detail-page" class="page">
+        <!-- Reading Progress Bar -->
+        <div class="adp-progress-bar" id="adp-progress-bar"></div>
         <div class="adp-header">
             <button class="adp-back-btn" onclick="closeAnalysisDetailPage()" aria-label="بازگشت">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
@@ -442,6 +478,14 @@
                 <span class="adp-meta-dot"></span>
                 <span id="adp-date"></span>
             </div>
+        </div>
+        <!-- Related Analyses (same coin or timeframe) -->
+        <div class="adp-related" id="adp-related" style="display:none;">
+            <div class="adp-related-header">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                <span>تحلیل‌های مرتبط</span>
+            </div>
+            <div class="adp-related-list" id="adp-related-list"></div>
         </div>
         <!-- Share Button -->
         <div class="adp-footer">
