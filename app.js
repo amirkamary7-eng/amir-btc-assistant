@@ -847,6 +847,12 @@ async function bootstrapUser() {
 
         // Only mark complete if the API call actually succeeded
         bootstrapComplete = true;
+        // CSS-level admin visibility — add class AFTER bootstrap confirms admin status
+        if (isCurrentUserAdmin) {
+            document.body.classList.add('admin-ready');
+        } else {
+            document.body.classList.remove('admin-ready');
+        }
     } catch (e) {
         console.error('[BOOT] bootstrapUser FAILED:', e);
         // Do NOT set bootstrapComplete — let retry try again
@@ -937,10 +943,26 @@ async function fetchAnalyses(force = false, append = false) {
         analysisListPage = data.pagination?.hasMore ? (data.pagination.page + 1) : page;
         localStorage.setItem('analyses', JSON.stringify(analyses));
         localStorage.setItem('analysisVersion', String(analysisVersion));
+        // Cache featured analysis separately for offline/fallback rendering
+        if (analysisFeatured) {
+            localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
+        } else {
+            localStorage.removeItem('analysisFeatured');
+        }
+        if (analysisStats) {
+            localStorage.setItem('analysisStats', JSON.stringify(analysisStats));
+        }
         return true;
     } catch (e) {
         console.warn('fetchAnalyses:', e);
         if (!analyses.length) analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
+        // Restore featured + stats from localStorage on API failure
+        if (!analysisFeatured) {
+            try { analysisFeatured = JSON.parse(localStorage.getItem('analysisFeatured') || 'null'); } catch {}
+        }
+        if (!analysisStats) {
+            try { analysisStats = JSON.parse(localStorage.getItem('analysisStats') || 'null'); } catch {}
+        }
     } finally {
         analysisListLoading = false;
         hideAnalysisSkeleton();
@@ -1060,22 +1082,22 @@ const SENTIMENT_CONFIG = {
     bullish: {
         label: 'صعودی',
         cls: 'bullish',
-        icon: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16L10 4L17 16"/><path d="M7 11h6"/></svg>',
+        icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20L12 4L21 20" fill="rgba(34,197,94,0.15)"/><path d="M12 4"/><path d="M7 15l5-7 5 7"/><path d="M9.5 13h5" stroke-width="2.5"/></svg>',
     },
     bearish: {
         label: 'نزولی',
         cls: 'bearish',
-        icon: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4L10 16L17 4"/><path d="M7 9h6"/></svg>',
+        icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4L12 20L21 4" fill="rgba(239,68,68,0.15)"/><path d="M7 9l5 7 5-7"/><path d="M9.5 11h5" stroke-width="2.5"/></svg>',
     },
     neutral: {
         label: 'خنثی',
         cls: 'neutral',
-        icon: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h14"/><path d="M8 6v8"/><circle cx="10" cy="10" r="2" fill="currentColor" stroke="none"/></svg>',
+        icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4" fill="rgba(148,163,184,0.1)"/><path d="M8 12h8" stroke-width="2.5"/><path d="M12 8v8" stroke-width="2.5"/></svg>',
     },
     decision: {
         label: 'محدوده تصمیم',
         cls: 'decision',
-        icon: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><path d="M10 6v4"/><circle cx="10" cy="13" r="1" fill="currentColor" stroke="none"/></svg>',
+        icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" fill="rgba(168,85,247,0.12)"/><path d="M12 7v5" stroke-width="2.5"/><circle cx="12" cy="15.5" r="1.5" fill="currentColor" stroke="none"/><path d="M12 3.5" stroke-dasharray="2 2" opacity="0.4"/></svg>',
     },
 };
 
@@ -1492,29 +1514,8 @@ function renderAnalysisList() {
         const bookmarked = isAnalysisBookmarked(a.id);
         const sentimentBadge = getSentimentBadgeHTML(sentiment, 'acv-sentiment');
 
-        // Price boxes
+        // Price boxes — REMOVED from cards (available in detail page + hero slider)
         let priceBoxes = '';
-        const sNum = parseFloat(a.support_level);
-        const rNum = parseFloat(a.resistance_level);
-        const cNum = parseFloat(a.current_price);
-        if (isFinite(sNum) || isFinite(rNum) || isFinite(cNum)) {
-            priceBoxes = `
-                <div class="acv-price-boxes">
-                    <div class="price-box price-box-resistance">
-                        <span class="price-box-label">مقاومت</span>
-                        <span class="price-box-value">${escapeHtml(a.resistance_level || '—')}</span>
-                    </div>
-                    <div class="price-box price-box-current">
-                        <span class="price-box-label">قیمت</span>
-                        <span class="price-box-value">${escapeHtml(a.current_price || '—')}</span>
-                    </div>
-                    <div class="price-box price-box-support">
-                        <span class="price-box-label">حمایت</span>
-                        <span class="price-box-value">${escapeHtml(a.support_level || '—')}</span>
-                    </div>
-                </div>
-            `;
-        }
 
         // Image section
         const imageSection = a.image
@@ -1547,7 +1548,6 @@ function renderAnalysisList() {
                 ${a.title ? `<h3 class="acv-card-title">${escapeHtml(truncateText(a.title, 60))}</h3>` : ''}
                 <p class="acv-card-snippet">${escapeHtml(truncateText(a.content || a.text || '', 120))}</p>
             </div>
-            ${priceBoxes}
             <div class="acv-footer-row">
                 <div class="acv-meta-icons">
                     <span class="acv-meta-item">${SVG_EYE} ${a.views_count || 0}</span>
@@ -1831,7 +1831,7 @@ function renderAnalysisDetailPage() {
         avatarEl.innerHTML = escapeHtml(a.coin || '?');
     }
 
-    // Admin actions — HIDDEN by default, only shown after bootstrap confirms admin
+    // Admin actions — hidden via CSS unless body.admin-ready is set
     const adminActions = $('adp-admin-actions');
     if (adminActions) adminActions.style.display = isAdmin() ? '' : 'none';
 
@@ -1877,7 +1877,7 @@ function renderAnalysisDetailPage() {
 
     // Price range visualizer — REMOVED (user requested removal)
     const rangeEl = $('adp-price-range');
-    if (rangeEl) rangeEl.style.display = 'none';
+    if (rangeEl) { rangeEl.style.display = 'none'; rangeEl.remove(); }
 
     // Meta
     const authorEl = $('adp-author'); if (authorEl) authorEl.innerText = a.author || '';
