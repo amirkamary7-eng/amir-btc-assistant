@@ -3431,14 +3431,32 @@ strong.down { color: var(--red); }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px 12px;
+    padding: 8px 12px 10px;
     border-top: 1px solid var(--border);
+    gap: 8px;
+}
+
+.acv-footer-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.acv-footer-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
 }
 
 .acv-views,
-.acv-time {
+.acv-time,
+.acv-readtime {
     font-size: 10px;
     color: var(--text-dim);
+    white-space: nowrap;
 }
 
 .acv-admin-actions {
@@ -3446,22 +3464,37 @@ strong.down { color: var(--red); }
     gap: 6px;
 }
 
+/* Icon-only action buttons (bookmark, edit, delete, share) */
+.acv-bookmark-btn,
 .acv-edit-btn,
 .acv-delete-btn,
 .acv-share-btn {
-    font-size: 10px;
-    padding: 4px 10px;
+    width: 30px;
+    height: 30px;
     border-radius: 8px;
     border: 1px solid var(--border);
     background: transparent;
     color: var(--text-sub);
     cursor: pointer;
-    transition: background 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
+.acv-bookmark-btn:active,
 .acv-edit-btn:active,
 .acv-share-btn:active {
     background: rgba(255, 255, 255, 0.05);
+    transform: scale(0.92);
+}
+
+.acv-bookmark-btn.saved {
+    color: var(--accent);
+    border-color: rgba(255, 138, 0, 0.3);
+    background: rgba(255, 138, 0, 0.08);
 }
 
 .acv-delete-btn {
@@ -3471,14 +3504,50 @@ strong.down { color: var(--red); }
 
 .acv-delete-btn:active {
     background: rgba(239, 68, 68, 0.1);
-}
-
-.acv-share-btn {
-    color: var(--accent);
+    transform: scale(0.92);
 }
 
 .acv-share-btn:active {
     background: rgba(255, 138, 0, 0.1);
+}
+
+/* ── Sentiment badge (bullish/bearish/neutral) ── */
+.acv-sentiment {
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-weight: 700;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.acv-sentiment-bullish {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--green);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.acv-sentiment-bearish {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.acv-sentiment-neutral {
+    background: rgba(156, 163, 175, 0.12);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.2);
+}
+
+/* Bookmarked card accent */
+.analysis-card-v2.acv-bookmarked {
+    border-color: rgba(255, 138, 0, 0.25);
+}
+
+.analysis-card-v2.acv-bookmarked::before {
+    opacity: 0.5;
 }
 
 /* #endregion */
@@ -3711,10 +3780,42 @@ strong.down { color: var(--red); }
 
 .adp-footer {
     padding: 16px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+/* Icon action buttons (bookmark, copy) */
+.adp-action-btn {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    border-radius: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-sub);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.adp-action-btn:active {
+    transform: scale(0.92);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.adp-bookmark-btn.saved {
+    color: var(--accent);
+    border-color: rgba(255, 138, 0, 0.3);
+    background: rgba(255, 138, 0, 0.08);
 }
 
 .adp-share-btn {
-    width: 100%;
+    flex: 1;
     padding: 14px;
     border-radius: 14px;
     background: var(--accent);
@@ -3733,6 +3834,38 @@ strong.down { color: var(--red); }
 .adp-share-btn:active {
     background: var(--accent-hover, #FFA726);
     transform: scale(0.98);
+}
+
+/* Sentiment badge on detail page title */
+.adp-sentiment {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 8px;
+    font-weight: 700;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    vertical-align: middle;
+    margin-right: 8px;
+}
+
+.adp-sentiment-bullish {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--green);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.adp-sentiment-bearish {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.adp-sentiment-neutral {
+    background: rgba(156, 163, 175, 0.12);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.2);
 }
 
 /* ── Related Analyses section ── */

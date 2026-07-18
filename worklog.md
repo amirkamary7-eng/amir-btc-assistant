@@ -329,3 +329,78 @@ Stage Summary:
 - Production deployed and verified end-to-end
 - The only untestable path is the actual DB INSERT (requires real Telegram admin auth),
   but the SQL is now syntactically correct and the entire chain is verified
+
+---
+Task ID: Analysis Module Enhancement Phase 2
+Agent: Z.ai Code (cron-triggered)
+Task: QA current state, then add features + improve styling for Analysis module
+
+Work Log:
+- Read worklog.md — prior session fixed SQL INSERT bug, FAB jump, FAB size, empty state
+- QA via agent-browser: confirmed publish flow works in production (2 analyses in DB!)
+- VLM analysis identified: flat cards, no search/filter, plain stats bar, no skeleton loading
+
+NEW FEATURES IMPLEMENTED (5 major additions):
+
+1. Search & Sort Toolbar (index.html + style.css + app.js):
+   - Search input with 250ms debounce, filters by coin/title/content
+   - Clear button (×) appears when text entered
+   - Sort dropdown: newest, oldest, most viewed, featured first
+   - All client-side, no API changes needed
+
+2. Timeframe Filter Chips (index.html + style.css + app.js):
+   - 5 chips: All, 1H, 4H, 1D, 1W (horizontally scrollable on mobile)
+   - Active chip: orange gradient with shadow
+   - Click handler via event delegation on container
+
+3. Skeleton Loading (index.html + style.css + app.js):
+   - 3 shimmer skeleton cards shown on first fetch (force && !analyses.length)
+   - Shimmer animation: linear-gradient background-position loop
+   - Hidden automatically in fetchAnalyses finally block
+
+4. 'No Results' Empty State (style.css + app.js):
+   - Shows when filter/search returns nothing (but analyses exist)
+   - Search icon, title "نتیجه‌ای یافت نشد", description, reset button
+   - Reset button clears all filters and re-renders
+
+5. Reading Progress Bar + Related Analyses (index.html + style.css + app.js):
+   - Fixed 3px gradient bar at top of detail page, tracks scroll %
+   - Related analyses section: up to 3 same-coin/same-timeframe items
+   - Each related item has coin avatar, title, meta (tf·views·time), arrow
+   - Scroll listener cleaned up on closeAnalysisDetailPage()
+
+STYLING IMPROVEMENTS:
+
+- Cards: gradient bg (165deg), hover lift + accent border glow, ::before accent strip
+  that appears on hover, box-shadow depth, active scale(0.985)
+- No-image placeholder: orange gradient avatar with glow text-shadow
+- Price levels: color-coded backgrounds (red resistance, orange current, green support)
+  with matching border tints
+- Stats bar: gradient bg, 3 colored icon badges (orange/green/indigo), gradient dividers
+- Card title field: now displays above snippet (1-line clamp)
+- Toolbar: 40px height inputs, focus ring with orange glow, custom select chevron
+
+VERIFICATION (agent-browser on production):
+- Page loads: ✓ zero console errors
+- Toolbar present: ✓ search input, sort select, 5 timeframe chips
+- Stats bar: ✓ present with 3 stat icons
+- Search 'BTC': ✓ 1 card shown
+- Search 'XYZNONEXISTENT': ✓ no-results state with reset button
+- Reset button click: ✓ clears search, restores cards
+- Timeframe 4H chip: ✓ filters to 1 card, active state correct
+- Detail page: ✓ progress bar present, handler registered
+- Related section: ✓ correctly hidden (only 1 non-featured analysis available)
+- Mobile 390x844: ✓ no overflow, toolbar wraps properly
+- Desktop 1280x800: ✓ card design rated 8/10 by VLM
+
+DEPLOY:
+- Git push: 75d6019 → origin/main ✓
+- Pages: build MRQ4K5Z0 deployed ✓
+- Worker: NOT redeployed (no backend changes — all features are client-side)
+
+Stage Summary:
+- 5 new features added to Analysis module (search, sort, filter, skeleton, reading progress)
+- 0 bugs found in QA — prior session's SQL fix confirmed working (2 analyses published)
+- All features scoped to Analysis module ONLY
+- Production verified end-to-end via agent-browser
+- VLM ratings: card design 8/10, visual hierarchy 7/10

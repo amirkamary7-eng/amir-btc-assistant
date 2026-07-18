@@ -344,6 +344,9 @@ const ANALYSIS_PAGE_SIZE = 20;
 let analysisSearchQuery = '';
 let analysisSortMode = 'newest';
 let analysisTimeframeFilter = 'all';
+let analysisShowSavedOnly = false;
+// ── Bookmarked analysis IDs (persisted in localStorage) ──
+let analysisBookmarks = JSON.parse(localStorage.getItem('analysisBookmarks') || '[]');
 let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
 let calendarEvents = [];
@@ -1010,6 +1013,78 @@ function truncateText(text, maxLen) {
     return text.substring(0, maxLen) + '...';
 }
 
+/**
+ * Estimate reading time in minutes based on text length.
+ * Assumes ~200 words per minute for Persian text.
+ */
+function estimateReadTime(text) {
+    if (!text) return 1;
+    const words = text.trim().split(/\s+/).length;
+    return Math.max(1, Math.ceil(words / 200));
+}
+
+/**
+ * Determine sentiment (bullish/bearish/neutral) based on price levels.
+ * Compares current_price to support and resistance.
+ */
+function getSentiment(a) {
+    const support = parseFloat(a.support_level);
+    const resistance = parseFloat(a.resistance_level);
+    const current = parseFloat(a.current_price);
+    if (!isFinite(support) || !isFinite(resistance) || !isFinite(current)) return null;
+    const range = resistance - support;
+    if (range <= 0) return null;
+    const position = (current - support) / range; // 0 = at support, 1 = at resistance
+    if (position <= 0.33) return 'bearish';
+    if (position >= 0.66) return 'bullish';
+    return 'neutral';
+}
+
+/**
+ * Toggle bookmark for an analysis ID. Persists to localStorage.
+ */
+function toggleAnalysisBookmark(id, event) {
+    if (event) event.stopPropagation();
+    const idx = analysisBookmarks.indexOf(id);
+    if (idx >= 0) {
+        analysisBookmarks.splice(idx, 1);
+        showToast('از ذخیره‌شده‌ها حذف شد.');
+    } else {
+        analysisBookmarks.push(id);
+        showToast('در ذخیره‌شده‌ها اضافه شد.');
+    }
+    localStorage.setItem('analysisBookmarks', JSON.stringify(analysisBookmarks));
+    // Update bookmark chip count
+    updateSavedChipCount();
+    // Re-render to update bookmark icons
+    renderAnalysisList();
+    // If on detail page, update the bookmark button
+    if (currentAnalysisDetail && currentAnalysisDetail.id === id) {
+        updateDetailBookmarkButton(id);
+    }
+}
+
+function isAnalysisBookmarked(id) {
+    return analysisBookmarks.includes(id);
+}
+
+function updateSavedChipCount() {
+    const chip = document.querySelector('.tf-chip[data-tf="saved"]');
+    if (!chip) return;
+    const count = analysisBookmarks.length;
+    chip.innerHTML = count > 0 ? `🔖 ذخیره‌شده (${count})` : '🔖 ذخیره‌شده';
+}
+
+function updateDetailBookmarkButton(id) {
+    const btn = document.getElementById('adp-bookmark-btn');
+    if (!btn) return;
+    const saved = isAnalysisBookmarked(id);
+    btn.classList.toggle('saved', saved);
+    btn.innerHTML = saved
+        ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="1.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'
+        : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+}
+
 function getAnalysisDeepLink(analysisId) {
     const tg = window.Telegram?.WebApp;
     const botName = tg?.initDataUnsafe?.user ? (window.BOT_USERNAME || 'AmirBTCAssistantBot') : 'AmirBTCAssistantBot';
@@ -1088,6 +1163,15 @@ function renderAnalysisStats() {
  */
 function getFilteredAnalyses() {
     let list = analyses.slice();
+
+    // Saved-only filter (bookmarked items)
+    if (analysisShowSavedOnly) {
+        list = list.filter(a => analysisBookmarks.includes(a.id));
+        // If showing saved only, also include the featured analysis if it's bookmarked
+        if (analysisFeatured && analysisBookmarks.includes(analysisFeatured.id) && !list.find(a => a.id === analysisFeatured.id)) {
+            list.unshift(analysisFeatured);
+        }
+    }
 
     // Timeframe filter
     if (analysisTimeframeFilter !== 'all') {
@@ -1204,8 +1288,13 @@ function renderAnalysisList() {
     }
 
     const isAdminUser = isAdmin();
-    container.innerHTML = filtered.map((a, i) => `
-        <div class="analysis-card-v2" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')" style="animation-delay:${Math.min(i, 8) * 0.04}s">
+    container.innerHTML = filtered.map((a, i) => {
+        const sentiment = getSentiment(a);
+        const readTime = estimateReadTime(a.content || a.text);
+        const bookmarked = isAnalysisBookmarked(a.id);
+        const sentimentBadge = sentiment ? `<span class="acv-sentiment acv-sentiment-${sentiment}">${sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی'}</span>` : '';
+        return `
+        <div class="analysis-card-v2 ${bookmarked ? 'acv-bookmarked' : ''}" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')" style="animation-delay:${Math.min(i, 8) * 0.04}s">
             <div class="acv-image-col">
                 ${a.image ? `<img src="${escapeHtml(a.image)}" class="acv-thumb" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="newsImageFallback(this)">` : `<div class="acv-no-img">${escapeHtml(a.coin)}</div>`}
             </div>
@@ -1214,6 +1303,7 @@ function renderAnalysisList() {
                     <span class="acv-coin">${escapeHtml(a.coin)}</span>
                     <span class="acv-tf">${escapeHtml(a.timeframe || '1D')}</span>
                     ${a.featured ? '<span class="acv-featured-badge">⭐ ویژه</span>' : ''}
+                    ${sentimentBadge}
                 </div>
                 ${a.title ? `<div class="acv-title">${escapeHtml(truncateText(a.title, 60))}</div>` : ''}
                 <p class="acv-snippet">${escapeHtml(truncateText(a.content || a.text || '', 90))}</p>
@@ -1224,15 +1314,26 @@ function renderAnalysisList() {
                 ${a.support_level ? `<div class="acv-level acv-support"><span class="acv-level-label">حمایت</span><span class="acv-level-value">${escapeHtml(a.support_level)}</span></div>` : ''}
             </div>
             <div class="acv-footer-row">
-                <span class="acv-views">👁 ${a.views_count || 0} بازدید</span>
-                <span class="acv-time">⏰ ${timeAgo(a.created_at)}</span>
-                ${isAdminUser ? `<div class="acv-admin-actions" onclick="event.stopPropagation()">
-                    <button class="acv-edit-btn" onclick="openEditAnalysisModal('${escapeHtml(a.id)}')">✏️ ویرایش</button>
-                    <button class="acv-delete-btn" onclick="startDeleteAnalysis('${escapeHtml(a.id)}')">🗑 حذف</button>
-                </div>` : `<button class="acv-share-btn" onclick="event.stopPropagation();shareAnalysisById('${escapeHtml(a.id)}')">🔗 اشتراک‌گذاری</button>`}
+                <div class="acv-footer-left">
+                    <span class="acv-views">👁 ${a.views_count || 0}</span>
+                    <span class="acv-time">⏰ ${timeAgo(a.created_at)}</span>
+                    <span class="acv-readtime">📖 ${readTime} دقیقه</span>
+                </div>
+                <div class="acv-footer-right" onclick="event.stopPropagation()">
+                    <button class="acv-bookmark-btn ${bookmarked ? 'saved' : ''}" onclick="toggleAnalysisBookmark('${escapeHtml(a.id)}', event)" aria-label="ذخیره">
+                        ${bookmarked
+                            ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="currentColor" stroke-width="1.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'
+                            : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'}
+                    </button>
+                    ${isAdminUser
+                        ? `<button class="acv-edit-btn" onclick="openEditAnalysisModal('${escapeHtml(a.id)}')">✏️</button>
+                           <button class="acv-delete-btn" onclick="startDeleteAnalysis('${escapeHtml(a.id)}')">🗑</button>`
+                        : `<button class="acv-share-btn" onclick="shareAnalysisById('${escapeHtml(a.id)}')">🔗</button>`}
+                </div>
             </div>
         </div>
-    `).join('');
+        `;
+    }).join('');
 
     // Setup infinite scroll
     setupAnalysisInfiniteScroll();
@@ -1245,6 +1346,7 @@ function resetAnalysisFilters() {
     analysisSearchQuery = '';
     analysisSortMode = 'newest';
     analysisTimeframeFilter = 'all';
+    analysisShowSavedOnly = false;
     const searchInput = $('analysis-search-input');
     if (searchInput) searchInput.value = '';
     const sortSelect = $('analysis-sort-select');
@@ -1300,10 +1402,20 @@ function initAnalysisToolbar() {
             if (!chip) return;
             document.querySelectorAll('.tf-chip').forEach(c => c.classList.remove('active'));
             chip.classList.add('active');
-            analysisTimeframeFilter = chip.dataset.tf;
+            const tf = chip.dataset.tf;
+            if (tf === 'saved') {
+                // Saved-only mode: show bookmarked analyses
+                analysisShowSavedOnly = true;
+                analysisTimeframeFilter = 'all';
+            } else {
+                analysisShowSavedOnly = false;
+                analysisTimeframeFilter = tf;
+            }
             renderAnalysisList();
         });
     }
+    // Initialize saved chip count
+    updateSavedChipCount();
 }
 
 function setupAnalysisInfiniteScroll() {
@@ -1327,8 +1439,9 @@ async function loadMoreAnalyses() {
 // ── Analysis Detail Page ──
 async function openAnalysisDetailPage(id) {
     currentAnalysisDetail = null;
-    const a = analyses.find(x => x.id === id);
-    if (!a) return;
+    // Look in both the list array AND the featured variable (featured is excluded
+    // from the list, so clicking the featured card would fail without this fallback).
+    const a = analyses.find(x => x.id === id) || (analysisFeatured && analysisFeatured.id === id ? analysisFeatured : null);
 
     // Fetch fresh detail from server (for full content + increment view)
     try {
@@ -1344,6 +1457,10 @@ async function openAnalysisDetailPage(id) {
                 if (localIdx >= 0 && detailRes.analysis.views_count !== undefined) {
                     analyses[localIdx].views_count = detailRes.analysis.views_count;
                 }
+                // Also update featured cache if this is the featured analysis
+                if (analysisFeatured && analysisFeatured.id === id && detailRes.analysis.views_count !== undefined) {
+                    analysisFeatured.views_count = detailRes.analysis.views_count;
+                }
             } else {
                 currentAnalysisDetail = a;
             }
@@ -1352,6 +1469,11 @@ async function openAnalysisDetailPage(id) {
         }
     } catch {
         currentAnalysisDetail = a;
+    }
+
+    if (!currentAnalysisDetail) {
+        showToast('تحلیل یافت نشد.');
+        return;
     }
 
     renderAnalysisDetailPage();
@@ -1371,15 +1493,20 @@ function renderAnalysisDetailPage() {
 
     const coinEl = $('adp-coin'); if (coinEl) coinEl.innerText = a.coin;
     const tfEl = $('adp-tf'); if (tfEl) tfEl.innerText = a.timeframe || '1D';
-    const viewsEl = $('adp-views'); if (viewsEl) viewsEl.innerText = `👁 ${a.views_count || 0}`;
+    const readTime = estimateReadTime(a.content || a.text);
+    const viewsEl = $('adp-views'); if (viewsEl) viewsEl.innerText = `👁 ${a.views_count || 0} · 📖 ${readTime} دقیقه`;
 
     // Admin actions
     const adminActions = $('adp-admin-actions');
     if (adminActions) adminActions.style.display = isAdmin() ? '' : 'none';
 
-    // Title
+    // Title (with sentiment badge if available)
     const titleEl = $('adp-title');
-    if (titleEl) titleEl.innerText = a.title || `${a.coin} — ${a.timeframe || '1D'}`;
+    if (titleEl) {
+        const sentiment = getSentiment(a);
+        const sentimentHtml = sentiment ? `<span class="adp-sentiment adp-sentiment-${sentiment}">${sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی'}</span>` : '';
+        titleEl.innerHTML = `${escapeHtml(a.title || `${a.coin} — ${a.timeframe || '1D'}`)} ${sentimentHtml}`;
+    }
 
     // Image
     const imgWrap = $('adp-image-wrap');
@@ -1416,6 +1543,9 @@ function renderAnalysisDetailPage() {
     // Meta
     const authorEl = $('adp-author'); if (authorEl) authorEl.innerText = a.author || '';
     const dateEl = $('adp-date'); if (dateEl) dateEl.innerText = a.date || '';
+
+    // Update bookmark button state
+    updateDetailBookmarkButton(a.id);
 
     // Related analyses (same coin, exclude current, max 3)
     renderRelatedAnalyses(a);
@@ -1511,6 +1641,44 @@ function closeAnalysisDetailPage() {
 function shareCurrentAnalysis() {
     if (!currentAnalysisDetail) return;
     shareAnalysisById(currentAnalysisDetail.id);
+}
+
+/**
+ * Copy the current analysis content to clipboard.
+ */
+function copyAnalysisContent() {
+    if (!currentAnalysisDetail) return;
+    const a = currentAnalysisDetail;
+    let text = `${a.coin} (${a.timeframe || '1D'})`;
+    if (a.title) text += ` — ${a.title}`;
+    text += '\n\n';
+    text += a.content || a.text || '';
+    if (a.support_level || a.current_price || a.resistance_level) {
+        text += '\n\n';
+        if (a.resistance_level) text += `مقاومت: ${a.resistance_level} | `;
+        if (a.current_price) text += `قیمت فعلی: ${a.current_price} | `;
+        if (a.support_level) text += `حمایت: ${a.support_level}`;
+    }
+    text += '\n\n📎 AMIRBTC';
+
+    try {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('متن تحلیل کپی شد.');
+        }).catch(() => {
+            // Fallback for older WebViews
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); showToast('متن تحلیل کپی شد.'); }
+            catch { showToast('کپی ناموفق بود.'); }
+            document.body.removeChild(ta);
+        });
+    } catch {
+        showToast('کپی ناموفق بود.');
+    }
 }
 
 function shareAnalysisById(id) {
@@ -5228,6 +5396,8 @@ window.closeAnalysisDetailPage = closeAnalysisDetailPage;
 window.startDeleteAnalysis = startDeleteAnalysis;
 window.resetAnalysisFilters = resetAnalysisFilters;
 window.initAnalysisToolbar = initAnalysisToolbar;
+window.toggleAnalysisBookmark = toggleAnalysisBookmark;
+window.copyAnalysisContent = copyAnalysisContent;
 window.openDashboardNewsModal = openDashboardNewsModal;
 window.openNewsModalWith = openNewsModalWith;
 window.openCoinDetail = openCoinDetail;
