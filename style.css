@@ -3066,6 +3066,17 @@ strong.down { color: var(--red); }
     border-radius: 20px;
 }
 
+/* Premium shimmer animation for featured card border */
+@keyframes premiumGlow {
+    0%, 100% { box-shadow: 0 0 15px rgba(255, 193, 7, 0.15), 0 4px 20px rgba(0,0,0,0.3), inset 0 0 0 1px rgba(255,193,7,0.2); }
+    50% { box-shadow: 0 0 25px rgba(255, 193, 7, 0.25), 0 4px 20px rgba(0,0,0,0.3), inset 0 0 0 1px rgba(255,193,7,0.35); }
+}
+
+@keyframes premiumShimmer {
+    0% { background-position: -200% center; }
+    100% { background-position: 200% center; }
+}
+
 .featured-slide {
     display: none;
     cursor: pointer;
@@ -3105,21 +3116,34 @@ strong.down { color: var(--red); }
     box-shadow: 0 0 8px rgba(255, 138, 0, 0.4);
 }
 
-/* Individual featured slide card */
+/* Individual featured slide card — PREMIUM look */
 .fs-card {
     position: relative;
     overflow: hidden;
-    background: linear-gradient(165deg, var(--bg-card) 0%, rgba(255, 138, 0, 0.04) 100%);
+    background: linear-gradient(165deg, #1a1510 0%, rgba(255, 193, 7, 0.08) 50%, #0f0d0a 100%);
     border-radius: 20px;
     cursor: pointer;
-    border: 1px solid rgba(255, 138, 0, 0.15);
+    border: 1.5px solid rgba(255, 193, 7, 0.35);
     transition: transform 0.2s ease, box-shadow 0.2s ease;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 138, 0, 0.05);
+    animation: premiumGlow 3s ease-in-out infinite;
+}
+
+.fs-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,193,7,0.06), transparent);
+    animation: premiumShimmer 4s ease-in-out infinite;
+    z-index: 1;
+    pointer-events: none;
 }
 
 .fs-card:active {
     transform: scale(0.985);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 10px rgba(255,193,7,0.2);
 }
 
 .fs-card-image-wrap {
@@ -3149,7 +3173,7 @@ strong.down { color: var(--red); }
     left: 0;
     right: 0;
     padding: 14px 16px;
-    z-index: 1;
+    z-index: 2;
 }
 
 .fs-card-no-image {
@@ -3181,16 +3205,17 @@ strong.down { color: var(--red); }
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    background: linear-gradient(145deg, rgba(255, 138, 0, 0.3), rgba(255, 138, 0, 0.1));
-    border: 1.5px solid rgba(255, 138, 0, 0.4);
+    background: linear-gradient(145deg, rgba(255, 193, 7, 0.35), rgba(255, 152, 0, 0.15));
+    border: 1.5px solid rgba(255, 193, 7, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 11px;
     font-weight: 800;
     color: #fff;
-    text-shadow: 0 0 6px rgba(255, 138, 0, 0.5);
+    text-shadow: 0 0 6px rgba(255, 193, 7, 0.5);
     flex-shrink: 0;
+    box-shadow: 0 0 10px rgba(255,193,7,0.2);
 }
 
 .fs-coin-info {
@@ -3209,13 +3234,14 @@ strong.down { color: var(--red); }
 
 .fs-tf-badge {
     font-size: 10px;
-    background: rgba(255, 138, 0, 0.25);
-    color: #fff;
+    background: rgba(255, 193, 7, 0.25);
+    color: #fbbf24;
     padding: 2px 8px;
     border-radius: 6px;
     font-weight: 700;
     width: fit-content;
     backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,193,7,0.2);
 }
 
 .fs-sentiment-badge {
@@ -3228,25 +3254,37 @@ strong.down { color: var(--red); }
     font-weight: 700;
     white-space: nowrap;
     backdrop-filter: blur(6px);
-    z-index: 2;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
 }
 
 .fs-sentiment-badge.bullish {
     background: rgba(34, 197, 94, 0.2);
     color: #4ade80;
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.15);
 }
 
 .fs-sentiment-badge.bearish {
     background: rgba(239, 68, 68, 0.2);
     color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.15);
 }
 
 .fs-sentiment-badge.neutral {
-    background: rgba(156, 163, 175, 0.15);
-    color: #d1d5db;
-    border: 1px solid rgba(156, 163, 175, 0.25);
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.fs-sentiment-badge.decision {
+    background: rgba(168, 85, 247, 0.2);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.35);
+    box-shadow: 0 0 8px rgba(168, 85, 247, 0.15);
 }
 
 .fs-featured-badge {
@@ -3257,15 +3295,16 @@ strong.down { color: var(--red); }
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: linear-gradient(135deg, rgba(255, 138, 0, 0.2), rgba(255, 100, 0, 0.1));
-    color: var(--accent);
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.25), rgba(255, 152, 0, 0.15));
+    color: #fbbf24;
     font-size: 10px;
     font-weight: 700;
     padding: 4px 10px;
     border-radius: 16px;
     backdrop-filter: blur(6px);
-    border: 1px solid rgba(255, 138, 0, 0.3);
-    z-index: 2;
+    border: 1px solid rgba(255, 193, 7, 0.4);
+    z-index: 3;
+    text-shadow: 0 0 8px rgba(255,193,7,0.4);
 }
 
 .fs-card-title {
@@ -3517,11 +3556,11 @@ strong.down { color: var(--red); }
 .analysis-card-v2:nth-child(5) { animation-delay: 0.16s; }
 .analysis-card-v2:nth-child(n+6) { animation-delay: 0.2s; }
 
-/* Image section - TOP of card, ~40% height */
+/* Image section - TOP of card, taller for better visual impact */
 .acv-image-section {
     position: relative;
     width: 100%;
-    height: 180px;
+    height: 220px;
     overflow: hidden;
     background: var(--bg-primary);
 }
@@ -3629,20 +3668,29 @@ strong.down { color: var(--red); }
 
 .acv-sentiment-bullish {
     background: rgba(34, 197, 94, 0.15);
-    color: var(--green);
-    border: 1px solid rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    box-shadow: 0 0 6px rgba(34,197,94,0.1);
 }
 
 .acv-sentiment-bearish {
     background: rgba(239, 68, 68, 0.15);
-    color: var(--red);
-    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 6px rgba(239,68,68,0.1);
 }
 
 .acv-sentiment-neutral {
-    background: rgba(156, 163, 175, 0.12);
-    color: #9ca3af;
-    border: 1px solid rgba(156, 163, 175, 0.2);
+    background: rgba(148, 163, 184, 0.12);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.acv-sentiment-decision {
+    background: rgba(168, 85, 247, 0.15);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    box-shadow: 0 0 6px rgba(168,85,247,0.1);
 }
 
 .acv-card-title {
@@ -3960,8 +4008,9 @@ strong.down { color: var(--red); }
 
 .adp-levels {
     display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
+    gap: 6px;
+    margin-bottom: 12px;
+    margin-top: 12px;
 }
 
 /* ── Price Range Visualizer ── */
@@ -4058,8 +4107,8 @@ strong.down { color: var(--red); }
 
 .adp-level {
     flex: 1;
-    padding: 12px;
-    border-radius: 14px;
+    padding: 8px 6px;
+    border-radius: 10px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     text-align: center;
@@ -4067,16 +4116,16 @@ strong.down { color: var(--red); }
 
 .adp-level-label {
     display: block;
-    font-size: 10px;
+    font-size: 9px;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
+    letter-spacing: 0.3px;
+    margin-bottom: 2px;
 }
 
 .adp-level-value {
     display: block;
-    font-size: 16px;
+    font-size: 13px;
     font-weight: 800;
     line-height: 1.3;
 }
@@ -4194,20 +4243,29 @@ strong.down { color: var(--red); }
 
 .adp-sentiment-bullish {
     background: rgba(34, 197, 94, 0.15);
-    color: var(--green);
-    border: 1px solid rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    box-shadow: 0 0 6px rgba(34,197,94,0.1);
 }
 
 .adp-sentiment-bearish {
     background: rgba(239, 68, 68, 0.15);
-    color: var(--red);
-    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 6px rgba(239,68,68,0.1);
 }
 
 .adp-sentiment-neutral {
-    background: rgba(156, 163, 175, 0.12);
-    color: #9ca3af;
-    border: 1px solid rgba(156, 163, 175, 0.2);
+    background: rgba(148, 163, 184, 0.12);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.adp-sentiment-decision {
+    background: rgba(168, 85, 247, 0.15);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    box-shadow: 0 0 6px rgba(168,85,247,0.1);
 }
 
 /* ── Related Analyses section ── */

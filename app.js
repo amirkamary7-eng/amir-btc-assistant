@@ -1038,7 +1038,7 @@ function estimateReadTime(text) {
 }
 
 /**
- * Determine sentiment (bullish/bearish/neutral) based on price levels.
+ * Determine sentiment (bullish/bearish/neutral/decision) based on price levels.
  * Compares current_price to support and resistance.
  */
 function getSentiment(a) {
@@ -1049,9 +1049,40 @@ function getSentiment(a) {
     const range = resistance - support;
     if (range <= 0) return null;
     const position = (current - support) / range; // 0 = at support, 1 = at resistance
-    if (position <= 0.33) return 'bearish';
-    if (position >= 0.66) return 'bullish';
-    return 'neutral';
+    if (position <= 0.25) return 'bearish';
+    if (position >= 0.75) return 'bullish';
+    if (position <= 0.45 || position >= 0.55) return 'neutral';
+    return 'decision';
+}
+
+// ── Sentiment Badge HTML Generator ──
+const SENTIMENT_CONFIG = {
+    bullish: {
+        label: 'صعودی',
+        cls: 'bullish',
+        icon: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16L10 4L17 16"/><path d="M7 11h6"/></svg>',
+    },
+    bearish: {
+        label: 'نزولی',
+        cls: 'bearish',
+        icon: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4L10 16L17 4"/><path d="M7 9h6"/></svg>',
+    },
+    neutral: {
+        label: 'خنثی',
+        cls: 'neutral',
+        icon: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h14"/><path d="M8 6v8"/><circle cx="10" cy="10" r="2" fill="currentColor" stroke="none"/></svg>',
+    },
+    decision: {
+        label: 'محدوده تصمیم',
+        cls: 'decision',
+        icon: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><path d="M10 6v4"/><circle cx="10" cy="13" r="1" fill="currentColor" stroke="none"/></svg>',
+    },
+};
+
+function getSentimentBadgeHTML(sentiment, badgeClass = 'acv-sentiment') {
+    if (!sentiment || !SENTIMENT_CONFIG[sentiment]) return '';
+    const cfg = SENTIMENT_CONFIG[sentiment];
+    return `<span class="${badgeClass} ${badgeClass}-${cfg.cls}">${cfg.icon} ${cfg.label}</span>`;
 }
 
 /**
@@ -1151,9 +1182,7 @@ function buildFeaturedPriceBoxes(a) {
 function renderFeaturedSlideHTML(a) {
     const sentiment = getSentiment(a);
     const readTime = estimateReadTime(a.content || a.text);
-    const sentimentClass = sentiment || 'neutral';
-    const sentimentText = sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی';
-    const sentimentHTML = sentiment ? `<span class="fs-sentiment-badge ${sentimentClass}">${sentimentText}</span>` : '';
+    const sentimentHTML = sentiment ? `<span class="fs-sentiment-badge ${sentiment}">${SENTIMENT_CONFIG[sentiment].icon} ${SENTIMENT_CONFIG[sentiment].label}</span>` : '';
     const featuredHTML = a.featured ? `<span class="fs-featured-badge">⭐ ویژه</span>` : '';
 
     const imageSection = a.image
@@ -1202,14 +1231,11 @@ function renderAnalysisFeatured() {
     const dotsEl = $('featured-slider-dots');
     if (!section || !container) return;
 
-    // Build slides: featured first, then up to 4 recent
+    // Build slides: ONLY featured analyses (no regular analyses in hero)
     featuredSlides = [];
     if (analysisFeatured) {
         featuredSlides.push(analysisFeatured);
     }
-    const recentIds = new Set(featuredSlides.map(a => a.id));
-    const recent = analyses.filter(a => !recentIds.has(a.id)).slice(0, 4);
-    featuredSlides = featuredSlides.concat(recent);
 
     if (!featuredSlides.length) {
         section.style.display = 'none';
@@ -1464,9 +1490,7 @@ function renderAnalysisList() {
         const sentiment = getSentiment(a);
         const readTime = estimateReadTime(a.content || a.text);
         const bookmarked = isAnalysisBookmarked(a.id);
-        const sentimentClass = sentiment || 'neutral';
-        const sentimentText = sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی';
-        const sentimentBadge = sentiment ? `<span class="acv-sentiment acv-sentiment-${sentimentClass}">${sentimentText}</span>` : '';
+        const sentimentBadge = getSentimentBadgeHTML(sentiment, 'acv-sentiment');
 
         // Price boxes
         let priceBoxes = '';
@@ -1807,19 +1831,11 @@ function renderAnalysisDetailPage() {
         avatarEl.innerHTML = escapeHtml(a.coin || '?');
     }
 
-    // Admin actions
+    // Admin actions — HIDDEN by default, only shown after bootstrap confirms admin
     const adminActions = $('adp-admin-actions');
     if (adminActions) adminActions.style.display = isAdmin() ? '' : 'none';
 
-    // Title (with sentiment badge if available)
-    const titleEl = $('adp-title');
-    if (titleEl) {
-        const sentiment = getSentiment(a);
-        const sentimentHtml = sentiment ? `<span class="adp-sentiment adp-sentiment-${sentiment}">${sentiment === 'bullish' ? '📈 صعودی' : sentiment === 'bearish' ? '📉 نزولی' : '➡️ خنثی'}</span>` : '';
-        titleEl.innerHTML = `${escapeHtml(a.title || `${a.coin} — ${a.timeframe || '1D'}`)} ${sentimentHtml}`;
-    }
-
-    // Image
+    // Image (shown first, prominent)
     const imgWrap = $('adp-image-wrap');
     const img = $('adp-image');
     if (a.image) {
@@ -1829,7 +1845,22 @@ function renderAnalysisDetailPage() {
         if (imgWrap) imgWrap.style.display = 'none';
     }
 
-    // Price levels
+    // Title (with sentiment badge if available)
+    const titleEl = $('adp-title');
+    if (titleEl) {
+        const sentiment = getSentiment(a);
+        const sentimentHtml = getSentimentBadgeHTML(sentiment, 'adp-sentiment');
+        titleEl.innerHTML = `${escapeHtml(a.title || `${a.coin} — ${a.timeframe || '1D'}`)} ${sentimentHtml}`;
+    }
+
+    // Content (escaped for XSS safety) — shown right after title
+    const contentEl = $('adp-content');
+    if (contentEl) {
+        const text = a.content || a.text || '';
+        contentEl.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+    }
+
+    // Price levels — smaller, shown BELOW content
     const levelsEl = $('adp-levels');
     if (levelsEl) {
         if (a.support_level || a.current_price || a.resistance_level) {
@@ -1844,15 +1875,9 @@ function renderAnalysisDetailPage() {
         }
     }
 
-    // Price range visualizer (only if all 3 levels are present and numeric)
-    renderPriceRangeVisualizer(a);
-
-    // Content (escaped for XSS safety)
-    const contentEl = $('adp-content');
-    if (contentEl) {
-        const text = a.content || a.text || '';
-        contentEl.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
-    }
+    // Price range visualizer — REMOVED (user requested removal)
+    const rangeEl = $('adp-price-range');
+    if (rangeEl) rangeEl.style.display = 'none';
 
     // Meta
     const authorEl = $('adp-author'); if (authorEl) authorEl.innerText = a.author || '';
