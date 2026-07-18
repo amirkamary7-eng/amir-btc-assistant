@@ -3385,8 +3385,6 @@ strong.down { color: var(--red); }
 
 /* #endregion */
 
-/* #endregion */
-
 /* #region 3. Stats Bar — Minimal */
 
 .stats-bar {
@@ -3769,8 +3767,6 @@ strong.down { color: var(--red); }
 .analysis-card-v2.acv-bookmarked::before {
     opacity: 0.5;
 }
-
-/* #endregion */
 
 /* #endregion */
 
