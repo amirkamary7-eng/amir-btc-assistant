@@ -27,6 +27,7 @@ export function createAnalysisRepository(deps) {
       resistance_level: normalizeOptionalString(row?.resistance_level) || '',
       views_count: Number(row?.views_count || 0),
       featured: Boolean(row?.featured),
+      category: normalizeOptionalString(row?.category) || 'crypto',
       author: normalizeOptionalString(row?.author) || '',
       author_id: normalizeOptionalString(row?.author_id),
       date: createdAt ? createdAt.toISOString().slice(0, 10) : '',
@@ -46,6 +47,7 @@ export function createAnalysisRepository(deps) {
       `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS resistance_level VARCHAR(64) DEFAULT ''`,
       `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS views_count INTEGER DEFAULT 0 NOT NULL`,
       `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT FALSE NOT NULL`,
+      `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS category VARCHAR(16) DEFAULT 'crypto' NOT NULL`,
     ];
     for (const sql of alterStatements) {
       try { await queryDb(env, sql); } catch (e) { console.warn('Analysis schema migration warning:', e.message); }
@@ -58,7 +60,7 @@ export function createAnalysisRepository(deps) {
   async function getFeatured(env) {
     const result = await queryDb(
       env,
-      `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, author, author_id, created_at, updated_at
+      `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
        FROM analyses WHERE featured = TRUE ORDER BY created_at DESC LIMIT 1`,
     );
     return result.rows.length ? serializeAnalysisRow(result.rows[0]) : null;
@@ -90,7 +92,7 @@ export function createAnalysisRepository(deps) {
       queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured IS NOT TRUE OR featured = FALSE`),
       queryDb(
         env,
-        `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, author, author_id, created_at, updated_at
+        `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
          FROM analyses
          WHERE featured IS NOT TRUE OR featured = FALSE
          ORDER BY created_at DESC
@@ -112,7 +114,7 @@ export function createAnalysisRepository(deps) {
   async function getById(env, analysisId) {
     const result = await queryDb(
       env,
-      `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, author, author_id, created_at, updated_at
+      `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
        FROM analyses WHERE id = $1`,
       [String(analysisId)],
     );
@@ -162,7 +164,7 @@ export function createAnalysisRepository(deps) {
   async function listAll(env) {
     const result = await queryDb(
       env,
-      `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, author, author_id, created_at, updated_at
+      `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
        FROM analyses ORDER BY created_at DESC`,
     );
     return result.rows.map((row) => serializeAnalysisRow(row));
@@ -176,15 +178,12 @@ export function createAnalysisRepository(deps) {
     if (payload.featured) {
       await queryDb(env, `UPDATE analyses SET featured = FALSE WHERE featured = TRUE`);
     }
-    // NOTE: column count (14) MUST match value count (14).
-    //   $12 = author_id, then NOW() for created_at, NOW() for updated_at.
-    //   Previous bug: only 13 values (missing $12) caused
-    //   "INSERT has more target columns than expressions" → publish silently failed.
+    // NOTE: 15 columns, 15 values ($1..$13 + NOW() + NOW())
     const result = await queryDb(
       env,
-      `INSERT INTO analyses (id, title, coin, timeframe, image, text, support_level, current_price, resistance_level, featured, author, author_id, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
-       RETURNING id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, author, author_id, created_at, updated_at`,
+      `INSERT INTO analyses (id, title, coin, timeframe, image, text, support_level, current_price, resistance_level, featured, category, author, author_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+       RETURNING id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at`,
       [
         String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 12),
         normalizeOptionalString(payload.title) || '',
@@ -196,6 +195,7 @@ export function createAnalysisRepository(deps) {
         normalizeOptionalString(payload.current_price) || '',
         normalizeOptionalString(payload.resistance_level) || '',
         Boolean(payload.featured) ? true : false,
+        normalizeOptionalString(payload.category) || 'crypto',
         normalizeOptionalString(payload.author) || '',
         String(adminUserId),
       ],
@@ -216,9 +216,9 @@ export function createAnalysisRepository(deps) {
       `UPDATE analyses
        SET title = $2, coin = $3, timeframe = $4, image = $5, text = $6,
            support_level = $7, current_price = $8, resistance_level = $9,
-           featured = COALESCE($10, featured), updated_at = NOW()
+           featured = COALESCE($10, featured), category = COALESCE($11, category), updated_at = NOW()
        WHERE id = $1
-       RETURNING id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, author, author_id, created_at, updated_at`,
+       RETURNING id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at`,
       [
         String(analysisId),
         normalizeOptionalString(payload.title) || '',
@@ -230,6 +230,7 @@ export function createAnalysisRepository(deps) {
         normalizeOptionalString(payload.current_price) || '',
         normalizeOptionalString(payload.resistance_level) || '',
         payload.featured === true ? true : payload.featured === false ? false : null,
+        normalizeOptionalString(payload.category) || null,
       ],
     );
     if (!result.rows[0]) return null;

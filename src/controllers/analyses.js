@@ -104,6 +104,7 @@ export function createAnalysisHandlers(deps) {
       { name: 'support_level', required: false, defaultValue: '', maxLength: 64 },
       { name: 'current_price', required: false, defaultValue: '', maxLength: 64 },
       { name: 'resistance_level', required: false, defaultValue: '', maxLength: 64 },
+      { name: 'category', required: false, defaultValue: 'crypto', maxLength: 16 },
       ...(requireAuthor ? [{ name: 'author', required: true, minLength: 1, maxLength: 128 }] : []),
     ];
 

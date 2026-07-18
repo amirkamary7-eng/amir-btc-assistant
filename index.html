@@ -368,8 +368,10 @@
         <!-- Pull to refresh indicator -->
         <div class="ptr-indicator" id="analysis-ptr">
             <svg class="ptr-spinner" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round"/></svg>
-            <span class="ptr-text" id="analysis-ptr-text">برایrefresh پایین بکشید</span>
+            <span class="ptr-text" id="analysis-ptr-text">برای refresh پایین بکشید</span>
         </div>
+
+        <!-- 1. Page Header -->
         <div class="analysis-page-header">
             <h2 class="page-title-with-icon">
                 <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
@@ -377,42 +379,33 @@
             </h2>
         </div>
 
-        <!-- Search & Filter Bar -->
-        <div class="analysis-toolbar" id="analysis-toolbar">
-            <div class="at-search-wrap">
-                <svg class="at-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-                <input type="text" id="analysis-search-input" class="at-search-input" placeholder="جستجوی ارز یا عنوان..." autocomplete="off" />
-                <button type="button" id="analysis-search-clear" class="at-search-clear" style="display:none;" aria-label="پاک کردن">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
-                </button>
-            </div>
-            <div class="at-sort-wrap">
-                <select id="analysis-sort-select" class="at-sort-select" aria-label="مرتب‌سازی">
-                    <option value="newest">🆕 جدیدترین</option>
-                    <option value="oldest">📅 قدیمی‌ترین</option>
-                    <option value="views">🔥 پر بازدید</option>
-                    <option value="featured">⭐ ویژه‌ها</option>
-                </select>
-                <svg class="at-sort-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-            </div>
-        </div>
-
-        <!-- Timeframe Filter Chips -->
-        <div class="analysis-tf-chips" id="analysis-tf-chips">
-            <button type="button" class="tf-chip active" data-tf="all">همه</button>
-            <button type="button" class="tf-chip" data-tf="1H">1H</button>
-            <button type="button" class="tf-chip" data-tf="4H">4H</button>
-            <button type="button" class="tf-chip" data-tf="1D">1D</button>
-            <button type="button" class="tf-chip" data-tf="1W">1W</button>
-            <button type="button" class="tf-chip" data-tf="saved">🔖 ذخیره‌شده</button>
-        </div>
-
+        <!-- 2. Featured Analysis (moved above stats) -->
         <div id="analysis-featured-section" style="display:none;"></div>
+
+        <!-- 3. Stats Bar (minimal) -->
         <div id="analysis-stats-bar" style="display:none;"></div>
 
-        <!-- Skeleton Loading Container -->
+        <!-- 4. Category Tabs + Search -->
+        <div class="analysis-tabs-row" id="analysis-tabs-row">
+            <div class="at-tabs" id="analysis-tf-chips">
+                <button type="button" class="tf-chip active" data-tf="all">همه</button>
+                <button type="button" class="tf-chip" data-tf="crypto">کریپتو</button>
+                <button type="button" class="tf-chip" data-tf="forex">فارکس</button>
+                <button type="button" class="tf-chip" data-tf="saved">🔖 ذخیره‌شده</button>
+            </div>
+            <div class="at-search-wrap">
+                <svg class="at-search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+                <input type="text" id="analysis-search-input" class="at-search-input" placeholder="جستجو..." autocomplete="off" />
+                <button type="button" id="analysis-search-clear" class="at-search-clear" style="display:none;" aria-label="پاک کردن">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- 5. Skeleton Loading Container -->
         <div id="analysis-skeleton-container" class="analysis-skeleton-container" style="display:none;"></div>
 
+        <!-- 6. Analysis List -->
         <div class="analysis-list-container" id="analysis-list-container"></div>
         <div id="analysis-load-trigger" class="analysis-load-trigger"></div>
     </section>
@@ -707,6 +700,21 @@
                     <div class="af-field af-field-half"><label>تایم فریم</label><input type="text" id="analysis-timeframe" placeholder="4H" class="input-field"></div>
                 </div>
                 <div class="af-row">
+                    <div class="af-field af-field-half">
+                        <label>دسته‌بندی</label>
+                        <select id="analysis-category" class="input-field">
+                            <option value="crypto">کریپتو</option>
+                            <option value="forex">فارکس</option>
+                        </select>
+                    </div>
+                    <div class="af-field af-field-half af-field-checkbox">
+                        <label class="af-checkbox-label">
+                            <input type="checkbox" id="analysis-featured">
+                            <span>⭐ تحلیل ویژه</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="af-row">
                     <div class="af-field"><label>لینک تصویر چارت</label><input type="text" id="analysis-image" placeholder="https://..." class="input-field"></div>
                 </div>
                 <div class="af-row">
@@ -715,14 +723,6 @@
                 <div class="af-row">
                     <div class="af-field af-field-half"><label>حمایت</label><input type="text" id="analysis-support" placeholder="61700" class="input-field"></div>
                     <div class="af-field af-field-half"><label>مقاومت</label><input type="text" id="analysis-resistance" placeholder="65000" class="input-field"></div>
-                </div>
-                <div class="af-row">
-                    <div class="af-field af-field-checkbox">
-                        <label class="af-checkbox-label">
-                            <input type="checkbox" id="analysis-featured">
-                            <span>⭐ تحلیل ویژه</span>
-                        </label>
-                    </div>
                 </div>
                 <div class="af-row">
                     <div class="af-field"><label>متن تحلیل</label><textarea id="analysis-text" placeholder="سناریوی اصلی: ...&#10;سناریوی جایگزین: ..." class="input-field" rows="5"></textarea></div>

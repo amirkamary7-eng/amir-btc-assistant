@@ -298,7 +298,7 @@ window.addEventListener('hashchange', () => {
 // ============================================================================
 
 let ADMIN_ID = null; // Set dynamically from bootstrap API response
-let isCurrentUserAdmin = false;
+let isCurrentUserAdmin = localStorage.getItem('is_admin') === '1';
 let BOT_USERNAME = 'Amir_BTC_AssistantBot'; // Fallback — overridden by bootstrap API (H-R4)
 const MAX_WATCHLIST = 7;
 const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
@@ -821,11 +821,15 @@ async function bootstrapUser() {
         saveLangToStorage();
         applyLanguage();
 
-        // Admin status from server
+        // Admin status from server — persist to localStorage for session stability
         isCurrentUserAdmin = Boolean(data.is_admin);
+        localStorage.setItem('is_admin', isCurrentUserAdmin ? '1' : '0');
         if (data.user?.id) {
             ADMIN_ID = String(data.user.id);
+            localStorage.setItem('admin_id', ADMIN_ID);
         }
+        // Update FAB visibility now that admin status is known
+        updateAnalysisFabVisibility();
 
         // ── Membership lock gate ──
         if (data.channel_joined === false) {
@@ -1189,26 +1193,26 @@ function renderAnalysisStats() {
         <div class="stats-bar">
             <div class="stat-item active">
                 <div class="stat-icon">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
                 </div>
                 <span class="stat-value">${analysisStats.active}</span>
-                <span class="stat-label">تحلیل فعال</span>
+                <span class="stat-label">فعال</span>
             </div>
             <div class="stat-divider"></div>
             <div class="stat-item today">
                 <div class="stat-icon">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
                 </div>
                 <span class="stat-value">${analysisStats.today}</span>
-                <span class="stat-label">جدید امروز</span>
+                <span class="stat-label">امروز</span>
             </div>
             <div class="stat-divider"></div>
             <div class="stat-item total">
                 <div class="stat-icon">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/></svg>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/></svg>
                 </div>
                 <span class="stat-value">${analysisStats.total}</span>
-                <span class="stat-label">کل تحلیل‌ها</span>
+                <span class="stat-label">کل</span>
             </div>
         </div>
     `;
@@ -1230,12 +1234,9 @@ function getFilteredAnalyses() {
         if (analysisFeatured && analysisBookmarks.includes(analysisFeatured.id) && !list.find(a => a.id === analysisFeatured.id)) {
             list.unshift(analysisFeatured);
         }
-    }
-
-    // Timeframe filter
-    if (analysisTimeframeFilter !== 'all') {
-        const tf = analysisTimeframeFilter.toUpperCase();
-        list = list.filter(a => (a.timeframe || '1D').toUpperCase() === tf);
+    } else if (analysisTimeframeFilter !== 'all') {
+        // Category filter (crypto/forex) — not timeframe anymore
+        list = list.filter(a => (a.category || 'crypto') === analysisTimeframeFilter);
     }
 
     // Search query (coin or title)
@@ -1251,22 +1252,8 @@ function getFilteredAnalyses() {
         }
     }
 
-    // Sort
-    switch (analysisSortMode) {
-        case 'oldest':
-            list.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-            break;
-        case 'views':
-            list.sort((a, b) => (b.views_count || 0) - (a.views_count || 0));
-            break;
-        case 'featured':
-            list.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0));
-            break;
-        case 'newest':
-        default:
-            list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-            break;
-    }
+    // Always sort newest first (simpler, better UX)
+    list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
     return list;
 }
@@ -1421,13 +1408,10 @@ function renderAnalysisList() {
  */
 function resetAnalysisFilters() {
     analysisSearchQuery = '';
-    analysisSortMode = 'newest';
     analysisTimeframeFilter = 'all';
     analysisShowSavedOnly = false;
     const searchInput = $('analysis-search-input');
     if (searchInput) searchInput.value = '';
-    const sortSelect = $('analysis-sort-select');
-    if (sortSelect) sortSelect.value = 'newest';
     const clearBtn = $('analysis-search-clear');
     if (clearBtn) clearBtn.style.display = 'none';
     document.querySelectorAll('.tf-chip').forEach(c => c.classList.toggle('active', c.dataset.tf === 'all'));
@@ -1441,7 +1425,6 @@ function resetAnalysisFilters() {
 function initAnalysisToolbar() {
     const searchInput = $('analysis-search-input');
     const clearBtn = $('analysis-search-clear');
-    const sortSelect = $('analysis-sort-select');
     const chipsContainer = $('analysis-tf-chips');
 
     if (searchInput) {
@@ -1466,13 +1449,6 @@ function initAnalysisToolbar() {
         });
     }
 
-    if (sortSelect) {
-        sortSelect.addEventListener('change', (e) => {
-            analysisSortMode = e.target.value;
-            renderAnalysisList();
-        });
-    }
-
     if (chipsContainer) {
         chipsContainer.addEventListener('click', (e) => {
             const chip = e.target.closest('.tf-chip');
@@ -1481,7 +1457,6 @@ function initAnalysisToolbar() {
             chip.classList.add('active');
             const tf = chip.dataset.tf;
             if (tf === 'saved') {
-                // Saved-only mode: show bookmarked analyses
                 analysisShowSavedOnly = true;
                 analysisTimeframeFilter = 'all';
             } else {
@@ -1491,9 +1466,7 @@ function initAnalysisToolbar() {
             renderAnalysisList();
         });
     }
-    // Initialize saved chip count
     updateSavedChipCount();
-    // Initialize pull-to-refresh
     initPullToRefresh();
 }
 
@@ -2092,12 +2065,14 @@ function openAddAnalysisModal() {
     });
     const featuredEl = document.getElementById('analysis-featured');
     if (featuredEl) featuredEl.checked = false;
+    const catEl = document.getElementById('analysis-category');
+    if (catEl) catEl.value = 'crypto';
     document.getElementById('add-analysis-modal').style.display = 'flex';
 }
 
 function openEditAnalysisModal(id) {
     if (!isAdmin()) return;
-    const a = analyses.find(x => x.id === id);
+    const a = analyses.find(x => x.id === id) || (analysisFeatured?.id === id ? analysisFeatured : null);
     if (!a) return;
     editingAnalysisId = id;
     document.getElementById('analysis-modal-title').innerText = 'ویرایش تحلیل';
@@ -2112,6 +2087,8 @@ function openEditAnalysisModal(id) {
     document.getElementById('analysis-resistance').value = a.resistance_level || '';
     const featuredEl = document.getElementById('analysis-featured');
     if (featuredEl) featuredEl.checked = Boolean(a.featured);
+    const catEl = document.getElementById('analysis-category');
+    if (catEl) catEl.value = a.category || 'crypto';
     document.getElementById('add-analysis-modal').style.display = 'flex';
 }
 
@@ -2132,6 +2109,7 @@ function submitAnalysis() {
         const priceEl = document.getElementById('analysis-current-price');
         const resEl   = document.getElementById('analysis-resistance');
         const featEl  = document.getElementById('analysis-featured');
+        const catEl   = document.getElementById('analysis-category');
 
         // ── Step 2: Read values ──
         const title          = titleEl ? titleEl.value.trim() : '';
@@ -2143,6 +2121,7 @@ function submitAnalysis() {
         const current_price  = priceEl ? priceEl.value.trim() : '';
         const resistance_level = resEl  ? resEl.value.trim() : '';
         const featured       = featEl  ? featEl.checked : false;
+        const category       = catEl   ? catEl.value : 'crypto';
 
         // ── Step 3: Validate ──
         if (!coin || !text) {
@@ -2152,17 +2131,18 @@ function submitAnalysis() {
 
         // ── Step 4: Build payload ──
         const author = getTelegramUser()?.first_name || 'مدیر';
-        const payload = { coin, timeframe, image, text, author, title, support_level, current_price, resistance_level, featured };
+        const payload = { coin, timeframe, image, text, author, title, support_level, current_price, resistance_level, featured, category };
 
         // ── Step 5: Disable button ──
         const btn = document.getElementById('analysis-submit-btn');
         if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.innerText = '⏳ در حال ارسال...'; }
 
-        // ── Step 6: Async save ──
+        // ── Step 6: Async save with optimistic UI update ──
+        const wasEditing = !!editingAnalysisId;
         (async () => {
             try {
                 let result;
-                if (editingAnalysisId) {
+                if (wasEditing) {
                     result = await saveAnalysisToServer(payload, 'PUT', editingAnalysisId);
                 } else {
                     result = await saveAnalysisToServer(payload, 'POST');
@@ -2173,24 +2153,72 @@ function submitAnalysis() {
                     return;
                 }
 
-                if (result.status === 'success') {
-                    showToast(editingAnalysisId ? 'تحلیل ویرایش شد.' : 'تحلیل منتشر شد.');
-                } else {
+                if (result.status !== 'success') {
                     showToast(result.detail || result.message || 'خطا در ذخیره تحلیل.');
                     return;
                 }
 
-                await fetchAnalyses(true);
+                // ── OPTIMISTIC UI UPDATE (instant, no refetch needed) ──
+                if (result.analysis) {
+                    if (wasEditing) {
+                        // UPDATE: replace in local array
+                        const idx = analyses.findIndex(a => a.id === result.analysis.id);
+                        if (idx >= 0) analyses[idx] = result.analysis;
+                        // Update featured if it was the featured one
+                        if (analysisFeatured?.id === result.analysis.id) {
+                            analysisFeatured = result.analysis.featured ? result.analysis : null;
+                        } else if (result.analysis.featured) {
+                            analysisFeatured = result.analysis;
+                        }
+                    } else {
+                        // CREATE: insert at beginning of array
+                        analyses.unshift(result.analysis);
+                        // Update featured if new analysis is featured
+                        if (result.analysis.featured) {
+                            analysisFeatured = result.analysis;
+                        }
+                    }
+                }
+
+                // Update stats locally
+                if (analysisStats) {
+                    if (!wasEditing) {
+                        analysisStats.total++;
+                        analysisStats.active++;
+                        // Check if created today
+                        const created = new Date(result.analysis?.created_at || Date.now());
+                        if (created.toDateString() === new Date().toDateString()) {
+                            analysisStats.today++;
+                        }
+                    }
+                }
+
+                // Update version from response to avoid stale cache
+                if (result.version) analysisVersion = result.version;
+
+                // Close modal FIRST (user sees immediate response)
+                closeAddAnalysisModal();
+
+                // Re-render all views with updated local data
                 renderAnalysisFeatured();
                 renderAnalysisStats();
                 renderAnalysisList();
                 renderAnalysisSlider();
-                closeAddAnalysisModal();
+
+                showToast(wasEditing ? 'تحلیل ویرایش شد.' : 'تحلیل منتشر شد.');
+
+                // Background refetch to sync with server (non-blocking, silent)
+                fetchAnalyses(true).then(() => {
+                    renderAnalysisFeatured();
+                    renderAnalysisStats();
+                    renderAnalysisList();
+                    renderAnalysisSlider();
+                }).catch(() => {});
             } catch (e) {
                 console.error('[ANALYSIS] save error:', e.message);
                 showToast('خطا در ذخیره تحلیل: ' + (e.message || 'Unknown'));
             } finally {
-                if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerText = editingAnalysisId ? 'ذخیره تغییرات' : 'انتشار تحلیل'; }
+                if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerText = wasEditing ? 'ذخیره تغییرات' : 'انتشار تحلیل'; }
             }
         })();
     } catch (syncErr) {
@@ -2224,17 +2252,46 @@ function executeDeleteAnalysis() {
     cancelDeleteAnalysis();
     (async () => {
         try {
-            await saveAnalysisToServer(null, 'DELETE', id);
+            const result = await saveAnalysisToServer(null, 'DELETE', id);
+            if (result && result.status !== 'success' && result.status !== undefined) {
+                showToast(result.detail || result.message || 'خطا در حذف تحلیل.');
+                return;
+            }
+
+            // ── OPTIMISTIC UI UPDATE ──
+            // Remove from local array immediately
+            const idx = analyses.findIndex(a => a.id === id);
+            if (idx >= 0) analyses.splice(idx, 1);
+            // Clear featured if it was the deleted one
+            if (analysisFeatured?.id === id) analysisFeatured = null;
+            // Update stats locally
+            if (analysisStats && analysisStats.total > 0) {
+                analysisStats.total--;
+                analysisStats.active = Math.max(0, analysisStats.active - 1);
+            }
+            // Update version from response
+            if (result?.version) analysisVersion = result.version;
+
             showToast('تحلیل حذف شد.');
+
             // If we're on the detail page of the deleted analysis, go back
             if (currentAnalysisDetail?.id === id) {
                 closeAnalysisDetailPage();
             }
-            await fetchAnalyses(true);
+
+            // Re-render with updated local data (instant)
             renderAnalysisFeatured();
             renderAnalysisStats();
             renderAnalysisList();
             renderAnalysisSlider();
+
+            // Background refetch to sync (non-blocking)
+            fetchAnalyses(true).then(() => {
+                renderAnalysisFeatured();
+                renderAnalysisStats();
+                renderAnalysisList();
+                renderAnalysisSlider();
+            }).catch(() => {});
         } catch (e) {
             console.error('deleteAnalysis:', e);
             showToast('خطا در حذف تحلیل.');
@@ -5305,11 +5362,15 @@ function switchTab(pageId, btn) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     if (btn) btn.classList.add('active');
 
-    // Hide analysis overlays on every tab switch; analysis-page branch re-shows them.
+    // Hide analysis empty state on every tab switch; analysis-page branch re-shows it.
     const _aes = document.getElementById('analysis-empty-state');
     if (_aes) _aes.style.display = 'none';
-    const _fab = document.getElementById('analysis-fab');
-    if (_fab) _fab.style.display = 'none';
+    // FAB visibility is managed by updateAnalysisFabVisibility() — only hide when
+    // leaving the analysis page. This prevents the "FAB disappears" bug.
+    if (pageId !== 'analysis-page') {
+        const _fab = document.getElementById('analysis-fab');
+        if (_fab) _fab.style.display = 'none';
+    }
 
     if (pageId === 'dashboard-page') {
         if (!tabLoaded.dashboard) {
