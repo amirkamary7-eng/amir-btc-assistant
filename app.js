@@ -19,8 +19,10 @@ function getTg() {
 
 let telegramInitDone = false;
 let telegramAuthWaitPromise = null;
+let _authWaitAttempted = false;
 let bootstrapComplete = false;
 let _bootstrapPromise = null;
+let _bootstrapLongTimer = null; // Long-term bootstrap retry — survives visibility changes (NOT in _pollingIntervals)
 let _adminPanelInitialized = false;
 
 function $(id) { return document.getElementById(id); }
@@ -154,6 +156,27 @@ function hasTelegramAuthPayload() {
 }
 
 /**
+ * بررسی می‌کند که آیا احراز هویت تلگرام کاملاً آماده است.
+ * تنها زمانی true برمی‌گرداند که هم user ID و هم initData معتبر وجود داشته باشد.
+ * این تنها Source of Truth برای آماده بودن احراز هویت است.
+ */
+function isTelegramAuthReady() {
+    return !!getTelegramUser()?.id && hasTelegramAuthPayload();
+}
+
+/**
+ * وقتی احراز هویت تلگرام آماده می‌شود، UserContext.ready را به‌روزرسانی می‌کند.
+ */
+function _notifyAuthStateChange() {
+    const ready = isTelegramAuthReady();
+    if (ready && !UserContext.ready) {
+        UserContext.ready = true;
+        UserContext.loading = false;
+        UserContext._setLoadingUI(false);
+    }
+}
+
+/**
  * تا آماده شدن یا در دسترس قرار گرفتن for تلگرام init data منتظر می‌ماند.
  * ورودی: پارامترهای `maxWaitMs = 8000` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
@@ -186,7 +209,7 @@ async function waitForTelegramInitData(maxWaitMs = 8000) {
  */
 async function ensureTelegramAuthReady(maxWaitMs = 8000) {
     if (!isInTelegram()) return true;
-    if (hasTelegramAuthPayload() && getTelegramUser()?.id) return true;
+    if (isTelegramAuthReady()) return true;
     if (!telegramAuthWaitPromise) {
         telegramAuthWaitPromise = (async () => {
             await initTelegramWebApp(maxWaitMs);
@@ -202,7 +225,7 @@ async function ensureTelegramAuthReady(maxWaitMs = 8000) {
 function canRunSessionRequests(userId = getUserId()) {
     if (!API_BASE) return false;
     if (isGuestUserId(userId) || isPendingTelegramUserId(userId) || UserContext.isPending()) return false;
-    if (isInTelegram() && (!hasTelegramAuthPayload() || !getTelegramUser()?.id)) return false;
+    if (isInTelegram() && !isTelegramAuthReady()) return false;
     return true;
 }
 
@@ -214,12 +237,15 @@ function canRunSessionRequests(userId = getUserId()) {
 async function waitForApiReady(maxWaitMs = 8000) {
     if (!API_BASE) throw new Error('API_BASE not configured');
     if (!isInTelegram()) return;
-    // If UserContext.init() already completed (success or timeout),
-    // do NOT re-wait — this prevents cascading 16s+ waits on every apiFetch call.
-    // Auth-gated endpoints will reject gracefully via their own try/catch.
-    if (UserContext.ready) return;
+    // Fast path: auth already available
+    if (isTelegramAuthReady()) return;
+    // Already waited in UserContext.init() — don't cascade waits on every apiFetch.
+    if (_authWaitAttempted) return;
+    _authWaitAttempted = true;
     const ready = await ensureTelegramAuthReady(maxWaitMs);
-    if (!ready) {
+    if (ready) {
+        _notifyAuthStateChange();
+    } else {
         console.warn('Telegram auth not ready, proceeding without auth header');
     }
 }
@@ -242,8 +268,7 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
                 const u = getTelegramUser();
                 if (u?.id) {
                     UserContext.user = u;
-                    UserContext.loading = false;
-                    UserContext._setLoadingUI(false);
+                    _notifyAuthStateChange();
                     loadUser();
                     tryLateBootstrap();
                 }
@@ -261,15 +286,15 @@ async function initTelegramWebApp(maxWaitMs = 8000) {
             localStorage.removeItem('guest_id');
             telegramInitDone = true;
             UserContext.user = user;
-            UserContext.loading = false;
+            _notifyAuthStateChange();
             return user;
         }
         if (!getTg() && !getTelegramInitData()) break;
         await new Promise(r => setTimeout(r, 100));
     }
     telegramInitDone = true;
-    UserContext.loading = false;
     UserContext.user = getTelegramUser();
+    _notifyAuthStateChange();
     return UserContext.user;
 }
 
@@ -282,8 +307,7 @@ window.addEventListener('hashchange', () => {
             const user = parseInitDataUser(hashData);
             if (user?.id) {
                 UserContext.user = user;
-                UserContext.loading = false;
-                UserContext._setLoadingUI(false);
+                _notifyAuthStateChange();
                 loadUser();
                 tryLateBootstrap();
             }
@@ -332,7 +356,9 @@ let sliderInterval = null;
 let currentSlide = 0;
 let editingAnalysisId = null;
 let analysisVersion = localStorage.getItem('analysisVersion') ? Number(localStorage.getItem('analysisVersion')) : null;
-let analysisFeatured = null;
+let analysisFeatured = [];
+// Restore featured from localStorage for instant render (cache-first strategy)
+try { const _f = JSON.parse(localStorage.getItem('analysisFeatured') || '[]'); analysisFeatured = Array.isArray(_f) ? _f : (_f ? [_f] : []); } catch { analysisFeatured = []; }
 let analysisStats = null;
 let analysisPagination = null;
 let analysisListPage = 1;
@@ -634,7 +660,9 @@ const UserContext = {
         this._setLoadingUI(true);
         await initTelegramWebApp();
         this.user = getTelegramUser();
-        this.ready = true;
+        // Only mark ready when auth is actually available (user ID + valid initData)
+        this.ready = isTelegramAuthReady();
+        _authWaitAttempted = true;
         this.loading = false;
         this._setLoadingUI(false);
         return this.user;
@@ -772,17 +800,19 @@ async function bootstrapUser() {
     loadWatchlistFromStorage();
 
     if (!API_BASE) {
-        console.log('[BOOT] bootstrapUser skipped: no API_BASE');
         applyLanguage();
         return;
     }
     if (UserContext.isGuest()) {
-        console.log('[BOOT] bootstrapUser skipped: guest user');
         applyLanguage();
         return;
     }
     if (UserContext.isPending()) {
-        console.log('[BOOT] bootstrapUser skipped: user isPending (no Telegram ID yet)');
+        applyLanguage();
+        return;
+    }
+    // Guard: don't bootstrap without valid initData — request would fail auth on server
+    if (isInTelegram() && !isTelegramAuthReady()) {
         applyLanguage();
         return;
     }
@@ -790,7 +820,6 @@ async function bootstrapUser() {
     try {
         const u = getTelegramUser();
         const referrerId = getReferrerId();
-        console.log('[BOOT] bootstrapUser START — user_id:', u?.id, 'referrer:', referrerId, 'initData length:', getTelegramInitData().length);
 
         const bootstrapUrl = '/api/users/bootstrap';
         const data = await apiFetch(bootstrapUrl, {
@@ -804,7 +833,6 @@ async function bootstrapUser() {
                 referrer_id: referrerId
             })
         });
-        console.log('[BOOT] bootstrapUser SUCCESS — watchlist:', JSON.stringify(data.watchlist), 'user:', JSON.stringify(data.user));
         if (data.bot_username) {
             BOT_USERNAME = data.bot_username;
         }
@@ -833,10 +861,19 @@ async function bootstrapUser() {
         }
         // Update FAB visibility now that admin status is known
         updateAnalysisFabVisibility();
+        // Update admin entry button (single source of truth: isCurrentUserAdmin)
+        updateAdminEntryButton();
         // If admin status changed, re-render analysis list to show/hide admin buttons
         if (adminChanged) {
-            console.log('[BOOT] Admin status changed:', newAdminStatus, '— re-rendering analysis UI');
             renderAnalysisList();
+        }
+
+        // FIX-1b: If analysis detail page is open, update admin actions visibility.
+        if (adminChanged) {
+            const adminActions = $('adp-admin-actions');
+            if (adminActions && $('analysis-detail-page')?.classList.contains('active')) {
+                adminActions.style.display = isCurrentUserAdmin ? '' : 'none';
+            }
         }
 
         // ── Membership lock gate ──
@@ -846,8 +883,10 @@ async function bootstrapUser() {
             hideJoinLock();
         }
 
-        // Only mark complete if the API call actually succeeded
+        // Mark bootstrap complete BEFORE any UI re-renders that depend on isAdmin()
         bootstrapComplete = true;
+        // Stop long-term bootstrap retry — no longer needed
+        if (_bootstrapLongTimer) { clearInterval(_bootstrapLongTimer); _bootstrapLongTimer = null; }
         // CSS-level admin visibility — add class AFTER bootstrap confirms admin status
         if (isCurrentUserAdmin) {
             document.body.classList.add('admin-ready');
@@ -859,7 +898,6 @@ async function bootstrapUser() {
         // Do NOT set bootstrapComplete — let retry try again
         applyLanguage();
     }
-    console.log('[BOOT] bootstrapUser DONE — bootstrapComplete:', bootstrapComplete);
 }
 
 /**
@@ -878,9 +916,8 @@ async function tryLateBootstrap() {
 let _bootstrapFailedAt = 0;
 
 async function _doBootstrap() {
-    const user = getTelegramUser();
-    if (!user?.id) return;
-    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) return;
+    // Single readiness check: both user ID and valid initData required
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady())) return;
     try {
         await bootstrapUser();
         _bootstrapFailedAt = 0;
@@ -930,16 +967,16 @@ async function fetchAnalyses(force = false, append = false) {
         const data = await apiFetch(url);
 
         // Always update featured + stats from response (even when unchanged — they are fresh from DB)
-        if (data.featured) analysisFeatured = data.featured;
-        else if (force) analysisFeatured = null;
+        if (Array.isArray(data.featured)) analysisFeatured = data.featured;
+        else if (force) analysisFeatured = [];
         if (data.stats) {
             analysisStats = data.stats;
             localStorage.setItem('analysisStats', JSON.stringify(analysisStats));
         }
-        if (data.featured) {
-            localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
+        if (Array.isArray(data.featured) && data.featured.length) {
+            localStorage.setItem('analysisFeatured', JSON.stringify(data.featured));
         } else if (force) {
-            localStorage.removeItem('analysisFeatured');
+            localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
         }
         analysisVersion = data.version || analysisVersion || 0;
         localStorage.setItem('analysisVersion', String(analysisVersion));
@@ -969,8 +1006,8 @@ async function fetchAnalyses(force = false, append = false) {
         console.warn('fetchAnalyses:', e);
         if (!analyses.length) analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
         // Restore featured + stats from localStorage on API failure
-        if (!analysisFeatured) {
-            try { analysisFeatured = JSON.parse(localStorage.getItem('analysisFeatured') || 'null'); } catch {}
+        if (!analysisFeatured.length) {
+            try { const _f = JSON.parse(localStorage.getItem('analysisFeatured') || '[]'); analysisFeatured = Array.isArray(_f) ? _f : (_f ? [_f] : []); } catch {}
         }
         if (!analysisStats) {
             try { analysisStats = JSON.parse(localStorage.getItem('analysisStats') || 'null'); } catch {}
@@ -1268,10 +1305,7 @@ function renderAnalysisFeatured() {
     if (!section || !container) return;
 
     // Build slides: ONLY featured analyses (no regular analyses in hero)
-    featuredSlides = [];
-    if (analysisFeatured) {
-        featuredSlides.push(analysisFeatured);
-    }
+    featuredSlides = [...analysisFeatured];
 
     if (!featuredSlides.length) {
         section.style.display = 'none';
@@ -1418,9 +1452,11 @@ function getFilteredAnalyses() {
     // Saved-only filter (bookmarked items)
     if (analysisShowSavedOnly) {
         list = list.filter(a => analysisBookmarks.includes(a.id));
-        // If showing saved only, also include the featured analysis if it's bookmarked
-        if (analysisFeatured && analysisBookmarks.includes(analysisFeatured.id) && !list.find(a => a.id === analysisFeatured.id)) {
-            list.unshift(analysisFeatured);
+        // If showing saved only, also include featured analyses if bookmarked
+        for (const fa of analysisFeatured) {
+            if (analysisBookmarks.includes(fa.id) && !list.find(a => a.id === fa.id)) {
+                list.unshift(fa);
+            }
         }
     } else if (analysisCategoryFilter !== 'all') {
         // Category filter (crypto/forex)
@@ -1765,53 +1801,65 @@ async function loadMoreAnalyses() {
 
 // ── Analysis Detail Page ──
 async function openAnalysisDetailPage(id) {
-    currentAnalysisDetail = null;
-    // Look in both the list array AND the featured variable (featured is excluded
-    // from the list, so clicking the featured card would fail without this fallback).
-    const a = analyses.find(x => x.id === id) || (analysisFeatured && analysisFeatured.id === id ? analysisFeatured : null);
+    const tg = getTg();
+    if (tg?.BackButton) {
+        tg.BackButton.show();
+        tg.BackButton.onClick(closeAnalysisDetailPage);
+    }
 
-    // Fetch fresh detail from server (for full content + increment view)
-    try {
-        if (API_BASE) {
+    currentAnalysisDetail = null;
+    const cachedAnalysis = analyses.find(x => x.id === id) || analysisFeatured.find(a => a.id === id) || null;
+
+    // Render detail page IMMEDIATELY from cached data for instant UX
+    if (cachedAnalysis) {
+        currentAnalysisDetail = cachedAnalysis;
+        renderAnalysisDetailPage();
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        const page = $('analysis-detail-page');
+        if (page) page.classList.add('active');
+        const nav = document.querySelector('.bottom-nav');
+        if (nav) nav.style.display = 'none';
+        window.scrollTo(0, 0);
+    }
+
+    // Fetch fresh detail from server in background (for full content + increment view)
+    // Includes retry: if first attempt fails, waits 1.5s and retries once
+    let detailFetched = false;
+    for (let attempt = 0; attempt < 2 && !detailFetched; attempt++) {
+        try {
+            if (!API_BASE) break;
+            if (attempt === 1) await new Promise(r => setTimeout(r, 1500));
             const [detailRes, viewRes] = await Promise.all([
                 apiFetch(`/api/analyses/${id}`),
                 apiFetch(`/api/analyses/${id}/view`, { method: 'POST' }).catch(() => null),
             ]);
             if (detailRes.analysis) {
+                detailFetched = true;
                 currentAnalysisDetail = detailRes.analysis;
-                // Update local cache with new view count
                 const localIdx = analyses.findIndex(x => x.id === id);
                 if (localIdx >= 0 && detailRes.analysis.views_count !== undefined) {
                     analyses[localIdx].views_count = detailRes.analysis.views_count;
                 }
-                // Also update featured cache if this is the featured analysis
-                if (analysisFeatured && analysisFeatured.id === id && detailRes.analysis.views_count !== undefined) {
-                    analysisFeatured.views_count = detailRes.analysis.views_count;
+                const fIdx = analysisFeatured.findIndex(a => a.id === id);
+                if (fIdx >= 0 && detailRes.analysis.views_count !== undefined) {
+                    analysisFeatured[fIdx].views_count = detailRes.analysis.views_count;
                 }
-            } else {
-                currentAnalysisDetail = a;
+                renderAnalysisDetailPage();
             }
-        } else {
-            currentAnalysisDetail = a;
+        } catch (fetchErr) {
+            console.warn('[ANALYSIS-DETAIL] fetch attempt', attempt + 1, 'failed:', fetchErr);
         }
-    } catch {
-        currentAnalysisDetail = a;
     }
-
-    if (!currentAnalysisDetail) {
-        showToast('تحلیل یافت نشد.');
-        return;
+    if (!detailFetched && !cachedAnalysis) {
+        showToast('خطا در بارگذاری تحلیل. لطفاً دوباره تلاش کنید.');
+        if (tg?.BackButton) {
+            tg.BackButton.offClick(closeAnalysisDetailPage);
+            tg.BackButton.onClick(handleTelegramBack);
+            updateTelegramBackButton();
+        }
+    } else if (!detailFetched && cachedAnalysis) {
+        showToast('متن کامل تحلیل بارگذاری نشد. نسخه خلاصه نمایش داده می‌شود.');
     }
-
-    renderAnalysisDetailPage();
-    // Navigate to detail page
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    const page = $('analysis-detail-page');
-    if (page) page.classList.add('active');
-    // Hide bottom nav on detail page
-    const nav = document.querySelector('.bottom-nav');
-    if (nav) nav.style.display = 'none';
-    window.scrollTo(0, 0);
 }
 
 /**
@@ -2294,6 +2342,28 @@ function closeAddAnalysisModal() {
     editingAnalysisId = null;
 }
 
+function showFeaturedLimitConfirm(onConfirm, onCancel) {
+    const overlay = document.createElement('div');
+    overlay.id = 'featured-limit-confirm';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML = `
+        <div style="background:var(--bg-primary,#1a1a2e);border-radius:16px;padding:24px;max-width:340px;width:100%;text-align:center;direction:rtl;">
+            <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
+            <p style="font-size:14px;line-height:1.8;color:var(--text-primary,#fff);margin:0 0 20px;">
+                در حال حاضر ۵ تحلیل ویژه فعال دارید.<br>قدیمی‌ترین تحلیل ویژه حذف و این تحلیل جایگزین خواهد شد.<br>ادامه می‌دهید؟
+            </p>
+            <div style="display:flex;gap:10px;">
+                <button id="fl-confirm-yes" style="flex:1;padding:10px;border:none;border-radius:10px;background:#e74c3c;color:#fff;font-size:14px;cursor:pointer;font-weight:bold;">بله، ادامه</button>
+                <button id="fl-confirm-no" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--bg-secondary,#2a2a4a);color:var(--text-primary,#fff);font-size:14px;cursor:pointer;">انصراف</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#fl-confirm-yes').onclick = () => { overlay.remove(); onConfirm(); };
+    overlay.querySelector('#fl-confirm-no').onclick = () => { overlay.remove(); if (onCancel) onCancel(); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); if (onCancel) onCancel(); } });
+}
+
 function submitAnalysis() {
     try {
         // ── Step 1: Read form elements ──
@@ -2350,80 +2420,53 @@ function submitAnalysis() {
                     return;
                 }
 
+                if (result.status === 'FEATURED_LIMIT_REACHED') {
+                    showFeaturedLimitConfirm(
+                        async () => {
+                            payload.force_featured = true;
+                            let retryResult;
+                            if (wasEditing) {
+                                retryResult = await saveAnalysisToServer(payload, 'PUT', editingAnalysisId);
+                            } else {
+                                retryResult = await saveAnalysisToServer(payload, 'POST');
+                            }
+                            if (retryResult && retryResult.status === 'success') {
+                                _applySaveResult(retryResult, wasEditing);
+                            } else {
+                                showToast(retryResult?.detail || retryResult?.message || 'خطا در ذخیره تحلیل.');
+                            }
+                        },
+                        () => {
+                            // Cancelled: retry without featured
+                            payload.featured = false;
+                            (async () => {
+                                let retryResult;
+                                if (wasEditing) {
+                                    retryResult = await saveAnalysisToServer(payload, 'PUT', editingAnalysisId);
+                                } else {
+                                    retryResult = await saveAnalysisToServer(payload, 'POST');
+                                }
+                                if (retryResult && retryResult.status === 'success') {
+                                    _applySaveResult(retryResult, wasEditing);
+                                } else {
+                                    showToast(retryResult?.detail || retryResult?.message || 'خطا در ذخیره تحلیل.');
+                                }
+                            })();
+                        }
+                    );
+                    return;
+                }
+
                 if (result.status !== 'success') {
                     showToast(result.detail || result.message || 'خطا در ذخیره تحلیل.');
                     return;
                 }
 
-                // ── OPTIMISTIC UI UPDATE (instant, no refetch needed) ──
-                if (result.analysis) {
-                    if (wasEditing) {
-                        const wasFeaturedBefore = analysisFeatured?.id === result.analysis.id;
-                        const isFeaturedNow = result.analysis.featured;
-
-                        if (wasFeaturedBefore && !isFeaturedNow) {
-                            // UN-FEATURE: Remove from hero, ADD to list
-                            analysisFeatured = null;
-                            analyses.unshift(result.analysis);
-                        } else if (!wasFeaturedBefore && isFeaturedNow) {
-                            // FEATURE: Remove from list, ADD to hero
-                            const idx = analyses.findIndex(a => a.id === result.analysis.id);
-                            if (idx >= 0) analyses.splice(idx, 1);
-                            analysisFeatured = result.analysis;
-                        } else if (wasFeaturedBefore && isFeaturedNow) {
-                            // Was featured, still featured — just update the object
-                            analysisFeatured = result.analysis;
-                        } else {
-                            // Normal edit (not featured → not featured)
-                            const idx = analyses.findIndex(a => a.id === result.analysis.id);
-                            if (idx >= 0) analyses[idx] = result.analysis;
-                        }
-                    } else {
-                        // CREATE: insert at beginning of array (only if not featured)
-                        if (result.analysis.featured) {
-                            analysisFeatured = result.analysis;
-                        } else {
-                            analyses.unshift(result.analysis);
-                        }
-                    }
-                }
-
-                // Update version from response to avoid stale cache
-                if (result.version) analysisVersion = result.version;
-
-                // Use fresh stats + featured from CRUD response (KV-safe, no stale cache)
-                if (result.stats) {
-                    analysisStats = result.stats;
-                    localStorage.setItem('analysisStats', JSON.stringify(analysisStats));
-                }
-                if (result.featured !== undefined) {
-                    analysisFeatured = result.featured;
-                    if (result.featured) {
-                        localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
-                    } else {
-                        localStorage.removeItem('analysisFeatured');
-                    }
-                }
-
-                // Close modal FIRST (user sees immediate response)
-                closeAddAnalysisModal();
-
-                // Re-render all views with updated local data
-                renderAnalysisFeatured();
-                renderAnalysisStats();
-                renderAnalysisList();
-                renderAnalysisSlider();
-
+                _applySaveResult(result, wasEditing);
                 showToast(wasEditing ? 'تحلیل ویرایش شد.' : 'تحلیل منتشر شد.');
 
-                // Background refetch to sync with server (non-blocking, silent)
-                fetchAnalyses(true).then(() => {
-                    renderAnalysisFeatured();
-                    renderAnalysisStats();
-                    renderAnalysisList();
-                    renderAnalysisSlider();
-                    updateAnalysisFabVisibility();
-                }).catch(() => {});
+                // Background refetch to sync with server
+                fetchAnalyses(true).catch(() => {});
             } catch (e) {
                 console.error('[ANALYSIS] save error:', e.message);
                 showToast('خطا در ذخیره تحلیل: ' + (e.message || 'Unknown'));
@@ -2437,9 +2480,58 @@ function submitAnalysis() {
     }
 }
 
+function _applySaveResult(result, wasEditing) {
+    if (!result.analysis) return;
+    if (wasEditing) {
+        const wasFeaturedBefore = analysisFeatured.some(a => a.id === result.analysis.id);
+        const isFeaturedNow = result.analysis.featured;
+
+        if (wasFeaturedBefore && !isFeaturedNow) {
+            analysisFeatured = analysisFeatured.filter(a => a.id !== result.analysis.id);
+            analyses.unshift(result.analysis);
+        } else if (!wasFeaturedBefore && isFeaturedNow) {
+            const idx = analyses.findIndex(a => a.id === result.analysis.id);
+            if (idx >= 0) analyses.splice(idx, 1);
+            analysisFeatured.unshift(result.analysis);
+        } else if (wasFeaturedBefore && isFeaturedNow) {
+            const fIdx = analysisFeatured.findIndex(a => a.id === result.analysis.id);
+            if (fIdx >= 0) analysisFeatured[fIdx] = result.analysis;
+            else analysisFeatured.unshift(result.analysis);
+        } else {
+            const idx = analyses.findIndex(a => a.id === result.analysis.id);
+            if (idx >= 0) analyses[idx] = result.analysis;
+        }
+    } else {
+        if (result.analysis.featured) {
+            analysisFeatured.unshift(result.analysis);
+            if (analysisFeatured.length > 5) analysisFeatured.length = 5;
+        } else {
+            analyses.unshift(result.analysis);
+        }
+    }
+
+    if (result.version) analysisVersion = result.version;
+    if (result.stats) {
+        analysisStats = result.stats;
+        localStorage.setItem('analysisStats', JSON.stringify(analysisStats));
+    }
+    if (result.featured !== undefined) {
+        analysisFeatured = Array.isArray(result.featured) ? result.featured : (result.featured ? [result.featured] : []);
+        localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
+    } else {
+        localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
+    }
+
+    closeAddAnalysisModal();
+    renderAnalysisFeatured();
+    renderAnalysisStats();
+    renderAnalysisList();
+    renderAnalysisSlider();
+}
+
 // ── Admin: Delete (Double Confirm) ──
 function startDeleteAnalysis(id) {
-    if (!isAdmin()) return;
+    if (!isAdmin()) { showToast('فقط ادمین اجازه حذف تحلیل را دارد.'); return; }
     deletingAnalysisId = id;
     document.getElementById('delete-confirm-step1').style.display = '';
     document.getElementById('delete-confirm-step2').style.display = 'none';
@@ -2479,10 +2571,9 @@ function executeDeleteAnalysis() {
             // ── OPTIMISTIC UI UPDATE ──
             // Remove from local array immediately
             const idx = analyses.findIndex(a => a.id === id);
-            const wasFeatured = analysisFeatured?.id === id;
+            const wasFeatured = analysisFeatured.some(a => a.id === id);
             if (idx >= 0) analyses.splice(idx, 1);
-            // Clear featured if it was the deleted one
-            if (wasFeatured) analysisFeatured = null;
+            if (wasFeatured) analysisFeatured = analysisFeatured.filter(a => a.id !== id);
             // Update version from response
             if (result?.version) analysisVersion = result.version;
 
@@ -2492,12 +2583,10 @@ function executeDeleteAnalysis() {
                 localStorage.setItem('analysisStats', JSON.stringify(analysisStats));
             }
             if (result.featured !== undefined) {
-                analysisFeatured = result.featured;
-                if (result.featured) {
-                    localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
-                } else {
-                    localStorage.removeItem('analysisFeatured');
-                }
+                analysisFeatured = Array.isArray(result.featured) ? result.featured : (result.featured ? [result.featured] : []);
+                localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
+            } else {
+                localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
             }
 
             showToast('تحلیل حذف شد.');
@@ -2786,12 +2875,6 @@ async function apiFetch(path, options = {}) {
     const initData = getTelegramInitData();
     if (initData) headers['X-Telegram-Init-Data'] = initData;
     const url = `${API_BASE}${path}`;
-    if (path === '/api/admin/is-admin') {
-        console.log('[API] GET', path, 'initDataLen:', initData.length);
-    }
-    if (path === '/api/users/bootstrap') {
-        console.log('[BOOT] apiFetch bootstrap — initData length:', initData.length, 'hasAuthHeader:', !!initData, 'user_id:', getUserId());
-    }
 
     const fetchOpts = { ...options, headers };
     const doRequest = async () => {
@@ -5199,6 +5282,13 @@ function updateAnalysisFabVisibility() {
     const onAnalysisTab = (document.getElementById('analysis-page')?.classList.contains('active')) === true;
     fab.style.display = (isAdmin() && onAnalysisTab) ? '' : 'none';
 }
+
+function updateAdminEntryButton() {
+    const btn = document.getElementById('admin-entry-btn');
+    if (btn) {
+        btn.style.display = (isCurrentUserAdmin && bootstrapComplete) ? 'inline-flex' : 'none';
+    }
+}
 /**
  * ارجاع لینک را کپی می‌کند.
  * ورودی: بدون ورودی.
@@ -5771,9 +5861,32 @@ document.addEventListener('visibilitychange', () => {
     _appVisible = !document.hidden;
     if (document.hidden) {
         _stopAllPolling();
+        // NOTE: Do NOT clear _bootstrapLongTimer here — it must survive background cycles
     } else {
         _startAllPolling();
+        // Retry bootstrap if app returned to foreground and bootstrap hasn't completed
+        _notifyAuthStateChange();
+        if (!bootstrapComplete) {
+            // Ensure long-term retry is running
+            if (!_bootstrapLongTimer) {
+                _bootstrapLongTimer = setInterval(() => {
+                    if (bootstrapComplete) { clearInterval(_bootstrapLongTimer); _bootstrapLongTimer = null; return; }
+                    _notifyAuthStateChange();
+                    if (isTelegramAuthReady()) tryLateBootstrap();
+                }, 15000);
+            }
+            // Also try immediately if auth is ready
+            if (isTelegramAuthReady()) {
+                tryLateBootstrap();
+            }
+        }
     }
+});
+
+// Clean up all timers on page unload (refresh / close)
+window.addEventListener('beforeunload', () => {
+    _stopAllPolling();
+    if (_bootstrapLongTimer) { clearInterval(_bootstrapLongTimer); _bootstrapLongTimer = null; }
 });
 
 function startPolling() {
@@ -5859,24 +5972,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     // If user is pending (in Telegram but no initData yet), set up a robust
     // retry mechanism: polling + hashchange + MutationObserver.
     // This ensures bootstrap completes even on cold-open where initData arrives late.
-    if (!bootstrapComplete && UserContext.isPending()) {
+    if (!bootstrapComplete && (UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady()))) {
         // Method 1: Polling retry — most reliable for cold-open scenarios
-        const _bootPollMax = 20000; // 20 seconds total
+        // NOTE: Not pushed to _pollingIntervals — must survive visibility changes.
+        const _bootPollMax = 20000;
         const _bootPollStart = Date.now();
         const _bootPollInterval = setInterval(() => {
             if (bootstrapComplete || Date.now() - _bootPollStart > _bootPollMax) {
                 clearInterval(_bootPollInterval);
                 return;
             }
-            if (getTelegramUser()?.id) {
+            _notifyAuthStateChange();
+            if (isTelegramAuthReady()) {
                 clearInterval(_bootPollInterval);
                 tryLateBootstrap();
             }
-        }, 500); // Check every 500ms
+        }, 500);
 
         // Method 2: MutationObserver — fires when profile-name DOM updates
         const _bootObserver = new MutationObserver(() => {
-            if (getTelegramUser()?.id && !bootstrapComplete) {
+            _notifyAuthStateChange();
+            if (isTelegramAuthReady() && !bootstrapComplete) {
                 _bootObserver.disconnect();
                 clearInterval(_bootPollInterval);
                 tryLateBootstrap();
@@ -5895,11 +6011,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     startPolling();
 
-    // Admin panel
+    // Admin panel — initAdminPanel just sets a flag; admin entry button
+    // visibility is managed by updateAdminEntryButton() called from bootstrapUser().
     if (typeof initAdminPanel === 'function' && !_adminPanelInitialized) {
-        _adminPanelInitialized = true;
         initAdminPanel();
     }
+
+    // ── Bootstrap long-term resilience ──
+    // CRITICAL: NOT pushed to _pollingIntervals — must survive visibility changes.
+    _bootstrapLongTimer = setInterval(() => {
+        if (bootstrapComplete) {
+            clearInterval(_bootstrapLongTimer);
+            _bootstrapLongTimer = null;
+            return;
+        }
+        _notifyAuthStateChange();
+        if (isTelegramAuthReady()) {
+            tryLateBootstrap();
+        }
+    }, 15000);
 
     // Ticket polling (only when modals are open)
     _pollingIntervals.push(setInterval(() => {

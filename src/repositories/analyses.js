@@ -55,15 +55,15 @@ export function createAnalysisRepository(deps) {
   }
 
   /**
-   * Get the single featured analysis (or null).
+   * Get featured analyses (up to 5).
    */
   async function getFeatured(env) {
     const result = await queryDb(
       env,
-      `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
-       FROM analyses WHERE featured = TRUE ORDER BY created_at DESC LIMIT 1`,
+      `SELECT id, coin, timeframe, image, LEFT(text, 200) AS text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
+       FROM analyses WHERE featured = TRUE ORDER BY created_at DESC LIMIT 5`,
     );
-    return result.rows.length ? serializeAnalysisRow(result.rows[0]) : null;
+    return result.rows.length ? result.rows.map(serializeAnalysisRow) : [];
   }
 
   /**
@@ -136,10 +136,9 @@ export function createAnalysisRepository(deps) {
   }
 
   /**
-   * Set a single analysis as featured, un-featuring all others.
+   * Set an analysis as featured (up to 5 allowed — controller enforces the limit).
    */
   async function setFeatured(env, analysisId) {
-    await queryDb(env, `UPDATE analyses SET featured = FALSE WHERE featured = TRUE`);
     const result = await queryDb(
       env,
       `UPDATE analyses SET featured = TRUE, updated_at = NOW() WHERE id = $1 RETURNING id`,
@@ -176,10 +175,8 @@ export function createAnalysisRepository(deps) {
    * Insert a new analysis and return the serialized row.
    */
   async function create(env, adminUserId, payload) {
-    // If this is featured, unset any existing featured first
-    if (payload.featured) {
-      await queryDb(env, `UPDATE analyses SET featured = FALSE WHERE featured = TRUE`);
-    }
+    // NOTE: Featured limit (max 5) is enforced by the controller.
+    // The controller may call unsetOldestFeatured() before this if force_featured=true.
     // NOTE: 15 columns, 15 values ($1..$13 + NOW() + NOW())
     const result = await queryDb(
       env,
@@ -209,10 +206,7 @@ export function createAnalysisRepository(deps) {
    * Update an existing analysis by ID. Returns null if not found.
    */
   async function update(env, analysisId, payload) {
-    // If featuring, unset existing
-    if (payload.featured) {
-      await queryDb(env, `UPDATE analyses SET featured = FALSE WHERE featured = TRUE`);
-    }
+    // NOTE: Featured limit (max 5) is enforced by the controller.
     const result = await queryDb(
       env,
       `UPDATE analyses
@@ -251,6 +245,27 @@ export function createAnalysisRepository(deps) {
     return Boolean(result.rows[0]);
   }
 
+  /**
+   * Count currently featured analyses.
+   */
+  async function countFeatured(env) {
+    const result = await queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured = TRUE`);
+    return Number(result.rows[0]?.cnt || 0);
+  }
+
+  /**
+   * Un-feature the oldest featured analysis. Returns the un-featured row or null.
+   */
+  async function unsetOldestFeatured(env) {
+    const result = await queryDb(
+      env,
+      `UPDATE analyses SET featured = FALSE, updated_at = NOW() WHERE id = (
+          SELECT id FROM analyses WHERE featured = TRUE ORDER BY created_at ASC LIMIT 1
+        ) AND featured = TRUE RETURNING id`,
+    );
+    return result.rows.length > 0;
+  }
+
   return Object.freeze({
     ensureSchema,
     getFeatured,
@@ -261,6 +276,8 @@ export function createAnalysisRepository(deps) {
     incrementViews,
     setFeatured,
     unsetFeatured,
+    countFeatured,
+    unsetOldestFeatured,
     create,
     update,
     remove,

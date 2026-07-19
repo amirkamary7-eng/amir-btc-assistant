@@ -94,23 +94,10 @@ function adminPagination(containerId, currentPage, totalPages, loadFn) {
 // ─── Initialize ─────────────────────────────────────────────
 
 async function initAdminPanel() {
-    try {
-        // Skip if no Telegram user is available yet (cold-open scenario)
-        if (typeof getTelegramUser === 'function' && !getTelegramUser()?.id) {
-            return;
-        }
-
-        const data = await apiFetch('/api/admin/is-admin');
-        _adminData = data || { is_admin: false, role: '', permissions: [] };
-        if (data && data.is_admin) {
-            const btn = document.getElementById('admin-entry-btn');
-            if (btn) {
-                btn.style.display = 'inline-flex';
-            }
-        }
-    } catch (e) {
-        console.warn('[ADMIN] initAdminPanel error:', e.message || e);
-    }
+    // Admin detection is unified: isCurrentUserAdmin (set by bootstrapUser) is the
+    // single source of truth. No separate /api/admin/is-admin call needed.
+    // Admin entry button visibility is managed by updateAdminEntryButton() in app.js.
+    _adminPanelInitialized = true;
 }
 
 // ─── Panel Open / Close ─────────────────────────────────────

@@ -128,6 +128,9 @@ export function createAnalysisHandlers(deps) {
     // Handle boolean featured field
     validated.featured = Boolean(payload.featured);
 
+    // Handle force_featured flag (not a DB field, used for featured limit override)
+    validated.force_featured = Boolean(payload.force_featured);
+
     return { payload: validated };
   }
 
@@ -325,6 +328,19 @@ export function createAnalysisHandlers(deps) {
 
     try {
       await analysisRepo.ensureSchema(env);
+
+      // Featured limit check (max 5)
+      if (parsed.payload.featured && !parsed.payload.force_featured) {
+        const featuredCount = await analysisRepo.countFeatured(env);
+        if (featuredCount >= 5) {
+          return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: featuredCount, max: 5 }, {}, env);
+        }
+      }
+      // If force_featured, un-feature the oldest first
+      if (parsed.payload.featured && parsed.payload.force_featured) {
+        await analysisRepo.unsetOldestFeatured(env);
+      }
+
       const analysis = await analysisRepo.create(env, authResult.user.id, parsed.payload);
       const version = await invalidateAnalysesCache(env);
 
@@ -363,6 +379,23 @@ export function createAnalysisHandlers(deps) {
     if (parsed.error) return parsed.error;
 
     try {
+      // Featured limit check (max 5)
+      if (parsed.payload.featured && !parsed.payload.force_featured) {
+        const featuredCount = await analysisRepo.countFeatured(env);
+        // If this analysis is NOT already featured, check the limit
+        const existing = await analysisRepo.getById(env, analysisId);
+        if (!existing?.featured && featuredCount >= 5) {
+          return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: featuredCount, max: 5 }, {}, env);
+        }
+      }
+      // If force_featured, un-feature the oldest first
+      if (parsed.payload.featured && parsed.payload.force_featured) {
+        const existing = await analysisRepo.getById(env, analysisId);
+        if (!existing?.featured) {
+          await analysisRepo.unsetOldestFeatured(env);
+        }
+      }
+
       const analysis = await analysisRepo.update(env, analysisId, parsed.payload);
       if (!analysis) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
