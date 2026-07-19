@@ -813,6 +813,14 @@ async function bootstrapUser() {
     }
     // Guard: don't bootstrap without valid initData — request would fail auth on server
     if (isInTelegram() && !isTelegramAuthReady()) {
+        console.log('[BOOT] Skipped — auth not ready yet.', {
+            isInTelegram: true,
+            isTelegramAuthReady: false,
+            hasInitData: hasTelegramAuthPayload(),
+            userId: getTelegramUser()?.id || null,
+            initDataLen: getTelegramInitData()?.length || 0,
+            bootstrapComplete
+        });
         applyLanguage();
         return;
     }
@@ -820,6 +828,12 @@ async function bootstrapUser() {
     try {
         const u = getTelegramUser();
         const referrerId = getReferrerId();
+
+        console.log('[BOOT] Calling POST /api/users/bootstrap', {
+            userId: u?.id,
+            initDataLen: getTelegramInitData()?.length || 0,
+            hasInitData: hasTelegramAuthPayload()
+        });
 
         const bootstrapUrl = '/api/users/bootstrap';
         const data = await apiFetch(bootstrapUrl, {
@@ -859,22 +873,6 @@ async function bootstrapUser() {
             ADMIN_ID = String(data.user.id);
             localStorage.setItem('admin_id', ADMIN_ID);
         }
-        // Update FAB visibility now that admin status is known
-        updateAnalysisFabVisibility();
-        // Update admin entry button (single source of truth: isCurrentUserAdmin)
-        updateAdminEntryButton();
-        // If admin status changed, re-render analysis list to show/hide admin buttons
-        if (adminChanged) {
-            renderAnalysisList();
-        }
-
-        // FIX-1b: If analysis detail page is open, update admin actions visibility.
-        if (adminChanged) {
-            const adminActions = $('adp-admin-actions');
-            if (adminActions && $('analysis-detail-page')?.classList.contains('active')) {
-                adminActions.style.display = isCurrentUserAdmin ? '' : 'none';
-            }
-        }
 
         // ── Membership lock gate ──
         if (data.channel_joined === false) {
@@ -883,7 +881,9 @@ async function bootstrapUser() {
             hideJoinLock();
         }
 
-        // Mark bootstrap complete BEFORE any UI re-renders that depend on isAdmin()
+        // CRITICAL: Set bootstrapComplete BEFORE any UI re-renders.
+        // isAdmin() gates on bootstrapComplete — if set after, all UI updates
+        // below would see isAdmin()=false and become no-ops (inline display:none).
         bootstrapComplete = true;
         // Stop long-term bootstrap retry — no longer needed
         if (_bootstrapLongTimer) { clearInterval(_bootstrapLongTimer); _bootstrapLongTimer = null; }
@@ -892,6 +892,34 @@ async function bootstrapUser() {
             document.body.classList.add('admin-ready');
         } else {
             document.body.classList.remove('admin-ready');
+        }
+
+        console.log('[BOOT] Bootstrap SUCCESS', {
+            is_admin: data.is_admin,
+            adminChanged,
+            isCurrentUserAdmin,
+            bootstrapComplete: true,
+            isAdmin: isAdmin()
+        });
+
+        // NOW update all admin UI — isAdmin() will return correct value.
+        // Update FAB visibility now that admin status is known
+        updateAnalysisFabVisibility();
+        // Update admin entry button (single source of truth: isCurrentUserAdmin)
+        updateAdminEntryButton();
+        // Always re-render analysis list when bootstrap completes.
+        // The list may have been rendered before bootstrap (when isAdmin()=false),
+        // so cards need edit/delete buttons added.
+        // Using adminChanged would miss the returning-admin cold-open case
+        // where localStorage already had is_admin=1 and API confirms it.
+        renderAnalysisList();
+        renderAnalysisFeatured();
+        renderAnalysisStats();
+
+        // If analysis detail page is open, update admin actions visibility.
+        const adminActions = $('adp-admin-actions');
+        if (adminActions && $('analysis-detail-page')?.classList.contains('active')) {
+            adminActions.style.display = isCurrentUserAdmin ? '' : 'none';
         }
     } catch (e) {
         console.error('[BOOT] bootstrapUser FAILED:', e);
@@ -917,7 +945,18 @@ let _bootstrapFailedAt = 0;
 
 async function _doBootstrap() {
     // Single readiness check: both user ID and valid initData required
-    if (!API_BASE || UserContext.isGuest() || UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady())) return;
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady())) {
+        console.log('[BOOT] _doBootstrap skipped — conditions not met.', {
+            hasApiBase: !!API_BASE,
+            isGuest: UserContext.isGuest(),
+            isPending: UserContext.isPending(),
+            isInTelegram: isInTelegram(),
+            isTelegramAuthReady: isTelegramAuthReady(),
+            userId: getTelegramUser()?.id || null,
+            initDataLen: getTelegramInitData()?.length || 0
+        });
+        return;
+    }
     try {
         await bootstrapUser();
         _bootstrapFailedAt = 0;
