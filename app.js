@@ -6217,6 +6217,32 @@ window.getTelegramUser = getTelegramUser;
 window.UserContext = UserContext;
 Object.defineProperty(window, 'BOT_USERNAME', { get: () => BOT_USERNAME });
 
+// [TEMP-DIAG] Capture real initData and send to diagnostic endpoint
+// Usage: window.diagInitData() — returns full diagnostic breakdown
+window.diagInitData = async function() {
+    const initData = getTelegramInitData();
+    if (!initData) {
+        console.log('[DIAG] No initData available');
+        return 'No initData';
+    }
+    console.log('[DIAG] initData length:', initData.length);
+    console.log('[DIAG] initData first 80:', initData.substring(0, 80));
+    console.log('[DIAG] initData last 40:', initData.substring(initData.length - 40));
+    try {
+        const r = await fetch(`${API_BASE}/api/_diag/init-data`, {
+            method: 'POST',
+            headers: { 'X-Telegram-Init-Data': initData }
+        });
+        const data = await r.json();
+        console.log('[DIAG] Full diagnostic result:', data);
+        console.log('[DIAG] Conclusion:', data.conclusion);
+        return data;
+    } catch (e) {
+        console.error('[DIAG] Error:', e.message);
+        return e.message;
+    }
+};
+
 // ============================================================================
 //#region Join Lock Screen
 // ============================================================================

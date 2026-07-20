@@ -364,16 +364,17 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
 
     // Build data-check-string per Telegram Bot API spec:
     // - Exclude 'hash' field (it's what we're verifying)
-    // - INCLUDE 'signature' field — confirmed via production diagnostic logs:
-    //   Telegram Android (real device) computes the hash WITH signature present in DCS.
-    //   Log evidence: hashMatchesWithSignatureIncluded = true
-    //   receivedHashPrefix = ae74c4c7... matched computedHash when signature was included.
+    // - Exclude 'signature' field — Telegram Android computes the HMAC-SHA256 hash
+    //   WITHOUT signature in DCS. The signature field is for Ed25519 third-party
+    //   verification only, not for HMAC validation.
+    //   Reference: https://github.com/Telegram-Mini-Apps/init-data-golang
+    //   "The functions that sign data remove parameters such as hash and signature"
     // - Sort remaining fields alphabetically by key
     // - Decode all values before joining
     // - Join with '\n'
     // Reference: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
     const dataCheckString = pairs
-      .filter(([k]) => k !== 'hash')
+      .filter(([k]) => k !== 'hash' && k !== 'signature')
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => k + '=' + decodeTelegramValue(v))
       .join('\n');
@@ -3462,6 +3463,101 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return handleHealth(env);
+      }
+
+      // [TEMP-DIAG] Capture real initData from Telegram for analysis
+      // Returns detailed breakdown of initData, DCS, hash comparison
+      if (request.method === 'POST' && url.pathname === '/api/_diag/init-data') {
+        const initData = getTelegramInitData(request);
+        if (!initData) {
+          return jsonResponse({ status: 'error', message: 'No X-Telegram-Init-Data header' }, {}, env);
+        }
+        try {
+          const botToken = String(env.TELEGRAM_BOT_TOKEN || '').trim();
+          const pairs = parseTelegramInitDataPairs(initData.trim());
+          const hashPair = pairs.find(([k]) => k === 'hash');
+          const receivedHash = hashPair ? hashPair[1] : null;
+
+          // Method A (current): exclude only hash, INCLUDE signature
+          const dcsA = pairs.filter(([k]) => k !== 'hash').sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + '=' + decodeTelegramValue(v)).join('\n');
+          const secretKey = createHmac('sha256', 'WebAppData').update(botToken).digest();
+          const computedHashA = createHmac('sha256', secretKey).update(dcsA).digest('hex');
+          const matchA = safeCompareStrings(computedHashA, receivedHash);
+
+          // Method B: exclude both hash AND signature
+          const dcsB = pairs.filter(([k]) => k !== 'hash' && k !== 'signature').sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + '=' + decodeTelegramValue(v)).join('\n');
+          const computedHashB = createHmac('sha256', secretKey).update(dcsB).digest('hex');
+          const matchB = safeCompareStrings(computedHashB, receivedHash);
+
+          // Method C: try with raw (non-decoded) values
+          const dcsC = pairs.filter(([k]) => k !== 'hash').sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + '=' + v).join('\n');
+          const computedHashC = createHmac('sha256', secretKey).update(dcsC).digest('hex');
+          const matchC = safeCompareStrings(computedHashC, receivedHash);
+
+          return jsonResponse({
+            status: 'diagnostic',
+            init_data_length: initData.length,
+            init_data_full: initData,
+            pairs_count: pairs.length,
+            pairs_keys: pairs.map(([k]) => k),
+            pairs_raw: pairs.map(([k, v]) => ({ key: k, value_length: v.length, value_first50: v.substring(0, 50) })),
+            received_hash: receivedHash,
+            received_hash_length: receivedHash ? receivedHash.length : 0,
+            bot_token_length: botToken.length,
+            bot_token_first10: botToken.substring(0, 10),
+            method_A_include_signature: {
+              dcs: dcsA,
+              dcs_length: dcsA.length,
+              computed_hash: computedHashA,
+              match: matchA
+            },
+            method_B_exclude_signature: {
+              dcs: dcsB,
+              dcs_length: dcsB.length,
+              computed_hash: computedHashB,
+              match: matchB
+            },
+            method_C_raw_values: {
+              dcs: dcsC,
+              dcs_length: dcsC.length,
+              computed_hash: computedHashC,
+              match: matchC
+            },
+            conclusion: matchA ? 'A (include sig) works' : (matchB ? 'B (exclude sig) works' : (matchC ? 'C (raw values) works' : 'NONE work — check BOT_TOKEN or initData format'))
+          }, {}, env);
+        } catch (e) {
+          return jsonResponse({ status: 'error', message: e.message, stack: e.stack?.split('\n').slice(0, 5) }, { status: 500 }, env);
+        }
+      }
+
+      // [TEMP-DIAG] Verify BOT_TOKEN via getMe
+      if (request.method === 'GET' && url.pathname === '/api/_diag/bot-token') {
+        const botToken = String(env.TELEGRAM_BOT_TOKEN || '').trim();
+        if (!botToken) {
+          return jsonResponse({ status: 'error', message: 'No BOT_TOKEN' }, { status: 500 }, env);
+        }
+        try {
+          const resp = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+          const data = await resp.json();
+          return jsonResponse({
+            status: 'diagnostic',
+            token_length: botToken.length,
+            token_first10: botToken.substring(0, 10),
+            token_last5: botToken.substring(botToken.length - 5),
+            has_whitespace: botToken !== env.TELEGRAM_BOT_TOKEN,
+            get_me: {
+              ok: data.ok,
+              status: resp.status,
+              username: data.result?.username,
+              id: data.result?.id,
+              first_name: data.result?.first_name,
+              error: data.ok ? null : data.description
+            },
+            expected_bot_username: env.BOT_USERNAME || ''
+          }, {}, env);
+        } catch (e) {
+          return jsonResponse({ status: 'error', message: e.message }, { status: 500 }, env);
+        }
       }
 
       if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
