@@ -3218,20 +3218,48 @@ function generateSparklinePoints(changePercent, symbol, width, height) {
     function sRand() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
 
     var points = [];
-    var steps = 16;
+    var steps = 20;
     var midY = height / 2;
-    var amp = Math.min(height * 0.38, Math.abs(changePercent) * 0.6 + 1.5);
+    var amp = Math.min(height * 0.35, Math.abs(changePercent) * 0.8 + 2);
     var dir = changePercent >= 0 ? -1 : 1;
 
     for (var i = 0; i <= steps; i++) {
         var x = (i / steps) * width;
         var progress = i / steps;
+        // Smooth trend with sine wave for natural curve
         var trend = dir * progress * amp;
-        var noise = (sRand() - 0.5) * amp * 0.5;
-        var y = Math.max(2, Math.min(height - 2, midY + trend + noise));
+        // Add multi-frequency noise for realistic market-like variation
+        var noise1 = Math.sin(progress * Math.PI * 3 + seed * 0.01) * amp * 0.25;
+        var noise2 = (sRand() - 0.5) * amp * 0.35;
+        var y = Math.max(2, Math.min(height - 2, midY + trend + noise1 + noise2));
         points.push(x.toFixed(1) + ',' + y.toFixed(1));
     }
     return points.join(' ');
+}
+
+/**
+ * Build a smooth curved SVG sparkline using Catmull-Rom spline approximation.
+ * Returns an SVG path string (for <path d="...">).
+ */
+function buildSmoothSparklinePath(points, width, height) {
+    if (!points || points.length < 2) return '';
+    var pts = points.split(' ').map(function(p) {
+        var parts = p.split(',');
+        return { x: parseFloat(parts[0]), y: parseFloat(parts[1]) };
+    });
+    var path = 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
+    for (var i = 0; i < pts.length - 1; i++) {
+        var p0 = pts[i - 1] || pts[i];
+        var p1 = pts[i];
+        var p2 = pts[i + 1];
+        var p3 = pts[i + 2] || p2;
+        var cp1x = p1.x + (p2.x - p0.x) / 6;
+        var cp1y = p1.y + (p2.y - p0.y) / 6;
+        var cp2x = p2.x - (p3.x - p1.x) / 6;
+        var cp2y = p2.y - (p3.y - p1.y) / 6;
+        path += ' C ' + cp1x.toFixed(1) + ' ' + cp1y.toFixed(1) + ' ' + cp2x.toFixed(1) + ' ' + cp2y.toFixed(1) + ' ' + p2.x.toFixed(1) + ' ' + p2.y.toFixed(1);
+    }
+    return path;
 }
 
 //#endregion
@@ -4050,32 +4078,32 @@ function formatWatchPrice(priceUsd) {
  * Pure CSS/SVG, no external data needed.
  * Slope intensity scales with the magnitude of the 24h change.
  */
-function buildWatchTrendSVG(changePercent) {
+function buildWatchTrendSVG(changePercent, symbol) {
     const pct = (typeof changePercent === 'number' && !isNaN(changePercent)) ? changePercent : 0;
     const isUp = pct >= 0;
     const color = isUp ? '#22C55E' : '#EF4444';
-    const fillColor = isUp ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)';
-    const gradId = 'spark-' + (isUp ? 'up' : 'down') + '-' + Math.abs(Math.round(pct * 100));
-    // 100x22 viewBox, 7 sample points — slight wave to feel organic
-    // Slope intensity scales with magnitude (clamped)
-    const mag = Math.min(Math.abs(pct), 10) / 10; // 0..1
-    const startY = 11;
-    const endY = isUp ? (11 - 7 * mag - 2) : (11 + 7 * mag + 2);
-    const midY = (startY + endY) / 2;
-    const pts = isUp
-        ? `0,${startY + 2} 17,${startY} 33,${startY - 1} 50,${midY} 67,${midY - 1} 83,${endY + 1} 100,${endY}`
-        : `0,${startY - 2} 17,${startY} 33,${startY + 1} 50,${midY} 67,${midY + 1} 83,${endY - 1} 100,${endY}`;
-    // Fill polygon (close to bottom)
-    const fillPts = pts + ` 100,22 0,22`;
-    return `<svg viewBox="0 0 100 22" preserveAspectRatio="none" fill="none">
+    const glowColor = isUp ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)';
+    const fillColor = isUp ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)';
+    const gradId = 'spark-' + (symbol || 'x') + '-' + (isUp ? 'up' : 'dn');
+    // Generate smooth curved sparkline with natural variation
+    const W = 100, H = 22;
+    const pts = generateSparklinePoints(pct, symbol || 'BTC', W, H);
+    const smoothPath = buildSmoothSparklinePath(pts, W, H);
+    // Fill path (close to bottom)
+    const fillPath = smoothPath + ` L ${W} ${H} L 0 ${H} Z`;
+    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" fill="none">
         <defs>
             <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="${fillColor}"/>
                 <stop offset="100%" stop-color="${fillColor}" stop-opacity="0"/>
             </linearGradient>
+            <filter id="${gradId}-glow">
+                <feGaussianBlur stdDeviation="1.2" result="blur"/>
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
         </defs>
-        <polygon points="${fillPts}" fill="url(#${gradId})"/>
-        <polyline points="${pts}" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="${fillPath}" fill="url(#${gradId})"/>
+        <path d="${smoothPath}" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#${gradId}-glow)" style="filter:drop-shadow(0 0 2px ${glowColor})"/>
     </svg>`;
 }
 
@@ -4135,7 +4163,7 @@ function renderWatchlist() {
                 const trendEl = item.querySelector('.watch-card-trend');
                 if (trendEl) {
                     const pct = (typeof coin.changePercent24Hr === 'number' && !isNaN(coin.changePercent24Hr)) ? coin.changePercent24Hr : 0;
-                    const newTrend = buildWatchTrendSVG(pct);
+                    const newTrend = buildWatchTrendSVG(pct, coin.symbol);
                     if (trendEl.innerHTML !== newTrend) trendEl.innerHTML = newTrend;
                 }
             }
@@ -4170,7 +4198,7 @@ function renderWatchlist() {
             <span class="watch-card-name">${safeName}</span>
             <span class="watch-card-price">${formatWatchPrice(c.priceUsd)}</span>
             <span class="watch-card-change ${isPos ? 'up' : 'down'}">${arrowSvg}<span>${changeStr}</span></span>
-            <div class="watch-card-trend">${buildWatchTrendSVG(pct)}</div>
+            <div class="watch-card-trend">${buildWatchTrendSVG(pct, safeSymbol)}</div>
         </div>`;
     }).join('');
 
@@ -6145,7 +6173,7 @@ function renderDashboardMarketStatus() {
         </div>
     `;
 
-    // ── Market Trend (right column) — Bullish / Bearish / Neutral indicator ──
+    // ── Market Trend (right column) — Bull / Bear graphic indicator ──
     let gainers = 0, losers = 0;
     if (Array.isArray(allCoins) && allCoins.length) {
         for (let i = 0; i < allCoins.length; i++) {
@@ -6158,19 +6186,43 @@ function renderDashboardMarketStatus() {
     }
     const totalGL = gainers + losers;
     const ratio = totalGL > 0 ? (gainers / totalGL) : 0.5;
-    let trendLabel, trendClass, trendArrowSvg;
+    let trendLabel, trendClass, trendGraphic;
     if (ratio > 0.58) {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
-        trendArrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg>';
+        // Bull SVG — premium 3D-style with horns
+        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="34" r="20" fill="rgba(34,197,94,0.08)" stroke="rgba(34,197,94,0.2)" stroke-width="1"/>
+            <path d="M20 28 Q16 20 14 16 Q18 18 22 24" stroke="#22C55E" stroke-width="3" stroke-linecap="round" fill="none"/>
+            <path d="M44 28 Q48 20 50 16 Q46 18 42 24" stroke="#22C55E" stroke-width="3" stroke-linecap="round" fill="none"/>
+            <ellipse cx="32" cy="36" rx="16" ry="14" fill="rgba(34,197,94,0.15)" stroke="#22C55E" stroke-width="2"/>
+            <circle cx="26" cy="33" r="2" fill="#22C55E"/>
+            <circle cx="38" cy="33" r="2" fill="#22C55E"/>
+            <path d="M28 42 Q32 45 36 42" stroke="#22C55E" stroke-width="2" stroke-linecap="round" fill="none"/>
+            <path d="M24 48 L22 54 M40 48 L42 54" stroke="#22C55E" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        trendArrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="32" r="20" fill="rgba(245,166,35,0.08)" stroke="rgba(245,166,35,0.2)" stroke-width="1"/>
+            <line x1="18" y1="32" x2="46" y2="32" stroke="#F5A623" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="32" cy="32" r="4" fill="rgba(245,166,35,0.2)" stroke="#F5A623" stroke-width="2"/>
+        </svg>`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
-        trendArrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+        // Bear SVG — premium 3D-style with ears
+        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="34" r="20" fill="rgba(239,68,68,0.08)" stroke="rgba(239,68,68,0.2)" stroke-width="1"/>
+            <circle cx="20" cy="22" r="5" fill="rgba(239,68,68,0.15)" stroke="#EF4444" stroke-width="2"/>
+            <circle cx="44" cy="22" r="5" fill="rgba(239,68,68,0.15)" stroke="#EF4444" stroke-width="2"/>
+            <ellipse cx="32" cy="36" rx="16" ry="14" fill="rgba(239,68,68,0.15)" stroke="#EF4444" stroke-width="2"/>
+            <circle cx="26" cy="33" r="2" fill="#EF4444"/>
+            <circle cx="38" cy="33" r="2" fill="#EF4444"/>
+            <path d="M28 42 Q32 39 36 42" stroke="#EF4444" stroke-width="2" stroke-linecap="round" fill="none"/>
+            <path d="M24 48 L22 54 M40 48 L42 54" stroke="#EF4444" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>`;
     }
 
     const trendHTML = `
@@ -6180,7 +6232,7 @@ function renderDashboardMarketStatus() {
                 <span>${escapeHtml(t('dashboard_market_trend'))}</span>
             </div>
             <div class="dms-trend-body">
-                <div class="dms-trend-arrow ${trendClass}">${trendArrowSvg}</div>
+                <div class="dms-trend-graphic ${trendClass}">${trendGraphic}</div>
                 <span class="dms-trend-label-big ${trendClass}">${escapeHtml(trendLabel)}</span>
                 <span class="dms-trend-sub">
                     <span class="up">${gainers}</span>

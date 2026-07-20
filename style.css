@@ -5727,3 +5727,244 @@ html[dir="rtl"] .dc-card.impact-medium { border-inline-start-color: #F5A623; }
 html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 
 /* #endregion Dashboard Polish */
+
+/* ============================================================
+   Dashboard Polish — Bull/Bear Graphics, Sparkline Glow, Watchlist Alignment
+   ============================================================ */
+
+/* ── Market Trend: Bull/Bear Graphics ── */
+.dms-trend-graphic {
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin: 0 auto 4px;
+}
+.dms-trend-graphic svg.trend-bull-bear {
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 0 6px currentColor);
+}
+.dms-trend-graphic.bullish svg.trend-bull-bear {
+    filter: drop-shadow(0 0 8px rgba(34,197,94,0.6));
+}
+.dms-trend-graphic.bearish svg.trend-bull-bear {
+    filter: drop-shadow(0 0 8px rgba(239,68,68,0.6));
+}
+.dms-trend-graphic.neutral svg.trend-bull-bear {
+    filter: drop-shadow(0 0 6px rgba(245,166,35,0.4));
+}
+/* Glass style background for trend graphic */
+.dms-trend-graphic::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.02);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.04);
+}
+.dms-trend-graphic.bullish::before {
+    background: rgba(34,197,94,0.06);
+    border-color: rgba(34,197,94,0.12);
+}
+.dms-trend-graphic.bearish::before {
+    background: rgba(239,68,68,0.06);
+    border-color: rgba(239,68,68,0.12);
+}
+.dms-trend-graphic.neutral::before {
+    background: rgba(245,166,35,0.06);
+    border-color: rgba(245,166,35,0.12);
+}
+
+/* ── Watchlist: Perfect Alignment ── */
+.watchlist-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+}
+.watch-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 12px 8px 8px;
+    border-radius: 16px;
+    background: linear-gradient(145deg, #0B1220, #0E1622);
+    border: 1px solid rgba(255,255,255,0.04);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    min-height: 130px;
+    justify-content: space-between;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    position: relative;
+    overflow: hidden;
+}
+.watch-card:active {
+    transform: scale(0.97);
+}
+.watch-card-img-wrap {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+}
+.watch-card-img-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+.watch-card-symbol {
+    font-size: 13px;
+    font-weight: 700;
+    color: #FFFFFF;
+    line-height: 1.2;
+}
+.watch-card-name {
+    display: none; /* Hidden on dashboard — symbol is enough */
+}
+.watch-card-price {
+    font-size: 12px;
+    font-weight: 600;
+    color: #A5B4C7;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+    line-height: 1.3;
+}
+.watch-card-change {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+    line-height: 1.2;
+}
+.watch-card-change.up { color: #22C55E; }
+.watch-card-change.down { color: #EF4444; }
+.watch-card-change svg {
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+}
+.watch-card-trend {
+    width: 100%;
+    height: 28px;
+    margin-top: 6px;
+    overflow: hidden;
+}
+.watch-card-trend svg {
+    width: 100%;
+    height: 100%;
+}
+
+/* ── Watchlist Add Coin Card ── */
+.watch-card-add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.02);
+    border: 1px dashed rgba(245,166,35,0.2);
+    min-height: 130px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.watch-card-add:active {
+    transform: scale(0.97);
+    border-color: rgba(245,166,35,0.4);
+    background: rgba(245,166,35,0.04);
+}
+.watch-card-add svg {
+    width: 24px;
+    height: 24px;
+    color: #F5A623;
+    margin-bottom: 4px;
+}
+.watch-card-add span {
+    font-size: 11px;
+    color: #A5B4C7;
+    font-weight: 600;
+}
+
+/* ── Hero CTA: Safe Area Positioning ── */
+.hero-slide {
+    position: relative;
+    border-radius: 24px;
+    overflow: hidden;
+    cursor: pointer;
+}
+.hero-slide-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.hero-slide-shade {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 35%;
+    background: linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%);
+    pointer-events: none;
+}
+.hero-cta {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 20px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #F5A623, #FF8A00);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(245,166,35,0.4);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    z-index: 2;
+}
+.hero-cta:active {
+    transform: translateX(-50%) scale(0.95);
+    box-shadow: 0 2px 8px rgba(245,166,35,0.3);
+}
+
+/* ── Responsive Watchlist ── */
+@media (max-width: 360px) {
+    .watchlist-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    .watch-card {
+        min-height: 120px;
+        padding: 10px 6px 6px;
+    }
+    .watch-card-img-wrap {
+        width: 28px;
+        height: 28px;
+    }
+    .watch-card-symbol {
+        font-size: 12px;
+    }
+    .watch-card-price {
+        font-size: 11px;
+    }
+}
+@media (min-width: 412px) {
+    .watchlist-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
