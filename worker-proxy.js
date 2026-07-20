@@ -364,17 +364,18 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
 
     // Build data-check-string per Telegram Bot API spec:
     // - Exclude 'hash' field (it's what we're verifying)
-    // - Exclude 'signature' field — Telegram Android computes the HMAC-SHA256 hash
-    //   WITHOUT signature in DCS. The signature field is for Ed25519 third-party
-    //   verification only, not for HMAC validation.
-    //   Reference: https://github.com/Telegram-Mini-Apps/init-data-golang
-    //   "The functions that sign data remove parameters such as hash and signature"
+    // - INCLUDE 'signature' field — confirmed via REAL production diagnostic data
+    //   from Telegram Android 12.9.0:
+    //   receivedHash: 3759fe79d6564ea5d6b0391f3c98a554b7d7f37718d7ba0983a980501b7df361
+    //   Method A (include signature): computedHash matches receivedHash ✅
+    //   Method B (exclude signature): computedHash does NOT match ❌
+    //   Conclusion: Telegram Android computes HMAC-SHA256 hash WITH signature in DCS.
     // - Sort remaining fields alphabetically by key
     // - Decode all values before joining
     // - Join with '\n'
     // Reference: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
     const dataCheckString = pairs
-      .filter(([k]) => k !== 'hash' && k !== 'signature')
+      .filter(([k]) => k !== 'hash')
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => k + '=' + decodeTelegramValue(v))
       .join('\n');
