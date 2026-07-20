@@ -363,12 +363,15 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
     const receivedHash = hashPair[1];
 
     // Build data-check-string per Telegram Bot API spec:
-    // - Exclude 'hash' field
+    // - Exclude 'hash' field (it's what we're verifying)
+    // - Exclude 'signature' field (Telegram Android includes it for third-party Ed25519
+    //   verification, but it's NOT part of the HMAC-SHA256 hash computation)
     // - Sort remaining fields alphabetically by key
     // - Decode all values before joining
     // - Join with '\n'
+    // Reference: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
     const dataCheckString = pairs
-      .filter(([k]) => k !== 'hash')
+      .filter(([k]) => k !== 'hash' && k !== 'signature')
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => k + '=' + decodeTelegramValue(v))
       .join('\n');
