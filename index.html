@@ -135,17 +135,17 @@
     <!-- #region DashboardPage -->
     <!-- ویترین داشبورد: هرو اسلایدر، وضعیت بازار، واچ‌لیست، تحلیل ویژه، اخبار مهم، تقویم اقتصادی -->
     <section id="dashboard-page" class="page active">
-        <!-- 1. Hero Slider — 2 production banners -->
+        <!-- 1. Hero Slider — 2 banners: Analysis Channel + Bitunix -->
         <div class="hero-banner-slider" id="hero-banner-slider">
-            <div class="hero-slide active" data-slide="0" onclick="window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">
-                <img src="assets/banner-1.png" alt="Bitunix" class="hero-slide-img" loading="eager" decoding="async">
+            <div class="hero-slide active" data-slide="0" onclick="window.open('https://t.me/amir_btc_2024','_blank')">
+                <img src="assets/banner-2.png" alt="AMIRBTC تحلیل تخصصی" class="hero-slide-img" loading="eager" decoding="async" onerror="this.style.background='#0B1220'">
                 <div class="hero-slide-shade"></div>
-                <button class="hero-cta" type="button" onclick="event.stopPropagation();window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">ثبت نام در بیت یونیکس</button>
+                <button class="hero-cta" type="button" onclick="event.stopPropagation();window.open('https://t.me/amir_btc_2024','_blank')">مشاهده تحلیل‌ها</button>
             </div>
-            <div class="hero-slide" data-slide="1" onclick="switchTab('analysis-page')">
-                <img src="assets/banner-2.png" alt="AMIRBTC Analysis" class="hero-slide-img" loading="lazy" decoding="async">
+            <div class="hero-slide" data-slide="1" onclick="window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">
+                <img src="assets/banner-1.png" alt="Bitunix" class="hero-slide-img" loading="lazy" decoding="async" onerror="this.style.background='#0B1220'">
                 <div class="hero-slide-shade"></div>
-                <button class="hero-cta" type="button" onclick="event.stopPropagation();switchTab('analysis-page')">مشاهده تحلیل‌ها</button>
+                <button class="hero-cta hero-cta--bitunix" type="button" onclick="event.stopPropagation();window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">ثبت نام در Bitunix</button>
             </div>
             <div class="hero-slider-dots" id="hero-slider-dots">
                 <span class="hero-dot active" data-dot="0"></span>

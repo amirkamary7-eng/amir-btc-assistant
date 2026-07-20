@@ -4741,15 +4741,15 @@ strong.down { color: var(--red); }
    1. HERO SLIDER — image-based banner slides, aspect-ratio for CLS=0
    ========================================================================== */
 .hero-banner-slider {
-    margin: 0 0 24px;
+    margin: 0 0 16px;
     border-radius: 24px;
     position: relative;
     overflow: hidden;
     aspect-ratio: 16 / 9;
     width: 100%;
-    border: 1px solid rgba(245, 166, 35, 0.18);
+    border: 1px solid rgba(245, 166, 35, 0.12);
     background: #0B1220;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(245, 166, 35, 0.04) inset;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 .hero-slide {
     position: absolute;
@@ -4781,28 +4781,26 @@ strong.down { color: var(--red); }
 }
 .hero-cta {
     position: absolute;
-    bottom: 14px;
-    inset-inline-start: 14px;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 2;
     background: #F5A623;
     border: none;
     color: #020611;
     font-weight: 800;
-    padding: 8px 18px;
+    padding: 9px 22px;
     border-radius: 12px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1;
     pointer-events: auto;
     transition: transform 0.15s ease, box-shadow 0.2s ease;
-    box-shadow: 0 4px 14px rgba(245, 166, 35, 0.45);
-    max-width: 60%;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    box-shadow: 0 4px 16px rgba(245, 166, 35, 0.4);
     white-space: nowrap;
 }
 .hero-cta:active {
-    transform: scale(0.95);
+    transform: translateX(-50%) scale(0.95);
     box-shadow: 0 2px 8px rgba(245, 166, 35, 0.35);
 }
 .hero-cta--bitunix {
@@ -4886,20 +4884,21 @@ strong.down { color: var(--red); }
 .dms-fg-body {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex: 1;
+    justify-content: center;
 }
 .dms-fg-gauge {
-    width: 76px;
+    width: 90px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1px;
+    gap: 2px;
 }
 .dms-fg-gauge svg {
-    width: 76px;
-    height: 42px;
+    width: 90px;
+    height: 50px;
     display: block;
 }
 .dms-fg-score {
@@ -4910,8 +4909,8 @@ strong.down { color: var(--red); }
     gap: 1px;
 }
 .dms-fg-score-num {
-    font-size: 17px;
-    font-weight: 800;
+    font-size: 24px;
+    font-weight: 900;
     color: #FFFFFF;
     font-variant-numeric: tabular-nums;
     line-height: 1;
@@ -4928,70 +4927,80 @@ strong.down { color: var(--red); }
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
+    align-items: center;
+    justify-content: center;
 }
 .dms-fg-class {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 800;
     color: #FFFFFF;
     line-height: 1.2;
+    text-align: center;
 }
 .dms-fg-class.fg-extreme-fear { color: #EF4444; }
 .dms-fg-class.fg-fear { color: #F97316; }
 .dms-fg-class.fg-neutral { color: #A5B4C7; }
 .dms-fg-class.fg-greed { color: #84CC16; }
 .dms-fg-class.fg-extreme-greed { color: #22C55E; }
-.dms-fg-source {
-    font-size: 9px;
-    color: #6B7A8D;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
+.dms-fg-source { display: none; }
 
-/* Market Trend card — simplified to Bullish/Bearish/Neutral indicator */
+/* Market Trend card — Bull/Bear graphic indicator */
 .dms-trend-body {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     flex: 1;
     justify-content: center;
     align-items: center;
     text-align: center;
 }
-.dms-trend-arrow {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
+.dms-trend-graphic {
+    width: 56px;
+    height: 56px;
     display: flex;
     align-items: center;
     justify-content: center;
-    flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    position: relative;
+    margin: 0 auto 2px;
 }
-.dms-trend-arrow svg {
-    width: 22px;
-    height: 22px;
+.dms-trend-graphic svg.trend-bull-bear {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 1;
 }
-.dms-trend-arrow.bullish {
-    background: rgba(34, 197, 94, 0.12);
-    border-color: rgba(34, 197, 94, 0.3);
-    color: #22C55E;
+.dms-trend-graphic::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.03);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.06);
 }
-.dms-trend-arrow.bullish svg { stroke: #22C55E; color: #22C55E; }
-.dms-trend-arrow.bearish {
-    background: rgba(239, 68, 68, 0.12);
-    border-color: rgba(239, 68, 68, 0.3);
-    color: #EF4444;
+.dms-trend-graphic.bullish svg.trend-bull-bear {
+    filter: drop-shadow(0 0 8px rgba(34,197,94,0.5));
 }
-.dms-trend-arrow.bearish svg { stroke: #EF4444; color: #EF4444; }
-.dms-trend-arrow.neutral {
-    background: rgba(245, 166, 35, 0.12);
-    border-color: rgba(245, 166, 35, 0.3);
-    color: #F5A623;
+.dms-trend-graphic.bullish::before {
+    background: rgba(34,197,94,0.06);
+    border-color: rgba(34,197,94,0.15);
 }
-.dms-trend-arrow.neutral svg { stroke: #F5A623; color: #F5A623; }
+.dms-trend-graphic.bearish svg.trend-bull-bear {
+    filter: drop-shadow(0 0 8px rgba(239,68,68,0.5));
+}
+.dms-trend-graphic.bearish::before {
+    background: rgba(239,68,68,0.06);
+    border-color: rgba(239,68,68,0.15);
+}
+.dms-trend-graphic.neutral svg.trend-bull-bear {
+    filter: drop-shadow(0 0 6px rgba(245,166,35,0.4));
+}
+.dms-trend-graphic.neutral::before {
+    background: rgba(245,166,35,0.06);
+    border-color: rgba(245,166,35,0.15);
+}
 .dms-trend-label-big {
     font-size: 14px;
     font-weight: 800;
@@ -5047,33 +5056,26 @@ strong.down { color: var(--red); }
    3. WATCHLIST — Max 5 coins + Add Coin card, horizontal scroll, sparkline
    ========================================================================== */
 #dashboard-page .watchlist-grid {
-    display: flex;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 10px;
-    padding: 0 0 4px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+    padding: 0;
     margin: 0 0 4px;
 }
 #dashboard-page .watchlist-grid::-webkit-scrollbar { display: none; }
 
 .watch-card {
-    flex: 0 0 122px;
-    scroll-snap-align: start;
     background: linear-gradient(180deg, #0E1626 0%, #0B1220 100%);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 18px;
     padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     cursor: pointer;
     position: relative;
     transition: transform 0.15s ease, border-color 0.2s ease;
-    min-height: 138px;
+    min-height: 140px;
     overflow: hidden;
 }
 .watch-card:active {
@@ -5083,17 +5085,20 @@ strong.down { color: var(--red); }
 .watch-card-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 6px;
+    margin-bottom: 2px;
 }
 .watch-card-icon {
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     flex-shrink: 0;
     object-fit: cover;
 }
 .watch-card-remove {
+    position: absolute;
+    top: 10px;
+    inset-inline-end: 10px;
     width: 18px;
     height: 18px;
     border-radius: 50%;
@@ -5105,11 +5110,12 @@ strong.down { color: var(--red); }
     cursor: pointer;
     flex-shrink: 0;
     transition: background 0.2s;
+    z-index: 2;
 }
 .watch-card-remove:hover { background: rgba(239, 68, 68, 0.25); }
 .watch-card-remove svg { width: 10px; height: 10px; }
 .watch-card-symbol {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 800;
     color: #FFFFFF;
     letter-spacing: 0.3px;
@@ -5124,12 +5130,12 @@ strong.down { color: var(--red); }
     white-space: nowrap;
 }
 .watch-card-price {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     color: #FFFFFF;
     font-variant-numeric: tabular-nums;
     margin-top: 2px;
-    line-height: 1;
+    line-height: 1.2;
 }
 .watch-card-change {
     display: inline-flex;
@@ -5141,7 +5147,8 @@ strong.down { color: var(--red); }
     padding: 2px 6px;
     border-radius: 8px;
     width: fit-content;
-    line-height: 1;
+    line-height: 1.2;
+    margin-top: 2px;
 }
 .watch-card-change.up { color: #22C55E; background: rgba(34, 197, 94, 0.1); }
 .watch-card-change.down { color: #EF4444; background: rgba(239, 68, 68, 0.1); }
@@ -5149,7 +5156,7 @@ strong.down { color: var(--red); }
 
 /* Mini trend sparkline (SVG) */
 .watch-card-trend {
-    height: 22px;
+    height: 28px;
     margin-top: auto;
     display: flex;
     align-items: flex-end;
@@ -5780,181 +5787,20 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     border-color: rgba(245,166,35,0.12);
 }
 
-/* ── Watchlist: Perfect Alignment ── */
-.watchlist-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 10px;
-}
-.watch-card {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    padding: 12px 8px 8px;
-    border-radius: 16px;
-    background: linear-gradient(145deg, #0B1220, #0E1622);
-    border: 1px solid rgba(255,255,255,0.04);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-    min-height: 130px;
-    justify-content: space-between;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-    position: relative;
-    overflow: hidden;
-}
-.watch-card:active {
-    transform: scale(0.97);
-}
-.watch-card-img-wrap {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 4px;
-    flex-shrink: 0;
-}
-.watch-card-img-wrap img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-}
-.watch-card-symbol {
-    font-size: 13px;
-    font-weight: 700;
-    color: #FFFFFF;
-    line-height: 1.2;
-}
-.watch-card-name {
-    display: none; /* Hidden on dashboard — symbol is enough */
-}
-.watch-card-price {
-    font-size: 12px;
-    font-weight: 600;
-    color: #A5B4C7;
-    font-variant-numeric: tabular-nums;
-    margin-top: 2px;
-    line-height: 1.3;
-}
-.watch-card-change {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    font-size: 11px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    margin-top: 2px;
-    line-height: 1.2;
-}
-.watch-card-change.up { color: #22C55E; }
-.watch-card-change.down { color: #EF4444; }
-.watch-card-change svg {
-    width: 10px;
-    height: 10px;
-    flex-shrink: 0;
-}
-.watch-card-trend {
-    width: 100%;
-    height: 28px;
-    margin-top: 6px;
-    overflow: hidden;
-}
-.watch-card-trend svg {
-    width: 100%;
-    height: 100%;
-}
 
-/* ── Watchlist Add Coin Card ── */
-.watch-card-add {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 12px;
-    border-radius: 16px;
-    background: rgba(255,255,255,0.02);
-    border: 1px dashed rgba(245,166,35,0.2);
-    min-height: 130px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-.watch-card-add:active {
-    transform: scale(0.97);
-    border-color: rgba(245,166,35,0.4);
-    background: rgba(245,166,35,0.04);
-}
-.watch-card-add svg {
-    width: 24px;
-    height: 24px;
-    color: #F5A623;
-    margin-bottom: 4px;
-}
-.watch-card-add span {
-    font-size: 11px;
-    color: #A5B4C7;
-    font-weight: 600;
-}
-
-/* ── Hero CTA: Safe Area Positioning ── */
-.hero-slide {
-    position: relative;
-    border-radius: 24px;
-    overflow: hidden;
-    cursor: pointer;
-}
-.hero-slide-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-.hero-slide-shade {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 35%;
-    background: linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%);
-    pointer-events: none;
-}
-.hero-cta {
-    position: absolute;
-    bottom: 16px;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 8px 20px;
-    border-radius: 12px;
-    background: linear-gradient(135deg, #F5A623, #FF8A00);
-    color: #fff;
-    font-size: 13px;
-    font-weight: 700;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
-    box-shadow: 0 4px 16px rgba(245,166,35,0.4);
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-    z-index: 2;
-}
-.hero-cta:active {
-    transform: translateX(-50%) scale(0.95);
-    box-shadow: 0 2px 8px rgba(245,166,35,0.3);
-}
-
-/* ── Responsive Watchlist ── */
+/* ── Responsive Watchlist Grid ── */
 @media (max-width: 360px) {
-    .watchlist-grid {
+    #dashboard-page .watchlist-grid {
         grid-template-columns: repeat(2, 1fr);
         gap: 8px;
     }
     .watch-card {
-        min-height: 120px;
-        padding: 10px 6px 6px;
+        min-height: 130px;
+        padding: 10px;
     }
-    .watch-card-img-wrap {
-        width: 28px;
-        height: 28px;
+    .watch-card-icon {
+        width: 24px;
+        height: 24px;
     }
     .watch-card-symbol {
         font-size: 12px;
@@ -5964,7 +5810,7 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     }
 }
 @media (min-width: 412px) {
-    .watchlist-grid {
+    #dashboard-page .watchlist-grid {
         grid-template-columns: repeat(3, 1fr);
     }
 }

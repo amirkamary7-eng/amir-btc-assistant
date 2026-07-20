@@ -6154,7 +6154,6 @@ function renderDashboardMarketStatus() {
                 </div>
                 <div class="dms-fg-text">
                     <span class="dms-fg-class ${fgClassStr}">${escapeHtml(fgLabel)}</span>
-                    ${fgSource ? `<span class="dms-fg-source">${escapeHtml(fgSource)}</span>` : ''}
                 </div>
             </div>
         </div>
