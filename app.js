@@ -1110,10 +1110,15 @@ async function saveAnalysisToServer(payload, method, analysisId) {
 }
 
 function isAdmin() {
-    // CRITICAL: Never return true before bootstrap completes.
-    // This prevents non-admin users from seeing admin UI due to stale localStorage.
-    if (!bootstrapComplete) return false;
-    return isCurrentUserAdmin;
+    // Optimistic admin check:
+    // - If bootstrap has completed, use the authoritative server-confirmed value.
+    // - If bootstrap hasn't completed yet (cold start / reopen), fall back to
+    //   localStorage. This prevents admin buttons from flickering off during
+    //   the 1-3 second bootstrap window. bootstrapUser() will revoke this
+    //   if the server says is_admin=false.
+    if (bootstrapComplete) return isCurrentUserAdmin;
+    // Cold-start fallback: trust localStorage is_admin (set during previous session)
+    return localStorage.getItem('is_admin') === '1';
 }
 
 function timeAgo(dateStr) {
@@ -5347,7 +5352,8 @@ function updateAnalysisFabVisibility() {
 function updateAdminEntryButton() {
     const btn = document.getElementById('admin-entry-btn');
     if (!btn) return;
-    btn.style.display = (isCurrentUserAdmin && bootstrapComplete) ? 'inline-flex' : 'none';
+    // Use isAdmin() which has optimistic fallback for cold-start
+    btn.style.display = isAdmin() ? 'inline-flex' : 'none';
 }
 /**
  * ارجاع لینک را کپی می‌کند.
@@ -5959,6 +5965,25 @@ window.addEventListener('beforeunload', () => {
     if (_bootstrapLongTimer) { clearInterval(_bootstrapLongTimer); _bootstrapLongTimer = null; }
 });
 
+// pageshow — fires when page is restored from bfcache (Mini App reopen)
+// This is the key event for Telegram Mini App close/reopen scenario.
+// On reopen, bootstrapComplete may be false (if page was evicted from memory)
+// or the page may be restored from bfcache with stale state.
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+        // Page restored from bfcache — re-assert admin UI and retry bootstrap if needed
+        console.log('[BOOT] pageshow — restored from bfcache');
+        if (localStorage.getItem('is_admin') === '1') {
+            document.body.classList.add('admin-ready');
+        }
+        updateAnalysisFabVisibility();
+        updateAdminEntryButton();
+        if (!bootstrapComplete && isTelegramAuthReady()) {
+            tryLateBootstrap();
+        }
+    }
+});
+
 function startPolling() {
     _startAllPolling();
 }
@@ -5971,6 +5996,15 @@ function startPolling() {
 document.addEventListener('DOMContentLoaded', async () => {
     // ── Phase 0: Telegram SDK init + user resolution ──
     await UserContext.init();
+
+    // ── Phase 0.5: Optimistic admin-ready restoration from localStorage ──
+    // On app reopen, bootstrapComplete is false and body.admin-ready is missing.
+    // If localStorage has is_admin=1, restore admin-ready class immediately so
+    // CSS gates don't hide admin buttons before bootstrap completes.
+    // This is safe: bootstrapUser() will confirm/revoke this on success.
+    if (localStorage.getItem('is_admin') === '1') {
+        document.body.classList.add('admin-ready');
+    }
 
     // ── Phase 1: Apply language + render UI from cache immediately ──
     applyLanguage();
