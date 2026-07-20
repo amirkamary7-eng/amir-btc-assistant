@@ -799,27 +799,62 @@ async function bootstrapUser() {
     currentLang = loadLangFromStorage();
     loadWatchlistFromStorage();
 
+    // [DIAG-A1] Snapshot BEFORE any logic
+    console.log('[DIAG-A1-PRE] bootstrapUser() called', {
+        'UserContext.isGuest()': UserContext.isGuest(),
+        'UserContext.isPending()': UserContext.isPending(),
+        'isInTelegram()': isInTelegram(),
+        'isTelegramAuthReady()': isTelegramAuthReady(),
+        'getTelegramUser()?.id': getTelegramUser()?.id || null,
+        'getTelegramInitData()?.length': getTelegramInitData()?.length || 0,
+        'bootstrapComplete': bootstrapComplete,
+        'isCurrentUserAdmin': isCurrentUserAdmin,
+        'API_BASE': !!API_BASE
+    });
+
     if (!API_BASE) {
+        console.log('[DIAG-A1-SKIP] bootstrapUser skipped — no API_BASE', {
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin
+        });
         applyLanguage();
         return;
     }
     if (UserContext.isGuest()) {
+        console.log('[DIAG-A1-SKIP] bootstrapUser skipped — isGuest', {
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'UserContext.isPending()': UserContext.isPending(),
+            'isInTelegram()': isInTelegram(),
+            'isTelegramAuthReady()': isTelegramAuthReady(),
+            'getTelegramUser()?.id': getTelegramUser()?.id || null,
+            'getTelegramInitData()?.length': getTelegramInitData()?.length || 0
+        });
         applyLanguage();
         return;
     }
     if (UserContext.isPending()) {
+        console.log('[DIAG-A1-SKIP] bootstrapUser skipped — isPending', {
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'getTelegramUser()?.id': getTelegramUser()?.id || null,
+            'isInTelegram()': isInTelegram(),
+            'isTelegramAuthReady()': isTelegramAuthReady(),
+            'getTelegramInitData()?.length': getTelegramInitData()?.length || 0
+        });
         applyLanguage();
         return;
     }
     // Guard: don't bootstrap without valid initData — request would fail auth on server
     if (isInTelegram() && !isTelegramAuthReady()) {
-        console.log('[BOOT] Skipped — auth not ready yet.', {
-            isInTelegram: true,
-            isTelegramAuthReady: false,
-            hasInitData: hasTelegramAuthPayload(),
-            userId: getTelegramUser()?.id || null,
-            initDataLen: getTelegramInitData()?.length || 0,
-            bootstrapComplete
+        console.log('[DIAG-A1-SKIP] bootstrapUser skipped — auth not ready', {
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'getTelegramUser()?.id': getTelegramUser()?.id || null,
+            'getTelegramInitData()?.length': getTelegramInitData()?.length || 0,
+            'isTelegramAuthReady()': false,
+            'hasTelegramAuthPayload()': hasTelegramAuthPayload(),
+            'isInTelegram()': true
         });
         applyLanguage();
         return;
@@ -894,19 +929,37 @@ async function bootstrapUser() {
             document.body.classList.remove('admin-ready');
         }
 
-        console.log('[BOOT] Bootstrap SUCCESS', {
-            is_admin: data.is_admin,
-            adminChanged,
-            isCurrentUserAdmin,
-            bootstrapComplete: true,
-            isAdmin: isAdmin()
+        console.log('[DIAG-A1-POST] bootstrapUser SUCCESS — full state trace', {
+            'server.is_admin': data.is_admin,
+            'adminChanged': adminChanged,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'bootstrapComplete': bootstrapComplete,
+            'body.admin-ready': document.body.classList.contains('admin-ready'),
+            'isAdmin()': isAdmin(),
+            'FAB before update': document.getElementById('analysis-fab')?.style.display
         });
 
         // NOW update all admin UI — isAdmin() will return correct value.
         // Update FAB visibility now that admin status is known
         updateAnalysisFabVisibility();
+        // [DIAG-A2] Immediately after updateAnalysisFabVisibility
+        console.log('[DIAG-A2] after updateAnalysisFabVisibility()', {
+            'isAdmin()': isAdmin(),
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'body.admin-ready': document.body.classList.contains('admin-ready'),
+            'fab.style.display': document.getElementById('analysis-fab')?.style.display,
+            'fab.computed.display': getComputedStyle(document.getElementById('analysis-fab')).display
+        });
         // Update admin entry button (single source of truth: isCurrentUserAdmin)
         updateAdminEntryButton();
+        // [DIAG-A3] Immediately after updateAdminEntryButton
+        console.log('[DIAG-A3] after updateAdminEntryButton()', {
+            'isAdmin()': isAdmin(),
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'button.style.display': document.getElementById('admin-entry-btn')?.style.display
+        });
         // Always re-render analysis list when bootstrap completes.
         // The list may have been rendered before bootstrap (when isAdmin()=false),
         // so cards need edit/delete buttons added.
@@ -922,7 +975,12 @@ async function bootstrapUser() {
             adminActions.style.display = isCurrentUserAdmin ? '' : 'none';
         }
     } catch (e) {
-        console.error('[BOOT] bootstrapUser FAILED:', e);
+        console.error('[DIAG-A1-FAIL] bootstrapUser FAILED', {
+            'error': e.message,
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'isAdmin()': isAdmin()
+        });
         // Do NOT set bootstrapComplete — let retry try again
         applyLanguage();
     }
@@ -1092,6 +1150,20 @@ async function saveAnalysisToServer(payload, method, analysisId) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 20000);
         const fullUrl = `${API_BASE}${url}`;
+        // [DIAG-A5] Before fetch — full state snapshot
+        console.log('[DIAG-A5-PRE] saveAnalysisToServer fetch about to fire', {
+            'method': method,
+            'url': fullUrl,
+            'hasInitData': !!initData,
+            'initDataLength': initData?.length || 0,
+            'initData_first50': initData ? initData.substring(0, 50) : '(empty)',
+            'header_X-Telegram-Init-Data_present': !!headers['X-Telegram-Init-Data'],
+            'isAdmin()': isAdmin(),
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'bodyHasContent': !!body && body.length > 0,
+            'bodyLength': body?.length || 0
+        });
         const res = await fetch(fullUrl, {
             method,
             headers,
@@ -1102,6 +1174,16 @@ async function saveAnalysisToServer(payload, method, analysisId) {
 
         // ── Step 5: Handle response ──
         const responseText = await res.text();
+
+        // [DIAG-A5] After fetch — response info
+        console.log('[DIAG-A5-POST] saveAnalysisToServer response', {
+            'method': method,
+            'status': res.status,
+            'ok': res.ok,
+            'statusText': res.statusText,
+            'responseBody_first200': responseText.substring(0, 200),
+            'responseBodyLength': responseText.length
+        });
 
         if (!res.ok) {
             console.error('[ANALYSIS] HTTP ERROR', res.status, responseText.substring(0, 200));
@@ -1114,6 +1196,13 @@ async function saveAnalysisToServer(payload, method, analysisId) {
         }
 
         const result = JSON.parse(responseText);
+        console.log('[DIAG-A5-OK] saveAnalysisToServer parsed result', {
+            'method': method,
+            'resultStatus': result?.status,
+            'hasAnalysis': !!result?.analysis,
+            'analysisId': result?.analysis?.id,
+            'version': result?.version
+        });
         return result;
     } catch (err) {
         console.error('[ANALYSIS] fetch exception:', err.name, err.message);
@@ -1124,7 +1213,21 @@ async function saveAnalysisToServer(payload, method, analysisId) {
 function isAdmin() {
     // CRITICAL: Never return true before bootstrap completes.
     // This prevents non-admin users from seeing admin UI due to stale localStorage.
-    if (!bootstrapComplete) return false;
+    if (!bootstrapComplete) {
+        console.log('[DIAG-A4] isAdmin() called', {
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'returnValue': false,
+            'caller': (new Error()).stack?.split('\n')[2]?.trim()?.substring(0, 80) || 'unknown'
+        });
+        return false;
+    }
+    console.log('[DIAG-A4] isAdmin() called', {
+        'bootstrapComplete': bootstrapComplete,
+        'isCurrentUserAdmin': isCurrentUserAdmin,
+        'returnValue': isCurrentUserAdmin,
+        'caller': (new Error()).stack?.split('\n')[2]?.trim()?.substring(0, 80) || 'unknown'
+    });
     return isCurrentUserAdmin;
 }
 
@@ -5317,15 +5420,39 @@ function loadUser() {
 // Called from switchTab() and updateProfileUI().
 function updateAnalysisFabVisibility() {
     const fab = document.getElementById('analysis-fab');
-    if (!fab) return;
+    if (!fab) {
+        console.log('[DIAG-A2-INNER] updateAnalysisFabVisibility — FAB element not found');
+        return;
+    }
     const onAnalysisTab = (document.getElementById('analysis-page')?.classList.contains('active')) === true;
-    fab.style.display = (isAdmin() && onAnalysisTab) ? '' : 'none';
+    const adminCheck = isAdmin();
+    const willShow = adminCheck && onAnalysisTab;
+    fab.style.display = willShow ? '' : 'none';
+    console.log('[DIAG-A2-INNER] updateAnalysisFabVisibility executed', {
+        'isAdmin()': adminCheck,
+        'bootstrapComplete': bootstrapComplete,
+        'isCurrentUserAdmin': isCurrentUserAdmin,
+        'onAnalysisTab': onAnalysisTab,
+        'willShow': willShow,
+        'fab.style.display after': fab.style.display,
+        'fab.computed.display after': getComputedStyle(fab).display
+    });
 }
 
 function updateAdminEntryButton() {
     const btn = document.getElementById('admin-entry-btn');
     if (btn) {
-        btn.style.display = (isCurrentUserAdmin && bootstrapComplete) ? 'inline-flex' : 'none';
+        const willShow = isCurrentUserAdmin && bootstrapComplete;
+        btn.style.display = willShow ? 'inline-flex' : 'none';
+        console.log('[DIAG-A3-INNER] updateAdminEntryButton executed', {
+            'isAdmin()': isAdmin(),
+            'bootstrapComplete': bootstrapComplete,
+            'isCurrentUserAdmin': isCurrentUserAdmin,
+            'willShow': willShow,
+            'button.style.display after': btn.style.display
+        });
+    } else {
+        console.log('[DIAG-A3-INNER] updateAdminEntryButton — button not found');
     }
 }
 /**
