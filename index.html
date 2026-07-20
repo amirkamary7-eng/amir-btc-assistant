@@ -135,39 +135,27 @@
     <!-- #region DashboardPage -->
     <!-- ویترین داشبورد: هرو اسلایدر، وضعیت بازار، واچ‌لیست، تحلیل ویژه، اخبار مهم، تقویم اقتصادی -->
     <section id="dashboard-page" class="page active">
-        <!-- 1. Hero Slider -->
+        <!-- 1. Hero Slider — image-based banner slides -->
         <div class="hero-banner-slider" id="hero-banner-slider">
             <div class="hero-slide active" data-slide="0">
-                <div class="hero-inner">
-                    <div class="hero-content">
-                        <span class="hero-badge" data-i18n="hero_badge">کانال تحلیلی</span>
-                        <h2>AMIRBTC</h2>
-                        <p data-i18n="hero_desc">سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار</p>
-                        <button class="hero-cta" data-i18n="hero_cta" onclick="window.open('https://t.me/amir_btc_2024','_blank')">عضویت رایگان</button>
-                    </div>
-                    <div class="hero-art">
-                        <img src="assets/amirbtc-logo.png" alt="AMIRBTC" class="hero-logo">
-                    </div>
-                </div>
-                <div class="hero-glow"></div>
+                <img src="assets/banner-1.png" alt="AMIRBTC" class="hero-slide-img" loading="eager" decoding="async" width="2037" height="772">
+                <div class="hero-slide-shade"></div>
+                <button class="hero-cta" type="button" onclick="window.open('https://t.me/amir_btc_2024','_blank')" data-i18n="hero_cta">عضویت رایگان</button>
             </div>
             <div class="hero-slide" data-slide="1">
-                <div class="hero-inner bitunix-slide">
-                    <div class="hero-content">
-                        <span class="hero-badge bitunix-badge">⚡ Exchange Partner</span>
-                        <h2>Bitunix</h2>
-                        <p>معاملات فیوچرز با بالاترین امنیت و کمترین کارمزد</p>
-                        <button class="hero-cta bitunix-cta" onclick="window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">شروع معامله</button>
-                    </div>
-                    <div class="hero-art">
-                        <div class="bitunix-logo-art">₿</div>
-                    </div>
-                </div>
-                <div class="hero-glow bitunix-glow"></div>
+                <img src="assets/banner-2.png" alt="Bitunix" class="hero-slide-img" loading="lazy" decoding="async" width="1672" height="941">
+                <div class="hero-slide-shade"></div>
+                <button class="hero-cta hero-cta--bitunix" type="button" onclick="window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')" data-i18n="hero_cta_trade">شروع معامله</button>
+            </div>
+            <div class="hero-slide" data-slide="2">
+                <img src="assets/banner-3.png" alt="Market Analysis" class="hero-slide-img" loading="lazy" decoding="async" width="1672" height="941">
+                <div class="hero-slide-shade"></div>
+                <button class="hero-cta" type="button" onclick="switchTab('analysis-page')" data-i18n="hero_cta_analysis">مشاهده تحلیل‌ها</button>
             </div>
             <div class="hero-slider-dots" id="hero-slider-dots">
                 <span class="hero-dot active" data-dot="0"></span>
                 <span class="hero-dot" data-dot="1"></span>
+                <span class="hero-dot" data-dot="2"></span>
             </div>
         </div>
 
@@ -204,23 +192,19 @@
         </div>
         <div class="watchlist-grid" id="watchlist-grid"></div>
 
-        <!-- 4. Featured Analysis -->
+        <!-- 4. Market Analysis (regular + VIP) -->
         <div class="section-header">
             <span class="section-title">
-                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                <span data-i18n="dashboard_featured_analysis">تحلیل ویژه</span>
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+                <span data-i18n="dashboard_market_analysis">تحلیل‌های بازار</span>
             </span>
             <span class="section-more" data-i18n="view_all" onclick="switchTab('analysis-page')">مشاهده همه</span>
         </div>
         <div id="dashboard-featured-analysis" class="dashboard-featured-analysis-wrap">
             <!-- skeleton placeholder -->
-            <div class="dfa-skeleton">
-                <div class="dfa-skel-img"></div>
-                <div class="dfa-skel-content">
-                    <div class="dfa-skel-line w-40"></div>
-                    <div class="dfa-skel-line w-90"></div>
-                    <div class="dfa-skel-line w-70"></div>
-                </div>
+            <div class="dfa-skeleton-row">
+                <div class="dfa-skel-card"><div class="dfa-skel-img"></div><div class="dfa-skel-content"><div class="dfa-skel-line w-60"></div><div class="dfa-skel-line w-90"></div></div></div>
+                <div class="dfa-skel-card"><div class="dfa-skel-img"></div><div class="dfa-skel-content"><div class="dfa-skel-line w-60"></div><div class="dfa-skel-line w-90"></div></div></div>
             </div>
         </div>
 

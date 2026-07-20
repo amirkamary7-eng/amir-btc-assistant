@@ -476,11 +476,12 @@ const i18n = {
         ns_sub_activate: 'فعال‌سازی',
         ns_active: 'فعال', ns_inactive: 'غیرفعال',
         dashboard_market_status: 'وضعیت بازار',
-        dashboard_featured_analysis: 'تحلیل ویژه',
+        dashboard_featured_analysis: 'تحلیل‌های بازار',
+        dashboard_market_analysis: 'تحلیل‌های بازار',
         dashboard_calendar: 'تقویم اقتصادی',
         dashboard_market_trend: 'روند بازار',
         dashboard_add_coin: 'افزودن ارز',
-        dashboard_no_featured: 'تحلیل ویژه‌ای موجود نیست',
+        dashboard_no_featured: 'تحلیلی موجود نیست',
         dashboard_no_calendar: 'رویداد اقتصادی در دسترس نیست',
         dashboard_no_news: 'خبری موجود نیست',
         dashboard_priority_urgent: 'فوری',
@@ -491,7 +492,9 @@ const i18n = {
         dashboard_btc_dominance: 'سلطه بیت‌کوین',
         dashboard_trend_bullish: 'صعودی',
         dashboard_trend_bearish: 'نزولی',
-        dashboard_trend_neutral: 'خنثی'
+        dashboard_trend_neutral: 'خنثی',
+        hero_cta_trade: 'شروع معامله',
+        hero_cta_analysis: 'مشاهده تحلیل‌ها'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -582,11 +585,12 @@ const i18n = {
         ns_sub_activate: 'Activate',
         ns_active: 'Active', ns_inactive: 'Inactive',
         dashboard_market_status: 'Market Status',
-        dashboard_featured_analysis: 'Featured Analysis',
+        dashboard_featured_analysis: 'Market Analysis',
+        dashboard_market_analysis: 'Market Analysis',
         dashboard_calendar: 'Economic Calendar',
         dashboard_market_trend: 'Market Trend',
         dashboard_add_coin: 'Add Coin',
-        dashboard_no_featured: 'No featured analysis available',
+        dashboard_no_featured: 'No analysis available',
         dashboard_no_calendar: 'No economic events available',
         dashboard_no_news: 'No news available',
         dashboard_priority_urgent: 'Urgent',
@@ -597,7 +601,9 @@ const i18n = {
         dashboard_btc_dominance: 'BTC Dominance',
         dashboard_trend_bullish: 'Bullish',
         dashboard_trend_bearish: 'Bearish',
-        dashboard_trend_neutral: 'Neutral'
+        dashboard_trend_neutral: 'Neutral',
+        hero_cta_trade: 'Start Trading',
+        hero_cta_analysis: 'View Analysis'
     }
 };
 /**
@@ -4042,15 +4048,33 @@ function formatWatchPrice(priceUsd) {
 /**
  * Build a tiny SVG sparkline that visualises 24h change direction.
  * Pure CSS/SVG, no external data needed.
+ * Slope intensity scales with the magnitude of the 24h change.
  */
 function buildWatchTrendSVG(changePercent) {
-    const isUp = (changePercent || 0) >= 0;
+    const pct = (typeof changePercent === 'number' && !isNaN(changePercent)) ? changePercent : 0;
+    const isUp = pct >= 0;
     const color = isUp ? '#22C55E' : '#EF4444';
-    // 100x18 viewBox, 6 sample points
+    const fillColor = isUp ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)';
+    const gradId = 'spark-' + (isUp ? 'up' : 'down') + '-' + Math.abs(Math.round(pct * 100));
+    // 100x22 viewBox, 7 sample points — slight wave to feel organic
+    // Slope intensity scales with magnitude (clamped)
+    const mag = Math.min(Math.abs(pct), 10) / 10; // 0..1
+    const startY = 11;
+    const endY = isUp ? (11 - 7 * mag - 2) : (11 + 7 * mag + 2);
+    const midY = (startY + endY) / 2;
     const pts = isUp
-        ? '0,15 20,13 40,10 60,7 80,5 100,3'
-        : '0,3 20,5 40,8 60,11 80,13 100,15';
-    return `<svg viewBox="0 0 100 18" preserveAspectRatio="none" fill="none">
+        ? `0,${startY + 2} 17,${startY} 33,${startY - 1} 50,${midY} 67,${midY - 1} 83,${endY + 1} 100,${endY}`
+        : `0,${startY - 2} 17,${startY} 33,${startY + 1} 50,${midY} 67,${midY + 1} 83,${endY - 1} 100,${endY}`;
+    // Fill polygon (close to bottom)
+    const fillPts = pts + ` 100,22 0,22`;
+    return `<svg viewBox="0 0 100 22" preserveAspectRatio="none" fill="none">
+        <defs>
+            <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="${fillColor}"/>
+                <stop offset="100%" stop-color="${fillColor}" stop-opacity="0"/>
+            </linearGradient>
+        </defs>
+        <polygon points="${fillPts}" fill="url(#${gradId})"/>
         <polyline points="${pts}" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>`;
 }
@@ -6070,7 +6094,7 @@ function renderDashboardMarketStatus() {
     else if (globalMarketData.fearGreedClassification) { fgLabel = globalMarketData.fearGreedClassification; fgClassStr = 'fg-neutral'; }
     else { fgLabel = '--'; fgClassStr = 'fg-neutral'; }
 
-    // Arc calculation (gauge): 0..100 → arc fill
+    // Semicircle gauge: 0..100 → arc fill (stroke-dashoffset)
     const fgPercent = (fgVal != null) ? Math.max(0, Math.min(100, fgVal)) : 0;
     const totalArcLen = 150.8;
     const arcOffset = (totalArcLen - (totalArcLen * fgPercent / 100)).toFixed(1);
@@ -6083,9 +6107,9 @@ function renderDashboardMarketStatus() {
             </div>
             <div class="dms-fg-body">
                 <div class="dms-fg-gauge">
-                    <svg viewBox="0 0 120 70" fill="none">
-                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="rgba(255,255,255,0.06)" stroke-width="8" stroke-linecap="round" fill="none"/>
-                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="url(#dms-fg-grad)" stroke-width="8" stroke-linecap="round" fill="none" stroke-dasharray="150.8" stroke-dashoffset="${arcOffset}"/>
+                    <svg viewBox="0 0 120 70" fill="none" preserveAspectRatio="xMidYMid meet">
+                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="rgba(255,255,255,0.06)" stroke-width="9" stroke-linecap="round" fill="none"/>
+                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="url(#dms-fg-grad)" stroke-width="9" stroke-linecap="round" fill="none" stroke-dasharray="150.8" stroke-dashoffset="${arcOffset}"/>
                         <defs>
                             <linearGradient id="dms-fg-grad" x1="0%" y1="0%" x2="100%" y2="0%">
                                 <stop offset="0%" stop-color="#EF4444"/>
@@ -6095,9 +6119,9 @@ function renderDashboardMarketStatus() {
                             </linearGradient>
                         </defs>
                     </svg>
-                    <div class="dms-fg-value">
-                        <span class="dms-fg-value-num">${fgVal}</span>
-                        <span class="dms-fg-value-label">${escapeHtml(t('dashboard_gauge_index'))}</span>
+                    <div class="dms-fg-score">
+                        <span class="dms-fg-score-num">${fgVal}</span>
+                        <span class="dms-fg-score-label">${escapeHtml(t('dashboard_gauge_index'))}</span>
                     </div>
                 </div>
                 <div class="dms-fg-text">
@@ -6121,7 +6145,7 @@ function renderDashboardMarketStatus() {
         </div>
     `;
 
-    // ── Market Trend (right column) — gainers/losers ratio + BTC dominance ──
+    // ── Market Trend (right column) — Bullish / Bearish / Neutral indicator ──
     let gainers = 0, losers = 0;
     if (Array.isArray(allCoins) && allCoins.length) {
         for (let i = 0; i < allCoins.length; i++) {
@@ -6134,14 +6158,20 @@ function renderDashboardMarketStatus() {
     }
     const totalGL = gainers + losers;
     const ratio = totalGL > 0 ? (gainers / totalGL) : 0.5;
-    let trendLabel, trendClass;
-    if (ratio > 0.6) { trendLabel = t('dashboard_trend_bullish'); trendClass = 'up'; }
-    else if (ratio >= 0.4) { trendLabel = t('dashboard_trend_neutral'); trendClass = ''; }
-    else { trendLabel = t('dashboard_trend_bearish'); trendClass = 'down'; }
-
-    const btcDom = (typeof globalMarketData.btcDominance === 'number' && !isNaN(globalMarketData.btcDominance))
-        ? globalMarketData.btcDominance : null;
-    const needlePos = (ratio * 100).toFixed(1);
+    let trendLabel, trendClass, trendArrowSvg;
+    if (ratio > 0.58) {
+        trendLabel = t('dashboard_trend_bullish');
+        trendClass = 'bullish';
+        trendArrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg>';
+    } else if (ratio >= 0.42) {
+        trendLabel = t('dashboard_trend_neutral');
+        trendClass = 'neutral';
+        trendArrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    } else {
+        trendLabel = t('dashboard_trend_bearish');
+        trendClass = 'bearish';
+        trendArrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    }
 
     const trendHTML = `
         <div class="dms-card dms-trend">
@@ -6150,26 +6180,15 @@ function renderDashboardMarketStatus() {
                 <span>${escapeHtml(t('dashboard_market_trend'))}</span>
             </div>
             <div class="dms-trend-body">
-                <div class="dms-trend-row">
-                    <span class="dms-trend-label">${escapeHtml(t('dashboard_trend_bullish'))}</span>
-                    <span class="dms-trend-value up">${gainers}</span>
-                </div>
-                <div class="dms-trend-row">
-                    <span class="dms-trend-label">${escapeHtml(t('dashboard_trend_bearish'))}</span>
-                    <span class="dms-trend-value down">${losers}</span>
-                </div>
-                <div class="dms-trend-row">
-                    <span class="dms-trend-label">${escapeHtml(t('dashboard_btc_dominance'))}</span>
-                    <span class="dms-trend-value">${btcDom != null ? btcDom.toFixed(1) + '%' : '--'}</span>
-                </div>
-                <div class="dms-trend-bar">
-                    <div class="dms-trend-bar-fill"></div>
-                    <div class="dms-trend-bar-needle" style="left: ${needlePos}%;"></div>
-                </div>
-                <div class="dms-trend-row" style="margin-top:2px;">
-                    <span class="dms-trend-label">${escapeHtml(t('market_sentiment'))}</span>
-                    <span class="dms-trend-value ${trendClass}">${escapeHtml(trendLabel)}</span>
-                </div>
+                <div class="dms-trend-arrow ${trendClass}">${trendArrowSvg}</div>
+                <span class="dms-trend-label-big ${trendClass}">${escapeHtml(trendLabel)}</span>
+                <span class="dms-trend-sub">
+                    <span class="up">${gainers}</span>
+                    <span>▲</span>
+                    <span style="color:#6B7A8D;">·</span>
+                    <span class="down">${losers}</span>
+                    <span>▼</span>
+                </span>
             </div>
         </div>
     `;
@@ -6178,61 +6197,77 @@ function renderDashboardMarketStatus() {
 }
 
 /**
- * کارت بزرگ تحلیل ویژه را رندر می‌کند. از analysisFeatured[0] استفاده می‌کند.
- * شامل تصویر کاور، گرادینت پایین، محتوای پایین‌چین، VIP badge.
+ * Market Analysis section — combines VIP (analysisFeatured) + regular analyses,
+ * renders up to 5 horizontal scrollable cards with cover image, gradient overlay,
+ * VIP badge if featured, and line-clamped title. Click opens detail page.
  */
 function renderDashboardFeaturedAnalysis() {
     const container = $('dashboard-featured-analysis');
     if (!container) return;
 
-    const a = Array.isArray(analysisFeatured) && analysisFeatured.length ? analysisFeatured[0] : null;
-    if (!a) {
+    // Combine VIP (featured) first, then regular analyses; dedupe by id; max 5 total.
+    const seen = new Set();
+    const combined = [];
+    const pushUnique = (arr) => {
+        if (!Array.isArray(arr)) return;
+        for (const a of arr) {
+            if (!a || !a.id || seen.has(a.id)) continue;
+            seen.add(a.id);
+            combined.push(a);
+            if (combined.length >= 5) break;
+        }
+    };
+    pushUnique(analysisFeatured);
+    if (combined.length < 5) pushUnique(analyses);
+
+    if (!combined.length) {
         container.innerHTML = `<div class="dfa-empty">${escapeHtml(t('dashboard_no_featured'))}</div>`;
         return;
     }
 
-    const safeId = escapeHtml(a.id);
-    const safeCoin = escapeHtml(a.coin || '');
-    const safeTitle = escapeHtml(a.title || '');
-    const safeSnippet = escapeHtml(truncateText(a.content || a.text || '', 110));
-    const safeTimeframe = escapeHtml(a.timeframe || '1D');
-    const safeImage = a.image ? escapeHtml(a.image) : getAmirbtcFallbackSvg(400, 240, 'AMIRBTC');
-    const isFeatured = !!a.featured;
-    const views = a.views_count || 0;
-    const timeAgoStr = a.created_at ? timeAgo(a.created_at) : '';
+    const html = combined.map(a => {
+        const safeId = escapeHtml(a.id);
+        const safeCoin = escapeHtml(a.coin || '');
+        const safeTitle = escapeHtml(a.title || '');
+        const safeTimeframe = escapeHtml(a.timeframe || '1D');
+        const safeImage = a.image ? escapeHtml(a.image) : getAmirbtcFallbackSvg(400, 240, 'AMIRBTC');
+        const isFeatured = !!a.featured;
+        const views = a.views_count || 0;
+        const timeAgoStr = a.created_at ? timeAgo(a.created_at) : '';
 
-    const vipBadge = isFeatured ? `
-        <span class="dfa-vip-badge">
-            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-            VIP
-        </span>` : '';
+        const vipBadge = isFeatured ? `
+            <span class="dma-vip-badge">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                VIP
+            </span>` : '';
 
-    container.innerHTML = `
-        <div class="dfa-card" onclick="openAnalysisDetailPage('${safeId}')" role="button" aria-label="${safeTitle}">
-            <img src="${safeImage}" class="dfa-card-image" alt="${safeCoin}" onerror="newsImageFallback(this)">
-            <div class="dfa-card-overlay"></div>
-            <div class="dfa-card-content">
-                <div class="dfa-card-top-row">
+        return `
+        <div class="dma-card" onclick="openAnalysisDetailPage('${safeId}')" role="button" aria-label="${safeTitle}">
+            <img src="${safeImage}" class="dma-card-image" alt="${safeCoin}" loading="lazy" decoding="async" onerror="newsImageFallback(this)">
+            <div class="dma-card-overlay"></div>
+            <div class="dma-card-content">
+                <div class="dma-card-top-row">
                     ${vipBadge}
-                    <span class="dfa-coin-badge">${safeCoin}</span>
-                    <span class="dfa-tf-badge">${safeTimeframe}</span>
+                    ${safeCoin ? `<span class="dma-coin-badge">${safeCoin}</span>` : ''}
+                    <span class="dma-tf-badge">${safeTimeframe}</span>
                 </div>
-                <h3 class="dfa-title">${safeTitle}</h3>
-                <p class="dfa-snippet">${safeSnippet}</p>
-                <div class="dfa-meta">
-                    <span class="dfa-meta-item">
+                <h3 class="dma-title">${safeTitle}</h3>
+                <div class="dma-meta">
+                    <span class="dma-meta-item">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         <span>${views}</span>
                     </span>
-                    <span class="dfa-meta-item">
+                    ${timeAgoStr ? `
+                    <span class="dma-meta-item">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                         <span>${escapeHtml(timeAgoStr)}</span>
-                    </span>
-                    <span class="dfa-cta">${escapeHtml(t('dashboard_view_detail'))} ←</span>
+                    </span>` : ''}
                 </div>
             </div>
-        </div>
-    `;
+        </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="dma-row">${html}</div>`;
 }
 
 /**
@@ -6286,17 +6321,18 @@ function renderDashboardCalendar() {
 
         return `
         <div class="dc-card impact-${impactClass}">
-            <div class="dc-card-header">
+            <div class="dc-card-top">
                 <span class="dc-card-country">
                     <span class="dc-card-flag">${escapeHtml(flag)}</span>
-                    <span>${safeCountry}</span>
+                    <span class="dc-card-country-name">${safeCountry}</span>
                 </span>
                 <span class="dc-card-impact impact-${impactClass}">${impactIcons[impactClass] || impactIcons.medium}<span>${impactLabels[impactClass] || impactLabels.medium}</span></span>
             </div>
             <div class="dc-card-title">${safeTitle}</div>
-            <div class="dc-card-time">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <div class="dc-card-bottom">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                 <span class="dc-card-time-day">${escapeHtml(dayStr)}</span>
+                <span class="dc-card-time-sep">·</span>
                 <span>${escapeHtml(timeStr)}</span>
             </div>
         </div>`;
