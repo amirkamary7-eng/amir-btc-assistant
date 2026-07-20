@@ -6345,13 +6345,7 @@ window.runDiagnostic = async function() {
     modal.style.display = 'flex';
 };
 
-// Show diag button if ?diag=1 in URL
-if (new URLSearchParams(location.search).get('diag') === '1') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const btn = document.getElementById('diag-btn');
-        if (btn) btn.style.display = 'inline-flex';
-    });
-}
+// Diagnostic is now triggered by 5 taps on profile name (no URL change needed)
 
 // ============================================================================
 //#region Join Lock Screen
