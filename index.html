@@ -683,7 +683,7 @@
             </div>
             <div class="analysis-form-fields">
                 <div class="af-row">
-                    <div class="af-field"><label>عنوان</label><input type="text" id="analysis-title" placeholder="عنوان تحلیل" class="input-field"></div>
+                    <div class="af-field"><label>عنوان</label><input type="text" id="analysis-title" placeholder="عنوان تحلیل" class="input-field" maxlength="256"></div>
                 </div>
                 <div class="af-row">
                     <div class="af-field af-field-half"><label>نماد</label><input type="text" id="analysis-coin" placeholder="BTC" class="input-field" style="text-transform:uppercase"></div>
@@ -715,7 +715,11 @@
                     <div class="af-field af-field-half"><label>مقاومت</label><input type="text" id="analysis-resistance" placeholder="65000" class="input-field"></div>
                 </div>
                 <div class="af-row">
-                    <div class="af-field"><label>متن تحلیل</label><textarea id="analysis-text" placeholder="سناریوی اصلی: ...&#10;سناریوی جایگزین: ..." class="input-field" rows="5"></textarea></div>
+                    <div class="af-field">
+                        <label>متن تحلیل</label>
+                        <textarea id="analysis-text" placeholder="سناریوی اصلی: ...&#10;سناریوی جایگزین: ..." class="input-field" rows="6" maxlength="5000"></textarea>
+                        <div class="af-char-counter" id="analysis-text-counter">0 / 5000</div>
+                    </div>
                 </div>
             </div>
             <div class="modal-actions">

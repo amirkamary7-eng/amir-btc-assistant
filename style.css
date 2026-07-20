@@ -4663,6 +4663,23 @@ strong.down { color: var(--red); }
     padding: 8px 0;
 }
 
+.af-char-counter {
+    text-align: left;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+    transition: color 0.2s;
+}
+
+.af-char-counter.warn {
+    color: #f59e0b;
+}
+
+.af-char-counter.danger {
+    color: #ef4444;
+}
+
 .af-checkbox-label {
     display: flex;
     align-items: center;

@@ -1750,7 +1750,7 @@ function renderAnalysisList() {
                     ${sentimentBadge}
                 </div>
                 ${a.title ? `<h3 class="acv-card-title">${escapeHtml(truncateText(a.title, 60))}</h3>` : ''}
-                <p class="acv-card-snippet">${escapeHtml(truncateText(a.content || a.text || '', 120))}</p>
+                <p class="acv-card-snippet">${escapeHtml(truncateText(a.content || a.text || '', 250))}</p>
             </div>
             <div class="acv-footer-row">
                 <div class="acv-meta-icons">
@@ -2445,6 +2445,32 @@ function checkAnalysisDeepLink() {
 }
 
 // ── Admin: Create / Edit ──
+function updateAnalysisCharCounter() {
+    const textEl = document.getElementById('analysis-text');
+    const counterEl = document.getElementById('analysis-text-counter');
+    if (!textEl || !counterEl) return;
+    const len = textEl.value.length;
+    const max = 5000;
+    counterEl.textContent = `${len} / ${max}`;
+    counterEl.classList.remove('warn', 'danger');
+    if (len >= max) {
+        counterEl.classList.add('danger');
+    } else if (len >= max * 0.85) {
+        counterEl.classList.add('warn');
+    }
+}
+
+// Real-time char counter — initialized once
+let _analysisCharCounterInit = false;
+function initAnalysisCharCounter() {
+    if (_analysisCharCounterInit) return;
+    _analysisCharCounterInit = true;
+    const textEl = document.getElementById('analysis-text');
+    if (textEl) {
+        textEl.addEventListener('input', updateAnalysisCharCounter);
+    }
+}
+
 function openAddAnalysisModal() {
     if (!isAdmin()) return;
     editingAnalysisId = null;
@@ -2459,6 +2485,8 @@ function openAddAnalysisModal() {
     const catEl = document.getElementById('analysis-category');
     if (catEl) catEl.value = 'crypto';
     document.getElementById('add-analysis-modal').style.display = 'flex';
+    initAnalysisCharCounter();
+    updateAnalysisCharCounter();
 }
 
 function openEditAnalysisModal(id) {
@@ -2481,6 +2509,8 @@ function openEditAnalysisModal(id) {
     const catEl = document.getElementById('analysis-category');
     if (catEl) catEl.value = a.category || 'crypto';
     document.getElementById('add-analysis-modal').style.display = 'flex';
+    initAnalysisCharCounter();
+    updateAnalysisCharCounter();
 }
 
 function closeAddAnalysisModal() {

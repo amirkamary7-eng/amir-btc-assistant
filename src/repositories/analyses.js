@@ -69,7 +69,7 @@ export function createAnalysisRepository(deps) {
   async function getFeatured(env) {
     const result = await queryDb(
       env,
-      `SELECT id, coin, timeframe, image, LEFT(text, 200) AS text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
+      `SELECT id, coin, timeframe, image, LEFT(text, 250) AS text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
        FROM analyses WHERE featured = TRUE ORDER BY created_at DESC LIMIT 5`,
     );
     return result.rows.length ? result.rows.map(serializeAnalysisRow) : [];
