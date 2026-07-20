@@ -349,7 +349,7 @@ function timingSafeEqualSecret(a, b) {
   return timingSafeEqual(hashA, hashB);
 }
 
-async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
+async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400, routeInfo = '') {
   if (!initData || !botToken || botToken === 'REPLACE_WITH_TOKEN') {
     return null;
   }
@@ -364,14 +364,16 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
 
     // Build data-check-string per Telegram Bot API spec:
     // - Exclude 'hash' field (it's what we're verifying)
-    // - Exclude 'signature' field (Telegram Android includes it for third-party Ed25519
-    //   verification, but it's NOT part of the HMAC-SHA256 hash computation)
+    // - INCLUDE 'signature' field — confirmed via production diagnostic logs:
+    //   Telegram Android (real device) computes the hash WITH signature present in DCS.
+    //   Log evidence: hashMatchesWithSignatureIncluded = true
+    //   receivedHashPrefix = ae74c4c7... matched computedHash when signature was included.
     // - Sort remaining fields alphabetically by key
     // - Decode all values before joining
     // - Join with '\n'
     // Reference: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
     const dataCheckString = pairs
-      .filter(([k]) => k !== 'hash' && k !== 'signature')
+      .filter(([k]) => k !== 'hash')
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => k + '=' + decodeTelegramValue(v))
       .join('\n');
