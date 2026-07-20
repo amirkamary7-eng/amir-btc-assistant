@@ -6243,6 +6243,116 @@ window.diagInitData = async function() {
     }
 };
 
+// [TEMP-DIAG] Run diagnostic and show results in a modal
+window.runDiagnostic = async function() {
+    const tgInitData = window.Telegram?.WebApp?.initData || '';
+    const frontendInitData = getTelegramInitData();
+    const tgUser = getTelegramUser();
+
+    let html = '<div style="direction:ltr;text-align:left;font-family:monospace;font-size:11px;white-space:pre-wrap;word-break:break-all;">';
+    html += '=== FRONTEND SIDE ===\n';
+    html += 'window.Telegram.WebApp.initData length: ' + tgInitData.length + '\n';
+    html += 'window.Telegram.WebApp.initData first 80: ' + tgInitData.substring(0, 80) + '\n';
+    html += 'window.Telegram.WebApp.initData last 40: ' + tgInitData.substring(tgInitData.length - 40) + '\n';
+    html += 'getTelegramInitData() length: ' + (frontendInitData?.length || 0) + '\n';
+    html += 'getTelegramInitData() first 80: ' + (frontendInitData?.substring(0, 80) || '(empty)') + '\n';
+    html += 'getTelegramInitData() last 40: ' + (frontendInitData?.substring(frontendInitData.length - 40) || '(empty)') + '\n';
+    html += 'initData match (tg vs getTelegramInitData): ' + (tgInitData === frontendInitData ? 'YES' : 'NO') + '\n';
+    html += 'getTelegramUser().id: ' + (tgUser?.id || 'null') + '\n';
+    html += 'isInTelegram(): ' + isInTelegram() + '\n';
+    html += 'isTelegramAuthReady(): ' + isTelegramAuthReady() + '\n';
+    html += 'hasTelegramAuthPayload(): ' + hasTelegramAuthPayload() + '\n';
+    html += 'bootstrapComplete: ' + bootstrapComplete + '\n';
+    html += 'isCurrentUserAdmin: ' + isCurrentUserAdmin + '\n';
+    html += '\n=== WORKER SIDE (sending initData to /api/_diag/init-data) ===\n';
+
+    if (!frontendInitData) {
+        html += 'ERROR: No initData to send to Worker\n';
+    } else {
+        try {
+            html += 'Sending initData (length: ' + frontendInitData.length + ')...\n';
+            const r = await fetch(`${API_BASE}/api/_diag/init-data`, {
+                method: 'POST',
+                headers: { 'X-Telegram-Init-Data': frontendInitData }
+            });
+            const data = await r.json();
+            html += 'HTTP status: ' + r.status + '\n\n';
+            html += '=== WORKER RESPONSE ===\n';
+            html += 'init_data_length: ' + data.init_data_length + '\n';
+            html += 'init_data_full:\n' + data.init_data_full + '\n\n';
+            html += 'pairs_count: ' + data.pairs_count + '\n';
+            html += 'pairs_keys: ' + JSON.stringify(data.pairs_keys) + '\n';
+            html += 'received_hash: ' + data.received_hash + '\n';
+            html += 'received_hash_length: ' + data.received_hash_length + '\n';
+            html += 'bot_token_length: ' + data.bot_token_length + '\n';
+            html += 'bot_token_first10: ' + data.bot_token_first10 + '\n\n';
+            html += '=== METHOD A (include signature in DCS) ===\n';
+            html += 'dcs:\n' + data.method_A_include_signature.dcs + '\n';
+            html += 'computed_hash: ' + data.method_A_include_signature.computed_hash + '\n';
+            html += 'match: ' + data.method_A_include_signature.match + '\n\n';
+            html += '=== METHOD B (exclude signature from DCS) ===\n';
+            html += 'dcs:\n' + data.method_B_exclude_signature.dcs + '\n';
+            html += 'computed_hash: ' + data.method_B_exclude_signature.computed_hash + '\n';
+            html += 'match: ' + data.method_B_exclude_signature.match + '\n\n';
+            html += '=== METHOD C (raw values, no decode) ===\n';
+            html += 'match: ' + data.method_C_raw_values.match + '\n\n';
+            html += '=== CONCLUSION ===\n';
+            html += data.conclusion + '\n';
+        } catch (e) {
+            html += 'ERROR: ' + e.message + '\n';
+        }
+    }
+
+    html += '\n=== BOOTSTRAP TEST ===\n';
+    try {
+        const r = await fetch(`${API_BASE}/api/users/bootstrap`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': frontendInitData || '' },
+            body: JSON.stringify({ user_id: String(tgUser?.id || ''), lang: currentLang })
+        });
+        const data = await r.json();
+        html += 'HTTP status: ' + r.status + '\n';
+        html += 'response: ' + JSON.stringify(data).substring(0, 500) + '\n';
+        if (data.is_admin !== undefined) {
+            html += 'is_admin: ' + data.is_admin + '\n';
+        }
+    } catch (e) {
+        html += 'bootstrap error: ' + e.message + '\n';
+    }
+
+    html += '</div>';
+
+    // Show in modal
+    let modal = document.getElementById('diag-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'diag-modal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;padding:20px;';
+        document.body.appendChild(modal);
+    }
+    modal.innerHTML = `
+        <div style="background:#1a1a2e;color:#fff;border-radius:12px;padding:20px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 style="margin:0;color:#f7931a;">🔍 Auth Diagnostic</h3>
+                <button onclick="document.getElementById('diag-modal').style.display='none'" style="background:#ef4444;color:white;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;">Close</button>
+            </div>
+            ${html}
+            <div style="margin-top:12px;text-align:center;">
+                <button onclick="navigator.clipboard.writeText(document.querySelector('#diag-modal pre, #diag-modal div').innerText).then(()=>alert('Copied!'))" style="background:#f7931a;color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">📋 Copy All</button>
+            </div>
+        </div>
+    `;
+    modal.style.display = 'flex';
+};
+
+// Show diag button if ?diag=1 in URL
+if (new URLSearchParams(location.search).get('diag') === '1') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const btn = document.getElementById('diag-btn');
+        if (btn) btn.style.display = 'inline-flex';
+    });
+}
+
 // ============================================================================
 //#region Join Lock Screen
 // ============================================================================
