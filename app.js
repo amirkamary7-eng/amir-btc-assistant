@@ -474,7 +474,24 @@ const i18n = {
         ns_news: 'اخبار فوری', ns_news_desc: 'اخبار مهم و فوری بازار کریپتو',
         ns_sub_title: 'اشتراک اعلانات', ns_sub_desc: 'برای دریافت هشدارها از طریق تلگرام اشتراک فعال کنید.',
         ns_sub_activate: 'فعال‌سازی',
-        ns_active: 'فعال', ns_inactive: 'غیرفعال'
+        ns_active: 'فعال', ns_inactive: 'غیرفعال',
+        dashboard_market_status: 'وضعیت بازار',
+        dashboard_featured_analysis: 'تحلیل ویژه',
+        dashboard_calendar: 'تقویم اقتصادی',
+        dashboard_market_trend: 'روند بازار',
+        dashboard_add_coin: 'افزودن ارز',
+        dashboard_no_featured: 'تحلیل ویژه‌ای موجود نیست',
+        dashboard_no_calendar: 'رویداد اقتصادی در دسترس نیست',
+        dashboard_no_news: 'خبری موجود نیست',
+        dashboard_priority_urgent: 'فوری',
+        dashboard_priority_important: 'مهم',
+        dashboard_priority_latest: 'تازه',
+        dashboard_view_detail: 'مشاهده',
+        dashboard_gauge_index: 'شاخص',
+        dashboard_btc_dominance: 'سلطه بیت‌کوین',
+        dashboard_trend_bullish: 'صعودی',
+        dashboard_trend_bearish: 'نزولی',
+        dashboard_trend_neutral: 'خنثی'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -563,7 +580,24 @@ const i18n = {
         ns_news: 'Breaking News', ns_news_desc: 'Major crypto news and urgent developments',
         ns_sub_title: 'Notification Subscription', ns_sub_desc: 'Activate your subscription to receive alerts through Telegram.',
         ns_sub_activate: 'Activate',
-        ns_active: 'Active', ns_inactive: 'Inactive'
+        ns_active: 'Active', ns_inactive: 'Inactive',
+        dashboard_market_status: 'Market Status',
+        dashboard_featured_analysis: 'Featured Analysis',
+        dashboard_calendar: 'Economic Calendar',
+        dashboard_market_trend: 'Market Trend',
+        dashboard_add_coin: 'Add Coin',
+        dashboard_no_featured: 'No featured analysis available',
+        dashboard_no_calendar: 'No economic events available',
+        dashboard_no_news: 'No news available',
+        dashboard_priority_urgent: 'Urgent',
+        dashboard_priority_important: 'Important',
+        dashboard_priority_latest: 'Latest',
+        dashboard_view_detail: 'View',
+        dashboard_gauge_index: 'Index',
+        dashboard_btc_dominance: 'BTC Dominance',
+        dashboard_trend_bullish: 'Bullish',
+        dashboard_trend_bearish: 'Bearish',
+        dashboard_trend_neutral: 'Neutral'
     }
 };
 /**
@@ -3034,11 +3068,14 @@ function refreshUI() {
     renderWatchlist();
     renderSummary();
     renderMarketInsights();
+    renderDashboardMarketStatus();
 
     // Defer non-critical renders to next frame to reduce main thread blocking
     requestAnimationFrame(() => {
         renderAnalysisSlider();
         renderAnalysisList();
+        renderDashboardFeaturedAnalysis();
+        renderDashboardCalendar();
         if (newsCache.length) renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
         loadImportantNews();
         renderTickets();
@@ -3987,10 +4024,50 @@ function showToast(msg) {
  * ورودی: بدون ورودی.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
+// Maximum number of coins shown in the dashboard watchlist row (Add Coin card follows)
+const DASHBOARD_WATCHLIST_MAX = 5;
+
+/**
+ * Format a coin price for display. Handles undefined / NaN / very small values.
+ * Returns a string like "$68,432.10" or "$0.00001234".
+ */
+function formatWatchPrice(priceUsd) {
+    if (priceUsd == null || isNaN(priceUsd) || priceUsd < 0) return '--';
+    if (priceUsd >= 1000) return '$' + priceUsd.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    if (priceUsd >= 1) return '$' + priceUsd.toFixed(2);
+    if (priceUsd >= 0.01) return '$' + priceUsd.toFixed(4);
+    return '$' + priceUsd.toFixed(6);
+}
+
+/**
+ * Build a tiny SVG sparkline that visualises 24h change direction.
+ * Pure CSS/SVG, no external data needed.
+ */
+function buildWatchTrendSVG(changePercent) {
+    const isUp = (changePercent || 0) >= 0;
+    const color = isUp ? '#22C55E' : '#EF4444';
+    // 100x18 viewBox, 6 sample points
+    const pts = isUp
+        ? '0,15 20,13 40,10 60,7 80,5 100,3'
+        : '0,3 20,5 40,8 60,11 80,13 100,15';
+    return `<svg viewBox="0 0 100 18" preserveAspectRatio="none" fill="none">
+        <polyline points="${pts}" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
+}
+
 function renderWatchlist() {
     const grid = $('watchlist-grid');
     if (!grid) return;
-    const watchCoins = allCoins.filter(c => watchlist.includes(c.symbol));
+    const watchCoins = allCoins.filter(c => watchlist.includes(c.symbol)).slice(0, DASHBOARD_WATCHLIST_MAX);
+
+    if (!allCoins.length) {
+        // Market data not loaded yet — show skeleton (preserve CLS)
+        if (!grid.querySelector('.watchlist-skeleton')) {
+            grid.innerHTML = '<div class="watchlist-skeleton">' + Array(4).fill('<div class="watchlist-skeleton-item"><div class="watchlist-skeleton-icon"></div><div class="watchlist-skeleton-lines"><div class="watchlist-skeleton-line"></div><div class="watchlist-skeleton-line"></div></div></div>').join('') + '</div>';
+        }
+        return;
+    }
+
     if (!watchCoins.length) {
         grid.innerHTML = `
             <div class="watchlist-empty-state">
@@ -4002,47 +4079,93 @@ function renderWatchlist() {
         return;
     }
 
-    // Price-only diffing: if watchlist items exist and count matches, update prices in-place
-    const existingItems = grid.querySelectorAll('.watch-item');
-    if (existingItems.length === watchCoins.length && !grid.querySelector('.watchlist-empty-state')) {
+    // Price-only diffing: if existing watch-card items match the current set, update prices in-place
+    const existingItems = grid.querySelectorAll('.watch-card');
+    if (existingItems.length === watchCoins.length && !grid.querySelector('.watchlist-empty-state') && !grid.querySelector('.watchlist-skeleton')) {
+        let allMatch = true;
         for (let i = 0; i < existingItems.length; i++) {
-            const item = existingItems[i];
-            const coin = watchCoins[i];
-            if (!coin || item.dataset.symbol !== coin.symbol) {
-                // Symbols don't match — fall through to full render
-                break;
-            }
-            const priceEl = item.querySelector('.watch-price');
-            if (priceEl) {
-                const newPrice = '$' + (coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6));
-                if (priceEl.textContent !== newPrice) priceEl.textContent = newPrice;
-            }
-            const changeEl = item.querySelector('.watch-change');
-            if (changeEl) {
-                const isPos = coin.changePercent24Hr >= 0;
-                const newChange = (isPos ? '+' : '') + coin.changePercent24Hr.toFixed(2) + '%';
-                if (changeEl.textContent !== newChange) {
-                    changeEl.textContent = newChange;
-                    changeEl.className = 'watch-change ' + (isPos ? 'up' : 'down');
+            if (existingItems[i].dataset.symbol !== watchCoins[i].symbol) { allMatch = false; break; }
+        }
+        if (allMatch) {
+            for (let i = 0; i < existingItems.length; i++) {
+                const item = existingItems[i];
+                const coin = watchCoins[i];
+                const priceEl = item.querySelector('.watch-card-price');
+                if (priceEl) {
+                    const newPrice = formatWatchPrice(coin.priceUsd);
+                    if (priceEl.textContent !== newPrice) priceEl.textContent = newPrice;
+                }
+                const changeEl = item.querySelector('.watch-card-change');
+                if (changeEl) {
+                    const pct = (typeof coin.changePercent24Hr === 'number' && !isNaN(coin.changePercent24Hr)) ? coin.changePercent24Hr : 0;
+                    const isPos = pct >= 0;
+                    const newChange = (isPos ? '+' : '') + pct.toFixed(2) + '%';
+                    const newClass = 'watch-card-change ' + (isPos ? 'up' : 'down');
+                    if (changeEl.textContent.trim() !== newChange) {
+                        changeEl.innerHTML = (isPos
+                            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>'
+                            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>') + '<span>' + newChange + '</span>';
+                        changeEl.className = newClass;
+                    }
+                }
+                const trendEl = item.querySelector('.watch-card-trend');
+                if (trendEl) {
+                    const pct = (typeof coin.changePercent24Hr === 'number' && !isNaN(coin.changePercent24Hr)) ? coin.changePercent24Hr : 0;
+                    const newTrend = buildWatchTrendSVG(pct);
+                    if (trendEl.innerHTML !== newTrend) trendEl.innerHTML = newTrend;
                 }
             }
-            // All items matched — return early, no full render needed
-            if (i === existingItems.length - 1) return;
+            // Add Coin card already exists? ensure it's present
+            if (!grid.querySelector('.watch-card-add')) {
+                grid.insertAdjacentHTML('beforeend', buildAddCoinCardHTML());
+            }
+            return;
         }
     }
 
-    grid.innerHTML = watchCoins.map(c => {
+    // Full render — premium cards + Add Coin card
+    let html = watchCoins.map(c => {
         const safeSymbol = escapeHtml(c.symbol);
+        const safeName = escapeHtml(c.name || '');
         const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
+        const pct = (typeof c.changePercent24Hr === 'number' && !isNaN(c.changePercent24Hr)) ? c.changePercent24Hr : 0;
+        const isPos = pct >= 0;
+        const changeStr = (isPos ? '+' : '') + pct.toFixed(2) + '%';
+        const arrowSvg = isPos
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
         return `
-        <div class="watch-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
-            <span class="remove-watch" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-            <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-icon" data-symbol="${safeSymbol}">
-            <span class="watch-sym">${safeSymbol}</span>
-            <span class="watch-price">$${c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6)}</span>
-            <span class="watch-change ${c.changePercent24Hr >= 0 ? 'up' : 'down'}">${c.changePercent24Hr >= 0 ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</span>
-        </div>
-    `;}).join('');
+        <div class="watch-card" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
+            <div class="watch-card-header">
+                <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-card-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">
+                <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" aria-label="Remove">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+            </div>
+            <span class="watch-card-symbol">${safeSymbol}</span>
+            <span class="watch-card-name">${safeName}</span>
+            <span class="watch-card-price">${formatWatchPrice(c.priceUsd)}</span>
+            <span class="watch-card-change ${isPos ? 'up' : 'down'}">${arrowSvg}<span>${changeStr}</span></span>
+            <div class="watch-card-trend">${buildWatchTrendSVG(pct)}</div>
+        </div>`;
+    }).join('');
+
+    // Append "Add Coin" card (only if under global MAX_WATCHLIST limit)
+    if (watchlist.length < MAX_WATCHLIST) {
+        html += buildAddCoinCardHTML();
+    }
+
+    grid.innerHTML = html;
+}
+
+function buildAddCoinCardHTML() {
+    return `
+        <div class="watch-card-add" onclick="openAddCoinModal()" role="button" aria-label="${escapeHtml(t('dashboard_add_coin'))}">
+            <div class="watch-card-add-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </div>
+            <span class="watch-card-add-text">${escapeHtml(t('dashboard_add_coin'))}</span>
+        </div>`;
 }
 /**
  * add ارز مودال را باز می‌کند.
@@ -5761,11 +5884,15 @@ function switchTab(pageId, btn) {
         if (!tabLoaded.dashboard) {
             // Data is still loading from startup — just render what we have
             renderWatchlist();
-            renderAnalysisSlider();
+            renderDashboardMarketStatus();
+            renderDashboardFeaturedAnalysis();
+            renderDashboardCalendar();
             loadImportantNews();
         } else {
             renderWatchlist();
-            renderAnalysisSlider();
+            renderDashboardMarketStatus();
+            renderDashboardFeaturedAnalysis();
+            renderDashboardCalendar();
         }
     } else if (pageId === 'market-page') {
         if (!tabLoaded.market) {
@@ -5821,6 +5948,8 @@ function switchTab(pageId, btn) {
 
 /**
  * خلاصه اخبار مهم را برای داشبورد بارگذاری و رندر می‌کند.
+ * ساختار جدید: max 3 آیتم، اولویت‌بندی (Urgent → Important → Latest)،
+ * تصویر 64x64، ارتفاع برابر کارت‌ها.
  * ورودی: بدون ورودی.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
@@ -5829,23 +5958,67 @@ async function loadImportantNews() {
     if (!container) return;
     try {
         await loadNews(); // اطمینان از دریافت اخبار
-        const important = newsCache.slice(0, 3);
-        if (!important.length) {
-            container.innerHTML = `<div class="empty-state">${t('no_news')}</div>`;
+        if (!newsCache.length) {
+            container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
             return;
         }
+
+        // Priority sort: Urgent (breaking) → Important (bullish/bearish/macro) → Latest (neutral/other)
+        const priorityRank = (n) => {
+            const s = (n.sentiment || '').toLowerCase();
+            if (s === 'breaking') return 0; // urgent
+            if (s === 'bullish' || s === 'bearish' || s === 'macro') return 1; // important
+            return 2; // latest
+        };
+        const sorted = newsCache.slice().sort((a, b) => {
+            const pa = priorityRank(a), pb = priorityRank(b);
+            if (pa !== pb) return pa - pb;
+            // within same priority, keep original order (already by recency from API)
+            return 0;
+        });
+        const important = sorted.slice(0, 3);
+        if (!important.length) {
+            container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
+            return;
+        }
+
         // Store in a separate array for dashboard to avoid race with News page's displayedNews
         _dashboardDisplayedNews = important;
-        container.innerHTML = important.map((n, i) => `
-            <div class="important-news-item" style="animation-delay:${i * 0.06}s" onclick="openDashboardNewsModal(${i})">
-                <img src="${n.image || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22 viewBox=%220 0 24 24%22 fill=%22%231a2332%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E'}" class="important-news-img" onerror="newsImageFallback(this)">
+
+        const priorityLabels = {
+            urgent: t('dashboard_priority_urgent'),
+            important: t('dashboard_priority_important'),
+            latest: t('dashboard_priority_latest')
+        };
+        const priorityIcons = {
+            urgent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+            important: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+            latest: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+        };
+
+        container.innerHTML = important.map((n, i) => {
+            const rank = priorityRank(n);
+            const pKey = rank === 0 ? 'urgent' : (rank === 1 ? 'important' : 'latest');
+            const safeTitle = escapeHtml(n.title || '');
+            const safeSource = escapeHtml(n.source || '');
+            const safeImg = escapeHtml(n.image || getAmirbtcFallbackSvg(64, 64, 'AMIRBTC'));
+            return `
+            <div class="important-news-item priority-${pKey}" style="animation-delay:${i * 0.06}s" onclick="openDashboardNewsModal(${i})">
+                <img src="${safeImg}" class="important-news-img" alt="${safeTitle}" onerror="newsImageFallback(this)">
                 <div class="important-news-content">
-                    <div class="important-news-title">${escapeHtml(n.title)}</div>
-                    <div class="important-news-source">${escapeHtml(n.source)}</div>
+                    <span class="important-news-priority priority-${pKey}">${priorityIcons[pKey]}<span>${priorityLabels[pKey]}</span></span>
+                    <div class="important-news-title">${safeTitle}</div>
+                    <div class="important-news-source">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+                        <span>${safeSource}</span>
+                    </div>
                 </div>
-            </div>
-        `).join('');
-    } catch (e) {}
+            </div>`;
+        }).join('');
+    } catch (e) {
+        const c = document.getElementById('important-news');
+        if (c) c.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
+    }
 }
 
 // Separate news array for dashboard — isolated from News page's displayedNews
@@ -5865,6 +6038,272 @@ function openNewsModalWith(n) {
     const linkEl = el('news-modal-link'); if (linkEl) { linkEl.href = n.url || '#'; linkEl.innerText = t('view_source'); }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
 }
+
+// ============================================================================
+//#region داشبورد جدید — Market Status / Featured Analysis / Calendar
+// ============================================================================
+
+/**
+ * کارت وضعیت بازار را رندر می‌کند: Fear & Greed (چپ) + Market Trend (راست).
+ * داده‌ها از globalMarketData خوانده می‌شود. در صورت نبود داده، skeleton باقی می‌ماند.
+ */
+function renderDashboardMarketStatus() {
+    const container = $('dashboard-market-status');
+    if (!container) return;
+    if (!globalMarketData) {
+        // Keep skeleton in place — no flicker
+        return;
+    }
+
+    // ── Fear & Greed (left column) ──
+    const fgVal = (typeof globalMarketData.fearGreedValue === 'number' && !isNaN(globalMarketData.fearGreedValue))
+        ? globalMarketData.fearGreedValue : null;
+    const fgClass = (globalMarketData.fearGreedClassification || '').toLowerCase().replace(/\s+/g, '_');
+    const fgSource = globalMarketData.fearGreedSource || '';
+    let fgLabel = '';
+    let fgClassStr = '';
+    if (fgClass === 'extreme_greed' || fgClass === 'extremegreed') { fgLabel = t('fg_extreme_greed'); fgClassStr = 'fg-extreme-greed'; }
+    else if (fgClass === 'greed') { fgLabel = t('fg_greed'); fgClassStr = 'fg-greed'; }
+    else if (fgClass === 'neutral') { fgLabel = t('fg_neutral'); fgClassStr = 'fg-neutral'; }
+    else if (fgClass === 'fear') { fgLabel = t('fg_fear'); fgClassStr = 'fg-fear'; }
+    else if (fgClass === 'extreme_fear' || fgClass === 'extremefear') { fgLabel = t('fg_extreme_fear'); fgClassStr = 'fg-extreme-fear'; }
+    else if (globalMarketData.fearGreedClassification) { fgLabel = globalMarketData.fearGreedClassification; fgClassStr = 'fg-neutral'; }
+    else { fgLabel = '--'; fgClassStr = 'fg-neutral'; }
+
+    // Arc calculation (gauge): 0..100 → arc fill
+    const fgPercent = (fgVal != null) ? Math.max(0, Math.min(100, fgVal)) : 0;
+    const totalArcLen = 150.8;
+    const arcOffset = (totalArcLen - (totalArcLen * fgPercent / 100)).toFixed(1);
+
+    const fgHTML = fgVal != null ? `
+        <div class="dms-card dms-fg">
+            <div class="dms-card-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                <span>Fear &amp; Greed</span>
+            </div>
+            <div class="dms-fg-body">
+                <div class="dms-fg-gauge">
+                    <svg viewBox="0 0 120 70" fill="none">
+                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="rgba(255,255,255,0.06)" stroke-width="8" stroke-linecap="round" fill="none"/>
+                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="url(#dms-fg-grad)" stroke-width="8" stroke-linecap="round" fill="none" stroke-dasharray="150.8" stroke-dashoffset="${arcOffset}"/>
+                        <defs>
+                            <linearGradient id="dms-fg-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#EF4444"/>
+                                <stop offset="35%" stop-color="#F97316"/>
+                                <stop offset="65%" stop-color="#F5A623"/>
+                                <stop offset="100%" stop-color="#22C55E"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                    <div class="dms-fg-value">
+                        <span class="dms-fg-value-num">${fgVal}</span>
+                        <span class="dms-fg-value-label">${escapeHtml(t('dashboard_gauge_index'))}</span>
+                    </div>
+                </div>
+                <div class="dms-fg-text">
+                    <span class="dms-fg-class ${fgClassStr}">${escapeHtml(fgLabel)}</span>
+                    ${fgSource ? `<span class="dms-fg-source">${escapeHtml(fgSource)}</span>` : ''}
+                </div>
+            </div>
+        </div>
+    ` : `
+        <div class="dms-card dms-fg">
+            <div class="dms-card-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                <span>Fear &amp; Greed</span>
+            </div>
+            <div class="dms-fg-body">
+                <div class="dms-fg-text" style="flex:1;">
+                    <span class="dms-fg-class fg-neutral">--</span>
+                    <span class="dms-fg-source">${escapeHtml(t('no_data'))}</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // ── Market Trend (right column) — gainers/losers ratio + BTC dominance ──
+    let gainers = 0, losers = 0;
+    if (Array.isArray(allCoins) && allCoins.length) {
+        for (let i = 0; i < allCoins.length; i++) {
+            const ch = allCoins[i].changePercent24Hr;
+            if (typeof ch === 'number' && !isNaN(ch)) {
+                if (ch > 0) gainers++;
+                else if (ch < 0) losers++;
+            }
+        }
+    }
+    const totalGL = gainers + losers;
+    const ratio = totalGL > 0 ? (gainers / totalGL) : 0.5;
+    let trendLabel, trendClass;
+    if (ratio > 0.6) { trendLabel = t('dashboard_trend_bullish'); trendClass = 'up'; }
+    else if (ratio >= 0.4) { trendLabel = t('dashboard_trend_neutral'); trendClass = ''; }
+    else { trendLabel = t('dashboard_trend_bearish'); trendClass = 'down'; }
+
+    const btcDom = (typeof globalMarketData.btcDominance === 'number' && !isNaN(globalMarketData.btcDominance))
+        ? globalMarketData.btcDominance : null;
+    const needlePos = (ratio * 100).toFixed(1);
+
+    const trendHTML = `
+        <div class="dms-card dms-trend">
+            <div class="dms-card-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                <span>${escapeHtml(t('dashboard_market_trend'))}</span>
+            </div>
+            <div class="dms-trend-body">
+                <div class="dms-trend-row">
+                    <span class="dms-trend-label">${escapeHtml(t('dashboard_trend_bullish'))}</span>
+                    <span class="dms-trend-value up">${gainers}</span>
+                </div>
+                <div class="dms-trend-row">
+                    <span class="dms-trend-label">${escapeHtml(t('dashboard_trend_bearish'))}</span>
+                    <span class="dms-trend-value down">${losers}</span>
+                </div>
+                <div class="dms-trend-row">
+                    <span class="dms-trend-label">${escapeHtml(t('dashboard_btc_dominance'))}</span>
+                    <span class="dms-trend-value">${btcDom != null ? btcDom.toFixed(1) + '%' : '--'}</span>
+                </div>
+                <div class="dms-trend-bar">
+                    <div class="dms-trend-bar-fill"></div>
+                    <div class="dms-trend-bar-needle" style="left: ${needlePos}%;"></div>
+                </div>
+                <div class="dms-trend-row" style="margin-top:2px;">
+                    <span class="dms-trend-label">${escapeHtml(t('market_sentiment'))}</span>
+                    <span class="dms-trend-value ${trendClass}">${escapeHtml(trendLabel)}</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = fgHTML + trendHTML;
+}
+
+/**
+ * کارت بزرگ تحلیل ویژه را رندر می‌کند. از analysisFeatured[0] استفاده می‌کند.
+ * شامل تصویر کاور، گرادینت پایین، محتوای پایین‌چین، VIP badge.
+ */
+function renderDashboardFeaturedAnalysis() {
+    const container = $('dashboard-featured-analysis');
+    if (!container) return;
+
+    const a = Array.isArray(analysisFeatured) && analysisFeatured.length ? analysisFeatured[0] : null;
+    if (!a) {
+        container.innerHTML = `<div class="dfa-empty">${escapeHtml(t('dashboard_no_featured'))}</div>`;
+        return;
+    }
+
+    const safeId = escapeHtml(a.id);
+    const safeCoin = escapeHtml(a.coin || '');
+    const safeTitle = escapeHtml(a.title || '');
+    const safeSnippet = escapeHtml(truncateText(a.content || a.text || '', 110));
+    const safeTimeframe = escapeHtml(a.timeframe || '1D');
+    const safeImage = a.image ? escapeHtml(a.image) : getAmirbtcFallbackSvg(400, 240, 'AMIRBTC');
+    const isFeatured = !!a.featured;
+    const views = a.views_count || 0;
+    const timeAgoStr = a.created_at ? timeAgo(a.created_at) : '';
+
+    const vipBadge = isFeatured ? `
+        <span class="dfa-vip-badge">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            VIP
+        </span>` : '';
+
+    container.innerHTML = `
+        <div class="dfa-card" onclick="openAnalysisDetailPage('${safeId}')" role="button" aria-label="${safeTitle}">
+            <img src="${safeImage}" class="dfa-card-image" alt="${safeCoin}" onerror="newsImageFallback(this)">
+            <div class="dfa-card-overlay"></div>
+            <div class="dfa-card-content">
+                <div class="dfa-card-top-row">
+                    ${vipBadge}
+                    <span class="dfa-coin-badge">${safeCoin}</span>
+                    <span class="dfa-tf-badge">${safeTimeframe}</span>
+                </div>
+                <h3 class="dfa-title">${safeTitle}</h3>
+                <p class="dfa-snippet">${safeSnippet}</p>
+                <div class="dfa-meta">
+                    <span class="dfa-meta-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <span>${views}</span>
+                    </span>
+                    <span class="dfa-meta-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span>${escapeHtml(timeAgoStr)}</span>
+                    </span>
+                    <span class="dfa-cta">${escapeHtml(t('dashboard_view_detail'))} ←</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * تقویم اقتصادی داشبورد را رندر می‌کند: ۳ رویداد بعدی، کارت‌های افقی.
+ * رویدادهای گذشته فیلتر می‌شوند. داده از calendarEvents خوانده می‌شود.
+ */
+function renderDashboardCalendar() {
+    const container = $('dashboard-calendar');
+    if (!container) return;
+    if (!Array.isArray(calendarEvents) || !calendarEvents.length) {
+        container.innerHTML = `<div class="dc-empty">${escapeHtml(t('dashboard_no_calendar'))}</div>`;
+        return;
+    }
+
+    const now = Date.now();
+    // Filter upcoming events only, sort ascending by time, take next 3
+    const upcoming = calendarEvents
+        .filter(e => {
+            if (!e || !e.timestamp) return false;
+            const d = new Date(e.timestamp);
+            return !isNaN(d.getTime()) && d.getTime() >= now - 3600000; // allow events up to 1h in the past (live)
+        })
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+        .slice(0, 3);
+
+    if (!upcoming.length) {
+        container.innerHTML = `<div class="dc-empty">${escapeHtml(t('dashboard_no_calendar'))}</div>`;
+        return;
+    }
+
+    const impactLabels = {
+        high: t('cal_impact_high'),
+        medium: t('cal_impact_med'),
+        low: t('cal_impact_low')
+    };
+    const impactIcons = {
+        high: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>',
+        medium: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/></svg>',
+        low: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg>'
+    };
+
+    container.innerHTML = upcoming.map(e => {
+        const safeTitle = escapeHtml(e.title || '');
+        const safeCountry = escapeHtml(e.country || '');
+        const flag = e.flag || '';
+        const impact = (e.impact || 'medium').toLowerCase();
+        const impactClass = (impact === 'high' || impact === 'medium' || impact === 'low') ? impact : 'medium';
+        const timeInfo = formatCalendarTime(e.timestamp);
+        const timeStr = timeInfo ? timeInfo.time : '';
+        const dayStr = timeInfo ? timeInfo.dayStr : '';
+
+        return `
+        <div class="dc-card impact-${impactClass}">
+            <div class="dc-card-header">
+                <span class="dc-card-country">
+                    <span class="dc-card-flag">${escapeHtml(flag)}</span>
+                    <span>${safeCountry}</span>
+                </span>
+                <span class="dc-card-impact impact-${impactClass}">${impactIcons[impactClass] || impactIcons.medium}<span>${impactLabels[impactClass] || impactLabels.medium}</span></span>
+            </div>
+            <div class="dc-card-title">${safeTitle}</div>
+            <div class="dc-card-time">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <span class="dc-card-time-day">${escapeHtml(dayStr)}</span>
+                <span>${escapeHtml(timeStr)}</span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+//#endregion
 
 //#endregion
 
@@ -5891,13 +6330,19 @@ function _startAllPolling() {
     _pollingIntervals.push(setInterval(() => {
         const activePage = document.querySelector('.page.active')?.id;
         if (activePage === 'market-page' || activePage === 'dashboard-page') {
-            loadMarketData();
+            loadMarketData().then(() => {
+                if (activePage === 'dashboard-page') {
+                    renderDashboardMarketStatus();
+                    renderWatchlist();
+                }
+            });
         }
         if (activePage === 'analysis-page' || activePage === 'dashboard-page') {
             fetchAnalyses().then(changed => {
                 if (changed) {
                     renderAnalysisSlider();
                     if (activePage === 'analysis-page') renderAnalysisList();
+                    if (activePage === 'dashboard-page') renderDashboardFeaturedAnalysis();
                 }
             });
         }
@@ -5911,6 +6356,10 @@ function _startAllPolling() {
             } else {
                 loadCalendarEvents(true);
             }
+        }
+        // Dashboard rebuild: refresh dashboard calendar every poll cycle when on dashboard
+        if (activePage === 'dashboard-page') {
+            loadCalendarEvents(true).then(() => renderDashboardCalendar()).catch(() => {});
         }
     }, 120000));
 
@@ -6053,14 +6502,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ── Phase 2: Bootstrap (authenticated data load) ──
-    // Public data (market, analyses, news) loads immediately.
+    // Public data (market, analyses, news, calendar) loads immediately.
     // Authenticated data (alerts, bootstrap, admin) waits for auth.
-    loadMarketData(true).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
+    loadMarketData(true).then(() => {
+        // Dashboard rebuild: market status + watchlist render after market data arrives
+        renderDashboardMarketStatus();
+        renderWatchlist();
+    }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
     fetchAnalyses().then(changed => {
         if (changed) {
-            renderAnalysisSlider();
-            renderAnalysisFeatured();
+            renderAnalysisSlider();        // legacy — no-op if slider-track not in DOM
+            renderAnalysisFeatured();      // analysis page featured slider
             renderAnalysisStats();
+            renderDashboardFeaturedAnalysis(); // dashboard premium featured card
+        } else {
+            // Even if no change, render dashboard featured from cache
+            renderDashboardFeaturedAnalysis();
         }
         // Check for deep link after first load
         checkAnalysisDeepLink();
@@ -6068,6 +6525,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => {
         loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
     }, 2000);
+    // Dashboard rebuild: economic calendar — load next 3 upcoming events
+    loadCalendarEvents().then(() => renderDashboardCalendar()).catch(() => renderDashboardCalendar());
 
     // Authenticated bootstrap — runs once user is available
     await bootstrapUser();
@@ -6156,21 +6615,79 @@ document.addEventListener('DOMContentLoaded', async () => {
         }, { passive: true });
     }
 
-    // Hero Banner Slider
+    // Hero Banner Slider — fade transition (400ms), autoplay 5000ms, pause on touch/swipe
     (function initHeroSlider() {
+        const slider = document.getElementById('hero-banner-slider');
         const slides = document.querySelectorAll('.hero-slide');
         const dots = document.querySelectorAll('.hero-dot');
-        if (slides.length < 2) return;
+        if (!slides.length || slides.length < 2) return;
         let current = 0;
+        let autoTimer = null;
+        let pausedUntil = 0; // timestamp until which autoplay is paused
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchActive = false;
+
         function goTo(idx) {
             slides.forEach(s => s.classList.remove('active'));
             dots.forEach(d => d.classList.remove('active'));
             current = ((idx % slides.length) + slides.length) % slides.length;
             slides[current].classList.add('active');
-            dots[current].classList.add('active');
+            if (dots[current]) dots[current].classList.add('active');
         }
-        dots.forEach(d => d.addEventListener('click', () => goTo(Number(d.dataset.dot) + 1)));
-        _pollingIntervals.push(setInterval(() => goTo(current + 1), 3000));
+
+        function startAuto() {
+            if (autoTimer) clearInterval(autoTimer);
+            autoTimer = setInterval(() => {
+                if (Date.now() < pausedUntil) return;
+                goTo(current + 1);
+            }, 5000);
+        }
+        function stopAuto() {
+            if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+        }
+        function pauseFor(ms) {
+            pausedUntil = Math.max(pausedUntil, Date.now() + ms);
+        }
+
+        // Dot click
+        dots.forEach(d => d.addEventListener('click', () => {
+            const idx = Number(d.dataset.dot);
+            if (!isNaN(idx)) {
+                goTo(idx);
+                pauseFor(8000); // pause autoplay for 8s after manual interaction
+            }
+        }));
+
+        // Touch swipe + pause-on-touch
+        if (slider) {
+            slider.addEventListener('touchstart', (e) => {
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                touchActive = true;
+                pauseFor(10000); // pause on touch
+            }, { passive: true });
+
+            slider.addEventListener('touchend', (e) => {
+                if (!touchActive) return;
+                touchActive = false;
+                const dx = (e.changedTouches[0]?.clientX || 0) - touchStartX;
+                const dy = (e.changedTouches[0]?.clientY || 0) - touchStartY;
+                if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+                    if (dx > 0) goTo(current - 1); // swipe right → previous
+                    else goTo(current + 1);       // swipe left → next
+                }
+                pauseFor(8000); // pause autoplay for 8s after swipe
+            }, { passive: true });
+        }
+
+        startAuto();
+        if (autoTimer) _pollingIntervals.push(autoTimer);
+        // Stop on visibility hidden, restart on visible
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) stopAuto();
+            else startAuto();
+        });
     })();
 });
 
