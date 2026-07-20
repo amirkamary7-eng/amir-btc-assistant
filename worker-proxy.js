@@ -507,9 +507,13 @@ const JOINED_STATUSES = new Set(['creator', 'administrator', 'member', 'restrict
 const dbPools = new Map();
 
 function resolveDatabaseUrl(env) {
-  const url = String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
-  if (url && !url.includes('pgbouncer=true')) {
-    console.warn('DATABASE_URL should include ?pgbouncer=true for Neon serverless Pool');
+  let url = String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
+  if (!url) return '';
+  // Auto-append pgbouncer=true for Neon serverless Pool if missing.
+  // Without PgBouncer, every new connection triggers a Neon cold start (3-10s),
+  // which causes 503 timeouts on /api/wallet and /api/referrals/stats.
+  if (!url.includes('pgbouncer=true')) {
+    url += (url.includes('?') ? '&' : '?') + 'pgbouncer=true';
   }
   return url;
 }
@@ -890,9 +894,9 @@ function getDbPool(env) {
       databaseUrl,
       new Pool({
         connectionString: databaseUrl,
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 8000,
+        max: 20,
+        idleTimeoutMillis: 60000,
+        connectionTimeoutMillis: 5000,
       }),
     );
   }
@@ -960,16 +964,16 @@ function getReferralRewardPerInvite(env) {
   return Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0);
 }
 
-async function queryDb(env, sql, params = [], retries = 2) {
+async function queryDb(env, sql, params = [], retries = 3) {
   const pool = getDbPool(env);
   if (!pool) {
     throw new Error('Database not configured');
   }
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      // Per-query timeout: 10s via AbortSignal (Neon serverless supports it)
-      // This prevents a single slow query from hanging the entire Worker request
-      const timeoutMs = 10000;
+      // Per-query timeout: 5s — fail fast instead of hanging the Worker request
+      // Neon cold starts typically take 1-3s; if a query takes >5s, something is wrong
+      const timeoutMs = 5000;
       const result = await Promise.race([
         pool.query(sql, params),
         new Promise((_, reject) =>
@@ -979,8 +983,8 @@ async function queryDb(env, sql, params = [], retries = 2) {
       return result;
     } catch (error) {
       if (attempt === retries) throw error;
-      // Exponential backoff: 200ms, 400ms, 800ms
-      const ms = Math.min(200 * 2 ** attempt, 1000);
+      // Exponential backoff: 150ms, 300ms, 600ms, 1200ms
+      const ms = Math.min(150 * 2 ** attempt, 1500);
       await new Promise((r) => setTimeout(r, ms));
     }
   }
