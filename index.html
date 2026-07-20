@@ -412,30 +412,31 @@
         <!-- 6. Analysis List -->
         <div class="analysis-list-container" id="analysis-list-container"></div>
         <div id="analysis-load-trigger" class="analysis-load-trigger"></div>
+
+        <!-- Analysis Empty State — inside analysis-page so it stays within the content area -->
+        <div id="analysis-empty-state" class="analysis-empty-state" style="display:none;" aria-live="polite">
+            <div class="aes-card">
+                <div class="aes-glow"></div>
+                <div class="aes-icon">
+                    <svg viewBox="0 0 64 64" width="56" height="56" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M6 54h52" opacity="0.35"/>
+                        <path d="M10 54V36"/>
+                        <path d="M22 54V28"/>
+                        <path d="M34 54V20"/>
+                        <path d="M46 54V14"/>
+                        <path d="M10 36l12-8 12 8 12-22"/>
+                        <path d="M46 14h6v6" opacity="0.6"/>
+                        <circle cx="46" cy="14" r="2.5" fill="currentColor" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="aes-brand">AMIR<span>BTC</span></div>
+                <p class="aes-title" id="aes-title">هنوز تحلیلی منتشر نشده است</p>
+                <p class="aes-desc" id="aes-desc">به‌زودی تحلیل‌های جدید در این بخش نمایش داده می‌شوند</p>
+                <div class="aes-shimmer"></div>
+            </div>
+        </div>
     </section>
 
-    <!-- Analysis Empty State — outside .page so FAB + page transitions never reflow it -->
-    <div id="analysis-empty-state" class="analysis-empty-state" style="display:none;" aria-live="polite">
-        <div class="aes-card">
-            <div class="aes-glow"></div>
-            <div class="aes-icon">
-                <svg viewBox="0 0 64 64" width="56" height="56" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M6 54h52" opacity="0.35"/>
-                    <path d="M10 54V36"/>
-                    <path d="M22 54V28"/>
-                    <path d="M34 54V20"/>
-                    <path d="M46 54V14"/>
-                    <path d="M10 36l12-8 12 8 12-22"/>
-                    <path d="M46 14h6v6" opacity="0.6"/>
-                    <circle cx="46" cy="14" r="2.5" fill="currentColor" stroke="none"/>
-                </svg>
-            </div>
-            <div class="aes-brand">AMIR<span>BTC</span></div>
-            <p class="aes-title" id="aes-title">هنوز تحلیلی منتشر نشده است</p>
-            <p class="aes-desc" id="aes-desc">به‌زودی تحلیل‌های جدید در این بخش نمایش داده می‌شوند</p>
-            <div class="aes-shimmer"></div>
-        </div>
-    </div>
 
     <!-- Admin Floating Button — outside .page so position:fixed is never hijacked by page transform animations -->
     <button type="button" id="analysis-fab" class="analysis-fab" style="display:none;" onclick="openAddAnalysisModal()" aria-label="افزودن تحلیل">

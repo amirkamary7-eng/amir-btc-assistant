@@ -2968,12 +2968,14 @@ strong.down { color: var(--red); }
 
 /* ── Analysis Empty State — professional, Binance/TradingView-grade ── */
 .analysis-empty-state {
-    position: fixed;
-    inset: 0;
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px 20px 100px;
+    /* Stay within analysis-page content area — 28px below tab bar */
+    min-height: 280px;
+    margin-top: 28px;
+    padding: 20px 16px 24px;
     z-index: 5;
     pointer-events: none;
 }
@@ -2981,35 +2983,35 @@ strong.down { color: var(--red); }
 .analysis-empty-state .aes-card {
     position: relative;
     width: 100%;
-    max-width: 360px;
+    max-width: 320px;
     text-align: center;
-    padding: 40px 24px 36px;
-    border-radius: 22px;
+    padding: 24px 20px 22px;
+    border-radius: 18px;
     background: linear-gradient(168deg, rgba(255, 255, 255, 0.04), rgba(255, 138, 0, 0.015), rgba(255, 255, 255, 0.01));
     border: 1px solid rgba(255, 138, 0, 0.14);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255,255,255,0.04);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255,255,255,0.04);
     overflow: hidden;
     pointer-events: auto;
 }
 
 .analysis-empty-state .aes-glow {
     position: absolute;
-    top: -80px;
+    top: -60px;
     left: 50%;
     transform: translateX(-50%);
-    width: 240px;
-    height: 140px;
+    width: 200px;
+    height: 110px;
     background: radial-gradient(ellipse at center, rgba(255, 138, 0, 0.18) 0%, transparent 70%);
     pointer-events: none;
 }
 
 .analysis-empty-state .aes-icon {
     position: relative;
-    width: 96px;
-    height: 96px;
-    margin: 0 auto 20px;
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 14px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3017,15 +3019,15 @@ strong.down { color: var(--red); }
     background: linear-gradient(145deg, rgba(255, 138, 0, 0.2), rgba(255, 138, 0, 0.05));
     border: 1.5px solid rgba(255, 138, 0, 0.3);
     color: var(--accent);
-    box-shadow: 0 0 30px rgba(255, 138, 0, 0.1);
+    box-shadow: 0 0 24px rgba(255, 138, 0, 0.1);
 }
 
 .analysis-empty-state .aes-brand {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
     letter-spacing: 3px;
     color: var(--text-dim);
-    margin-bottom: 14px;
+    margin-bottom: 10px;
     text-transform: uppercase;
 }
 
@@ -3034,17 +3036,17 @@ strong.down { color: var(--red); }
 }
 
 .analysis-empty-state .aes-title {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 700;
     color: var(--text);
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     line-height: 1.4;
 }
 
 .analysis-empty-state .aes-desc {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-sub);
-    line-height: 1.6;
+    line-height: 1.5;
     margin: 0;
 }
 

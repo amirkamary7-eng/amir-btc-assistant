@@ -1669,6 +1669,8 @@ function renderAnalysisList() {
     // Case 1: No analyses at all (DB is empty)
     if (!analyses.length) {
         container.innerHTML = '';
+        // Hide list-container so its 120px bottom padding doesn't push empty state down
+        container.style.display = 'none';
         if (emptyState) {
             const adminUser = isAdmin();
             const titleEl = $('aes-title');
@@ -1684,6 +1686,8 @@ function renderAnalysisList() {
         }
         return;
     }
+    // Restore list-container display (in case it was hidden when DB was empty)
+    container.style.display = '';
     if (emptyState) emptyState.style.display = 'none';
 
     // Apply filter + sort
