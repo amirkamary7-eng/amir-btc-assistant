@@ -349,7 +349,7 @@ function timingSafeEqualSecret(a, b) {
   return timingSafeEqual(hashA, hashB);
 }
 
-async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400, routeInfo = '') {
+async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 86400) {
   if (!initData || !botToken || botToken === 'REPLACE_WITH_TOKEN') {
     return null;
   }
@@ -890,25 +890,9 @@ function getDbPool(env) {
       databaseUrl,
       new Pool({
         connectionString: databaseUrl,
-        max: 3,
-        idleTimeoutMillis: 10000,
-        connectionTimeoutMillis: 15000,
-      }),
-    );
-  }
-
-  const pool = dbPools.get(databaseUrl);
-  // @ts-expect-error — idleTimeoutMillis is valid for @neondatabase/serverless Pool
-  if (pool && typeof pool.totalCount === 'function' && pool.totalCount() === 0 && pool.idleCount() === 0) {
-    // Stale pool detected (no connections, likely after isolate eviction). Recreate.
-    pool.end().catch(() => {});
-    dbPools.set(
-      databaseUrl,
-      new Pool({
-        connectionString: databaseUrl,
-        max: 3,
-        idleTimeoutMillis: 10000,
-        connectionTimeoutMillis: 15000,
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 8000,
       }),
     );
   }
@@ -976,17 +960,27 @@ function getReferralRewardPerInvite(env) {
   return Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0);
 }
 
-async function queryDb(env, sql, params = [], retries = 1) {
+async function queryDb(env, sql, params = [], retries = 2) {
   const pool = getDbPool(env);
   if (!pool) {
     throw new Error('Database not configured');
   }
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await pool.query(sql, params);
+      // Per-query timeout: 10s via AbortSignal (Neon serverless supports it)
+      // This prevents a single slow query from hanging the entire Worker request
+      const timeoutMs = 10000;
+      const result = await Promise.race([
+        pool.query(sql, params),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Query timeout after ${timeoutMs}ms: ${sql.substring(0, 60)}`)), timeoutMs)
+        ),
+      ]);
+      return result;
     } catch (error) {
       if (attempt === retries) throw error;
-      const ms = Math.min(100 * 2 ** attempt, 1000);
+      // Exponential backoff: 200ms, 400ms, 800ms
+      const ms = Math.min(200 * 2 ** attempt, 1000);
       await new Promise((r) => setTimeout(r, ms));
     }
   }

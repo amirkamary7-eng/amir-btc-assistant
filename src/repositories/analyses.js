@@ -38,8 +38,16 @@ export function createAnalysisRepository(deps) {
 
   /**
    * Ensure new columns exist. Idempotent — safe to call on every Worker startup.
+   * NOTE: Schema migrations run ONCE per Worker isolate (cached via _schemaVerified).
+   * Running 7 ALTER TABLE queries on every /api/analyses request caused database
+   * timeouts because each query needs a fresh connection from the pool, and Neon
+   * serverless has cold-start latency on new connections.
+   * If the isolate is evicted (cold start), _schemaVerified resets and migration
+   * runs again — which is the correct behavior.
    */
+  let _schemaVerified = false;
   async function ensureSchema(env) {
+    if (_schemaVerified) return;
     const alterStatements = [
       `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS title VARCHAR(256) DEFAULT ''`,
       `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS support_level VARCHAR(64) DEFAULT ''`,
@@ -52,6 +60,7 @@ export function createAnalysisRepository(deps) {
     for (const sql of alterStatements) {
       try { await queryDb(env, sql); } catch (e) { console.warn('Analysis schema migration warning:', e.message); }
     }
+    _schemaVerified = true;
   }
 
   /**
