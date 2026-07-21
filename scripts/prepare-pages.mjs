@@ -257,6 +257,23 @@ async function main() {
   await writeFile(path.join(outputDir, 'index.html'), indexHtml, 'utf8');
   console.log('  Updated references, API_BASE, and BUILD_ID in index.html');
 
+  // Replace asset references in built JS files (e.g., 'assets/trend-bull.png' in app.js)
+  for (const [original, hashed] of assetRenameMap) {
+    const escaped = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(escaped, 'g');
+    for (const [jsOriginal, jsHashed] of jsRenameMap) {
+      const jsPath = path.join(outputDir, jsHashed);
+      try {
+        let jsContent = await readFile(jsPath, 'utf8');
+        if (pattern.test(jsContent)) {
+          jsContent = jsContent.replace(pattern, hashed);
+          await writeFile(jsPath, jsContent, 'utf8');
+          console.log(`  Replaced ${original} → ${hashed} in ${jsHashed}`);
+        }
+      } catch (_) { /* file might not exist */ }
+    }
+  }
+
   await writeVersionJson(buildId);
 
   await writeHeadersFile();

@@ -6237,10 +6237,13 @@ function renderDashboardMarketStatus() {
  * Uses existing `allCoins` array (NO new API calls). Renders symbol + 24h change %
  * for top 10 coins, duplicated for seamless infinite scroll.
  */
+let _tickerRendered = false;
 function renderMarketTicker() {
     const track = $('market-ticker-track');
     if (!track) return;
     if (!Array.isArray(allCoins) || !allCoins.length) return;
+    // Only render ONCE — CSS handles infinite loop, no re-render needed
+    if (_tickerRendered) return;
 
     // Take top 20 coins for ticker (allCoins is already ordered by rank from API)
     const tickerCoins = allCoins.slice(0, 20);
@@ -6260,6 +6263,7 @@ function renderMarketTicker() {
     // Duplicate the list TWICE for seamless infinite scroll (3x copy = smooth loop)
     const items = tickerCoins.map(buildItem).join('');
     track.innerHTML = items + items + items;
+    _tickerRendered = true;
 }
 
 /**
