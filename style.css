@@ -4743,7 +4743,7 @@ strong.down { color: var(--red); }
    1. HERO SLIDER — image-based banner slides, aspect-ratio for CLS=0
    ========================================================================== */
 .hero-banner-slider {
-    margin: 0 0 16px;
+    margin: 0 0 8px;
     border-radius: 24px;
     position: relative;
     overflow: hidden;
@@ -4840,21 +4840,22 @@ strong.down { color: var(--red); }
    ========================================================================== */
 .market-ticker {
     overflow: hidden;
-    margin: 0 0 16px;
+    margin: 0 0 8px;
     border-radius: 12px;
     background: rgba(11, 18, 32, 0.6);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 255, 255, 0.04);
-    padding: 8px 0;
+    padding: 6px 0;
 }
 .market-ticker-track {
     display: flex;
-    gap: 24px;
-    animation: ticker-scroll 30s linear infinite;
+    gap: 20px;
+    animation: ticker-scroll 40s linear infinite;
     white-space: nowrap;
     width: max-content;
     padding: 0 12px;
+    will-change: transform;
 }
 .market-ticker:hover .market-ticker-track {
     animation-play-state: paused;
@@ -4863,10 +4864,10 @@ strong.down { color: var(--red); }
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
-    scroll-snap-align: start;
+    flex-shrink: 0;
 }
 .market-ticker-symbol {
     color: #A5B4C7;
@@ -4880,15 +4881,15 @@ strong.down { color: var(--red); }
 .market-ticker-change.up { color: #22C55E; }
 .market-ticker-change.down { color: #EF4444; }
 .market-ticker-change svg {
-    width: 9px;
-    height: 9px;
+    width: 8px;
+    height: 8px;
 }
 @media (prefers-reduced-motion: reduce) {
     .market-ticker-track { animation: none; }
 }
 @keyframes ticker-scroll {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
+    0% { transform: translate3d(0, 0, 0); }
+    100% { transform: translate3d(-50%, 0, 0); }
 }
 html[dir="rtl"] .market-ticker-track {
     animation-direction: reverse;
@@ -5883,4 +5884,23 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     .watch-card {
         flex: 0 0 130px;
     }
+}
+
+/* ── Market Trend: Image-based Bull/Bear graphics ── */
+.dms-trend-graphic img.trend-bull-bear-img {
+    width: 56px;
+    height: 56px;
+    object-fit: contain;
+    position: relative;
+    z-index: 1;
+    border-radius: 50%;
+}
+.dms-trend-graphic.bullish img.trend-bull-bear-img {
+    filter: drop-shadow(0 0 8px rgba(34,197,94,0.5));
+}
+.dms-trend-graphic.bearish img.trend-bull-bear-img {
+    filter: drop-shadow(0 0 8px rgba(239,68,68,0.5));
+}
+.dms-trend-graphic.neutral img.trend-bull-bear-img {
+    filter: drop-shadow(0 0 6px rgba(245,166,35,0.4));
 }

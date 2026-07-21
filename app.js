@@ -6198,130 +6198,18 @@ function renderDashboardMarketStatus() {
     if (ratio > 0.58) {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
-        // Premium 3D Bull head SVG — large curved horns, gradient shading, neon green
-        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-                <linearGradient id="bull-horn-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stop-color="#A7F3D0"/>
-                    <stop offset="55%" stop-color="#22C55E"/>
-                    <stop offset="100%" stop-color="#15803D"/>
-                </linearGradient>
-                <linearGradient id="bull-head-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stop-color="#4ADE80"/>
-                    <stop offset="55%" stop-color="#22C55E"/>
-                    <stop offset="100%" stop-color="#166534"/>
-                </linearGradient>
-                <radialGradient id="bull-shine" cx="35%" cy="28%" r="60%">
-                    <stop offset="0%" stop-color="rgba(255,255,255,0.55)"/>
-                    <stop offset="60%" stop-color="rgba(255,255,255,0)"/>
-                </radialGradient>
-                <filter id="bull-glow" x="-30%" y="-30%" width="160%" height="160%">
-                    <feGaussianBlur stdDeviation="1.2" result="blur"/>
-                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                </filter>
-            </defs>
-            <g filter="url(#bull-glow)">
-                <path d="M22 18 C 14 8, 6 8, 4 12 C 3 14, 5 18, 10 22 C 14 25, 18 26, 22 24 Z" fill="url(#bull-horn-grad)" stroke="#15803D" stroke-width="0.6" stroke-linejoin="round"/>
-                <path d="M42 18 C 50 8, 58 8, 60 12 C 61 14, 59 18, 54 22 C 50 25, 46 26, 42 24 Z" fill="url(#bull-horn-grad)" stroke="#15803D" stroke-width="0.6" stroke-linejoin="round"/>
-                <path d="M14 13 Q 16 16 20 21" stroke="rgba(255,255,255,0.6)" stroke-width="0.8" stroke-linecap="round" fill="none"/>
-                <path d="M50 13 Q 48 16 44 21" stroke="rgba(255,255,255,0.6)" stroke-width="0.8" stroke-linecap="round" fill="none"/>
-                <ellipse cx="32" cy="36" rx="17" ry="15" fill="url(#bull-head-grad)" stroke="#15803D" stroke-width="1.2"/>
-                <ellipse cx="32" cy="36" rx="17" ry="15" fill="url(#bull-shine)"/>
-                <ellipse cx="24" cy="27" rx="6" ry="5" fill="rgba(34,197,94,0.35)" stroke="#15803D" stroke-width="0.8"/>
-                <ellipse cx="40" cy="27" rx="6" ry="5" fill="rgba(34,197,94,0.35)" stroke="#15803D" stroke-width="0.8"/>
-                <ellipse cx="26" cy="33" rx="3" ry="3.4" fill="#0B1220"/>
-                <ellipse cx="38" cy="33" rx="3" ry="3.4" fill="#0B1220"/>
-                <circle cx="26.8" cy="32.2" r="1" fill="#FFFFFF"/>
-                <circle cx="38.8" cy="32.2" r="1" fill="#FFFFFF"/>
-                <path d="M30 40 L32 42 L34 40 L34.5 44 L32 46 L29.5 44 Z" fill="#F5A623" stroke="#15803D" stroke-width="0.5" stroke-linejoin="round"/>
-                <path d="M32 46 L32 49" stroke="#15803D" stroke-width="1.2" stroke-linecap="round"/>
-                <path d="M28 49 Q 32 52 36 49" stroke="#0B1220" stroke-width="1.4" stroke-linecap="round" fill="none"/>
-                <path d="M22 50 Q 25 53 28 52" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-                <path d="M42 50 Q 39 53 36 52" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-            </g>
-        </svg>`;
+        // Premium Bull image asset — neon green, 3D crypto style
+        trendGraphic = `<img src="assets/trend-bull.png" alt="Bull Market" class="trend-bull-bear-img" loading="lazy" decoding="async" onerror="this.style.display='none'">`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        // Premium balance/scale indicator in amber
-        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-                <linearGradient id="neu-beam-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stop-color="#F5A623" stop-opacity="0.4"/>
-                    <stop offset="50%" stop-color="#F5A623"/>
-                    <stop offset="100%" stop-color="#F5A623" stop-opacity="0.4"/>
-                </linearGradient>
-                <radialGradient id="neu-pivot-grad" cx="50%" cy="40%" r="60%">
-                    <stop offset="0%" stop-color="#FCD34D"/>
-                    <stop offset="60%" stop-color="#F5A623"/>
-                    <stop offset="100%" stop-color="#92400E"/>
-                </radialGradient>
-                <linearGradient id="neu-pan-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stop-color="#FCD34D"/>
-                    <stop offset="100%" stop-color="#B45309"/>
-                </linearGradient>
-                <filter id="neu-glow" x="-30%" y="-30%" width="160%" height="160%">
-                    <feGaussianBlur stdDeviation="1" result="blur"/>
-                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                </filter>
-            </defs>
-            <g filter="url(#neu-glow)">
-                <rect x="31" y="14" width="2" height="32" fill="url(#neu-beam-grad)" rx="1"/>
-                <rect x="16" y="22" width="32" height="2.4" fill="url(#neu-beam-grad)" rx="1.2"/>
-                <line x1="16" y1="23" x2="16" y2="30" stroke="#F5A623" stroke-width="0.8" stroke-linecap="round"/>
-                <line x1="48" y1="23" x2="48" y2="30" stroke="#F5A623" stroke-width="0.8" stroke-linecap="round"/>
-                <path d="M10 30 Q 16 36 22 30 L 19 36 Q 16 38 13 36 Z" fill="url(#neu-pan-grad)" stroke="#92400E" stroke-width="0.6" stroke-linejoin="round"/>
-                <path d="M42 30 Q 48 36 54 30 L 51 36 Q 48 38 45 36 Z" fill="url(#neu-pan-grad)" stroke="#92400E" stroke-width="0.6" stroke-linejoin="round"/>
-                <circle cx="32" cy="20" r="3.2" fill="url(#neu-pivot-grad)" stroke="#92400E" stroke-width="0.6"/>
-                <rect x="26" y="46" width="12" height="3" rx="1.5" fill="#F5A623"/>
-                <rect x="22" y="49" width="20" height="3" rx="1.5" fill="#F5A623" opacity="0.85"/>
-            </g>
-        </svg>`;
+        // Premium Neutral image asset — golden balance
+        trendGraphic = `<img src="assets/trend-neutral.png" alt="Neutral Market" class="trend-bull-bear-img" loading="lazy" decoding="async" onerror="this.style.display='none'">`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
-        // Premium 3D Bear head SVG — round ears, gradient shading, red glow
-        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-                <linearGradient id="bear-head-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stop-color="#F87171"/>
-                    <stop offset="55%" stop-color="#EF4444"/>
-                    <stop offset="100%" stop-color="#7F1D1D"/>
-                </linearGradient>
-                <radialGradient id="bear-ear-grad" cx="40%" cy="35%" r="65%">
-                    <stop offset="0%" stop-color="#FCA5A5"/>
-                    <stop offset="55%" stop-color="#EF4444"/>
-                    <stop offset="100%" stop-color="#7F1D1D"/>
-                </radialGradient>
-                <radialGradient id="bear-shine" cx="35%" cy="28%" r="60%">
-                    <stop offset="0%" stop-color="rgba(255,255,255,0.5)"/>
-                    <stop offset="60%" stop-color="rgba(255,255,255,0)"/>
-                </radialGradient>
-                <filter id="bear-glow" x="-30%" y="-30%" width="160%" height="160%">
-                    <feGaussianBlur stdDeviation="1.2" result="blur"/>
-                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                </filter>
-            </defs>
-            <g filter="url(#bear-glow)">
-                <circle cx="20" cy="22" r="7" fill="url(#bear-ear-grad)" stroke="#7F1D1D" stroke-width="0.8"/>
-                <circle cx="20" cy="22" r="3.5" fill="rgba(127,29,29,0.6)"/>
-                <circle cx="44" cy="22" r="7" fill="url(#bear-ear-grad)" stroke="#7F1D1D" stroke-width="0.8"/>
-                <circle cx="44" cy="22" r="3.5" fill="rgba(127,29,29,0.6)"/>
-                <ellipse cx="32" cy="36" rx="17" ry="15.5" fill="url(#bear-head-grad)" stroke="#7F1D1D" stroke-width="1.2"/>
-                <ellipse cx="32" cy="36" rx="17" ry="15.5" fill="url(#bear-shine)"/>
-                <ellipse cx="24" cy="28" rx="3.2" ry="2.8" fill="#7F1D1D" opacity="0.25"/>
-                <ellipse cx="40" cy="28" rx="3.2" ry="2.8" fill="#7F1D1D" opacity="0.25"/>
-                <ellipse cx="26" cy="34" rx="2.8" ry="3.2" fill="#0B1220"/>
-                <ellipse cx="38" cy="34" rx="2.8" ry="3.2" fill="#0B1220"/>
-                <circle cx="26.7" cy="33.2" r="0.9" fill="#FFFFFF"/>
-                <circle cx="38.7" cy="33.2" r="0.9" fill="#FFFFFF"/>
-                <ellipse cx="32" cy="42" rx="4.2" ry="3.2" fill="#0B1220"/>
-                <path d="M32 45 L32 48" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round"/>
-                <path d="M28 48 Q 32 51 36 48" stroke="#0B1220" stroke-width="1.4" stroke-linecap="round" fill="none"/>
-                <path d="M22 50 Q 25 53 28 51" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-                <path d="M42 50 Q 39 53 36 51" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-            </g>
-        </svg>`;
+        // Premium Bear image asset — neon red, aggressive style
+        trendGraphic = `<img src="assets/trend-bear.png" alt="Bear Market" class="trend-bull-bear-img" loading="lazy" decoding="async" onerror="this.style.display='none'">`;
     }
 
     const trendHTML = `
@@ -6357,8 +6245,8 @@ function renderMarketTicker() {
     if (!track) return;
     if (!Array.isArray(allCoins) || !allCoins.length) return;
 
-    // Take top 10 coins (allCoins is already ordered by rank from API)
-    const tickerCoins = allCoins.slice(0, 10);
+    // Take top 20 coins for ticker (allCoins is already ordered by rank from API)
+    const tickerCoins = allCoins.slice(0, 20);
     if (!tickerCoins.length) return;
 
     const buildItem = (c) => {
@@ -6372,9 +6260,9 @@ function renderMarketTicker() {
         return `<div class="market-ticker-item"><span class="market-ticker-symbol">${sym}</span><span class="market-ticker-change ${isPos ? 'up' : 'down'}">${arrowSvg}${changeStr}</span></div>`;
     };
 
-    // Duplicate the list to create a seamless infinite scroll
-    const html = tickerCoins.map(buildItem).join('') + tickerCoins.map(buildItem).join('');
-    track.innerHTML = html;
+    // Duplicate the list TWICE for seamless infinite scroll (3x copy = smooth loop)
+    const items = tickerCoins.map(buildItem).join('');
+    track.innerHTML = items + items + items;
 }
 
 /**
