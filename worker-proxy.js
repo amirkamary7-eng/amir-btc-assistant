@@ -3302,7 +3302,7 @@ async function runScheduledAlertsBaseline(controller, env) {
     return;
   }
 
-  const maxAlerts = Math.max(getNumericEnv(env, 'ALERTS_CRON_MAX_ALERTS', 200), 0);
+  const maxAlerts = Math.max(getNumericEnv(env, 'ALERTS_CRON_MAX_ALERTS', 50), 0);
   const resultPayload = {
     ...payload,
     checked_count: 0,
@@ -3884,13 +3884,20 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runScheduledAlertsBaseline(controller, env));
+    // Wrap each task with a 25s timeout to prevent waitUntil cancellation
+    const withTimeout = (promise, ms = 25000) =>
+      Promise.race([
+        promise,
+        new Promise((resolve) => setTimeout(() => { console.warn('Scheduled task timeout after', ms, 'ms'); resolve(); }, ms)),
+      ]);
+
+    ctx.waitUntil(withTimeout(runScheduledAlertsBaseline(controller, env)));
     // Refresh CMC Market Overview every 15 minutes
     if (env.CMC_API_KEY) {
-      ctx.waitUntil(marketOverviewSvc.refreshOverview(env));
+      ctx.waitUntil(withTimeout(marketOverviewSvc.refreshOverview(env)));
     }
     // Phase 3 — Check for upcoming high-impact calendar events
-    ctx.waitUntil(runCalendarAlertsCheck(env));
+    ctx.waitUntil(withTimeout(runCalendarAlertsCheck(env)));
   },
 };
 //#endregion

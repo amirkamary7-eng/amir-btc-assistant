@@ -2815,15 +2815,8 @@ async function fetchOnlineCount() {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function updateOnlineBadge(count) {
-    const badge = document.getElementById('online-badge');
-    const countEl = document.getElementById('online-count');
-    if (!badge || !countEl) return;
-    if (count > 0) {
-        badge.style.display = 'inline-flex';
-        countEl.innerText = count;
-    } else {
-        badge.style.display = 'none';
-    }
+    // Online badge removed from profile page — no longer displayed
+    // Only update live-count in market page header if it exists
     const liveCountEl = document.getElementById('live-count');
     if (liveCountEl) liveCountEl.innerText = count > 0 ? count : '—';
 }

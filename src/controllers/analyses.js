@@ -457,10 +457,12 @@ export function createAnalysisHandlers(deps) {
     const message = analysis.title || `تحلیل ${coinLabel} (${analysis.timeframe}) منتشر شد.`;
 
     try {
-      const usersResult = await queryDb(env, `SELECT telegram_id FROM users WHERE channel_joined = TRUE`);
+      // Limit to 50 users max to prevent waitUntil timeout
+      const usersResult = await queryDb(env, `SELECT telegram_id FROM users WHERE channel_joined = TRUE LIMIT 50`);
       const userIds = usersResult.rows.map((r) => String(r.telegram_id));
       if (userIds.length === 0) return;
 
+      // Create in-app notifications (batch)
       await notificationRepo.createBulk(env, userIds, 'analysis', title, message, {
         analysis_id: analysis.id,
         coin: analysis.coin,
@@ -469,7 +471,15 @@ export function createAnalysisHandlers(deps) {
       const webAppUrl = resolveWebAppUrl ? resolveWebAppUrl(env, { cacheBust: true }) : '';
       if (!webAppUrl) return;
 
+      // Send Telegram messages with a hard timeout of 20 seconds total
+      const NOTIFY_TIMEOUT_MS = 20000;
+      const startTime = Date.now();
+      let sent = 0;
       for (const uid of userIds) {
+        if (Date.now() - startTime > NOTIFY_TIMEOUT_MS) {
+          console.warn('notifyNewAnalysis: timeout reached, sent', sent, 'of', userIds.length);
+          break;
+        }
         try {
           await sendTelegramMessage(env, {
             chat_id: Number(uid),
@@ -482,6 +492,7 @@ export function createAnalysisHandlers(deps) {
               }]],
             },
           });
+          sent++;
         } catch { /* skip */ }
       }
     } catch (err) {
