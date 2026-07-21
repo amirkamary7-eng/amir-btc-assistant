@@ -4553,8 +4553,20 @@ function renderNews(category) {
 
     // ── Featured News Hero Slider (only on "all" tab) ──
     if (category === 'all') {
-        // BUG #1 FIX: Filter to only valid items (with title), then take up to 5
-        const heroItems = filtered.filter(niIsHeroEligible).filter(n => n && n.title).slice(0, 5);
+        // BUG #1 FIX: Filter to only valid items (with title), deduplicate by URL,
+        // and take up to 5. Never create empty or duplicate slides.
+        const seenUrls = new Set();
+        const heroItems = filtered
+            .filter(niIsHeroEligible)
+            .filter(n => n && n.title && n.title.trim()) // Must have non-empty title
+            .filter(n => {
+                // Deduplicate by URL (or title if URL is missing)
+                const key = n.url || n.title;
+                if (seenUrls.has(key)) return false;
+                seenUrls.add(key);
+                return true;
+            })
+            .slice(0, 5);
         if (heroItems.length >= 1) {
             _niHeroSlides = heroItems;
             _niHeroIndex = 0;
@@ -4626,7 +4638,15 @@ function renderNews(category) {
 function niRenderHeroSlider(items) {
     // BUG #1 FIX: Only render slides from valid news items.
     // Filter out items without a title — never render empty slides.
-    const validItems = items.filter(n => n && n.title);
+    // Also deduplicate by URL/title to prevent duplicate slides.
+    const seenKeys = new Set();
+    const validItems = items.filter(n => {
+        if (!n || !n.title || !n.title.trim()) return false;
+        const key = n.url || n.title;
+        if (seenKeys.has(key)) return false;
+        seenKeys.add(key);
+        return true;
+    });
     if (!validItems.length) return ''; // No valid items → no slider
 
     const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22240%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22/%3E%3C/svg%3E';
@@ -4657,7 +4677,8 @@ function niRenderHeroSlider(items) {
         </div>`;
     }).join('');
 
-    // BUG #1 FIX: Only show dots when there are 2+ slides
+    // BUG #1 FIX: Only show dots when there are 2+ slides.
+    // Dots count must EXACTLY match slide count.
     const showDots = validItems.length > 1;
     const dotsHtml = showDots ? `<div class="ni-hero-dots">${validItems.map((_, i) => `<span class="ni-hero-dot${i === 0 ? ' active' : ''}" onclick="niGoToSlide(${i})"></span>`).join('')}</div>` : '';
 
@@ -4676,8 +4697,14 @@ function niInitHeroSlider() {
     const track = document.getElementById('ni-hero-track');
     if (!slider || !track) return;
 
-    // BUG #1 FIX: Only start autoplay if there are 2+ slides
-    if (_niHeroSlides.length <= 1) return; // Single slide → no autoplay, no swipe
+    // BUG #1 FIX: Count actual slide elements in the DOM (source of truth).
+    // Don't rely on _niHeroSlides.length which may include items that were
+    // filtered out during rendering.
+    const actualSlideCount = track.querySelectorAll('.ni-hero-slide').length;
+    if (actualSlideCount <= 1) return; // Single slide → no autoplay, no swipe
+
+    // Update _niHeroSlides to match actual DOM count
+    _niHeroSlides = _niHeroSlides.slice(0, actualSlideCount);
 
     // Start autoplay (5 seconds)
     if (_niHeroTimer) clearInterval(_niHeroTimer);
@@ -5558,10 +5585,11 @@ function switchNewsTab(category, btn) {
         const target = document.querySelector(`.ni-tab[data-news="${category}"]`);
         if (target) target.classList.add('active');
     }
-    if (category === 'calendar') {
-        currentCalendarTab = 'today';
-        currentCalCountry = 'all';
-    }
+    // CRITICAL FIX: Do NOT reset calendar sub-tab or country filter when
+    // switching to calendar tab. These should only change when the user
+    // explicitly selects a different sub-tab or country.
+    // Previous code was: if (category === 'calendar') { currentCalendarTab = 'today'; currentCalCountry = 'all'; }
+    // This caused the calendar to reset every time the user switched to it.
     renderNews(category);
 
     // BUG #2 FIX: Restore scroll position for the new tab
@@ -5569,6 +5597,9 @@ function switchNewsTab(category, btn) {
 }
 
 function switchCalendarTab(tab, btn) {
+    // CRITICAL FIX: Only update the sub-tab, do NOT reset country filter.
+    // Previous code reset currentCalCountry = 'all' which caused the country
+    // filter to be lost every time the user switched between today/tomorrow/week.
     currentCalendarTab = tab;
     document.querySelectorAll('.ni-cal-segment').forEach(b => b.classList.remove('active'));
     if (btn) {
