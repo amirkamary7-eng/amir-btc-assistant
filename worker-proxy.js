@@ -200,6 +200,7 @@ function diagLogSync(env, entry) {
 
 // ============================================================================
 // MAINTENANCE MODE — System-wide maintenance state stored in APP_CACHE KV
+// with in-memory fallback for when KV writes fail (free-plan daily limit).
 // ============================================================================
 const MAINT_KV_KEY = 'system_maintenance_state';
 const MAINT_DEFAULTS = {
@@ -211,13 +212,25 @@ const MAINT_DEFAULTS = {
   updated_by: null,
 };
 
+// In-memory fallback: persists across requests within the same Worker isolate.
+// This ensures maintenance state survives even when KV writes are rate-limited.
+// Each Worker isolate has its own copy, but KV is still the primary store
+// and will be used when available.
+let _maintMemoryState = null;
+let _maintKvWriteFailed = false;
+
 /**
- * Read the maintenance state from KV.
- * Returns the merged object (defaults + stored overrides).
+ * Read the maintenance state.
+ * Tries KV first, falls back to in-memory state, then defaults.
  * Never throws — on any error returns defaults.
  */
 async function getMaintenanceState(env) {
   try {
+    // If we have an in-memory override (from a previous setMaintenanceState
+    // where KV write failed), use that as the source of truth.
+    if (_maintMemoryState) {
+      return { maintenance: { ...MAINT_DEFAULTS, ..._maintMemoryState } };
+    }
     if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') {
       return { maintenance: { ...MAINT_DEFAULTS } };
     }
@@ -232,15 +245,20 @@ async function getMaintenanceState(env) {
     };
   } catch (e) {
     console.warn('getMaintenanceState error:', e.message || e);
+    // Last resort: return in-memory state or defaults
+    if (_maintMemoryState) {
+      return { maintenance: { ...MAINT_DEFAULTS, ..._maintMemoryState } };
+    }
     return { maintenance: { ...MAINT_DEFAULTS } };
   }
 }
 
 /**
  * Write the maintenance state to KV. Returns the new state.
- * Never throws — on KV write failure, returns the computed state with a warning flag
- * so the caller can still respond with the intended value (the next read will return
- * the previous state, but the admin sees what they tried to save).
+ * On KV write failure, stores in memory as fallback so the state persists
+ * within the Worker isolate. This prevents the "auto-disable" bug where
+ * the admin enables maintenance but it immediately reverts because the
+ * KV write failed and the next GET reads the old KV value.
  */
 async function setMaintenanceState(env, patch, updatedBy) {
   const current = (await getMaintenanceState(env)).maintenance;
@@ -255,17 +273,31 @@ async function setMaintenanceState(env, patch, updatedBy) {
     updated_at: new Date().toISOString(),
     updated_by: String(updatedBy || 'admin'),
   };
+
+  let kvWriteSuccess = false;
+
   if (env?.APP_CACHE && typeof env.APP_CACHE.put === 'function') {
     try {
       await env.APP_CACHE.put(MAINT_KV_KEY, JSON.stringify(next));
+      kvWriteSuccess = true;
+      _maintKvWriteFailed = false;
     } catch (err) {
-      console.warn('setMaintenanceState KV write failed:', err?.message || err);
-      // Return the intended state anyway, with a warning flag
-      // The next GET will return the old state, but the admin UI shows what they tried.
-      return { maintenance: next, warning: 'KV write failed — state may not persist' };
+      console.warn('setMaintenanceState KV write failed, using in-memory fallback:', err?.message || err);
+      _maintKvWriteFailed = true;
     }
   }
-  return { maintenance: next };
+
+  // CRITICAL FIX: Always store in memory as well, so the state persists
+  // even when KV writes fail. This prevents the "auto-disable" bug where
+  // getMaintenanceState() reads the OLD KV value after a failed write.
+  _maintMemoryState = { ...next };
+
+  // Include warning in response if KV write failed (but state IS persisted in memory)
+  const result = { maintenance: next };
+  if (!kvWriteSuccess) {
+    result.warning = 'State saved in memory only (KV write limit reached). State will reset when Worker restarts.';
+  }
+  return result;
 }
 
 async function readRateLimitCache(env, key) {

@@ -349,16 +349,43 @@ async function saveMaintenanceSettings() {
     };
 
     try {
-        await apiFetch('/api/admin/maintenance', {
+        const data = await apiFetch('/api/admin/maintenance', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
+
+        // CRITICAL FIX: Use the response data to update the UI immediately,
+        // rather than re-fetching from /api/system/status which might return
+        // stale data if KV write failed but in-memory fallback is active.
+        if (data && data.maintenance) {
+            const m = data.maintenance;
+            // Update the form to reflect the saved state
+            if (toggle) toggle.checked = Boolean(m.enabled);
+            const body = document.getElementById('adm-maint-body');
+            if (body) body.style.display = Boolean(m.enabled) ? 'flex' : 'none';
+            const statStatus = document.getElementById('adm-stat-maint-status');
+            if (statStatus) {
+                statStatus.textContent = m.enabled ? 'فعال' : 'غیرفعال';
+                statStatus.style.color = m.enabled ? '#f7b950' : '#a8b2c5';
+            }
+            const statProgress = document.getElementById('adm-stat-maint-progress');
+            if (statProgress) statProgress.textContent = (m.progress || 0) + '%';
+            const statUpdated = document.getElementById('adm-stat-maint-updated');
+            if (statUpdated) statUpdated.textContent = m.updated_at ? adminFormatDate(m.updated_at) : '—';
+        }
+
         if (statusEl) {
             statusEl.className = 'adm-maint-status success';
-            statusEl.textContent = '✓ تنظیمات با موفقیت ذخیره شد';
+            if (data && data.warning) {
+                statusEl.textContent = '⚠ تنظیمات ذخیره شد (حافظه موقت) — ' + data.warning;
+            } else {
+                statusEl.textContent = '✓ تنظیمات با موفقیت ذخیره شد';
+            }
         }
-        showAdminToast('تنظیمات نگهداری ذخیره شد', 'success');
+        showAdminToast(data && data.warning ? 'ذخیره شد (حافظه موقت)' : 'تنظیمات نگهداری ذخیره شد', 'success');
+
+        // Reload to confirm state persisted (but the UI already shows the correct state)
         loadMaintenanceSettings();
     } catch (e) {
         if (statusEl) {
