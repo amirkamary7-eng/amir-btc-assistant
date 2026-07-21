@@ -48,17 +48,20 @@ export function createAnalysisRepository(deps) {
   let _schemaVerified = false;
   async function ensureSchema(env) {
     if (_schemaVerified) return;
-    const alterStatements = [
-      `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS title VARCHAR(256) DEFAULT ''`,
-      `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS support_level VARCHAR(64) DEFAULT ''`,
-      `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS current_price VARCHAR(64) DEFAULT ''`,
-      `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS resistance_level VARCHAR(64) DEFAULT ''`,
-      `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS views_count INTEGER DEFAULT 0 NOT NULL`,
-      `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT FALSE NOT NULL`,
-      `ALTER TABLE analyses ADD COLUMN IF NOT EXISTS category VARCHAR(16) DEFAULT 'crypto' NOT NULL`,
-    ];
-    for (const sql of alterStatements) {
-      try { await queryDb(env, sql); } catch (e) { console.warn('Analysis schema migration warning:', e.message); }
+    // Run ALL ALTER TABLEs in a SINGLE query to avoid 7 separate Pool creations
+    const batchSql = `
+      ALTER TABLE analyses ADD COLUMN IF NOT EXISTS title VARCHAR(256) DEFAULT '';
+      ALTER TABLE analyses ADD COLUMN IF NOT EXISTS support_level VARCHAR(64) DEFAULT '';
+      ALTER TABLE analyses ADD COLUMN IF NOT EXISTS current_price VARCHAR(64) DEFAULT '';
+      ALTER TABLE analyses ADD COLUMN IF NOT EXISTS resistance_level VARCHAR(64) DEFAULT '';
+      ALTER TABLE analyses ADD COLUMN IF NOT EXISTS views_count INTEGER DEFAULT 0 NOT NULL;
+      ALTER TABLE analyses ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT FALSE NOT NULL;
+      ALTER TABLE analyses ADD COLUMN IF NOT EXISTS category VARCHAR(16) DEFAULT 'crypto' NOT NULL;
+    `;
+    try {
+      await queryDb(env, batchSql);
+    } catch (e) {
+      console.warn('Analysis schema migration warning:', e.message);
     }
     _schemaVerified = true;
   }
