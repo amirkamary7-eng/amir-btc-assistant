@@ -26,55 +26,80 @@ export function createReferralRepository(deps) {
   /**
    * Get aggregated referral stats for a user:
    * total referrals, active (channel_verified), rewarded count, token balance.
+   * Uses a SINGLE query with CTE to avoid multiple Pool creations (CPU limit).
    */
   async function getStats(env, userId) {
-    const referralsResult = await queryDb(
+    const result = await queryDb(
       env,
       `
-        SELECT channel_verified, rewarded
-        FROM referrals
-        WHERE inviter_id = $1
+        WITH ref_stats AS (
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE channel_verified = true)::int AS active,
+            COUNT(*) FILTER (WHERE rewarded = true)::int AS rewarded
+          FROM referrals
+          WHERE inviter_id = $1
+        ),
+        bal AS (
+          SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1
+        )
+        SELECT r.total, r.active, r.rewarded, COALESCE(b.balance, 0) AS balance
+        FROM ref_stats r, bal b
       `,
       [String(userId)],
     );
-    const balanceResult = await queryDb(
-      env,
-      'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
-      [String(userId)],
-    );
-    const referrals = referralsResult.rows;
+    const row = result.rows[0] || {};
     return {
-      total: referrals.length,
-      active: referrals.filter((row) => Boolean(row.channel_verified)).length,
-      rewarded: referrals.filter((row) => Boolean(row.rewarded)).length,
-      tokens: Number(balanceResult.rows[0]?.balance || 0),
+      total: Number(row.total || 0),
+      active: Number(row.active || 0),
+      rewarded: Number(row.rewarded || 0),
+      tokens: Number(row.balance || 0),
       reward_per_invite: getReferralRewardPerInvite(env),
     };
   }
 
   /**
    * Get token balance and recent transaction history for a user.
+   * Uses a SINGLE query with CTE to avoid multiple Pool creations (CPU limit).
    */
   async function getTokens(env, userId) {
-    const balanceResult = await queryDb(
-      env,
-      'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
-      [String(userId)],
-    );
-    const historyResult = await queryDb(
+    const result = await queryDb(
       env,
       `
-        SELECT id, amount, tx_type, description, ref_id, created_at
-        FROM token_transactions
-        WHERE user_id = $1
-        ORDER BY created_at DESC
-        LIMIT 50
+        WITH bal AS (
+          SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1
+        ),
+        tx AS (
+          SELECT id, amount, tx_type, description, ref_id, created_at
+          FROM token_transactions
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+          LIMIT 50
+        )
+        SELECT
+          COALESCE((SELECT balance FROM bal), 0) AS balance,
+          COALESCE(json_agg(
+            json_build_object(
+              'id', tx.id, 'amount', tx.amount, 'tx_type', tx.tx_type,
+              'description', tx.description, 'ref_id', tx.ref_id, 'created_at', tx.created_at
+            )
+          ) FILTER (WHERE tx.id IS NOT NULL), '[]') AS history
+        FROM tx
       `,
       [String(userId)],
     );
+    const row = result.rows[0] || {};
+    let history = [];
+    try {
+      if (row.history && typeof row.history === 'string') {
+        history = JSON.parse(row.history);
+      } else if (Array.isArray(row.history)) {
+        history = row.history;
+      }
+    } catch {}
     return {
-      balance: Number(balanceResult.rows[0]?.balance || 0),
-      history: historyResult.rows.map((row) => serializeTokenRow(row)),
+      balance: Number(row.balance || 0),
+      history: history.map((row) => serializeTokenRow(row)),
     };
   }
 

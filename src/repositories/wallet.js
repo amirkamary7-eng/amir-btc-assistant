@@ -56,30 +56,52 @@ export function createWalletRepository(deps) {
    * Get full wallet state: balance, tier info, and recent transactions.
    */
   async function getWalletState(env, userId) {
-    const balanceResult = await queryDb(
-      env,
-      'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
-      [String(userId)],
-    );
-    const balance = Number(balanceResult.rows[0]?.balance || 0);
-    const tierInfo = getTierForBalance(balance);
-
-    const historyResult = await queryDb(
+    // Single query with CTE to avoid multiple Pool creations (CPU limit)
+    const result = await queryDb(
       env,
       `
-        SELECT id, amount, tx_type, description, ref_id, created_at
-        FROM token_transactions
-        WHERE user_id = $1
-        ORDER BY created_at DESC
-        LIMIT 50
+        WITH bal AS (
+          SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1
+        ),
+        tx AS (
+          SELECT id, amount, tx_type, description, ref_id, created_at
+          FROM token_transactions
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+          LIMIT 50
+        )
+        SELECT
+          COALESCE((SELECT balance FROM bal), 0) AS balance,
+          COALESCE(json_agg(
+            json_build_object(
+              'id', tx.id,
+              'amount', tx.amount,
+              'tx_type', tx.tx_type,
+              'description', tx.description,
+              'ref_id', tx.ref_id,
+              'created_at', tx.created_at
+            )
+          ) FILTER (WHERE tx.id IS NOT NULL), '[]') AS history
+        FROM tx
       `,
       [String(userId)],
     );
+    const row = result.rows[0] || {};
+    const balance = Number(row.balance || 0);
+    const tierInfo = getTierForBalance(balance);
+    let history = [];
+    try {
+      if (row.history && typeof row.history === 'string') {
+        history = JSON.parse(row.history);
+      } else if (Array.isArray(row.history)) {
+        history = row.history;
+      }
+    } catch {}
 
     return {
       balance,
       tier: tierInfo,
-      history: historyResult.rows.map(serializeTxRow),
+      history: history.map(serializeTxRow),
     };
   }
 
