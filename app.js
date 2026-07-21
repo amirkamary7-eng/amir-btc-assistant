@@ -6598,7 +6598,10 @@ async function checkMaintenanceMode() {
 
         const resp = await fetch(`${baseUrl}/api/system/status`, {
             signal: controller.signal,
-            headers: { 'Cache-Control': 'no-cache' },
+            // NOTE: Do NOT set custom headers like 'Cache-Control' here —
+            // that would trigger a CORS preflight which the Worker may not
+            // allow. Keep this a "simple request" (GET with no custom headers).
+            cache: 'no-store',
         });
         clearTimeout(timeoutId);
 

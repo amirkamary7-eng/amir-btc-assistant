@@ -37,7 +37,7 @@ import { createMarketOverviewService } from './src/services/market_overview_serv
 //#region ثابت‌ها و ابزارهای کمکی
 // ============================================================================
 const CORS_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
-const CORS_ALLOW_HEADERS = 'Content-Type, X-Telegram-Init-Data, X-Telegram-Bot-Api-Secret-Token';
+const CORS_ALLOW_HEADERS = 'Content-Type, X-Telegram-Init-Data, X-Telegram-Bot-Api-Secret-Token, Cache-Control';
 
 /**
  * Sanitize an error for safe logging — strips potential secrets (DB URLs, tokens).
