@@ -7286,7 +7286,9 @@ function _stopAllPolling() {
 function _startAllPolling() {
     if (_pollingIntervals.length) return; // already running
 
-    // Main data polling (market + analyses + news) — 120s, aligned with backend cache TTL
+    // Main data polling (market + analyses + news) — 180s, aligned with backend cache TTL
+    // OPTIMIZATION: Increased from 120s to 180s to reduce API calls by 33%.
+    // Only polls when the relevant page is active (lazy polling).
     _pollingIntervals.push(setInterval(() => {
         const activePage = document.querySelector('.page.active')?.id;
         if (activePage === 'market-page' || activePage === 'dashboard-page') {
@@ -7309,38 +7311,39 @@ function _startAllPolling() {
         }
         if (activePage === 'news-page') {
             loadNews();
-            // Calendar auto-refresh (§7#7): refresh every 30s when on news page
             const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news;
             if (activeTab === 'calendar') {
                 calendarEvents = [];
                 loadCalendarEvents(true).then(events => renderNews('calendar'));
-            } else {
-                loadCalendarEvents(true);
             }
+            // OPTIMIZATION: Don't refresh calendar when not on calendar tab
         }
-        // Dashboard rebuild: refresh dashboard calendar every poll cycle when on dashboard
+        // OPTIMIZATION: Only refresh dashboard calendar when on dashboard
         if (activePage === 'dashboard-page') {
             loadCalendarEvents(true).then(() => renderDashboardCalendar()).catch(() => {});
         }
-    }, 120000));
+    }, 180000));
 
-    // R3-1: Alert checking — 15s interval, uses allCoins from memory (no /api/market call)
-    _pollingIntervals.push(setInterval(checkAlerts, 15000));
+    // R3-1: Alert checking — 30s interval (was 15s), uses allCoins from memory
+    // OPTIMIZATION: Doubled interval — alerts don't need 15s precision.
+    _pollingIntervals.push(setInterval(checkAlerts, 30000));
 
-    // R3-2: Session heartbeat — 120s (was 45s), skips if app not visible
+    // R3-2: Session heartbeat — 180s (was 120s), skips if app not visible
+    // OPTIMIZATION: Increased to match main polling interval, reduces KV writes.
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
         sendSessionHeartbeat();
-    }, 120000));
+    }, 180000));
 
-    // R3-3: Online count — 300s (was 60s), only polls when Profile tab is active
+    // R3-3: Online count — 600s (was 300s), only polls when Profile tab is active
+    // OPTIMIZATION: Doubled interval — online count is non-critical display data.
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
         const activePage = document.querySelector('.page.active')?.id;
         if (activePage === 'profile-page') {
             fetchOnlineCount();
         }
-    }, 300000));
+    }, 600000));
 }
 
 document.addEventListener('visibilitychange', () => {

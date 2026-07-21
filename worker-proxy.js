@@ -150,7 +150,14 @@ async function readAppCache(env, key) {
     return null;
   }
 
-  return env.APP_CACHE.get(key);
+  // FAIL-SAFE: KV read failure should return null (cache miss) not crash.
+  // The caller will fall through to live data fetching.
+  try {
+    return await env.APP_CACHE.get(key);
+  } catch (e) {
+    console.warn('readAppCache failed (non-fatal):', e.message || e);
+    return null;
+  }
 }
 
 async function writeAppCache(env, key, value, expirationTtl) {
@@ -1800,8 +1807,24 @@ function parseRssItems(rssText) {
  * Workers AI: free, no rate-limit, runs inside the Worker — no external call.
  * Google Translate fallback: kept for environments without AI binding.
  */
+// In-memory translation cache — avoids re-translating the same text across requests.
+// Key: hash of input text, Value: translated text.
+// Survives for the lifetime of the Worker isolate.
+const _translationCache = new Map();
+const TRANSLATION_CACHE_MAX = 500;
+
 async function translateToFarsi(text, env) {
   if (!text) return '';
+
+  // OPTIMIZATION: Check in-memory translation cache first.
+  // This avoids redundant AI/Google Translate calls for the same text
+  // across multiple news refresh cycles.
+  const cacheKey = text.length > 100 ? text.substring(0, 100) : text;
+  if (_translationCache.has(cacheKey)) {
+    return _translationCache.get(cacheKey);
+  }
+
+  let result = text;
 
   // ── Primary: Cloudflare Workers AI ─────────────────────────────────
   if (env?.AI) {
@@ -1813,7 +1836,7 @@ async function translateToFarsi(text, env) {
       });
       const translated = response?.translated_text;
       if (translated && typeof translated === 'string' && translated.trim()) {
-        return translated.trim();
+        result = translated.trim();
       }
     } catch {
       // AI unavailable or model error — fall through to Google Translate
@@ -1821,27 +1844,40 @@ async function translateToFarsi(text, env) {
   }
 
   // ── Fallback: Google Translate (unofficial) ───────────────────────
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=fa&dt=t&q=${encodeURIComponent(text)}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+  if (result === text && env?.AI) {
+    // Only use Google Translate if AI failed (result still equals input)
+    try {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=fa&dt=t&q=${encodeURIComponent(text)}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-    if (!response.ok) return text;
-
-    const body = await response.json();
-    if (!Array.isArray(body?.[0])) return text;
-
-    const translated = body[0].map((part) => part?.[0] || '').join('').trim();
-    return translated || text;
-  } catch {
-    return text;
+      if (response.ok) {
+        const body = await response.json();
+        if (Array.isArray(body?.[0])) {
+          const translated = body[0].map((part) => part?.[0] || '').join('').trim();
+          if (translated) result = translated;
+        }
+      }
+    } catch {
+      // Both AI and Google failed — return original text
+    }
   }
+
+  // Cache the result (even if it's the original text — avoids retrying failed translations)
+  if (_translationCache.size >= TRANSLATION_CACHE_MAX) {
+    // Evict oldest entry (first key in Map insertion order)
+    const firstKey = _translationCache.keys().next().value;
+    _translationCache.delete(firstKey);
+  }
+  _translationCache.set(cacheKey, result);
+
+  return result;
 }
 
 /**
