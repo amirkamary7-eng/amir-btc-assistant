@@ -370,6 +370,89 @@ async function saveMaintenanceSettings() {
     }
 }
 
+/**
+ * Quick Maintenance Presets — one-click scenarios for common maintenance situations.
+ * Each preset fills the form fields with appropriate values + saves automatically.
+ * @param {string} presetKey - 'deploy'|'upgrade'|'database'|'emergency'|'end'
+ */
+const MAINT_PRESETS = {
+    deploy: {
+        enabled: true,
+        title: 'در حال استقرار نسخه جدید',
+        description: 'در حال انتشار نسخه جدید اپلیکیشن با قابلیت‌های بهتر هستیم. به‌زودی بازمی‌گردیم!',
+        progress: 25,
+    },
+    upgrade: {
+        enabled: true,
+        title: 'ارتقای سیستم در حال انجام است',
+        description: 'در حال ارتقاء زیرساخت و بهبود عملکرد سیستم هستیم. چند دقیقه دیگر بازمی‌گردیم.',
+        progress: 50,
+    },
+    database: {
+        enabled: true,
+        title: 'مهاجرت دیتابیس',
+        description: 'در حال مهاجرت دیتابیس برای بهبود سرعت و پایداری هستیم. این عملیات کمی طول می‌کشد.',
+        progress: 75,
+    },
+    emergency: {
+        enabled: true,
+        title: 'اصلاح فوری سیستم',
+        description: 'متأسفیم! یک مشکل فوری شناسایی کردیم که در حال رفع آن هستیم. به‌زودی بازمی‌گردیم.',
+        progress: 10,
+    },
+    end: {
+        enabled: false,
+        title: 'در حال ساخت آینده‌ای بهتر!',
+        description: 'در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.',
+        progress: 100,
+    },
+};
+
+async function applyMaintenancePreset(presetKey) {
+    const preset = MAINT_PRESETS[presetKey];
+    if (!preset) {
+        showAdminToast('سناریو نامشخص', 'error');
+        return;
+    }
+
+    // Confirm before enabling maintenance (not for 'end' preset)
+    if (preset.enabled) {
+        const confirmed = confirm(
+            '⚠️ فعال‌سازی حالت نگهداری؟\n\n' +
+            'تمام کاربران عادی قفل خواهند شد و فقط ادمین‌ها می‌توانند وارد شوند.\n\n' +
+            'سناریو: ' + preset.title
+        );
+        if (!confirmed) return;
+    } else {
+        const confirmed = confirm('✓ پایان حالت نگهداری؟\n\nکاربران دوباره می‌توانند وارد شوند.');
+        if (!confirmed) return;
+    }
+
+    // Fill form fields
+    const toggle = document.getElementById('adm-maint-toggle');
+    const titleInput = document.getElementById('adm-maint-title-input');
+    const descInput = document.getElementById('adm-maint-desc-input');
+    const progressInput = document.getElementById('adm-maint-progress');
+    const body = document.getElementById('adm-maint-body');
+
+    if (toggle) toggle.checked = preset.enabled;
+    if (titleInput) titleInput.value = preset.title;
+    if (descInput) descInput.value = preset.description;
+    if (progressInput) progressInput.value = preset.progress;
+    if (body) body.style.display = preset.enabled ? 'flex' : 'none';
+
+    // Update progress display
+    onMaintenanceProgressChange(preset.progress);
+
+    // Save automatically
+    await saveMaintenanceSettings();
+
+    // Reload dashboard banner to reflect new state
+    if (typeof loadDashboardMaintenanceBanner === 'function') {
+        loadDashboardMaintenanceBanner();
+    }
+}
+
 // ─── Dashboard ──────────────────────────────────────────────
 
 async function loadAdminDashboard() {
@@ -1155,3 +1238,4 @@ window.loadMaintenanceSettings = loadMaintenanceSettings;
 window.onMaintenanceToggleChange = onMaintenanceToggleChange;
 window.onMaintenanceProgressChange = onMaintenanceProgressChange;
 window.saveMaintenanceSettings = saveMaintenanceSettings;
+window.applyMaintenancePreset = applyMaintenancePreset;
