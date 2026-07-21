@@ -3027,6 +3027,115 @@ strong.down { color: var(--red); }
     transition: width 0.3s ease;
 }
 
+/* ── Maintenance Status Banner (admin dashboard) ── */
+.adm-maint-banner {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 16px; border-radius: 14px;
+    margin-bottom: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    transition: all 0.25s ease;
+    position: relative; overflow: hidden;
+}
+.adm-maint-banner::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(0,200,150,0.05), transparent 60%);
+    opacity: 1; transition: opacity 0.3s;
+}
+.adm-maint-banner.is-active {
+    background: linear-gradient(135deg, rgba(247,147,26,0.12), rgba(247,147,26,0.04));
+    border-color: rgba(247,147,26,0.3);
+    box-shadow: 0 4px 20px rgba(247,147,26,0.1);
+}
+.adm-maint-banner.is-active::before {
+    background: linear-gradient(135deg, rgba(247,147,26,0.08), transparent 60%);
+}
+.adm-maint-banner:hover { transform: translateY(-1px); }
+.adm-maint-banner-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: rgba(0,200,150,0.15);
+    border: 1px solid rgba(0,200,150,0.3);
+    color: #4ade80;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; z-index: 1;
+    transition: all 0.3s ease;
+}
+.adm-maint-banner.is-active .adm-maint-banner-icon {
+    background: rgba(247,147,26,0.2);
+    border-color: rgba(247,147,26,0.4);
+    color: #f7b950;
+    animation: admMaintBannerPulse 2s ease-in-out infinite;
+}
+@keyframes admMaintBannerPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(247,147,26,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(247,147,26,0); }
+}
+.adm-maint-banner-content { flex: 1; min-width: 0; z-index: 1; }
+.adm-maint-banner-title { font-size: 14px; font-weight: 700; color: #e4e9f2; }
+.adm-maint-banner.is-active .adm-maint-banner-title { color: #f7b950; }
+.adm-maint-banner-sub { font-size: 12px; color: #7a8499; margin-top: 2px; }
+.adm-maint-banner-arrow { color: #5a6378; flex-shrink: 0; z-index: 1; }
+.adm-maint-banner:hover .adm-maint-banner-arrow { color: #a8b2c5; transform: translateX(-3px); }
+
+/* ── Quick Actions Row ── */
+.adm-quick-actions {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 8px; margin-bottom: 16px;
+}
+.adm-quick-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 12px 6px; border-radius: 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    color: #a8b2c5; font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s ease;
+    font-family: inherit;
+}
+.adm-quick-btn svg { color: #7a8499; transition: all 0.2s ease; }
+.adm-quick-btn:hover {
+    background: rgba(247,147,26,0.08);
+    border-color: rgba(247,147,26,0.2);
+    color: #f7b950;
+    transform: translateY(-2px);
+}
+.adm-quick-btn:hover svg { color: #f7b950; }
+.adm-quick-btn:active { transform: scale(0.96); }
+
+/* ── Enhanced Stat Cards (with icon + color) ── */
+.adm-stat-card-v2 {
+    background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px; padding: 14px;
+    transition: all 0.2s ease;
+    display: flex; flex-direction: column; gap: 8px;
+    position: relative; overflow: hidden;
+}
+.adm-stat-card-v2::before {
+    content: ''; position: absolute; top: 0; right: 0;
+    width: 60px; height: 60px; border-radius: 50%;
+    background: var(--stat-glow, rgba(247,147,26,0.08));
+    transform: translate(20px, -20px);
+    transition: transform 0.3s ease;
+}
+.adm-stat-card-v2:hover { border-color: rgba(255,255,255,0.12); transform: translateY(-2px); }
+.adm-stat-card-v2:hover::before { transform: translate(15px, -15px) scale(1.2); }
+.adm-stat-card-v2-icon {
+    width: 32px; height: 32px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--stat-bg, rgba(247,147,26,0.12));
+    color: var(--stat-color, #f7b950);
+    position: relative; z-index: 1;
+}
+.adm-stat-card-v2-value {
+    font-size: 24px; font-weight: 800; color: #fff;
+    line-height: 1.1; position: relative; z-index: 1;
+    font-variant-numeric: tabular-nums;
+}
+.adm-stat-card-v2-label {
+    font-size: 11px; color: #7a8499; font-weight: 500;
+    position: relative; z-index: 1;
+}
+
 /* ── Desktop: show sidebar inline, hide hamburger ── */
 @media (min-width: 900px) {
     .admin-panel-container { max-width: 760px; }

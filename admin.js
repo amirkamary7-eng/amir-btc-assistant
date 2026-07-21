@@ -75,6 +75,41 @@ function adminStatCard(value, label) {
         '</div><div class="admin-stat-label">' + adminEscapeHtml(label) + '</div></div>';
 }
 
+/**
+ * Enhanced stat card with icon and color theming.
+ * @param {string} value - The stat value
+ * @param {string} label - The stat label
+ * @param {string} iconKey - Key in _adminStatIcons
+ * @param {string} color - Color theme: 'orange'|'green'|'blue'|'red'|'purple'|'gray'
+ */
+function adminStatCardV2(value, label, iconKey, color) {
+    const icons = {
+        users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+        active: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+        new: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>',
+        tickets: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+        open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+        tx: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>',
+        rewards: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89 7 23l5-3 5 3-1.21-9.12"/></svg>',
+        admins: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    };
+    const colors = {
+        orange: { bg: 'rgba(247,147,26,0.12)', color: '#f7b950', glow: 'rgba(247,147,26,0.08)' },
+        green: { bg: 'rgba(0,200,150,0.12)', color: '#4ade80', glow: 'rgba(0,200,150,0.08)' },
+        blue: { bg: 'rgba(96,165,250,0.12)', color: '#60a5fa', glow: 'rgba(96,165,250,0.08)' },
+        red: { bg: 'rgba(239,68,68,0.12)', color: '#f87171', glow: 'rgba(239,68,68,0.08)' },
+        purple: { bg: 'rgba(167,139,250,0.12)', color: '#a78bfa', glow: 'rgba(167,139,250,0.08)' },
+        gray: { bg: 'rgba(255,255,255,0.06)', color: '#a8b2c5', glow: 'rgba(255,255,255,0.04)' },
+    };
+    const c = colors[color] || colors.orange;
+    const icon = icons[iconKey] || icons.users;
+    return '<div class="adm-stat-card-v2" style="--stat-bg:' + c.bg + ';--stat-color:' + c.color + ';--stat-glow:' + c.glow + '">' +
+        '<div class="adm-stat-card-v2-icon">' + icon + '</div>' +
+        '<div class="adm-stat-card-v2-value">' + adminEscapeHtml(String(value)) + '</div>' +
+        '<div class="adm-stat-card-v2-label">' + adminEscapeHtml(label) + '</div>' +
+        '</div>';
+}
+
 function adminPagination(containerId, currentPage, totalPages, loadFn) {
     const container = document.getElementById(containerId);
     if (!container || totalPages <= 1) {
@@ -342,6 +377,9 @@ async function loadAdminDashboard() {
     const activityList = document.getElementById('admin-activity-list');
     if (!grid) return;
 
+    // Load maintenance status banner (independent of dashboard API)
+    loadDashboardMaintenanceBanner();
+
     grid.innerHTML = '<div class="admin-empty">Loading...</div>';
     if (activityList) activityList.innerHTML = '';
 
@@ -349,25 +387,25 @@ async function loadAdminDashboard() {
         const data = await apiFetch('/api/admin/dashboard');
         if (!data) throw new Error('No data');
 
-        // Stats
+        // Stats — use enhanced v2 cards with icons + colors
         let statsHtml = '';
         if (data.stats) {
             const s = data.stats;
-            if (s.total_users != null) statsHtml += adminStatCard(adminFormatNumber(s.total_users), 'Total Users');
-            if (s.active_today != null) statsHtml += adminStatCard(adminFormatNumber(s.active_today), 'Active Today');
-            if (s.new_users_today != null) statsHtml += adminStatCard(adminFormatNumber(s.new_users_today), 'New Today');
-            if (s.total_tickets != null) statsHtml += adminStatCard(adminFormatNumber(s.total_tickets), 'Total Tickets');
-            if (s.open_tickets != null) statsHtml += adminStatCard(adminFormatNumber(s.open_tickets), 'Open Tickets');
-            if (s.total_transactions != null) statsHtml += adminStatCard(adminFormatNumber(s.total_transactions), 'Transactions');
-            if (s.total_rewards != null) statsHtml += adminStatCard(adminFormatNumber(s.total_rewards), 'Rewards');
-            if (s.admins_count != null) statsHtml += adminStatCard(adminFormatNumber(s.admins_count), 'Admins');
+            if (s.total_users != null) statsHtml += adminStatCardV2(adminFormatNumber(s.total_users), 'کل کاربران', 'users', 'blue');
+            if (s.active_today != null) statsHtml += adminStatCardV2(adminFormatNumber(s.active_today), 'فعال امروز', 'active', 'green');
+            if (s.new_users_today != null) statsHtml += adminStatCardV2(adminFormatNumber(s.new_users_today), 'کاربران جدید', 'new', 'purple');
+            if (s.total_tickets != null) statsHtml += adminStatCardV2(adminFormatNumber(s.total_tickets), 'کل تیکت‌ها', 'tickets', 'gray');
+            if (s.open_tickets != null) statsHtml += adminStatCardV2(adminFormatNumber(s.open_tickets), 'تیکت‌های باز', 'open', 'red');
+            if (s.total_transactions != null) statsHtml += adminStatCardV2(adminFormatNumber(s.total_transactions), 'تراکنش‌ها', 'tx', 'orange');
+            if (s.total_rewards != null) statsHtml += adminStatCardV2(adminFormatNumber(s.total_rewards), 'پاداش‌ها', 'rewards', 'orange');
+            if (s.admins_count != null) statsHtml += adminStatCardV2(adminFormatNumber(s.admins_count), 'مدیران', 'admins', 'purple');
         }
-        grid.innerHTML = statsHtml || adminEmpty('No stats available');
+        grid.innerHTML = statsHtml || adminEmpty('آماری موجود نیست');
 
         // Activity
         if (activityList && data.recent_activity) {
             if (data.recent_activity.length === 0) {
-                activityList.innerHTML = adminEmpty('No recent activity');
+                activityList.innerHTML = adminEmpty('فعالیتی اخیر وجود ندارد');
             } else {
                 let actHtml = '';
                 data.recent_activity.forEach(function (act) {
@@ -384,8 +422,45 @@ async function loadAdminDashboard() {
             }
         }
     } catch (e) {
-        grid.innerHTML = adminEmpty('Failed to load dashboard');
+        grid.innerHTML = adminEmpty('بارگذاری داشبورد ناموفق بود');
         console.error('loadAdminDashboard:', e);
+    }
+}
+
+/**
+ * Load maintenance status into the dashboard banner.
+ * This is independent of the main dashboard API so the banner always works
+ * even if /api/admin/dashboard fails.
+ */
+async function loadDashboardMaintenanceBanner() {
+    const banner = document.getElementById('adm-maint-banner');
+    const titleEl = document.getElementById('adm-maint-banner-title');
+    const subEl = document.getElementById('adm-maint-banner-sub');
+    if (!banner) return;
+
+    try {
+        const data = await apiFetch('/api/system/status');
+        if (!data || !data.maintenance) {
+            titleEl.textContent = 'وضعیت نگهداری: غیرفعال';
+            subEl.textContent = 'سیستم در حالت عادی';
+            banner.classList.remove('is-active');
+            return;
+        }
+        const m = data.maintenance;
+        if (m.enabled) {
+            titleEl.textContent = 'وضعیت نگهداری: فعال ⚠';
+            const pct = Math.max(0, Math.min(100, Number(m.progress) || 0));
+            subEl.textContent = 'پیشرفت: ' + pct + '% — کاربران قفل شده‌اند';
+            banner.classList.add('is-active');
+        } else {
+            titleEl.textContent = 'وضعیت نگهداری: غیرفعال ✓';
+            subEl.textContent = 'سیستم در حالت عادی';
+            banner.classList.remove('is-active');
+        }
+    } catch (e) {
+        titleEl.textContent = 'وضعیت نگهداری: نامشخص';
+        subEl.textContent = 'خطا در دریافت وضعیت';
+        banner.classList.remove('is-active');
     }
 }
 

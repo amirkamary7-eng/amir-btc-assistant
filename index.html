@@ -1247,6 +1247,41 @@
                             <p class="adm-section-desc">نمای کلی سیستم در یک نگاه</p>
                         </div>
                     </div>
+
+                    <!-- Maintenance Status Banner -->
+                    <div class="adm-maint-banner" id="adm-maint-banner" onclick="switchAdminSection('system-controls', document.querySelector('.adm-nav-item[data-admin-section=&quot;system-controls&quot;]'))" style="cursor:pointer;">
+                        <div class="adm-maint-banner-icon" id="adm-maint-banner-icon">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                        </div>
+                        <div class="adm-maint-banner-content">
+                            <div class="adm-maint-banner-title" id="adm-maint-banner-title">وضعیت نگهداری: بررسی...</div>
+                            <div class="adm-maint-banner-sub" id="adm-maint-banner-sub">در حال بارگذاری وضعیت سیستم</div>
+                        </div>
+                        <div class="adm-maint-banner-arrow">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions Row -->
+                    <div class="adm-quick-actions">
+                        <button class="adm-quick-btn" onclick="switchAdminSection('users', document.querySelector('.adm-nav-item[data-admin-section=&quot;users&quot;]'))">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            <span>کاربران</span>
+                        </button>
+                        <button class="adm-quick-btn" onclick="switchAdminSection('tickets', document.querySelector('.adm-nav-item[data-admin-section=&quot;tickets&quot;]'))">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                            <span>تیکت‌ها</span>
+                        </button>
+                        <button class="adm-quick-btn" onclick="switchAdminSection('broadcast', document.querySelector('.adm-nav-item[data-admin-section=&quot;broadcast&quot;]'))">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+                            <span>پیام همگانی</span>
+                        </button>
+                        <button class="adm-quick-btn" onclick="switchAdminSection('system-controls', document.querySelector('.adm-nav-item[data-admin-section=&quot;system-controls&quot;]'))">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            <span>نگهداری</span>
+                        </button>
+                    </div>
+
                     <div class="adm-stats-grid" id="admin-stats-grid"></div>
                     <div class="adm-card">
                         <div class="adm-card-head">
