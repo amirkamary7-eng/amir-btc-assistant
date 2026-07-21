@@ -3080,7 +3080,7 @@ function refreshUI() {
         renderAnalysisList();
         renderDashboardFeaturedAnalysis();
         renderDashboardCalendar();
-        if (newsCache.length) renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
+        if (newsCache.length) renderNews(document.querySelector('.ni-tab.active')?.dataset?.news || 'all');
         loadImportantNews();
         renderTickets();
         renderActiveAlerts(document.getElementById('detail-coin-title')?.innerText?.split(' ')[0] || '');
@@ -4419,15 +4419,15 @@ async function loadNews(force = false, append = false) {
             const cached = Cache.get('news');
             if (cached) {
                 newsCache = cached;
-                renderNews(document.querySelector('.news-tab.active')?.dataset?.news || 'all');
+                renderNews(document.querySelector('.ni-tab.active')?.dataset?.news || 'all');
                 loadNews(true);
                 return;
             }
         }
         const container = document.getElementById('news-list');
         if (!container) return;
-        const activeTab = document.querySelector('.news-tab.active')?.dataset?.news || 'all';
-        if (!append && activeTab !== 'calendar') {
+        const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
+        if (!append && activeTab !== 'calendar' && activeTab !== 'saved') {
             container.innerHTML = `
                 <div class="skeleton-hero"></div>
                 ${Array(4).fill(`
@@ -4544,11 +4544,14 @@ function renderNews(category) {
 
     // ── Featured News Hero Slider (only on "all" tab) ──
     if (category === 'all') {
-        const heroItems = filtered.filter(niIsHeroEligible).slice(0, 5);
+        // BUG #1 FIX: Filter to only valid items (with title), then take up to 5
+        const heroItems = filtered.filter(niIsHeroEligible).filter(n => n && n.title).slice(0, 5);
         if (heroItems.length >= 1) {
             _niHeroSlides = heroItems;
             _niHeroIndex = 0;
             html += niRenderHeroSlider(heroItems);
+        } else {
+            _niHeroSlides = []; // No valid hero items
         }
     }
 
@@ -4612,8 +4615,13 @@ function renderNews(category) {
 // ============================================================================
 
 function niRenderHeroSlider(items) {
+    // BUG #1 FIX: Only render slides from valid news items.
+    // Filter out items without a title — never render empty slides.
+    const validItems = items.filter(n => n && n.title);
+    if (!validItems.length) return ''; // No valid items → no slider
+
     const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22240%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22/%3E%3C/svg%3E';
-    const slidesHtml = items.map((n, i) => {
+    const slidesHtml = validItems.map((n, i) => {
         const img = n.image && !n.image.includes('data:image/svg') ? n.image : placeholderImg;
         const idx = newsCache.indexOf(n); // index in displayedNews for modal
         const isSaved = _niSavedNews.some(s => s.url === n.url);
@@ -4626,7 +4634,7 @@ function niRenderHeroSlider(items) {
                 <div class="ni-hero-headline">${escapeHtml(n.title)}</div>
                 ${n.summary ? `<div class="ni-hero-summary">${escapeHtml(n.summary)}</div>` : ''}
                 <div class="ni-hero-meta">
-                    <div class="ni-hero-source">${NI_ICONS.clock}<span>${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</span></div>
+                    <div class="ni-hero-source">${NI_ICONS.clock}<span>${escapeHtml(n.source || '')} • ${escapeHtml(n.time || '')}</span></div>
                     <div class="ni-hero-actions">
                         <button class="ni-hero-action-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="ذخیره">
                             ${isSaved ? NI_ICONS.bookmarkFilled : NI_ICONS.bookmark}
@@ -4640,12 +4648,17 @@ function niRenderHeroSlider(items) {
         </div>`;
     }).join('');
 
-    const dotsHtml = items.map((_, i) => `<span class="ni-hero-dot${i === 0 ? ' active' : ''}" onclick="niGoToSlide(${i})"></span>`).join('');
+    // BUG #1 FIX: Only show dots when there are 2+ slides
+    const showDots = validItems.length > 1;
+    const dotsHtml = showDots ? `<div class="ni-hero-dots">${validItems.map((_, i) => `<span class="ni-hero-dot${i === 0 ? ' active' : ''}" onclick="niGoToSlide(${i})"></span>`).join('')}</div>` : '';
+
+    // BUG #1 FIX: Add 'single' class when only 1 slide (hides cursor: grab, etc.)
+    const sliderClass = validItems.length === 1 ? 'ni-hero-slider ni-hero-single' : 'ni-hero-slider';
 
     return `
-    <div class="ni-hero-slider" id="ni-hero-slider">
+    <div class="${sliderClass}" id="ni-hero-slider">
         <div class="ni-hero-track" id="ni-hero-track">${slidesHtml}</div>
-        <div class="ni-hero-dots">${dotsHtml}</div>
+        ${dotsHtml}
     </div>`;
 }
 
@@ -4653,6 +4666,9 @@ function niInitHeroSlider() {
     const slider = document.getElementById('ni-hero-slider');
     const track = document.getElementById('ni-hero-track');
     if (!slider || !track) return;
+
+    // BUG #1 FIX: Only start autoplay if there are 2+ slides
+    if (_niHeroSlides.length <= 1) return; // Single slide → no autoplay, no swipe
 
     // Start autoplay (5 seconds)
     if (_niHeroTimer) clearInterval(_niHeroTimer);
@@ -5496,19 +5512,43 @@ function toggleCalReminder(btn) {
     btn.textContent = btn.classList.contains('active') ? '🔔' : '🔕';
 }
 
-function filterCalCountry(country, btn) {
-    currentCalCountry = country;
-    document.querySelectorAll('.cal-country-btn').forEach(b => b.classList.remove('active'));
-    if (btn) btn.classList.add('active');
-    renderCalendar();
-}
-
 /**
  * نمایش یا وضعیت اخبار تب را تعویض می‌کند.
  * ورودی: پارامترهای `category, btn` را دریافت می‌کند.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
+// Scroll position preservation per tab
+const _niScrollPositions = {};
+
+function _niSaveScrollPosition() {
+    const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news;
+    if (!activeTab) return;
+    const container = document.getElementById('news-list');
+    if (!container) return;
+    // Find scrollable parent (the page or feed container)
+    const scrollEl = document.getElementById('news-page') || container;
+    _niScrollPositions[activeTab] = scrollEl.scrollTop || window.scrollY || 0;
+}
+
+function _niRestoreScrollPosition(tab) {
+    if (!tab) return;
+    const saved = _niScrollPositions[tab];
+    if (saved == null) return;
+    // Use requestAnimationFrame to ensure DOM is rendered
+    requestAnimationFrame(() => {
+        const scrollEl = document.getElementById('news-page');
+        if (scrollEl) {
+            scrollEl.scrollTop = saved;
+        } else {
+            window.scrollTo(0, saved);
+        }
+    });
+}
+
 function switchNewsTab(category, btn) {
+    // BUG #2 FIX: Save scroll position of the current tab before switching
+    _niSaveScrollPosition();
+
     document.querySelectorAll('.ni-tab').forEach(b => b.classList.remove('active'));
     if (btn) {
         btn.classList.add('active');
@@ -5522,6 +5562,9 @@ function switchNewsTab(category, btn) {
         currentCalCountry = 'all';
     }
     renderNews(category);
+
+    // BUG #2 FIX: Restore scroll position for the new tab
+    _niRestoreScrollPosition(category);
 }
 
 function switchCalendarTab(tab, btn) {
@@ -7235,7 +7278,7 @@ function _startAllPolling() {
         if (activePage === 'news-page') {
             loadNews();
             // Calendar auto-refresh (§7#7): refresh every 30s when on news page
-            const activeTab = document.querySelector('.news-tab.active')?.dataset?.news;
+            const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news;
             if (activeTab === 'calendar') {
                 calendarEvents = [];
                 loadCalendarEvents(true).then(events => renderNews('calendar'));
