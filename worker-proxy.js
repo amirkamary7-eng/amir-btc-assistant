@@ -238,12 +238,14 @@ async function getMaintenanceState(env) {
 
 /**
  * Write the maintenance state to KV. Returns the new state.
+ * Never throws — on KV write failure, returns the computed state with a warning flag
+ * so the caller can still respond with the intended value (the next read will return
+ * the previous state, but the admin sees what they tried to save).
  */
 async function setMaintenanceState(env, patch, updatedBy) {
   const current = (await getMaintenanceState(env)).maintenance;
   const next = {
     ...current,
-    ...patch,
     // Clamp progress 0-100
     progress: patch.progress != null ? Math.max(0, Math.min(100, Number(patch.progress) || 0)) : current.progress,
     // Sanitize title/description
@@ -254,7 +256,14 @@ async function setMaintenanceState(env, patch, updatedBy) {
     updated_by: String(updatedBy || 'admin'),
   };
   if (env?.APP_CACHE && typeof env.APP_CACHE.put === 'function') {
-    await env.APP_CACHE.put(MAINT_KV_KEY, JSON.stringify(next));
+    try {
+      await env.APP_CACHE.put(MAINT_KV_KEY, JSON.stringify(next));
+    } catch (err) {
+      console.warn('setMaintenanceState KV write failed:', err?.message || err);
+      // Return the intended state anyway, with a warning flag
+      // The next GET will return the old state, but the admin UI shows what they tried.
+      return { maintenance: next, warning: 'KV write failed — state may not persist' };
+    }
   }
   return { maintenance: next };
 }
@@ -3654,8 +3663,16 @@ export default {
         if (payload.description !== undefined) patch.description = String(payload.description);
         if (payload.progress !== undefined) patch.progress = Number(payload.progress);
 
-        const newState = await setMaintenanceState(env, patch, authState.user.id);
-        return jsonResponse({ status: 'success', ...newState }, {}, env);
+        try {
+          const newState = await setMaintenanceState(env, patch, authState.user.id);
+          return jsonResponse({ status: 'success', ...newState }, {}, env);
+        } catch (err) {
+          console.warn('maintenance update failed:', err?.message || err);
+          return jsonResponse(
+            { status: 'error', message: 'Failed to save maintenance state', detail: String(err?.message || err).slice(0, 200) },
+            { status: 500 }, env
+          );
+        }
       }
 
       if (request.method === 'GET' && url.pathname === '/api/market') {

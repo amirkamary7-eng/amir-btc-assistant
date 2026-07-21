@@ -624,3 +624,133 @@ test('OPTIONS: preflight returns 204 with CORS headers', async () => {
   assert.ok(response.headers.get('access-control-allow-origin'));
   assert.ok(response.headers.get('access-control-allow-methods'));
 });
+
+// ============================================================================
+// Maintenance Mode — /api/system/status + /api/admin/maintenance
+// ============================================================================
+test('Maintenance: GET /api/system/status returns default disabled state (no auth)', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const res = await sendRequest(worker, env, 'GET', '/api/system/status');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, 'success');
+  assert.equal(res.body.maintenance.enabled, false);
+  assert.equal(res.body.maintenance.progress, 0);
+  assert.ok(res.body.maintenance.title, 'should have default title');
+  assert.ok(res.body.maintenance.description, 'should have default description');
+});
+
+test('Maintenance: PUT /api/admin/maintenance without auth returns 401', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const res = await sendRequest(worker, env, 'PUT', '/api/admin/maintenance', {
+    body: { enabled: true, progress: 50 },
+  });
+  assert.equal(res.status, 401);
+});
+
+test('Maintenance: PUT /api/admin/maintenance with admin auth updates state', async () => {
+  const worker = loadWorker();
+  const env = createEnv(); // ADMIN_TELEGRAM_ID = '831704732', bot token = 'test-bot-token'
+  const user = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', user);
+
+  const updateRes = await sendRequest(worker, env, 'PUT', '/api/admin/maintenance', {
+    body: { enabled: true, title: 'Test Mode', description: 'Testing', progress: 42 },
+    initData,
+  });
+  assert.equal(updateRes.status, 200);
+  assert.equal(updateRes.body.status, 'success');
+  assert.equal(updateRes.body.maintenance.enabled, true);
+  assert.equal(updateRes.body.maintenance.title, 'Test Mode');
+  assert.equal(updateRes.body.maintenance.progress, 42);
+  assert.ok(updateRes.body.maintenance.updated_at, 'should have updated_at timestamp');
+});
+
+test('Maintenance: state persists across requests (GET after PUT)', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const user = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', user);
+
+  // PUT with admin
+  await sendRequest(worker, env, 'PUT', '/api/admin/maintenance', {
+    body: { enabled: true, progress: 75, title: 'Persisted State' },
+    initData,
+  });
+  // GET — should return the persisted state
+  const getRes = await sendRequest(worker, env, 'GET', '/api/system/status');
+  assert.equal(getRes.status, 200);
+  assert.equal(getRes.body.maintenance.enabled, true);
+  assert.equal(getRes.body.maintenance.progress, 75);
+  assert.equal(getRes.body.maintenance.title, 'Persisted State');
+});
+
+test('Maintenance: progress is clamped to 0-100 range', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const user = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', user);
+
+  // Test over 100
+  const res1 = await sendRequest(worker, env, 'PUT', '/api/admin/maintenance', {
+    body: { enabled: true, progress: 150 },
+    initData,
+  });
+  assert.equal(res1.body.maintenance.progress, 100);
+  // Test under 0
+  const res2 = await sendRequest(worker, env, 'PUT', '/api/admin/maintenance', {
+    body: { enabled: true, progress: -10 },
+    initData,
+  });
+  assert.equal(res2.body.maintenance.progress, 0);
+});
+
+test('Maintenance: title is truncated to 60 chars', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const user = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', user);
+  const longTitle = 'A'.repeat(100);
+
+  const res = await sendRequest(worker, env, 'PUT', '/api/admin/maintenance', {
+    body: { enabled: true, title: longTitle },
+    initData,
+  });
+  assert.equal(res.body.maintenance.title.length, 60);
+});
+
+test('Maintenance: disabling sets enabled to false', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const user = { id: 831704732, first_name: 'Admin' };
+  const initData = buildInitData('test-bot-token', user);
+
+  // First enable
+  await sendRequest(worker, env, 'PUT', '/api/admin/maintenance', {
+    body: { enabled: true, progress: 50 },
+    initData,
+  });
+  // Then disable
+  const res = await sendRequest(worker, env, 'PUT', '/api/admin/maintenance', {
+    body: { enabled: false },
+    initData,
+  });
+  assert.equal(res.body.maintenance.enabled, false);
+  // Verify GET returns disabled
+  const getRes = await sendRequest(worker, env, 'GET', '/api/system/status');
+  assert.equal(getRes.body.maintenance.enabled, false);
+});
+
+test('Maintenance: non-admin user gets 403', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const user = { id: 123456, first_name: 'Regular User' }; // Not an admin
+  const initData = buildInitData('test-bot-token', user);
+
+  const res = await sendRequest(worker, env, 'PUT', '/api/admin/maintenance', {
+    body: { enabled: true, progress: 50 },
+    initData,
+  });
+  assert.equal(res.status, 403);
+});
