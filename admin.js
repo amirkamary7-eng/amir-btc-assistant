@@ -102,18 +102,38 @@ async function initAdminPanel() {
 
 // ─── Panel Open / Close ─────────────────────────────────────
 
+// Section labels (Persian) for the header subtitle
+const _adminSectionLabels = {
+    'dashboard': 'داشبورد',
+    'users': 'کاربران',
+    'admins': 'مدیران',
+    'tickets': 'تیکت‌ها',
+    'broadcast': 'پیام همگانی',
+    'rewards': 'پاداش‌ها',
+    'transactions': 'تراکنش‌ها',
+    'referrals': 'رفرال',
+    'system-controls': 'کنترل سیستم',
+    'system-health': 'سلامت سیستم',
+    'logs': 'لاگ‌ها',
+};
+
 function openAdminPanel() {
     const panel = document.getElementById('admin-panel');
     if (!panel) return;
     panel.style.display = 'flex';
     _adminPanelOpen = true;
     document.body.style.overflow = 'hidden';
+    // Update admin sidebar user info
+    _updateAdminSidebarUser();
     // Load dashboard by default
     if (_currentAdminSection === 'dashboard') {
         loadAdminDashboard();
     } else {
         switchAdminSection(_currentAdminSection, null);
     }
+    // On mobile, start with sidebar closed (content visible).
+    // On desktop, sidebar is always visible via CSS.
+    closeAdminSidebar();
 }
 
 function closeAdminPanel() {
@@ -122,29 +142,87 @@ function closeAdminPanel() {
     panel.style.display = 'none';
     _adminPanelOpen = false;
     document.body.style.overflow = '';
+    closeAdminSidebar();
+}
+
+// ─── Sidebar Toggle (hamburger menu) ────────────────────────
+
+function toggleAdminSidebar() {
+    const sidebar = document.getElementById('adm-sidebar');
+    const backdrop = document.getElementById('adm-sidebar-backdrop');
+    if (!sidebar) return;
+    const isOpen = sidebar.classList.contains('open');
+    if (isOpen) {
+        closeAdminSidebar();
+    } else {
+        openAdminSidebar();
+    }
+}
+
+function openAdminSidebar() {
+    const sidebar = document.getElementById('adm-sidebar');
+    const backdrop = document.getElementById('adm-sidebar-backdrop');
+    if (sidebar) sidebar.classList.add('open');
+    if (backdrop) backdrop.classList.add('open');
+}
+
+function closeAdminSidebar() {
+    const sidebar = document.getElementById('adm-sidebar');
+    const backdrop = document.getElementById('adm-sidebar-backdrop');
+    if (sidebar) sidebar.classList.remove('open');
+    if (backdrop) backdrop.classList.remove('open');
+}
+
+// ─── Update admin sidebar user info from current user ───────
+
+function _updateAdminSidebarUser() {
+    try {
+        // Try to read from getTelegramUser() if available (defined in app.js)
+        const tg = (typeof getTg === 'function') ? getTg() : null;
+        const u = tg?.initDataUnsafe?.user || (typeof getTelegramUser === 'function' ? getTelegramUser() : null);
+        const nameEl = document.querySelector('.adm-sidebar-username');
+        const roleEl = document.querySelector('.adm-sidebar-userrole');
+        const avatarEl = document.querySelector('.adm-sidebar-avatar');
+        if (u) {
+            const fullName = ((u.first_name || '') + ' ' + (u.last_name || '')).trim();
+            if (nameEl) nameEl.textContent = fullName || 'مدیر';
+            if (avatarEl) avatarEl.textContent = (u.first_name || 'A').charAt(0).toUpperCase();
+        }
+    } catch (e) { /* ignore */ }
 }
 
 function switchAdminSection(section, btn) {
     _currentAdminSection = section;
 
-    // Update nav buttons
-    const navItems = document.querySelectorAll('.admin-nav-item');
+    // Update nav buttons (both new .adm-nav-item and legacy .admin-nav-item)
+    const navItems = document.querySelectorAll('.adm-nav-item, .admin-nav-item');
     navItems.forEach(function (item) { item.classList.remove('active'); });
     if (btn) {
         btn.classList.add('active');
     } else {
-        const target = document.querySelector('.admin-nav-item[data-admin-section="' + section + '"]');
+        const target = document.querySelector('.adm-nav-item[data-admin-section="' + section + '"], .admin-nav-item[data-admin-section="' + section + '"]');
         if (target) target.classList.add('active');
     }
 
-    // Update content sections
-    const sections = document.querySelectorAll('.admin-section');
+    // Update content sections (both .adm-section and legacy .admin-section)
+    const sections = document.querySelectorAll('.adm-section, .admin-section');
     sections.forEach(function (s) { s.classList.remove('active'); });
     const activeSection = document.getElementById('admin-section-' + section);
     if (activeSection) activeSection.classList.add('active');
 
+    // Update header subtitle label
+    const labelEl = document.getElementById('adm-section-label');
+    if (labelEl) labelEl.textContent = _adminSectionLabels[section] || section;
+
     // Scroll sidebar item into view
-    if (btn) btn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    if (btn && btn.scrollIntoView) {
+        try { btn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }); } catch (e) {}
+    }
+
+    // On mobile, close sidebar after selection
+    if (window.matchMedia && window.matchMedia('(max-width: 899px)').matches) {
+        closeAdminSidebar();
+    }
 
     // Load section data
     switch (section) {
@@ -156,6 +234,7 @@ function switchAdminSection(section, btn) {
         case 'rewards': loadAdminRewards(); break;
         case 'transactions': loadAdminTransactions(1); break;
         case 'referrals': loadAdminReferrals(); break;
+        case 'system-controls': loadMaintenanceSettings(); break;
         case 'system-health': loadAdminSystemHealth(); break;
         case 'logs': loadAdminLogs(1); break;
     }
@@ -163,6 +242,97 @@ function switchAdminSection(section, btn) {
     // Scroll content to top
     const content = document.getElementById('admin-content');
     if (content) content.scrollTop = 0;
+}
+
+// ─── Maintenance Mode Admin Controls ─────────────────────────
+
+async function loadMaintenanceSettings() {
+    const statusEl = document.getElementById('adm-maint-status');
+    try {
+        const data = await apiFetch('/api/system/status');
+        if (!data) throw new Error('No data');
+        const maint = data.maintenance || {};
+        const toggle = document.getElementById('adm-maint-toggle');
+        const body = document.getElementById('adm-maint-body');
+        const titleInput = document.getElementById('adm-maint-title-input');
+        const descInput = document.getElementById('adm-maint-desc-input');
+        const progressInput = document.getElementById('adm-maint-progress');
+        const progressVal = document.getElementById('adm-progress-val');
+        const progressFill = document.getElementById('adm-progress-fill');
+        const statStatus = document.getElementById('adm-stat-maint-status');
+        const statProgress = document.getElementById('adm-stat-maint-progress');
+        const statUpdated = document.getElementById('adm-stat-maint-updated');
+
+        if (toggle) toggle.checked = Boolean(maint.enabled);
+        if (body) body.style.display = Boolean(maint.enabled) ? 'flex' : 'none';
+        if (titleInput) titleInput.value = maint.title || '';
+        if (descInput) descInput.value = maint.description || '';
+        const pct = Math.max(0, Math.min(100, Number(maint.progress) || 0));
+        if (progressInput) progressInput.value = pct;
+        if (progressVal) progressVal.textContent = pct + '%';
+        if (progressFill) progressFill.style.width = pct + '%';
+        if (statStatus) {
+            statStatus.textContent = maint.enabled ? 'فعال' : 'غیرفعال';
+            statStatus.style.color = maint.enabled ? '#f7b950' : '#a8b2c5';
+        }
+        if (statProgress) statProgress.textContent = pct + '%';
+        if (statUpdated) statUpdated.textContent = maint.updated_at ? adminFormatDate(maint.updated_at) : '—';
+    } catch (e) {
+        if (statusEl) {
+            statusEl.className = 'adm-maint-status error';
+            statusEl.textContent = 'خطا در بارگذاری وضعیت: ' + (e.message || 'نامشخص');
+        }
+        console.error('loadMaintenanceSettings:', e);
+    }
+}
+
+function onMaintenanceToggleChange(checked) {
+    const body = document.getElementById('adm-maint-body');
+    if (body) body.style.display = checked ? 'flex' : 'none';
+}
+
+function onMaintenanceProgressChange(val) {
+    const pct = Math.max(0, Math.min(100, Number(val) || 0));
+    const valEl = document.getElementById('adm-progress-val');
+    const fillEl = document.getElementById('adm-progress-fill');
+    if (valEl) valEl.textContent = pct + '%';
+    if (fillEl) fillEl.style.width = pct + '%';
+}
+
+async function saveMaintenanceSettings() {
+    const statusEl = document.getElementById('adm-maint-status');
+    const toggle = document.getElementById('adm-maint-toggle');
+    const titleInput = document.getElementById('adm-maint-title-input');
+    const descInput = document.getElementById('adm-maint-desc-input');
+    const progressInput = document.getElementById('adm-maint-progress');
+
+    const payload = {
+        enabled: Boolean(toggle && toggle.checked),
+        title: (titleInput && titleInput.value.trim()) || 'در حال ساخت آینده‌ای بهتر!',
+        description: (descInput && descInput.value.trim()) || 'در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.',
+        progress: Math.max(0, Math.min(100, Number(progressInput && progressInput.value) || 0)),
+    };
+
+    try {
+        await apiFetch('/api/admin/maintenance', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (statusEl) {
+            statusEl.className = 'adm-maint-status success';
+            statusEl.textContent = '✓ تنظیمات با موفقیت ذخیره شد';
+        }
+        showAdminToast('تنظیمات نگهداری ذخیره شد', 'success');
+        loadMaintenanceSettings();
+    } catch (e) {
+        if (statusEl) {
+            statusEl.className = 'adm-maint-status error';
+            statusEl.textContent = '✗ خطا در ذخیره: ' + (e.message || 'نامشخص');
+        }
+        showAdminToast('خطا در ذخیره تنظیمات', 'error');
+        console.error('saveMaintenanceSettings:', e);
+    }
 }
 
 // ─── Dashboard ──────────────────────────────────────────────
@@ -887,6 +1057,9 @@ window.openAdminPanel = openAdminPanel;
 window.closeAdminPanel = closeAdminPanel;
 window.switchAdminSection = switchAdminSection;
 window.initAdminPanel = initAdminPanel;
+window.toggleAdminSidebar = toggleAdminSidebar;
+window.openAdminSidebar = openAdminSidebar;
+window.closeAdminSidebar = closeAdminSidebar;
 window.openAddAdminForm = openAddAdminForm;
 window.closeAddAdminForm = closeAddAdminForm;
 window.submitAddAdmin = submitAddAdmin;
@@ -902,3 +1075,8 @@ window.loadAdminUsers = loadAdminUsers;
 window.loadAdminTickets = loadAdminTickets;
 window.loadAdminTransactions = loadAdminTransactions;
 window.loadAdminLogs = loadAdminLogs;
+// Maintenance Mode
+window.loadMaintenanceSettings = loadMaintenanceSettings;
+window.onMaintenanceToggleChange = onMaintenanceToggleChange;
+window.onMaintenanceProgressChange = onMaintenanceProgressChange;
+window.saveMaintenanceSettings = saveMaintenanceSettings;

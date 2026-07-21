@@ -928,6 +928,10 @@ async function bootstrapUser() {
         updateAnalysisFabVisibility();
         // Update admin entry button (single source of truth: isCurrentUserAdmin)
         updateAdminEntryButton();
+        // Update maintenance bypass button visibility (in case maintenance popup is showing)
+        if (typeof updateMaintenanceAdminBypass === 'function') {
+            updateMaintenanceAdminBypass();
+        }
         // Always re-render analysis list when bootstrap completes.
         // The list may have been rendered before bootstrap (when isAdmin()=false),
         // so cards need edit/delete buttons added.
@@ -6537,11 +6541,190 @@ function startPolling() {
 //#endregion
 
 // ============================================================================
+//#region حالت نگهداری (Maintenance Mode)
+// ============================================================================
+/**
+ * Maintenance Mode — checks system status BEFORE app loads.
+ *
+ * Flow:
+ *   1. GET /api/system/status (no auth required)
+ *   2. If maintenance.enabled === true → show full-screen popup, block app init
+ *   3. Admin bypass: if user is admin (checked via isAdmin() after bootstrap),
+ *      a bypass button appears. Clicking it sets _maintenanceBypassed = true
+ *      and hides the popup, allowing the app to continue loading.
+ *
+ * Security:
+ *   - Regular users CANNOT close or bypass the popup (no close button, no escape).
+ *   - The bypass button is only visible to admins (isAdmin() === true).
+ *   - Fail-open: if the status endpoint is unreachable, the app loads normally.
+ *     This prevents a network error from locking out all users.
+ */
+
+let _maintenanceBypassed = false;
+let _maintenanceActive = false;
+
+/**
+ * Check maintenance mode status. Shows the popup if enabled.
+ * Returns true if app should continue loading, false if blocked.
+ */
+async function checkMaintenanceMode() {
+    // Skip if already bypassed this session (admin)
+    if (_maintenanceBypassed) return true;
+
+    try {
+        // Use a short timeout — if the server is slow, fail open
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+        const resp = await fetch('/api/system/status', {
+            signal: controller.signal,
+            headers: { 'Cache-Control': 'no-cache' },
+        });
+        clearTimeout(timeoutId);
+
+        if (!resp.ok) {
+            // Server returned an error — fail open
+            return true;
+        }
+
+        const data = await resp.json();
+        const maint = data.maintenance || {};
+
+        if (maint.enabled === true) {
+            // Maintenance is ON — show the popup
+            showMaintenancePopup(maint);
+            _maintenanceActive = true;
+            return false;
+        }
+    } catch (e) {
+        // Network error or timeout — fail open
+        console.log('[MAINT] check skipped (network):', e.message || e);
+        return true;
+    }
+    return true;
+}
+
+/**
+ * Show the maintenance popup with the given settings.
+ * @param {object} maint - {title, description, progress, enabled}
+ */
+function showMaintenancePopup(maint) {
+    const overlay = document.getElementById('maintenance-overlay');
+    if (!overlay) return;
+
+    // Set title
+    const titleEl = document.getElementById('maint-title');
+    if (titleEl && maint.title) titleEl.textContent = maint.title;
+
+    // Set description
+    const descEl = document.getElementById('maint-desc');
+    if (descEl && maint.description) descEl.textContent = maint.description;
+
+    // Set progress
+    const pct = Math.max(0, Math.min(100, Number(maint.progress) || 0));
+    const pctEl = document.getElementById('maint-progress-percent');
+    const fillEl = document.getElementById('maint-progress-fill');
+    if (pctEl) pctEl.textContent = pct + '%';
+    if (fillEl) fillEl.style.width = pct + '%';
+
+    // Generate floating particles
+    _generateMaintenanceParticles();
+
+    // Show overlay
+    overlay.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    // Check if current user is admin — if so, show bypass button
+    // This runs after bootstrap, so isAdmin() should be accurate.
+    // If bootstrap hasn't completed yet, the button stays hidden until
+    // updateMaintenanceAdminBypass() is called from bootstrapUser().
+    updateMaintenanceAdminBypass();
+}
+
+/**
+ * Generate floating particle elements for the maintenance popup background.
+ */
+function _generateMaintenanceParticles() {
+    const container = document.getElementById('maint-particles');
+    if (!container) return;
+    // Don't regenerate if already populated
+    if (container.children.length > 0) return;
+
+    const count = 18;
+    for (let i = 0; i < count; i++) {
+        const p = document.createElement('div');
+        p.className = 'maint-particle';
+        const size = 2 + Math.random() * 4;
+        p.style.width = size + 'px';
+        p.style.height = size + 'px';
+        p.style.left = Math.random() * 100 + '%';
+        p.style.animationDuration = (8 + Math.random() * 12) + 's';
+        p.style.animationDelay = (Math.random() * 10) + 's';
+        container.appendChild(p);
+    }
+}
+
+/**
+ * Update the visibility of the admin bypass button based on current admin status.
+ * Called from bootstrapUser() after admin status is confirmed, and also from
+ * showMaintenancePopup() in case bootstrap already completed.
+ */
+function updateMaintenanceAdminBypass() {
+    const bypassBtn = document.getElementById('maint-admin-bypass');
+    if (!bypassBtn) return;
+    // Only show if user is admin (isAdmin() requires bootstrapComplete)
+    if (isAdmin()) {
+        bypassBtn.style.display = 'inline-flex';
+    } else {
+        bypassBtn.style.display = 'none';
+    }
+}
+
+/**
+ * Admin bypass — hide the maintenance popup and continue loading the app.
+ * Only works if isAdmin() returns true. Sets _maintenanceBypassed so the
+ * check won't re-trigger on re-initialization.
+ */
+function adminBypassMaintenance() {
+    // SECURITY: double-check admin status before allowing bypass
+    if (!isAdmin()) {
+        console.warn('[MAINT] Non-admin attempted to bypass maintenance mode');
+        return;
+    }
+    _maintenanceBypassed = true;
+    _maintenanceActive = false;
+    const overlay = document.getElementById('maintenance-overlay');
+    if (overlay) overlay.style.display = 'none';
+    document.body.style.overflow = '';
+    console.log('[MAINT] Admin bypassed maintenance mode');
+    // Open the admin panel directly
+    if (typeof openAdminPanel === 'function') {
+        openAdminPanel();
+    }
+}
+
+// Expose globally for inline onclick
+window.checkMaintenanceMode = checkMaintenanceMode;
+window.showMaintenancePopup = showMaintenancePopup;
+window.updateMaintenanceAdminBypass = updateMaintenanceAdminBypass;
+window.adminBypassMaintenance = adminBypassMaintenance;
+
+// ============================================================================
 //#region راه‌اندازی برنامه
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
     // ── Phase 0: Telegram SDK init + user resolution ──
     await UserContext.init();
+
+    // ── Phase -1: MAINTENANCE MODE CHECK ──
+    // This runs BEFORE any other UI loads. If maintenance is enabled,
+    // the full-screen maintenance popup is shown and the rest of the app
+    // is blocked from initializing. Admins can bypass via a button.
+    //
+    // This is non-blocking for the rest of the DOMContentLoaded handler
+    // on failure: if the status endpoint is unreachable, we assume NOT in
+    // maintenance (fail-open) so users aren't locked out by a network error.
+    await checkMaintenanceMode();
 
     // ── Phase 0.5: SECURITY — Do NOT restore admin state from localStorage ──
     // Admin status is ONLY determined by server bootstrap response.

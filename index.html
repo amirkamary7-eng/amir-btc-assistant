@@ -1129,190 +1129,481 @@
     <!-- #endregion -->
     <!-- #endregion -->
 
-    <!-- R4: Admin Control Center — Full Panel -->
+    <!-- ════════════════════════════════════════════════════════════════
+         R4: Admin Control Center — Premium Dark Glassmorphism Rebuild
+         ════════════════════════════════════════════════════════════════ -->
     <div id="admin-panel" class="admin-panel" style="display:none;">
         <div class="admin-panel-backdrop" onclick="closeAdminPanel()"></div>
-        <div class="admin-panel-container" dir="ltr">
-            <!-- Header -->
-            <div class="admin-header">
-                <button class="admin-back-btn" onclick="closeAdminPanel()">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-                </button>
-                <h2>Admin Control Center</h2>
-            </div>
+        <div class="admin-panel-container" dir="rtl">
 
-            <!-- Sidebar Navigation -->
-            <div class="admin-sidebar" id="admin-sidebar">
-                <button class="admin-nav-item active" data-admin-section="dashboard" onclick="switchAdminSection('dashboard', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-                    <span>Dashboard</span>
-                </button>
-                <button class="admin-nav-item" data-admin-section="admins" onclick="switchAdminSection('admins', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                    <span>Admins</span>
-                </button>
-                <button class="admin-nav-item" data-admin-section="users" onclick="switchAdminSection('users', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                    <span>Users</span>
-                </button>
-                <button class="admin-nav-item" data-admin-section="tickets" onclick="switchAdminSection('tickets', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    <span>Tickets</span>
-                </button>
-                <button class="admin-nav-item" data-admin-section="broadcast" onclick="switchAdminSection('broadcast', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                    <span>Broadcast</span>
-                </button>
-                <button class="admin-nav-item" data-admin-section="rewards" onclick="switchAdminSection('rewards', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
-                    <span>Rewards</span>
-                </button>
-                <button class="admin-nav-item" data-admin-section="transactions" onclick="switchAdminSection('transactions', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                    <span>Transactions</span>
-                </button>
-                <button class="admin-nav-item" data-admin-section="referrals" onclick="switchAdminSection('referrals', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                    <span>Referrals</span>
-                </button>
-                <button class="admin-nav-item" data-admin-section="system-health" onclick="switchAdminSection('system-health', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                    <span>Health</span>
-                </button>
-                <button class="admin-nav-item" data-admin-section="logs" onclick="switchAdminSection('logs', this)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                    <span>Logs</span>
-                </button>
-            </div>
+            <!-- ── Premium Admin Header ── -->
+            <header class="adm-header">
+                <div class="adm-header-left">
+                    <button class="adm-icon-btn" id="adm-hamburger" onclick="toggleAdminSidebar()" aria-label="منو">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    </button>
+                    <div class="adm-header-title">
+                        <div class="adm-header-brand">
+                            <span class="adm-header-crown">◆</span>
+                            <span>پنل مدیریت</span>
+                        </div>
+                        <div class="adm-header-sub" id="adm-section-label">داشبورد</div>
+                    </div>
+                </div>
+                <div class="adm-header-right">
+                    <button class="adm-icon-btn adm-back-btn" onclick="closeAdminPanel()" aria-label="بازگشت به اپ">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                    </button>
+                </div>
+            </header>
 
-            <!-- Content Area -->
-            <div class="admin-content" id="admin-content">
+            <!-- ── Sidebar Overlay (mobile) ── -->
+            <div class="adm-sidebar-backdrop" id="adm-sidebar-backdrop" onclick="closeAdminSidebar()"></div>
+
+            <!-- ── Premium Sidebar Navigation ── -->
+            <aside class="adm-sidebar" id="adm-sidebar">
+                <div class="adm-sidebar-inner">
+                    <div class="adm-sidebar-section">
+                        <div class="adm-sidebar-label">نمای کلی</div>
+                        <button class="adm-nav-item active" data-admin-section="dashboard" onclick="switchAdminSection('dashboard', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                            <span>داشبورد</span>
+                        </button>
+                    </div>
+
+                    <div class="adm-sidebar-section">
+                        <div class="adm-sidebar-label">مدیریت</div>
+                        <button class="adm-nav-item" data-admin-section="users" onclick="switchAdminSection('users', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            <span>کاربران</span>
+                        </button>
+                        <button class="adm-nav-item" data-admin-section="admins" onclick="switchAdminSection('admins', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            <span>مدیران</span>
+                        </button>
+                        <button class="adm-nav-item" data-admin-section="tickets" onclick="switchAdminSection('tickets', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                            <span>تیکت‌ها</span>
+                            <span class="adm-nav-badge" id="adm-tickets-badge" style="display:none;">0</span>
+                        </button>
+                    </div>
+
+                    <div class="adm-sidebar-section">
+                        <div class="adm-sidebar-label">محتوا</div>
+                        <button class="adm-nav-item" data-admin-section="broadcast" onclick="switchAdminSection('broadcast', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+                            <span>پیام همگانی</span>
+                        </button>
+                        <button class="adm-nav-item" data-admin-section="rewards" onclick="switchAdminSection('rewards', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89 7 23l5-3 5 3-1.21-9.12"/></svg>
+                            <span>پاداش‌ها</span>
+                        </button>
+                        <button class="adm-nav-item" data-admin-section="transactions" onclick="switchAdminSection('transactions', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                            <span>تراکنش‌ها</span>
+                        </button>
+                        <button class="adm-nav-item" data-admin-section="referrals" onclick="switchAdminSection('referrals', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                            <span>رفرال</span>
+                        </button>
+                    </div>
+
+                    <div class="adm-sidebar-section">
+                        <div class="adm-sidebar-label">سیستم</div>
+                        <button class="adm-nav-item" data-admin-section="system-controls" onclick="switchAdminSection('system-controls', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            <span>کنترل سیستم</span>
+                        </button>
+                        <button class="adm-nav-item" data-admin-section="system-health" onclick="switchAdminSection('system-health', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                            <span>سلامت سیستم</span>
+                        </button>
+                        <button class="adm-nav-item" data-admin-section="logs" onclick="switchAdminSection('logs', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                            <span>لاگ‌ها</span>
+                        </button>
+                    </div>
+
+                    <div class="adm-sidebar-footer">
+                        <div class="adm-sidebar-user" id="adm-sidebar-user">
+                            <div class="adm-sidebar-avatar">A</div>
+                            <div class="adm-sidebar-userinfo">
+                                <div class="adm-sidebar-username">مدیر</div>
+                                <div class="adm-sidebar-userrole">Super Admin</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- ── Main Content ── -->
+            <main class="adm-content" id="admin-content">
 
                 <!-- Dashboard Section -->
-                <div class="admin-section active" id="admin-section-dashboard">
-                    <h3 class="admin-section-title">Dashboard</h3>
-                    <div class="admin-stats-grid" id="admin-stats-grid"></div>
-                    <h4 class="admin-subtitle">Recent Activity</h4>
-                    <div class="admin-activity-list" id="admin-activity-list"></div>
-                </div>
+                <section class="adm-section active" id="admin-section-dashboard">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">داشبورد</h3>
+                            <p class="adm-section-desc">نمای کلی سیستم در یک نگاه</p>
+                        </div>
+                    </div>
+                    <div class="adm-stats-grid" id="admin-stats-grid"></div>
+                    <div class="adm-card">
+                        <div class="adm-card-head">
+                            <h4 class="adm-card-title">فعالیت‌های اخیر</h4>
+                        </div>
+                        <div class="admin-activity-list" id="admin-activity-list"></div>
+                    </div>
+                </section>
 
                 <!-- Admin Management Section -->
-                <div class="admin-section" id="admin-section-admins">
-                    <div class="admin-section-header">
-                        <h3 class="admin-section-title">Admin Management</h3>
-                        <button class="admin-btn admin-btn-accent" onclick="openAddAdminForm()">+ Add Admin</button>
-                    </div>
-                    <div id="admin-add-form" style="display:none;" class="admin-form-card">
-                        <input type="text" id="admin-new-telegram-id" placeholder="Telegram ID" class="admin-input">
-                        <select id="admin-new-role" class="admin-input">
-                            <option value="admin">Admin</option>
-                            <option value="moderator">Moderator</option>
-                            <option value="viewer">Viewer</option>
-                        </select>
-                        <div class="admin-perm-checks" id="admin-new-permissions">
-                            <label><input type="checkbox" value="analysis"> Analysis</label>
-                            <label><input type="checkbox" value="tickets"> Tickets</label>
-                            <label><input type="checkbox" value="broadcast"> Broadcast</label>
-                            <label><input type="checkbox" value="rewards"> Rewards</label>
-                            <label><input type="checkbox" value="users"> Users</label>
-                            <label><input type="checkbox" value="wallet"> Wallet</label>
+                <section class="adm-section" id="admin-section-admins">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">مدیریت مدیران</h3>
+                            <p class="adm-section-desc">افزودن، ویرایش و حذف مدیران سیستم</p>
                         </div>
-                        <div class="admin-form-actions">
-                            <button class="admin-btn admin-btn-accent" onclick="submitAddAdmin()">Add</button>
-                            <button class="admin-btn admin-btn-ghost" onclick="closeAddAdminForm()">Cancel</button>
+                        <button class="adm-btn adm-btn-primary" onclick="openAddAdminForm()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            افزودن مدیر
+                        </button>
+                    </div>
+                    <div id="admin-add-form" style="display:none;" class="adm-form-card">
+                        <div class="adm-form-row">
+                            <div class="adm-form-field">
+                                <label class="adm-form-label">شناسه تلگرام</label>
+                                <input type="text" id="admin-new-telegram-id" placeholder="مثال: 123456789" class="adm-input">
+                            </div>
+                            <div class="adm-form-field">
+                                <label class="adm-form-label">نقش</label>
+                                <select id="admin-new-role" class="adm-input">
+                                    <option value="admin">مدیر</option>
+                                    <option value="moderator">ناظم</option>
+                                    <option value="viewer">بیننده</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="adm-form-field">
+                            <label class="adm-form-label">دسترسی‌ها</label>
+                            <div class="adm-perm-checks" id="admin-new-permissions">
+                                <label class="adm-chip"><input type="checkbox" value="analysis"> تحلیل</label>
+                                <label class="adm-chip"><input type="checkbox" value="tickets"> تیکت</label>
+                                <label class="adm-chip"><input type="checkbox" value="broadcast"> پیام</label>
+                                <label class="adm-chip"><input type="checkbox" value="rewards"> پاداش</label>
+                                <label class="adm-chip"><input type="checkbox" value="users"> کاربران</label>
+                                <label class="adm-chip"><input type="checkbox" value="wallet"> کیف پول</label>
+                            </div>
+                        </div>
+                        <div class="adm-form-actions">
+                            <button class="adm-btn adm-btn-primary" onclick="submitAddAdmin()">افزودن</button>
+                            <button class="adm-btn adm-btn-ghost" onclick="closeAddAdminForm()">انصراف</button>
                         </div>
                     </div>
-                    <div class="admin-list" id="admin-list"></div>
-                </div>
+                    <div class="adm-list" id="admin-list"></div>
+                </section>
 
                 <!-- Users Section -->
-                <div class="admin-section" id="admin-section-users">
-                    <h3 class="admin-section-title">Users</h3>
-                    <input type="text" id="admin-user-search" placeholder="Search by ID, username, name..." class="admin-input admin-search-input" oninput="debounceAdminUserSearch()">
-                    <div class="admin-list" id="admin-users-list"></div>
+                <section class="adm-section" id="admin-section-users">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">کاربران</h3>
+                            <p class="adm-section-desc">جستجو و مدیریت کاربران مینی‌اپ</p>
+                        </div>
+                    </div>
+                    <div class="adm-search-bar">
+                        <svg class="adm-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="text" id="admin-user-search" placeholder="جستجو بر اساس ID، نام کاربری، نام..." class="adm-input adm-search-input" oninput="debounceAdminUserSearch()">
+                    </div>
+                    <div class="adm-list" id="admin-users-list"></div>
                     <div class="admin-pagination" id="admin-users-pagination"></div>
-                </div>
+                </section>
 
                 <!-- Tickets Section -->
-                <div class="admin-section" id="admin-section-tickets">
-                    <h3 class="admin-section-title">Ticket Center</h3>
-                    <div class="admin-filters">
-                        <button class="admin-filter-btn active" onclick="filterAdminTickets('all', this)">All</button>
-                        <button class="admin-filter-btn" onclick="filterAdminTickets('open', this)">Open</button>
-                        <button class="admin-filter-btn" onclick="filterAdminTickets('answered', this)">Answered</button>
-                        <button class="admin-filter-btn" onclick="filterAdminTickets('closed', this)">Closed</button>
+                <section class="adm-section" id="admin-section-tickets">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">مرکز تیکت‌ها</h3>
+                            <p class="adm-section-desc">مدیریت و پاسخ به تیکت‌های کاربران</p>
+                        </div>
                     </div>
-                    <div class="admin-list" id="admin-tickets-list"></div>
+                    <div class="adm-filters">
+                        <button class="adm-filter-btn active" onclick="filterAdminTickets('all', this)">همه</button>
+                        <button class="adm-filter-btn" onclick="filterAdminTickets('open', this)">باز</button>
+                        <button class="adm-filter-btn" onclick="filterAdminTickets('answered', this)">پاسخ داده شده</button>
+                        <button class="adm-filter-btn" onclick="filterAdminTickets('closed', this)">بسته شده</button>
+                    </div>
+                    <div class="adm-list" id="admin-tickets-list"></div>
                     <div class="admin-pagination" id="admin-tickets-pagination"></div>
-                </div>
+                </section>
 
                 <!-- Broadcast Section -->
-                <div class="admin-section" id="admin-section-broadcast">
-                    <h3 class="admin-section-title">Broadcast Center</h3>
-                    <div class="admin-form-card">
-                        <select id="admin-broadcast-target" class="admin-input" onchange="toggleBroadcastTargetId()">
-                            <option value="all">All Users</option>
-                            <option value="active">Active Users (today)</option>
-                            <option value="token_holders">Token Holders</option>
-                            <option value="specific">Specific User</option>
-                        </select>
-                        <input type="text" id="admin-broadcast-target-id" placeholder="Telegram ID (for specific)" class="admin-input" style="display:none;">
-                        <textarea id="admin-broadcast-content" placeholder="Message content..." class="admin-input admin-textarea" rows="4"></textarea>
-                        <button class="admin-btn admin-btn-accent" onclick="sendBroadcast()" style="width:100%;">Send Broadcast</button>
+                <section class="adm-section" id="admin-section-broadcast">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">پیام همگانی</h3>
+                            <p class="adm-section-desc">ارسال پیام به کاربران به صورت گروهی یا فردی</p>
+                        </div>
                     </div>
-                    <h4 class="admin-subtitle" style="margin-top:16px;">History</h4>
-                    <div class="admin-list" id="admin-broadcasts-list"></div>
-                </div>
+                    <div class="adm-form-card">
+                        <div class="adm-form-field">
+                            <label class="adm-form-label">مخاطب</label>
+                            <select id="admin-broadcast-target" class="adm-input" onchange="toggleBroadcastTargetId()">
+                                <option value="all">همه کاربران</option>
+                                <option value="active">کاربران فعال امروز</option>
+                                <option value="token_holders">دارندگان توکن</option>
+                                <option value="specific">کاربر خاص</option>
+                            </select>
+                        </div>
+                        <div class="adm-form-field" id="admin-broadcast-target-id-wrap" style="display:none;">
+                            <label class="adm-form-label">شناسه تلگرام کاربر</label>
+                            <input type="text" id="admin-broadcast-target-id" placeholder="مثال: 123456789" class="adm-input">
+                        </div>
+                        <div class="adm-form-field">
+                            <label class="adm-form-label">متن پیام</label>
+                            <textarea id="admin-broadcast-content" placeholder="متن پیام خود را وارد کنید..." class="adm-input adm-textarea" rows="4"></textarea>
+                        </div>
+                        <button class="adm-btn adm-btn-primary adm-btn-block" onclick="sendBroadcast()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            ارسال پیام
+                        </button>
+                    </div>
+                    <div class="adm-card">
+                        <div class="adm-card-head">
+                            <h4 class="adm-card-title">تاریخچه پیام‌ها</h4>
+                        </div>
+                        <div class="adm-list" id="admin-broadcasts-list"></div>
+                    </div>
+                </section>
 
                 <!-- Rewards Section -->
-                <div class="admin-section" id="admin-section-rewards">
-                    <h3 class="admin-section-title">Rewards</h3>
-                    <div class="admin-filters">
-                        <button class="admin-filter-btn active" onclick="filterAdminRewards('all', this)">All</button>
-                        <button class="admin-filter-btn" onclick="filterAdminRewards('pending', this)">Pending</button>
-                        <button class="admin-filter-btn" onclick="filterAdminRewards('approved', this)">Approved</button>
-                        <button class="admin-filter-btn" onclick="filterAdminRewards('delivered', this)">Delivered</button>
+                <section class="adm-section" id="admin-section-rewards">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">پاداش‌ها</h3>
+                            <p class="adm-section-desc">مدیریت درخواست‌های پاداش کاربران</p>
+                        </div>
                     </div>
-                    <div class="admin-list" id="admin-rewards-list"></div>
-                </div>
+                    <div class="adm-filters">
+                        <button class="adm-filter-btn active" onclick="filterAdminRewards('all', this)">همه</button>
+                        <button class="adm-filter-btn" onclick="filterAdminRewards('pending', this)">در انتظار</button>
+                        <button class="adm-filter-btn" onclick="filterAdminRewards('approved', this)">تأیید شده</button>
+                        <button class="adm-filter-btn" onclick="filterAdminRewards('delivered', this)">تحویل شده</button>
+                    </div>
+                    <div class="adm-list" id="admin-rewards-list"></div>
+                </section>
 
                 <!-- Transactions Section -->
-                <div class="admin-section" id="admin-section-transactions">
-                    <h3 class="admin-section-title">Wallet & Transactions</h3>
-                    <div class="admin-filters-row">
-                        <input type="text" id="admin-tx-user-id" placeholder="User ID" class="admin-input" style="flex:1;">
-                        <select id="admin-tx-type" class="admin-input" style="flex:1;">
-                            <option value="">All Types</option>
-                            <option value="daily_claim">Daily Claim</option>
-                            <option value="referral">Referral</option>
-                            <option value="admin_grant">Admin Grant</option>
-                            <option value="wheel">Wheel</option>
-                        </select>
+                <section class="adm-section" id="admin-section-transactions">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">کیف پول و تراکنش‌ها</h3>
+                            <p class="adm-section-desc">مشاهده و فیلتر تراکنش‌های AB Token</p>
+                        </div>
                     </div>
-                    <div class="admin-list" id="admin-transactions-list"></div>
+                    <div class="adm-filters-row">
+                        <div class="adm-form-field" style="flex:1;">
+                            <input type="text" id="admin-tx-user-id" placeholder="شناسه کاربر" class="adm-input">
+                        </div>
+                        <div class="adm-form-field" style="flex:1;">
+                            <select id="admin-tx-type" class="adm-input">
+                                <option value="">همه انواع</option>
+                                <option value="daily_claim">چک‌این روزانه</option>
+                                <option value="referral">رفرال</option>
+                                <option value="admin_grant">هدیه مدیر</option>
+                                <option value="wheel">چرخ شانس</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="adm-list" id="admin-transactions-list"></div>
                     <div class="admin-pagination" id="admin-transactions-pagination"></div>
-                </div>
+                </section>
 
                 <!-- Referrals Section -->
-                <div class="admin-section" id="admin-section-referrals">
-                    <h3 class="admin-section-title">Referral System</h3>
-                    <input type="text" id="admin-referral-search" placeholder="Search by user ID..." class="admin-input admin-search-input" oninput="debounceAdminReferralSearch()">
-                    <div class="admin-list" id="admin-referrals-list"></div>
-                </div>
+                <section class="adm-section" id="admin-section-referrals">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">سیستم رفرال</h3>
+                            <p class="adm-section-desc">آمار دعوت‌ها و پاداش‌های معرف</p>
+                        </div>
+                    </div>
+                    <div class="adm-search-bar">
+                        <svg class="adm-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="text" id="admin-referral-search" placeholder="جستجو بر اساس شناسه کاربر..." class="adm-input adm-search-input" oninput="debounceAdminReferralSearch()">
+                    </div>
+                    <div class="adm-list" id="admin-referrals-list"></div>
+                </section>
+
+                <!-- ═══ System Controls Section (Maintenance Mode) ═══ -->
+                <section class="adm-section" id="admin-section-system-controls">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">کنترل سیستم</h3>
+                            <p class="adm-section-desc">مدیریت وضعیت مینی‌اپ و حالت نگهداری</p>
+                        </div>
+                    </div>
+
+                    <!-- Maintenance Mode Card -->
+                    <div class="adm-card adm-maintenance-card" id="adm-maintenance-card">
+                        <div class="adm-maint-head">
+                            <div class="adm-maint-icon-wrap">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            </div>
+                            <div class="adm-maint-info">
+                                <h4 class="adm-maint-title">حالت نگهداری (Maintenance Mode)</h4>
+                                <p class="adm-maint-desc">با فعال‌سازی، مینی‌اپ برای کاربران عادی غیرفعال می‌شود.</p>
+                            </div>
+                            <label class="adm-switch" id="adm-maint-switch-wrap">
+                                <input type="checkbox" id="adm-maint-toggle" onchange="onMaintenanceToggleChange(this.checked)">
+                                <span class="adm-switch-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="adm-maint-body" id="adm-maint-body" style="display:none;">
+                            <div class="adm-form-field">
+                                <label class="adm-form-label">عنوان نمایشی</label>
+                                <input type="text" id="adm-maint-title-input" class="adm-input" placeholder="در حال ساخت آینده‌ای بهتر!" maxlength="60">
+                            </div>
+                            <div class="adm-form-field">
+                                <label class="adm-form-label">توضیحات</label>
+                                <textarea id="adm-maint-desc-input" class="adm-input adm-textarea" rows="3" placeholder="در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم..." maxlength="200"></textarea>
+                            </div>
+                            <div class="adm-form-field">
+                                <label class="adm-form-label">
+                                    پیشرفت کار
+                                    <span class="adm-progress-val" id="adm-progress-val">0%</span>
+                                </label>
+                                <div class="adm-progress-slider-wrap">
+                                    <input type="range" id="adm-maint-progress" class="adm-range" min="0" max="100" value="0" oninput="onMaintenanceProgressChange(this.value)">
+                                    <div class="adm-progress-bar-bg">
+                                        <div class="adm-progress-bar-fill" id="adm-progress-fill" style="width:0%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="adm-form-actions">
+                                <button class="adm-btn adm-btn-primary" onclick="saveMaintenanceSettings()">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                    ذخیره تنظیمات
+                                </button>
+                                <button class="adm-btn adm-btn-ghost" onclick="loadMaintenanceSettings()">بارگذاری مجدد</button>
+                            </div>
+                            <div class="adm-maint-status" id="adm-maint-status"></div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Stats -->
+                    <div class="adm-stats-grid adm-stats-grid-3">
+                        <div class="adm-stat-mini">
+                            <div class="adm-stat-mini-value" id="adm-stat-maint-status">غیرفعال</div>
+                            <div class="adm-stat-mini-label">وضعیت نگهداری</div>
+                        </div>
+                        <div class="adm-stat-mini">
+                            <div class="adm-stat-mini-value" id="adm-stat-maint-progress">0%</div>
+                            <div class="adm-stat-mini-label">پیشرفت</div>
+                        </div>
+                        <div class="adm-stat-mini">
+                            <div class="adm-stat-mini-value" id="adm-stat-maint-updated">—</div>
+                            <div class="adm-stat-mini-label">آخرین به‌روزرسانی</div>
+                        </div>
+                    </div>
+                </section>
 
                 <!-- System Health Section -->
-                <div class="admin-section" id="admin-section-system-health">
-                    <h3 class="admin-section-title">System Health</h3>
-                    <div class="admin-stats-grid" id="admin-health-grid"></div>
-                </div>
+                <section class="adm-section" id="admin-section-system-health">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">سلامت سیستم</h3>
+                            <p class="adm-section-desc">شاخص‌های عملکرد و وضعیت سرویس‌ها</p>
+                        </div>
+                    </div>
+                    <div class="adm-stats-grid" id="admin-health-grid"></div>
+                </section>
 
                 <!-- Security Logs Section -->
-                <div class="admin-section" id="admin-section-logs">
-                    <h3 class="admin-section-title">Security Logs</h3>
-                    <div class="admin-list" id="admin-logs-list"></div>
+                <section class="adm-section" id="admin-section-logs">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">لاگ‌های امنیتی</h3>
+                            <p class="adm-section-desc">رویدادهای امنیتی و فعالیت مدیران</p>
+                        </div>
+                    </div>
+                    <div class="adm-list" id="admin-logs-list"></div>
                     <div class="admin-pagination" id="admin-logs-pagination"></div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         MAINTENANCE MODE — Full-screen popup with animated repair robot
+         Displayed when GET /api/system/status returns maintenance.enabled=true
+         Admins see a bypass button; regular users cannot close or bypass it.
+         ════════════════════════════════════════════════════════════════ -->
+    <div id="maintenance-overlay" class="maint-overlay" style="display:none;">
+        <!-- Floating particles background -->
+        <div class="maint-particles" id="maint-particles"></div>
+
+        <div class="maint-content">
+            <!-- Robot + Gear + Wrench animation scene -->
+            <div class="maint-robot-scene">
+                <div class="maint-glow"></div>
+
+                <!-- The robot -->
+                <div class="maint-robot">
+                    <div class="maint-robot-head">
+                        <div class="maint-robot-antenna"></div>
+                        <div class="maint-robot-eyes">
+                            <div class="maint-robot-eye"></div>
+                            <div class="maint-robot-eye"></div>
+                        </div>
+                    </div>
+                    <div class="maint-robot-body">
+                        <div class="maint-robot-chest"></div>
+                    </div>
+                    <!-- Arm holding wrench — up/down motion -->
+                    <div class="maint-robot-arm">
+                        <div class="maint-wrench">
+                            <div class="maint-wrench-head"></div>
+                            <div class="maint-wrench-handle"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- The spinning gear -->
+                <div class="maint-gear">
+                    <svg viewBox="0 0 100 100" fill="none" stroke="#f7b950" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M50 5 L55 18 L70 15 L72 30 L85 35 L80 50 L85 65 L72 70 L70 85 L55 82 L50 95 L45 82 L30 85 L28 70 L15 65 L20 50 L15 35 L28 30 L30 15 L45 18 Z"/>
+                        <circle cx="50" cy="50" r="14"/>
+                    </svg>
+                </div>
+
+                <!-- Sparks -->
+                <div class="maint-spark"></div>
+                <div class="maint-spark"></div>
+                <div class="maint-spark"></div>
+                <div class="maint-spark"></div>
+                <div class="maint-spark"></div>
+            </div>
+
+            <!-- Text content -->
+            <h2 class="maint-title" id="maint-title">در حال ساخت آینده‌ای بهتر!</h2>
+            <p class="maint-desc" id="maint-desc">در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.</p>
+
+            <!-- Progress bar -->
+            <div class="maint-progress-wrap">
+                <div class="maint-progress-label">
+                    <span class="maint-progress-text">پیشرفت کار</span>
+                    <span class="maint-progress-percent" id="maint-progress-percent">0%</span>
+                </div>
+                <div class="maint-progress-track">
+                    <div class="maint-progress-fill" id="maint-progress-fill" style="width:0%"></div>
                 </div>
             </div>
+
+            <!-- Admin bypass button (only shown if user is admin) -->
+            <button class="maint-admin-bypass" id="maint-admin-bypass" onclick="adminBypassMaintenance()">
+                ورود به پنل مدیریت
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </button>
         </div>
     </div>
 

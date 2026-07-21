@@ -198,6 +198,67 @@ function diagLogSync(env, entry) {
   }
 }
 
+// ============================================================================
+// MAINTENANCE MODE — System-wide maintenance state stored in APP_CACHE KV
+// ============================================================================
+const MAINT_KV_KEY = 'system_maintenance_state';
+const MAINT_DEFAULTS = {
+  enabled: false,
+  title: 'در حال ساخت آینده‌ای بهتر!',
+  description: 'در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.',
+  progress: 0,
+  updated_at: null,
+  updated_by: null,
+};
+
+/**
+ * Read the maintenance state from KV.
+ * Returns the merged object (defaults + stored overrides).
+ * Never throws — on any error returns defaults.
+ */
+async function getMaintenanceState(env) {
+  try {
+    if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') {
+      return { maintenance: { ...MAINT_DEFAULTS } };
+    }
+    const raw = await env.APP_CACHE.get(MAINT_KV_KEY);
+    if (!raw) return { maintenance: { ...MAINT_DEFAULTS } };
+    const parsed = JSON.parse(raw);
+    return {
+      maintenance: {
+        ...MAINT_DEFAULTS,
+        ...parsed,
+      },
+    };
+  } catch (e) {
+    console.warn('getMaintenanceState error:', e.message || e);
+    return { maintenance: { ...MAINT_DEFAULTS } };
+  }
+}
+
+/**
+ * Write the maintenance state to KV. Returns the new state.
+ */
+async function setMaintenanceState(env, patch, updatedBy) {
+  const current = (await getMaintenanceState(env)).maintenance;
+  const next = {
+    ...current,
+    ...patch,
+    // Clamp progress 0-100
+    progress: patch.progress != null ? Math.max(0, Math.min(100, Number(patch.progress) || 0)) : current.progress,
+    // Sanitize title/description
+    title: patch.title != null ? String(patch.title).slice(0, 60) : current.title,
+    description: patch.description != null ? String(patch.description).slice(0, 200) : current.description,
+    enabled: patch.enabled != null ? Boolean(patch.enabled) : current.enabled,
+    updated_at: new Date().toISOString(),
+    updated_by: String(updatedBy || 'admin'),
+  };
+  if (env?.APP_CACHE && typeof env.APP_CACHE.put === 'function') {
+    await env.APP_CACHE.put(MAINT_KV_KEY, JSON.stringify(next));
+  }
+  return { maintenance: next };
+}
+
 async function readRateLimitCache(env, key) {
   if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.get !== 'function') {
     return null;
@@ -3457,6 +3518,18 @@ export default {
         return handleHealth(env);
       }
 
+      // ── System Status (public — maintenance mode check) ──
+      // No auth required: this MUST be reachable before app load, even for
+      // unauthenticated users. The response contains only the maintenance
+      // display fields (title, description, progress, enabled) — no secrets.
+      if (request.method === 'GET' && url.pathname === '/api/system/status') {
+        const state = await getMaintenanceState(env);
+        return jsonResponse({
+          status: 'success',
+          maintenance: state.maintenance,
+        }, {}, env);
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
         return await handleChartResolve(request, env);
       }
@@ -3549,6 +3622,40 @@ export default {
       }
       if (url.pathname === '/api/admin/logs' && request.method === 'GET') {
         return await adminHandlers.handleLogs(request, env);
+      }
+
+      // ── Maintenance Mode Controls (admin only) ──
+      // GET    /api/admin/maintenance  → read current state
+      // PUT    /api/admin/maintenance  → update {enabled, title, description, progress}
+      // POST   /api/admin/maintenance  → alias for PUT (some clients prefer POST)
+      if (url.pathname === '/api/admin/maintenance' && (request.method === 'GET' || request.method === 'PUT' || request.method === 'POST')) {
+        // Auth: require admin (uses the same authenticateTelegramRequest + isAdminTelegramId
+        // pattern as other admin endpoints). Super admins from env var are allowed.
+        const authState = await authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+        if (!isAdminTelegramId(env, authState.user.id)) {
+          return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
+        }
+
+        if (request.method === 'GET') {
+          const state = await getMaintenanceState(env);
+          return jsonResponse({ status: 'success', ...state }, {}, env);
+        }
+
+        // PUT / POST — update
+        const bodyResult = await readJsonBody(request, 10240, env);
+        if (bodyResult.error) return bodyResult.error;
+        const payload = bodyResult.payload || {};
+
+        // Only allow known fields; ignore everything else
+        const patch = {};
+        if (payload.enabled !== undefined) patch.enabled = Boolean(payload.enabled);
+        if (payload.title !== undefined) patch.title = String(payload.title);
+        if (payload.description !== undefined) patch.description = String(payload.description);
+        if (payload.progress !== undefined) patch.progress = Number(payload.progress);
+
+        const newState = await setMaintenanceState(env, patch, authState.user.id);
+        return jsonResponse({ status: 'success', ...newState }, {}, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/market') {
