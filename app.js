@@ -6198,11 +6198,13 @@ function renderDashboardMarketStatus() {
     if (ratio > 0.58) {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
-        trendGraphic = `<img src="assets/market/bull.webp" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐂</span>'">`;
+        // Bull image (originally named neutral.webp — it's the green bull)
+        trendGraphic = `<img src="assets/market/neutral.webp" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐂</span>'">`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        trendGraphic = `<img src="assets/market/neutral.webp" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
+        // Neutral image (originally named bull.webp — it shows bull+bear equal)
+        trendGraphic = `<img src="assets/market/bull.webp" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
@@ -6623,9 +6625,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Dashboard rebuild: market status + watchlist render after market data arrives
         renderDashboardMarketStatus();
         renderWatchlist();
-        // Re-render ticker with real data (reset flag to allow one re-render)
-        _tickerRendered = false;
-        renderMarketTicker();
+        // NOTE: Do NOT re-render ticker here — it was already rendered in Phase C
+        // with cached/fallback data. Re-rendering resets the CSS animation and
+        // causes the ticker to disappear/reappear. The ticker updates prices
+        // naturally when allCoins is updated (price-only diffing in renderWatchlist).
     }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
     fetchAnalyses().then(changed => {
         if (changed) {

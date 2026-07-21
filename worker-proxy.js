@@ -2486,6 +2486,11 @@ const _inflightRequests = new Map();
  * Single-flight helper: if an identical request is already in-flight,
  * return the existing Promise instead of firing a new one.
  * Automatically cleaned up after resolution.
+ *
+ * CRITICAL: The Promise must resolve to a SERIALIZED value (e.g., JSON object),
+ * NOT a Response object. Response bodies are streams that can only be consumed
+ * once — sharing them across requests causes "Cannot perform I/O on behalf of
+ * a different request" errors.
  */
 function singleFlight(key, fn) {
   const existing = _inflightRequests.get(key);
@@ -3566,9 +3571,17 @@ export default {
           return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
         }
         // Single Flight: coalesce concurrent requests into one upstream call.
-        // KV cache is checked inside handleMarketData; this deduplicates the
-        // cache-miss path where actual API calls are made.
-        return singleFlight('market:data:fetch', () => handleMarketData(env));
+        // CRITICAL: Must serialize the Response to avoid sharing stream I/O
+        // across requests. We clone the response data and rebuild for each caller.
+        const sharedResponse = await singleFlight('market:data:fetch', async () => {
+          const resp = await handleMarketData(env);
+          const text = await resp.text();
+          return { status: resp.status, body: text };
+        });
+        return new Response(sharedResponse.body, {
+          status: sharedResponse.status,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
       }
 
       if (request.method === 'GET' && url.pathname === '/api/forex') {
