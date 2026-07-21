@@ -3218,20 +3218,31 @@ function generateSparklinePoints(changePercent, symbol, width, height) {
     function sRand() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
 
     var points = [];
-    var steps = 20;
+    var steps = 24;
     var midY = height / 2;
-    var amp = Math.min(height * 0.35, Math.abs(changePercent) * 0.8 + 2);
+    // Larger amplitude for more visible variation (TradingView-style)
+    var baseAmp = height * 0.34;
+    var dynamicAmp = Math.min(height * 0.18, Math.abs(changePercent) * 1.1 + 1.5);
+    var amp = baseAmp + dynamicAmp;
     var dir = changePercent >= 0 ? -1 : 1;
+
+    // Multiple peaks/pullbacks: use sum of sine waves at different frequencies
+    var phase1 = (sRand() * Math.PI * 2);
+    var phase2 = (sRand() * Math.PI * 2);
+    var phase3 = (sRand() * Math.PI * 2);
 
     for (var i = 0; i <= steps; i++) {
         var x = (i / steps) * width;
         var progress = i / steps;
-        // Smooth trend with sine wave for natural curve
-        var trend = dir * progress * amp;
-        // Add multi-frequency noise for realistic market-like variation
-        var noise1 = Math.sin(progress * Math.PI * 3 + seed * 0.01) * amp * 0.25;
-        var noise2 = (sRand() - 0.5) * amp * 0.35;
-        var y = Math.max(2, Math.min(height - 2, midY + trend + noise1 + noise2));
+        // Primary trend (overall direction)
+        var trend = dir * progress * amp * 0.55;
+        // Multi-frequency oscillation — creates realistic peaks and pullbacks
+        var wave1 = Math.sin(progress * Math.PI * 2.2 + phase1) * amp * 0.32;
+        var wave2 = Math.sin(progress * Math.PI * 4.5 + phase2) * amp * 0.18;
+        var wave3 = Math.sin(progress * Math.PI * 7 + phase3) * amp * 0.10;
+        // Small random noise for organic feel
+        var noise = (sRand() - 0.5) * amp * 0.12;
+        var y = Math.max(2, Math.min(height - 2, midY + trend + wave1 + wave2 + wave3 + noise));
         points.push(x.toFixed(1) + ',' + y.toFixed(1));
     }
     return points.join(' ');
@@ -4082,11 +4093,11 @@ function buildWatchTrendSVG(changePercent, symbol) {
     const pct = (typeof changePercent === 'number' && !isNaN(changePercent)) ? changePercent : 0;
     const isUp = pct >= 0;
     const color = isUp ? '#22C55E' : '#EF4444';
-    const glowColor = isUp ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)';
-    const fillColor = isUp ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)';
-    const gradId = 'spark-' + (symbol || 'x') + '-' + (isUp ? 'up' : 'dn');
+    const glowColor = isUp ? 'rgba(34,197,94,0.55)' : 'rgba(239,68,68,0.55)';
+    const fillColor = isUp ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)';
+    const gradId = 'spark-' + (symbol || 'x').replace(/[^a-zA-Z0-9_-]/g, '') + '-' + (isUp ? 'up' : 'dn');
     // Generate smooth curved sparkline with natural variation
-    const W = 100, H = 22;
+    const W = 100, H = 26;
     const pts = generateSparklinePoints(pct, symbol || 'BTC', W, H);
     const smoothPath = buildSmoothSparklinePath(pts, W, H);
     // Fill path (close to bottom)
@@ -4097,13 +4108,9 @@ function buildWatchTrendSVG(changePercent, symbol) {
                 <stop offset="0%" stop-color="${fillColor}"/>
                 <stop offset="100%" stop-color="${fillColor}" stop-opacity="0"/>
             </linearGradient>
-            <filter id="${gradId}-glow">
-                <feGaussianBlur stdDeviation="1.2" result="blur"/>
-                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
         </defs>
         <path d="${fillPath}" fill="url(#${gradId})"/>
-        <path d="${smoothPath}" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#${gradId}-glow)" style="filter:drop-shadow(0 0 2px ${glowColor})"/>
+        <path d="${smoothPath}" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 0 2.5px ${glowColor}) drop-shadow(0 1px 1px rgba(0,0,0,0.3))"/>
     </svg>`;
 }
 
@@ -5939,12 +5946,14 @@ function switchTab(pageId, btn) {
             renderDashboardMarketStatus();
             renderDashboardFeaturedAnalysis();
             renderDashboardCalendar();
+            renderMarketTicker();
             loadImportantNews();
         } else {
             renderWatchlist();
             renderDashboardMarketStatus();
             renderDashboardFeaturedAnalysis();
             renderDashboardCalendar();
+            renderMarketTicker();
         }
     } else if (pageId === 'market-page') {
         if (!tabLoaded.market) {
@@ -6189,38 +6198,129 @@ function renderDashboardMarketStatus() {
     if (ratio > 0.58) {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
-        // Bull SVG — premium 3D-style with horns
+        // Premium 3D Bull head SVG — large curved horns, gradient shading, neon green
         trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="32" cy="34" r="20" fill="rgba(34,197,94,0.08)" stroke="rgba(34,197,94,0.2)" stroke-width="1"/>
-            <path d="M20 28 Q16 20 14 16 Q18 18 22 24" stroke="#22C55E" stroke-width="3" stroke-linecap="round" fill="none"/>
-            <path d="M44 28 Q48 20 50 16 Q46 18 42 24" stroke="#22C55E" stroke-width="3" stroke-linecap="round" fill="none"/>
-            <ellipse cx="32" cy="36" rx="16" ry="14" fill="rgba(34,197,94,0.15)" stroke="#22C55E" stroke-width="2"/>
-            <circle cx="26" cy="33" r="2" fill="#22C55E"/>
-            <circle cx="38" cy="33" r="2" fill="#22C55E"/>
-            <path d="M28 42 Q32 45 36 42" stroke="#22C55E" stroke-width="2" stroke-linecap="round" fill="none"/>
-            <path d="M24 48 L22 54 M40 48 L42 54" stroke="#22C55E" stroke-width="2.5" stroke-linecap="round"/>
+            <defs>
+                <linearGradient id="bull-horn-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#A7F3D0"/>
+                    <stop offset="55%" stop-color="#22C55E"/>
+                    <stop offset="100%" stop-color="#15803D"/>
+                </linearGradient>
+                <linearGradient id="bull-head-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="#4ADE80"/>
+                    <stop offset="55%" stop-color="#22C55E"/>
+                    <stop offset="100%" stop-color="#166534"/>
+                </linearGradient>
+                <radialGradient id="bull-shine" cx="35%" cy="28%" r="60%">
+                    <stop offset="0%" stop-color="rgba(255,255,255,0.55)"/>
+                    <stop offset="60%" stop-color="rgba(255,255,255,0)"/>
+                </radialGradient>
+                <filter id="bull-glow" x="-30%" y="-30%" width="160%" height="160%">
+                    <feGaussianBlur stdDeviation="1.2" result="blur"/>
+                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+            </defs>
+            <g filter="url(#bull-glow)">
+                <path d="M22 18 C 14 8, 6 8, 4 12 C 3 14, 5 18, 10 22 C 14 25, 18 26, 22 24 Z" fill="url(#bull-horn-grad)" stroke="#15803D" stroke-width="0.6" stroke-linejoin="round"/>
+                <path d="M42 18 C 50 8, 58 8, 60 12 C 61 14, 59 18, 54 22 C 50 25, 46 26, 42 24 Z" fill="url(#bull-horn-grad)" stroke="#15803D" stroke-width="0.6" stroke-linejoin="round"/>
+                <path d="M14 13 Q 16 16 20 21" stroke="rgba(255,255,255,0.6)" stroke-width="0.8" stroke-linecap="round" fill="none"/>
+                <path d="M50 13 Q 48 16 44 21" stroke="rgba(255,255,255,0.6)" stroke-width="0.8" stroke-linecap="round" fill="none"/>
+                <ellipse cx="32" cy="36" rx="17" ry="15" fill="url(#bull-head-grad)" stroke="#15803D" stroke-width="1.2"/>
+                <ellipse cx="32" cy="36" rx="17" ry="15" fill="url(#bull-shine)"/>
+                <ellipse cx="24" cy="27" rx="6" ry="5" fill="rgba(34,197,94,0.35)" stroke="#15803D" stroke-width="0.8"/>
+                <ellipse cx="40" cy="27" rx="6" ry="5" fill="rgba(34,197,94,0.35)" stroke="#15803D" stroke-width="0.8"/>
+                <ellipse cx="26" cy="33" rx="3" ry="3.4" fill="#0B1220"/>
+                <ellipse cx="38" cy="33" rx="3" ry="3.4" fill="#0B1220"/>
+                <circle cx="26.8" cy="32.2" r="1" fill="#FFFFFF"/>
+                <circle cx="38.8" cy="32.2" r="1" fill="#FFFFFF"/>
+                <path d="M30 40 L32 42 L34 40 L34.5 44 L32 46 L29.5 44 Z" fill="#F5A623" stroke="#15803D" stroke-width="0.5" stroke-linejoin="round"/>
+                <path d="M32 46 L32 49" stroke="#15803D" stroke-width="1.2" stroke-linecap="round"/>
+                <path d="M28 49 Q 32 52 36 49" stroke="#0B1220" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+                <path d="M22 50 Q 25 53 28 52" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+                <path d="M42 50 Q 39 53 36 52" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+            </g>
         </svg>`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
+        // Premium balance/scale indicator in amber
         trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="32" cy="32" r="20" fill="rgba(245,166,35,0.08)" stroke="rgba(245,166,35,0.2)" stroke-width="1"/>
-            <line x1="18" y1="32" x2="46" y2="32" stroke="#F5A623" stroke-width="3" stroke-linecap="round"/>
-            <circle cx="32" cy="32" r="4" fill="rgba(245,166,35,0.2)" stroke="#F5A623" stroke-width="2"/>
+            <defs>
+                <linearGradient id="neu-beam-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#F5A623" stop-opacity="0.4"/>
+                    <stop offset="50%" stop-color="#F5A623"/>
+                    <stop offset="100%" stop-color="#F5A623" stop-opacity="0.4"/>
+                </linearGradient>
+                <radialGradient id="neu-pivot-grad" cx="50%" cy="40%" r="60%">
+                    <stop offset="0%" stop-color="#FCD34D"/>
+                    <stop offset="60%" stop-color="#F5A623"/>
+                    <stop offset="100%" stop-color="#92400E"/>
+                </radialGradient>
+                <linearGradient id="neu-pan-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="#FCD34D"/>
+                    <stop offset="100%" stop-color="#B45309"/>
+                </linearGradient>
+                <filter id="neu-glow" x="-30%" y="-30%" width="160%" height="160%">
+                    <feGaussianBlur stdDeviation="1" result="blur"/>
+                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+            </defs>
+            <g filter="url(#neu-glow)">
+                <rect x="31" y="14" width="2" height="32" fill="url(#neu-beam-grad)" rx="1"/>
+                <rect x="16" y="22" width="32" height="2.4" fill="url(#neu-beam-grad)" rx="1.2"/>
+                <line x1="16" y1="23" x2="16" y2="30" stroke="#F5A623" stroke-width="0.8" stroke-linecap="round"/>
+                <line x1="48" y1="23" x2="48" y2="30" stroke="#F5A623" stroke-width="0.8" stroke-linecap="round"/>
+                <path d="M10 30 Q 16 36 22 30 L 19 36 Q 16 38 13 36 Z" fill="url(#neu-pan-grad)" stroke="#92400E" stroke-width="0.6" stroke-linejoin="round"/>
+                <path d="M42 30 Q 48 36 54 30 L 51 36 Q 48 38 45 36 Z" fill="url(#neu-pan-grad)" stroke="#92400E" stroke-width="0.6" stroke-linejoin="round"/>
+                <circle cx="32" cy="20" r="3.2" fill="url(#neu-pivot-grad)" stroke="#92400E" stroke-width="0.6"/>
+                <rect x="26" y="46" width="12" height="3" rx="1.5" fill="#F5A623"/>
+                <rect x="22" y="49" width="20" height="3" rx="1.5" fill="#F5A623" opacity="0.85"/>
+            </g>
         </svg>`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
-        // Bear SVG — premium 3D-style with ears
+        // Premium 3D Bear head SVG — round ears, gradient shading, red glow
         trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="32" cy="34" r="20" fill="rgba(239,68,68,0.08)" stroke="rgba(239,68,68,0.2)" stroke-width="1"/>
-            <circle cx="20" cy="22" r="5" fill="rgba(239,68,68,0.15)" stroke="#EF4444" stroke-width="2"/>
-            <circle cx="44" cy="22" r="5" fill="rgba(239,68,68,0.15)" stroke="#EF4444" stroke-width="2"/>
-            <ellipse cx="32" cy="36" rx="16" ry="14" fill="rgba(239,68,68,0.15)" stroke="#EF4444" stroke-width="2"/>
-            <circle cx="26" cy="33" r="2" fill="#EF4444"/>
-            <circle cx="38" cy="33" r="2" fill="#EF4444"/>
-            <path d="M28 42 Q32 39 36 42" stroke="#EF4444" stroke-width="2" stroke-linecap="round" fill="none"/>
-            <path d="M24 48 L22 54 M40 48 L42 54" stroke="#EF4444" stroke-width="2.5" stroke-linecap="round"/>
+            <defs>
+                <linearGradient id="bear-head-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="#F87171"/>
+                    <stop offset="55%" stop-color="#EF4444"/>
+                    <stop offset="100%" stop-color="#7F1D1D"/>
+                </linearGradient>
+                <radialGradient id="bear-ear-grad" cx="40%" cy="35%" r="65%">
+                    <stop offset="0%" stop-color="#FCA5A5"/>
+                    <stop offset="55%" stop-color="#EF4444"/>
+                    <stop offset="100%" stop-color="#7F1D1D"/>
+                </radialGradient>
+                <radialGradient id="bear-shine" cx="35%" cy="28%" r="60%">
+                    <stop offset="0%" stop-color="rgba(255,255,255,0.5)"/>
+                    <stop offset="60%" stop-color="rgba(255,255,255,0)"/>
+                </radialGradient>
+                <filter id="bear-glow" x="-30%" y="-30%" width="160%" height="160%">
+                    <feGaussianBlur stdDeviation="1.2" result="blur"/>
+                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+            </defs>
+            <g filter="url(#bear-glow)">
+                <circle cx="20" cy="22" r="7" fill="url(#bear-ear-grad)" stroke="#7F1D1D" stroke-width="0.8"/>
+                <circle cx="20" cy="22" r="3.5" fill="rgba(127,29,29,0.6)"/>
+                <circle cx="44" cy="22" r="7" fill="url(#bear-ear-grad)" stroke="#7F1D1D" stroke-width="0.8"/>
+                <circle cx="44" cy="22" r="3.5" fill="rgba(127,29,29,0.6)"/>
+                <ellipse cx="32" cy="36" rx="17" ry="15.5" fill="url(#bear-head-grad)" stroke="#7F1D1D" stroke-width="1.2"/>
+                <ellipse cx="32" cy="36" rx="17" ry="15.5" fill="url(#bear-shine)"/>
+                <ellipse cx="24" cy="28" rx="3.2" ry="2.8" fill="#7F1D1D" opacity="0.25"/>
+                <ellipse cx="40" cy="28" rx="3.2" ry="2.8" fill="#7F1D1D" opacity="0.25"/>
+                <ellipse cx="26" cy="34" rx="2.8" ry="3.2" fill="#0B1220"/>
+                <ellipse cx="38" cy="34" rx="2.8" ry="3.2" fill="#0B1220"/>
+                <circle cx="26.7" cy="33.2" r="0.9" fill="#FFFFFF"/>
+                <circle cx="38.7" cy="33.2" r="0.9" fill="#FFFFFF"/>
+                <ellipse cx="32" cy="42" rx="4.2" ry="3.2" fill="#0B1220"/>
+                <path d="M32 45 L32 48" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round"/>
+                <path d="M28 48 Q 32 51 36 48" stroke="#0B1220" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+                <path d="M22 50 Q 25 53 28 51" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+                <path d="M42 50 Q 39 53 36 51" stroke="#0B1220" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+            </g>
         </svg>`;
     }
 
@@ -6245,6 +6345,36 @@ function renderDashboardMarketStatus() {
     `;
 
     container.innerHTML = fgHTML + trendHTML;
+}
+
+/**
+ * Market Ticker — auto-scrolling horizontal price strip.
+ * Uses existing `allCoins` array (NO new API calls). Renders symbol + 24h change %
+ * for top 10 coins, duplicated for seamless infinite scroll.
+ */
+function renderMarketTicker() {
+    const track = $('market-ticker-track');
+    if (!track) return;
+    if (!Array.isArray(allCoins) || !allCoins.length) return;
+
+    // Take top 10 coins (allCoins is already ordered by rank from API)
+    const tickerCoins = allCoins.slice(0, 10);
+    if (!tickerCoins.length) return;
+
+    const buildItem = (c) => {
+        const sym = escapeHtml(c.symbol || '');
+        const pct = (typeof c.changePercent24Hr === 'number' && !isNaN(c.changePercent24Hr)) ? c.changePercent24Hr : 0;
+        const isPos = pct >= 0;
+        const changeStr = (isPos ? '+' : '') + pct.toFixed(2) + '%';
+        const arrowSvg = isPos
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+        return `<div class="market-ticker-item"><span class="market-ticker-symbol">${sym}</span><span class="market-ticker-change ${isPos ? 'up' : 'down'}">${arrowSvg}${changeStr}</span></div>`;
+    };
+
+    // Duplicate the list to create a seamless infinite scroll
+    const html = tickerCoins.map(buildItem).join('') + tickerCoins.map(buildItem).join('');
+    track.innerHTML = html;
 }
 
 /**
@@ -6421,6 +6551,7 @@ function _startAllPolling() {
                 if (activePage === 'dashboard-page') {
                     renderDashboardMarketStatus();
                     renderWatchlist();
+                    renderMarketTicker();
                 }
             });
         }
@@ -6584,6 +6715,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Dashboard rebuild: market status + watchlist render after market data arrives
         renderDashboardMarketStatus();
         renderWatchlist();
+        renderMarketTicker();
     }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
     fetchAnalyses().then(changed => {
         if (changed) {

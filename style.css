@@ -2380,15 +2380,17 @@ strong.down { color: var(--red); }
 
 /* Admin Entry Button (inside profile card) */
 .admin-entry-btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    margin-top: 12px; padding: 6px 16px; height: 32px;
-    font-size: 12px; font-weight: 600; letter-spacing: 0.3px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    margin: 12px auto 0; padding: 6px 16px; height: 28px;
+    width: fit-content;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
     color: #1a1200;
     background: linear-gradient(135deg, #f7931a 0%, #e8a838 50%, #f7c948 100%);
     border: 1px solid rgba(247,201,72,0.6);
-    border-radius: 20px; cursor: pointer;
+    border-radius: 10px; cursor: pointer;
     box-shadow: 0 2px 12px rgba(247,147,26,0.25), inset 0 1px 0 rgba(255,255,255,0.3);
     transition: all 0.2s ease;
+    align-self: center;
 }
 .admin-entry-btn:active { transform: scale(0.95); box-shadow: 0 1px 6px rgba(247,147,26,0.2); }
 .admin-entry-btn svg { opacity: 0.85; }
@@ -4768,7 +4770,7 @@ strong.down { color: var(--red); }
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     object-position: center;
     display: block;
 }
@@ -4834,12 +4836,72 @@ strong.down { color: var(--red); }
 }
 
 /* ============================================================================
+   1b. MARKET TICKER — auto-scrolling price strip (zero API calls)
+   ========================================================================== */
+.market-ticker {
+    overflow: hidden;
+    margin: 0 0 16px;
+    border-radius: 12px;
+    background: rgba(11, 18, 32, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    padding: 8px 0;
+}
+.market-ticker-track {
+    display: flex;
+    gap: 24px;
+    animation: ticker-scroll 30s linear infinite;
+    white-space: nowrap;
+    width: max-content;
+    padding: 0 12px;
+}
+.market-ticker:hover .market-ticker-track {
+    animation-play-state: paused;
+}
+.market-ticker-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    scroll-snap-align: start;
+}
+.market-ticker-symbol {
+    color: #A5B4C7;
+    letter-spacing: 0.3px;
+}
+.market-ticker-change {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.market-ticker-change.up { color: #22C55E; }
+.market-ticker-change.down { color: #EF4444; }
+.market-ticker-change svg {
+    width: 9px;
+    height: 9px;
+}
+@media (prefers-reduced-motion: reduce) {
+    .market-ticker-track { animation: none; }
+}
+@keyframes ticker-scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+html[dir="rtl"] .market-ticker-track {
+    animation-direction: reverse;
+}
+
+/* ============================================================================
    2. MARKET STATUS — Fear & Greed (left) + Market Trend (right), equal columns
    ========================================================================== */
 .dashboard-market-status {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
+    align-items: stretch;
 }
 .dms-card {
     background: linear-gradient(180deg, #0E1626 0%, #0B1220 100%);
@@ -5056,26 +5118,35 @@ strong.down { color: var(--red); }
    3. WATCHLIST — Max 5 coins + Add Coin card, horizontal scroll, sparkline
    ========================================================================== */
 #dashboard-page .watchlist-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    display: flex;
+    flex-direction: row;
     gap: 10px;
     padding: 0;
     margin: 0 0 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
 }
 #dashboard-page .watchlist-grid::-webkit-scrollbar { display: none; }
 
 .watch-card {
+    flex: 0 0 120px;
+    scroll-snap-align: start;
     background: linear-gradient(180deg, #0E1626 0%, #0B1220 100%);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 18px;
-    padding: 12px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
+    align-items: center;
+    text-align: center;
     gap: 4px;
     cursor: pointer;
     position: relative;
     transition: transform 0.15s ease, border-color 0.2s ease;
-    min-height: 140px;
+    min-height: 130px;
     overflow: hidden;
 }
 .watch-card:active {
@@ -5085,8 +5156,10 @@ strong.down { color: var(--red); }
 .watch-card-header {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
     margin-bottom: 2px;
+    width: 100%;
 }
 .watch-card-icon {
     width: 28px;
@@ -5147,8 +5220,8 @@ strong.down { color: var(--red); }
     padding: 2px 6px;
     border-radius: 8px;
     width: fit-content;
+    margin: 2px auto 0;
     line-height: 1.2;
-    margin-top: 2px;
 }
 .watch-card-change.up { color: #22C55E; background: rgba(34, 197, 94, 0.1); }
 .watch-card-change.down { color: #EF4444; background: rgba(239, 68, 68, 0.1); }
@@ -5157,6 +5230,7 @@ strong.down { color: var(--red); }
 /* Mini trend sparkline (SVG) */
 .watch-card-trend {
     height: 28px;
+    width: 100%;
     margin-top: auto;
     display: flex;
     align-items: flex-end;
@@ -5684,7 +5758,7 @@ strong.down { color: var(--red); }
 @media (max-width: 360px) {
     #dashboard-page { padding: 10px 12px 20px; }
     .hero-banner-slider { border-radius: 18px; }
-    .hero-cta { font-size: 11px; padding: 7px 14px; bottom: 12px; inset-inline-start: 12px; }
+    .hero-cta { font-size: 11px; padding: 7px 14px; bottom: 12px; }
     .hero-slider-dots { bottom: 9px; inset-inline-end: 12px; }
     .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }
     .dms-fg-gauge { width: 64px; }
@@ -5694,7 +5768,6 @@ strong.down { color: var(--red); }
     .dms-trend-arrow { width: 38px; height: 38px; }
     .dms-trend-arrow svg { width: 19px; height: 19px; }
     .dms-trend-label-big { font-size: 13px; }
-    .watch-card { flex: 0 0 112px; padding: 10px; min-height: 130px; }
     .watch-card-add { flex: 0 0 80px; min-height: 130px; }
     .dma-card { flex: 0 0 190px; height: 184px; }
     .dfa-skel-card { flex: 0 0 190px; height: 184px; }
@@ -5714,7 +5787,7 @@ strong.down { color: var(--red); }
 }
 
 @media (min-width: 430px) {
-    .watch-card { flex: 0 0 130px; }
+    .watch-card { flex: 0 0 134px; }
     .dma-card { flex: 0 0 252px; }
     .dfa-skel-card { flex: 0 0 252px; }
 }
@@ -5788,13 +5861,10 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 }
 
 
-/* ── Responsive Watchlist Grid ── */
+/* ── Responsive Watchlist (horizontal scroll) ── */
 @media (max-width: 360px) {
-    #dashboard-page .watchlist-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-    }
     .watch-card {
+        flex: 0 0 108px;
         min-height: 130px;
         padding: 10px;
     }
@@ -5810,7 +5880,7 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     }
 }
 @media (min-width: 412px) {
-    #dashboard-page .watchlist-grid {
-        grid-template-columns: repeat(3, 1fr);
+    .watch-card {
+        flex: 0 0 130px;
     }
 }
