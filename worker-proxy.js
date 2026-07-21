@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { neon } from '@neondatabase/serverless';
+import { Pool } from '@neondatabase/serverless';
 import { createAlertRepository } from './src/repositories/alerts.js';
 import { createAlertHandlers } from './src/controllers/alerts.js';
 import { createWatchlistRepository } from './src/repositories/watchlist.js';
@@ -512,8 +512,6 @@ function resolveDatabaseUrl(env) {
   let url = String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
   if (!url) return '';
   // Auto-append pgbouncer=true for Neon serverless Pool if missing.
-  // Without PgBouncer, every new connection triggers a Neon cold start (3-10s),
-  // which causes 503 timeouts on /api/wallet and /api/referrals/stats.
   if (!url.includes('pgbouncer=true')) {
     url += (url.includes('?') ? '&' : '?') + 'pgbouncer=true';
   }
@@ -885,34 +883,27 @@ function isAdminTelegramId(env, userId) {
   return getAdminIds(env).has(String(userId));
 }
 
-// Use Neon's stateless HTTP client instead of Pool to avoid
-// "Cannot perform I/O on behalf of a different request" errors.
-// Pool stores connections at module level, which bind to the original
-// request's I/O context. neon() creates a fresh HTTP request per query.
-// (neon imported at top of file)
-
-let _sqlClient = null;
-function getSqlClient(env) {
+// Create a NEW Pool per queryDb call to avoid module-level I/O sharing.
+// Pool is lightweight to create — it doesn't connect until query() is called.
+// This eliminates "Cannot perform I/O on behalf of a different request" errors
+// while keeping TCP connections (which work from Cloudflare Workers).
+function createPool(env) {
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) return null;
-  if (!_sqlClient || _sqlClient._url !== databaseUrl) {
-    _sqlClient = neon(databaseUrl);
-    _sqlClient._url = databaseUrl;
-  }
-  return _sqlClient;
+  return new Pool({
+    connectionString: databaseUrl,
+    max: 1,
+    idleTimeoutMillis: 0,
+    connectionTimeoutMillis: 8000,
+  });
 }
 
 async function getDbUserJoinState(env, userId) {
-  const sql = getSqlClient(env);
-  if (!sql) {
-    return null;
-  }
-
+  const pool = createPool(env);
+  if (!pool) return null;
   try {
-    const rows = await sql('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [
-      String(userId),
-    ]);
-    const row = rows[0];
+    const result = await pool.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [String(userId)]);
+    const row = result.rows[0];
     if (!row) {
       return null;
     }
@@ -924,17 +915,16 @@ async function getDbUserJoinState(env, userId) {
   } catch (error) {
     console.warn(safeError('join-db-read', error));
     return null;
+  } finally {
+    pool.end().catch(() => {});
   }
 }
 
 async function persistDbUserJoinState(env, userId, joined) {
-  const sql = getSqlClient(env);
-  if (!sql) {
-    return;
-  }
-
+  const pool = createPool(env);
+  if (!pool) return;
   try {
-    await sql(
+    await pool.query(
       `
         INSERT INTO users (
           telegram_id,
@@ -955,6 +945,8 @@ async function persistDbUserJoinState(env, userId, joined) {
     );
   } catch (error) {
     console.warn(safeError('join-db-write', error));
+  } finally {
+    pool.end().catch(() => {});
   }
 }
 
@@ -963,25 +955,27 @@ function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  const sqlClient = getSqlClient(env);
-  if (!sqlClient) {
-    throw new Error('Database not configured');
-  }
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const timeoutMs = 8000;
-      const result = await Promise.race([
-        sqlClient(sqlText, params),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Query timeout after ${timeoutMs}ms: ${sqlText.substring(0, 60)}`)), timeoutMs)
-        ),
-      ]);
-      return { rows: result };
-    } catch (error) {
-      if (attempt === retries) throw error;
-      const ms = Math.min(200 * 2 ** attempt, 1000);
-      await new Promise((r) => setTimeout(r, ms));
+  const pool = createPool(env);
+  if (!pool) throw new Error('Database not configured');
+  try {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const timeoutMs = 8000;
+        const result = await Promise.race([
+          pool.query(sqlText, params),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Query timeout after ${timeoutMs}ms: ${sqlText.substring(0, 60)}`)), timeoutMs)
+          ),
+        ]);
+        return result;
+      } catch (error) {
+        if (attempt === retries) throw error;
+        const ms = Math.min(200 * 2 ** attempt, 1000);
+        await new Promise((r) => setTimeout(r, ms));
+      }
     }
+  } finally {
+    pool.end().catch(() => {});
   }
 }
 
@@ -991,22 +985,23 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * Requires Neon serverless Pool with transaction_mode support.
  */
 async function queryDbTransaction(env, queries) {
-  const sqlClient = getSqlClient(env);
-  if (!sqlClient) {
-    throw new Error('Database not configured');
-  }
+  const pool = createPool(env);
+  if (!pool) throw new Error('Database not configured');
+  const client = await pool.connect();
   try {
-    await sqlClient('BEGIN');
+    await client.query('BEGIN');
     const results = [];
     for (const { sql, params } of queries) {
-      const rows = await sqlClient(sql, params);
-      results.push({ rows });
+      results.push(await client.query(sql, params));
     }
-    await sqlClient('COMMIT');
+    await client.query('COMMIT');
     return results;
   } catch (error) {
-    try { await sqlClient('ROLLBACK'); } catch { /* ignore */ }
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
     throw error;
+  } finally {
+    client.release();
+    pool.end().catch(() => {});
   }
 }
 
