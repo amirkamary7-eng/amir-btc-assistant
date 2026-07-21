@@ -168,33 +168,46 @@ async function writeAppCache(env, key, value, expirationTtl) {
 
 // ============================================================================
 // DIAG: Write diagnostic log entries to KV for retrieval via /api/_diag/referral-log
+// OPTIMIZATION: Use in-memory buffer + batch writes to reduce KV writes.
+// Previously each diagLog call did 1 KV read + 1 KV write = 2 KV ops.
+// With 21 calls per referral flow, that's 42 KV ops just for logging.
+// Now: buffer in memory, flush once per request via waitUntil.
 // ============================================================================
 const DIAG_LOG_KEY = 'diag_referral_flow_log';
 const DIAG_LOG_MAX = 50;
+const _diagBuffer = [];
 
 async function diagLog(env, entry) {
   const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
   console.log(line);
+  // Buffer in memory — will be flushed by flushDiagLog()
+  _diagBuffer.push(line);
+  if (_diagBuffer.length > DIAG_LOG_MAX) {
+    _diagBuffer.splice(0, _diagBuffer.length - DIAG_LOG_MAX);
+  }
+}
+
+/** Flush buffered diag logs to KV (call once at end of request via waitUntil) */
+async function flushDiagLog(env) {
+  if (_diagBuffer.length === 0) return;
+  if (!env?.APP_CACHE?.put) return;
   try {
     const existing = await env.APP_CACHE.get(DIAG_LOG_KEY);
     let lines = existing ? existing.split('\n').filter(Boolean) : [];
-    lines.push(line);
+    lines = lines.concat(_diagBuffer);
     if (lines.length > DIAG_LOG_MAX) lines = lines.slice(-DIAG_LOG_MAX);
     await env.APP_CACHE.put(DIAG_LOG_KEY, lines.join('\n'), { expirationTtl: 600 });
+    _diagBuffer.length = 0; // Clear buffer after successful flush
   } catch { /* KV write failure should not break the flow */ }
 }
 
-/** Fire-and-forget version for sync contexts (does not block caller) */
+/** Fire-and-forget version for sync contexts (buffers, does not block caller) */
 function diagLogSync(env, entry) {
   const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
   console.log(line);
-  if (env?.APP_CACHE?.put) {
-    env.APP_CACHE.get(DIAG_LOG_KEY).then(existing => {
-      let lines = existing ? existing.split('\n').filter(Boolean) : [];
-      lines.push(line);
-      if (lines.length > DIAG_LOG_MAX) lines = lines.slice(-DIAG_LOG_MAX);
-      return env.APP_CACHE.put(DIAG_LOG_KEY, lines.join('\n'), { expirationTtl: 600 });
-    }).catch(() => {});
+  _diagBuffer.push(line);
+  if (_diagBuffer.length > DIAG_LOG_MAX) {
+    _diagBuffer.splice(0, _diagBuffer.length - DIAG_LOG_MAX);
   }
 }
 
@@ -1871,17 +1884,25 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
   const items = parseRssItems(rssText);
   if (items.length === 0) return [];
 
+  // CPU OPTIMIZATION: Limit articles per source to 5 (was unlimited).
+  // Each article requires 2 AI translations (title + description) = 2 Workers AI calls.
+  // With 7 sources × 10 articles × 2 translations = 140 AI calls — far too many.
+  // Now: 7 sources × 5 articles × 2 translations = 70 AI calls max.
+  // Plus the Promise.all parallelism means these run concurrently.
+  const MAX_ARTICLES_PER_SOURCE = 5;
+  const limitedItems = items.slice(0, MAX_ARTICLES_PER_SOURCE);
+
   let allTranslations;
   if (skipTranslate) {
     // Persian sources — no translation needed
-    allTranslations = items.map((item) => [
+    allTranslations = limitedItems.map((item) => [
       item.title || 'بدون عنوان',
       item.description || '',
     ]);
   } else {
     // Parallel translation — all titles + descriptions translated concurrently
     allTranslations = await Promise.all(
-      items.flatMap((item) => [
+      limitedItems.flatMap((item) => [
         translateToFarsi(item.title || 'بدون عنوان', env),
         translateToFarsi(item.description || '', env),
       ])
@@ -1889,19 +1910,19 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
   }
 
   const articles = [];
-  for (let i = 0; i < items.length; i++) {
+  for (let i = 0; i < limitedItems.length; i++) {
     const translatedTitle = allTranslations[i * 2];
     const translatedDescription = allTranslations[i * 2 + 1];
 
     articles.push({
-      title: String(translatedTitle || items[i].title || 'بدون عنوان').replace(/\n/g, ' ').trim(),
-      description: String(translatedDescription || items[i].description || '').replace(/\n/g, ' ').trim(),
-      time_ago: parseRelativeTime(items[i].pubDate),
+      title: String(translatedTitle || limitedItems[i].title || 'بدون عنوان').replace(/\n/g, ' ').trim(),
+      description: String(translatedDescription || limitedItems[i].description || '').replace(/\n/g, ' ').trim(),
+      time_ago: parseRelativeTime(limitedItems[i].pubDate),
       source: sourceName,
       category: category || 'crypto',
-      image: items[i].image,
-      url: items[i].url,
-      sentiment: classifySentiment(items[i].title, items[i].description),
+      image: limitedItems[i].image,
+      url: limitedItems[i].url,
+      sentiment: classifySentiment(limitedItems[i].title, limitedItems[i].description),
     });
   }
 

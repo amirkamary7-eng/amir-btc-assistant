@@ -101,6 +101,10 @@ export function createUserHandlers(deps) {
         Boolean(userRow?.channel_joined),
         isNewUser,
       );
+      // Flush buffered diag logs to KV (1 write instead of 21+)
+      if (typeof flushDiagLog === 'function') {
+        try { await flushDiagLog(env); } catch {}
+      }
       const freshUserRow = await userRepo.getById(env, userId);
       const watchlist = await watchlistRepo.getSymbols(env, userId);
 

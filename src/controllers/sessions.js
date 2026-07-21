@@ -20,6 +20,10 @@ export function createSessionHandlers(deps) {
   /**
    * POST /api/sessions/heartbeat — Register/refresh a user session.
    * Generates a session_id if not provided, updates KV, and returns online count.
+   *
+   * KV WRITE OPTIMIZATION: Previously did 3 KV writes per call (2 individual
+   * session keys + 1 presence_state). Now only writes presence_state (1 write).
+   * Individual session keys are not read by any other endpoint, so they're skipped.
    */
   async function handleHeartbeat(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
@@ -45,8 +49,8 @@ export function createSessionHandlers(deps) {
     const lastSeen = now.toISOString();
     const nowMs = now.getTime();
 
-    await sessionRepo.writeHeartbeat(env, userId, sessionId, lastSeen, ttlSeconds);
-
+    // OPTIMIZATION: Only write presence_state (1 KV write instead of 3).
+    // Skip individual session keys — not read by any other endpoint.
     const state = await sessionRepo.readPresenceState(env);
     sessionRepo.prunePresenceState(state, nowMs);
     state[userId] = nowMs + ttlSeconds * 1000;
@@ -62,6 +66,9 @@ export function createSessionHandlers(deps) {
 
   /**
    * GET /api/sessions/online — Return the current online user count.
+   *
+   * KV WRITE OPTIMIZATION: Previously wrote presence_state on every GET.
+   * Now only reads — no write needed for a count query.
    */
   async function handleOnline(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
@@ -78,11 +85,11 @@ export function createSessionHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const ttlSeconds = getNumericEnv(env, 'SESSION_TTL', 120);
     const nowMs = Date.now();
     const state = await sessionRepo.readPresenceState(env);
     sessionRepo.prunePresenceState(state, nowMs);
-    await sessionRepo.persistPresenceState(env, state, ttlSeconds);
+    // OPTIMIZATION: Do NOT write on GET — just read and count.
+    // The pruned state will be persisted on the next heartbeat.
 
     return jsonResponse({
       status: 'success',
