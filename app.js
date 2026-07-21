@@ -6198,18 +6198,15 @@ function renderDashboardMarketStatus() {
     if (ratio > 0.58) {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
-        // Premium Bull image asset — neon green, 3D crypto style
-        trendGraphic = `<img src="assets/trend-bull.png" alt="Bull Market" class="trend-bull-bear-img" loading="lazy" decoding="async" onerror="this.style.display='none'">`;
+        trendGraphic = `<img src="assets/trend-bull.png" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="sync">`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        // Premium Neutral image asset — golden balance
-        trendGraphic = `<img src="assets/trend-neutral.png" alt="Neutral Market" class="trend-bull-bear-img" loading="lazy" decoding="async" onerror="this.style.display='none'">`;
+        trendGraphic = `<img src="assets/trend-neutral.png" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="sync">`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
-        // Premium Bear image asset — neon red, aggressive style
-        trendGraphic = `<img src="assets/trend-bear.png" alt="Bear Market" class="trend-bull-bear-img" loading="lazy" decoding="async" onerror="this.style.display='none'">`;
+        trendGraphic = `<img src="assets/trend-bear.png" alt="Bear" class="trend-bull-bear-img" loading="eager" decoding="sync">`;
     }
 
     const trendHTML = `
@@ -6572,6 +6569,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const cachedMarket = JSON.parse(localStorage.getItem('market_data_cache') || '[]');
         if (Array.isArray(cachedMarket) && cachedMarket.length && cachedVersion >= MARKET_CACHE_VERSION) {
             allCoins = cachedMarket;
+            // Render ticker IMMEDIATELY from cached data — zero delay
+            renderMarketTicker();
+            renderDashboardMarketStatus();
         } else if (cachedVersion < MARKET_CACHE_VERSION) {
             localStorage.removeItem('market_data_cache');
         }

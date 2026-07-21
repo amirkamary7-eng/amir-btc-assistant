@@ -4806,9 +4806,18 @@ strong.down { color: var(--red); }
     box-shadow: 0 2px 8px rgba(245, 166, 35, 0.35);
 }
 .hero-cta--bitunix {
-    background: #FFFFFF;
-    color: #0B1220;
-    box-shadow: 0 4px 14px rgba(255, 255, 255, 0.3);
+    background: #F5A623;
+    color: #020611;
+    box-shadow: 0 3px 12px rgba(245, 166, 35, 0.4);
+    font-size: 11px;
+    padding: 7px 16px;
+    left: auto;
+    right: 16px;
+    transform: none;
+    border-radius: 10px;
+}
+.hero-cta--bitunix:active {
+    transform: scale(0.95);
 }
 .hero-slider-dots {
     position: absolute;
@@ -5019,8 +5028,8 @@ html[dir="rtl"] .market-ticker-track {
     text-align: center;
 }
 .dms-trend-graphic {
-    width: 56px;
-    height: 56px;
+    width: 90px;
+    height: 90px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -5814,93 +5823,31 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
    ============================================================ */
 
 /* ── Market Trend: Bull/Bear Graphics ── */
-.dms-trend-graphic {
-    width: 56px;
-    height: 56px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    margin: 0 auto 4px;
-}
-.dms-trend-graphic svg.trend-bull-bear {
-    width: 100%;
-    height: 100%;
-    filter: drop-shadow(0 0 6px currentColor);
-}
-.dms-trend-graphic.bullish svg.trend-bull-bear {
-    filter: drop-shadow(0 0 8px rgba(34,197,94,0.6));
-}
-.dms-trend-graphic.bearish svg.trend-bull-bear {
-    filter: drop-shadow(0 0 8px rgba(239,68,68,0.6));
-}
-.dms-trend-graphic.neutral svg.trend-bull-bear {
-    filter: drop-shadow(0 0 6px rgba(245,166,35,0.4));
-}
-/* Glass style background for trend graphic */
-.dms-trend-graphic::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.02);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(255,255,255,0.04);
-}
-.dms-trend-graphic.bullish::before {
-    background: rgba(34,197,94,0.06);
-    border-color: rgba(34,197,94,0.12);
-}
-.dms-trend-graphic.bearish::before {
-    background: rgba(239,68,68,0.06);
-    border-color: rgba(239,68,68,0.12);
-}
-.dms-trend-graphic.neutral::before {
-    background: rgba(245,166,35,0.06);
-    border-color: rgba(245,166,35,0.12);
-}
-
-
-/* ── Responsive Watchlist (horizontal scroll) ── */
-@media (max-width: 360px) {
-    .watch-card {
-        flex: 0 0 108px;
-        min-height: 130px;
-        padding: 10px;
-    }
-    .watch-card-icon {
-        width: 24px;
-        height: 24px;
-    }
-    .watch-card-symbol {
-        font-size: 12px;
-    }
-    .watch-card-price {
-        font-size: 11px;
-    }
-}
-@media (min-width: 412px) {
-    .watch-card {
-        flex: 0 0 130px;
-    }
-}
-
 /* ── Market Trend: Image-based Bull/Bear graphics ── */
 .dms-trend-graphic img.trend-bull-bear-img {
-    width: 56px;
-    height: 56px;
+    width: 90px;
+    height: 90px;
     object-fit: contain;
     position: relative;
     z-index: 1;
     border-radius: 50%;
 }
 .dms-trend-graphic.bullish img.trend-bull-bear-img {
-    filter: drop-shadow(0 0 8px rgba(34,197,94,0.5));
+    filter: drop-shadow(0 0 10px rgba(34,197,94,0.5));
 }
 .dms-trend-graphic.bearish img.trend-bull-bear-img {
-    filter: drop-shadow(0 0 8px rgba(239,68,68,0.5));
+    filter: drop-shadow(0 0 10px rgba(239,68,68,0.5));
 }
 .dms-trend-graphic.neutral img.trend-bull-bear-img {
-    filter: drop-shadow(0 0 6px rgba(245,166,35,0.4));
+    filter: drop-shadow(0 0 8px rgba(245,166,35,0.4));
+}
+@media (max-width: 430px) {
+    .dms-trend-graphic img.trend-bull-bear-img {
+        width: 72px;
+        height: 72px;
+    }
+    .dms-trend-graphic {
+        width: 72px;
+        height: 72px;
+    }
 }
