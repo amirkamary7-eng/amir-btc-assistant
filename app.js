@@ -4485,7 +4485,16 @@ async function loadNews(force = false, append = false) {
         }
 
         Cache.set('news', newsCache, 300);
-        renderNews(activeTab);
+        // BUG #2 FIX: Preserve scroll position when re-rendering (not append)
+        if (!append) {
+            const savedScroll = window.scrollY;
+            renderNews(activeTab);
+            // Restore scroll after re-render
+            requestAnimationFrame(() => window.scrollTo(0, savedScroll));
+        } else {
+            // Append: just re-render, scroll stays naturally
+            renderNews(activeTab);
+        }
     } catch (e) {
         console.error('News error:', e);
         const container = document.getElementById('news-list');
@@ -5523,11 +5532,8 @@ const _niScrollPositions = {};
 function _niSaveScrollPosition() {
     const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news;
     if (!activeTab) return;
-    const container = document.getElementById('news-list');
-    if (!container) return;
-    // Find scrollable parent (the page or feed container)
-    const scrollEl = document.getElementById('news-page') || container;
-    _niScrollPositions[activeTab] = scrollEl.scrollTop || window.scrollY || 0;
+    // The window scrolls (not the container), so use window.scrollY
+    _niScrollPositions[activeTab] = window.scrollY || document.documentElement.scrollTop || 0;
 }
 
 function _niRestoreScrollPosition(tab) {
@@ -5536,12 +5542,7 @@ function _niRestoreScrollPosition(tab) {
     if (saved == null) return;
     // Use requestAnimationFrame to ensure DOM is rendered
     requestAnimationFrame(() => {
-        const scrollEl = document.getElementById('news-page');
-        if (scrollEl) {
-            scrollEl.scrollTop = saved;
-        } else {
-            window.scrollTo(0, saved);
-        }
+        window.scrollTo(0, saved);
     });
 }
 
