@@ -582,18 +582,179 @@
     <!-- #region NewsPage -->
     <!-- این بخش دسته‌بندی خبرها و خروجی تقویم اقتصادی را نمایش می‌دهد. -->
     <section id="news-page" class="page">
-        <div class="news-tabs-wrapper">
-            <div class="news-tabs" id="news-tabs">
-                <button class="news-tab active" data-news="all" onclick="switchNewsTab('all', this)" >همه <span class="news-badge" id="badge-all"></span></button>
-                <button class="news-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)" >کریپتو <span class="news-badge" id="badge-crypto"></span></button>
-                <button class="news-tab" data-news="forex" onclick="switchNewsTab('forex', this)" >فارکس <span class="news-badge" id="badge-forex"></span></button>
-                <button class="news-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)" >تقویم <span class="news-badge" id="badge-calendar"></span></button>
+        <!-- Premium Top Bar: Tabs + Filter + Search -->
+        <div class="ni-topbar">
+            <div class="ni-tabs-row">
+                <div class="ni-tabs" id="news-tabs">
+                    <button class="ni-tab active" data-news="all" onclick="switchNewsTab('all', this)">همه</button>
+                    <button class="ni-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)">کریپتو</button>
+                    <button class="ni-tab" data-news="forex" onclick="switchNewsTab('forex', this)">فارکس</button>
+                    <button class="ni-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)">تقویم</button>
+                    <button class="ni-tab" data-news="saved" onclick="switchNewsTab('saved', this)">ذخیره شده</button>
+                </div>
+                <button class="ni-icon-btn" onclick="openNewsFilterSheet()" aria-label="فیلتر">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                    <span class="ni-filter-dot" id="ni-filter-dot" style="display:none;"></span>
+                </button>
+                <button class="ni-icon-btn" onclick="openNewsSearch()" aria-label="جستجو">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </button>
             </div>
         </div>
-        <div class="news-feed-container" id="news-feed-container">
-            <div class="news-list" id="news-list"></div>
+
+        <!-- News Feed Container -->
+        <div class="ni-feed-container" id="news-feed-container">
+            <div class="ni-list" id="news-list"></div>
         </div>
     </section>
+
+    <!-- ═══ News Filter Bottom Sheet ═══ -->
+    <div id="ni-filter-sheet" class="ni-sheet-overlay" style="display:none;" onclick="if(event.target===this) closeNewsFilterSheet()">
+        <div class="ni-sheet" dir="rtl">
+            <div class="ni-sheet-handle"></div>
+            <div class="ni-sheet-header">
+                <h3 class="ni-sheet-title">فیلتر اخبار</h3>
+                <button class="ni-sheet-close" onclick="closeNewsFilterSheet()" aria-label="بستن">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="ni-sheet-body">
+                <!-- Sentiment -->
+                <div class="ni-filter-section">
+                    <div class="ni-filter-label">احساس بازار</div>
+                    <div class="ni-chip-row">
+                        <button class="ni-chip" data-filter="sentiment" data-value="bullish">صعودی</button>
+                        <button class="ni-chip" data-filter="sentiment" data-value="bearish">نزولی</button>
+                        <button class="ni-chip" data-filter="sentiment" data-value="neutral">خنثی</button>
+                    </div>
+                </div>
+                <!-- Priority -->
+                <div class="ni-filter-section">
+                    <div class="ni-filter-label">اولویت</div>
+                    <div class="ni-chip-row">
+                        <button class="ni-chip" data-filter="priority" data-value="breaking">خبر فوری</button>
+                        <button class="ni-chip" data-filter="priority" data-value="high">تأثیر بالا</button>
+                        <button class="ni-chip" data-filter="priority" data-value="trending">پرطرفدار</button>
+                    </div>
+                </div>
+                <!-- Category -->
+                <div class="ni-filter-section">
+                    <div class="ni-filter-label">دسته‌بندی</div>
+                    <div class="ni-chip-row">
+                        <button class="ni-chip" data-filter="category" data-value="bitcoin">بیت‌کوین</button>
+                        <button class="ni-chip" data-filter="category" data-value="ethereum">اتریوم</button>
+                        <button class="ni-chip" data-filter="category" data-value="solana">سولانا</button>
+                        <button class="ni-chip" data-filter="category" data-value="xrp">XRP</button>
+                        <button class="ni-chip" data-filter="category" data-value="etf">ETF</button>
+                        <button class="ni-chip" data-filter="category" data-value="regulation">قانون‌گذاری</button>
+                        <button class="ni-chip" data-filter="category" data-value="macro">کلان</button>
+                        <button class="ni-chip" data-filter="category" data-value="market">ساختار بازار</button>
+                    </div>
+                </div>
+                <!-- Time Range -->
+                <div class="ni-filter-section">
+                    <div class="ni-filter-label">بازه زمانی</div>
+                    <div class="ni-chip-row">
+                        <button class="ni-chip" data-filter="time" data-value="1h">ساعت گذشته</button>
+                        <button class="ni-chip" data-filter="time" data-value="24h">۲۴ ساعت گذشته</button>
+                        <button class="ni-chip" data-filter="time" data-value="7d">۷ روز گذشته</button>
+                    </div>
+                </div>
+            </div>
+            <div class="ni-sheet-actions">
+                <button class="ni-btn ni-btn-ghost" onclick="resetNewsFilters()">بازنشانی</button>
+                <button class="ni-btn ni-btn-primary" onclick="applyNewsFilters()">اعمال فیلتر</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ News Search Overlay ═══ -->
+    <div id="ni-search-overlay" class="ni-sheet-overlay" style="display:none;" onclick="if(event.target===this) closeNewsSearch()">
+        <div class="ni-search-panel" dir="rtl">
+            <div class="ni-search-header">
+                <button class="ni-icon-btn" onclick="closeNewsSearch()" aria-label="بستن">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                </button>
+                <div class="ni-search-input-wrap">
+                    <svg class="ni-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" id="ni-search-input" class="ni-search-input" placeholder="جستجوی خبر، ارز، کشور..." oninput="onNewsSearchInput(this.value)">
+                </div>
+            </div>
+            <div class="ni-search-results" id="ni-search-results"></div>
+        </div>
+    </div>
+
+    <!-- ═══ Calendar Reminder Bottom Sheet ═══ -->
+    <div id="ni-reminder-sheet" class="ni-sheet-overlay" style="display:none;" onclick="if(event.target===this) closeReminderSheet()">
+        <div class="ni-sheet" dir="rtl">
+            <div class="ni-sheet-handle"></div>
+            <div class="ni-sheet-header">
+                <h3 class="ni-sheet-title">یادآوری رویداد</h3>
+                <button class="ni-sheet-close" onclick="closeReminderSheet()" aria-label="بستن">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="ni-sheet-body">
+                <div class="ni-reminder-event-info" id="ni-reminder-event-info"></div>
+                <div class="ni-reminder-options">
+                    <button class="ni-reminder-option" onclick="setEventReminder('15m')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span>۱۵ دقیقه قبل</span>
+                    </button>
+                    <button class="ni-reminder-option" onclick="setEventReminder('1h')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span>۱ ساعت قبل</span>
+                    </button>
+                    <button class="ni-reminder-option" onclick="setEventReminder('24h')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span>۲۴ ساعت قبل</span>
+                    </button>
+                </div>
+                <button class="ni-btn ni-btn-ghost ni-btn-block" style="margin-top:12px;" onclick="removeEventReminder()">حذف یادآوری</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Share Bottom Sheet ═══ -->
+    <div id="ni-share-sheet" class="ni-sheet-overlay" style="display:none;" onclick="if(event.target===this) closeShareSheet()">
+        <div class="ni-sheet" dir="rtl">
+            <div class="ni-sheet-handle"></div>
+            <div class="ni-sheet-header">
+                <h3 class="ni-sheet-title">اشتراک‌گذاری</h3>
+                <button class="ni-sheet-close" onclick="closeShareSheet()" aria-label="بستن">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="ni-sheet-body">
+                <div class="ni-share-options">
+                    <button class="ni-share-option" onclick="shareNewsTo('telegram')">
+                        <div class="ni-share-icon ni-share-telegram">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+                        </div>
+                        <span>تلگرام</span>
+                    </button>
+                    <button class="ni-share-option" onclick="shareNewsTo('whatsapp')">
+                        <div class="ni-share-icon ni-share-whatsapp">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                        </div>
+                        <span>واتساپ</span>
+                    </button>
+                    <button class="ni-share-option" onclick="shareNewsTo('x')">
+                        <div class="ni-share-icon ni-share-x">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                        </div>
+                        <span>X</span>
+                    </button>
+                    <button class="ni-share-option" onclick="shareNewsTo('copy')">
+                        <div class="ni-share-icon ni-share-copy">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </div>
+                        <span>کپی لینک</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- #endregion -->
 

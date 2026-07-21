@@ -4289,43 +4289,111 @@ let newsLoadObserver = null;
 let calCountdownInterval = null;
 let currentCalCountry = 'all';
 
+// News Intelligence — new state for filters, saved, hero slider, search
+let _niActiveFilters = { sentiment: [], priority: [], category: [], time: null };
+let _niSavedNews = JSON.parse(localStorage.getItem('ni_saved_news') || '[]');
+let _niHeroSlides = [];
+let _niHeroIndex = 0;
+let _niHeroTimer = null;
+let _niHeroStartX = 0;
+let _niHeroDragActive = false;
+let _niCurrentSearchQuery = '';
+let _niCurrentReminderEvent = null;
+let _niCurrentShareNews = null;
+let _niCalendarReminders = JSON.parse(localStorage.getItem('ni_cal_reminders') || '{}');
+
+// SVG icon constants for news (Lucide-style, consistent stroke weight)
+const NI_ICONS = {
+    bookmark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+    bookmarkFilled: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+    share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+    trending: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    arrowUp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+    arrowDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+    bellOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+    sparkles: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>',
+    searchEmpty: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="48" height="48"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    bookmarkEmpty: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="48" height="48"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+};
+
 // ============================================================================
 // NOTE (Phase 5): translateText, translateArticles, detectNewsCategory,
-// parseRssItems, fetchRssArticles — all removed.
+// parseRssItems, fetchRssArticle — all removed.
 // Backend now handles: multi-source RSS, translation (CF Workers AI), categories.
 // Frontend only calls /api/farsi-news and uses the 'category' field directly.
 // ============================================================================
 
-function sentimentBadge(sentiment) {
+/**
+ * Generate premium badge HTML for a news item's sentiment/type.
+ * No emojis — uses SVG icons only.
+ */
+function niBadgeHtml(sentiment) {
     const s = (sentiment || '').toLowerCase();
     const map = {
-        bullish: '<span class="news-card-sentiment sentiment-bullish">🟢 Bullish</span>',
-        bearish: '<span class="news-card-sentiment sentiment-bearish">🔴 Bearish</span>',
-        macro: '<span class="news-card-sentiment sentiment-macro">🟡 Macro</span>',
-        neutral: '<span class="news-card-sentiment sentiment-neutral">⚪ Neutral</span>',
-        breaking: '<span class="news-card-sentiment sentiment-breaking">🚨 Breaking</span>',
+        bullish: `<span class="ni-badge ni-badge-bullish">${NI_ICONS.arrowUp} صعودی</span>`,
+        bearish: `<span class="ni-badge ni-badge-bearish">${NI_ICONS.arrowDown} نزولی</span>`,
+        macro: `<span class="ni-badge ni-badge-macro">کلان</span>`,
+        neutral: `<span class="ni-badge ni-badge-neutral">خنثی</span>`,
+        breaking: `<span class="ni-badge ni-badge-breaking">${NI_ICONS.alert} فوری</span>`,
     };
     return map[s] || map.neutral;
 }
 
-function sentimentBadgeHero(sentiment) {
-    const s = (sentiment || '').toLowerCase();
-    const map = {
-        bullish: '<span class="news-hero-sentiment sentiment-bullish">🟢 Bullish</span>',
-        bearish: '<span class="news-hero-sentiment sentiment-bearish">🔴 Bearish</span>',
-        macro: '<span class="news-hero-sentiment sentiment-macro">🟡 Macro</span>',
-        neutral: '<span class="news-hero-sentiment sentiment-neutral">⚪ Neutral</span>',
-        breaking: '<span class="news-hero-sentiment sentiment-breaking">🚨 Breaking</span>',
-    };
-    return map[s] || map.neutral;
+/**
+ * Determine impact level from sentiment + title keywords.
+ * Returns 'high', 'medium', or 'low'.
+ */
+function niImpactLevel(news) {
+    const s = (news.sentiment || '').toLowerCase();
+    const title = (news.title || '').toLowerCase();
+    if (s === 'breaking') return 'high';
+    if (s === 'bullish' || s === 'bearish') return 'medium';
+    // Check for high-impact keywords
+    const highImpactKeywords = ['bitcoin', 'ethereum', 'sec', 'etf', 'fed', 'cpi', 'rate', 'ban', 'hack', 'crash', 'rally', 'surge'];
+    if (highImpactKeywords.some(k => title.includes(k))) return 'high';
+    return 'low';
 }
+
+/**
+ * Generate impact score HTML.
+ */
+function niImpactHtml(news) {
+    const level = niImpactLevel(news);
+    const labels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
+    return `<span class="ni-impact ni-impact-${level}"><span class="ni-impact-dot"></span>${labels[level]}</span>`;
+}
+
+/**
+ * Determine if a news item qualifies for the hero slider.
+ * Only breaking, high-impact, or trending news goes in the hero.
+ */
+function niIsHeroEligible(news) {
+    const s = (news.sentiment || '').toLowerCase();
+    if (s === 'breaking') return true;
+    if (niImpactLevel(news) === 'high') return true;
+    // Check title for major events
+    const title = (news.title || '').toUpperCase();
+    const majorKeywords = ['BITCOIN', 'BTC', 'ETHEREUM', 'ETH', 'ETF', 'FED', 'SEC', 'RALLY', 'CRASH', 'SURGE', 'REGULATION'];
+    return majorKeywords.some(k => title.includes(k));
+}
+
+/**
+ * Generate AI summary HTML for a news card.
+ */
+function niAiSummaryHtml(news) {
+    if (!news.summary) return '';
+    return `<div class="ni-card-ai-summary">${NI_ICONS.sparkles}<span>${escapeHtml(news.summary)}</span></div>`;
+}
+
+// Legacy badge functions — kept for dashboard important news compatibility
+function sentimentBadge(sentiment) { return niBadgeHtml(sentiment); }
+function sentimentBadgeHero(sentiment) { return niBadgeHtml(sentiment); }
 
 function updateNewsBadges() {
-    const el = (id) => document.getElementById(id);
-    const bAll = el('badge-all'); if (bAll) bAll.textContent = categoryCounts.all || '';
-    const bCrypto = el('badge-crypto'); if (bCrypto) bCrypto.textContent = categoryCounts.crypto || '';
-    const bForex = el('badge-forex'); if (bForex) bForex.textContent = categoryCounts.forex || '';
-    const bCal = el('badge-calendar'); if (bCal) bCal.textContent = calendarEvents.length || '';
+    // No-op: badges removed from tabs per design spec (no counters)
 }
 
 function setupInfiniteScroll() {
@@ -4431,9 +4499,8 @@ function loadMoreNews() {
 }
 
 /**
- * اخبار را در رابط کاربری رندر می‌کند.
- * ورودی: پارامترهای `category` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ * اخبار را در رابط کاربری رندر می‌کند — News Intelligence Rebuild.
+ * Renders the premium news feed with hero slider, cards, badges, impact scores.
  */
 function renderNews(category) {
     const container = document.getElementById('news-list');
@@ -4441,18 +4508,32 @@ function renderNews(category) {
 
     // Clear any existing countdown interval
     if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+    // Clear hero timer
+    if (_niHeroTimer) { clearInterval(_niHeroTimer); _niHeroTimer = null; }
 
-    let filtered = newsCache;
-    if (category === 'crypto') filtered = filtered.filter(n => n.category === 'crypto');
-    else if (category === 'economy') filtered = filtered.filter(n => n.category === 'economy');
-    else if (category === 'forex') filtered = filtered.filter(n => n.category === 'forex');
-    else if (category === 'calendar') {
-        renderCalendar();
+    // Calendar tab
+    if (category === 'calendar') {
+        renderCalendarV2();
         return;
     }
 
+    // Saved tab
+    if (category === 'saved') {
+        renderSavedNews();
+        return;
+    }
+
+    // Filter by category
+    let filtered = newsCache;
+    if (category === 'crypto') filtered = filtered.filter(n => n.category === 'crypto');
+    else if (category === 'forex') filtered = filtered.filter(n => n.category === 'forex');
+    else if (category === 'economy') filtered = filtered.filter(n => n.category === 'economy');
+
+    // Apply active filters
+    filtered = niApplyFilters(filtered);
+
     if (!filtered.length) {
-        container.innerHTML = `<div class="empty-state">${t('no_data')}</div>`;
+        container.innerHTML = `<div class="ni-empty">${NI_ICONS.searchEmpty}<div>خبری یافت نشد</div></div>`;
         return;
     }
 
@@ -4460,47 +4541,503 @@ function renderNews(category) {
     const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22220%22 height=%22220%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
 
     let html = '';
-    const heroItem = filtered[0];
-    const heroImg = heroItem.image || placeholderImg;
 
-    // Hero card
-    if (category === 'all' && heroImg && !heroImg.includes('data:image/svg')) {
-        html += `
-        <div class="news-hero" onclick="openNewsModal(0)">
-            <img class="news-hero-image" src="${escapeHtml(heroImg)}" loading="eager" alt="" onerror="newsImageFallback(this)">
-            <div class="news-hero-overlay">
-                ${sentimentBadgeHero(heroItem.sentiment)}
-                <div class="news-hero-title">${escapeHtml(heroItem.title)}</div>
-                <div class="news-hero-meta">${escapeHtml(heroItem.source)} • ${escapeHtml(heroItem.time || '')}</div>
-            </div>
-        </div>`;
+    // ── Featured News Hero Slider (only on "all" tab) ──
+    if (category === 'all') {
+        const heroItems = filtered.filter(niIsHeroEligible).slice(0, 5);
+        if (heroItems.length >= 1) {
+            _niHeroSlides = heroItems;
+            _niHeroIndex = 0;
+            html += niRenderHeroSlider(heroItems);
+        }
     }
 
-    // News cards (skip first if used as hero)
-    const startIdx = (category === 'all' && heroImg && !heroImg.includes('data:image/svg')) ? 1 : 0;
-    for (let i = startIdx; i < filtered.length; i++) {
-        const n = filtered[i];
-        const idx = i;
-        const delay = (i - startIdx) * 0.06;
+    // ── News Cards ──
+    const heroUrls = _niHeroSlides.map(s => s.url);
+    const cardItems = filtered.filter(n => !heroUrls.includes(n.url));
+    const startIdx = 0;
+    for (let i = startIdx; i < cardItems.length; i++) {
+        const n = cardItems[i];
+        const idx = filtered.indexOf(n); // index in displayedNews for modal
+        const delay = (i - startIdx) * 0.05;
+        const isSaved = _niSavedNews.some(s => s.url === n.url);
         html += `
-        <div class="news-card" style="animation-delay:${delay}s" onclick="openNewsModal(${idx})">
-            <div class="news-card-body">
-                ${sentimentBadge(n.sentiment)}
-                <div class="news-card-title">${escapeHtml(n.title)}</div>
-                ${n.summary ? `<div class="news-card-summary">${escapeHtml(n.summary)}</div>` : ''}
-                <div class="news-card-meta">${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</div>
+        <div class="ni-card" style="animation-delay:${delay}s" onclick="openNewsModal(${idx})">
+            <div class="ni-card-top">
+                <div class="ni-card-body">
+                    <div class="ni-card-badges">
+                        ${niBadgeHtml(n.sentiment)}
+                        ${niImpactHtml(n)}
+                    </div>
+                    <div class="ni-card-title">${escapeHtml(n.title)}</div>
+                    ${n.summary ? `<div class="ni-card-summary">${escapeHtml(n.summary)}</div>` : ''}
+                </div>
+                <img class="ni-card-thumb" src="${escapeHtml(n.image || placeholderImg)}" loading="lazy" alt="" onerror="newsImageFallback(this)">
             </div>
-            <img class="news-card-thumb" src="${escapeHtml(n.image || placeholderImg)}" loading="lazy" alt="" onerror="newsImageFallback(this)">
+            ${niAiSummaryHtml(n)}
+            <div class="ni-card-footer">
+                <div class="ni-card-source">
+                    ${NI_ICONS.clock}
+                    <span>${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</span>
+                </div>
+                <div class="ni-card-actions">
+                    <button class="ni-card-action ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="ذخیره">
+                        ${isSaved ? NI_ICONS.bookmarkFilled : NI_ICONS.bookmark}
+                    </button>
+                    <button class="ni-card-action" onclick="event.stopPropagation(); openShareSheet(${idx})" aria-label="اشتراک‌گذاری">
+                        ${NI_ICONS.share}
+                    </button>
+                </div>
+            </div>
         </div>`;
     }
 
     // Infinite scroll trigger
     if (newsHasMore && (category === 'all' || category === 'crypto' || category === 'forex')) {
-        html += `<div class="news-load-trigger" id="news-load-trigger"></div>`;
+        html += `<div class="ni-load-trigger" id="news-load-trigger"></div>`;
     }
 
     container.innerHTML = html;
+
+    // Initialize hero slider if present
+    if (category === 'all' && _niHeroSlides.length > 1) {
+        niInitHeroSlider();
+    }
+
     setupInfiniteScroll();
+}
+
+// ============================================================================
+// Featured News Hero Slider
+// ============================================================================
+
+function niRenderHeroSlider(items) {
+    const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22240%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22/%3E%3C/svg%3E';
+    const slidesHtml = items.map((n, i) => {
+        const img = n.image && !n.image.includes('data:image/svg') ? n.image : placeholderImg;
+        const idx = newsCache.indexOf(n); // index in displayedNews for modal
+        const isSaved = _niSavedNews.some(s => s.url === n.url);
+        return `
+        <div class="ni-hero-slide" onclick="openNewsModal(${idx})">
+            <img class="ni-hero-slide-img" src="${escapeHtml(img)}" loading="${i === 0 ? 'eager' : 'lazy'}" alt="" onerror="this.src='${placeholderImg}'">
+            <div class="ni-hero-slide-overlay"></div>
+            <div class="ni-hero-slide-content">
+                <div class="ni-hero-badges">${niBadgeHtml(n.sentiment)}${niImpactHtml(n)}</div>
+                <div class="ni-hero-headline">${escapeHtml(n.title)}</div>
+                ${n.summary ? `<div class="ni-hero-summary">${escapeHtml(n.summary)}</div>` : ''}
+                <div class="ni-hero-meta">
+                    <div class="ni-hero-source">${NI_ICONS.clock}<span>${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</span></div>
+                    <div class="ni-hero-actions">
+                        <button class="ni-hero-action-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="ذخیره">
+                            ${isSaved ? NI_ICONS.bookmarkFilled : NI_ICONS.bookmark}
+                        </button>
+                        <button class="ni-hero-action-btn" onclick="event.stopPropagation(); openShareSheet(${idx})" aria-label="اشتراک‌گذاری">
+                            ${NI_ICONS.share}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    const dotsHtml = items.map((_, i) => `<span class="ni-hero-dot${i === 0 ? ' active' : ''}" onclick="niGoToSlide(${i})"></span>`).join('');
+
+    return `
+    <div class="ni-hero-slider" id="ni-hero-slider">
+        <div class="ni-hero-track" id="ni-hero-track">${slidesHtml}</div>
+        <div class="ni-hero-dots">${dotsHtml}</div>
+    </div>`;
+}
+
+function niInitHeroSlider() {
+    const slider = document.getElementById('ni-hero-slider');
+    const track = document.getElementById('ni-hero-track');
+    if (!slider || !track) return;
+
+    // Start autoplay (5 seconds)
+    if (_niHeroTimer) clearInterval(_niHeroTimer);
+    _niHeroTimer = setInterval(() => {
+        niGoToSlide((_niHeroIndex + 1) % _niHeroSlides.length);
+    }, 5000);
+
+    // Touch/swipe support
+    let startX = 0, currentX = 0, isDragging = false;
+    slider.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+        isDragging = true;
+        if (_niHeroTimer) clearInterval(_niHeroTimer);
+    }, { passive: true });
+    slider.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        currentX = e.touches[0].clientX;
+    }, { passive: true });
+    slider.addEventListener('touchend', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        const diff = startX - currentX;
+        if (Math.abs(diff) > 40) {
+            if (diff > 0) {
+                niGoToSlide((_niHeroIndex + 1) % _niHeroSlides.length);
+            } else {
+                niGoToSlide((_niHeroIndex - 1 + _niHeroSlides.length) % _niHeroSlides.length);
+            }
+        }
+        // Resume autoplay
+        _niHeroTimer = setInterval(() => {
+            niGoToSlide((_niHeroIndex + 1) % _niHeroSlides.length);
+        }, 5000);
+    });
+}
+
+function niGoToSlide(index) {
+    _niHeroIndex = index;
+    const track = document.getElementById('ni-hero-track');
+    if (track) {
+        track.style.transform = `translateX(-${index * 100}%)`;
+    }
+    document.querySelectorAll('.ni-hero-dot').forEach((dot, i) => {
+        dot.classList.toggle('active', i === index);
+    });
+}
+
+// ============================================================================
+// News Filters
+// ============================================================================
+
+function niApplyFilters(items) {
+    let result = items;
+    // Sentiment filter
+    if (_niActiveFilters.sentiment.length) {
+        result = result.filter(n => _niActiveFilters.sentiment.includes((n.sentiment || '').toLowerCase()));
+    }
+    // Priority filter
+    if (_niActiveFilters.priority.length) {
+        result = result.filter(n => {
+            const level = niImpactLevel(n);
+            const s = (n.sentiment || '').toLowerCase();
+            if (_niActiveFilters.priority.includes('breaking') && s === 'breaking') return true;
+            if (_niActiveFilters.priority.includes('high') && level === 'high') return true;
+            if (_niActiveFilters.priority.includes('trending') && niIsHeroEligible(n)) return true;
+            return false;
+        });
+    }
+    // Category filter (keyword-based)
+    if (_niActiveFilters.category.length) {
+        result = result.filter(n => {
+            const title = (n.title || '').toLowerCase() + ' ' + (n.summary || '').toLowerCase();
+            return _niActiveFilters.category.some(cat => {
+                const catMap = {
+                    bitcoin: ['bitcoin', 'btc', 'بیت‌کوین', 'بیت کوین'],
+                    ethereum: ['ethereum', 'eth', 'اتریوم'],
+                    solana: ['solana', 'sol', 'سولانا'],
+                    xrp: ['xrp', 'ripple', 'ریپل'],
+                    etf: ['etf', 'ای‌تی‌اف'],
+                    regulation: ['sec', 'regulation', 'قانون', 'تنظیم'],
+                    macro: ['fed', 'cpi', 'gdp', 'rate', 'interest', 'فدرال', 'نرخ'],
+                    market: ['market', 'rally', 'crash', 'surge', 'بازار', 'رشد', 'افت'],
+                };
+                const keywords = catMap[cat] || [cat];
+                return keywords.some(kw => title.includes(kw));
+            });
+        });
+    }
+    // Time range filter
+    if (_niActiveFilters.time) {
+        const now = Date.now();
+        const ranges = { '1h': 3600000, '24h': 86400000, '7d': 604800000 };
+        const range = ranges[_niActiveFilters.time];
+        if (range) {
+            result = result.filter(n => {
+                // Parse relative time like "2h ago", "3d ago", "5m ago"
+                const timeStr = n.time || '';
+                const match = timeStr.match(/(\d+)\s*(m|h|d)/i);
+                if (match) {
+                    const num = parseInt(match[1]);
+                    const unit = match[2].toLowerCase();
+                    const ms = unit === 'm' ? num * 60000 : unit === 'h' ? num * 3600000 : num * 86400000;
+                    return ms <= range;
+                }
+                return true; // Keep items with unparseable time
+            });
+        }
+    }
+    return result;
+}
+
+function openNewsFilterSheet() {
+    const sheet = document.getElementById('ni-filter-sheet');
+    if (!sheet) return;
+    sheet.style.display = 'flex';
+    // Restore active state from _niActiveFilters
+    document.querySelectorAll('.ni-chip[data-filter]').forEach(chip => {
+        const filter = chip.dataset.filter;
+        const value = chip.dataset.value;
+        if (filter === 'time') {
+            chip.classList.toggle('active', _niActiveFilters.time === value);
+        } else {
+            chip.classList.toggle('active', _niActiveFilters[filter] && _niActiveFilters[filter].includes(value));
+        }
+        chip.onclick = function() {
+            if (filter === 'time') {
+                if (_niActiveFilters.time === value) {
+                    _niActiveFilters.time = null;
+                    chip.classList.remove('active');
+                } else {
+                    document.querySelectorAll('.ni-chip[data-filter="time"]').forEach(c => c.classList.remove('active'));
+                    _niActiveFilters.time = value;
+                    chip.classList.add('active');
+                }
+            } else {
+                if (!_niActiveFilters[filter]) _niActiveFilters[filter] = [];
+                const idx = _niActiveFilters[filter].indexOf(value);
+                if (idx >= 0) {
+                    _niActiveFilters[filter].splice(idx, 1);
+                    chip.classList.remove('active');
+                } else {
+                    _niActiveFilters[filter].push(value);
+                    chip.classList.add('active');
+                }
+            }
+        };
+    });
+}
+
+function closeNewsFilterSheet() {
+    const sheet = document.getElementById('ni-filter-sheet');
+    if (sheet) sheet.style.display = 'none';
+}
+
+function applyNewsFilters() {
+    closeNewsFilterSheet();
+    // Update filter dot indicator
+    const hasFilters = _niActiveFilters.sentiment.length || _niActiveFilters.priority.length ||
+                       _niActiveFilters.category.length || _niActiveFilters.time;
+    const dot = document.getElementById('ni-filter-dot');
+    if (dot) dot.style.display = hasFilters ? 'block' : 'none';
+    // Re-render current tab
+    const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
+    renderNews(activeTab);
+}
+
+function resetNewsFilters() {
+    _niActiveFilters = { sentiment: [], priority: [], category: [], time: null };
+    document.querySelectorAll('.ni-chip[data-filter]').forEach(chip => chip.classList.remove('active'));
+    applyNewsFilters();
+}
+
+// ============================================================================
+// Save News System
+// ============================================================================
+
+function toggleSaveNews(idx) {
+    const n = displayedNews[idx];
+    if (!n) return;
+    const savedIdx = _niSavedNews.findIndex(s => s.url === n.url);
+    if (savedIdx >= 0) {
+        _niSavedNews.splice(savedIdx, 1);
+    } else {
+        _niSavedNews.unshift({ url: n.url, title: n.title, image: n.image, source: n.source, time: n.time, sentiment: n.sentiment, summary: n.summary, body: n.body, category: n.category, savedAt: Date.now() });
+    }
+    localStorage.setItem('ni_saved_news', JSON.stringify(_niSavedNews));
+    // Re-render to update button state
+    const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
+    renderNews(activeTab);
+}
+
+function renderSavedNews() {
+    const container = document.getElementById('news-list');
+    if (!container) return;
+
+    if (!_niSavedNews.length) {
+        container.innerHTML = `<div class="ni-empty">${NI_ICONS.bookmarkEmpty}<div>هیچ مورد ذخیره شده‌ای وجود ندارد</div></div>`;
+        return;
+    }
+
+    // Sort newest first
+    const sorted = _niSavedNews.slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+    displayedNews = sorted; // for modal access
+    const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22220%22 height=%22220%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
+
+    let html = '';
+    sorted.forEach((n, i) => {
+        const isSaved = true; // always saved in this tab
+        html += `
+        <div class="ni-card" style="animation-delay:${i * 0.05}s" onclick="openNewsModal(${i})">
+            <div class="ni-card-top">
+                <div class="ni-card-body">
+                    <div class="ni-card-badges">
+                        ${niBadgeHtml(n.sentiment)}
+                        ${niImpactHtml(n)}
+                    </div>
+                    <div class="ni-card-title">${escapeHtml(n.title)}</div>
+                    ${n.summary ? `<div class="ni-card-summary">${escapeHtml(n.summary)}</div>` : ''}
+                </div>
+                <img class="ni-card-thumb" src="${escapeHtml(n.image || placeholderImg)}" loading="lazy" alt="" onerror="newsImageFallback(this)">
+            </div>
+            ${niAiSummaryHtml(n)}
+            <div class="ni-card-footer">
+                <div class="ni-card-source">
+                    ${NI_ICONS.clock}
+                    <span>${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</span>
+                </div>
+                <div class="ni-card-actions">
+                    <button class="ni-card-action saved" onclick="event.stopPropagation(); toggleSaveNews(${i})" aria-label="حذف ذخیره">
+                        ${NI_ICONS.bookmarkFilled}
+                    </button>
+                    <button class="ni-card-action" onclick="event.stopPropagation(); openShareSheet(${i})" aria-label="اشتراک‌گذاری">
+                        ${NI_ICONS.share}
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    });
+    container.innerHTML = html;
+}
+
+// ============================================================================
+// Share System
+// ============================================================================
+
+function openShareSheet(idx) {
+    const n = displayedNews[idx];
+    if (!n) return;
+    _niCurrentShareNews = n;
+    const sheet = document.getElementById('ni-share-sheet');
+    if (sheet) sheet.style.display = 'flex';
+}
+
+function closeShareSheet() {
+    const sheet = document.getElementById('ni-share-sheet');
+    if (sheet) sheet.style.display = 'none';
+    _niCurrentShareNews = null;
+}
+
+function shareNewsTo(platform) {
+    if (!_niCurrentShareNews) return;
+    const url = _niCurrentShareNews.url || window.location.href;
+    const title = _niCurrentShareNews.title || '';
+    const text = encodeURIComponent(title);
+    const urlEnc = encodeURIComponent(url);
+
+    switch (platform) {
+        case 'telegram':
+            window.open(`https://t.me/share/url?url=${urlEnc}&text=${text}`, '_blank');
+            break;
+        case 'whatsapp':
+            window.open(`https://wa.me/?text=${text}%20${urlEnc}`, '_blank');
+            break;
+        case 'x':
+            window.open(`https://twitter.com/intent/tweet?text=${text}&url=${urlEnc}`, '_blank');
+            break;
+        case 'copy':
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(url).then(() => {
+                    if (typeof showToast === 'function') showToast('لینک کپی شد');
+                });
+            } else {
+                // Fallback
+                const input = document.createElement('input');
+                input.value = url;
+                document.body.appendChild(input);
+                input.select();
+                try { document.execCommand('copy'); } catch(e) {}
+                document.body.removeChild(input);
+            }
+            break;
+    }
+    // Try native share API if supported
+    if (navigator.share && platform !== 'copy') {
+        navigator.share({ title: title, url: url }).catch(() => {});
+    }
+    closeShareSheet();
+}
+
+// ============================================================================
+// Search System
+// ============================================================================
+
+function openNewsSearch() {
+    const overlay = document.getElementById('ni-search-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    setTimeout(() => {
+        const input = document.getElementById('ni-search-input');
+        if (input) input.focus();
+    }, 300);
+}
+
+function closeNewsSearch() {
+    const overlay = document.getElementById('ni-search-overlay');
+    if (overlay) overlay.style.display = 'none';
+    const input = document.getElementById('ni-search-input');
+    if (input) input.value = '';
+    _niCurrentSearchQuery = '';
+}
+
+function onNewsSearchInput(query) {
+    _niCurrentSearchQuery = query.trim().toLowerCase();
+    const results = document.getElementById('ni-search-results');
+    if (!results) return;
+
+    if (!_niCurrentSearchQuery) {
+        results.innerHTML = '';
+        return;
+    }
+
+    // Search news cache + calendar events
+    const newsResults = newsCache.filter(n => {
+        const haystack = (n.title + ' ' + (n.summary || '') + ' ' + (n.source || '') + ' ' + (n.category || '')).toLowerCase();
+        return haystack.includes(_niCurrentSearchQuery);
+    }).slice(0, 10);
+
+    const calResults = calendarEvents.filter(e => {
+        const haystack = (e.title + ' ' + (e.country || '') + ' ' + (e.currency || '')).toLowerCase();
+        return haystack.includes(_niCurrentSearchQuery);
+    }).slice(0, 5);
+
+    if (!newsResults.length && !calResults.length) {
+        results.innerHTML = `<div class="ni-empty">${NI_ICONS.searchEmpty}<div>نتیجه‌ای یافت نشد</div></div>`;
+        return;
+    }
+
+    let html = '';
+    const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22220%22 height=%22220%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3C/svg%3E';
+
+    if (newsResults.length) {
+        html += '<div class="ni-cal-time-group">اخبار</div>';
+        newsResults.forEach(n => {
+            const idx = newsCache.indexOf(n);
+            html += `
+            <div class="ni-card" style="animation-delay:0s" onclick="closeNewsSearch(); switchTab('news-page'); setTimeout(() => openNewsModal(${idx}), 300)">
+                <div class="ni-card-top">
+                    <div class="ni-card-body">
+                        <div class="ni-card-badges">${niBadgeHtml(n.sentiment)}</div>
+                        <div class="ni-card-title">${escapeHtml(n.title)}</div>
+                    </div>
+                    <img class="ni-card-thumb" src="${escapeHtml(n.image || placeholderImg)}" loading="lazy" alt="" onerror="newsImageFallback(this)">
+                </div>
+            </div>`;
+        });
+    }
+
+    if (calResults.length) {
+        html += '<div class="ni-cal-time-group">رویدادهای اقتصادی</div>';
+        calResults.forEach(e => {
+            html += `
+            <div class="ni-cal-event impact-${e.impact || 'medium'}" onclick="closeNewsSearch(); switchTab('news-page'); setTimeout(() => switchNewsTab('calendar'), 300)">
+                <div class="ni-cal-event-top">
+                    <div class="ni-cal-event-left">
+                        <div class="ni-cal-event-flag">${e.flag || ''}</div>
+                        <div class="ni-cal-event-currency">${escapeHtml(e.country || '')}</div>
+                    </div>
+                    <div class="ni-cal-event-time">${formatCalendarTime(e.timestamp).time || ''}</div>
+                </div>
+                <div class="ni-cal-event-title">${escapeHtml(e.title)}</div>
+            </div>`;
+        });
+    }
+
+    results.innerHTML = html;
 }
 
 // ============================================================================
@@ -4728,9 +5265,230 @@ function startCalCountdown() {
                 el.textContent = formatCountdown(diff);
             }
         });
+        // Also update new V2 countdowns
+        document.querySelectorAll('.ni-cal-countdown[data-ts]').forEach(el => {
+            const ts = parseInt(el.dataset.ts);
+            const diff = new Date(ts).getTime() - now;
+            if (diff <= 0) {
+                el.textContent = 'زمان گذشته';
+                el.removeAttribute('data-ts');
+            } else {
+                el.textContent = formatCountdown(diff);
+            }
+        });
     };
     updateCountdowns();
     calCountdownInterval = setInterval(updateCountdowns, 1000);
+}
+
+// ============================================================================
+// Calendar V2 — Redesigned Economic Calendar
+// ============================================================================
+
+const MAJOR_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CAD', 'AUD', 'NZD', 'CHF'];
+
+function renderCalendarV2() {
+    const container = document.getElementById('news-list');
+    if (!container) return;
+
+    if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+
+    // Segmented control (today/tomorrow/week)
+    const segmentsHtml = `
+    <div class="ni-cal-segments">
+        <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
+        <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
+        <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
+    </div>`;
+
+    if (calendarLoading) {
+        container.innerHTML = segmentsHtml + `
+            <div class="ni-skeleton-card"></div>
+            <div class="ni-skeleton-card"></div>
+            <div class="ni-skeleton-card"></div>
+            <div class="ni-skeleton-card"></div>`;
+        return;
+    }
+
+    loadCalendarEvents().then(events => {
+        if (!events.length) {
+            container.innerHTML = segmentsHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویداد اقتصادی یافت نشد</div></div>`;
+            return;
+        }
+
+        // Filter by tab
+        const now = new Date();
+        const tz = 'Asia/Tehran';
+        const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+        const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
+        const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+        const weekEnd = new Date(todayStart.getTime() + 7 * 86400000);
+
+        let filteredEvents = events.filter(e => {
+            if (!e.timestamp) return false;
+            const eventDate = new Date(e.timestamp);
+            if (isNaN(eventDate.getTime())) return false;
+            const eventParts = eventDate.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+            const eventDay = new Date(Date.UTC(Number(eventParts[0]), Number(eventParts[1]) - 1, Number(eventParts[2])));
+            if (currentCalendarTab === 'today') return eventDay.getTime() === todayStart.getTime();
+            if (currentCalendarTab === 'tomorrow') return eventDay.getTime() === tomorrowStart.getTime();
+            if (currentCalendarTab === 'week') return eventDay >= todayStart && eventDay < weekEnd;
+            return true;
+        });
+
+        // Country filter chips
+        const availableCountries = [...new Set(filteredEvents.map(e => e.country).filter(Boolean))];
+        const allCountries = ['all', ...MAJOR_CURRENCIES.filter(c => availableCountries.includes(c))];
+        if (availableCountries.some(c => !MAJOR_CURRENCIES.includes(c))) {
+            allCountries.push(...availableCountries.filter(c => !MAJOR_CURRENCIES.includes(c)));
+        }
+
+        const countriesHtml = `
+        <div class="ni-cal-countries">
+            <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">همه</button>
+            ${allCountries.filter(c => c !== 'all').map(c => {
+                const flag = filteredEvents.find(e => e.country === c)?.flag || '';
+                return `<button class="ni-cal-country${currentCalCountry === c ? ' active' : ''}" onclick="filterCalCountry('${escapeHtml(c)}', this)">${flag} ${escapeHtml(c)}</button>`;
+            }).join('')}
+        </div>`;
+
+        // Apply country filter
+        if (currentCalCountry && currentCalCountry !== 'all') {
+            filteredEvents = filteredEvents.filter(e => e.country === currentCalCountry);
+        }
+
+        if (!filteredEvents.length) {
+            container.innerHTML = segmentsHtml + countriesHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویدادی برای این فیلتر یافت نشد</div></div>`;
+            return;
+        }
+
+        // Sort by time
+        filteredEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        // Group by time period
+        const groups = {};
+        filteredEvents.forEach(e => {
+            const d = new Date(e.timestamp);
+            const hour = Number(d.toLocaleString('en-GB', { timeZone: tz, hour: 'numeric', hour12: false }));
+            const group = getTimeGroup(hour);
+            if (!groups[group]) groups[group] = [];
+            groups[group].push(e);
+        });
+
+        const lang = currentLang || 'fa';
+        const labels = timeGroupLabels[lang] || timeGroupLabels.fa;
+        const impactLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
+        const statusLabel = { past: 'گذشته', live: 'در حال اجرا', upcoming: 'در انتظار' };
+
+        let eventsHtml = '';
+        const groupOrder = ['morning', 'afternoon', 'evening'];
+        groupOrder.forEach(g => {
+            if (!groups[g]) return;
+            eventsHtml += `<div class="ni-cal-time-group">${labels[g]}</div>`;
+            groups[g].forEach(e => {
+                const ft = formatCalendarTime(e.timestamp);
+                const timeText = ft.time || '';
+                const isPast = e.status === 'past';
+                const isLive = e.status === 'live';
+                const impact = e.impact || 'medium';
+                const eventKey = e.title + '|' + e.timestamp;
+                const hasReminder = _niCalendarReminders[eventKey];
+
+                // Surprise indicator
+                let surpriseHtml = '';
+                if (e.actual && e.forecast) {
+                    const actualVal = parseFloat(e.actual);
+                    const forecastVal = parseFloat(e.forecast);
+                    if (!isNaN(actualVal) && !isNaN(forecastVal)) {
+                        const diff = actualVal - forecastVal;
+                        const isPositiveGood = !e.title?.toUpperCase().includes('UNEMPLOYMENT');
+                        const isBetter = isPositiveGood ? diff > 0 : diff < 0;
+                        const cls = Math.abs(diff) < 0.01 ? 'surprise-expected' : (isBetter ? 'surprise-better' : 'surprise-worse');
+                        const icon = Math.abs(diff) < 0.01 ? NI_ICONS.clock : (isBetter ? NI_ICONS.arrowUp : NI_ICONS.arrowDown);
+                        surpriseHtml = ` <span class="cal-event-surprise ${cls}" style="display:inline-flex;align-items:center;gap:2px;">${icon}</span>`;
+                    }
+                }
+
+                eventsHtml += `
+                <div class="ni-cal-event impact-${impact}${isPast ? ' past' : ''}${isLive ? ' live' : ''}">
+                    <div class="ni-cal-event-top">
+                        <div class="ni-cal-event-left">
+                            <div class="ni-cal-event-flag">${e.flag || ''}</div>
+                            <div>
+                                <div class="ni-cal-event-currency">${escapeHtml(e.country || '')}</div>
+                                ${e.status ? `<span class="ni-cal-status ni-cal-status-${e.status}">${statusLabel[e.status] || e.status}</span>` : ''}
+                            </div>
+                        </div>
+                        <div style="text-align:left;">
+                            <div class="ni-cal-event-time">${timeText}</div>
+                            ${!isPast && !isLive ? `<div class="ni-cal-countdown" data-ts="${e.timestamp}">--</div>` : ''}
+                        </div>
+                    </div>
+                    <div class="ni-cal-event-title">${escapeHtml(e.title)}</div>
+                    <div class="ni-cal-event-stats">
+                        ${e.forecast ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">پیش‌بینی</div><div class="ni-cal-stat-value">${escapeHtml(e.forecast)}</div></div>` : ''}
+                        ${e.previous ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">قبلی</div><div class="ni-cal-stat-value">${escapeHtml(e.previous)}</div></div>` : ''}
+                        ${e.actual ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">واقعی</div><div class="ni-cal-stat-value actual">${escapeHtml(e.actual)}${surpriseHtml}</div></div>` : ''}
+                        <div class="ni-cal-stat"><div class="ni-cal-stat-label">تأثیر</div><div class="ni-cal-stat-value">${impactLabels[impact] || impactLabels.medium}</div></div>
+                    </div>
+                    <div class="ni-cal-event-footer">
+                        <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}')">
+                            ${hasReminder ? NI_ICONS.bell : NI_ICONS.bellOff}
+                            <span>${hasReminder ? 'یادآور فعال' : 'یادآوری'}</span>
+                        </button>
+                    </div>
+                </div>`;
+            });
+        });
+
+        container.innerHTML = segmentsHtml + countriesHtml + eventsHtml;
+        startCalCountdown();
+    });
+}
+
+// ============================================================================
+// Event Reminder System
+// ============================================================================
+
+function openReminderSheet(eventKey, title, country, time) {
+    _niCurrentReminderEvent = { key: eventKey, title, country, time };
+    const sheet = document.getElementById('ni-reminder-sheet');
+    if (!sheet) return;
+    // Fill event info
+    const info = document.getElementById('ni-reminder-event-info');
+    if (info) {
+        info.innerHTML = `
+        <div class="ni-reminder-event-info-title">${escapeHtml(title)}</div>
+        <div class="ni-reminder-event-info-meta">${escapeHtml(country)} • ${escapeHtml(time)}</div>`;
+    }
+    // Check active reminder
+    const activeReminder = _niCalendarReminders[eventKey];
+    document.querySelectorAll('.ni-reminder-option').forEach(opt => {
+        opt.classList.toggle('active', activeReminder === opt.querySelector('span').textContent);
+    });
+    sheet.style.display = 'flex';
+}
+
+function closeReminderSheet() {
+    const sheet = document.getElementById('ni-reminder-sheet');
+    if (sheet) sheet.style.display = 'none';
+    _niCurrentReminderEvent = null;
+}
+
+function setEventReminder(when) {
+    if (!_niCurrentReminderEvent) return;
+    _niCalendarReminders[_niCurrentReminderEvent.key] = when;
+    localStorage.setItem('ni_cal_reminders', JSON.stringify(_niCalendarReminders));
+    closeReminderSheet();
+    renderCalendarV2();
+}
+
+function removeEventReminder() {
+    if (!_niCurrentReminderEvent) return;
+    delete _niCalendarReminders[_niCurrentReminderEvent.key];
+    localStorage.setItem('ni_cal_reminders', JSON.stringify(_niCalendarReminders));
+    closeReminderSheet();
+    renderCalendarV2();
 }
 
 function toggleCalReminder(btn) {
@@ -4751,8 +5509,14 @@ function filterCalCountry(country, btn) {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function switchNewsTab(category, btn) {
-    document.querySelectorAll('.news-tab').forEach(b => b.classList.remove('active'));
-    if (btn) btn.classList.add('active');
+    document.querySelectorAll('.ni-tab').forEach(b => b.classList.remove('active'));
+    if (btn) {
+        btn.classList.add('active');
+    } else {
+        // Find the tab by data attribute
+        const target = document.querySelector(`.ni-tab[data-news="${category}"]`);
+        if (target) target.classList.add('active');
+    }
     if (category === 'calendar') {
         currentCalendarTab = 'today';
         currentCalCountry = 'all';
@@ -4762,10 +5526,23 @@ function switchNewsTab(category, btn) {
 
 function switchCalendarTab(tab, btn) {
     currentCalendarTab = tab;
-    currentCalCountry = 'all';
-    document.querySelectorAll('.cal-nav-btn').forEach(b => b.classList.remove('active'));
-    if (btn) btn.classList.add('active');
-    renderCalendar();
+    document.querySelectorAll('.ni-cal-segment').forEach(b => b.classList.remove('active'));
+    if (btn) {
+        btn.classList.add('active');
+    } else {
+        const target = document.querySelector(`.ni-cal-segment[data-cal-tab="${tab}"]`);
+        if (target) target.classList.add('active');
+    }
+    renderCalendarV2();
+}
+
+function filterCalCountry(country, btn) {
+    currentCalCountry = country;
+    document.querySelectorAll('.ni-cal-country').forEach(b => b.classList.remove('active'));
+    if (btn) {
+        btn.classList.add('active');
+    }
+    renderCalendarV2();
 }
 
 /**
@@ -7034,6 +7811,24 @@ window.switchMainTab = switchMainTab;
 window.switchSubTab = switchSubTab;
 window.switchNewsTab = switchNewsTab;
 window.switchCalendarTab = switchCalendarTab;
+window.filterCalCountry = filterCalCountry;
+// News Intelligence — new functions
+window.openNewsFilterSheet = openNewsFilterSheet;
+window.closeNewsFilterSheet = closeNewsFilterSheet;
+window.applyNewsFilters = applyNewsFilters;
+window.resetNewsFilters = resetNewsFilters;
+window.toggleSaveNews = toggleSaveNews;
+window.openShareSheet = openShareSheet;
+window.closeShareSheet = closeShareSheet;
+window.shareNewsTo = shareNewsTo;
+window.openNewsSearch = openNewsSearch;
+window.closeNewsSearch = closeNewsSearch;
+window.onNewsSearchInput = onNewsSearchInput;
+window.niGoToSlide = niGoToSlide;
+window.openReminderSheet = openReminderSheet;
+window.closeReminderSheet = closeReminderSheet;
+window.setEventReminder = setEventReminder;
+window.removeEventReminder = removeEventReminder;
 window.toggleWatchlist = toggleWatchlist;
 window.showMiniToast = showMiniToast;
 window.updateDetailWatchBtn = updateDetailWatchBtn;
