@@ -2789,9 +2789,10 @@ async function sendSessionHeartbeat() {
             localStorage.setItem('app_session_id', sessionId);
         }
         updateOnlineBadge(data.online_count);
-        // First successful heartbeat = auth confirmed → load alerts lazily
-        if (!alerts.length || alerts.every(a => !a.serverId)) {
-            loadAlertsFromServer().catch(() => {});
+        // First successful heartbeat = auth confirmed → load alerts lazily (only once)
+        if (!_alertsLoaded && (!alerts.length || alerts.every(a => !a.serverId))) {
+            _alertsLoaded = true;
+            loadAlertsFromServer().catch(() => { _alertsLoaded = false; });
         }
     } catch (e) { console.warn('heartbeat:', e); }
 }
@@ -5287,12 +5288,14 @@ async function triggerAlert(alert, currentPrice) {
  * ورودی: بدون ورودی.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
+let _alertsLoaded = false;
 async function checkAlerts() {
     const userId = getUserId();
 
-    // Retry loading alerts from server if user is now authenticated but alerts weren't loaded yet
-    if (alerts.length === 0 && !isGuestUserId(userId) && !isPendingTelegramUserId(userId) && getTelegramUser()?.id) {
-        await loadAlertsFromServer().catch(() => {});
+    // Only load alerts from server ONCE — not every 15s
+    if (!_alertsLoaded && alerts.length === 0 && !isGuestUserId(userId) && !isPendingTelegramUserId(userId) && getTelegramUser()?.id) {
+        _alertsLoaded = true;
+        await loadAlertsFromServer().catch(() => { _alertsLoaded = false; });
     }
 
     const userAlerts = alerts.filter(a => a.userId === userId);

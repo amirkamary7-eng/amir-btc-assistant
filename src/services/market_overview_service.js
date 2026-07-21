@@ -194,57 +194,37 @@ export function createMarketOverviewService(deps) {
   async function refreshOverview(env) {
     const apiKey = env.CMC_API_KEY;
     if (!apiKey) {
-      console.warn('[CMC] No CMC_API_KEY configured');
       return { success: false, source: null, credits_used: 0, error: 'no_api_key' };
     }
 
     let totalCredits = 0;
-    let metrics = null;
-    let fearGreed = null;
 
-    // Fetch both endpoints in parallel
-    const [metricsResult, fgResult] = await Promise.all([
-      fetchCMCGlobalMetrics(apiKey),
-      fetchCMCFearAndGreed(apiKey),
-    ]);
+    // Only fetch global metrics from CMC — F&G is fetched from Alternative.me
+    // in fetchGlobalStats() (worker-proxy.js). CMC does not have a F&G endpoint.
+    const metrics = await fetchCMCGlobalMetrics(apiKey);
 
-    if (metricsResult) {
-      metrics = metricsResult;
+    if (metrics) {
       totalCredits += CMC_CREDITS.globalMetrics;
-    }
-    if (fgResult) {
-      fearGreed = fgResult;
-      totalCredits += CMC_CREDITS.fearAndGreed;
     }
 
     // Log usage
     await logUsage(env, 'refresh', totalCredits);
 
-    // If at least one source succeeded, merge and cache
-    if (metrics || fearGreed) {
+    if (metrics) {
       const merged = {
-        ...(metrics || {}),
-        ...(fearGreed || {}),
-        source: metrics ? 'coinmarketcap' : (fearGreed ? 'coinmarketcap_fg_only' : null),
+        ...metrics,
+        source: 'coinmarketcap',
       };
 
-      // Compute market status from Fear & Greed
-      if (merged.fearGreedValue > 0) {
-        if (merged.fearGreedValue >= 60) merged.marketStatus = 'Bullish';
-        else if (merged.fearGreedValue >= 40) merged.marketStatus = 'Neutral';
-        else merged.marketStatus = 'Bearish';
-      }
-
-      // Only overwrite cache with valid data (preserve last good cache)
-      if (merged.totalMarketCap > 0 || merged.fearGreedValue > 0) {
+      // Only overwrite cache with valid data
+      if (merged.totalMarketCap > 0) {
         await writeAppCache(env, CACHE_KEY, JSON.stringify(merged), CACHE_TTL);
       }
 
       return { success: true, source: merged.source, credits_used: totalCredits };
     }
 
-    // Both failed — cache is preserved (not overwritten with empty)
-    return { success: false, source: null, credits_used: 0, error: 'both_failed' };
+    return { success: false, source: null, credits_used: 0, error: 'metrics_failed' };
   }
 
   return Object.freeze({
