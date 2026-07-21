@@ -6566,17 +6566,37 @@ let _maintenanceActive = false;
 /**
  * Check maintenance mode status. Shows the popup if enabled.
  * Returns true if app should continue loading, false if blocked.
+ *
+ * CRITICAL: This uses API_BASE (the Worker URL) — NOT a relative URL.
+ * The app is served from Cloudflare Pages (amir-btc-assistant-pages.pages.dev)
+ * but the API lives on a different domain (the Worker). A relative fetch
+ * would hit the Pages domain and return HTML, not JSON.
  */
 async function checkMaintenanceMode() {
-    // Skip if already bypassed this session (admin)
+    // Skip if already bypassed this session (admin) — check both in-memory
+    // flag and sessionStorage (so reload after bypass still works)
     if (_maintenanceBypassed) return true;
+    try {
+        if (sessionStorage.getItem('maint_bypassed') === '1') {
+            _maintenanceBypassed = true;
+            return true;
+        }
+    } catch (e) { /* sessionStorage may be blocked */ }
+
+    // Build the full URL using API_BASE (Worker domain)
+    const baseUrl = (window.API_BASE || API_BASE || '').replace(/\/$/, '');
+    if (!baseUrl) {
+        // No API_BASE configured — can't check, fail open
+        console.log('[MAINT] check skipped — no API_BASE');
+        return true;
+    }
 
     try {
         // Use a short timeout — if the server is slow, fail open
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-        const resp = await fetch('/api/system/status', {
+        const resp = await fetch(`${baseUrl}/api/system/status`, {
             signal: controller.signal,
             headers: { 'Cache-Control': 'no-cache' },
         });
@@ -6584,6 +6604,7 @@ async function checkMaintenanceMode() {
 
         if (!resp.ok) {
             // Server returned an error — fail open
+            console.log('[MAINT] check skipped — HTTP', resp.status);
             return true;
         }
 
@@ -6592,9 +6613,10 @@ async function checkMaintenanceMode() {
 
         if (maint.enabled === true) {
             // Maintenance is ON — show the popup
+            console.log('[MAINT] Maintenance is ON — blocking app load');
             showMaintenancePopup(maint);
             _maintenanceActive = true;
-            return false;
+            return false;  // <-- caller MUST check this and STOP
         }
     } catch (e) {
         // Network error or timeout — fail open
@@ -6682,8 +6704,8 @@ function updateMaintenanceAdminBypass() {
 
 /**
  * Admin bypass — hide the maintenance popup and continue loading the app.
- * Only works if isAdmin() returns true. Sets _maintenanceBypassed so the
- * check won't re-trigger on re-initialization.
+ * Only works if isAdmin() returns true. Stores bypass in sessionStorage so
+ * it persists across the page reload, then reloads to re-initialize the app.
  */
 function adminBypassMaintenance() {
     // SECURITY: double-check admin status before allowing bypass
@@ -6693,14 +6715,15 @@ function adminBypassMaintenance() {
     }
     _maintenanceBypassed = true;
     _maintenanceActive = false;
+    // Store in sessionStorage so the bypass survives the reload
+    try { sessionStorage.setItem('maint_bypassed', '1'); } catch (e) {}
     const overlay = document.getElementById('maintenance-overlay');
     if (overlay) overlay.style.display = 'none';
     document.body.style.overflow = '';
-    console.log('[MAINT] Admin bypassed maintenance mode');
-    // Open the admin panel directly
-    if (typeof openAdminPanel === 'function') {
-        openAdminPanel();
-    }
+    console.log('[MAINT] Admin bypassed maintenance mode — reloading app');
+    // Reload the page so the full app initializes (DOMContentLoaded will
+    // see maint_bypassed in sessionStorage and skip the maintenance check)
+    window.location.reload();
 }
 
 // Expose globally for inline onclick
@@ -6719,12 +6742,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Phase -1: MAINTENANCE MODE CHECK ──
     // This runs BEFORE any other UI loads. If maintenance is enabled,
     // the full-screen maintenance popup is shown and the rest of the app
-    // is blocked from initializing. Admins can bypass via a button.
+    // is BLOCKED from initializing. Admins can bypass via a button.
     //
-    // This is non-blocking for the rest of the DOMContentLoaded handler
-    // on failure: if the status endpoint is unreachable, we assume NOT in
-    // maintenance (fail-open) so users aren't locked out by a network error.
-    await checkMaintenanceMode();
+    // CRITICAL: We check the return value and return early if maintenance
+    // is active. This prevents ALL subsequent code (Phase 1, 2, 3) from
+    // running, so no tabs, no API calls, no dashboard — only the popup.
+    const _maintOk = await checkMaintenanceMode();
+    if (!_maintOk) {
+        // Maintenance is active — STOP here. Do not load the app.
+        // The popup is already shown. Only admin bypass can continue.
+        console.log('[MAINT] App load blocked — maintenance mode active');
+        return;  // <-- This is the critical fix: actually stop execution
+    }
 
     // ── Phase 0.5: SECURITY — Do NOT restore admin state from localStorage ──
     // Admin status is ONLY determined by server bootstrap response.
