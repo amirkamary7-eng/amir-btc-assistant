@@ -6198,15 +6198,15 @@ function renderDashboardMarketStatus() {
     if (ratio > 0.58) {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
-        trendGraphic = `<img src="assets/trend-bull.png" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="sync">`;
+        trendGraphic = `<img src="assets/market/bull.webp" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐂</span>'">`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        trendGraphic = `<img src="assets/trend-neutral.png" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="sync">`;
+        trendGraphic = `<img src="assets/market/neutral.webp" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
-        trendGraphic = `<img src="assets/trend-bear.png" alt="Bear" class="trend-bull-bear-img" loading="eager" decoding="sync">`;
+        trendGraphic = `<img src="assets/market/bear.webp" alt="Bear" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐻</span>'">`;
     }
 
     const trendHTML = `
@@ -6573,13 +6573,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         const cachedMarket = JSON.parse(localStorage.getItem('market_data_cache') || '[]');
         if (Array.isArray(cachedMarket) && cachedMarket.length && cachedVersion >= MARKET_CACHE_VERSION) {
             allCoins = cachedMarket;
-            // Render ticker IMMEDIATELY from cached data — zero delay
-            renderMarketTicker();
-            renderDashboardMarketStatus();
         } else if (cachedVersion < MARKET_CACHE_VERSION) {
             localStorage.removeItem('market_data_cache');
         }
     } catch(_) {}
+
+    // Render ticker IMMEDIATELY — from cache if available, else with fallback coins
+    if (!allCoins.length) {
+        // Fallback: show ticker with placeholder coins until real data arrives
+        allCoins = [
+            { symbol: 'BTC', changePercent24Hr: 0 }, { symbol: 'ETH', changePercent24Hr: 0 },
+            { symbol: 'SOL', changePercent24Hr: 0 }, { symbol: 'BNB', changePercent24Hr: 0 },
+            { symbol: 'XRP', changePercent24Hr: 0 }, { symbol: 'DOGE', changePercent24Hr: 0 },
+            { symbol: 'ADA', changePercent24Hr: 0 }, { symbol: 'TRX', changePercent24Hr: 0 },
+            { symbol: 'LINK', changePercent24Hr: 0 }, { symbol: 'AVAX', changePercent24Hr: 0 },
+            { symbol: 'SUI', changePercent24Hr: 0 }, { symbol: 'TON', changePercent24Hr: 0 },
+            { symbol: 'DOT', changePercent24Hr: 0 }, { symbol: 'ATOM', changePercent24Hr: 0 },
+            { symbol: 'HBAR', changePercent24Hr: 0 }, { symbol: 'APT', changePercent24Hr: 0 },
+            { symbol: 'NEAR', changePercent24Hr: 0 }, { symbol: 'LTC', changePercent24Hr: 0 },
+            { symbol: 'BCH', changePercent24Hr: 0 }, { symbol: 'PEPE', changePercent24Hr: 0 },
+        ];
+    }
+    renderMarketTicker();
+    renderDashboardMarketStatus();
 
     // Skeletons for watchlist and news
     const watchGrid = $('watchlist-grid');
@@ -6607,6 +6623,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Dashboard rebuild: market status + watchlist render after market data arrives
         renderDashboardMarketStatus();
         renderWatchlist();
+        // Re-render ticker with real data (reset flag to allow one re-render)
+        _tickerRendered = false;
         renderMarketTicker();
     }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
     fetchAnalyses().then(changed => {

@@ -77,18 +77,28 @@ async function copyAssetsWithHash() {
   await mkdir(targetAssets, { recursive: true });
 
   const renameMap = new Map();
-  const entries = await readdir(sourceAssets, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const srcPath = path.join(sourceAssets, entry.name);
-    const data = await readFile(srcPath);
-    const hashStr = createHash('sha256').update(data).digest('hex').slice(0, 8);
-    const hashedName = `${hashStr}${path.extname(entry.name)}`;
-    const dstPath = path.join(targetAssets, hashedName);
-    await copyFile(srcPath, dstPath);
-    renameMap.set(`assets/${entry.name}`, `assets/${hashedName}`);
-    console.log(`  assets/${entry.name} → assets/${hashedName}`);
+
+  async function processDir(srcDir, relPath) {
+    const entries = await readdir(srcDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(srcDir, entry.name);
+      const entryRelPath = relPath ? `${relPath}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        await processDir(srcPath, entryRelPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const data = await readFile(srcPath);
+      const hashStr = createHash('sha256').update(data).digest('hex').slice(0, 8);
+      const hashedName = `${hashStr}${path.extname(entry.name)}`;
+      const dstPath = path.join(targetAssets, hashedName);
+      await copyFile(srcPath, dstPath);
+      renameMap.set(`assets/${entryRelPath}`, `assets/${hashedName}`);
+      console.log(`  assets/${entryRelPath} → assets/${hashedName}`);
+    }
   }
+
+  await processDir(sourceAssets, '');
   return renameMap;
 }
 

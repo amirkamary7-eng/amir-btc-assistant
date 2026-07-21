@@ -4855,7 +4855,9 @@ strong.down { color: var(--red); }
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 255, 255, 0.04);
-    padding: 6px 0;
+    height: 40px;
+    display: flex;
+    align-items: center;
 }
 .market-ticker-track {
     display: flex;
@@ -4865,6 +4867,7 @@ strong.down { color: var(--red); }
     width: max-content;
     padding: 0 12px;
     will-change: transform;
+    align-items: center;
 }
 .market-ticker:hover .market-ticker-track {
     animation-play-state: paused;
@@ -5850,4 +5853,12 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
         width: 72px;
         height: 72px;
     }
+}
+
+/* ── Trend image fallback emoji ── */
+.trend-fallback {
+    font-size: 48px;
+    line-height: 90px;
+    display: block;
+    text-align: center;
 }
