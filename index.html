@@ -250,45 +250,69 @@
     <!-- #region MarketPage -->
     <!-- این بخش تب‌های بازار، جستجو و فهرست ارزها را نمایش می‌دهد. -->
     <section id="market-page" class="page">
-        <!-- ═══ MKT: Premium Market Header ═══ -->
+        <!-- ═══ MKT: Premium Market Header (REDESIGNED — icon + title + subtitle) ═══ -->
         <div class="mkt-header">
             <div class="mkt-header-left">
-                <h2 class="mkt-title" data-i18n="market">بازار</h2>
+                <div class="mkt-header-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                        <polyline points="17 6 23 6 23 12"/>
+                    </svg>
+                </div>
+                <div class="mkt-header-text">
+                    <h2 class="mkt-title" data-i18n="market">بازار</h2>
+                    <p class="mkt-subtitle">مشاهده بازارهای جهانی و فرصت‌های معاملاتی</p>
+                </div>
             </div>
             <button class="mkt-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             </button>
         </div>
 
-        <!-- ═══ MKT: Top Overview Cards (3 stat cards) ═══ -->
+        <!-- ═══ MKT: Premium Overview Cards (3 stat cards with icons + trend) ═══ -->
         <div class="mkt-overview-grid">
-            <div class="mkt-stat-card">
-                <div class="mkt-stat-top">
-                    <span class="mkt-stat-label">BTC Dominance</span>
-                    <span class="mkt-stat-change" id="mkt-btc-dom-change">--</span>
+            <div class="mkt-stat-card" id="mkt-card-btc-dom">
+                <div class="mkt-stat-icon-wrap mkt-stat-icon-orange">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
                 </div>
-                <span class="mkt-stat-value" id="btc-dom">--</span>
+                <div class="mkt-stat-content">
+                    <div class="mkt-stat-top">
+                        <span class="mkt-stat-label">BTC Dominance</span>
+                        <span class="mkt-stat-change" id="mkt-btc-dom-change">--</span>
+                    </div>
+                    <span class="mkt-stat-value" id="btc-dom">--</span>
+                </div>
                 <div class="mkt-stat-spark" id="mkt-btc-spark"></div>
             </div>
-            <div class="mkt-stat-card">
-                <div class="mkt-stat-top">
-                    <span class="mkt-stat-label">24h Volume</span>
-                    <span class="mkt-stat-change" id="mkt-vol-change">--</span>
+            <div class="mkt-stat-card" id="mkt-card-volume">
+                <div class="mkt-stat-icon-wrap mkt-stat-icon-blue">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 </div>
-                <span class="mkt-stat-value" id="global-volume">--</span>
+                <div class="mkt-stat-content">
+                    <div class="mkt-stat-top">
+                        <span class="mkt-stat-label">24h Volume</span>
+                        <span class="mkt-stat-change" id="mkt-vol-change">--</span>
+                    </div>
+                    <span class="mkt-stat-value" id="global-volume">--</span>
+                </div>
                 <div class="mkt-stat-spark" id="mkt-vol-spark"></div>
             </div>
-            <div class="mkt-stat-card">
-                <div class="mkt-stat-top">
-                    <span class="mkt-stat-label">Market Cap</span>
-                    <span class="mkt-stat-change" id="mkt-mcap-change">--</span>
+            <div class="mkt-stat-card" id="mkt-card-mcap">
+                <div class="mkt-stat-icon-wrap mkt-stat-icon-green">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                 </div>
-                <span class="mkt-stat-value" id="global-mcap">--</span>
+                <div class="mkt-stat-content">
+                    <div class="mkt-stat-top">
+                        <span class="mkt-stat-label">Market Cap</span>
+                        <span class="mkt-stat-change" id="mkt-mcap-change">--</span>
+                    </div>
+                    <span class="mkt-stat-value" id="global-mcap">--</span>
+                </div>
                 <div class="mkt-stat-spark" id="mkt-mcap-spark"></div>
             </div>
         </div>
 
-        <!-- ═══ MKT: Fear & Greed + Market Status ═══ -->
+        <!-- ═══ MKT: Fear & Greed + Market Status (REDESIGNED) ═══ -->
         <div class="mkt-dashboard-row">
             <div class="mkt-fg-card">
                 <div class="mkt-fg-header">
@@ -318,23 +342,37 @@
             <div class="mkt-status-card">
                 <div class="mkt-status-header">
                     <span class="mkt-status-title">وضعیت بازار</span>
+                    <span class="mkt-status-total" id="mkt-status-total">0 ارز</span>
                 </div>
                 <div class="mkt-status-body">
+                    <!-- Triple-segment ratio bar: gainers | neutral | losers -->
                     <div class="mkt-status-bar-wrap">
                         <div class="mkt-status-bar" id="mkt-status-bar">
-                            <div class="mkt-status-fill-green" id="mkt-status-green" style="width:50%"></div>
-                            <div class="mkt-status-fill-red" id="mkt-status-red" style="width:50%"></div>
+                            <div class="mkt-status-fill-green" id="mkt-status-green" style="width:33%"></div>
+                            <div class="mkt-status-fill-neutral" id="mkt-status-neutral" style="width:34%"></div>
+                            <div class="mkt-status-fill-red" id="mkt-status-red" style="width:33%"></div>
                         </div>
                     </div>
                     <div class="mkt-status-labels">
                         <span class="mkt-status-up">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
-                            <b id="sentiment-gainers">0</b> صعودی
+                            <b id="sentiment-gainers">0</b>
+                            <small>صعودی</small>
+                        </span>
+                        <span class="mkt-status-neutral">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#6B7A8D" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            <b id="sentiment-neutral">0</b>
+                            <small>خنثی</small>
                         </span>
                         <span class="mkt-status-down">
-                            <b id="sentiment-losers">0</b> نزولی
+                            <b id="sentiment-losers">0</b>
+                            <small>نزولی</small>
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
                         </span>
+                    </div>
+                    <div class="mkt-status-sentiment">
+                        <span class="mkt-status-sentiment-label">احساس بازار:</span>
+                        <span class="mkt-status-sentiment-value" id="mkt-sentiment-value">--</span>
                     </div>
                 </div>
             </div>
@@ -346,8 +384,8 @@
             <input type="text" id="market-search" placeholder="جستجوی ارز یا نماد..." class="mkt-search-input" data-i18n-placeholder="search">
         </div>
 
-        <!-- ═══ MKT: Segmented Tabs ═══ -->
-        <div class="mkt-tabs" id="market-main-tabs" role="tablist">
+        <!-- ═══ MKT: Segmented Tabs (EQUAL WIDTH — Crypto | Forex | Watchlist) ═══ -->
+        <div class="mkt-tabs mkt-tabs-equal" id="market-main-tabs" role="tablist">
             <button type="button" class="mkt-tab active" data-main-tab="crypto" onclick="switchMainTab('crypto', this)" role="tab" aria-selected="true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
                 <span>کریپتو</span>
@@ -362,11 +400,41 @@
             </button>
         </div>
 
-        <!-- ═══ MKT: Filter Chips ═══ -->
+        <!-- ═══ MKT: Filter Chips (EXPANDED — All/Gainers/Losers/Popular/BTC Pairs) ═══ -->
         <div class="mkt-filters" id="market-sub-tabs" role="tablist">
             <button type="button" class="mkt-filter-chip active" data-sub-tab="top" onclick="switchSubTab('top', this)" role="tab">همه</button>
             <button type="button" class="mkt-filter-chip" data-sub-tab="gainers" onclick="switchSubTab('gainers', this)" role="tab">بیشترین رشد</button>
             <button type="button" class="mkt-filter-chip" data-sub-tab="losers" onclick="switchSubTab('losers', this)" role="tab">بیشترین ریزش</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="popular" onclick="switchSubTab('popular', this)" role="tab">محبوب‌ها</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="btcpairs" onclick="switchSubTab('btcpairs', this)" role="tab">جفت‌های BTC</button>
+        </div>
+
+        <!-- ═══ MKT: BTC Pairs Sub-Groups (only shown when btcpairs filter is active) ═══ -->
+        <div id="mkt-btc-pairs-section" class="mkt-btc-pairs-section" style="display:none;">
+            <div class="mkt-btc-pair-group">
+                <div class="mkt-btc-pair-header">
+                    <div class="mkt-btc-pair-header-left">
+                        <span class="mkt-btc-pair-badge mkt-btc-pair-bull">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
+                        </span>
+                        <span class="mkt-btc-pair-title">Bullish BTC Pairs</span>
+                    </div>
+                    <span class="mkt-btc-pair-count" id="mkt-btc-bull-count">0</span>
+                </div>
+                <div class="mkt-btc-pair-list" id="mkt-btc-bull-list" role="list"></div>
+            </div>
+            <div class="mkt-btc-pair-group">
+                <div class="mkt-btc-pair-header">
+                    <div class="mkt-btc-pair-header-left">
+                        <span class="mkt-btc-pair-badge mkt-btc-pair-bear">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+                        </span>
+                        <span class="mkt-btc-pair-title">Bearish BTC Pairs</span>
+                    </div>
+                    <span class="mkt-btc-pair-count" id="mkt-btc-bear-count">0</span>
+                </div>
+                <div class="mkt-btc-pair-list" id="mkt-btc-bear-list" role="list"></div>
+            </div>
         </div>
 
         <!-- ═══ MKT: Coin List ═══ -->
@@ -985,6 +1053,62 @@
                 <div id="detail-chart" class="cd-chart"></div>
             </div>
 
+            <!-- ═══ CD: Price Alert (PREMIUM REDESIGN) ═══ -->
+            <div class="cd-section">
+                <h4 class="cd-section-title">هشدار قیمت</h4>
+                <div class="cd-alert-card">
+                    <!-- Status header row -->
+                    <div class="cd-alert-header">
+                        <div class="cd-alert-status">
+                            <div class="cd-alert-status-icon" id="cd-alert-status-icon">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                            </div>
+                            <div class="cd-alert-status-text">
+                                <span class="cd-alert-status-label">وضعیت هشدار</span>
+                                <span class="cd-alert-status-value" id="cd-alert-status-value">غیرفعال</span>
+                            </div>
+                        </div>
+                        <div class="cd-alert-count-badge" id="cd-alert-count-badge">
+                            <span class="cd-alert-count-num" id="cd-alert-count-num">0</span>
+                            <span class="cd-alert-count-label">هشدار فعال</span>
+                        </div>
+                    </div>
+
+                    <!-- Current price display -->
+                    <div class="cd-alert-current">
+                        <span class="cd-alert-current-label">قیمت فعلی</span>
+                        <span class="cd-alert-current-value" id="alert-current-price-value">--</span>
+                    </div>
+
+                    <!-- Direction toggle -->
+                    <div class="cd-alert-direction-group" role="group" aria-label="Alert direction">
+                        <button type="button" class="cd-alert-dir-btn active" data-direction="above" onclick="selectCdAlertDirection('above', this)">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
+                            <span>وقتی بالاتر رفت</span>
+                        </button>
+                        <button type="button" class="cd-alert-dir-btn" data-direction="below" onclick="selectCdAlertDirection('below', this)">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+                            <span>وقتی پایین‌تر رفت</span>
+                        </button>
+                    </div>
+
+                    <!-- Price input + create button -->
+                    <div class="cd-alert-form">
+                        <div class="cd-alert-input-wrap">
+                            <span class="cd-alert-prefix">$</span>
+                            <input type="number" id="alert-price" placeholder="قیمت هدف را وارد کنید" class="cd-alert-input" step="any" min="0">
+                        </div>
+                        <button type="button" class="cd-alert-btn" onclick="setPriceAlert()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                            <span>ثبت هشدار</span>
+                        </button>
+                    </div>
+
+                    <!-- Active alerts list -->
+                    <div id="active-alerts" class="cd-alert-list"></div>
+                </div>
+            </div>
+
             <!-- ═══ CD: Market Statistics ═══ -->
             <div class="cd-section">
                 <h4 class="cd-section-title">آمار بازار</h4>
@@ -1005,25 +1129,6 @@
                         <span class="cd-stat-label">رتبه</span>
                         <span class="cd-stat-value" id="cd-stat-rank">--</span>
                     </div>
-                </div>
-            </div>
-
-            <!-- ═══ CD: Price Alert ═══ -->
-            <div class="cd-section">
-                <h4 class="cd-section-title">هشدار قیمت</h4>
-                <div class="cd-alert-card">
-                    <div class="cd-alert-info">
-                        <span class="cd-alert-label">قیمت فعلی:</span>
-                        <strong id="alert-current-price-value">--</strong>
-                    </div>
-                    <div class="cd-alert-form">
-                        <div class="cd-alert-input-wrap">
-                            <span class="cd-alert-prefix">$</span>
-                            <input type="number" id="alert-price" placeholder="قیمت هدف" class="cd-alert-input">
-                        </div>
-                        <button type="button" class="cd-alert-btn" onclick="setPriceAlert()">ثبت هشدار</button>
-                    </div>
-                    <div id="active-alerts" class="cd-alert-list"></div>
                 </div>
             </div>
 

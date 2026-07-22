@@ -335,7 +335,7 @@ let analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
 let tickets = [];
 let notifications = []; // DB-backed — loaded from /api/notifications
 let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
-let currentAlertDirection = 'cross';
+let currentAlertDirection = 'above';
 let _previousPrices = {}; // Symbol → price tracking for cross-check alerts
 const MARKET_DEFAULT_LIMIT = 100;
 const MARKET_LOAD_MORE_BATCH = 50;
@@ -3521,13 +3521,15 @@ function renderMarketInsights() {
     if (!allCoins.length) return;
 
     // --- Sentiment ---
-    var gainers = 0, losers = 0;
+    var gainers = 0, losers = 0, neutral = 0;
     for (var i = 0; i < allCoins.length; i++) {
-        if (allCoins[i].changePercent24Hr > 0) gainers++;
-        else if (allCoins[i].changePercent24Hr < 0) losers++;
+        var chg = allCoins[i].changePercent24Hr || 0;
+        if (chg > 0.5) gainers++;
+        else if (chg < -0.5) losers++;
+        else neutral++;
     }
-    var total = gainers + losers;
-    var ratio = total > 0 ? gainers / total : 0.5;
+    var total = gainers + losers + neutral;
+    var ratio = total > 0 ? gainers / (gainers + losers || 1) : 0.5;
 
     // Gradient fill bar (top bar width = ratio)
     var fillEl = document.getElementById('sentiment-fill');
@@ -3544,11 +3546,50 @@ function renderMarketInsights() {
         badgeEl.className = 'sentiment-badge ' + sClass;
     }
 
-    // Gainers / Losers numbers (nested span inside)
+    // Gainers / Losers / Neutral numbers — support both legacy (span inside) and new (b element) layouts
     var gEl = document.getElementById('sentiment-gainers');
-    if (gEl) { var gs = gEl.querySelector('span'); if (gs) gs.textContent = gainers; }
+    if (gEl) {
+        var gs = gEl.querySelector('span');
+        if (gs) gs.textContent = gainers; else gEl.textContent = gainers;
+    }
     var lEl = document.getElementById('sentiment-losers');
-    if (lEl) { var ls = lEl.querySelector('span'); if (ls) ls.textContent = losers; }
+    if (lEl) {
+        var ls = lEl.querySelector('span');
+        if (ls) ls.textContent = losers; else lEl.textContent = losers;
+    }
+    var nEl = document.getElementById('sentiment-neutral');
+    if (nEl) nEl.textContent = neutral;
+
+    // Triple-segment ratio bar (green | neutral | red) — new premium market status card
+    var greenBar = document.getElementById('mkt-status-green');
+    var neutralBar = document.getElementById('mkt-status-neutral');
+    var redBar = document.getElementById('mkt-status-red');
+    if (greenBar && neutralBar && redBar && total > 0) {
+        var gPct = (gainers / total) * 100;
+        var nPct = (neutral / total) * 100;
+        var rPct = (losers / total) * 100;
+        greenBar.style.width = gPct.toFixed(1) + '%';
+        neutralBar.style.width = nPct.toFixed(1) + '%';
+        redBar.style.width = rPct.toFixed(1) + '%';
+    }
+
+    // Total coins count
+    var totalEl = document.getElementById('mkt-status-total');
+    if (totalEl) {
+        var totalLabel = currentLang === 'fa' ? `${total} ارز` : `${total} coins`;
+        totalEl.textContent = totalLabel;
+    }
+
+    // Market sentiment label (bullish/bearish/neutral)
+    var sentimentValueEl = document.getElementById('mkt-sentiment-value');
+    if (sentimentValueEl) {
+        var senLabel, senClass;
+        if (ratio > 0.6) { senLabel = t('sentiment_bullish') || 'صعودی'; senClass = 'bullish'; }
+        else if (ratio >= 0.4) { senLabel = t('sentiment_neutral') || 'خنثی'; senClass = 'neutral'; }
+        else { senLabel = t('sentiment_bearish') || 'نزولی'; senClass = 'bearish'; }
+        sentimentValueEl.textContent = senLabel;
+        sentimentValueEl.className = 'mkt-status-sentiment-value ' + senClass;
+    }
 
     // --- Fear & Greed ---
     // FIX 4: Only show real data from Alternative.me. Hide the entire section if unavailable.
@@ -3731,7 +3772,7 @@ function renderMarket() {
         return;
     }
 
-    // Crypto tabs (overview, gainers, losers, watchlist)
+    // Crypto tabs (overview, gainers, losers, watchlist, popular, btcpairs)
     let filtered = [...allCoins];
     switch (currentMarketTab) {
         case 'gainers':
@@ -3742,6 +3783,19 @@ function renderMarket() {
             break;
         case 'watchlist':
             filtered = filtered.filter(c => watchlist.includes(c.symbol));
+            break;
+        case 'popular':
+            // Popular = top 15 by 24h volume (real data, not mock)
+            filtered = filtered
+                .filter(c => (c.volumeUsd24Hr || 0) > 0)
+                .sort((a, b) => (b.volumeUsd24Hr || 0) - (a.volumeUsd24Hr || 0))
+                .slice(0, 15);
+            break;
+        case 'btcpairs':
+            // BTC pairs view — show separate Bullish/Bearish sections above the coin list.
+            // The coin list itself shows all coins that have a BTC pair (i.e., everything except BTC).
+            renderBtcPairsSection();
+            filtered = filtered.filter(c => c.symbol !== 'BTC' && c.priceUsd > 0);
             break;
         default:
             // Performance: limit visible coins, show Load More button
@@ -3970,6 +4024,12 @@ function switchSubTab(tab, btn) {
     btn.classList.add('active');
     btn.setAttribute('aria-selected', 'true');
 
+    // Show/hide BTC Pairs section based on filter
+    const btcPairsSection = document.getElementById('mkt-btc-pairs-section');
+    if (btcPairsSection) {
+        btcPairsSection.style.display = (tab === 'btcpairs') ? 'flex' : 'none';
+    }
+
     // Re-render with animation
     const list = document.getElementById('coin-list');
     if (list) {
@@ -3983,6 +4043,77 @@ function switchSubTab(tab, btn) {
     } else {
         renderMarket();
     }
+}
+
+/**
+ * Render the BTC Pairs section with Bullish/Bearish sub-groups.
+ * Bullish = coins gaining value against BTC (24h change > 0)
+ * Bearish = coins losing value against BTC (24h change < 0)
+ * Real data only — derived from allCoins (no mock data).
+ */
+function renderBtcPairsSection() {
+    const btc = allCoins.find(c => c.symbol === 'BTC');
+    const btcPrice = btc?.priceUsd || 0;
+    if (!btcPrice) {
+        // BTC price unavailable — show empty states
+        const bullList = document.getElementById('mkt-btc-bull-list');
+        const bearList = document.getElementById('mkt-btc-bear-list');
+        const bullCount = document.getElementById('mkt-btc-bull-count');
+        const bearCount = document.getElementById('mkt-btc-bear-count');
+        if (bullList) bullList.innerHTML = '<div class="mkt-btc-pair-empty">داده BTC در دسترس نیست</div>';
+        if (bearList) bearList.innerHTML = '<div class="mkt-btc-pair-empty">داده BTC در دسترس نیست</div>';
+        if (bullCount) bullCount.textContent = '0';
+        if (bearCount) bearCount.textContent = '0';
+        return;
+    }
+
+    // Compute BTC pair price (coin/BTC) and 24h change vs BTC for each coin
+    const pairs = allCoins
+        .filter(c => c.symbol !== 'BTC' && c.priceUsd > 0)
+        .map(c => {
+            const pairPrice = c.priceUsd / btcPrice; // how many BTC per 1 coin
+            // Relative change vs BTC: if coin went up more than BTC, it's bullish vs BTC
+            const coinChange = c.changePercent24Hr || 0;
+            const btcChange = btc.changePercent24Hr || 0;
+            const relativeChange = coinChange - btcChange;
+            return {
+                symbol: c.symbol,
+                name: c.name,
+                pairPrice,
+                relativeChange,
+                isBullish: relativeChange > 0,
+            };
+        });
+
+    const bullish = pairs.filter(p => p.isBullish).sort((a, b) => b.relativeChange - a.relativeChange).slice(0, 10);
+    const bearish = pairs.filter(p => !p.isBullish).sort((a, b) => a.relativeChange - b.relativeChange).slice(0, 10);
+
+    const renderPairItem = (p) => {
+        const safeSym = escapeHtml(p.symbol);
+        const pairPriceStr = p.pairPrice >= 1 ? p.pairPrice.toFixed(6) : p.pairPrice.toFixed(8);
+        const chgStr = (p.relativeChange >= 0 ? '+' : '') + p.relativeChange.toFixed(2) + '%';
+        const cls = p.relativeChange >= 0 ? 'up' : 'down';
+        return `
+            <div class="mkt-btc-pair-item" data-symbol="${safeSym}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
+                <span class="mkt-btc-pair-symbol">${safeSym}/BTC</span>
+                <span class="mkt-btc-pair-price ${cls}">${pairPriceStr} <small>(${chgStr})</small></span>
+            </div>
+        `;
+    };
+
+    const bullList = document.getElementById('mkt-btc-bull-list');
+    const bearList = document.getElementById('mkt-btc-bear-list');
+    const bullCount = document.getElementById('mkt-btc-bull-count');
+    const bearCount = document.getElementById('mkt-btc-bear-count');
+
+    if (bullList) bullList.innerHTML = bullish.length
+        ? bullish.map(renderPairItem).join('')
+        : '<div class="mkt-btc-pair-empty">جفت صعودی یافت نشد</div>';
+    if (bearList) bearList.innerHTML = bearish.length
+        ? bearish.map(renderPairItem).join('')
+        : '<div class="mkt-btc-pair-empty">جفت نزولی یافت نشد</div>';
+    if (bullCount) bullCount.textContent = String(bullish.length);
+    if (bearCount) bearCount.textContent = String(bearish.length);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -5949,6 +6080,39 @@ function selectAlertDirection(dir, btn) {
 }
 
 /**
+ * Direction toggle for the new premium Coin Detail alert card.
+ * Updates currentAlertDirection and the .cd-alert-dir-btn active states.
+ */
+function selectCdAlertDirection(dir, btn) {
+    currentAlertDirection = dir;
+    document.querySelectorAll('.cd-alert-dir-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+}
+
+/**
+ * Update the alert status badge (active count + status icon/text)
+ * based on the current symbol's active alerts.
+ */
+function updateCdAlertStatus(symbol) {
+    const numEl = document.getElementById('cd-alert-count-num');
+    const badgeEl = document.getElementById('cd-alert-count-badge');
+    const statusIconEl = document.getElementById('cd-alert-status-icon');
+    const statusValueEl = document.getElementById('cd-alert-status-value');
+    if (!symbol) return;
+    const userAlerts = alerts.filter(a => a.symbol === symbol);
+    const count = userAlerts.length;
+    if (numEl) numEl.textContent = String(count);
+    if (badgeEl) badgeEl.classList.toggle('has-alerts', count > 0);
+    if (statusIconEl) statusIconEl.classList.toggle('active', count > 0);
+    if (statusValueEl) {
+        statusValueEl.textContent = count > 0
+            ? (currentLang === 'fa' ? `${count} هشدار فعال` : `${count} active`)
+            : (currentLang === 'fa' ? 'غیرفعال' : 'Inactive');
+        statusValueEl.classList.toggle('active', count > 0);
+    }
+}
+
+/**
  * قدرت روند را بر اساس تغییر ۲۴ ساعته محاسبه و نمایش می‌دهد.
  */
 function updateTrendStrength(symbol) {
@@ -5974,27 +6138,45 @@ function updateTrendStrength(symbol) {
 
 function renderActiveAlerts(symbol) {
     const container = document.getElementById('active-alerts');
-    if (!container || !symbol) return;
+    if (!container || !symbol) {
+        if (container) container.innerHTML = '';
+        updateCdAlertStatus(symbol);
+        return;
+    }
     const userAlerts = alerts.filter(a => a.symbol === symbol);
+    // Update the status badge regardless of list state
+    updateCdAlertStatus(symbol);
     if (!userAlerts.length) {
-        container.innerHTML = `<div class="alert-empty">${t('alert_empty')}</div>`;
+        container.innerHTML = `
+            <div class="cd-alert-empty">
+                <svg class="cd-alert-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                ${t('alert_empty') || 'هیچ هشدار فعالی وجود ندارد'}
+            </div>
+        `;
         return;
     }
     container.innerHTML = userAlerts.map(a => {
         const priceStr = a.price >= 1 ? Number(a.price).toFixed(2) : Number(a.price).toFixed(6);
+        const dir = (a.direction || 'above').toLowerCase();
+        const dirIcon = dir === 'below'
+            ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>'
+            : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>';
+        const dirLabel = dir === 'below'
+            ? (currentLang === 'fa' ? 'وقتی پایین‌تر رفت' : 'When below')
+            : (currentLang === 'fa' ? 'وقتی بالاتر رفت' : 'When above');
+        const createdAt = a.createdAt ? new Date(a.createdAt).toLocaleDateString(currentLang === 'fa' ? 'fa-IR' : 'en-US', { month: 'short', day: 'numeric' }) : '';
         return `
-        <div class="alert-item">
-            <div class="alert-item-left">
-                <div class="alert-item-status-dot"></div>
-                <div class="alert-item-info">
-                    <div class="alert-item-top">
-                        <span class="alert-item-symbol">${escapeHtml(a.symbol)}</span>
-                    </div>
-                    <span class="alert-item-target">$${priceStr}</span>
-                </div>
+        <div class="cd-alert-item">
+            <div class="cd-alert-item-dir ${dir}">${dirIcon}</div>
+            <div class="cd-alert-item-info">
+                <span class="cd-alert-item-price">$${priceStr}</span>
+                <span class="cd-alert-item-meta">${escapeHtml(dirLabel)}${createdAt ? ' · ' + escapeHtml(createdAt) : ''}</span>
             </div>
-            <button class="alert-remove-btn" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <button class="cd-alert-item-delete" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)" aria-label="Delete alert">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
         </div>
     `}).join('');
@@ -6113,8 +6295,9 @@ async function setPriceAlert() {
     const price = parseFloat(input.value);
     const symbol = _currentDetailSymbol || document.getElementById('detail-coin-title').innerText.split(' ')[0];
     if (!price || price <= 0) { alert(t('invalid_price')); return; }
+    const direction = (currentAlertDirection === 'below' ? 'below' : 'above');
     const userId = getUserId();
-    let newAlert = { id: Date.now().toString(), symbol, price, direction: 'cross', userId, createdAt: new Date().toISOString() };
+    let newAlert = { id: Date.now().toString(), symbol, price, direction, userId, createdAt: new Date().toISOString() };
     newAlert = await syncAlertToServer(newAlert);
     alerts.push(newAlert);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
@@ -6123,6 +6306,7 @@ async function setPriceAlert() {
     const priceStr = price >= 1 ? price.toFixed(2) : price.toFixed(6);
     addNotification(t('price_alert'), `${symbol} → $${priceStr}`);
     getTg()?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${priceStr}`, buttons: [{ type: 'ok' }] });
+    getTg()?.HapticFeedback?.notificationOccurred('success');
 }
 /**
  * هشدار را حذف می‌کند.
@@ -7983,6 +8167,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 window.switchTab = switchTab;
 window.switchMainTab = switchMainTab;
 window.switchSubTab = switchSubTab;
+window.renderBtcPairsSection = renderBtcPairsSection;
 window.switchNewsTab = switchNewsTab;
 window.switchCalendarTab = switchCalendarTab;
 window.filterCalCountry = filterCalCountry;
@@ -8029,6 +8214,8 @@ window.openCoinDetail = openCoinDetail;
 window.closeCoinDetail = closeCoinDetail;
 window.setPriceAlert = setPriceAlert;
 window.selectAlertDirection = selectAlertDirection;
+window.selectCdAlertDirection = selectCdAlertDirection;
+window.updateCdAlertStatus = updateCdAlertStatus;
 window.removeAlert = removeAlert;
 window.updateTrendStrength = updateTrendStrength;
 window.toggleNotificationPanel = toggleNotificationPanel;

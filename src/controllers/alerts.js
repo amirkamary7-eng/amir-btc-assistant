@@ -50,6 +50,31 @@ export function createAlertHandlers(deps) {
         { status: 422 }, env);
     }
 
+    // AUDIT-002 FIX: Validate symbol + price + direction before DB write
+    const rawSymbol = typeof payload.symbol === 'string' ? payload.symbol.trim().toUpperCase() : '';
+    if (!rawSymbol || rawSymbol.length > 20 || !/^[A-Z0-9]{2,20}$/.test(rawSymbol)) {
+      return jsonResponse(
+        { status: 'error', message: 'Invalid symbol. Must be 2-20 alphanumeric characters (A-Z, 0-9).' },
+        { status: 422 }, env);
+    }
+
+    const rawPrice = Number(payload.price);
+    if (!Number.isFinite(rawPrice) || rawPrice <= 0 || rawPrice > 1e12) {
+      return jsonResponse(
+        { status: 'error', message: 'Invalid price. Must be a positive number between 0 and 1 trillion.' },
+        { status: 422 }, env);
+    }
+
+    const rawDirection = typeof payload.direction === 'string' ? payload.direction.trim().toLowerCase() : 'above';
+    if (rawDirection !== 'above' && rawDirection !== 'below') {
+      return jsonResponse(
+        { status: 'error', message: 'Invalid direction. Must be "above" or "below".' },
+        { status: 422 }, env);
+    }
+
+    payload.symbol = rawSymbol;
+    payload.price = rawPrice;
+    payload.direction = rawDirection;
     payload.user_id = String(authState.user.id);
     try {
       const alert = await alertRepo.create(env, payload.user_id, payload);

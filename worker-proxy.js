@@ -3576,6 +3576,11 @@ async function runScheduledAlertsBaseline(controller, env) {
   };
 
   try {
+    // AUDIT-002 FIX: Ensure table + indexes exist before querying (idempotent).
+    // Adds idx_price_alerts_status_created for fast cron scans.
+    if (typeof alertRepo?.ensureTable === 'function') {
+      try { await alertRepo.ensureTable(env); } catch {}
+    }
     const alertsResult = await queryDb(
       env,
       `
@@ -3656,37 +3661,70 @@ async function runScheduledAlertsBaseline(controller, env) {
         const chatId = Number.isFinite(chatIdValue) ? chatIdValue : userId;
         const text = `🔔 هشدار قیمت فعال شد\n${symbol} — قیمت فعلی: ${Number(currentPrice).toFixed(6)}\nهدف: ${Number(targetPrice).toFixed(6)}`;
         const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
-        const tgPayload = {
-          chat_id: chatId,
-          text,
-          disable_web_page_preview: true,
-        };
-        // Phase 5 — add Mini App button
-        if (webAppUrl) {
-          tgPayload.reply_markup = {
-            inline_keyboard: [[{
-              text: 'Open Amir BTC Assistant 🚀',
-              web_app: { url: webAppUrl },
-            }]],
-          };
-        }
-        await sendTelegramMessage(env, tgPayload);
 
-        // Phase 4 — create in-app notification for triggered alert
-        // CRITICAL FIX: Only notify if user has price_alert preference enabled
+        // CRITICAL FIX (AUDIT-002): Honor user notification preference BEFORE sending.
+        // If the user disabled price_alert notifications, skip BOTH Telegram and in-app delivery.
+        // The alert is still marked as triggered (status update below) so we don't keep checking it.
+        let prefsEnabled = true; // default to enabled (fail-open) for backwards compat
         if (notificationRepo) {
           try {
-            const prefsEnabled = await notificationRepo.isPreferenceEnabled(env, userId, 'price_alert');
-            if (prefsEnabled) {
-              notificationRepo.create(env, userId, 'price_alert', `🔔 هشدار ${symbol}`, text, {
+            prefsEnabled = await notificationRepo.isPreferenceEnabled(env, userId, 'price_alert');
+          } catch (e) {
+            // prefs check failed — fail open (send notification) but log for monitoring
+            console.warn('alert preference check failed, sending anyway:', {
+              alert_id: alertId,
+              user_id: userId,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+
+        if (prefsEnabled) {
+          // 1) Telegram delivery
+          const tgPayload = {
+            chat_id: chatId,
+            text,
+            disable_web_page_preview: true,
+          };
+          if (webAppUrl) {
+            tgPayload.reply_markup = {
+              inline_keyboard: [[{
+                text: 'Open Amir BTC Assistant 🚀',
+                web_app: { url: webAppUrl },
+              }]],
+            };
+          }
+          await sendTelegramMessage(env, tgPayload);
+
+          // 2) In-App notification (Mini App notification center + badge)
+          // FIX: await the create call and log on failure (was fire-and-forget, silent failures)
+          if (notificationRepo) {
+            try {
+              await notificationRepo.create(env, userId, 'price_alert', `🔔 هشدار ${symbol}`, text, {
                 alert_id: alertId,
                 symbol,
                 target_price: targetPrice,
                 direction,
                 current_price: currentPrice,
-              }).catch(() => {});
+              });
+            } catch (notifErr) {
+              console.warn('in-app alert notification failed:', {
+                alert_id: alertId,
+                user_id: userId,
+                symbol,
+                error: notifErr instanceof Error ? notifErr.message : String(notifErr),
+              });
             }
-          } catch { /* prefs check failed — send anyway */ }
+          }
+        } else {
+          // User opted out of price_alert notifications — log for audit trail
+          console.log(JSON.stringify({
+            scope: 'scheduled-alerts-execution',
+            skipped_preference: true,
+            alert_id: alertId,
+            user_id: userId,
+            symbol,
+          }));
         }
 
         await queryDb(

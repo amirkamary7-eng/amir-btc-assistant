@@ -2734,3 +2734,113 @@ Stage Summary:
 - All 10 production verification checks PASS
 - No deployment warnings (only an informational warning about pages_build_output_dir field missing from wrangler.jsonc, which is expected since Pages uses a separate config)
 - Production URL: https://amir-btc-assistant-pages.pages.dev
+
+---
+Task ID: ALERT-SYSTEM-AUDIT-002
+Agent: main (Z.ai Code)
+Task: Audit alert system end-to-end (read-only)
+
+AUDIT FINDINGS (PASS/FAIL with file:line):
+
+1. Alert creation (POST /api/alerts)
+   - ✅ user_id from auth: src/controllers/alerts.js:53 (`payload.user_id = String(authState.user.id)`)
+   - ✅ Symbol validated: src/repositories/alerts.js:32 (uppercased, normalized)
+   - ✅ Direction supported ('above'/'below'): src/repositories/alerts.js:33
+   - ✅ Duplicate prevention via reactivation: src/repositories/alerts.js:36-69 (SELECT existing → UPDATE status='active', triggered_at=NULL)
+   - ❌ MISSING: Price validation (NaN, negative, zero, >1B) — repository just calls Number(payload.price)
+   - ❌ MISSING: Symbol whitelist (any string accepted, even invalid like "FOO123")
+   - Severity: MEDIUM (bad inputs can cause silent trigger failures)
+
+2. Alert deletion (DELETE /api/alerts/:id)
+   - ✅ user_id check present: src/controllers/alerts.js:111 (`if (String(alert.user_id) !== userId) return 403`)
+   - ✅ SQL also enforces: src/repositories/alerts.js:128 (`WHERE id = $1 AND user_id = $2`)
+   - ✅ findById before delete: src/controllers/alerts.js:107 (returns 404 if not found)
+   - Status: FIXED (was CRITICAL in prior audit MARKET-AUDIT-PHASE2-001)
+
+3. Alert listing (GET /api/alerts)
+   - ✅ user_id filtered: src/repositories/alerts.js:98 (`WHERE user_id = $1 AND status = 'active'`)
+   - ✅ Ordered by created_at DESC
+
+4. Alert triggering (cron */5min)
+   - ✅ worker-proxy.js:3579 SELECT active alerts ORDER BY created_at DESC
+   - ✅ maxAlerts cap: worker-proxy.js:3567 (default 200, was 50 before)
+   - ✅ Batch price fetch (Promise.allSettled, BATCH_SIZE=20): worker-proxy.js:3605-3626
+   - ✅ Direction logic correct: worker-proxy.js:3649 (`below` → currentPrice <= targetPrice; else currentPrice >= targetPrice)
+   - ✅ Guest users skipped: worker-proxy.js:3635
+   - ✅ Status updated to 'triggered' after delivery: worker-proxy.js:3692-3700
+
+5. Database schema
+   - price_alerts table: id, user_id, symbol, price, direction, status, created_at, triggered_at
+   - ❌ MISSING: index on (status, created_at DESC) — full table scan on every cron
+   - ❌ MISSING: index on (user_id, status) — list query optimization
+   - Severity: LOW (acceptable at current scale <1000 alerts)
+
+6. Telegram notification delivery
+   - ✅ sendTelegramMessage called: worker-proxy.js:3673
+   - ✅ Payload includes chat_id, text, disable_web_page_preview
+   - ✅ Inline keyboard with Mini App button: worker-proxy.js:3666-3671
+   - ✅ WebApp URL resolved with cacheBust: worker-proxy.js:3658
+
+7. Mini App / In-App notification delivery
+   - ✅ notificationRepo.create called: worker-proxy.js:3681
+   - ✅ Type='price_alert', title=`🔔 هشدار ${symbol}`, message=text
+   - ✅ Metadata includes alert_id, symbol, target_price, direction, current_price
+   - ❌ ISSUE: notificationRepo.create is called WITHOUT await — fire-and-forget with .catch(() => {}) (worker-proxy.js:3687). If it fails silently, no log. Minor but should be awaited or at minimum logged.
+   - Severity: LOW
+
+8. Notification center integration
+   - ✅ GET /api/notifications returns triggered alert notifications (type='price_alert')
+   - ✅ list() ordered by created_at DESC, limit 50
+   - ❌ MISSING: Alert notifications may not have a distinct visual treatment in the notification center (need to check frontend)
+   - Severity: MEDIUM (UX consistency)
+
+9. User preference checks
+   - ✅ isPreferenceEnabled('price_alert') called: worker-proxy.js:3679
+   - ✅ If disabled, in-app notification skipped (but Telegram message already sent — see issue below)
+   - ❌ ISSUE: Telegram message is sent BEFORE the preference check (lines 3673-3690). User who disabled price_alert notifications still gets Telegram messages.
+   - Severity: HIGH (user preference not honored for Telegram delivery)
+
+10. Badge count
+    - ✅ DB-backed unreadCount() exists: src/repositories/notifications.js:248
+    - ❌ ISSUE: Frontend may use localStorage for badge (per prior audit). Need to verify current state.
+    - Severity: MEDIUM (potential stale badge)
+
+11. Alert history
+    - ❌ MISSING: No dedicated alert_history table
+    - ✅ Triggered alerts remain in price_alerts with status='triggered' (could be queried for history)
+    - ✅ Triggered alert info also stored in notifications table (metadata has alert_id, symbol, etc.)
+    - Severity: LOW (history can be derived)
+
+12. Duplicate alert prevention
+    - ✅ Identical alert reactivated: src/repositories/alerts.js:36-69
+    - ❌ MISSING: Different price, same symbol+direction → multiple alerts allowed (may be intentional for tiered alerts)
+    - Status: ACCEPTABLE
+
+BUGS FOUND:
+1. [HIGH] Telegram message sent before preference check — user who disabled price_alert still gets Telegram notifications
+   Fix: Move isPreferenceEnabled check before sendTelegramMessage; gate both deliveries on it
+2. [MEDIUM] No price validation in alert creation — NaN/negative/zero prices accepted
+   Fix: Add `if (!Number.isFinite(price) || price <= 0) return 422`
+3. [MEDIUM] No symbol whitelist — invalid symbols accepted, will never trigger
+   Fix: Validate symbol against allCoins list or fetchSpotPriceUsd result
+4. [MEDIUM] Badge count may be localStorage-only — stale risk
+   Fix: Use DB unreadCount() from /api/notifications response
+5. [LOW] notificationRepo.create fire-and-forget — silent failures
+   Fix: await it, or at minimum log errors
+6. [LOW] Missing DB index on (status, created_at) — full table scan on cron
+   Fix: CREATE INDEX idx_price_alerts_status_created ON price_alerts(status, created_at DESC)
+
+ARCHITECTURE SUMMARY:
+User creates alert (POST /api/alerts) → alertRepo.create (DB INSERT or reactivate)
+→ Cron */5min → runScheduledAlertsBaseline → SELECT active alerts → batch fetch prices (MEXC)
+→ For each alert: check trigger condition → sendTelegramMessage → notificationRepo.create → UPDATE status='triggered'
+→ Frontend polls /api/notifications every N seconds → updates badge + notification center list
+
+FIXES NEEDED (in priority order):
+1. Move isPreferenceEnabled check before sendTelegramMessage (HIGH)
+2. Add price/symbol validation in alert creation (MEDIUM)
+3. Verify frontend badge uses DB unreadCount (MEDIUM)
+4. Add DB index on price_alerts(status, created_at) (LOW)
+5. Await notificationRepo.create with error logging (LOW)
+
+No code changes made in this audit. Fixes will be applied in subsequent task.

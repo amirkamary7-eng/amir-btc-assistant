@@ -24,10 +24,36 @@ export function createAlertRepository(deps) {
   }
 
   /**
+   * Ensure price_alerts table + indexes exist.
+   * Idempotent — runs CREATE INDEX IF NOT EXISTS on every call.
+   * AUDIT-002 FIX: Added idx_price_alerts_status_created for cron query optimization
+   * (was missing — full table scan on every cron cycle).
+   */
+  async function ensureTable(env) {
+    await queryDb(env, `
+      CREATE TABLE IF NOT EXISTS price_alerts (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        symbol VARCHAR(32) NOT NULL,
+        price NUMERIC(24,8) NOT NULL,
+        direction VARCHAR(16) NOT NULL DEFAULT 'above',
+        status VARCHAR(16) NOT NULL DEFAULT 'active',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        triggered_at TIMESTAMPTZ
+      )
+    `, []);
+    await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_price_alerts_user_status ON price_alerts (user_id, status)`, []);
+    await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_price_alerts_dedup ON price_alerts (user_id, symbol, price, direction)`, []);
+    // AUDIT-002 FIX: index for the cron query (status='active' ORDER BY created_at DESC)
+    await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_price_alerts_status_created ON price_alerts (status, created_at DESC)`, []);
+  }
+
+  /**
    * Create a new price alert, or reactivate an existing identical one.
    * Returns the (re)activated alert row.
    */
   async function create(env, userId, payload) {
+    await ensureTable(env);
     const normalizedUserId = String(userId);
     const symbol = (normalizeOptionalString(payload.symbol) || '').toUpperCase();
     const direction = (normalizeOptionalString(payload.direction) || 'above').toLowerCase();
@@ -90,6 +116,7 @@ export function createAlertRepository(deps) {
    * List all active price alerts for a user.
    */
   async function list(env, userId) {
+    await ensureTable(env);
     const result = await queryDb(
       env,
       `
@@ -128,5 +155,5 @@ export function createAlertRepository(deps) {
     await queryDb(env, 'DELETE FROM price_alerts WHERE id = $1 AND user_id = $2', [String(alertId), String(userId)]);
   }
 
-  return Object.freeze({ create, list, findById, remove, serializeRow });
+  return Object.freeze({ create, list, findById, remove, serializeRow, ensureTable });
 }

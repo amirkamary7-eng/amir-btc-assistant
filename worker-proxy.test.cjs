@@ -501,16 +501,54 @@ test('Alerts DELETE: without auth returns 401', async () => {
 });
 
 // With valid initData, alerts now properly authenticate and return 503 (no DB configured).
+// AUDIT-002: Updated payload to use 'price' field (controller expects 'price', not 'target_price').
 test('Alerts POST: with valid initData returns 503 (no DB)', async () => {
   const worker = loadWorker();
   const env = createEnv();
   const user = { id: 999888, first_name: 'Test' };
   const initData = buildInitData('test-bot-token', user);
   const res = await sendRequest(worker, env, 'POST', '/api/alerts', {
-    body: { symbol: 'BTC', target_price: 100000 },
+    body: { symbol: 'BTC', price: 100000, direction: 'above' },
     initData,
   });
   assert.equal(res.status, 503);
+});
+
+// AUDIT-002: New tests for input validation
+test('Alerts POST: invalid symbol returns 422 (AUDIT-002)', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/alerts', {
+    body: { symbol: '!!!', price: 100, direction: 'above' },
+    initData,
+  });
+  assert.equal(res.status, 422);
+});
+
+test('Alerts POST: invalid price returns 422 (AUDIT-002)', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/alerts', {
+    body: { symbol: 'BTC', price: -50, direction: 'above' },
+    initData,
+  });
+  assert.equal(res.status, 422);
+});
+
+test('Alerts POST: invalid direction returns 422 (AUDIT-002)', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/alerts', {
+    body: { symbol: 'BTC', price: 100, direction: 'sideways' },
+    initData,
+  });
+  assert.equal(res.status, 422);
 });
 
 // ============================================================================
