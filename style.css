@@ -7638,6 +7638,56 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     display: flex; flex-direction: column; gap: 2px;
 }
 
+/* ── Forex Grouped List (Major / Cross / Metals / Indices / Commodities) ── */
+.mkt-forex-group {
+    margin-bottom: 16px;
+}
+.mkt-forex-group-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 4px 8px;
+}
+.mkt-forex-group-left { display: flex; align-items: center; gap: 8px; }
+.mkt-forex-group-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    box-shadow: 0 0 8px currentColor;
+}
+.mkt-forex-group-title {
+    font-size: 12px; font-weight: 700; color: #A5B4C7;
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.mkt-forex-group-count {
+    font-size: 10px; font-weight: 700; color: #6B7A8D;
+    background: rgba(255,255,255,0.04); padding: 2px 8px; border-radius: 6px;
+}
+.mkt-forex-group-items {
+    display: flex; flex-direction: column; gap: 2px;
+}
+
+/* ── Forex Row (premium, matches crypto row design) ── */
+.mkt-forex-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    cursor: pointer; transition: background 0.15s ease;
+    animation: mktFadeIn 0.3s ease both;
+}
+.mkt-forex-row:hover { background: rgba(255,255,255,0.02); }
+.mkt-forex-row:active { background: rgba(255,255,255,0.04); }
+.mkt-forex-icon {
+    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; letter-spacing: -0.5px;
+}
+.mkt-forex-row .mkt-coin-info { flex: 1; min-width: 0; }
+.mkt-forex-row .mkt-coin-right {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+}
+.mkt-coin-category-tag {
+    font-size: 9px; font-weight: 700;
+    padding: 2px 6px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+}
+
 /* ── Coin Row (Premium) ── */
 .mkt-coin-row {
     display: flex; align-items: center; gap: 10px;

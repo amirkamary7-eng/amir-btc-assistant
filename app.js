@@ -3768,7 +3768,8 @@ function renderMarket() {
             `).join('');
             return;
         }
-        list.innerHTML = buildInfoBar(allForexPairs.length, t('tab_forex') || 'Forex') + allForexPairs.map(f => renderMarketItem({...f, _type: 'forex'})).join('');
+        // Use premium grouped forex list (Major / Cross / Metals / Indices / Commodities)
+        list.innerHTML = buildInfoBar(allForexPairs.length, t('tab_forex') || 'Forex') + renderForexGroupedList();
         return;
     }
 
@@ -3894,37 +3895,135 @@ function renderForexItem(f) {
     const safeSymbol = escapeHtml(f.symbol);
     const safeName = escapeHtml(f.name);
     const cat = f.category || 'major';
+
+    // Category config: colors, icons, labels, precision
     const catConfig = {
-        major:    { color: 'var(--green)',  icon: 'M',  label: 'Major' },
-        cross:    { color: 'var(--accent)', icon: 'X',  label: 'Cross' },
-        metal:    { color: '#ffd700',     icon: 'Au', label: 'Metal' },
-        index:    { color: '#60a5fa',     icon: 'ID', label: 'Index' },
-        commodity:{ color: '#f97316',     icon: 'Cm', label: 'Commodity' },
+        major:     { color: '#22C55E', icon: 'M',  label: 'Major',     labelFa: 'جفت اصلی',   decimals: 4 },
+        cross:     { color: '#F5A623', icon: 'X',  label: 'Cross',     labelFa: 'کراس',       decimals: 4 },
+        metal:     { color: '#FFD700', icon: 'Au', label: 'Metal',     labelFa: 'فلز گران‌بها', decimals: 2 },
+        index:     { color: '#60A5FA', icon: 'ID', label: 'Index',     labelFa: 'شاخص',       decimals: 0 },
+        commodity: { color: '#F97316', icon: 'Cm', label: 'Commodity', labelFa: 'کالا',       decimals: 0 },
     };
     const cfg = catConfig[cat] || catConfig.major;
-    const decimals = cat === 'metal' ? 2 : (cat === 'index' || cat === 'commodity' ? 0 : 4);
-    const priceStr = f.price > 0 ? f.price.toFixed(decimals) : '--';
-    const catLabelFa = { major: 'جفت اصلی', cross: 'کراس', metal: 'فلز', index: 'شاخص', commodity: 'کالا' };
-    const catLabel = currentLang === 'fa' ? (catLabelFa[cat] || cat) : cfg.label;
+    const decimals = cfg.decimals;
+
+    // Format price with appropriate precision
+    let priceStr;
+    if (f.price > 0) {
+        if (cat === 'metal' && f.price > 1000) {
+            // Gold: $2,654.32 (with thousands separator)
+            priceStr = f.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        } else if (cat === 'metal') {
+            // Silver: $30.45
+            priceStr = f.price.toFixed(2);
+        } else if (decimals === 0) {
+            priceStr = f.price.toLocaleString('en-US', { maximumFractionDigits: 0 });
+        } else {
+            priceStr = f.price.toFixed(decimals);
+        }
+    } else {
+        priceStr = '--';
+    }
+
+    // Change display: show actual change % if available, otherwise show category label
+    const change = f.change || 0;
+    const hasChange = Math.abs(change) > 0.001;
+    const changeStr = hasChange ? (change >= 0 ? '+' : '') + change.toFixed(2) + '%' : '';
+    const catLabel = currentLang === 'fa' ? cfg.labelFa : cfg.label;
+
+    // Category icon with premium styling
+    const iconBg = `background:${cfg.color}15; color:${cfg.color}; border:1px solid ${cfg.color}30;`;
+
     return `
-        <div class="coin-item" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" onclick="openForexDetail(this.dataset.symbol)" role="listitem">
-            <div class="coin-left">
-                <div class="forex-icon-wrap" style="background:${cfg.color}15; color:${cfg.color}">
-                    <span class="forex-pair-icon">${cfg.icon}</span>
-                </div>
-                <div class="coin-identity">
-                    <span class="coin-sym">${safeName}</span>
-                    <span class="coin-name">${catLabel}</span>
-                </div>
+        <div class="mkt-coin-row mkt-forex-row" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" onclick="openForexDetail(this.dataset.symbol)" role="listitem">
+            <div class="mkt-forex-icon" style="${iconBg}">
+                <span>${cfg.icon}</span>
             </div>
-            <div class="coin-right">
-                <div class="coin-price-data">
-                    <div class="coin-price">${priceStr}</div>
-                    <div class="coin-change" style="color:${cfg.color}; background:${cfg.color}15;">${cfg.label.toUpperCase()}</div>
-                </div>
+            <div class="mkt-coin-info">
+                <span class="mkt-coin-symbol">${safeName}</span>
+                <span class="mkt-coin-name">${catLabel}</span>
+            </div>
+            <div class="mkt-coin-right">
+                <span class="mkt-coin-price">${priceStr}</span>
+                ${hasChange
+                    ? `<span class="mkt-coin-change ${change >= 0 ? 'up' : 'down'}">${changeStr}</span>`
+                    : `<span class="mkt-coin-category-tag" style="color:${cfg.color}; background:${cfg.color}10;">${cfg.label.toUpperCase()}</span>`
+                }
             </div>
         </div>
     `;
+}
+
+/**
+ * Render the forex list grouped by category (Major / Cross / Metals / Indices / Commodities).
+ * Each group has a header with count badge and a list of items.
+ */
+function renderForexGroupedList() {
+    if (!allForexPairs.length) {
+        return Array(5).fill(`
+            <div class="market-skeleton">
+                <div class="market-skeleton-left">
+                    <div class="market-skeleton-icon"></div>
+                    <div class="market-skeleton-text">
+                        <div class="market-skeleton-line"></div>
+                        <div class="market-skeleton-line"></div>
+                    </div>
+                </div>
+                <div class="market-skeleton-right">
+                    <div class="market-skeleton-block"></div>
+                    <div class="market-skeleton-block"></div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // Group by category
+    const groups = {
+        major:     { label: 'Major Pairs',     labelFa: 'جفت‌های اصلی',     items: [] },
+        cross:     { label: 'Cross Pairs',     labelFa: 'کراس‌ها',          items: [] },
+        metal:     { label: 'Metals',          labelFa: 'فلزات گران‌بها',    items: [] },
+        index:     { label: 'Indices',         labelFa: 'شاخص‌ها',          items: [] },
+        commodity: { label: 'Commodities',     labelFa: 'کالاها',           items: [] },
+    };
+
+    for (const f of allForexPairs) {
+        const cat = f.category || 'major';
+        if (groups[cat]) groups[cat].items.push(f);
+    }
+
+    // Render each non-empty group
+    const groupOrder = ['major', 'cross', 'metal', 'index', 'commodity'];
+    let html = '';
+    for (const cat of groupOrder) {
+        const g = groups[cat];
+        if (!g.items.length) continue;
+
+        const groupLabel = currentLang === 'fa' ? g.labelFa : g.label;
+        const catCfg = {
+            major:     { color: '#22C55E' },
+            cross:     { color: '#F5A623' },
+            metal:     { color: '#FFD700' },
+            index:     { color: '#60A5FA' },
+            commodity: { color: '#F97316' },
+        }[cat];
+
+        html += `
+            <div class="mkt-forex-group">
+                <div class="mkt-forex-group-header">
+                    <div class="mkt-forex-group-left">
+                        <span class="mkt-forex-group-dot" style="background:${catCfg.color};"></span>
+                        <span class="mkt-forex-group-title">${groupLabel}</span>
+                    </div>
+                    <span class="mkt-forex-group-count">${g.items.length}</span>
+                </div>
+                <div class="mkt-forex-group-items">
+                    ${g.items.map(f => renderForexItem(f)).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    return html;
 }
 
 /**
@@ -3956,14 +4055,20 @@ function switchMainTab(tab, btn) {
         indicator.classList.add('pos-' + idx);
     }
 
-    // Show/hide crypto sub-tabs
+    // Show/hide crypto sub-tabs (filters: All/Gainers/Losers/Popular/BTC Pairs)
+    // BUG FIX: previous code used classList.add('hidden') but the .hidden CSS rule
+    // was scoped to .market-sub-tabs.hidden (old class name), not .mkt-filters.hidden.
+    // The element now has class "mkt-filters" — so the hidden class never took effect.
+    // Fix: use direct display style.
     const subTabs = document.getElementById('market-sub-tabs');
     if (subTabs) {
-        if (tab === 'crypto') {
-            subTabs.classList.remove('hidden');
-        } else {
-            subTabs.classList.add('hidden');
-        }
+        subTabs.style.display = (tab === 'crypto') ? '' : 'none';
+    }
+
+    // Also hide the BTC Pairs section when not on crypto tab
+    const btcPairsSection = document.getElementById('mkt-btc-pairs-section');
+    if (btcPairsSection) {
+        btcPairsSection.style.display = 'none';
     }
 
     // Show/hide summary bar and insights (only for crypto, not forex/watchlist)
@@ -5778,7 +5883,14 @@ function closeNewsModal() {
  * ورودی: پارامترهای `symbol` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
+// Race-condition guard for openCoinDetail.
+// Each call increments this token; if a newer call starts, older calls abort silently.
+let _detailLoadToken = 0;
+
 async function openCoinDetail(symbol) {
+    // Increment token to invalidate any in-flight older calls
+    const token = ++_detailLoadToken;
+
     // Lazy-load TradingView widget on first use
     if (!window.TradingView) {
         const s = document.createElement('script');
@@ -5786,6 +5898,9 @@ async function openCoinDetail(symbol) {
         document.head.appendChild(s);
         await new Promise((resolve, reject) => { s.onload = resolve; s.onerror = reject; });
     }
+
+    // RACE GUARD: if a newer openCoinDetail call started while we were loading tv.js, abort.
+    if (token !== _detailLoadToken) return;
 
     const coin = allCoins.find(c => c.symbol === symbol);
     if (!coin) return;
@@ -5824,7 +5939,8 @@ async function openCoinDetail(symbol) {
     setText('cd-stat-supply', coin.supply ? formatLargeNumber(coin.supply) : '--');
     setText('cd-stat-rank', '#' + (Number(coin.rank) || 0));
 
-    // ── Alert section ──
+    // ── Alert section: current price binding ──
+    // CRITICAL: this must use the CURRENT coin's price, not a stale value from a previous call.
     const alertPriceVal = document.getElementById('alert-current-price-value');
     if (alertPriceVal) alertPriceVal.textContent = '$' + priceStr;
 
@@ -5841,13 +5957,31 @@ async function openCoinDetail(symbol) {
     chartContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#6B7A8D;font-size:13px;">در حال بارگذاری چارت...</div>';
 
     const chartInfo = await resolveChartSymbol(symbol);
+
+    // RACE GUARD: if a newer openCoinDetail call started while we were resolving the chart, abort.
+    // This prevents stale chart/alert data from overwriting the newer coin's state.
+    if (token !== _detailLoadToken) return;
+
+    // SAFETY: re-assert the alert price in case something overwrote it during the await.
+    // This is the root-cause fix for "alert price stuck on BTC" — ensures the price always
+    // matches _currentDetailSymbol, never a stale value from a previous call.
+    if (alertPriceVal && _currentDetailSymbol === symbol) {
+        alertPriceVal.textContent = '$' + priceStr;
+    }
+    if (priceEl && _currentDetailSymbol === symbol) {
+        priceEl.textContent = '$' + priceStr;
+    }
+
     currentTvChartInfo = chartInfo;
     currentTvInterval = 'D';
     updateTvTimeframeUI();
     createTradingViewWidget(chartInfo);
 
     // ── Active Alerts ──
-    renderActiveAlerts(symbol);
+    // Only render if we're still the active coin (no newer call has started)
+    if (token === _detailLoadToken && _currentDetailSymbol === symbol) {
+        renderActiveAlerts(symbol);
+    }
 }
 /**
  * ویجت TradingView را با تنظیمات فعلی می‌سازد.
