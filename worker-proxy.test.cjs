@@ -28,8 +28,96 @@ function loadWorker(pgOverride) {
   const defaultMocks = {
     '@neondatabase/serverless': pgOverride || {
       Pool: class Pool {
-        async query() { return { rows: [] }; }
-        async connect() { return { async query() { return { rows: [] }; }, release() {} }; }
+        async query(sql, params) {
+          // Smart mock: return appropriate rows based on SQL query
+          const sqlLower = (sql || '').toLowerCase();
+
+          // INSERT ... ON CONFLICT ... RETURNING (bootstrap upsert)
+          if (sqlLower.includes('insert into users') && sqlLower.includes('returning')) {
+            return { rows: [{
+              telegram_id: String(params?.[0] || '123456'),
+              username: null, first_name: 'Test', last_name: null,
+              lang: 'fa', channel_joined: false, channel_verified_at: null,
+              created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            }] };
+          }
+
+          // SELECT ... FROM users WHERE telegram_id (getById)
+          if (sqlLower.includes('select') && sqlLower.includes('from users') && sqlLower.includes('where telegram_id')) {
+            return { rows: [] }; // user not found for first check
+          }
+
+          // SELECT ... FROM watchlist_items
+          if (sqlLower.includes('from watchlist_items')) {
+            return { rows: [] }; // empty watchlist
+          }
+
+          // INSERT INTO watchlist_items ... RETURNING
+          if (sqlLower.includes('insert into watchlist_items') && sqlLower.includes('returning')) {
+            return { rows: [{ user_id: String(params?.[0] || '123456'), symbol: String(params?.[1] || 'BTC').toUpperCase(), position: 0 }] };
+          }
+
+          // SELECT from referrals
+          if (sqlLower.includes('from referrals')) {
+            return { rows: [] };
+          }
+
+          // SELECT from token_balances
+          if (sqlLower.includes('from token_balances')) {
+            return { rows: [] };
+          }
+
+          // SELECT from token_transactions
+          if (sqlLower.includes('from token_transactions')) {
+            return { rows: [] };
+          }
+
+          // SELECT from price_alerts
+          if (sqlLower.includes('from price_alerts')) {
+            return { rows: [] };
+          }
+
+          // SELECT from notifications
+          if (sqlLower.includes('from notifications')) {
+            return { rows: [] };
+          }
+
+          // SELECT from notification_settings
+          if (sqlLower.includes('from notification_settings')) {
+            return { rows: [] }; // no settings = defaults
+          }
+
+          // SELECT from analyses
+          if (sqlLower.includes('from analyses')) {
+            return { rows: [] };
+          }
+
+          // SELECT from tickets
+          if (sqlLower.includes('from tickets')) {
+            return { rows: [] };
+          }
+
+          // SELECT from admins
+          if (sqlLower.includes('from admins')) {
+            return { rows: [] };
+          }
+
+          // INSERT ... ON CONFLICT DO NOTHING (ensureUserRow)
+          if (sqlLower.includes('on conflict') && sqlLower.includes('do nothing')) {
+            return { rows: [] };
+          }
+
+          // Default: empty rows
+          return { rows: [] };
+        }
+        async connect() {
+          const self = this;
+          return {
+            async query(sql, params) { return self.query(sql, params); },
+            release() {},
+          };
+        }
+        end() { return Promise.resolve(); }
       },
     },
   };

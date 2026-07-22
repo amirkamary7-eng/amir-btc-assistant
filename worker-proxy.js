@@ -1178,6 +1178,30 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
     },
   ]);
   await diagLog(env, { scope: 'diag-creditReferralWithReward-SUCCESS' });
+
+  // Send referral + reward notifications to the inviter
+  if (notificationRepo) {
+    try {
+      // Referral notification (new referral created)
+      const refEnabled = await notificationRepo.isPreferenceEnabled(env, inviterId, 'referral');
+      if (refEnabled) {
+        await notificationRepo.create(env, inviterId, 'referral',
+          `🎯 دعوت جدید`,
+          `کاربر ${String(inviteeId)} با لینک دعوت شما وارد شد.`,
+          { invitee_id: String(inviteeId), referral_id: referralId }
+        ).catch(() => {});
+      }
+      // Reward notification (tokens credited)
+      const rewardEnabled = await notificationRepo.isPreferenceEnabled(env, inviterId, 'reward');
+      if (rewardEnabled) {
+        await notificationRepo.create(env, inviterId, 'reward',
+          `💎 پاداش رفرال`,
+          `${amount} AB Token به عنوان پاداش دعوت به کیف پول شما اضافه شد.`,
+          { amount, referral_id: referralId, invitee_id: String(inviteeId) }
+        ).catch(() => {});
+      }
+    } catch { /* notification failure should not break reward */ }
+  }
   } catch (err) {
     await diagLog(env, { scope: 'diag-creditReferralWithReward-ERROR', error: err?.message, stack: err?.stack });
     throw err;
@@ -2539,6 +2563,7 @@ const adminHandlers = createAdminHandlers({
   sendTelegramMessage,
   normalizeOptionalString,
   adminRepo,
+  notificationRepo,
   diagLog,
 });
 //#endregion

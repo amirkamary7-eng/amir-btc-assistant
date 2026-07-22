@@ -23,6 +23,7 @@ export function createAdminHandlers(deps) {
     sendTelegramMessage,
     normalizeOptionalString,
     adminRepo,
+    notificationRepo,
     diagLog,
   } = deps;
 
@@ -479,10 +480,31 @@ export function createAdminHandlers(deps) {
 
       // Notify ticket owner
       try {
-        const ownerId = Number(ticketInfo.user_id);
-        if (Number.isFinite(ownerId)) {
+        const ownerId = String(ticketInfo.user_id);
+        const ownerIdNum = Number(ownerId);
+        // CRITICAL FIX: Check if user has ticket notifications enabled
+        if (notificationRepo) {
+          const ticketEnabled = await notificationRepo.isPreferenceEnabled(env, ownerId, 'ticket');
+          if (ticketEnabled) {
+            // Create in-app notification
+            await notificationRepo.create(env, ownerId, 'ticket',
+              `💬 پاسخ تیکت: ${ticketInfo.title || ''}`,
+              message,
+              { ticket_id: ticketId, title: ticketInfo.title }
+            ).catch(() => {});
+            // Send Telegram message
+            if (Number.isFinite(ownerIdNum)) {
+              await sendTelegramMessage(env, {
+                chat_id: ownerIdNum,
+                text: `💬 پاسخ تیکت: ${ticketInfo.title || ''}\n\n${message}`,
+                disable_web_page_preview: true,
+              });
+            }
+          }
+        } else if (Number.isFinite(ownerIdNum)) {
+          // Fallback: no notificationRepo, just send Telegram
           await sendTelegramMessage(env, {
-            chat_id: ownerId,
+            chat_id: ownerIdNum,
             text: `💬 پاسخ تیکت: ${ticketInfo.title || ''}\n\n${message}`,
             disable_web_page_preview: true,
           });
