@@ -6210,10 +6210,29 @@ function openForexDetail(symbol) {
     const typeLabel = currentLang === 'fa'
         ? ({ major: 'فارکس', cross: 'فارکس', metal: 'فلز', index: 'شاخص', commodity: 'کامودیتی' }[cat] || 'بازار')
         : ({ major: 'Forex', cross: 'Forex', metal: 'Commodity', index: 'Index', commodity: 'Commodity' }[cat] || 'Market');
+
+    // ── Premium stats grid for forex/metals ──
+    // Previously this rendered bare .info-item spans (whose CSS is scoped under
+    // .detail-extra-info, NOT .cd-stats-grid), so the forex detail stats looked
+    // unstyled next to the crypto detail's premium 2x2 cards. Now we render the
+    // SAME .cd-stat-item grid as crypto, with forex-relevant metrics: current
+    // price, daily change %, category, and symbol. This gives every asset type
+    // a consistent, premium statistics card.
+    const fchg = (typeof pair.change === 'number' && !isNaN(pair.change)) ? pair.change : 0;
+    const changeStr = fchg !== 0 ? (fchg >= 0 ? '+' : '') + fchg.toFixed(2) + '%' : '--';
+    const changeCls = fchg > 0 ? 'cd-stat-value-up' : (fchg < 0 ? 'cd-stat-value-down' : '');
+    const priceDisplay = pair.price > 0
+        ? (cat === 'metal' && pair.price > 1000
+            ? '$' + pair.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            : cat === 'metal'
+                ? '$' + pair.price.toFixed(2)
+                : '$' + pair.price.toFixed(4))
+        : '--';
     document.getElementById('detail-stats').innerHTML =
-        `<span class="info-item"><span class="info-label">Category</span><span class="info-value">${catLabel}</span></span>` +
-        `<span class="info-item"><span class="info-label">Symbol</span><span class="info-value">${escapeHtml(symbol)}</span></span>` +
-        `<span class="info-item"><span class="info-label">Type</span><span class="info-value">${typeLabel}</span></span>`;
+        `<div class="cd-stat-item"><span class="cd-stat-label">${currentLang === 'fa' ? 'قیمت فعلی' : 'Current Price'}</span><span class="cd-stat-value">${priceDisplay}</span></div>` +
+        `<div class="cd-stat-item"><span class="cd-stat-label">${currentLang === 'fa' ? 'تغییر روزانه' : 'Daily Change'}</span><span class="cd-stat-value ${changeCls}">${changeStr}</span></div>` +
+        `<div class="cd-stat-item"><span class="cd-stat-label">${currentLang === 'fa' ? 'دسته‌بندی' : 'Category'}</span><span class="cd-stat-value" style="font-size:13px;">${catLabel}</span></div>` +
+        `<div class="cd-stat-item"><span class="cd-stat-label">${currentLang === 'fa' ? 'نوع' : 'Type'}</span><span class="cd-stat-value" style="font-size:13px;">${typeLabel}</span></div>`;
 
     // ── BUG 1 FIX: Alert card stays VISIBLE for every asset type ──
     // Previously this tried to hide the alert card with a dead `.alert-section`
@@ -6521,6 +6540,22 @@ async function checkAlerts() {
     if (!allCoins.length) return;
     const priceMap = {};
     allCoins.forEach(c => { priceMap[c.symbol] = c.priceUsd; });
+
+    // FIX: merge forex/metals prices so alerts on EURUSD, XAUUSD, etc. can
+    // actually trigger. Previously the priceMap was crypto-only, so any forex
+    // alert created via the (now-visible) alert card silently never fired
+    // (priceMap[alert.symbol] was undefined → current == null → continue).
+    // If the user has forex alerts but allForexPairs hasn't been loaded yet
+    // (e.g. they never opened the Forex tab), load it now so alerts work.
+    const hasForexAlerts = userAlerts.some(a => !priceMap[a.symbol]);
+    if (hasForexAlerts && !allForexPairs.length) {
+        await loadForexData().catch(() => {});
+    }
+    if (allForexPairs.length) {
+        allForexPairs.forEach(f => {
+            if (f.price > 0) priceMap[f.symbol] = f.price;
+        });
+    }
     for (const alert of userAlerts) {
         const current = priceMap[alert.symbol];
         if (current == null) continue;
@@ -7725,6 +7760,104 @@ function renderDashboardCalendar() {
 // R3-4: App visibility tracking — all polling pauses when tab is hidden
 const _pollingIntervals = [];
 
+/**
+ * Live price refresh for an open Coin Detail modal.
+ * When the detail view is open and a market/forex poll delivers fresh prices,
+ * this updates the header price, header change %, and the alert-card current
+ * price IN PLACE — so the user sees the price tick without reopening the detail.
+ * A subtle green/red pulse animation highlights the change direction.
+ *
+ * Returns true if an update was applied, false if the detail was closed or the
+ * symbol's price was unavailable.
+ */
+function refreshOpenDetailPrice() {
+    const modal = document.getElementById('coin-detail-modal');
+    if (!modal || modal.style.display !== 'flex') return false;
+    const symbol = _currentDetailSymbol;
+    if (!symbol) return false;
+
+    // Resolve the current price from whichever dataset owns this symbol.
+    // Crypto symbols live in allCoins; forex/metals live in allForexPairs.
+    let price = null;
+    let change = null;
+    const coin = allCoins.find(c => c.symbol === symbol);
+    if (coin) {
+        price = coin.priceUsd;
+        change = coin.changePercent24Hr;
+    } else if (allForexPairs.length) {
+        const pair = allForexPairs.find(f => f.symbol === symbol);
+        if (pair) {
+            price = pair.price;
+            change = pair.change;
+        }
+    }
+    if (price == null || price <= 0) return false;
+
+    // Determine decimals based on asset type (mirror openCoinDetail/openForexDetail logic)
+    const isCrypto = !!coin;
+    let priceStr;
+    if (isCrypto) {
+        priceStr = price > 1 ? price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : price.toFixed(6);
+    } else {
+        const pair = allForexPairs.find(f => f.symbol === symbol);
+        const cat = pair?.category || 'major';
+        if (cat === 'metal' && price > 1000) {
+            priceStr = price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        } else if (cat === 'metal') {
+            priceStr = price.toFixed(2);
+        } else if (cat === 'index' || cat === 'commodity') {
+            priceStr = price > 0 ? price.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '--';
+        } else {
+            priceStr = price.toFixed(4);
+        }
+    }
+
+    // Track previous price to detect direction for the pulse animation
+    const prevPrice = refreshOpenDetailPrice._lastPrice?.[symbol];
+    const direction = (prevPrice != null && price !== prevPrice)
+        ? (price > prevPrice ? 'up' : 'down')
+        : null;
+
+    // Update header price
+    const priceEl = document.getElementById('detail-coin-price');
+    if (priceEl) {
+        const display = isCrypto ? '$' + priceStr : priceStr;
+        if (priceEl.textContent !== display) {
+            priceEl.textContent = display;
+            priceEl.classList.remove('pulse-up', 'pulse-down');
+            if (direction) {
+                // force reflow so the animation restarts
+                void priceEl.offsetWidth;
+                priceEl.classList.add(direction === 'up' ? 'pulse-up' : 'pulse-down');
+            }
+        }
+    }
+
+    // Update header change % (crypto only — forex change already shown in stats grid)
+    if (isCrypto && change != null) {
+        const changeEl = document.getElementById('detail-coin-change');
+        if (changeEl) {
+            const chg = change || 0;
+            changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+            changeEl.className = 'cd-change ' + (chg >= 0 ? 'up' : 'down');
+        }
+    }
+
+    // Update alert card current price
+    const alertPriceVal = document.getElementById('alert-current-price-value');
+    if (alertPriceVal) {
+        const display = isCrypto ? '$' + priceStr : '$' + priceStr;
+        if (alertPriceVal.textContent !== display) {
+            alertPriceVal.textContent = display;
+        }
+    }
+
+    // Remember the price for next-cycle direction detection
+    if (!refreshOpenDetailPrice._lastPrice) refreshOpenDetailPrice._lastPrice = {};
+    refreshOpenDetailPrice._lastPrice[symbol] = price;
+    return true;
+}
+
 function _stopAllPolling() {
     _pollingIntervals.forEach(id => clearInterval(id));
     _pollingIntervals.length = 0;
@@ -7745,7 +7878,13 @@ function _startAllPolling() {
                     renderWatchlist();
                     renderMarketTicker();
                 }
+                // FEATURE: live-refresh the open Coin Detail price in place so
+                // the user sees ticks without reopening the modal. Works for
+                // both crypto (allCoins) and forex/metals (allForexPairs).
+                refreshOpenDetailPrice();
             });
+            // Refresh forex data too so open forex/metals detail views tick
+            loadForexData().then(() => { refreshOpenDetailPrice(); });
         }
         if (activePage === 'analysis-page' || activePage === 'dashboard-page') {
             fetchAnalyses().then(changed => {

@@ -7916,7 +7916,21 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     display: flex; flex-direction: column; gap: 6px;
 }
 .cd-stat-label { font-size: 11px; color: #6B7A8D; font-weight: 600; }
-.cd-stat-value { font-size: 16px; font-weight: 700; color: #FFFFFF; font-variant-numeric: tabular-nums; }
+.cd-stat-value { font-size: 16px; font-weight: 700; color: #FFFFFF; font-variant-numeric: tabular-nums; transition: color 0.3s ease; }
+/* Daily-change stat value colors (used by forex/metals detail Daily Change card) */
+.cd-stat-value-up { color: #22C55E !important; }
+.cd-stat-value-down { color: #EF4444 !important; }
+/* Subtle pulse highlight when a stat value updates in real-time (live price refresh) */
+.cd-stat-value.pulse-up { animation: cdStatPulseUp 0.8s ease-out; }
+.cd-stat-value.pulse-down { animation: cdStatPulseDown 0.8s ease-out; }
+@keyframes cdStatPulseUp {
+    0% { color: #22C55E; text-shadow: 0 0 8px rgba(34,197,94,0.5); }
+    100% { color: #FFFFFF; text-shadow: none; }
+}
+@keyframes cdStatPulseDown {
+    0% { color: #EF4444; text-shadow: 0 0 8px rgba(239,68,68,0.5); }
+    100% { color: #FFFFFF; text-shadow: none; }
+}
 
 /* ── Alert Card (PREMIUM REDESIGN) ── */
 .cd-alert-card {
