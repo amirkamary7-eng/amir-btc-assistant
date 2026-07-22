@@ -3659,6 +3659,11 @@ function renderMarket() {
     }
     _lastMarketRenderKey = renderKey;
 
+    // Helper to build the info bar
+    function buildInfoBar(count, label) {
+        return '';
+    }
+
     // Unified search: search across crypto and all market types
     if (searchTerm) {
         const cryptoResults = allCoins.filter(c =>
