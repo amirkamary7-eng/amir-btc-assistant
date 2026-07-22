@@ -7811,6 +7811,7 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 .cd-fullscreen {
     position: fixed; inset: 0; z-index: 10000;
     background: #020611; display: flex; flex-direction: column;
+    overflow: hidden; /* BUG 2 fix: prevent content bleed/overlap on small screens */
     animation: cdSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .cd-fullscreen.slide-up {
@@ -7861,9 +7862,12 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 
 /* ── Scrollable Content ── */
 .cd-content {
-    flex: 1; overflow-y: auto;
+    flex: 1;
+    min-height: 0; /* BUG 2 fix: critical — without this iOS Safari flexbox refuses to scroll and the alert/stats sections get clipped/overlapped */
+    overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    padding: 16px 16px 80px;
+    overscroll-behavior: contain; /* prevent scroll-chaining to background */
+    padding: 16px 16px 28px; /* BUG 2 fix: was 80px bottom — wasted space & pushed content off-screen on short viewports */
 }
 
 /* ── Chart Section ── */
@@ -7887,11 +7891,12 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 }
 .cd-chart {
     background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px; height: 380px; overflow: hidden;
+    border-radius: 12px; height: 340px; overflow: hidden;
 }
+.cd-chart-section { margin-bottom: 18px; }
 
 /* ── Section ── */
-.cd-section { margin-bottom: 18px; }
+.cd-section { margin-bottom: 16px; }
 .cd-section-title {
     font-size: 14px; font-weight: 700; color: #FFFFFF;
     margin: 0 0 10px;
@@ -8097,14 +8102,23 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 }
 
 /* ── Responsive ── */
+/* BUG 2 fix: chart heights tuned per breakpoint so chart + alert + stats all fit
+   without overlap on 320/360/390/412/430px viewports. Combined with min-height:0
+   on .cd-content (which enables proper flex scrolling) nothing is clipped. */
 @media (max-width: 360px) {
-    .cd-chart { height: 320px; }
+    .cd-chart { height: 280px; }
     .cd-stats-grid { gap: 8px; }
     .cd-stat-item { padding: 12px; }
     .cd-stat-value { font-size: 15px; }
     .cd-tf-btn { font-size: 11px; padding: 6px 2px; }
+    .cd-content { padding: 12px 12px 24px; }
+    .cd-alert-card { padding: 14px; gap: 12px; }
+    .cd-section { margin-bottom: 14px; }
+}
+@media (min-width: 361px) and (max-width: 411px) {
+    .cd-chart { height: 320px; }
 }
 @media (min-width: 412px) {
-    .cd-chart { height: 420px; }
+    .cd-chart { height: 380px; }
     .cd-stat-item { padding: 16px; }
 }

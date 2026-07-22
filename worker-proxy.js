@@ -3108,16 +3108,32 @@ async function handleForexData(env) {
   // Primary: fetch rates using a free API
   try {
     // Fetch metals prices in parallel with forex rates
+    // BUG 3 fix: capture metals change fields (prev close + chgPct) so we can show
+    // a REAL daily change for XAU/USD and XAG/USD instead of a hardcoded 0.
     const metalsPromise = fetchJson('https://data-asg.goldprice.org/dbXRates/USD')
       .then(res => {
         if (res.ok && res.body) {
+          const m = res.body.items?.[0] || {};
           return {
-            xau: res.body.items?.[0]?.xauPrice || 0,
-            xag: res.body.items?.[0]?.xagPrice || 0,
+            xau: Number(m.xauPrice) || 0,
+            xag: Number(m.xagPrice) || 0,
+            xauPrev: Number(m.xauClose ?? m.xauOpen ?? m.prevClose) || 0,
+            xagPrev: Number(m.xagClose ?? m.xagOpen ?? m.prevClose) || 0,
+            xauChgPct: (typeof m.xauChgPct === 'number') ? m.xauChgPct : null,
+            xagChgPct: (typeof m.xagChgPct === 'number') ? m.xagChgPct : null,
           };
         }
         return null;
       })
+      .catch(() => null);
+
+    // BUG 3 fix: fetch YESTERDAY's frankfurter rates (in parallel) so we can
+    // compute a real daily % change for fiat pairs. frankfurter publishes ECB
+    // daily reference rates, so (today - yesterday)/yesterday is a true daily
+    // change rather than the previous hardcoded 0.
+    const yesterdayISO = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const histPromise = fetchJson(`https://api.frankfurter.app/${yesterdayISO}?from=USD`)
+      .then(res => (res.ok && res.body?.rates) ? res.body.rates : null)
       .catch(() => null);
 
     // Use frankfurter.app (free, no API key, reliable) for fiat pairs
@@ -3125,6 +3141,18 @@ async function handleForexData(env) {
     if (ok && body?.rates) {
       const rates = body.rates;
       const metals = await metalsPromise;
+      const prevRates = await histPromise;
+
+      // Helper: compute a fiat pair price from a frankfurter rates object
+      // (frankfurter quotes 1 USD = N units of XXX)
+      const priceFromRates = (r, pair) => {
+        const base = pair.symbol.slice(0, 3);
+        const quote = pair.symbol.slice(3, 6);
+        if (base === 'USD') return r[quote] || 0;
+        if (quote === 'USD') { const b = r[base]; return b ? 1 / b : 0; }
+        const b = r[base]; const q = r[quote];
+        return (b && q) ? q / b : 0;
+      };
 
       data = FOREX_PAIRS.map(pair => {
         let price = 0;
@@ -3137,32 +3165,20 @@ async function handleForexData(env) {
 
         if (pair.symbol === 'XAUUSD') {
           price = metals?.xau || 0;
+          if (typeof metals?.xauChgPct === 'number') change = metals.xauChgPct;
+          else if (metals?.xauPrev > 0 && price > 0) change = ((price - metals.xauPrev) / metals.xauPrev) * 100;
         } else if (pair.symbol === 'XAGUSD') {
           price = metals?.xag || 0;
+          if (typeof metals?.xagChgPct === 'number') change = metals.xagChgPct;
+          else if (metals?.xagPrev > 0 && price > 0) change = ((price - metals.xagPrev) / metals.xagPrev) * 100;
         } else {
-          // frankfurter returns: 1 USD = rates[XXX] units of XXX
-          // EURUSD = how many USD per 1 EUR = 1 / rates.EUR
-          // GBPUSD = how many USD per 1 GBP = 1 / rates.GBP
-          // USDJPY = how many JPY per 1 USD = rates.JPY
-          // USDCAD = how many CAD per 1 USD = rates.CAD
-          const base = pair.symbol.slice(0, 3);  // EUR, GBP, USD, AUD, NZD
-          const quote = pair.symbol.slice(3, 6);  // USD, JPY, CAD, CHF
-
-          if (base === 'USD') {
-            // USD/XXX = rates[XXX] (how many units of XXX per 1 USD)
-            const quoteRate = rates[quote];
-            if (quoteRate) price = quoteRate;
-          } else if (quote === 'USD') {
-            // XXX/USD = 1 / rates[XXX] (how many USD per 1 unit of XXX)
-            const baseRate = rates[base];
-            if (baseRate) price = 1 / baseRate;
-          } else {
-            // Cross: EUR/JPY = (1/rates.EUR) * rates.JPY = rates.JPY / rates.EUR
-            const baseRate = rates[base];
-            const quoteRate = rates[quote];
-            if (baseRate && quoteRate) price = quoteRate / baseRate;
-          }
+          price = priceFromRates(rates, pair);
+          const prevPrice = prevRates ? priceFromRates(prevRates, pair) : 0;
+          if (prevPrice > 0 && price > 0) change = ((price - prevPrice) / prevPrice) * 100;
         }
+
+        // Round change to 2 decimals to keep the payload tidy
+        change = Math.round(change * 100) / 100;
 
         return {
           symbol: pair.symbol,

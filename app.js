@@ -3407,7 +3407,7 @@ async function loadMarketData(force = false) {
         Cache.set('market', allCoins, 120);
         // Phase C: Persist market data to localStorage for instant watchlist render on cold start
         // Defer cache write off the critical render path (2-5ms saved per market load)
-        requestIdleCallback?.(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(3)); } catch(_) {} }) ?? setTimeout(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(3)); } catch(_) {} }, 200);
+        requestIdleCallback?.(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(3)); localStorage.setItem('market_cache_ts', String(Date.now())); } catch(_) {} }) ?? setTimeout(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(3)); localStorage.setItem('market_cache_ts', String(Date.now())); } catch(_) {} }, 200);
         lastMarketFetchTime = Date.now();
         renderMarket();
         renderWatchlist();
@@ -4201,7 +4201,7 @@ function renderBtcPairsSection() {
         return `
             <div class="mkt-btc-pair-item" data-symbol="${safeSym}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
                 <span class="mkt-btc-pair-symbol">${safeSym}/BTC</span>
-                <span class="mkt-btc-pair-price ${cls}">${pairPriceStr} <small>(${chgStr})</small></span>
+                <span class="mkt-btc-pair-price ${cls}">${pairPriceStr} <small>(vs BTC ${chgStr})</small></span>
             </div>
         `;
     };
@@ -6123,6 +6123,9 @@ function closeCoinDetail() {
     }
     currentTvChartInfo = null;
     _currentDetailSymbol = null;
+    // BUG 1 FIX: reset the alert current-price so no stale value survives a close.
+    const _alertPriceReset = document.getElementById('alert-current-price-value');
+    if (_alertPriceReset) _alertPriceReset.textContent = '--';
     const modal = document.getElementById('coin-detail-modal');
     modal.classList.remove('slide-up');
     modal.classList.add('slide-down');
@@ -6161,11 +6164,25 @@ function openForexDetail(symbol) {
     document.getElementById('detail-coin-title').innerText = pair.name || symbol;
     _currentDetailSymbol = symbol;
 
-    // Price in header for forex
+    // Price in header for forex — compute formatted price string once
     const priceEl = document.getElementById('detail-coin-price');
     const changeEl = document.getElementById('detail-coin-change');
-    if (priceEl) priceEl.textContent = pair.price > 0 ? pair.price.toFixed(pair.category === 'metal' ? 2 : (pair.category === 'index' || pair.category === 'commodity' ? 0 : 4)) : '--';
-    if (changeEl) { changeEl.textContent = ''; changeEl.className = 'detail-coin-change'; }
+    const forexPriceStr = pair.price > 0 ? pair.price.toFixed(pair.category === 'metal' ? 2 : (pair.category === 'index' || pair.category === 'commodity' ? 0 : 4)) : '--';
+    if (priceEl) priceEl.textContent = forexPriceStr;
+    if (changeEl) {
+        // BUG 3 fix: show the real daily change for forex/metals when the worker provides it
+        const fchg = (typeof pair.change === 'number' && !isNaN(pair.change)) ? pair.change : 0;
+        changeEl.textContent = fchg !== 0 ? (fchg >= 0 ? '+' : '') + fchg.toFixed(2) + '%' : '';
+        changeEl.className = 'cd-change ' + (fchg >= 0 ? 'up' : 'down');
+    }
+
+    // ── BUG 1 FIX: Alert card current-price binding for forex/metals ──
+    // MUST write the CURRENT asset's price so a stale crypto price never lingers
+    // in the alert card after switching from a crypto asset to a forex/metal.
+    const alertPriceVal = document.getElementById('alert-current-price-value');
+    if (alertPriceVal) {
+        alertPriceVal.textContent = pair.price > 0 ? '$' + forexPriceStr : '--';
+    }
 
     const chartContainer = document.getElementById('detail-chart');
     chartContainer.innerHTML = '<div class="chart-loading-state"><div class="chart-spinner"></div></div>';
@@ -6198,9 +6215,15 @@ function openForexDetail(symbol) {
         `<span class="info-item"><span class="info-label">Symbol</span><span class="info-value">${escapeHtml(symbol)}</span></span>` +
         `<span class="info-item"><span class="info-label">Type</span><span class="info-value">${typeLabel}</span></span>`;
 
-    // Hide alert section for forex
-    const alertSection = document.querySelector('.alert-section');
-    if (alertSection) alertSection.style.display = 'none';
+    // ── BUG 1 FIX: Alert card stays VISIBLE for every asset type ──
+    // Previously this tried to hide the alert card with a dead `.alert-section`
+    // selector (the real class is `.cd-alert-card`), so the hide was a no-op and
+    // the previous crypto price stayed stuck in the card. Now we keep the card
+    // visible for ALL asset types and render the active alerts for THIS symbol,
+    // so the entire card always reflects the currently-opened asset.
+    const cdAlertCard = document.querySelector('#coin-detail-modal .cd-alert-card');
+    if (cdAlertCard) cdAlertCard.style.display = '';
+    renderActiveAlerts(symbol);
 }
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -7506,16 +7529,26 @@ function renderDashboardMarketStatus() {
  * for top 10 coins, duplicated for seamless infinite scroll.
  */
 let _tickerRendered = false;
+let _tickerSignature = '';
 function renderMarketTicker() {
     const track = $('market-ticker-track');
     if (!track) return;
     if (!Array.isArray(allCoins) || !allCoins.length) return;
-    // Only render ONCE — CSS handles infinite loop, no re-render needed
-    if (_tickerRendered) return;
 
     // Take top 20 coins for ticker (allCoins is already ordered by rank from API)
     const tickerCoins = allCoins.slice(0, 20);
     if (!tickerCoins.length) return;
+
+    // BUG 3 FIX: re-render whenever the data actually changes.
+    // Previously this rendered exactly ONCE (guarded by _tickerRendered) and never
+    // updated, so the ticker permanently showed stale cached or fallback 0.00%
+    // values. Now we compare a signature of symbol+24h-change and only rebuild
+    // the DOM when something changed — this keeps the CSS infinite-scroll
+    // animation running when data is unchanged while guaranteeing the displayed
+    // % is always the real, fresh 24h change.
+    const sig = tickerCoins.map(c => `${c.symbol}:${(Number(c.changePercent24Hr) || 0).toFixed(2)}`).join('|');
+    if (sig === _tickerSignature) return;
+    _tickerSignature = sig;
 
     const buildItem = (c) => {
         const sym = escapeHtml(c.symbol || '');
@@ -7531,7 +7564,7 @@ function renderMarketTicker() {
     // Duplicate the list TWICE for seamless infinite scroll (3x copy = smooth loop)
     const items = tickerCoins.map(buildItem).join('');
     track.innerHTML = items + items + items;
-    _tickerRendered = true;
+    _tickerRendered = true; // kept for backward-compat; _tickerSignature is the real guard now
 }
 
 /**
@@ -8049,14 +8082,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Phase C: Load cached market data for instant watchlist render
+    // BUG 3 FIX: add a 5-minute TTL. Previously the cache had NO expiry (only a
+    // version bump), so the ticker could paint with prices/changes that were
+    // hours old. Now stale caches are discarded and fresh data is fetched.
     const MARKET_CACHE_VERSION = 3;
+    const MARKET_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
     try {
         const cachedVersion = parseInt(localStorage.getItem('market_cache_version') || '0', 10);
+        const cachedTs = parseInt(localStorage.getItem('market_cache_ts') || '0', 10);
         const cachedMarket = JSON.parse(localStorage.getItem('market_data_cache') || '[]');
-        if (Array.isArray(cachedMarket) && cachedMarket.length && cachedVersion >= MARKET_CACHE_VERSION) {
+        const isFresh = cachedTs && (Date.now() - cachedTs) < MARKET_CACHE_TTL_MS;
+        if (Array.isArray(cachedMarket) && cachedMarket.length && cachedVersion >= MARKET_CACHE_VERSION && isFresh) {
             allCoins = cachedMarket;
-        } else if (cachedVersion < MARKET_CACHE_VERSION) {
+        } else {
             localStorage.removeItem('market_data_cache');
+            localStorage.removeItem('market_cache_ts');
         }
     } catch(_) {}
 
@@ -8105,10 +8145,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Dashboard rebuild: market status + watchlist render after market data arrives
         renderDashboardMarketStatus();
         renderWatchlist();
-        // NOTE: Do NOT re-render ticker here — it was already rendered in Phase C
-        // with cached/fallback data. Re-rendering resets the CSS animation and
-        // causes the ticker to disappear/reappear. The ticker updates prices
-        // naturally when allCoins is updated (price-only diffing in renderWatchlist).
+        // BUG 3 FIX: re-render ticker with REAL 24h changes once fresh data arrives.
+        // The signature guard inside renderMarketTicker skips the no-op rebuild
+        // (and avoids resetting the CSS animation) when nothing has changed.
+        renderMarketTicker();
     }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
     fetchAnalyses().then(changed => {
         if (changed) {
