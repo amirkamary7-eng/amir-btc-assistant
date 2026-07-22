@@ -111,7 +111,7 @@ export function createAlertHandlers(deps) {
       if (String(alert.user_id) !== userId) {
         return jsonResponse({ status: 'error', message: 'Forbidden' }, { status: 403 }, env);
       }
-      await alertRepo.remove(env, alertId);
+      await alertRepo.remove(env, alertId, userId);
       return jsonResponse({ status: 'success', deleted: true }, {}, env);
     } catch (error) {
       console.warn(safeError('delete-alert', error));

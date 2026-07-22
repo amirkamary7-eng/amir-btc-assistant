@@ -2702,6 +2702,89 @@ async function fetchFearGreed() {
  * Returns { totalMarketCap, totalVolume, btcDominance, fearGreedValue, fearGreedClassification, source }
  * or null if ALL sources fail.
  */
+/**
+ * PHASE 2 FIX: Enrich market data with CoinMarketCap market cap & supply.
+ * Called when fallback sources (CoinCap, Binance) return marketCapUsd=0.
+ * Uses CMC API key if available, otherwise computes marketCap from
+ * circulating supply estimates (price × known supply for top coins).
+ *
+ * Strategy:
+ * 1. If CMC_API_KEY available: fetch /v2/cryptocurrency/listings/latest
+ * 2. Build a symbol→{marketCap, supply} map
+ * 3. For each coin in data, if marketCapUsd=0, fill from CMC map
+ * 4. If no CMC key: use price × estimated supply for top 20 coins
+ */
+async function enrichMarketData(env, coins) {
+  if (!coins || !coins.length) return coins;
+
+  // Check if any coins actually need enrichment
+  const needsEnrichment = coins.some(c => !c.marketCapUsd || c.marketCapUsd === 0);
+  if (!needsEnrichment) return coins; // All good, no enrichment needed
+
+  // Try CMC API if key is available
+  if (env.CMC_API_KEY) {
+    try {
+      const cmcRes = await fetch('https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?limit=200&start=1', {
+        headers: { 'X-CMC_PRO_API_KEY': env.CMC_API_KEY },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (cmcRes.ok) {
+        const cmcBody = await cmcRes.json();
+        const cmcData = cmcBody?.data || [];
+        // Build symbol → {marketCap, supply} map
+        const cmcMap = new Map();
+        for (const c of cmcData) {
+          cmcMap.set(String(c.symbol).toUpperCase(), {
+            marketCapUsd: parseFloat(c.quote?.USD?.market_cap) || 0,
+            supply: parseFloat(c.circulating_supply) || 0,
+            name: c.name || '',
+            rank: c.cmc_rank || 0,
+          });
+        }
+        // Enrich coins
+        for (const coin of coins) {
+          const cmc = cmcMap.get(coin.symbol);
+          if (cmc) {
+            if (!coin.marketCapUsd || coin.marketCapUsd === 0) {
+              coin.marketCapUsd = cmc.marketCapUsd;
+            }
+            if (!coin.supply || coin.supply === 0) {
+              coin.supply = cmc.supply;
+            }
+            if (!coin.name || coin.name === coin.symbol) {
+              coin.name = cmc.name || coin.name;
+            }
+            if (!coin.rank || coin.rank === 0) {
+              coin.rank = cmc.rank || coin.rank;
+            }
+          }
+        }
+        console.log('Market: enriched with CMC data, ' + coins.filter(c => c.marketCapUsd > 0).length + '/' + coins.length + ' coins have marketCap');
+        return coins;
+      }
+    } catch (e) {
+      console.warn('Market: CMC enrichment failed:', e.message || e);
+    }
+  }
+
+  // Fallback: compute marketCap from price × estimated supply for top coins
+  // This is a rough estimate — better than showing 0
+  const estimatedSupply = {
+    BTC: 19700000, ETH: 120000000, USDT: 110000000000, BNB: 150000000,
+    SOL: 460000000, USDC: 33000000000, XRP: 56000000000, DOGE: 145000000000,
+    ADA: 35000000000, TRX: 87000000000, AVAX: 400000000, SHIB: 589000000000000,
+    DOT: 1400000000, LINK: 620000000, MATIC: 9300000000, LTC: 75000000,
+    BCH: 19700000, UNI: 750000000, ATOM: 390000000, XLM: 29000000000,
+  };
+  for (const coin of coins) {
+    if ((!coin.marketCapUsd || coin.marketCapUsd === 0) && estimatedSupply[coin.symbol]) {
+      coin.marketCapUsd = coin.priceUsd * estimatedSupply[coin.symbol];
+      coin.supply = estimatedSupply[coin.symbol];
+    }
+  }
+  return coins;
+}
+
 async function fetchGlobalStats(env) {
   // ── Step 0: Check KV cache ──
   try {
@@ -2843,7 +2926,7 @@ async function handleMarketData(env) {
     console.warn('Market: CoinGecko failed', e.message || e);
   }
 
-  // Fallback: CoinCap
+  // Fallback: CoinCap (enriched with CMC data for market cap & supply)
   try {
     const { ok, body } = await fetchJson('https://api.coincap.io/v2/assets?limit=' + MARKET_FETCH_LIMIT);
     const assets = body?.data || (Array.isArray(body) ? body : null);
@@ -2853,25 +2936,25 @@ async function handleMarketData(env) {
         name: item.name || '',
         rank: parseInt(item.rank, 10) || 0,
         priceUsd: parseFloat(item.priceUsd) || 0,
-        // CoinCap returns changePercent24Hr as a decimal fraction (e.g. -0.0034 = -0.34%).
-        // Normalize to percentage format (×100) so the frontend never needs heuristic detection.
         changePercent24Hr: (parseFloat(item.changePercent24Hr) || 0) * 100,
         volumeUsd24Hr: parseFloat(item.volumeUsd24Hr) || 0,
         marketCapUsd: parseFloat(item.marketCapUsd) || 0,
         supply: parseFloat(item.supply) || 0,
         image: `https://assets.coincap.io/assets/icons/${String(item.symbol || '').toLowerCase()}@2x.png`,
       }));
-      // Filter out coins with absurd percentages (> 1000%) — likely bad data
       const filtered = data.filter(c => Math.abs(c.changePercent24Hr) < 1000);
+
+      // PHASE 2 FIX: Enrich with CoinMarketCap data if marketCap is 0
+      const enriched = await enrichMarketData(env, filtered);
       let global = await globalPromise;
-      await writeAppCache(env, 'market:data:v3', JSON.stringify(filtered), MARKET_CACHE_TTL);
-      return jsonResponse({ status: 'success', data: filtered, cached: false, global, dataSource: 'coincap' }, {}, env);
+      await writeAppCache(env, 'market:data:v3', JSON.stringify(enriched), MARKET_CACHE_TTL);
+      return jsonResponse({ status: 'success', data: enriched, cached: false, global, dataSource: 'coincap+cmc' }, {}, env);
     }
   } catch (e) {
     console.warn('Market: CoinCap fallback failed', e.message || e);
   }
 
-  // Fallback 2: Binance Futures API (spot API IP-bans frequently from CF Workers)
+  // Fallback 2: Binance Futures API (enriched with CMC data)
   try {
     const binanceRes = await fetchJson('https://fapi.binance.com/fapi/v1/ticker/24hr');
     if (Array.isArray(binanceRes.body) && binanceRes.body.length > 0) {
@@ -2888,7 +2971,6 @@ async function handleMarketData(env) {
             name: sym,
             rank: index + 1,
             priceUsd: parseFloat(item.lastPrice) || 0,
-            // Binance Futures priceChangePercent is a direct percentage (e.g. -1.85 = -1.85%).
             changePercent24Hr: parseFloat(item.priceChangePercent) || 0,
             volumeUsd24Hr: parseFloat(item.quoteVolume) || 0,
             marketCapUsd: 0,
@@ -2897,9 +2979,12 @@ async function handleMarketData(env) {
           };
         })
         .filter(c => Math.abs(c.changePercent24Hr) < 1000);
+
+        // PHASE 2 FIX: Enrich with CMC data
+        const enriched = await enrichMarketData(env, data);
         const global = await globalPromise;
-        await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
-        return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'binance' }, {}, env);
+        await writeAppCache(env, 'market:data:v3', JSON.stringify(enriched), MARKET_CACHE_TTL);
+        return jsonResponse({ status: 'success', data: enriched, cached: false, global, dataSource: 'binance+cmc' }, {}, env);
       }
     }
   } catch (e) {
@@ -3476,7 +3561,7 @@ async function runScheduledAlertsBaseline(controller, env) {
     return;
   }
 
-  const maxAlerts = Math.max(getNumericEnv(env, 'ALERTS_CRON_MAX_ALERTS', 50), 0);
+  const maxAlerts = Math.max(getNumericEnv(env, 'ALERTS_CRON_MAX_ALERTS', 200), 0);
   const resultPayload = {
     ...payload,
     checked_count: 0,
@@ -3505,20 +3590,34 @@ async function runScheduledAlertsBaseline(controller, env) {
       return;
     }
 
+    // PHASE 4 FIX: Batch price fetches with Promise.all for parallelism.
+    // Previously sequential (1 MEXC call at a time). Now fetches all unique
+    // symbols concurrently, reducing cron runtime significantly.
     const symbolPriceMap = new Map();
-    for (const alert of alerts) {
-      const symbol = String(alert?.symbol || '').trim().toUpperCase();
-      if (!symbol) {
-        resultPayload.skipped_price_missing += 1;
-        continue;
-      }
-      if (!symbolPriceMap.has(symbol)) {
-        const priceInfo = await fetchSpotPriceUsd(env, symbol);
-        if (!priceInfo) {
-          resultPayload.price_fetch_failures += 1;
-          symbolPriceMap.set(symbol, null);
+    const uniqueSymbols = [...new Set(
+      alerts.map(a => String(a?.symbol || '').trim().toUpperCase()).filter(Boolean)
+    )];
+
+    // Fetch all unique symbol prices in parallel (max 20 concurrent to avoid rate limits)
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < uniqueSymbols.length; i += BATCH_SIZE) {
+      const batch = uniqueSymbols.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (symbol) => {
+          const priceInfo = await fetchSpotPriceUsd(env, symbol);
+          return { symbol, price: priceInfo?.price || null };
+        })
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          if (r.value.price) {
+            symbolPriceMap.set(r.value.symbol, r.value.price);
+          } else {
+            resultPayload.price_fetch_failures += 1;
+            symbolPriceMap.set(r.value.symbol, null);
+          }
         } else {
-          symbolPriceMap.set(symbol, priceInfo.price);
+          resultPayload.price_fetch_failures += 1;
         }
       }
     }
@@ -3675,8 +3774,27 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/market/overview') {
         const overview = await marketOverviewSvc.getCachedOverview(env);
         if (overview) {
+          // PHASE 5 FIX: Enrich with Fear & Greed from alternative.me
+          // (not included in CMC global metrics)
+          if (!overview.fearGreedValue) {
+            try {
+              const fg = await fetchFearGreed();
+              if (fg) {
+                overview.fearGreedValue = fg.value;
+                overview.fearGreedClassification = fg.classification;
+                overview.fearGreedSource = 'alternative.me';
+              }
+            } catch { /* F&G is optional — don't fail overview if it fails */ }
+          }
           return jsonResponse({ status: 'success', ...overview }, {}, env);
         }
+        // Fallback: try fetchGlobalStats which includes F&G
+        try {
+          const stats = await fetchGlobalStats(env);
+          if (stats) {
+            return jsonResponse({ status: 'success', ...stats }, {}, env);
+          }
+        } catch {}
         return jsonResponse({ status: 'error', message: 'Market overview unavailable' }, { status: 503 }, env);
       }
 

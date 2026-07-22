@@ -121,10 +121,11 @@ export function createAlertRepository(deps) {
   }
 
   /**
-   * Delete an alert by ID.
+   * Delete an alert by ID — SECURITY: requires user_id ownership check.
+   * No user can delete another user's alerts.
    */
-  async function remove(env, alertId) {
-    await queryDb(env, 'DELETE FROM price_alerts WHERE id = $1', [String(alertId)]);
+  async function remove(env, alertId, userId) {
+    await queryDb(env, 'DELETE FROM price_alerts WHERE id = $1 AND user_id = $2', [String(alertId), String(userId)]);
   }
 
   return Object.freeze({ create, list, findById, remove, serializeRow });
