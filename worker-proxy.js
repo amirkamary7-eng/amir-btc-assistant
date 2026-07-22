@@ -54,7 +54,14 @@ function safeError(scope, error) {
 
 function withCors(headers = {}, env = null) {
   const merged = new Headers(headers);
-  if (env) {
+  // Echo localhost origins (any port) so the app can be previewed locally
+  // via the Next.js dev server / `wrangler pages dev`. Real traffic keeps the
+  // pinned WEBAPP_URL origin.
+  const reqOrigin = _currentRequestOrigin;
+  const isLocalhost = reqOrigin && (reqOrigin.startsWith('http://localhost:') || reqOrigin.startsWith('https://localhost:'));
+  if (isLocalhost) {
+    merged.set('Access-Control-Allow-Origin', reqOrigin);
+  } else if (env) {
     try {
       merged.set('Access-Control-Allow-Origin', new URL(resolveWebAppUrl(env)).origin);
     } catch {
@@ -67,6 +74,10 @@ function withCors(headers = {}, env = null) {
   merged.set('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
   return merged;
 }
+
+// Per-invocation request Origin (set at the top of the fetch handler). Workers
+// handle one request per invocation, so this is safe to keep module-scoped.
+let _currentRequestOrigin = null;
 
 function jsonResponse(payload, init = {}, env = null) {
   const headers = withCors(init.headers, env);
@@ -675,6 +686,19 @@ function validateReferrer(request, env) {
   const origin = request.headers.get('Origin');
   if (!origin) {
     return null;
+  }
+
+  // Allow localhost origins (any port) so the app can be previewed locally
+  // (e.g. via the Next.js dev server or `wrangler pages dev`). Real user
+  // traffic still comes from the Telegram WebView / Pages domain and is
+  // validated below. Telegram init-data remains the real auth layer.
+  try {
+    const reqOrigin = new URL(origin).origin;
+    if (reqOrigin.startsWith('http://localhost:') || reqOrigin.startsWith('https://localhost:')) {
+      return null;
+    }
+  } catch {
+    // malformed Origin header → fall through to rejection below
   }
 
   let allowedOrigin;
@@ -3827,6 +3851,7 @@ async function runScheduledAlertsBaseline(controller, env) {
 // ============================================================================
 export default {
   async fetch(request, env, ctx) {
+    _currentRequestOrigin = request.headers.get('Origin');
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,

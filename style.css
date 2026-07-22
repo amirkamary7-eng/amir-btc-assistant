@@ -7891,9 +7891,12 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 }
 .cd-chart {
     background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px; height: 340px; overflow: hidden;
+    border-radius: 12px; height: 340px !important; overflow: hidden;
+    /* !important locks the height against TradingView's inline height:100% (autosize),
+       which otherwise expands the container to fill the parent and causes the chart
+       to overlap the alert/stats sections on mobile. */
 }
-.cd-chart-section { margin-bottom: 18px; }
+.cd-chart-section { margin-bottom: 18px; height: auto !important; /* override TradingView's inline height:100% on the section wrapper */ }
 
 /* ── Section ── */
 .cd-section { margin-bottom: 16px; }
@@ -8106,7 +8109,7 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
    without overlap on 320/360/390/412/430px viewports. Combined with min-height:0
    on .cd-content (which enables proper flex scrolling) nothing is clipped. */
 @media (max-width: 360px) {
-    .cd-chart { height: 280px; }
+    .cd-chart { height: 280px !important; }
     .cd-stats-grid { gap: 8px; }
     .cd-stat-item { padding: 12px; }
     .cd-stat-value { font-size: 15px; }
@@ -8116,9 +8119,9 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     .cd-section { margin-bottom: 14px; }
 }
 @media (min-width: 361px) and (max-width: 411px) {
-    .cd-chart { height: 320px; }
+    .cd-chart { height: 320px !important; }
 }
 @media (min-width: 412px) {
-    .cd-chart { height: 380px; }
+    .cd-chart { height: 380px !important; }
     .cd-stat-item { padding: 16px; }
 }
