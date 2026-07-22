@@ -32,15 +32,129 @@ export function createNotificationRepository(deps) {
       // Performance indexes — all queries filter by user_id
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)`);
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read_status = FALSE`);
+
+      // Notification settings table — stores per-user notification preferences
+      await queryDb(env, `
+        CREATE TABLE IF NOT EXISTS notification_settings (
+          user_id TEXT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+          analysis BOOLEAN NOT NULL DEFAULT TRUE,
+          calendar BOOLEAN NOT NULL DEFAULT FALSE,
+          price_alert BOOLEAN NOT NULL DEFAULT FALSE,
+          market BOOLEAN NOT NULL DEFAULT FALSE,
+          news BOOLEAN NOT NULL DEFAULT FALSE,
+          referral BOOLEAN NOT NULL DEFAULT FALSE,
+          reward BOOLEAN NOT NULL DEFAULT FALSE,
+          ticket BOOLEAN NOT NULL DEFAULT FALSE,
+          system BOOLEAN NOT NULL DEFAULT FALSE,
+          marketing BOOLEAN NOT NULL DEFAULT FALSE,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
       _tableEnsured = true;
     } catch (error) {
-      // If table already exists (race condition), that's fine
       if (error?.code === '42P07') {
         _tableEnsured = true;
         return;
       }
       throw error;
     }
+  }
+
+  /**
+   * Get notification preferences for a user.
+   * Returns default prefs if user has no settings row.
+   */
+  async function getSettings(env, userId) {
+    await ensureTable(env);
+    const result = await queryDb(env,
+      `SELECT analysis, calendar, price_alert, market, news, referral, reward, ticket, system, marketing
+       FROM notification_settings WHERE user_id = $1`,
+      [String(userId)]
+    );
+    if (!result.rows[0]) {
+      // Return defaults: analysis ON, everything else OFF
+      return {
+        analysis: true, calendar: false, price_alert: false, market: false,
+        news: false, referral: false, reward: false, ticket: false,
+        system: false, marketing: false,
+      };
+    }
+    const row = result.rows[0];
+    return {
+      analysis: Boolean(row.analysis),
+      calendar: Boolean(row.calendar),
+      price_alert: Boolean(row.price_alert),
+      market: Boolean(row.market),
+      news: Boolean(row.news),
+      referral: Boolean(row.referral),
+      reward: Boolean(row.reward),
+      ticket: Boolean(row.ticket),
+      system: Boolean(row.system),
+      marketing: Boolean(row.marketing),
+    };
+  }
+
+  /**
+   * Save notification preferences for a user (upsert).
+   */
+  async function saveSettings(env, userId, prefs) {
+    await ensureTable(env);
+    await queryDb(env,
+      `INSERT INTO notification_settings (user_id, analysis, calendar, price_alert, market, news, referral, reward, ticket, system, marketing, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         analysis = EXCLUDED.analysis,
+         calendar = EXCLUDED.calendar,
+         price_alert = EXCLUDED.price_alert,
+         market = EXCLUDED.market,
+         news = EXCLUDED.news,
+         referral = EXCLUDED.referral,
+         reward = EXCLUDED.reward,
+         ticket = EXCLUDED.ticket,
+         system = EXCLUDED.system,
+         marketing = EXCLUDED.marketing,
+         updated_at = NOW()`,
+      [
+        String(userId),
+        Boolean(prefs.analysis),
+        Boolean(prefs.calendar),
+        Boolean(prefs.price_alert),
+        Boolean(prefs.market),
+        Boolean(prefs.news),
+        Boolean(prefs.referral),
+        Boolean(prefs.reward),
+        Boolean(prefs.ticket),
+        Boolean(prefs.system),
+        Boolean(prefs.marketing),
+      ]
+    );
+    return { success: true };
+  }
+
+  /**
+   * Check if a user has a specific notification type enabled.
+   * Used by triggers to skip notifications for users who opted out.
+   */
+  async function isPreferenceEnabled(env, userId, prefKey) {
+    const prefs = await getSettings(env, userId);
+    return Boolean(prefs[prefKey]);
+  }
+
+  /**
+   * Filter user IDs by notification preference.
+   * Returns only users who have the given preference enabled.
+   */
+  async function filterUsersByPreference(env, userIds, prefKey) {
+    if (!userIds || !userIds.length) return [];
+    await ensureTable(env);
+    // For small user lists, check individually (avoids complex SQL)
+    const enabled = [];
+    for (const uid of userIds) {
+      const prefs = await getSettings(env, uid);
+      if (Boolean(prefs[prefKey])) enabled.push(uid);
+    }
+    return enabled;
   }
 
   /**
@@ -178,5 +292,5 @@ export function createNotificationRepository(deps) {
     return result.rowCount || 0;
   }
 
-  return Object.freeze({ create, createBulk, list, unreadCount, markRead, markAllRead, serializeRow, ensureTable });
+  return Object.freeze({ create, createBulk, list, unreadCount, markRead, markAllRead, serializeRow, ensureTable, getSettings, saveSettings, isPreferenceEnabled, filterUsersByPreference });
 }

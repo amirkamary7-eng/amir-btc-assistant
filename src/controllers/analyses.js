@@ -459,7 +459,11 @@ export function createAnalysisHandlers(deps) {
     try {
       // Limit to 50 users max to prevent waitUntil timeout
       const usersResult = await queryDb(env, `SELECT telegram_id FROM users WHERE channel_joined = TRUE LIMIT 50`);
-      const userIds = usersResult.rows.map((r) => String(r.telegram_id));
+      const allUserIds = usersResult.rows.map((r) => String(r.telegram_id));
+      if (allUserIds.length === 0) return;
+
+      // CRITICAL FIX: Filter users who have analysis notifications enabled
+      const userIds = await notificationRepo.filterUsersByPreference(env, allUserIds, 'analysis');
       if (userIds.length === 0) return;
 
       // Create in-app notifications (batch)

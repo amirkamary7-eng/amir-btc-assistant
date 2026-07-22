@@ -472,6 +472,11 @@ const i18n = {
         ns_price_alert: 'هشدار قیمت', ns_price_alert_desc: 'اعلان هنگام فعال شدن هشدار قیمت',
         ns_market: 'حرکات بازار', ns_market_desc: 'اعلان نوسانات و تحرکات مهم بازار',
         ns_news: 'اخبار فوری', ns_news_desc: 'اخبار مهم و فوری بازار کریپتو',
+        ns_referral: 'رفرال', ns_referral_desc: 'اعلان دعوت کاربران جدید',
+        ns_reward: 'پاداش توکن', ns_reward_desc: 'اعلان دریافت پاداش AB Token',
+        ns_ticket: 'تیکت پشتیبانی', ns_ticket_desc: 'پاسخ به تیکت‌های پشتیبانی',
+        ns_system: 'اعلان‌های سیستمی', ns_system_desc: 'اطلاعیه‌های مهم سیستمی',
+        ns_marketing: 'اعلان‌های تبلیغاتی', ns_marketing_desc: 'پیشنهادها و کمپین‌های ویژه',
         ns_sub_title: 'اشتراک اعلانات', ns_sub_desc: 'برای دریافت هشدارها از طریق تلگرام اشتراک فعال کنید.',
         ns_sub_activate: 'فعال‌سازی',
         ns_active: 'فعال', ns_inactive: 'غیرفعال',
@@ -6485,9 +6490,40 @@ function closeAboutModal() { document.getElementById('about-modal').style.displa
 //#region Notification Settings
 // ============================================================================
 
-const NS_DEFAULT_PREFS = { analysis: true, calendar: true, price_alert: true, market: false, news: false };
+// NOTIFICATION PREFERENCES
+// Default: Analysis ON, everything else OFF (per spec)
+const NS_DEFAULT_PREFS = {
+    analysis: true,      // ON by default
+    calendar: false,     // OFF
+    price_alert: false,  // OFF
+    market: false,       // OFF
+    news: false,         // OFF
+    referral: false,     // OFF
+    reward: false,       // OFF
+    ticket: false,       // OFF
+    system: false,       // OFF
+    marketing: false,    // OFF
+};
 
-function getNotifPrefs() {
+// In-memory cache of prefs (synced from server)
+let _notifPrefsCache = null;
+
+async function getNotifPrefs() {
+    // Return cached prefs if available
+    if (_notifPrefsCache) return { ..._notifPrefsCache };
+
+    // Try to load from server
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            const data = await apiFetch('/api/notifications/settings');
+            if (data && data.preferences) {
+                _notifPrefsCache = { ...NS_DEFAULT_PREFS, ...data.preferences };
+                return { ..._notifPrefsCache };
+            }
+        }
+    } catch (e) { /* fall through to localStorage */ }
+
+    // Fallback: localStorage (for guests or when API fails)
     try {
         const key = 'notif_prefs_' + getUserId();
         const stored = localStorage.getItem(key);
@@ -6496,11 +6532,23 @@ function getNotifPrefs() {
     return { ...NS_DEFAULT_PREFS };
 }
 
-function saveNotifPrefs(prefs) {
+async function saveNotifPrefs(prefs) {
+    _notifPrefsCache = { ...prefs };
+    // Save to localStorage as fallback
     try {
         const key = 'notif_prefs_' + getUserId();
         localStorage.setItem(key, JSON.stringify(prefs));
     } catch (e) { /* ignore */ }
+    // Sync to server
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            await apiFetch('/api/notifications/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ preferences: prefs })
+            });
+        }
+    } catch (e) { /* localStorage is fallback */ }
 }
 
 function openNotifSettingsModal() {
@@ -6516,8 +6564,8 @@ function closeNotifSettingsModal() {
     openSettingsModal();
 }
 
-function renderNotifSettings() {
-    const prefs = getNotifPrefs();
+async function renderNotifSettings() {
+    const prefs = await getNotifPrefs();
     // Set toggle states
     document.querySelectorAll('.ns-toggle-switch input[data-pref]').forEach(input => {
         const key = input.getAttribute('data-pref');
@@ -6534,12 +6582,12 @@ function renderNotifSettings() {
     }
 }
 
-function handleNotifPrefChange(input) {
+async function handleNotifPrefChange(input) {
     const key = input.getAttribute('data-pref');
     if (!key) return;
-    const prefs = getNotifPrefs();
+    const prefs = await getNotifPrefs();
     prefs[key] = input.checked;
-    saveNotifPrefs(prefs);
+    await saveNotifPrefs(prefs);
     renderNotifSettings();
 }
 

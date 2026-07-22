@@ -3359,7 +3359,11 @@ async function runCalendarAlertsCheck(env) {
         env,
         `SELECT telegram_id FROM users WHERE channel_joined = TRUE`,
       );
-      const userIds = usersResult.rows.map((r) => String(r.telegram_id));
+      const allUserIds = usersResult.rows.map((r) => String(r.telegram_id));
+      if (allUserIds.length === 0) continue;
+
+      // CRITICAL FIX: Filter users who have calendar notifications enabled
+      const userIds = await notificationRepo.filterUsersByPreference(env, allUserIds, 'calendar');
       if (userIds.length === 0) continue;
 
       const title = `🔔 رویداد مهم تقویم: ${event.title}`;
@@ -3542,14 +3546,20 @@ async function runScheduledAlertsBaseline(controller, env) {
         await sendTelegramMessage(env, tgPayload);
 
         // Phase 4 — create in-app notification for triggered alert
+        // CRITICAL FIX: Only notify if user has price_alert preference enabled
         if (notificationRepo) {
-          notificationRepo.create(env, userId, 'price_alert', `🔔 هشدار ${symbol}`, text, {
-            alert_id: alertId,
-            symbol,
-            target_price: targetPrice,
-            direction,
-            current_price: currentPrice,
-          }).catch(() => {});
+          try {
+            const prefsEnabled = await notificationRepo.isPreferenceEnabled(env, userId, 'price_alert');
+            if (prefsEnabled) {
+              notificationRepo.create(env, userId, 'price_alert', `🔔 هشدار ${symbol}`, text, {
+                alert_id: alertId,
+                symbol,
+                target_price: targetPrice,
+                direction,
+                current_price: currentPrice,
+              }).catch(() => {});
+            }
+          } catch { /* prefs check failed — send anyway */ }
         }
 
         await queryDb(
@@ -3969,6 +3979,34 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/notifications') {
         return await notificationHandlers.handleList(request, env);
+      }
+
+      // ── Notification Settings API ──
+      if (request.method === 'GET' && url.pathname === '/api/notifications/settings') {
+        const authState = await authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+        try {
+          const prefs = await notificationRepo.getSettings(env, String(authState.user.id));
+          return jsonResponse({ status: 'success', preferences: prefs }, {}, env);
+        } catch (err) {
+          console.warn('notif-settings-get:', err?.message || err);
+          return jsonResponse({ status: 'error', message: 'Failed to load settings' }, { status: 500 }, env);
+        }
+      }
+
+      if (request.method === 'PUT' && url.pathname === '/api/notifications/settings') {
+        const authState = await authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+        try {
+          const bodyResult = await readJsonBody(request, 10240, env);
+          if (bodyResult.error) return bodyResult.error;
+          const prefs = bodyResult.payload?.preferences || {};
+          await notificationRepo.saveSettings(env, String(authState.user.id), prefs);
+          return jsonResponse({ status: 'success', preferences: { ...prefs } }, {}, env);
+        } catch (err) {
+          console.warn('notif-settings-save:', err?.message || err);
+          return jsonResponse({ status: 'error', message: 'Failed to save settings' }, { status: 500 }, env);
+        }
       }
 
       if (request.method === 'POST' && url.pathname === '/api/notifications/read-all') {
