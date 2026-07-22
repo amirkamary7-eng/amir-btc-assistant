@@ -2962,21 +2962,46 @@ strong.down { color: var(--red); }
 /* ============================================================================ */
 
 /* Admin Entry Button (inside profile card) */
+/* Admin entry button — premium full-width card-style button, placed BELOW the
+   profile card so it's clearly separated from account info and feels important.
+   Dark/gold theme consistent with the app design language. RTL-optimized. */
 .admin-entry-btn {
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    margin: 12px auto 0; padding: 6px 16px; height: 28px;
-    width: fit-content;
-    font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
-    color: #1a1200;
-    background: linear-gradient(135deg, #f7931a 0%, #e8a838 50%, #f7c948 100%);
-    border: 1px solid rgba(247,201,72,0.6);
-    border-radius: 10px; cursor: pointer;
-    box-shadow: 0 2px 12px rgba(247,147,26,0.25), inset 0 1px 0 rgba(255,255,255,0.3);
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    margin: 0 20px 16px; padding: 0 20px; height: 52px;
+    width: calc(100% - 40px); max-width: 420px; margin-left: auto; margin-right: auto;
+    font-size: 14px; font-weight: 700; letter-spacing: 0.2px;
+    color: #F5A623;
+    background: linear-gradient(135deg, #0E1623 0%, #0B1220 100%);
+    border: 1px solid rgba(245, 166, 35, 0.25);
+    border-radius: 14px; cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
     transition: all 0.2s ease;
-    align-self: center;
+    position: relative; overflow: hidden;
 }
-.admin-entry-btn:active { transform: scale(0.95); box-shadow: 0 1px 6px rgba(247,147,26,0.2); }
-.admin-entry-btn svg { opacity: 0.85; }
+/* Subtle gold shimmer sweep on hover for premium feel */
+.admin-entry-btn::before {
+    content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(245, 166, 35, 0.08), transparent);
+    transition: left 0.6s ease;
+}
+.admin-entry-btn:hover {
+    border-color: rgba(245, 166, 35, 0.45);
+    box-shadow: 0 6px 20px rgba(245, 166, 35, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.admin-entry-btn:hover::before { left: 100%; }
+.admin-entry-btn:active {
+    transform: scale(0.98);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.admin-entry-icon {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
+    background: rgba(245, 166, 35, 0.12); border: 1px solid rgba(245, 166, 35, 0.2);
+    color: #F5A623;
+}
+.admin-entry-text { flex: 1; text-align: center; }
+.admin-entry-arrow { opacity: 0.6; flex-shrink: 0; }
+.admin-entry-btn:hover .admin-entry-arrow { opacity: 1; transform: translateX(-2px); }
 
 /* Admin Panel Overlay */
 .admin-panel {
@@ -6265,48 +6290,78 @@ strong.down { color: var(--red); }
     pointer-events: none;
     z-index: 1;
 }
+/* Banner 2 (Bitunix): stronger bottom-right shade so the CTA in the bottom-right
+   safe area has guaranteed contrast over the gift-box coins. */
+.hero-slide-shade--right {
+    background:
+        linear-gradient(180deg, rgba(2, 6, 17, 0) 50%, rgba(2, 6, 17, 0.7) 100%),
+        linear-gradient(270deg, rgba(2, 6, 17, 0.6) 0%, rgba(2, 6, 17, 0) 45%);
+}
+/* Premium CTA base — modern rounded, strong contrast, dark/gold theme, RTL-friendly.
+   Placement is set per-banner via the modifier classes below (bottom-center for the
+   channel banner, bottom-right for the Bitunix banner) based on VLM image-composition
+   analysis that confirmed those are the empty safe areas. */
 .hero-cta {
     position: absolute;
-    bottom: 16px;
-    left: 50%;
-    transform: translateX(-50%);
     z-index: 2;
-    background: #F5A623;
-    border: none;
+    background: linear-gradient(135deg, #F5A623 0%, #E0941A 100%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     color: #020611;
     font-weight: 800;
-    padding: 9px 22px;
-    border-radius: 12px;
+    padding: 11px 24px;
+    border-radius: 14px;
     cursor: pointer;
     font-size: 13px;
-    line-height: 1;
+    line-height: 1.2;
     pointer-events: auto;
-    transition: transform 0.15s ease, box-shadow 0.2s ease;
-    box-shadow: 0 4px 16px rgba(245, 166, 35, 0.4);
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    box-shadow: 0 6px 20px rgba(245, 166, 35, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
     white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 6px;
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+.hero-cta::after {
+    content: '←'; font-size: 14px; font-weight: 900; opacity: 0.7; /* RTL arrow points left */
 }
 .hero-cta:active {
-    transform: translateX(-50%) scale(0.95);
-    box-shadow: 0 2px 8px rgba(245, 166, 35, 0.35);
+    transform: scale(0.95);
+    box-shadow: 0 3px 10px rgba(245, 166, 35, 0.4);
+    filter: brightness(0.95);
 }
+/* Banner 1 (AMIRBTC channel): bottom-center — VLM confirmed this is the empty area
+   below the laptop, with no text/logos/graphics to collide with. */
+.hero-cta--channel {
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+.hero-cta--channel:active {
+    transform: translateX(-50%) scale(0.95);
+}
+/* Banner 2 (Bitunix registration): bottom-right — VLM confirmed the bottom-right
+   corner (below the feature boxes, right of the coin stack) is empty dark space.
+   NOTE: uses physical `right` (not inset-inline-end) because the banner image's
+   safe area is physically bottom-right regardless of the app's RTL direction. */
 .hero-cta--bitunix {
-    background: #F5A623;
+    background: linear-gradient(135deg, #F5A623 0%, #E0941A 100%);
     color: #020611;
-    box-shadow: 0 3px 12px rgba(245, 166, 35, 0.4);
-    font-size: 11px;
-    padding: 7px 16px;
+    box-shadow: 0 6px 18px rgba(245, 166, 35, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    font-size: 13px;
+    padding: 11px 22px;
+    bottom: 18px;
+    right: 18px; /* physical right — banner safe area is image-relative, not RTL-relative */
     left: auto;
-    right: 31px;
     transform: none;
-    border-radius: 10px;
+    border-radius: 14px;
 }
 .hero-cta--bitunix:active {
     transform: scale(0.95);
 }
 .hero-slider-dots {
     position: absolute;
-    bottom: 10px;
-    inset-inline-end: 14px;
+    top: 12px;
+    right: 14px; /* moved to TOP-right so they NEVER collide with bottom CTAs
+                    (channel CTA = bottom-center, Bitunix CTA = bottom-right) */
     display: flex;
     gap: 6px;
     z-index: 3;
@@ -7255,8 +7310,11 @@ html[dir="rtl"] .market-ticker-track {
 @media (max-width: 360px) {
     #dashboard-page { padding: 10px 12px 20px; }
     .hero-banner-slider { border-radius: 18px; }
-    .hero-cta { font-size: 11px; padding: 7px 14px; bottom: 12px; }
-    .hero-slider-dots { bottom: 9px; inset-inline-end: 12px; }
+    .hero-cta { font-size: 11px; padding: 8px 14px; }
+    .hero-cta--channel { bottom: 12px; }
+    .hero-cta--bitunix { bottom: 12px; right: 12px; padding: 8px 14px; }
+    .hero-cta::after { font-size: 12px; }
+    .hero-slider-dots { top: 8px; right: 10px; }
     .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }
     .dms-fg-gauge { width: 64px; }
     .dms-fg-gauge svg { width: 64px; height: 36px; }
@@ -7276,7 +7334,7 @@ html[dir="rtl"] .market-ticker-track {
 }
 
 @media (min-width: 412px) {
-    .hero-cta { font-size: 13px; padding: 9px 20px; }
+    .hero-cta { font-size: 13px; padding: 11px 22px; }
     .dma-card { flex: 0 0 240px; height: 210px; }
     .dfa-skel-card { flex: 0 0 240px; height: 210px; }
     .dc-card { flex: 0 0 224px; min-height: 140px; }
