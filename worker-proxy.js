@@ -3108,32 +3108,73 @@ async function handleForexData(env) {
   // Primary: fetch rates using a free API
   try {
     // Fetch metals prices in parallel with forex rates
-    // BUG 3 fix: capture metals change fields (prev close + chgPct) so we can show
-    // a REAL daily change for XAU/USD and XAG/USD instead of a hardcoded 0.
-    const metalsPromise = fetchJson('https://data-asg.goldprice.org/dbXRates/USD')
-      .then(res => {
-        if (res.ok && res.body) {
-          const m = res.body.items?.[0] || {};
-          return {
-            xau: Number(m.xauPrice) || 0,
-            xag: Number(m.xagPrice) || 0,
-            xauPrev: Number(m.xauClose ?? m.xauOpen ?? m.prevClose) || 0,
-            xagPrev: Number(m.xagClose ?? m.xagOpen ?? m.prevClose) || 0,
-            xauChgPct: (typeof m.xauChgPct === 'number') ? m.xauChgPct : null,
-            xagChgPct: (typeof m.xagChgPct === 'number') ? m.xagChgPct : null,
-          };
+    // BUG 3 fix: metals (XAU/USD, XAG/USD) via Yahoo Finance chart endpoint,
+    // which returns regularMarketPrice + chartPreviousClose so we can compute a
+    // REAL daily change. goldprice.org was returning 0/Forbidden from the Worker,
+    // so Yahoo is the primary source now. Symbols: GC=F (gold futures), SI=F
+    // (silver futures) — these track spot XAU/XAG closely and give real prices +
+    // prev close. A browser-like User-Agent is set because Yahoo blocks generic
+    // bot UAs. Also retains a goldprice.org fallback.
+    const yahooQuote = async (sym) => {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+        const resp = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=5d`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+            'Accept': 'application/json',
+          },
+          signal: ctrl.signal,
+        });
+        clearTimeout(t);
+        if (!resp.ok) return null;
+        const body = await resp.json();
+        const meta = body?.chart?.result?.[0]?.meta || {};
+        const price = Number(meta.regularMarketPrice) || 0;
+        const prev = Number(meta.chartPreviousClose ?? meta.previousClose) || 0;
+        return { price, prev };
+      } catch { return null; }
+    };
+    const metalsPromise = Promise.all([yahooQuote('GC=F'), yahooQuote('SI=F')])
+      .then(async ([g, s]) => {
+        // Fallback to goldprice.org if Yahoo failed for either metal
+        if (!g || !s) {
+          const fb = await fetchJson('https://data-asg.goldprice.org/dbXRates/USD')
+            .then(r => r.ok ? r.body?.items?.[0] : null)
+            .catch(() => null);
+          if (fb) {
+            g = g || { price: Number(fb.xauPrice) || 0, prev: Number(fb.xauClose ?? fb.xauOpen) || 0 };
+            s = s || { price: Number(fb.xagPrice) || 0, prev: Number(fb.xagClose ?? fb.xagOpen) || 0 };
+          }
         }
-        return null;
+        return {
+          xau: g?.price || 0,
+          xag: s?.price || 0,
+          xauPrev: g?.prev || 0,
+          xagPrev: s?.prev || 0,
+          xauChgPct: null,
+          xagChgPct: null,
+        };
       })
       .catch(() => null);
 
-    // BUG 3 fix: fetch YESTERDAY's frankfurter rates (in parallel) so we can
-    // compute a real daily % change for fiat pairs. frankfurter publishes ECB
-    // daily reference rates, so (today - yesterday)/yesterday is a true daily
-    // change rather than the previous hardcoded 0.
-    const yesterdayISO = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const histPromise = fetchJson(`https://api.frankfurter.app/${yesterdayISO}?from=USD`)
-      .then(res => (res.ok && res.body?.rates) ? res.body.rates : null)
+    // BUG 3 fix: fetch a 7-day frankfurter TIME SERIES (in parallel) and compare
+    // the two most recent business days. Using "yesterday" alone failed because
+    // frankfurter's /latest and "yesterday" can resolve to the SAME ECB
+    // publishing date (rates publish once per business day), yielding a 0%
+    // change. The timeframe approach always yields two distinct business days.
+    const endISO = new Date().toISOString().slice(0, 10);
+    const startISO = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const histPromise = fetchJson(`https://api.frankfurter.app/${startISO}..${endISO}?from=USD`)
+      .then(res => {
+        if (!res.ok || !res.body?.rates) return null;
+        const dates = Object.keys(res.body.rates).sort();
+        if (dates.length < 2) return null;
+        return {
+          prev: res.body.rates[dates[dates.length - 2]],
+          last: res.body.rates[dates[dates.length - 1]],
+        };
+      })
       .catch(() => null);
 
     // Use frankfurter.app (free, no API key, reliable) for fiat pairs
@@ -3173,7 +3214,8 @@ async function handleForexData(env) {
           else if (metals?.xagPrev > 0 && price > 0) change = ((price - metals.xagPrev) / metals.xagPrev) * 100;
         } else {
           price = priceFromRates(rates, pair);
-          const prevPrice = prevRates ? priceFromRates(prevRates, pair) : 0;
+          const prevRatesObj = prevRates?.prev;
+          const prevPrice = prevRatesObj ? priceFromRates(prevRatesObj, pair) : 0;
           if (prevPrice > 0 && price > 0) change = ((price - prevPrice) / prevPrice) * 100;
         }
 
