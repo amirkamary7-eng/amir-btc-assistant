@@ -3608,22 +3608,17 @@ function renderTopMovers() { return; }
  * ورودی: بدون ورودی.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
+let _renderIdx = 0;
+
 function renderMarket() {
     const list = document.getElementById('coin-list');
     if (!list) return;
 
     // Price-only diffing: if the list is already rendered with the same tab/filter/search,
-    // just update prices and change percentages — avoid full innerHTML rebuild (~30-60ms → ~3-5ms)
+    // just update prices and change percentages — avoid full innerHTML rebuild
     const renderKey = `${currentMarketTab}|${searchTerm}|${watchlist.length}|${marketVisibleCount}`;
-    if (!searchTerm && currentMarketTab !== 'forex' && _lastMarketRenderKey === renderKey && list.querySelector('.coin-item')) {
-        // Update info bar timestamp
-        const timeEl = list.querySelector('.coin-list-time');
-        if (timeEl) {
-            const now = new Date();
-            timeEl.textContent = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-        }
-        // Update prices in-place
-        const items = list.querySelectorAll('.coin-item');
+    if (!searchTerm && currentMarketTab !== 'forex' && _lastMarketRenderKey === renderKey && list.querySelector('.mkt-coin-row')) {
+        const items = list.querySelectorAll('.mkt-coin-row');
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             const symbol = item.dataset.symbol;
@@ -3631,30 +3626,26 @@ function renderMarket() {
             const coin = allCoins.find(c => c.symbol === symbol);
             if (!coin) continue;
 
-            const priceEl = item.querySelector('.coin-price');
+            const priceEl = item.querySelector('.mkt-coin-price');
             if (priceEl) {
-                const newPrice = '$' + (coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6));
+                const newPrice = '$' + (coin.priceUsd > 1 ? coin.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : coin.priceUsd.toFixed(6));
                 if (priceEl.textContent !== newPrice) {
-                    var oldPrice = parseFloat(priceEl.textContent.replace(/[$,]/g, '')) || 0;
                     priceEl.textContent = newPrice;
-                    // Price flash animation
-                    priceEl.classList.remove('flash-up', 'flash-down');
-                    void priceEl.offsetWidth; // force reflow
-                    if (coin.priceUsd > oldPrice) priceEl.classList.add('flash-up');
-                    else if (coin.priceUsd < oldPrice) priceEl.classList.add('flash-down');
                 }
             }
-            const changeEl = item.querySelector('.coin-change');
+            const changeEl = item.querySelector('.mkt-coin-change');
             if (changeEl && !item.dataset.forex) {
                 const isPos = coin.changePercent24Hr >= 0;
                 const newChange = (isPos ? '+' : '') + coin.changePercent24Hr.toFixed(2) + '%';
-                if (changeEl.textContent !== newChange) {
-                    changeEl.textContent = newChange;
-                    changeEl.className = 'coin-change ' + (isPos ? 'up' : 'down');
+                const changeIcon = isPos
+                    ? '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>'
+                    : '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>';
+                if (changeEl.textContent.replace(/[^\d.\-+%]/g, '') !== newChange) {
+                    changeEl.innerHTML = changeIcon + newChange;
+                    changeEl.className = 'mkt-coin-change ' + (isPos ? 'up' : 'down');
                 }
             }
-            // Update watchlist star state
-            const starEl = item.querySelector('.watch-star');
+            const starEl = item.querySelector('.mkt-coin-star');
             if (starEl) {
                 const inWatch = watchlist.includes(symbol);
                 if (inWatch !== starEl.classList.contains('active')) {
@@ -3667,13 +3658,6 @@ function renderMarket() {
         return;
     }
     _lastMarketRenderKey = renderKey;
-
-    // Helper to build the info bar
-    function buildInfoBar(count, label) {
-        const now = new Date();
-        const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-        return `<div class="coin-list-info"><span class="coin-list-count">${count} ${label}</span><span class="coin-list-time">${timeStr}</span></div>`;
-    }
 
     // Unified search: search across crypto and all market types
     if (searchTerm) {
@@ -3763,7 +3747,7 @@ function renderMarket() {
                 let html = buildInfoBar(filtered.length, totalLabel) + visible.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
                 if (hasMore) {
                     const remaining = filtered.length - marketVisibleCount;
-                    html += `<button class="load-more-btn" onclick="loadMoreCoins()">${t('load_more') || 'نمایش بیشتر'} (${remaining})</button>`;
+                    html += `<div class="mkt-load-more"><button class="mkt-load-more-btn" onclick="loadMoreCoins()">${t('load_more') || 'نمایش بیشتر'} (${remaining})</button></div>`;
                 }
                 list.innerHTML = html;
             } else {
@@ -3823,28 +3807,25 @@ function renderCryptoItem(c) {
     const safeSymbol = escapeHtml(c.symbol);
     const safeName = escapeHtml(c.name);
     const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
-    const priceStr = c.priceUsd > 1 ? c.priceUsd.toFixed(2) : c.priceUsd.toFixed(6);
+    const priceStr = c.priceUsd > 1 ? c.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : c.priceUsd.toFixed(6);
     const rankNum = Number(c.rank) || 0;
+    const changeStr = (isPos ? '+' : '') + c.changePercent24Hr.toFixed(2) + '%';
+    const changeIcon = isPos
+        ? '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>'
+        : '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>';
     return `
-        <div class="coin-item" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
-            <div class="coin-left">
-                <span class="coin-rank">${rankNum}</span>
-                <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="coin-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">
-                <div class="coin-identity">
-                    <span class="coin-sym">${safeSymbol}</span>
-                    <span class="coin-name">${safeName}</span>
-                </div>
+        <div class="mkt-coin-row" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem" style="animation-delay:${Math.min(_renderIdx * 0.02, 0.4)}s">
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="event.stopPropagation(); toggleWatchlist(this.dataset.symbol)" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            </span>
+            <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="mkt-coin-logo" data-symbol="${safeSymbol}" alt="${safeSymbol}">
+            <div class="mkt-coin-info">
+                <span class="mkt-coin-symbol">${safeSymbol}</span>
+                <span class="mkt-coin-name">${safeName}</span>
             </div>
-            <div class="coin-right">
-                <div class="coin-price-data">
-                    <div class="coin-price">$${priceStr}</div>
-                    <div class="coin-change ${isPos ? 'up' : 'down'}">${isPos ? '+' : ''}${c.changePercent24Hr.toFixed(2)}%</div>
-                </div>
-                <span class="watch-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}" tabindex="0">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                    </svg>
-                </span>
+            <div class="mkt-coin-right">
+                <span class="mkt-coin-price">$${priceStr}</span>
+                <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeIcon}${changeStr}</span>
             </div>
         </div>
     `;

@@ -250,153 +250,128 @@
     <!-- #region MarketPage -->
     <!-- این بخش تب‌های بازار، جستجو و فهرست ارزها را نمایش می‌دهد. -->
     <section id="market-page" class="page">
-        <!-- Premium Market Header -->
-        <div class="market-premium-header">
-            <div class="mph-content">
-                <div class="mph-icon-wrap">
-                    <svg class="mph-icon" width="30" height="30" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="7" y="4" width="3.5" height="14" rx="1.2" fill="url(#candle-grad)" opacity="0.9"/>
-                        <rect x="7.75" y="2" width="2" height="4" rx="0.5" fill="url(#candle-grad)"/>
-                        <rect x="7.75" y="16" width="2" height="5" rx="0.5" fill="url(#candle-grad)"/>
-                        <rect x="14.25" y="10" width="3.5" height="12" rx="1.2" fill="url(#candle-grad-green)" opacity="0.9"/>
-                        <rect x="14.75" y="8" width="2.5" height="4" rx="0.5" fill="url(#candle-grad-green)"/>
-                        <rect x="14.75" y="20" width="2.5" height="4" rx="0.5" fill="url(#candle-grad-green)"/>
-                        <rect x="21.5" y="6" width="3.5" height="16" rx="1.2" fill="url(#candle-grad)" opacity="0.85"/>
-                        <rect x="22" y="4" width="2.5" height="4" rx="0.5" fill="url(#candle-grad)"/>
-                        <rect x="22" y="20" width="2.5" height="5" rx="0.5" fill="url(#candle-grad)"/>
-                        <polyline points="9,14 16,11 23,8" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.7"/>
-                        <polyline points="20,9 23,8 23,11" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.7"/>
-                        <defs>
-                            <linearGradient id="candle-grad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stop-color="#f7931a"/>
-                                <stop offset="100%" stop-color="#e07c0f"/>
-                            </linearGradient>
-                            <linearGradient id="candle-grad-green" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stop-color="#00c896"/>
-                                <stop offset="100%" stop-color="#00a87a"/>
-                            </linearGradient>
-                        </defs>
-                    </svg>
-                </div>
-                <div class="mph-text">
-                    <h2 class="mph-title" data-i18n="market">بازار</h2>
-                </div>
+        <!-- ═══ MKT: Premium Market Header ═══ -->
+        <div class="mkt-header">
+            <div class="mkt-header-left">
+                <h2 class="mkt-title" data-i18n="market">بازار</h2>
             </div>
-            <button class="mph-refresh" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">
+            <button class="mkt-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             </button>
         </div>
 
-        <!-- Market Stats Row (3 Glassmorphism Cards) -->
-        <div class="market-stats-row" id="market-stats-row">
-            <div class="stat-glass-card">
-                <div class="sgc-icon-wrap sgc-mcap">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <!-- ═══ MKT: Top Overview Cards (3 stat cards) ═══ -->
+        <div class="mkt-overview-grid">
+            <div class="mkt-stat-card">
+                <div class="mkt-stat-top">
+                    <span class="mkt-stat-label">BTC Dominance</span>
+                    <span class="mkt-stat-change" id="mkt-btc-dom-change">--</span>
                 </div>
-                <div class="sgc-content">
-                    <span class="sgc-label" data-i18n="summary_mcap">ارزش کل بازار</span>
-                    <span class="sgc-value loading" id="global-mcap">--</span>
-                </div>
+                <span class="mkt-stat-value" id="btc-dom">--</span>
+                <div class="mkt-stat-spark" id="mkt-btc-spark"></div>
             </div>
-            <div class="stat-glass-card">
-                <div class="sgc-icon-wrap sgc-vol">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            <div class="mkt-stat-card">
+                <div class="mkt-stat-top">
+                    <span class="mkt-stat-label">24h Volume</span>
+                    <span class="mkt-stat-change" id="mkt-vol-change">--</span>
                 </div>
-                <div class="sgc-content">
-                    <span class="sgc-label" data-i18n="summary_volume">حجم ۲۴h</span>
-                    <span class="sgc-value loading" id="global-volume">--</span>
-                </div>
+                <span class="mkt-stat-value" id="global-volume">--</span>
+                <div class="mkt-stat-spark" id="mkt-vol-spark"></div>
             </div>
-            <div class="stat-glass-card">
-                <div class="sgc-icon-wrap sgc-btc">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11.767 19.089c4.924.868 6.14-6.025 1.216-6.894m-1.216 6.894L5.86 18.047m5.908 1.042-.347 1.97m1.563-8.864c4.924.869 6.14-6.025 1.215-6.893m-1.215 6.893-5.908-1.042m5.908 1.042.348-1.97M7.48 20.364l3.126-17.727"/></svg>
+            <div class="mkt-stat-card">
+                <div class="mkt-stat-top">
+                    <span class="mkt-stat-label">Market Cap</span>
+                    <span class="mkt-stat-change" id="mkt-mcap-change">--</span>
                 </div>
-                <div class="sgc-content">
-                    <span class="sgc-label" data-i18n="summary_btc_dom">سلطه BTC</span>
-                    <span class="sgc-value loading" id="btc-dom">--</span>
-                </div>
+                <span class="mkt-stat-value" id="global-mcap">--</span>
+                <div class="mkt-stat-spark" id="mkt-mcap-spark"></div>
             </div>
         </div>
 
-        <!-- Market Insights Row: Sentiment + Fear & Greed (compact side-by-side) -->
-        <div class="market-insights-row" id="market-insights-row">
-            <div class="insight-card sentiment-card">
-                <div class="ic-header">
-                    <span class="ic-title" data-i18n="market_sentiment">وضعیت بازار</span>
-                    <span class="sentiment-badge" id="sentiment-badge">--</span>
+        <!-- ═══ MKT: Fear & Greed + Market Status ═══ -->
+        <div class="mkt-dashboard-row">
+            <div class="mkt-fg-card">
+                <div class="mkt-fg-header">
+                    <span class="mkt-fg-title">Fear &amp; Greed</span>
                 </div>
-                <div class="sentiment-body">
-                    <div class="sc2-gradient-bar">
-                        <div class="sc2-gradient-fill" id="sentiment-fill"></div>
-                    </div>
-                    <div class="sentiment-labels">
-                        <span class="sl-count sl-up" id="sentiment-gainers">
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
-                            <span>0</span>
-                        </span>
-                        <span class="sl-count sl-down" id="sentiment-losers">
-                            <span>0</span>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
-                        </span>
-                    </div>
-                </div>
-            </div>
-            <div class="insight-card fear-greed-card">
-                <div class="ic-header">
-                    <span class="ic-title">Fear &amp; Greed</span>
-                    <span class="fg-index-num" id="fg-index-value">--</span>
-                </div>
-                <div class="fg-gauge-wrap">
-                    <svg class="fg-gauge" viewBox="0 0 120 70" fill="none">
-                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="rgba(255,255,255,0.06)" stroke-width="8" stroke-linecap="round" fill="none"/>
-                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="url(#fg-gradient)" stroke-width="8" stroke-linecap="round" fill="none" stroke-dasharray="150.8" stroke-dashoffset="150.8" id="fg-arc"/>
-                        <text x="60" y="50" text-anchor="middle" fill="var(--text)" font-size="20" font-weight="800" id="fg-gauge-text">--</text>
-                        <text x="60" y="64" text-anchor="middle" fill="var(--text-sub)" font-size="8.5" font-weight="500" id="fg-gauge-label">--</text>
+                <div class="mkt-fg-gauge-wrap">
+                    <svg class="mkt-fg-gauge" viewBox="0 0 120 70" fill="none">
+                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="rgba(255,255,255,0.06)" stroke-width="7" stroke-linecap="round" fill="none"/>
+                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="url(#mkt-fg-gradient)" stroke-width="7" stroke-linecap="round" fill="none" stroke-dasharray="150.8" stroke-dashoffset="150.8" id="fg-arc"/>
+                        <text x="60" y="48" text-anchor="middle" fill="#FFFFFF" font-size="22" font-weight="800" id="fg-gauge-text">--</text>
+                        <text x="60" y="62" text-anchor="middle" fill="#A5B4C7" font-size="8" font-weight="500" id="fg-gauge-label">--</text>
                         <defs>
-                            <linearGradient id="fg-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" stop-color="#ff4d4d"/>
-                                <stop offset="35%" stop-color="#f7931a"/>
-                                <stop offset="65%" stop-color="#f5a623"/>
-                                <stop offset="100%" stop-color="#00c896"/>
+                            <linearGradient id="mkt-fg-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#EF4444"/>
+                                <stop offset="35%" stop-color="#F5A623"/>
+                                <stop offset="65%" stop-color="#F5A623"/>
+                                <stop offset="100%" stop-color="#22C55E"/>
                             </linearGradient>
                         </defs>
                     </svg>
                 </div>
+                <div class="mkt-fg-meta">
+                    <span>دیروز: <b id="mkt-fg-yesterday">--</b></span>
+                    <span>هفته قبل: <b id="mkt-fg-last-week">--</b></span>
+                </div>
+            </div>
+            <div class="mkt-status-card">
+                <div class="mkt-status-header">
+                    <span class="mkt-status-title">وضعیت بازار</span>
+                </div>
+                <div class="mkt-status-body">
+                    <div class="mkt-status-bar-wrap">
+                        <div class="mkt-status-bar" id="mkt-status-bar">
+                            <div class="mkt-status-fill-green" id="mkt-status-green" style="width:50%"></div>
+                            <div class="mkt-status-fill-red" id="mkt-status-red" style="width:50%"></div>
+                        </div>
+                    </div>
+                    <div class="mkt-status-labels">
+                        <span class="mkt-status-up">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
+                            <b id="sentiment-gainers">0</b> صعودی
+                        </span>
+                        <span class="mkt-status-down">
+                            <b id="sentiment-losers">0</b> نزولی
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+                        </span>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Search -->
-        <div class="search-bar">
-            <input type="text" id="market-search" placeholder="جستجوی ارز..." class="search-input" data-i18n-placeholder="search">
-            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <!-- ═══ MKT: Search Bar ═══ -->
+        <div class="mkt-search-bar">
+            <svg class="mkt-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="market-search" placeholder="جستجوی ارز یا نماد..." class="mkt-search-input" data-i18n-placeholder="search">
         </div>
 
-        <!-- Segmented Control Tabs (replaces old main tabs) -->
-        <div class="market-seg-control" id="market-main-tabs" role="tablist">
-            <div class="seg-indicator" id="seg-indicator"></div>
-            <button type="button" class="seg-btn active" data-main-tab="crypto" onclick="switchMainTab('crypto', this)" role="tab" aria-selected="true">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
-                <span data-i18n="tab_crypto">Crypto</span>
+        <!-- ═══ MKT: Segmented Tabs ═══ -->
+        <div class="mkt-tabs" id="market-main-tabs" role="tablist">
+            <button type="button" class="mkt-tab active" data-main-tab="crypto" onclick="switchMainTab('crypto', this)" role="tab" aria-selected="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
+                <span>کریپتو</span>
             </button>
-            <button type="button" class="seg-btn" data-main-tab="forex" onclick="switchMainTab('forex', this)" role="tab" aria-selected="false">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                <span data-i18n="tab_forex">Forex</span>
+            <button type="button" class="mkt-tab" data-main-tab="forex" onclick="switchMainTab('forex', this)" role="tab" aria-selected="false">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <span>فارکس</span>
             </button>
-            <button type="button" class="seg-btn" data-main-tab="watchlist" onclick="switchMainTab('watchlist', this)" role="tab" aria-selected="false">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                <span data-i18n="watchlist">Watchlist</span>
+            <button type="button" class="mkt-tab" data-main-tab="watchlist" onclick="switchMainTab('watchlist', this)" role="tab" aria-selected="false">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                <span>واچ‌لیست</span>
             </button>
         </div>
 
-        <!-- Crypto sub-tabs -->
-        <div class="market-sub-tabs" id="market-sub-tabs" role="tablist">
-            <button type="button" class="sub-tab-btn active" data-sub-tab="top" onclick="switchSubTab('top', this)" data-i18n="tab_top_market" role="tab" aria-selected="true">Top Market</button>
-            <button type="button" class="sub-tab-btn" data-sub-tab="gainers" onclick="switchSubTab('gainers', this)" data-i18n="tab_gainers" role="tab" aria-selected="false">Gainers</button>
-            <button type="button" class="sub-tab-btn" data-sub-tab="losers" onclick="switchSubTab('losers', this)" data-i18n="tab_losers" role="tab" aria-selected="false">Losers</button>
+        <!-- ═══ MKT: Filter Chips ═══ -->
+        <div class="mkt-filters" id="market-sub-tabs" role="tablist">
+            <button type="button" class="mkt-filter-chip active" data-sub-tab="top" onclick="switchSubTab('top', this)" role="tab">همه</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="gainers" onclick="switchSubTab('gainers', this)" role="tab">بیشترین رشد</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="losers" onclick="switchSubTab('losers', this)" role="tab">بیشترین ریزش</button>
         </div>
 
-        <!-- Coin List -->
-        <div class="coin-list" id="coin-list" role="list"></div>
+        <!-- ═══ MKT: Coin List ═══ -->
+        <div class="mkt-coin-list" id="coin-list" role="list"></div>
+
         <button type="button" class="fab-add-watch fab-hidden" onclick="openAddCoinModal()" aria-label="Add to watchlist">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
