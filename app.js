@@ -3881,7 +3881,7 @@ function switchMainTab(tab, btn) {
     }
 
     // Update main tab active states
-    document.querySelectorAll('.seg-btn').forEach(b => {
+    document.querySelectorAll('.mkt-tab').forEach(b => {
         b.classList.remove('active');
         b.setAttribute('aria-selected', 'false');
     });
@@ -3958,7 +3958,7 @@ function switchSubTab(tab, btn) {
     marketVisibleCount = MARKET_DEFAULT_LIMIT;
 
     // Update sub-tab active states
-    document.querySelectorAll('.sub-tab-btn').forEach(b => {
+    document.querySelectorAll('.mkt-filter-chip').forEach(b => {
         b.classList.remove('active');
         b.setAttribute('aria-selected', 'false');
     });
