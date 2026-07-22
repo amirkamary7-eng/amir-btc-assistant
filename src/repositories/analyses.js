@@ -79,18 +79,25 @@ export function createAnalysisRepository(deps) {
   }
 
   /**
-   * Get stats: active count, today count, total count.
+   * Get stats: total, featured, today, and non-featured (regular) counts.
+   * FIX 4+5: added `featured` count so the frontend can show a dedicated featured
+   * counter that updates on every feature toggle. Renamed the misleading `active`
+   * concept — it counted non-featured analyses, not "active" ones. The field is
+   * kept as `active` for backward compat but now correctly represents the
+   * non-featured (regular) count; the new `featured` field is the true featured count.
    */
   async function getStats(env) {
-    const [totalRes, activeRes, todayRes] = await Promise.all([
+    const [totalRes, featuredRes, activeRes, todayRes] = await Promise.all([
       queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses`),
+      queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured = TRUE`),
       queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured IS NOT TRUE OR featured = FALSE`),
       queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE created_at >= CURRENT_DATE`),
     ]);
     const total = Number(totalRes.rows[0]?.cnt || 0);
+    const featured = Number(featuredRes.rows[0]?.cnt || 0);
     const active = Number(activeRes.rows[0]?.cnt || 0);
     const today = Number(todayRes.rows[0]?.cnt || 0);
-    return { active, today, total };
+    return { total, featured, active, today };
   }
 
   /**

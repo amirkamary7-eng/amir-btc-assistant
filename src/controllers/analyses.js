@@ -37,7 +37,11 @@ export function createAnalysisHandlers(deps) {
   const DETAIL_CACHE_PREFIX = 'analysis:detail:';
 
   function generateVersion() {
-    return Math.floor(Date.now() / 1000);
+    // FIX 2: millisecond precision (was second-granularity Date.now()/1000).
+    // Two CRUDs in the same second produced the same version → client saw
+    // unchanged:true and missed the second update. ms precision makes collisions
+    // virtually impossible.
+    return Date.now();
   }
 
   // ── Cache helpers ──────────────────────────────────────────────────────
@@ -70,7 +74,13 @@ export function createAnalysisHandlers(deps) {
     ]);
   }
 
-  async function invalidateAnalysesCache(env) {
+  /**
+   * Invalidate analyses list/featured/stats/version caches.
+   * FIX 1: optionally also invalidate the per-analysis detail cache
+   * (analysis:detail:<id>) so GET /:id never returns a stale or deleted record.
+   * Pass analysisId on update and delete to purge that specific detail entry.
+   */
+  async function invalidateAnalysesCache(env, analysisId = null) {
     const version = generateVersion();
     // Write a tombstone version so all clients know to refetch
     await writeAppCache(env, ANALYSES_VERSION_KEY, String(version), 86400 * 7);
@@ -80,6 +90,10 @@ export function createAnalysisHandlers(deps) {
     try { await env.APP_CACHE?.delete?.(ANALYSES_FEATURED_KEY); } catch {}
     // Delete stats cache
     try { await env.APP_CACHE?.delete?.(ANALYSES_STATS_KEY); } catch {}
+    // FIX 1: delete the per-analysis detail cache so stale data doesn't linger
+    if (analysisId) {
+      try { await env.APP_CACHE?.delete?.(`${DETAIL_CACHE_PREFIX}${analysisId}`); } catch {}
+    }
     return version;
   }
 
@@ -400,7 +414,8 @@ export function createAnalysisHandlers(deps) {
       if (!analysis) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
-      const version = await invalidateAnalysesCache(env);
+      // FIX 1: pass analysisId so the detail cache for this analysis is purged too
+      const version = await invalidateAnalysesCache(env, analysisId);
 
       // Fetch fresh stats + featured (KV may be stale on other instances)
       const [stats, featured] = await Promise.all([
@@ -433,7 +448,10 @@ export function createAnalysisHandlers(deps) {
       if (!deleted) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
-      const version = await invalidateAnalysesCache(env);
+      // FIX 1: pass analysisId so the detail cache for the deleted analysis is
+      // purged — previously GET /:id returned the deleted record from KV for
+      // up to 60s, making it look like the delete didn't work.
+      const version = await invalidateAnalysesCache(env, analysisId);
 
       // Fetch fresh stats + featured (KV may be stale on other instances)
       const [stats, featured] = await Promise.all([

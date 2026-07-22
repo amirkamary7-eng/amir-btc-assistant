@@ -1492,14 +1492,35 @@ function renderAnalysisStats() {
     if (!bar) return;
     if (!analysisStats) { bar.style.display = 'none'; return; }
     bar.style.display = '';
+    // FIX 4+5: added featured counter (analysisStats.featured from the backend
+    // getStats() which now returns {total, featured, active, today}). All four
+    // counters update immediately after create/delete/publish/feature-toggle
+    // because the CRUD response embeds fresh stats.
+    const featuredCount = analysisStats.featured || 0;
     bar.innerHTML = `
         <div class="stats-bar">
+            <div class="stat-item total">
+                <div class="stat-icon">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/></svg>
+                </div>
+                <span class="stat-value">${analysisStats.total}</span>
+                <span class="stat-label">کل</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item featured">
+                <div class="stat-icon">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </div>
+                <span class="stat-value">${featuredCount}</span>
+                <span class="stat-label">ویژه</span>
+            </div>
+            <div class="stat-divider"></div>
             <div class="stat-item active">
                 <div class="stat-icon">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
                 </div>
                 <span class="stat-value">${analysisStats.active}</span>
-                <span class="stat-label">فعال</span>
+                <span class="stat-label">عادی</span>
             </div>
             <div class="stat-divider"></div>
             <div class="stat-item today">
@@ -1508,14 +1529,6 @@ function renderAnalysisStats() {
                 </div>
                 <span class="stat-value">${analysisStats.today}</span>
                 <span class="stat-label">امروز</span>
-            </div>
-            <div class="stat-divider"></div>
-            <div class="stat-item total">
-                <div class="stat-icon">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/></svg>
-                </div>
-                <span class="stat-value">${analysisStats.total}</span>
-                <span class="stat-label">کل</span>
             </div>
         </div>
     `;
@@ -2430,7 +2443,10 @@ function openAddAnalysisModal() {
 
 function openEditAnalysisModal(id) {
     if (!isAdmin()) return;
-    const a = analyses.find(x => x.id === id) || (analysisFeatured?.id === id ? analysisFeatured : null);
+    // FIX: analysisFeatured is an ARRAY (not a single object). The old code
+    // `analysisFeatured?.id === id` never matched, so editing a featured analysis
+    // from the featured section failed silently. Now searches both arrays.
+    const a = analyses.find(x => x.id === id) || (Array.isArray(analysisFeatured) ? analysisFeatured.find(x => x.id === id) : null);
     if (!a) return;
     editingAnalysisId = id;
     document.getElementById('analysis-modal-title').innerText = 'ویرایش تحلیل';
@@ -2441,7 +2457,9 @@ function openEditAnalysisModal(id) {
     document.getElementById('analysis-image').value = a.image || '';
     document.getElementById('analysis-text').value = a.content || a.text || '';
     document.getElementById('analysis-support').value = a.support_level || '';
-    document.getElementById('analysis-current-price').value = a.current_price || '';
+    // FIX 3: current_price field removed from form — null-safe in case element is gone
+    const cpEl = document.getElementById('analysis-current-price');
+    if (cpEl) cpEl.value = a.current_price || '';
     document.getElementById('analysis-resistance').value = a.resistance_level || '';
     const featuredEl = document.getElementById('analysis-featured');
     if (featuredEl) featuredEl.checked = Boolean(a.featured);
@@ -2630,8 +2648,13 @@ function _applySaveResult(result, wasEditing) {
         analysisStats = result.stats;
         localStorage.setItem('analysisStats', JSON.stringify(analysisStats));
     }
-    if (result.featured !== undefined) {
-        analysisFeatured = Array.isArray(result.featured) ? result.featured : (result.featured ? [result.featured] : []);
+    // FIX 2: result.featured is ALWAYS an array from the server (handleCreate/
+    // handleUpdate/handleDelete return getFeatured() which is an array). The
+    // previous else-branch treated it as a boolean, so when the server returned
+    // an empty array [] (falsy), it fell through to the else and kept stale
+    // featured data. Now always treat it as an array.
+    if (Array.isArray(result.featured)) {
+        analysisFeatured = result.featured;
         localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
     } else {
         localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
@@ -2697,8 +2720,9 @@ function executeDeleteAnalysis() {
                 analysisStats = result.stats;
                 localStorage.setItem('analysisStats', JSON.stringify(analysisStats));
             }
-            if (result.featured !== undefined) {
-                analysisFeatured = Array.isArray(result.featured) ? result.featured : (result.featured ? [result.featured] : []);
+            // FIX 2: result.featured is always an array from the server
+            if (Array.isArray(result.featured)) {
+                analysisFeatured = result.featured;
                 localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
             } else {
                 localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
