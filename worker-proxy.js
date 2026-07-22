@@ -3020,9 +3020,12 @@ async function handleMarketData(env) {
           };
         })
         .filter(c => Math.abs(c.changePercent24Hr) < 1000);
+
+        // PHASE 2 FIX: Enrich MEXC data with market cap & supply
+        const enriched = await enrichMarketData(env, data);
         const global = await globalPromise;
-        await writeAppCache(env, 'market:data:v3', JSON.stringify(data), MARKET_CACHE_TTL);
-        return jsonResponse({ status: 'success', data, cached: false, global, dataSource: 'mexc' }, {}, env);
+        await writeAppCache(env, 'market:data:v3', JSON.stringify(enriched), MARKET_CACHE_TTL);
+        return jsonResponse({ status: 'success', data: enriched, cached: false, global, dataSource: 'mexc+cmc' }, {}, env);
       }
     }
   } catch (e) {
