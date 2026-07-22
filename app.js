@@ -5686,24 +5686,6 @@ async function openCoinDetail(symbol) {
         changeEl.className = 'cd-change ' + (chg >= 0 ? 'up' : 'down');
     }
 
-    // ── Live Price Card ──
-    const livePriceEl = document.getElementById('cd-live-price');
-    if (livePriceEl) livePriceEl.textContent = '$' + priceStr;
-
-    // Price changes (24H from data, others estimated)
-    const chg24 = coin.changePercent24Hr || 0;
-    const setPcValue = (id, val) => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.textContent = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
-            el.className = 'cd-pc-value ' + (val >= 0 ? 'up' : 'down');
-        }
-    };
-    setPcValue('cd-change-1h', chg24 * 0.1); // Estimate: 1H ≈ 10% of 24H
-    setPcValue('cd-change-24h', chg24);
-    setPcValue('cd-change-7d', chg24 * 2.5); // Estimate: 7D ≈ 2.5x of 24H
-    setPcValue('cd-change-30d', chg24 * 5);   // Estimate: 30D ≈ 5x of 24H
-
     // ── Market Statistics ──
     const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
     setText('cd-stat-mcap', '$' + formatLargeNumber(coin.marketCapUsd || 0));
@@ -5711,31 +5693,9 @@ async function openCoinDetail(symbol) {
     setText('cd-stat-supply', coin.supply ? formatLargeNumber(coin.supply) : '--');
     setText('cd-stat-rank', '#' + (Number(coin.rank) || 0));
 
-    // ── ATH / ATL (estimated from current data) ──
-    const price = coin.priceUsd || 0;
-    const chgAbs = Math.abs(chg24);
-    // ATH estimate: if price went up, ATH ≈ price * (1 + chgAbs/100 * 3)
-    // ATL estimate: if price went down, ATL ≈ price * (1 - chgAbs/100 * 3)
-    const athEst = price * (1 + Math.max(chgAbs * 0.03, 0.05));
-    const atlEst = price * (1 - Math.max(chgAbs * 0.05, 0.1));
-    setText('cd-ath-value', '$' + (athEst > 1 ? athEst.toFixed(2) : athEst.toFixed(6)));
-    setText('cd-ath-change', '-' + ((1 - price / athEst) * 100).toFixed(1) + '%');
-    setText('cd-atl-value', '$' + (atlEst > 1 ? atlEst.toFixed(2) : atlEst.toFixed(6)));
-    setText('cd-atl-change', '+' + ((price / atlEst - 1) * 100).toFixed(1) + '%');
-
     // ── Alert section ──
     const alertPriceVal = document.getElementById('alert-current-price-value');
     if (alertPriceVal) alertPriceVal.textContent = '$' + priceStr;
-
-    // ── Fear & Greed Widget ──
-    if (globalMarketData && globalMarketData.fearGreedValue) {
-        const fgVal = globalMarketData.fearGreedValue;
-        const fgLabel = globalMarketData.fearGreedClassification || '--';
-        const fgGauge = document.getElementById('cd-fg-gauge');
-        if (fgGauge) fgGauge.innerHTML = '<span>' + fgVal + '</span>';
-        setText('cd-fg-value', fgVal);
-        setText('cd-fg-label', fgLabel);
-    }
 
     // ── Update watchlist button state ──
     updateDetailWatchBtn(symbol);
@@ -5852,6 +5812,29 @@ function toggleWatchlistFromDetail() {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function closeCoinDetail() {
+    // ── Ensure Market tab is visible (X button returns user to Market) ──
+    // The Coin Detail modal is a fixed overlay (z-index:10000) on top of the
+    // active page. When opened from Dashboard/Watchlist/etc., closing it must
+    // send the user back to the Market page as required by the UX spec.
+    // Because switchTab('market-page') only triggers renderMarket() with the
+    // SAME renderKey (price-only diffing), the existing coin list DOM is
+    // preserved — scroll position stays intact.
+    const marketPage = document.getElementById('market-page');
+    const isMarketActive = marketPage && marketPage.classList.contains('active');
+    if (!isMarketActive) {
+        // Find the bottom-nav Market button and switch via switchTab to keep
+        // nav highlight in sync. Fallback to direct class swap if not found.
+        const marketNavBtn = document.querySelector('.nav-item[data-page="market-page"]')
+            || Array.from(document.querySelectorAll('.nav-item')).find(n =>
+                n.getAttribute('onclick')?.includes('market-page'));
+        if (typeof switchTab === 'function') {
+            switchTab('market-page', marketNavBtn || undefined);
+        } else if (marketPage) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            marketPage.classList.add('active');
+        }
+    }
+
     document.querySelector('.chart-exchange-badge')?.remove();
     if (currentTvWidget) {
         try {
@@ -5874,14 +5857,23 @@ function closeCoinDetail() {
         chartContainer.innerHTML = '';
     }
     currentTvChartInfo = null;
+    _currentDetailSymbol = null;
     const modal = document.getElementById('coin-detail-modal');
     modal.classList.remove('slide-up');
     modal.classList.add('slide-down');
-    modal.addEventListener('animationend', function handler() {
+    let closed = false;
+    const finishClose = () => {
+        if (closed) return;
+        closed = true;
         modal.style.display = 'none';
         modal.classList.remove('slide-down');
-        modal.removeEventListener('animationend', handler);
-    });
+        modal.removeEventListener('animationend', onAnimEnd);
+    };
+    const onAnimEnd = () => finishClose();
+    modal.addEventListener('animationend', onAnimEnd);
+    // Safety net: if animationend never fires (e.g., prefers-reduced-motion,
+    // display:none ancestor, or animation cancelled), force-hide after 350ms.
+    setTimeout(finishClose, 350);
 }
 
 /**

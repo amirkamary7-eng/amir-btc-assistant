@@ -7631,7 +7631,14 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     background: #020611; display: flex; flex-direction: column;
     animation: cdSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
+.cd-fullscreen.slide-up {
+    animation: cdSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cd-fullscreen.slide-down {
+    animation: cdSlideOut 0.25s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
 @keyframes cdSlideIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes cdSlideOut { from { transform: translateY(0); } to { transform: translateY(100%); } }
 
 /* ── Top Bar ── */
 .cd-top-bar {
@@ -7640,13 +7647,6 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     background: #0B1220; border-bottom: 1px solid rgba(255,255,255,0.06);
     flex-shrink: 0;
 }
-.cd-back-btn {
-    width: 36px; height: 36px; border-radius: 10px;
-    background: rgba(255,255,255,0.05); border: none;
-    color: #A5B4C7; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.cd-back-btn:active { transform: scale(0.92); }
 .cd-identity { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
 .cd-coin-logo {
     width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
@@ -7684,34 +7684,19 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     padding: 16px 16px 80px;
 }
 
-/* ── Live Price Card ── */
-.cd-price-card {
-    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 16px; padding: 16px; margin-bottom: 12px;
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-}
-.cd-price-main { display: flex; flex-direction: column; gap: 4px; }
-.cd-price-label { font-size: 11px; color: #6B7A8D; font-weight: 600; }
-.cd-price-big { font-size: 24px; font-weight: 800; color: #FFFFFF; font-variant-numeric: tabular-nums; }
-.cd-price-changes { display: flex; gap: 12px; }
-.cd-pc-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.cd-pc-label { font-size: 10px; color: #6B7A8D; font-weight: 600; }
-.cd-pc-value { font-size: 12px; font-weight: 700; }
-.cd-pc-value.up { color: #22C55E; }
-.cd-pc-value.down { color: #EF4444; }
-
 /* ── Chart Section ── */
-.cd-chart-section { margin-bottom: 16px; }
+.cd-chart-section { margin-bottom: 18px; }
 .cd-tf-bar {
     display: flex; gap: 4px; margin-bottom: 8px;
     overflow-x: auto; scrollbar-width: none;
 }
 .cd-tf-bar::-webkit-scrollbar { display: none; }
 .cd-tf-btn {
-    flex-shrink: 0; padding: 6px 12px; border-radius: 8px;
+    flex: 1; min-width: 0; padding: 7px 4px; border-radius: 8px;
     border: 1px solid rgba(255,255,255,0.06); background: #0B1220;
     color: #6B7A8D; font-size: 12px; font-weight: 600; cursor: pointer;
     transition: all 0.2s ease; font-family: inherit;
+    text-align: center;
 }
 .cd-tf-btn:active { transform: scale(0.94); }
 .cd-tf-btn.active {
@@ -7720,11 +7705,11 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 }
 .cd-chart {
     background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px; height: 320px; overflow: hidden;
+    border-radius: 12px; height: 380px; overflow: hidden;
 }
 
 /* ── Section ── */
-.cd-section { margin-bottom: 16px; }
+.cd-section { margin-bottom: 18px; }
 .cd-section-title {
     font-size: 14px; font-weight: 700; color: #FFFFFF;
     margin: 0 0 10px;
@@ -7733,32 +7718,15 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 /* ── Market Stats Grid ── */
 .cd-stats-grid {
     display: grid; grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: 10px;
 }
 .cd-stat-item {
     background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px; padding: 12px;
-    display: flex; flex-direction: column; gap: 4px;
+    border-radius: 12px; padding: 14px;
+    display: flex; flex-direction: column; gap: 6px;
 }
 .cd-stat-label { font-size: 11px; color: #6B7A8D; font-weight: 600; }
-.cd-stat-value { font-size: 15px; font-weight: 700; color: #FFFFFF; font-variant-numeric: tabular-nums; }
-
-/* ── ATH / ATL ── */
-.cd-ath-atl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.cd-ath-card, .cd-atl-card {
-    border-radius: 12px; padding: 12px;
-    display: flex; flex-direction: column; gap: 4px;
-    border: 1px solid rgba(255,255,255,0.06);
-}
-.cd-ath-card { background: rgba(34,197,94,0.06); }
-.cd-atl-card { background: rgba(239,68,68,0.06); }
-.cd-ath-label, .cd-atl-label { font-size: 11px; font-weight: 600; }
-.cd-ath-label { color: #22C55E; }
-.cd-atl-label { color: #EF4444; }
-.cd-ath-value, .cd-atl-value { font-size: 16px; font-weight: 800; color: #FFFFFF; }
-.cd-ath-change, .cd-atl-change { font-size: 11px; font-weight: 600; }
-.cd-ath-change { color: #22C55E; }
-.cd-atl-change { color: #EF4444; }
+.cd-stat-value { font-size: 16px; font-weight: 700; color: #FFFFFF; font-variant-numeric: tabular-nums; }
 
 /* ── Alert Card ── */
 .cd-alert-card {
@@ -7793,28 +7761,6 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 .cd-alert-btn:active { transform: scale(0.96); }
 .cd-alert-list { display: flex; flex-direction: column; gap: 6px; }
 
-/* ── F&G Widget ── */
-.cd-fg-widget {
-    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 14px; padding: 14px;
-    display: flex; align-items: center; gap: 12px;
-}
-.cd-fg-gauge-mini {
-    width: 48px; height: 48px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 16px; font-weight: 800;
-    background: conic-gradient(#EF4444 0deg, #F5A623 108deg, #22C55E 216deg, rgba(255,255,255,0.06) 216deg 360deg);
-    position: relative; flex-shrink: 0;
-}
-.cd-fg-gauge-mini::after {
-    content: ''; position: absolute; inset: 4px; border-radius: 50%;
-    background: #0B1220;
-}
-.cd-fg-gauge-mini span { position: relative; z-index: 1; color: #FFFFFF; }
-.cd-fg-info { display: flex; flex-direction: column; gap: 2px; }
-.cd-fg-value { font-size: 18px; font-weight: 800; color: #FFFFFF; }
-.cd-fg-label { font-size: 12px; color: #A5B4C7; }
-
 /* ── AI Card ── */
 .cd-ai-card {
     background: linear-gradient(135deg, rgba(245,166,35,0.06), rgba(255,255,255,0.02));
@@ -7823,11 +7769,25 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     font-size: 13px; line-height: 1.6; color: #A5B4C7;
 }
 
+/* ── Close Button (Back to Market) ── */
+.cd-close-btn {
+    background: rgba(245,166,35,0.1) !important;
+    border-color: rgba(245,166,35,0.25) !important;
+    color: #F5A623 !important;
+}
+.cd-close-btn:hover {
+    background: rgba(245,166,35,0.18) !important;
+}
+
 /* ── Responsive ── */
 @media (max-width: 360px) {
-    .cd-price-big { font-size: 20px; }
-    .cd-price-changes { gap: 8px; }
-    .cd-chart { height: 280px; }
-    .cd-stats-grid { gap: 6px; }
-    .cd-stat-item { padding: 10px; }
+    .cd-chart { height: 320px; }
+    .cd-stats-grid { gap: 8px; }
+    .cd-stat-item { padding: 12px; }
+    .cd-stat-value { font-size: 15px; }
+    .cd-tf-btn { font-size: 11px; padding: 6px 2px; }
+}
+@media (min-width: 412px) {
+    .cd-chart { height: 420px; }
+    .cd-stat-item { padding: 16px; }
 }

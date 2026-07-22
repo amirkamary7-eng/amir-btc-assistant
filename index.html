@@ -944,9 +944,6 @@
     <div id="coin-detail-modal" style="display:none" class="cd-fullscreen" role="dialog" aria-modal="true" aria-label="Coin detail">
         <!-- ═══ CD: Top Bar ═══ -->
         <div class="cd-top-bar">
-            <button class="cd-back-btn" onclick="closeCoinDetail()" aria-label="Back">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-            </button>
             <div class="cd-identity">
                 <img id="detail-coin-icon" class="cd-coin-logo" src="" alt="">
                 <div class="cd-identity-text">
@@ -967,43 +964,18 @@
                 <button class="cd-action-btn" onclick="document.getElementById('alert-price').focus()" aria-label="Alert">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                 </button>
-                <button class="cd-action-btn" onclick="closeCoinDetail()" aria-label="Close">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                <button class="cd-action-btn cd-close-btn" onclick="closeCoinDetail()" aria-label="Close and return to Market">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
                 </button>
             </div>
         </div>
 
         <!-- ═══ CD: Scrollable Content ═══ -->
         <div class="cd-content">
-            <!-- ═══ CD: Live Price Card ═══ -->
-            <div class="cd-price-card">
-                <div class="cd-price-main">
-                    <span class="cd-price-label">قیمت فعلی</span>
-                    <span id="cd-live-price" class="cd-price-big">--</span>
-                </div>
-                <div class="cd-price-changes">
-                    <div class="cd-pc-item">
-                        <span class="cd-pc-label">1H</span>
-                        <span class="cd-pc-value" id="cd-change-1h">--</span>
-                    </div>
-                    <div class="cd-pc-item">
-                        <span class="cd-pc-label">24H</span>
-                        <span class="cd-pc-value" id="cd-change-24h">--</span>
-                    </div>
-                    <div class="cd-pc-item">
-                        <span class="cd-pc-label">7D</span>
-                        <span class="cd-pc-value" id="cd-change-7d">--</span>
-                    </div>
-                    <div class="cd-pc-item">
-                        <span class="cd-pc-label">30D</span>
-                        <span class="cd-pc-value" id="cd-change-30d">--</span>
-                    </div>
-                </div>
-            </div>
-
             <!-- ═══ CD: Chart Section ═══ -->
             <div class="cd-chart-section">
                 <div class="cd-tf-bar" id="tv-tf-bar" role="group" aria-label="Chart timeframe">
+                    <button type="button" class="cd-tf-btn" data-interval="15" onclick="switchTvTimeframe('15', this)">15M</button>
                     <button type="button" class="cd-tf-btn" data-interval="60" onclick="switchTvTimeframe('60', this)">1H</button>
                     <button type="button" class="cd-tf-btn" data-interval="240" onclick="switchTvTimeframe('240', this)">4H</button>
                     <button type="button" class="cd-tf-btn active" data-interval="D" onclick="switchTvTimeframe('D', this)">1D</button>
@@ -1036,23 +1008,6 @@
                 </div>
             </div>
 
-            <!-- ═══ CD: ATH / ATL ═══ -->
-            <div class="cd-section">
-                <h4 class="cd-section-title">سقف و کف تاریخی</h4>
-                <div class="cd-ath-atl-grid">
-                    <div class="cd-ath-card">
-                        <span class="cd-ath-label">سقف تاریخی (ATH)</span>
-                        <span class="cd-ath-value" id="cd-ath-value">--</span>
-                        <span class="cd-ath-change" id="cd-ath-change">--</span>
-                    </div>
-                    <div class="cd-atl-card">
-                        <span class="cd-atl-label">کف تاریخی (ATL)</span>
-                        <span class="cd-atl-value" id="cd-atl-value">--</span>
-                        <span class="cd-atl-change" id="cd-atl-change">--</span>
-                    </div>
-                </div>
-            </div>
-
             <!-- ═══ CD: Price Alert ═══ -->
             <div class="cd-section">
                 <h4 class="cd-section-title">هشدار قیمت</h4>
@@ -1069,18 +1024,6 @@
                         <button type="button" class="cd-alert-btn" onclick="setPriceAlert()">ثبت هشدار</button>
                     </div>
                     <div id="active-alerts" class="cd-alert-list"></div>
-                </div>
-            </div>
-
-            <!-- ═══ CD: Fear & Greed Widget ═══ -->
-            <div class="cd-section">
-                <h4 class="cd-section-title">Fear &amp; Greed</h4>
-                <div class="cd-fg-widget">
-                    <div class="cd-fg-gauge-mini" id="cd-fg-gauge">--</div>
-                    <div class="cd-fg-info">
-                        <span class="cd-fg-value" id="cd-fg-value">--</span>
-                        <span class="cd-fg-label" id="cd-fg-label">--</span>
-                    </div>
                 </div>
             </div>
 
