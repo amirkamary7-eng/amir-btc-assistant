@@ -333,7 +333,7 @@ let currentLang = 'fa';
 let watchlist = [];
 let analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
 let tickets = [];
-let notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
+let notifications = []; // DB-backed — loaded from /api/notifications
 let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
 let currentAlertDirection = 'cross';
 let _previousPrices = {}; // Symbol → price tracking for cross-check alerts
@@ -2803,6 +2803,8 @@ async function sendSessionHeartbeat() {
             _alertsLoaded = true;
             loadAlertsFromServer().catch(() => { _alertsLoaded = false; });
         }
+        // Load notifications from DB (replaces localStorage)
+        loadNotificationsFromServer().catch(() => {});
     } catch (e) { console.warn('heartbeat:', e); }
 }
 
@@ -6222,14 +6224,12 @@ function addNotification(title, body, options = true) {
 
     if (window.NotificationCenter) {
         const notif = NotificationCenter.add(title, body, opts);
-        if (notif) notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
         return;
     }
 
     const notif = { id: Date.now().toString(), title, body, read: false, date: new Date().toISOString() };
     notifications.unshift(notif);
     if (notifications.length > 50) notifications = notifications.slice(0, 50);
-    localStorage.setItem('notifications', JSON.stringify(notifications));
     updateNotifBadge();
     if (opts.sendToTelegram) {
         const userId = getUserId();
@@ -6240,64 +6240,99 @@ function addNotification(title, body, options = true) {
     if (opts.playSound) playAlertSound();
 }
 /**
- * اعلان نشان را به‌روزرسانی می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ * اعلان نشان را به‌روزرسانی می‌کند — از دیتابیس می‌خواند (نه localStorage).
  */
-function updateNotifBadge() {
-    const unread = notifications.filter(n => !n.read).length;
+async function updateNotifBadge() {
     const badge = $('notif-badge');
     if (!badge) return;
+    // Try to fetch unread count from server
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            const data = await apiFetch('/api/notifications');
+            if (data && typeof data.unread_count === 'number') {
+                const unread = data.unread_count;
+                if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread; }
+                else { badge.style.display = 'none'; }
+                return;
+            }
+        }
+    } catch (e) { /* fall through to localStorage fallback */ }
+    // Fallback: use in-memory notifications array (for guests)
+    const unread = notifications.filter(n => !n.read).length;
     if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread; }
     else { badge.style.display = 'none'; }
 }
 /**
  * وضعیت اعلان پنل را بین دو حالت جابه‌جا می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function toggleNotificationPanel() {
     const modal = document.getElementById('notif-modal');
     modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
-    renderNotifications();
+    loadNotificationsFromServer();
 }
 /**
  * اعلان مودال را می‌بندد.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function closeNotifModal() {
     document.getElementById('notif-modal').style.display = 'none';
 }
 /**
- * وضعیت همه read را علامت‌گذاری می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ * وضعیت همه read را علامت‌گذاری می‌کند — از API استفاده می‌کند.
  */
-function markAllRead() {
+async function markAllRead() {
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            await apiFetch('/api/notifications/read-all', { method: 'POST' });
+        }
+    } catch (e) { /* fallback below */ }
+    // Update local state
     notifications.forEach(n => n.read = true);
-    localStorage.setItem('notifications', JSON.stringify(notifications));
     updateNotifBadge();
     renderNotifications();
 }
 /**
  * همه notifications را پاک‌سازی می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function clearAllNotifications() {
     if(confirm(t('confirm_clear_notif'))) {
         notifications = [];
-        localStorage.setItem('notifications', JSON.stringify(notifications));
         updateNotifBadge();
         renderNotifications();
         closeNotifModal();
     }
 }
 /**
+ * Notifications را از سرور بارگذاری می‌کند — DB source of truth.
+ */
+async function loadNotificationsFromServer() {
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            const data = await apiFetch('/api/notifications');
+            if (data && Array.isArray(data.notifications)) {
+                notifications = data.notifications.map(n => ({
+                    id: n.id,
+                    title: n.title || '',
+                    body: n.message || '',
+                    read: Boolean(n.read),
+                    date: n.created_at || new Date().toISOString(),
+                }));
+                // Update badge with server-provided unread count
+                const badge = $('notif-badge');
+                if (badge) {
+                    const unread = data.unread_count || notifications.filter(n => !n.read).length;
+                    if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread; }
+                    else { badge.style.display = 'none'; }
+                }
+                renderNotifications();
+                return;
+            }
+        }
+    } catch (e) { console.warn('loadNotificationsFromServer:', e); }
+    // Fallback: render from in-memory array
+    renderNotifications();
+}
+/**
  * notifications را در رابط کاربری رندر می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function renderNotifications() {
     const container = document.getElementById('notif-list');
@@ -6315,13 +6350,19 @@ function renderNotifications() {
     `).join('');
 }
 /**
- * وضعیت اعلان read را علامت‌گذاری می‌کند.
- * ورودی: پارامترهای `id` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ * وضعیت اعلان read را علامت‌گذاری می‌کند — از API استفاده می‌کند.
  */
-function markNotifRead(id) {
+async function markNotifRead(id) {
     const n = notifications.find(x => x.id === id);
-    if (n) { n.read = true; localStorage.setItem('notifications', JSON.stringify(notifications)); updateNotifBadge(); renderNotifications(); }
+    if (n) n.read = true;
+    // Sync to server
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            await apiFetch(`/api/notifications/${id}/read`, { method: 'POST' });
+        }
+    } catch (e) { /* local state already updated */ }
+    updateNotifBadge();
+    renderNotifications();
 }
 
 //#endregion
@@ -6496,13 +6537,10 @@ const NS_DEFAULT_PREFS = {
     analysis: true,      // ON by default
     calendar: false,     // OFF
     price_alert: false,  // OFF
-    market: false,       // OFF
-    news: false,         // OFF
     referral: false,     // OFF
     reward: false,       // OFF
     ticket: false,       // OFF
-    system: false,       // OFF
-    marketing: false,    // OFF
+    // market, news, system, marketing removed — no backend triggers
 };
 
 // In-memory cache of prefs (synced from server)
