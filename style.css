@@ -7620,3 +7620,214 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     .mkt-coin-symbol { font-size: 13px; }
     .mkt-coin-price { font-size: 13px; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   CD — Coin Detail Page (Premium Rebuild)
+   Colors: bg #020611, cards #0B1220, accent #F5A623
+   ════════════════════════════════════════════════════════════════════ */
+
+.cd-fullscreen {
+    position: fixed; inset: 0; z-index: 10000;
+    background: #020611; display: flex; flex-direction: column;
+    animation: cdSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes cdSlideIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+/* ── Top Bar ── */
+.cd-top-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: max(12px, env(safe-area-inset-top)) 16px 12px;
+    background: #0B1220; border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+}
+.cd-back-btn {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: rgba(255,255,255,0.05); border: none;
+    color: #A5B4C7; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.cd-back-btn:active { transform: scale(0.92); }
+.cd-identity { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.cd-coin-logo {
+    width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.06); background: #0B1220;
+}
+.cd-identity-text { min-width: 0; }
+.cd-identity-top { display: flex; align-items: center; gap: 6px; }
+.cd-title { font-size: 16px; font-weight: 700; color: #FFFFFF; margin: 0; }
+.cd-rank-badge {
+    font-size: 10px; font-weight: 700; color: #F5A623;
+    background: rgba(245,166,35,0.12); border: 1px solid rgba(245,166,35,0.2);
+    padding: 1px 6px; border-radius: 6px;
+}
+.cd-price-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.cd-price { font-size: 18px; font-weight: 800; color: #FFFFFF; font-variant-numeric: tabular-nums; }
+.cd-change { font-size: 12px; font-weight: 700; }
+.cd-change.up { color: #22C55E; }
+.cd-change.down { color: #EF4444; }
+.cd-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.cd-action-btn {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.06);
+    color: #A5B4C7; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s ease;
+}
+.cd-action-btn:hover { background: rgba(245,166,35,0.1); color: #F5A623; }
+.cd-action-btn:active { transform: scale(0.92); }
+.cd-action-btn.active { color: #F5A623; background: rgba(245,166,35,0.12); }
+
+/* ── Scrollable Content ── */
+.cd-content {
+    flex: 1; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px 16px 80px;
+}
+
+/* ── Live Price Card ── */
+.cd-price-card {
+    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px; padding: 16px; margin-bottom: 12px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.cd-price-main { display: flex; flex-direction: column; gap: 4px; }
+.cd-price-label { font-size: 11px; color: #6B7A8D; font-weight: 600; }
+.cd-price-big { font-size: 24px; font-weight: 800; color: #FFFFFF; font-variant-numeric: tabular-nums; }
+.cd-price-changes { display: flex; gap: 12px; }
+.cd-pc-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.cd-pc-label { font-size: 10px; color: #6B7A8D; font-weight: 600; }
+.cd-pc-value { font-size: 12px; font-weight: 700; }
+.cd-pc-value.up { color: #22C55E; }
+.cd-pc-value.down { color: #EF4444; }
+
+/* ── Chart Section ── */
+.cd-chart-section { margin-bottom: 16px; }
+.cd-tf-bar {
+    display: flex; gap: 4px; margin-bottom: 8px;
+    overflow-x: auto; scrollbar-width: none;
+}
+.cd-tf-bar::-webkit-scrollbar { display: none; }
+.cd-tf-btn {
+    flex-shrink: 0; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.06); background: #0B1220;
+    color: #6B7A8D; font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: all 0.2s ease; font-family: inherit;
+}
+.cd-tf-btn:active { transform: scale(0.94); }
+.cd-tf-btn.active {
+    background: rgba(245,166,35,0.12); border-color: rgba(245,166,35,0.3);
+    color: #F5A623;
+}
+.cd-chart {
+    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; height: 320px; overflow: hidden;
+}
+
+/* ── Section ── */
+.cd-section { margin-bottom: 16px; }
+.cd-section-title {
+    font-size: 14px; font-weight: 700; color: #FFFFFF;
+    margin: 0 0 10px;
+}
+
+/* ── Market Stats Grid ── */
+.cd-stats-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+.cd-stat-item {
+    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 12px;
+    display: flex; flex-direction: column; gap: 4px;
+}
+.cd-stat-label { font-size: 11px; color: #6B7A8D; font-weight: 600; }
+.cd-stat-value { font-size: 15px; font-weight: 700; color: #FFFFFF; font-variant-numeric: tabular-nums; }
+
+/* ── ATH / ATL ── */
+.cd-ath-atl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cd-ath-card, .cd-atl-card {
+    border-radius: 12px; padding: 12px;
+    display: flex; flex-direction: column; gap: 4px;
+    border: 1px solid rgba(255,255,255,0.06);
+}
+.cd-ath-card { background: rgba(34,197,94,0.06); }
+.cd-atl-card { background: rgba(239,68,68,0.06); }
+.cd-ath-label, .cd-atl-label { font-size: 11px; font-weight: 600; }
+.cd-ath-label { color: #22C55E; }
+.cd-atl-label { color: #EF4444; }
+.cd-ath-value, .cd-atl-value { font-size: 16px; font-weight: 800; color: #FFFFFF; }
+.cd-ath-change, .cd-atl-change { font-size: 11px; font-weight: 600; }
+.cd-ath-change { color: #22C55E; }
+.cd-atl-change { color: #EF4444; }
+
+/* ── Alert Card ── */
+.cd-alert-card {
+    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px; padding: 14px;
+    display: flex; flex-direction: column; gap: 10px;
+}
+.cd-alert-info { font-size: 13px; color: #A5B4C7; }
+.cd-alert-info strong { color: #FFFFFF; font-weight: 700; }
+.cd-alert-form { display: flex; gap: 8px; }
+.cd-alert-input-wrap {
+    position: relative; flex: 1;
+}
+.cd-alert-prefix {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    color: #6B7A8D; font-weight: 600;
+}
+.cd-alert-input {
+    width: 100%; height: 40px; border-radius: 10px;
+    background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08);
+    color: #FFFFFF; font-size: 14px; outline: none;
+    padding: 0 28px 0 12px; font-family: inherit;
+}
+.cd-alert-input:focus { border-color: rgba(245,166,35,0.3); }
+.cd-alert-btn {
+    padding: 0 16px; height: 40px; border-radius: 10px; border: none;
+    background: linear-gradient(135deg, #F5A623, #E0941A);
+    color: #0B1220; font-size: 13px; font-weight: 700; cursor: pointer;
+    font-family: inherit; transition: all 0.2s ease;
+    box-shadow: 0 2px 10px rgba(245,166,35,0.2);
+}
+.cd-alert-btn:active { transform: scale(0.96); }
+.cd-alert-list { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── F&G Widget ── */
+.cd-fg-widget {
+    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px; padding: 14px;
+    display: flex; align-items: center; gap: 12px;
+}
+.cd-fg-gauge-mini {
+    width: 48px; height: 48px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 800;
+    background: conic-gradient(#EF4444 0deg, #F5A623 108deg, #22C55E 216deg, rgba(255,255,255,0.06) 216deg 360deg);
+    position: relative; flex-shrink: 0;
+}
+.cd-fg-gauge-mini::after {
+    content: ''; position: absolute; inset: 4px; border-radius: 50%;
+    background: #0B1220;
+}
+.cd-fg-gauge-mini span { position: relative; z-index: 1; color: #FFFFFF; }
+.cd-fg-info { display: flex; flex-direction: column; gap: 2px; }
+.cd-fg-value { font-size: 18px; font-weight: 800; color: #FFFFFF; }
+.cd-fg-label { font-size: 12px; color: #A5B4C7; }
+
+/* ── AI Card ── */
+.cd-ai-card {
+    background: linear-gradient(135deg, rgba(245,166,35,0.06), rgba(255,255,255,0.02));
+    border: 1px solid rgba(245,166,35,0.12);
+    border-radius: 14px; padding: 14px;
+    font-size: 13px; line-height: 1.6; color: #A5B4C7;
+}
+
+/* ── Responsive ── */
+@media (max-width: 360px) {
+    .cd-price-big { font-size: 20px; }
+    .cd-price-changes { gap: 8px; }
+    .cd-chart { height: 280px; }
+    .cd-stats-grid { gap: 6px; }
+    .cd-stat-item { padding: 10px; }
+}

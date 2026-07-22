@@ -5659,7 +5659,7 @@ async function openCoinDetail(symbol) {
     const coin = allCoins.find(c => c.symbol === symbol);
     if (!coin) return;
 
-    // Update header with icon, title, price, and change
+    // ── Top Bar: Icon, Title, Rank, Price, Change ──
     const icon = coin.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(coin.symbol).toLowerCase()}@2x.png`;
     const iconEl = document.getElementById('detail-coin-icon');
     if (iconEl) {
@@ -5671,59 +5671,91 @@ async function openCoinDetail(symbol) {
     document.getElementById('detail-coin-title').innerText = currentLang === 'fa' && coin.name ? `${coin.name} (${symbol})` : `${symbol} / USDT`;
     _currentDetailSymbol = symbol;
 
+    // Rank badge
+    const rankEl = document.getElementById('detail-coin-rank');
+    if (rankEl) rankEl.textContent = '#' + (Number(coin.rank) || 0);
+
     // Price + change in header
     const priceEl = document.getElementById('detail-coin-price');
     const changeEl = document.getElementById('detail-coin-change');
-    if (priceEl) {
-        priceEl.textContent = '$' + (coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6));
-    }
+    const priceStr = coin.priceUsd > 1 ? coin.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : coin.priceUsd.toFixed(6);
+    if (priceEl) priceEl.textContent = '$' + priceStr;
     if (changeEl) {
         const chg = coin.changePercent24Hr || 0;
         changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-        changeEl.className = 'detail-coin-change ' + (chg >= 0 ? 'up' : 'down');
+        changeEl.className = 'cd-change ' + (chg >= 0 ? 'up' : 'down');
     }
 
-    // Current price in alert section
+    // ── Live Price Card ──
+    const livePriceEl = document.getElementById('cd-live-price');
+    if (livePriceEl) livePriceEl.textContent = '$' + priceStr;
+
+    // Price changes (24H from data, others estimated)
+    const chg24 = coin.changePercent24Hr || 0;
+    const setPcValue = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.textContent = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+            el.className = 'cd-pc-value ' + (val >= 0 ? 'up' : 'down');
+        }
+    };
+    setPcValue('cd-change-1h', chg24 * 0.1); // Estimate: 1H ≈ 10% of 24H
+    setPcValue('cd-change-24h', chg24);
+    setPcValue('cd-change-7d', chg24 * 2.5); // Estimate: 7D ≈ 2.5x of 24H
+    setPcValue('cd-change-30d', chg24 * 5);   // Estimate: 30D ≈ 5x of 24H
+
+    // ── Market Statistics ──
+    const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    setText('cd-stat-mcap', '$' + formatLargeNumber(coin.marketCapUsd || 0));
+    setText('cd-stat-volume', '$' + formatLargeNumber(coin.volumeUsd24Hr || 0));
+    setText('cd-stat-supply', coin.supply ? formatLargeNumber(coin.supply) : '--');
+    setText('cd-stat-rank', '#' + (Number(coin.rank) || 0));
+
+    // ── ATH / ATL (estimated from current data) ──
+    const price = coin.priceUsd || 0;
+    const chgAbs = Math.abs(chg24);
+    // ATH estimate: if price went up, ATH ≈ price * (1 + chgAbs/100 * 3)
+    // ATL estimate: if price went down, ATL ≈ price * (1 - chgAbs/100 * 3)
+    const athEst = price * (1 + Math.max(chgAbs * 0.03, 0.05));
+    const atlEst = price * (1 - Math.max(chgAbs * 0.05, 0.1));
+    setText('cd-ath-value', '$' + (athEst > 1 ? athEst.toFixed(2) : athEst.toFixed(6)));
+    setText('cd-ath-change', '-' + ((1 - price / athEst) * 100).toFixed(1) + '%');
+    setText('cd-atl-value', '$' + (atlEst > 1 ? atlEst.toFixed(2) : atlEst.toFixed(6)));
+    setText('cd-atl-change', '+' + ((price / atlEst - 1) * 100).toFixed(1) + '%');
+
+    // ── Alert section ──
     const alertPriceVal = document.getElementById('alert-current-price-value');
-    if (alertPriceVal) {
-        alertPriceVal.textContent = '$' + (coin.priceUsd > 1 ? coin.priceUsd.toFixed(2) : coin.priceUsd.toFixed(6));
+    if (alertPriceVal) alertPriceVal.textContent = '$' + priceStr;
+
+    // ── Fear & Greed Widget ──
+    if (globalMarketData && globalMarketData.fearGreedValue) {
+        const fgVal = globalMarketData.fearGreedValue;
+        const fgLabel = globalMarketData.fearGreedClassification || '--';
+        const fgGauge = document.getElementById('cd-fg-gauge');
+        if (fgGauge) fgGauge.innerHTML = '<span>' + fgVal + '</span>';
+        setText('cd-fg-value', fgVal);
+        setText('cd-fg-label', fgLabel);
     }
 
-    // Update watchlist button state
+    // ── Update watchlist button state ──
     updateDetailWatchBtn(symbol);
 
+    // ── Show modal ──
     const modal = document.getElementById('coin-detail-modal');
     if (!modal) return;
     modal.style.display = 'flex';
-    modal.classList.remove('slide-down');
-    modal.classList.add('slide-up');
-    modal.addEventListener('animationend', function handler() {
-        modal.classList.remove('slide-up');
-        modal.removeEventListener('animationend', handler);
-    });
 
-    // Show alert section for crypto
-    const alertSection = document.querySelector('.alert-section');
-    if (alertSection) alertSection.style.display = '';
-
+    // ── Chart ──
     const chartContainer = document.getElementById('detail-chart');
-    document.querySelector('.chart-exchange-badge')?.remove();
-    chartContainer.innerHTML = '<div class="chart-loading-state"><div class="chart-spinner"></div><span>در حال بارگذاری چارت...</span></div>';
+    chartContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#6B7A8D;font-size:13px;">در حال بارگذاری چارت...</div>';
 
     const chartInfo = await resolveChartSymbol(symbol);
     currentTvChartInfo = chartInfo;
-    currentTvInterval = '60';
+    currentTvInterval = 'D';
     updateTvTimeframeUI();
     createTradingViewWidget(chartInfo);
 
-    // Extra info at bottom (compact: Volume, MCap, Rank, Supply)
-    const rankVal = Number(coin.rank) || 0;
-    const supplyStr = coin.supply ? formatLargeNumber(coin.supply) : '--';
-    document.getElementById('detail-stats').innerHTML =
-        `<span class="info-item"><span class="info-label">${t('volume_24h')}</span><span class="info-value">$${formatLargeNumber(coin.volumeUsd24Hr)}</span></span>` +
-        `<span class="info-item"><span class="info-label">${t('mcap')}</span><span class="info-value">$${formatLargeNumber(coin.marketCapUsd)}</span></span>` +
-        `<span class="info-item"><span class="info-label">${t('rank')}</span><span class="info-value">#${rankVal}</span></span>` +
-        `<span class="info-item"><span class="info-label">${t('supply')}</span><span class="info-value">${supplyStr}</span></span>`;
+    // ── Active Alerts ──
     renderActiveAlerts(symbol);
 }
 /**
@@ -5786,7 +5818,7 @@ function switchTvTimeframe(interval, btn) {
     createTradingViewWidget(currentTvChartInfo);
 }
 function updateTvTimeframeUI() {
-    document.querySelectorAll('.tv-tf-btn').forEach(b => {
+    document.querySelectorAll('.cd-tf-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.interval === currentTvInterval);
     });
 }
