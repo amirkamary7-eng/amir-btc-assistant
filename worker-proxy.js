@@ -1528,14 +1528,19 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
   }
 }
 
+// Exchange priority order — STRICT sequential fallback per task spec:
+// Binance > Bybit > OKX > Bitget > KuCoin > MEXC > Gate > HTX
+// The first exchange that has a valid SYMBOLUSDT pair wins. Results are cached
+// 24h per symbol so subsequent opens are instant.
 const EXCHANGE_ORDER = [
   ['BINANCE', 'binance'],
   ['BYBIT', 'bybit'],
   ['OKX', 'okx'],
+  ['BITGET', 'bitget'],
   ['KUCOIN', 'kucoin'],
-  ['GATEIO', 'gateio'],
   ['MEXC', 'mexc'],
-  ['COINEX', 'coinex'],
+  ['GATEIO', 'gateio'],
+  ['HTX', 'htx'],
 ];
 
 const CHART_CHECKERS = {
@@ -1563,20 +1568,21 @@ const CHART_CHECKERS = {
       return Boolean(body?.code === '0' && Array.isArray(body?.data) && body.data.length > 0);
     },
   },
+  // Bitget: GET /api/v2/spot/market/tickers?symbol=BTCUSDT — returns array with data
+  bitget: {
+    buildUrl(symbol) {
+      return `https://api.bitget.com/api/v2/spot/market/tickers?symbol=${encodeURIComponent(`${symbol}USDT`)}`;
+    },
+    isMatch(body) {
+      return Boolean(body?.code === '00000' && Array.isArray(body?.data) && body.data.length > 0);
+    },
+  },
   kucoin: {
     buildUrl(symbol) {
       return `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${encodeURIComponent(`${symbol}-USDT`)}`;
     },
     isMatch(body) {
       return Boolean(body?.code === '200000');
-    },
-  },
-  gateio: {
-    buildUrl(symbol) {
-      return `https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${encodeURIComponent(`${symbol}_USDT`)}`;
-    },
-    isMatch(body) {
-      return Array.isArray(body) && body.length > 0;
     },
   },
   mexc: {
@@ -1587,12 +1593,21 @@ const CHART_CHECKERS = {
       return Boolean(body && typeof body === 'object' && 'price' in body);
     },
   },
-  coinex: {
+  gateio: {
     buildUrl(symbol) {
-      return `https://api.coinex.com/v1/market/ticker?market=${encodeURIComponent(`${symbol}USDT`)}`;
+      return `https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${encodeURIComponent(`${symbol}_USDT`)}`;
     },
     isMatch(body) {
-      return Boolean(body?.code === 0 && body?.data && typeof body.data.last === 'string');
+      return Array.isArray(body) && body.length > 0;
+    },
+  },
+  // HTX (Huobi): GET /market/detail/merged?symbol=btcusdt — returns {status:"ok", tick:{...}}
+  htx: {
+    buildUrl(symbol) {
+      return `https://api.huobi.pro/market/detail/merged?symbol=${encodeURIComponent(`${symbol}usdt`)}`;
+    },
+    isMatch(body) {
+      return Boolean(body?.status === 'ok' && body?.tick);
     },
   },
 };
@@ -1621,8 +1636,13 @@ function parseSpotTickerPrice(exchangeKey, body) {
     const price = Number(item?.last ?? item?.last_price);
     return Number.isFinite(price) ? price : null;
   }
-  if (exchangeKey === 'coinex') {
-    const price = Number(body?.data?.last);
+  if (exchangeKey === 'bitget') {
+    const item = Array.isArray(body?.data) ? body.data[0] : null;
+    const price = Number(item?.lastPr);
+    return Number.isFinite(price) ? price : null;
+  }
+  if (exchangeKey === 'htx') {
+    const price = Number(body?.tick?.close);
     return Number.isFinite(price) ? price : null;
   }
   return null;

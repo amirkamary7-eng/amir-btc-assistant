@@ -5887,9 +5887,95 @@ function closeNewsModal() {
 // Each call increments this token; if a newer call starts, older calls abort silently.
 let _detailLoadToken = 0;
 
+/**
+ * BUG 1 FIX — Fully clear ALL previous-asset state before opening a new one.
+ * Called at the START of both openCoinDetail and openForexDetail so no
+ * previous coin's logo, symbol, name, rank, price, alert price, chart,
+ * statistics, or watchlist button can bleed into the new asset.
+ *
+ * This is the root-cause fix for "BTC data remains visible when opening ETH":
+ * previously the icon/stats/watchlist-btn were only updated inside
+ * openCoinDetail (never openForexDetail), and nothing was reset during the
+ * async gap while the chart symbol was being resolved — so the old asset's
+ * values flashed or persisted.
+ */
+function resetDetailState() {
+    // ── Destroy any existing chart FIRST (prevents stale chart flash) ──
+    destroyTvWidget();
+    currentTvChartInfo = null;
+
+    // ── Reset top-bar identity ──
+    const iconEl = document.getElementById('detail-coin-icon');
+    if (iconEl) {
+        iconEl.removeAttribute('src');
+        iconEl.removeAttribute('data-symbol');
+        iconEl.style.visibility = 'hidden'; // hide until the new asset sets it
+    }
+    setText('detail-coin-title', '--');
+    setText('detail-coin-rank', '--');
+    setText('detail-coin-price', '--');
+    const changeEl = document.getElementById('detail-coin-change');
+    if (changeEl) { changeEl.textContent = '--'; changeEl.className = 'cd-change'; }
+
+    // ── Reset alert card ──
+    setText('alert-current-price-value', '--');
+    const alertList = document.getElementById('active-alerts');
+    if (alertList) alertList.innerHTML = '';
+    setText('cd-alert-status-value', 'غیرفعال');
+    setText('cd-alert-count-num', '0');
+
+    // ── Reset statistics grid ──
+    setText('cd-stat-mcap', '--');
+    setText('cd-stat-volume', '--');
+    setText('cd-stat-supply', '--');
+    setText('cd-stat-rank', '--');
+
+    // ── Reset watchlist button ──
+    const watchBtn = document.getElementById('detail-watch-btn');
+    if (watchBtn) {
+        watchBtn.classList.remove('active');
+        watchBtn.removeAttribute('data-symbol');
+        const svg = watchBtn.querySelector('svg');
+        if (svg) svg.setAttribute('fill', 'none');
+    }
+
+    // ── Reset alert direction toggle to default ──
+    document.querySelectorAll('.cd-alert-dir-btn').forEach(b => b.classList.remove('active'));
+    const defaultDirBtn = document.querySelector('.cd-alert-dir-btn[data-direction="above"]');
+    if (defaultDirBtn) defaultDirBtn.classList.add('active');
+    currentAlertDirection = 'above';
+
+    // ── Hide AI section (will be shown again if the new asset has analysis) ──
+    const aiSection = document.getElementById('cd-ai-section');
+    if (aiSection) aiSection.style.display = 'none';
+
+    // ── Clear alert price input ──
+    const alertInput = document.getElementById('alert-price');
+    if (alertInput) alertInput.value = '';
+
+    // ── Show skeleton loader in chart container (never blank) ──
+    showChartSkeleton();
+
+    // ── Reset live-price-refresh tracking ──
+    if (typeof refreshOpenDetailPrice !== 'undefined' && refreshOpenDetailPrice._lastPrice) {
+        refreshOpenDetailPrice._lastPrice = {};
+    }
+}
+
+// helper for resetDetailState
+function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+}
+
 async function openCoinDetail(symbol) {
     // Increment token to invalidate any in-flight older calls
     const token = ++_detailLoadToken;
+
+    // BUG 1 FIX: fully clear previous asset state BEFORE doing anything async.
+    // This ensures no previous coin's logo/price/stats/chart flashes while we
+    // load the new one.
+    resetDetailState();
 
     // Lazy-load TradingView widget on first use
     if (!window.TradingView) {
@@ -5911,6 +5997,7 @@ async function openCoinDetail(symbol) {
     if (iconEl) {
         iconEl.dataset.symbol = symbol;
         iconEl.src = icon;
+        iconEl.style.visibility = 'visible';
         iconEl.onerror = function() { iconFallback(this); };
     }
 
@@ -5933,11 +6020,11 @@ async function openCoinDetail(symbol) {
     }
 
     // ── Market Statistics ──
-    const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-    setText('cd-stat-mcap', '$' + formatLargeNumber(coin.marketCapUsd || 0));
-    setText('cd-stat-volume', '$' + formatLargeNumber(coin.volumeUsd24Hr || 0));
-    setText('cd-stat-supply', coin.supply ? formatLargeNumber(coin.supply) : '--');
-    setText('cd-stat-rank', '#' + (Number(coin.rank) || 0));
+    const setStatText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    setStatText('cd-stat-mcap', '$' + formatLargeNumber(coin.marketCapUsd || 0));
+    setStatText('cd-stat-volume', '$' + formatLargeNumber(coin.volumeUsd24Hr || 0));
+    setStatText('cd-stat-supply', coin.supply ? formatLargeNumber(coin.supply) : '--');
+    setStatText('cd-stat-rank', '#' + (Number(coin.rank) || 0));
 
     // ── Alert section: current price binding ──
     // CRITICAL: this must use the CURRENT coin's price, not a stale value from a previous call.
@@ -5952,10 +6039,7 @@ async function openCoinDetail(symbol) {
     if (!modal) return;
     modal.style.display = 'flex';
 
-    // ── Chart ──
-    const chartContainer = document.getElementById('detail-chart');
-    chartContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#6B7A8D;font-size:13px;">در حال بارگذاری چارت...</div>';
-
+    // ── Chart: skeleton already shown by resetDetailState; now resolve symbol ──
     const chartInfo = await resolveChartSymbol(symbol);
 
     // RACE GUARD: if a newer openCoinDetail call started while we were resolving the chart, abort.
@@ -5988,47 +6072,125 @@ async function openCoinDetail(symbol) {
  * ورودی: پارامترهای `chartInfo` را دریافت می‌کند.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
-function createTradingViewWidget(chartInfo) {
-    const chartContainer = document.getElementById('detail-chart');
-    if (!chartContainer) return;
-
-    // Clean up previous widget completely
+/**
+ * BUG 2 FIX — Proper TradingView widget lifecycle.
+ * Destroys the old widget instance, removes ALL iframes/scripts TradingView
+ * may have injected, and clears the container BEFORE creating a new widget.
+ * This eliminates "previous chart remains" and "chart never loads after
+ * switching" issues caused by leftover iframe state.
+ */
+function destroyTvWidget() {
+    // 1. Destroy the widget instance (TradingView.widget has a .remove() method)
     if (currentTvWidget) {
         try { currentTvWidget.remove(); } catch {}
         currentTvWidget = null;
     }
+    // 2. Remove the exchange badge (it's a sibling of the chart container)
     document.querySelector('.chart-exchange-badge')?.remove();
-    // Remove all TradingView artifacts before creating new widget
-    chartContainer.querySelectorAll('iframe').forEach(iframe => {
-        iframe.src = 'about:blank';
-        iframe.remove();
-    });
-    chartContainer.querySelectorAll('script').forEach(s => s.remove());
-    chartContainer.innerHTML = '';
+    // 3. Nuke every iframe inside the chart container (TradingView creates one
+    //    per widget instance; without removing them, switching assets stacks
+    //    stale charts and the new one may not render).
+    const chartContainer = document.getElementById('detail-chart');
+    if (chartContainer) {
+        chartContainer.querySelectorAll('iframe').forEach(iframe => {
+            try { iframe.src = 'about:blank'; } catch {}
+            iframe.remove();
+        });
+        chartContainer.querySelectorAll('script').forEach(s => s.remove());
+        chartContainer.innerHTML = '';
+    }
+}
 
-    if (typeof TradingView !== 'undefined' && chartInfo && chartInfo.found) {
+/**
+ * BUG 5 FIX — Show a premium skeleton loader in the chart container while
+ * the chart is loading. Never show a blank area.
+ */
+function showChartSkeleton() {
+    const chartContainer = document.getElementById('detail-chart');
+    if (!chartContainer) return;
+    destroyTvWidget();
+    chartContainer.innerHTML =
+        '<div class="cd-chart-skeleton">' +
+            '<div class="cd-chart-skeleton-bar"></div>' +
+            '<div class="cd-chart-skeleton-bar"></div>' +
+            '<div class="cd-chart-skeleton-bar"></div>' +
+            '<div class="cd-chart-skeleton-canvas"></div>' +
+        '</div>';
+}
+
+/**
+ * BUG 5 FIX — Show a "fallback searching" state while the exchange priority
+ * system tries the next exchange.
+ */
+function showChartFallbackSearching(exchangeName) {
+    const chartContainer = document.getElementById('detail-chart');
+    if (!chartContainer) return;
+    chartContainer.innerHTML =
+        '<div class="cd-chart-status">' +
+            '<div class="cd-chart-fallback-search">' +
+                '<div class="cd-chart-mini-spinner"></div>' +
+                '<span>جستجوی منبع جایگزین' + (exchangeName ? ' (' + exchangeName + ')' : '') + '...</span>' +
+            '</div>' +
+        '</div>';
+}
+
+/**
+ * BUG 5 FIX — Show an elegant "chart unavailable" card (never raw TradingView
+ * errors). Called only when ALL exchanges in the priority chain have failed.
+ */
+function showChartUnavailable() {
+    const chartContainer = document.getElementById('detail-chart');
+    if (!chartContainer) return;
+    destroyTvWidget();
+    chartContainer.innerHTML =
+        '<div class="cd-chart-status">' +
+            '<div class="cd-chart-status-icon error">' +
+                '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+                    '<path d="M3 3v18h18"/>' +
+                    '<path d="M7 16l4-8 4 5 5-9"/>' +
+                '</svg>' +
+            '</div>' +
+            '<div class="cd-chart-status-title">نمودار این دارایی در حال حاضر در دسترس نیست</div>' +
+            '<div class="cd-chart-status-sub">لطفاً بعداً دوباره تلاش کنید یا نماد دیگری را بررسی کنید.</div>' +
+        '</div>';
+}
+
+function createTradingViewWidget(chartInfo) {
+    const chartContainer = document.getElementById('detail-chart');
+    if (!chartContainer) return;
+
+    // BUG 2 FIX: full destroy + clear before recreating
+    destroyTvWidget();
+
+    if (typeof TradingView !== 'undefined' && chartInfo && chartInfo.found && chartInfo.tv_symbol) {
         if (chartInfo.exchange) {
             const badge = document.createElement('div');
             badge.className = 'chart-exchange-badge';
             badge.innerText = chartInfo.exchange.toUpperCase();
             chartContainer.parentNode.insertBefore(badge, chartContainer);
         }
-        currentTvWidget = new TradingView.widget({
-            width: '100%',
-            height: '100%',
-            symbol: chartInfo.tv_symbol,
-            interval: currentTvInterval,
-            theme: 'dark',
-            style: '1',
-            locale: 'en',
-            container_id: 'detail-chart',
-            hide_side_toolbar: true,
-            disabled_features: ['header_widget_dom_node'],
-            // Enable auto-resize to prevent layout issues
-            autosize: true,
-        });
+        try {
+            currentTvWidget = new TradingView.widget({
+                width: '100%',
+                height: '100%',
+                symbol: chartInfo.tv_symbol,
+                interval: currentTvInterval,
+                theme: 'dark',
+                style: '1',
+                locale: 'en',
+                container_id: 'detail-chart',
+                hide_side_toolbar: true,
+                disabled_features: ['header_widget_dom_node'],
+                // Enable auto-resize to prevent layout issues
+                autosize: true,
+            });
+        } catch (e) {
+            console.warn('[CHART] TradingView.widget creation failed:', e);
+            showChartUnavailable();
+        }
     } else {
-        chartContainer.innerHTML = '<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg><br>' + t('chart_unavailable') + '</div>';
+        // BUG 5 FIX: elegant fallback card instead of raw empty-state
+        showChartUnavailable();
     }
 }
 /**
@@ -6100,27 +6262,8 @@ function closeCoinDetail() {
         }
     }
 
-    document.querySelector('.chart-exchange-badge')?.remove();
-    if (currentTvWidget) {
-        try {
-            // TradingView creates an iframe inside the container.
-            // Remove the widget, then explicitly destroy any remaining iframes.
-            currentTvWidget.remove();
-        } catch {}
-        currentTvWidget = null;
-    }
-    // Ensure ALL iframes and TradingView artifacts are removed
-    const chartContainer = document.getElementById('detail-chart');
-    if (chartContainer) {
-        // Remove all iframes (TradingView may create multiple)
-        chartContainer.querySelectorAll('iframe').forEach(iframe => {
-            iframe.src = 'about:blank';
-            iframe.remove();
-        });
-        // Remove any script elements injected by TradingView
-        chartContainer.querySelectorAll('script').forEach(s => s.remove());
-        chartContainer.innerHTML = '';
-    }
+    // BUG 2 FIX: centralized chart destruction (was inline, duplicated).
+    destroyTvWidget();
     currentTvChartInfo = null;
     _currentDetailSymbol = null;
     // BUG 1 FIX: reset the alert current-price so no stale value survives a close.
@@ -6151,6 +6294,11 @@ function openForexDetail(symbol) {
     const pair = allForexPairs.find(f => f.symbol === symbol);
     if (!pair) return;
 
+    // BUG 1 FIX: fully clear previous asset state BEFORE populating forex data.
+    // This destroys any crypto chart, resets the logo/icon, stats grid, alert
+    // card, watchlist button, etc. so no previous crypto data bleeds in.
+    resetDetailState();
+
     const modal = document.getElementById('coin-detail-modal');
     if (!modal) return;
     modal.style.display = 'flex';
@@ -6161,8 +6309,34 @@ function openForexDetail(symbol) {
         modal.removeEventListener('animationend', handler);
     });
 
+    // ── Top bar: set a category icon for forex/metals (crypto logo is N/A) ──
+    // resetDetailState hid the icon; for forex we show a category badge instead
+    // of a coin logo so the user never sees a stale crypto logo.
+    const iconEl = document.getElementById('detail-coin-icon');
+    if (iconEl) {
+        const cat = pair.category || 'major';
+        const catIcons = {
+            major: '💱', cross: '💱', metal: '🥇', index: '📊', commodity: '🛢️',
+        };
+        iconEl.removeAttribute('src');
+        iconEl.removeAttribute('data-symbol');
+        iconEl.onerror = null;
+        // Use a data-URI SVG with the emoji so the img element shows something clean
+        const emoji = catIcons[cat] || '💱';
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#0B1220" stroke="rgba(245,166,35,0.2)" stroke-width="1"/><text x="40" y="52" font-size="36" text-anchor="middle">${emoji}</text></svg>`;
+        iconEl.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        iconEl.style.visibility = 'visible';
+    }
+
     document.getElementById('detail-coin-title').innerText = pair.name || symbol;
     _currentDetailSymbol = symbol;
+
+    // Rank badge — forex has no rank; show category badge instead
+    const rankEl = document.getElementById('detail-coin-rank');
+    if (rankEl) {
+        const catShort = { major: 'FX', cross: 'FX', metal: 'XAU', index: 'IDX', commodity: 'COM' }[pair.category || 'major'] || 'FX';
+        rankEl.textContent = catShort;
+    }
 
     // Price in header for forex — compute formatted price string once
     const priceEl = document.getElementById('detail-coin-price');
@@ -6184,9 +6358,10 @@ function openForexDetail(symbol) {
         alertPriceVal.textContent = pair.price > 0 ? '$' + forexPriceStr : '--';
     }
 
-    const chartContainer = document.getElementById('detail-chart');
-    chartContainer.innerHTML = '<div class="chart-loading-state"><div class="chart-spinner"></div></div>';
+    // ── Update watchlist button state (forex symbols can be watchlisted too) ──
+    updateDetailWatchBtn(symbol);
 
+    // BUG 2 FIX: chart skeleton already shown by resetDetailState; now build chart info
     // Build chart info — extract exchange from tvSymbol prefix
     const tvSym = pair.tvSymbol || `FX:${symbol}`;
     const exchangePart = tvSym.split(':')[0] || 'FX';

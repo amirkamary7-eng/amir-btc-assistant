@@ -437,6 +437,23 @@
             </div>
         </div>
 
+        <!-- ═══ MKT: Market Pulse Bar (top gainer + top loser quick-pulse) ═══ -->
+        <div class="mkt-pulse-bar" id="mkt-pulse-bar" role="region" aria-label="Market pulse">
+            <div class="mkt-pulse-item mkt-pulse-gainer" id="mkt-pulse-gainer" onclick="openCoinDetail(this.dataset.symbol)" role="button" tabindex="0">
+                <span class="mkt-pulse-label">بیشترین رشد</span>
+                <span class="mkt-pulse-sym" id="mkt-pulse-gainer-sym">--</span>
+                <span class="mkt-pulse-chg up" id="mkt-pulse-gainer-chg">--</span>
+                <svg class="mkt-pulse-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
+            </div>
+            <div class="mkt-pulse-divider"></div>
+            <div class="mkt-pulse-item mkt-pulse-loser" id="mkt-pulse-loser" onclick="openCoinDetail(this.dataset.symbol)" role="button" tabindex="0">
+                <svg class="mkt-pulse-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+                <span class="mkt-pulse-chg down" id="mkt-pulse-loser-chg">--</span>
+                <span class="mkt-pulse-sym" id="mkt-pulse-loser-sym">--</span>
+                <span class="mkt-pulse-label">بیشترین ریزش</span>
+            </div>
+        </div>
+
         <!-- ═══ MKT: Coin List ═══ -->
         <div class="mkt-coin-list" id="coin-list" role="list"></div>
 
