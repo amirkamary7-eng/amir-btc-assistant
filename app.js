@@ -6331,11 +6331,18 @@ function openForexDetail(symbol) {
     document.getElementById('detail-coin-title').innerText = pair.name || symbol;
     _currentDetailSymbol = symbol;
 
-    // Rank badge — forex has no rank; show category badge instead
+    // Rank badge — forex has no rank; show symbol-aware category badge instead
     const rankEl = document.getElementById('detail-coin-rank');
     if (rankEl) {
-        const catShort = { major: 'FX', cross: 'FX', metal: 'XAU', index: 'IDX', commodity: 'COM' }[pair.category || 'major'] || 'FX';
-        rankEl.textContent = catShort;
+        // Metals: show the actual metal code (XAU/XAU) from the symbol prefix
+        const cat = pair.category || 'major';
+        let rankText;
+        if (cat === 'metal') {
+            rankText = symbol.slice(0, 3); // XAU for XAUUSD, XAG for XAGUSD
+        } else {
+            rankText = { major: 'FX', cross: 'FX', index: 'IDX', commodity: 'COM' }[cat] || 'FX';
+        }
+        rankEl.textContent = rankText;
     }
 
     // Price in header for forex — compute formatted price string once
