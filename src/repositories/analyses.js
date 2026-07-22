@@ -48,8 +48,36 @@ export function createAnalysisRepository(deps) {
   let _schemaVerified = false;
   async function ensureSchema(env) {
     if (_schemaVerified) return;
-    // Run ALL ALTER TABLEs in a SINGLE query to avoid 7 separate Pool creations
+    // FIX: CREATE TABLE IF NOT EXISTS as a safety net. Previously ensureSchema
+    // only ran ALTER TABLE ADD COLUMN — if the base table didn't exist (e.g.
+    // external SQLAlchemy migration never ran on this DB), the ALTER failed
+    // silently and every subsequent INSERT/SELECT failed with "relation does
+    // not exist". This made publish (create) fail while the list endpoint
+    // returned empty results (errors swallowed). Now the table is guaranteed
+    // to exist before any ALTER or INSERT.
+    const createTableSql = `
+      CREATE TABLE IF NOT EXISTS analyses (
+        id VARCHAR(64) PRIMARY KEY,
+        coin VARCHAR(32) NOT NULL,
+        timeframe VARCHAR(16) NOT NULL DEFAULT '1d',
+        image VARCHAR(512) DEFAULT '',
+        text TEXT NOT NULL,
+        title VARCHAR(256) DEFAULT '',
+        support_level VARCHAR(64) DEFAULT '',
+        current_price VARCHAR(64) DEFAULT '',
+        resistance_level VARCHAR(64) DEFAULT '',
+        views_count INTEGER NOT NULL DEFAULT 0,
+        featured BOOLEAN NOT NULL DEFAULT FALSE,
+        category VARCHAR(16) NOT NULL DEFAULT 'crypto',
+        author VARCHAR(128) NOT NULL DEFAULT '',
+        author_id VARCHAR(64) DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `;
+    // Run CREATE TABLE + all ALTER TABLEs in a SINGLE query to avoid multiple Pool creations
     const batchSql = `
+      ${createTableSql}
       ALTER TABLE analyses ADD COLUMN IF NOT EXISTS title VARCHAR(256) DEFAULT '';
       ALTER TABLE analyses ADD COLUMN IF NOT EXISTS support_level VARCHAR(64) DEFAULT '';
       ALTER TABLE analyses ADD COLUMN IF NOT EXISTS current_price VARCHAR(64) DEFAULT '';
@@ -57,6 +85,10 @@ export function createAnalysisRepository(deps) {
       ALTER TABLE analyses ADD COLUMN IF NOT EXISTS views_count INTEGER DEFAULT 0 NOT NULL;
       ALTER TABLE analyses ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT FALSE NOT NULL;
       ALTER TABLE analyses ADD COLUMN IF NOT EXISTS category VARCHAR(16) DEFAULT 'crypto' NOT NULL;
+      ALTER TABLE analyses ADD COLUMN IF NOT EXISTS author VARCHAR(128) NOT NULL DEFAULT '';
+      ALTER TABLE analyses ADD COLUMN IF NOT EXISTS author_id VARCHAR(64) DEFAULT '';
+      CREATE INDEX IF NOT EXISTS idx_analyses_created_at ON analyses (created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_analyses_featured ON analyses (featured) WHERE featured = TRUE;
     `;
     try {
       await queryDb(env, batchSql);
