@@ -4442,8 +4442,17 @@ export default {
         return await referralHandlers.handleStats(request, env);
       }
 
+      if (request.method === 'GET' && url.pathname === '/api/referrals/history') {
+        return await referralHandlers.handleHistory(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/referrals/leaderboard') {
+        return await referralHandlers.handleLeaderboard(request, env);
+      }
+
+      // DEPRECATED: /api/referrals/tokens — use /api/wallet instead
       if (request.method === 'GET' && url.pathname === '/api/referrals/tokens') {
-        return await referralHandlers.handleTokens(request, env);
+        return await walletHandlers.handleGetWallet(request, env);
       }
 
       // Wallet API Routes
