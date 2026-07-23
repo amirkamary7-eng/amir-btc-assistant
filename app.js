@@ -909,8 +909,12 @@ async function bootstrapUser() {
         }
 
         // ── Membership lock gate ──
+        // Backend-verified: bootstrap returns channel_joined from a real Telegram
+        // getChatMember check (src/controllers/users.js line 113-117). If false,
+        // show the join-lock with 'not-joined' state. If true, hide the lock.
         if (data.channel_joined === false) {
             showJoinLock();
+            setJoinLockState('not-joined');
         } else {
             hideJoinLock();
         }
@@ -8491,6 +8495,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // any user to fake admin by setting localStorage.setItem('is_admin', '1').
     // Now we wait for bootstrapUser() to confirm admin status from the server.
 
+    // ── JOIN LOCK: Show loading state immediately ──
+    // The overlay is already visible (display:flex in HTML). Set the loading
+    // state so the user sees "Checking membership..." while bootstrap runs.
+    // Bootstrap will either hideJoinLock() (if channel_joined=true) or
+    // setJoinLockState('not-joined') (if false). This runs BEFORE any app
+    // content renders, so no bypass is possible.
+    showJoinLock();
+    setJoinLockState('loading');
+
     // ── Phase 1: Apply language + render UI from cache immediately ──
     applyLanguage();
     loadUser();
@@ -8859,53 +8872,127 @@ Object.defineProperty(window, 'BOT_USERNAME', { get: () => BOT_USERNAME });
 //#region Join Lock Screen
 // ============================================================================
 
-let _joinLockShown = false;
+// ============================================================================
+//#region Membership Lock — Backend-verified, no client bypass
+// ============================================================================
 
+let _joinLockShown = false;
+let _joinVerifying = false; // prevent double-click on verify button
+
+/**
+ * Show the membership lock overlay and lock the app body.
+ * Called at app startup (before bootstrap) and whenever membership is not confirmed.
+ */
 function showJoinLock() {
-    if (_joinLockShown) return;
     _joinLockShown = true;
+    document.body.classList.add('jl-locked');
     const overlay = document.getElementById('join-lock-overlay');
-    if (overlay) {
-        overlay.style.display = 'flex';
-        applyLanguage();
+    if (overlay) overlay.style.display = 'flex';
+    // Wire up the verify button (idempotent — safe to call multiple times)
+    const verifyBtn = document.getElementById('join-lock-verify-btn');
+    if (verifyBtn) {
+        verifyBtn.removeEventListener('click', recheckJoinMembership);
+        verifyBtn.addEventListener('click', recheckJoinMembership);
     }
-    document.getElementById('join-lock-verify-btn')?.addEventListener('click', recheckJoinMembership);
-    document.getElementById('join-lock-bot-btn')?.addEventListener('click', () => {
-        const tg = getTg();
-        if (tg?.close) { tg.close(); }
-        else { window.location.href = 'https://t.me/Amir_BTC_AssistantBot'; }
-    });
 }
 
+/**
+ * Hide the membership lock overlay and unlock the app body.
+ * ONLY called after backend confirms channel_joined=true.
+ */
 function hideJoinLock() {
-    if (!_joinLockShown) return;
     _joinLockShown = false;
+    document.body.classList.remove('jl-locked');
     const overlay = document.getElementById('join-lock-overlay');
     if (overlay) overlay.style.display = 'none';
 }
 
+/**
+ * Set the join-lock UI state: 'loading' | 'not-joined' | 'error' | 'joined'
+ * Each state shows appropriate title, desc, and action buttons.
+ */
+function setJoinLockState(state, errorMsg) {
+    const titleEl = document.getElementById('join-lock-title');
+    const descEl = document.getElementById('join-lock-desc');
+    const actionsEl = document.getElementById('join-lock-actions');
+    const loadingEl = document.getElementById('join-lock-loading');
+    const errorEl = document.getElementById('join-lock-error');
+    const isFa = currentLang === 'fa';
+
+    if (errorEl) {
+        if (errorMsg) { errorEl.textContent = errorMsg; errorEl.style.display = 'block'; }
+        else { errorEl.style.display = 'none'; }
+    }
+
+    if (state === 'loading') {
+        if (titleEl) titleEl.textContent = isFa ? 'در حال بررسی وضعیت عضویت...' : 'Checking membership...';
+        if (descEl) descEl.textContent = isFa ? 'لطفاً چند لحظه صبر کنید.' : 'Please wait a moment.';
+        if (actionsEl) actionsEl.style.display = 'none';
+        if (loadingEl) loadingEl.style.display = 'flex';
+    } else if (state === 'not-joined') {
+        if (titleEl) titleEl.textContent = isFa ? 'عضویت در کانال الزامی است' : 'Channel membership required';
+        if (descEl) descEl.textContent = isFa ? 'برای استفاده از امکانات برنامه، ابتدا باید عضو کانال رسمی شوید.' : 'To use the app, please join our official channel first.';
+        if (actionsEl) actionsEl.style.display = 'flex';
+        if (loadingEl) loadingEl.style.display = 'none';
+    } else if (state === 'error') {
+        if (titleEl) titleEl.textContent = isFa ? 'خطا در بررسی عضویت' : 'Verification Error';
+        if (descEl) descEl.textContent = isFa ? 'بررسی عضویت با مشکل مواجه شد. لطفاً چند لحظه دیگر دوباره تلاش کنید.' : 'Membership check failed. Please try again in a moment.';
+        if (actionsEl) actionsEl.style.display = 'flex';
+        if (loadingEl) loadingEl.style.display = 'none';
+    } else if (state === 'joined') {
+        if (titleEl) titleEl.textContent = isFa ? 'عضویت تأیید شد!' : 'Membership verified!';
+        if (descEl) descEl.textContent = isFa ? 'در حال ورود به برنامه...' : 'Entering app...';
+        if (actionsEl) actionsEl.style.display = 'none';
+        if (loadingEl) loadingEl.style.display = 'flex';
+    }
+}
+
+/**
+ * Recheck channel membership via backend.
+ * Called when user clicks "تأیید عضویت" button.
+ * Prevents double-clicks with _joinVerifying flag.
+ */
 async function recheckJoinMembership() {
+    if (_joinVerifying) return; // prevent double-click
+    _joinVerifying = true;
+
     const btn = document.getElementById('join-lock-verify-btn');
-    const errEl = document.getElementById('join-lock-error');
-    if (btn) { btn.disabled = true; btn.textContent = '...'; }
-    if (errEl) errEl.style.display = 'none';
+    if (btn) { btn.disabled = true; }
+    setJoinLockState('loading');
+
     try {
         const data = await apiFetch('/api/users/check-join', { method: 'POST' });
-        if (data.channel_joined === true) {
-            hideJoinLock();
-            refreshUI();
-            getTg()?.showPopup?.({ title: '✅', message: currentLang === 'fa' ? 'عضویت تأیید شد!' : 'Membership verified!', buttons: [{ type: 'ok' }] });
+        if (data && data.channel_joined === true) {
+            setJoinLockState('joined');
+            // Brief delay so user sees the success state, then enter app
+            setTimeout(() => {
+                hideJoinLock();
+                refreshUI();
+                getTg()?.HapticFeedback?.notificationOccurred?.('success');
+            }, 600);
         } else {
-            if (errEl) { errEl.textContent = currentLang === 'fa' ? 'هنوز عضو کانال نشده‌اید.' : 'Not a channel member yet.'; errEl.style.display = 'block'; }
+            // Still not a member
+            setJoinLockState('not-joined');
+            const isFa = currentLang === 'fa';
+            const errorEl = document.getElementById('join-lock-error');
+            if (errorEl) {
+                errorEl.textContent = isFa ? 'هنوز عضویت شما تأیید نشده است. لطفاً ابتدا عضو کانال شوید و سپس دوباره تأیید عضویت را انتخاب کنید.' : 'Membership not confirmed yet. Please join the channel first, then click verify again.';
+                errorEl.style.display = 'block';
+            }
+            getTg()?.HapticFeedback?.notificationOccurred?.('warning');
         }
     } catch (e) {
-        if (errEl) { errEl.textContent = currentLang === 'fa' ? 'خطا در بررسی. دوباره تلاش کنید.' : 'Error checking. Try again.'; errEl.style.display = 'block'; }
+        setJoinLockState('error');
+        getTg()?.HapticFeedback?.notificationOccurred?.('error');
+    } finally {
+        _joinVerifying = false;
+        if (btn) { btn.disabled = false; }
     }
-    if (btn) { btn.disabled = false; applyLanguage(); }
 }
 
 window.showJoinLock = showJoinLock;
 window.hideJoinLock = hideJoinLock;
 window.recheckJoinMembership = recheckJoinMembership;
+window.setJoinLockState = setJoinLockState;
 
 //#endregion

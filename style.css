@@ -8440,3 +8440,170 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     vertical-align: middle;
 }
 @keyframes tkSpin { to { transform: rotate(360deg); } }
+
+/* ============================================================================
+   MEMBERSHIP LOCK — Premium Dark+Gold full-page gate
+   Backend-verified. CSS hides app content until verified (security layer).
+   ============================================================================ */
+/* Security: hide ALL app content until membership is verified.
+   The JS removes this class only after backend confirms channel_joined=true. */
+body.jl-locked #app-root,
+body.jl-locked .app-header,
+body.jl-locked .bottom-nav,
+body.jl-locked .page,
+body.jl-locked .hero-banner-slider,
+body.jl-locked .market-ticker,
+body.jl-locked .modal,
+body.jl-locked .cd-fullscreen {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+.join-lock-overlay {
+    position: fixed; inset: 0; z-index: 999999;
+    background: radial-gradient(ellipse at center, #0d1326 0%, #050810 70%, #02050b 100%);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px; text-align: center;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    animation: jlFadeIn 0.4s ease;
+}
+@keyframes jlFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.join-lock-card {
+    position: relative; z-index: 2;
+    max-width: 380px; width: 100%;
+    background: linear-gradient(180deg, rgba(14, 22, 35, 0.9) 0%, rgba(11, 18, 32, 0.92) 100%);
+    border: 1px solid rgba(245, 166, 35, 0.15);
+    border-radius: 24px;
+    padding: 40px 28px 32px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(245, 166, 35, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    animation: jlCardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+}
+@keyframes jlCardIn {
+    from { opacity: 0; transform: translateY(20px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Icon scene */
+.join-lock-icon-scene {
+    position: relative;
+    width: 90px; height: 90px;
+    margin: 0 auto 20px;
+    display: flex; align-items: center; justify-content: center;
+}
+.join-lock-icon-glow {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 120px; height: 120px;
+    background: radial-gradient(circle, rgba(245, 166, 35, 0.22) 0%, transparent 65%);
+    border-radius: 50%;
+    animation: jlGlowPulse 3.5s ease-in-out infinite;
+    z-index: 0;
+}
+.join-lock-icon-ring {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80px; height: 80px;
+    border: 1.5px solid rgba(245, 166, 35, 0.2);
+    border-radius: 50%;
+    animation: jlRingPulse 3s ease-in-out infinite;
+}
+@keyframes jlRingPulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.15; }
+}
+@keyframes jlGlowPulse {
+    0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(1); }
+    50% { opacity: 0.85; transform: translate(-50%, -50%) scale(1.15); }
+}
+.join-lock-icon {
+    position: relative; z-index: 2;
+    width: 56px; height: 56px;
+    filter: drop-shadow(0 0 10px rgba(245, 166, 35, 0.35));
+    animation: jlIconFloat 4s ease-in-out infinite;
+}
+@keyframes jlIconFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+}
+
+/* Badge */
+.join-lock-badge {
+    font-size: 10px; font-weight: 800; color: #F5A623;
+    letter-spacing: 2.5px; text-transform: uppercase;
+    background: rgba(245, 166, 35, 0.08);
+    border: 1px solid rgba(245, 166, 35, 0.2);
+    padding: 4px 14px; border-radius: 20px;
+    margin-bottom: 16px;
+    display: inline-block;
+}
+
+.join-lock-title {
+    font-size: 19px; font-weight: 800; color: #FFFFFF;
+    margin: 0 0 10px; line-height: 1.35; letter-spacing: -0.3px;
+}
+.join-lock-desc {
+    font-size: 13.5px; color: #8B96A8; line-height: 1.65;
+    margin: 0 0 24px; max-width: 300px; margin-left: auto; margin-right: auto;
+}
+
+/* Action buttons */
+.join-lock-actions {
+    display: flex; flex-direction: column; gap: 10px;
+}
+.join-lock-btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; height: 46px;
+    border-radius: 12px; font-size: 14px; font-weight: 700;
+    border: none; cursor: pointer; text-decoration: none;
+    font-family: inherit;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+.join-lock-btn:active { transform: scale(0.97); }
+.join-lock-btn-primary {
+    background: linear-gradient(135deg, #F5A623, #FFCC4D);
+    color: #020611;
+    box-shadow: 0 4px 16px rgba(245, 166, 35, 0.3);
+}
+.join-lock-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(245, 166, 35, 0.4); filter: brightness(1.05); }
+.join-lock-btn-secondary {
+    background: rgba(245, 166, 35, 0.1);
+    color: #F5A623;
+    border: 1px solid rgba(245, 166, 35, 0.25);
+}
+.join-lock-btn-secondary:hover { background: rgba(245, 166, 35, 0.15); border-color: rgba(245, 166, 35, 0.4); }
+.join-lock-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; filter: grayscale(0.3); }
+
+/* Loading spinner */
+.join-lock-loading {
+    display: flex; align-items: center; justify-content: center;
+    padding: 12px 0;
+}
+.join-lock-spinner {
+    width: 28px; height: 28px;
+    border: 3px solid rgba(245, 166, 35, 0.15);
+    border-top-color: #F5A623;
+    border-radius: 50%;
+    animation: jlSpin 0.8s linear infinite;
+}
+@keyframes jlSpin { to { transform: rotate(360deg); } }
+
+/* Error message */
+.join-lock-error {
+    font-size: 13px; color: #EF4444; font-weight: 500;
+    margin-top: 12px; line-height: 1.5;
+    animation: jlShake 0.4s ease;
+}
+@keyframes jlShake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+}
+
+/* Responsive */
+@media (max-width: 360px) {
+    .join-lock-card { padding: 32px 22px 28px; border-radius: 20px; }
+    .join-lock-title { font-size: 18px; }
+    .join-lock-desc { font-size: 13px; }
+    .join-lock-btn { height: 42px; font-size: 13px; }
+}

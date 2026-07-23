@@ -95,7 +95,7 @@
     <script>window.API_BASE = window.API_BASE || "https://amir-btc-assistant-api-production.amirkamari9939.workers.dev";</script>
 </head>
 <!-- #endregion -->
-<body>
+<body class="jl-locked">
     <!-- #region Body -->
     <!-- ==================== ساختار اصلی رابط کاربری ==================== -->
 
@@ -2039,63 +2039,63 @@
     <!-- AB Token Wallet Full Page -->
     <div id="wallet-full-page" class="wallet-full-page"></div>
 
-    <!-- Full-Screen Membership Lock -->
-    <div id="join-lock-overlay" class="join-lock-overlay" style="display:none;">
+    <!-- Full-Screen Membership Lock — Premium Dark+Gold redesign.
+         Backend-verified on every app entry. No client bypass possible. -->
+    <div id="join-lock-overlay" class="join-lock-overlay" style="display:flex;">
         <div class="join-lock-card">
-            <div class="join-lock-icon">🔒</div>
-            <h2 class="join-lock-title" data-i18n="join_lock_title">عضویت در کانال الزامی است</h2>
-            <p class="join-lock-desc" data-i18n="join_lock_desc">برای استفاده از Amir BTC Assistant ابتدا باید عضو کانال رسمی شوید.</p>
-            <a id="join-lock-channel-btn" class="join-lock-btn join-lock-btn-primary" href="https://t.me/amir_btc_2024" target="_blank" data-i18n="join_lock_channel_btn">عضویت در کانال</a>
-            <button id="join-lock-verify-btn" class="join-lock-btn join-lock-btn-secondary" data-i18n="join_lock_verify_btn">بررسی عضویت</button>
-            <button id="join-lock-bot-btn" class="join-lock-btn join-lock-btn-ghost" data-i18n="join_lock_bot_btn">بازگشت به ربات</button>
+            <!-- Premium animated icon -->
+            <div class="join-lock-icon-scene">
+                <div class="join-lock-icon-glow"></div>
+                <div class="join-lock-icon-ring"></div>
+                <svg class="join-lock-icon" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="jl-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#FFCC4D"/>
+                            <stop offset="100%" stop-color="#F5A623"/>
+                        </linearGradient>
+                    </defs>
+                    <!-- Shield -->
+                    <path d="M40 6 L64 14 V36 C64 52 54 64 40 72 C26 64 16 52 16 36 V14 Z"
+                          fill="rgba(245,166,35,0.08)" stroke="url(#jl-grad)" stroke-width="2.5" stroke-linejoin="round"/>
+                    <!-- Lock body -->
+                    <rect x="28" y="34" width="24" height="20" rx="4" fill="url(#jl-grad)"/>
+                    <!-- Lock shackle -->
+                    <path d="M32 34 V28 C32 23 36 20 40 20 C44 20 48 23 48 28 V34" stroke="url(#jl-grad)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                    <!-- Keyhole -->
+                    <circle cx="40" cy="42" r="3" fill="#0B1220"/>
+                    <rect x="39" y="44" width="2" height="6" rx="1" fill="#0B1220"/>
+                </svg>
+            </div>
+
+            <!-- Badge -->
+            <div class="join-lock-badge">AMIRBTC</div>
+
+            <!-- Dynamic content area (states: loading / not-joined / error) -->
+            <h2 class="join-lock-title" id="join-lock-title">در حال بررسی وضعیت عضویت...</h2>
+            <p class="join-lock-desc" id="join-lock-desc">لطفاً چند لحظه صبر کنید.</p>
+
+            <!-- Action buttons (shown/hidden per state) -->
+            <div class="join-lock-actions" id="join-lock-actions" style="display:none;">
+                <a id="join-lock-channel-btn" class="join-lock-btn join-lock-btn-primary" href="https://t.me/amir_btc_2024" target="_blank">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                    <span>عضویت در کانال</span>
+                </a>
+                <button id="join-lock-verify-btn" class="join-lock-btn join-lock-btn-secondary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                    <span>تأیید عضویت</span>
+                </button>
+            </div>
+
+            <!-- Loading spinner (shown during verification) -->
+            <div class="join-lock-loading" id="join-lock-loading">
+                <div class="join-lock-spinner"></div>
+            </div>
+
+            <!-- Error message -->
             <p id="join-lock-error" class="join-lock-error" style="display:none;"></p>
         </div>
     </div>
 
-    <style>
-        .join-lock-overlay {
-            position: fixed; inset: 0; z-index: 99999;
-            background: var(--bg-primary, #0f0f1a);
-            display: flex; align-items: center; justify-content: center;
-            padding: 24px;
-        }
-        .join-lock-card {
-            background: var(--bg-secondary, #1a1a2e);
-            border-radius: 20px; padding: 36px 28px; text-align: center;
-            max-width: 340px; width: 100%;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-        }
-        .join-lock-icon { font-size: 48px; margin-bottom: 16px; }
-        .join-lock-title {
-            font-size: 20px; font-weight: 700; margin: 0 0 12px;
-            color: var(--text-primary, #fff);
-        }
-        .join-lock-desc {
-            font-size: 14px; line-height: 1.6; margin: 0 0 28px;
-            color: var(--text-secondary, rgba(255,255,255,0.6));
-        }
-        .join-lock-btn {
-            display: block; width: 100%; padding: 14px 20px;
-            border-radius: 14px; font-size: 15px; font-weight: 600;
-            border: none; cursor: pointer; text-decoration: none;
-            text-align: center; margin-bottom: 12px;
-            transition: transform 0.15s, opacity 0.15s;
-        }
-        .join-lock-btn:active { transform: scale(0.97); }
-        .join-lock-btn-primary {
-            background: var(--accent, #f7931a); color: #fff;
-        }
-        .join-lock-btn-secondary {
-            background: rgba(247,147,26,0.15); color: var(--accent, #f7931a);
-            border: 1.5px solid var(--accent, #f7931a);
-        }
-        .join-lock-btn-ghost {
-            background: transparent; color: var(--text-secondary, rgba(255,255,255,0.5));
-            font-size: 13px; font-weight: 500; padding: 10px;
-        }
-        .join-lock-error {
-            color: #ef4444; font-size: 13px; margin-top: 8px;
-        }
-    </style>
+    <!-- Old inline join-lock style removed — premium redesign now in style.css -->
 </body>
 </html>
