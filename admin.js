@@ -773,6 +773,8 @@ function debounceAdminUserSearch() {
 
 // ─── Tickets ────────────────────────────────────────────────
 
+let _adminTicketsExpanded = {}; // ticket IDs that are expanded to show detail + reply form
+
 async function loadAdminTickets(page) {
     const container = document.getElementById('admin-tickets-list');
     const paginationEl = document.getElementById('admin-tickets-pagination');
@@ -807,30 +809,133 @@ async function loadAdminTickets(page) {
                 t.status === 'answered' ? adminBadge('Answered', 'orange') :
                     t.status === 'closed' ? adminBadge('Closed', 'gray') :
                         adminBadge(String(t.status || ''), 'gray');
+            const isExpanded = !!_adminTicketsExpanded[t.id];
+            const replies = (t.replies && t.replies.length) ? t.replies : [];
 
-            html += '<div class="admin-list-item">' +
-                '<div class="admin-list-item-header">' +
+            html += '<div class="admin-list-item admin-ticket-item" id="adm-ticket-' + t.id + '">' +
+                '<div class="admin-list-item-header" style="cursor:pointer" onclick="toggleAdminTicketDetail(\'' + t.id + '\')">' +
                 '<span class="admin-list-item-title">' + adminEscapeHtml(t.subject || t.title || 'Ticket #' + (t.id || '')) + '</span>' +
                 statusBadge +
+                '<span class="admin-list-item-arrow" style="margin-left:auto;color:#6B7A8D">›</span>' +
                 '</div>' +
-                '<div class="admin-list-item-meta">' +
-                'From: ' + adminEscapeHtml(t.user_name || t.username || 'User') +
-                ' (ID: ' + adminEscapeHtml(String(t.telegram_id || t.user_id || '')) + ')' +
-                '</div>' +
+                '<div class="admin-list-item-meta">From: ' + adminEscapeHtml(t.user_name || t.username || 'User') +
+                ' (ID: ' + adminEscapeHtml(String(t.telegram_id || t.user_id || '')) + ')</div>' +
                 '<div class="admin-list-item-meta" style="margin-top:4px;white-space:pre-wrap;overflow:hidden;max-height:60px;">' +
                 adminEscapeHtml(t.message || t.last_message || '') +
                 '</div>' +
                 '<div class="admin-list-item-meta" style="margin-top:4px;">' +
                 adminFormatDate(t.created_at || t.date) +
                 (t.updated_at ? ' &bull; Updated: ' + adminFormatDate(t.updated_at) : '') +
-                '</div>' +
                 '</div>';
+
+            // Expanded detail: conversation history + reply form + status controls
+            if (isExpanded) {
+                html += '<div class="adm-ticket-detail" style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);">';
+
+                // Conversation thread
+                if (replies.length) {
+                    html += '<div class="adm-ticket-thread" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">';
+                    // Original message
+                    html += '<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:10px 12px;">' +
+                        '<div style="font-size:11px;color:#6B7A8D;margin-bottom:4px;">' + adminEscapeHtml(t.user_name || 'User') + ' • ' + adminFormatDate(t.created_at) + '</div>' +
+                        '<div style="white-space:pre-wrap;font-size:13px;color:#A5B4C7;">' + adminEscapeHtml(t.message || t.body || '') + '</div>' +
+                        '</div>';
+                    // Replies
+                    replies.forEach(function (r) {
+                        var isAdmin = r.from === 'admin' || r.is_admin;
+                        html += '<div style="background:' + (isAdmin ? 'rgba(245,166,35,0.08)' : 'rgba(255,255,255,0.03)') + ';border-radius:10px;padding:10px 12px;' + (isAdmin ? 'border:1px solid rgba(245,166,35,0.15);' : '') + '">' +
+                            '<div style="font-size:11px;color:' + (isAdmin ? '#F5A623' : '#6B7A8D') + ';margin-bottom:4px;">' + (isAdmin ? 'Admin' : adminEscapeHtml(t.user_name || 'User')) + ' • ' + adminFormatDate(r.at || r.created_at) + '</div>' +
+                            '<div style="white-space:pre-wrap;font-size:13px;color:#A5B4C7;">' + adminEscapeHtml(r.message || r.text || '') + '</div>' +
+                            '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                // Reply form
+                html += '<div style="margin-bottom:10px;">' +
+                    '<textarea id="adm-reply-' + t.id + '" class="adm-input" placeholder="Type a reply..." style="width:100%;min-height:70px;font-size:13px;padding:10px 12px;border-radius:10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#fff;font-family:inherit;resize:vertical;box-sizing:border-area;"></textarea>' +
+                    '<button class="admin-btn admin-btn-gold" style="margin-top:6px;padding:8px 18px;font-size:12px;" onclick="adminReplyTicket(\'' + t.id + '\')">Send Reply</button>' +
+                    '</div>';
+
+                // Status controls
+                html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
+                if (t.status !== 'closed') {
+                    html += '<button class="admin-btn" style="padding:6px 14px;font-size:11px;" onclick="adminSetTicketStatus(\'' + t.id + '\',\'closed\')">Close</button>';
+                }
+                if (t.status !== 'open') {
+                    html += '<button class="admin-btn" style="padding:6px 14px;font-size:11px;" onclick="adminSetTicketStatus(\'' + t.id + '\',\'open\')">Reopen</button>';
+                }
+                if (t.status !== 'answered') {
+                    html += '<button class="admin-btn" style="padding:6px 14px;font-size:11px;" onclick="adminSetTicketStatus(\'' + t.id + '\',\'answered\')">Mark Answered</button>';
+                }
+                html += '<button class="admin-btn admin-btn-danger" style="padding:6px 14px;font-size:11px;" onclick="adminDeleteTicket(\'' + t.id + '\')">Delete</button>';
+                html += '</div>';
+
+                html += '</div>';
+            }
+
+            html += '</div>';
         });
         container.innerHTML = html;
         adminPagination('admin-tickets-pagination', _adminTicketsPage, totalPages, 'loadAdminTickets');
     } catch (e) {
         container.innerHTML = adminEmpty('Failed to load tickets');
         console.error('loadAdminTickets:', e);
+    }
+}
+
+function toggleAdminTicketDetail(ticketId) {
+    _adminTicketsExpanded[ticketId] = !_adminTicketsExpanded[ticketId];
+    loadAdminTickets(_adminTicketsPage);
+}
+
+async function adminReplyTicket(ticketId) {
+    var textarea = document.getElementById('adm-reply-' + ticketId);
+    if (!textarea) return;
+    var message = textarea.value.trim();
+    if (!message) { showAdminToast('Reply cannot be empty', 'error'); return; }
+    if (message.length > 1500) { showAdminToast('Reply too long (max 1500 chars)', 'error'); return; }
+    try {
+        await apiFetch('/api/admin/tickets/' + ticketId + '/reply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: message })
+        });
+        showAdminToast('Reply sent', 'success');
+        _adminTicketsExpanded[ticketId] = true;
+        loadAdminTickets(_adminTicketsPage);
+    } catch (e) {
+        showAdminToast('Failed to send reply', 'error');
+        console.error('adminReplyTicket:', e);
+    }
+}
+
+async function adminSetTicketStatus(ticketId, status) {
+    try {
+        await apiFetch('/api/admin/tickets/' + ticketId + '/status', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: status })
+        });
+        showAdminToast('Status updated to ' + status, 'success');
+        _adminTicketsExpanded[ticketId] = true;
+        loadAdminTickets(_adminTicketsPage);
+    } catch (e) {
+        showAdminToast('Failed to update status', 'error');
+        console.error('adminSetTicketStatus:', e);
+    }
+}
+
+async function adminDeleteTicket(ticketId) {
+    if (!confirm('Delete this ticket permanently?')) return;
+    try {
+        await apiFetch('/api/tickets/' + ticketId, { method: 'DELETE' });
+        showAdminToast('Ticket deleted', 'success');
+        delete _adminTicketsExpanded[ticketId];
+        loadAdminTickets(_adminTicketsPage);
+    } catch (e) {
+        showAdminToast('Failed to delete ticket', 'error');
+        console.error('adminDeleteTicket:', e);
     }
 }
 

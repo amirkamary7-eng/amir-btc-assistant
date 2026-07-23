@@ -7304,6 +7304,51 @@ function renderTicketThread(replies) {
 }
 
 /**
+ * اعتبارسنجی لحظه‌ای فیلدهای فرم تیکت.
+ * ورودی: پارامترهای `field` (نام فیلد: title یا body) را دریافت می‌کند.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی رابط کاربری اعمال می‌شود.
+ */
+const TICKET_MIN_BODY = 10;
+const TICKET_MAX_BODY = 1500;
+function validateTicketField(field) {
+    const input = document.getElementById(field === 'title' ? 'ticket-title' : 'ticket-body');
+    const errorEl = document.getElementById(field === 'title' ? 'ticket-title-error' : 'ticket-body-error');
+    if (!input || !errorEl) return true;
+    const val = input.value.trim();
+    let valid = true;
+    let errMsg = '';
+    if (field === 'title') {
+        if (val && val.length < 3) { valid = false; errMsg = 'عنوان حداقل ۳ کاراکتر باشد'; }
+    } else {
+        if (val && val.length < TICKET_MIN_BODY) { valid = false; errMsg = `حداقل ${TICKET_MIN_BODY} کاراکتر`; }
+    }
+    errorEl.textContent = errMsg;
+    input.classList.toggle('tk-error-state', !valid && val.length > 0);
+    input.classList.toggle('tk-success-state', valid && val.length > 0);
+    return valid;
+}
+
+/**
+ * شمارنده لحظه‌ای تعداد کاراکترهای متن تیکت.
+ * ورودی: بدون ورودی.
+ * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی رابط کاربری اعمال می‌شود.
+ */
+function updateTicketCharCount() {
+    const body = document.getElementById('ticket-body');
+    const counter = document.getElementById('ticket-char-counter');
+    if (!body || !counter) return;
+    const len = body.value.length;
+    // Display in Persian digits
+    const faLen = len.toLocaleString('fa-IR');
+    const faMax = TICKET_MAX_BODY.toLocaleString('fa-IR');
+    counter.textContent = `${faLen} / ${faMax}`;
+    counter.classList.toggle('tk-limit', len >= TICKET_MAX_BODY);
+    if (len >= TICKET_MAX_BODY) {
+        counter.textContent = `سقف مجاز (${faMax} کاراکتر)`;
+    }
+}
+
+/**
  * تیکت‌ها را در رابط کاربری رندر می‌کند.
  * ورودی: بدون ورودی.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
@@ -7372,15 +7417,42 @@ function renderAdminTickets() {
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
 async function submitTicket() {
-    const title = document.getElementById('ticket-title').value.trim();
-    const body = document.getElementById('ticket-body').value.trim();
-    if (!title || !body) { alert(t('required_fields')); return; }
-    if (!API_BASE) {
-        alert(t('ticket_error'));
-        return;
+    const titleEl = document.getElementById('ticket-title');
+    const bodyEl = document.getElementById('ticket-body');
+    const title = titleEl ? titleEl.value.trim() : '';
+    const body = bodyEl ? bodyEl.value.trim() : '';
+    const btn = document.getElementById('ticket-submit-btn');
+
+    // Real-time validation
+    let valid = true;
+    if (!title) {
+        valid = false;
+        const errEl = document.getElementById('ticket-title-error');
+        if (errEl) errEl.textContent = 'عنوان الزامی است';
+        if (titleEl) titleEl.classList.add('tk-error-state');
+    } else if (title.length < 3) {
+        valid = false;
+        const errEl = document.getElementById('ticket-title-error');
+        if (errEl) errEl.textContent = 'عنوان حداقل ۳ کاراکتر باشد';
+        if (titleEl) titleEl.classList.add('tk-error-state');
     }
-    const btn = document.querySelector('#tickets-modal .submit-btn');
-    if (btn) { btn.disabled = true; btn.innerText = '...'; }
+    if (!body) {
+        valid = false;
+        const errEl = document.getElementById('ticket-body-error');
+        if (errEl) errEl.textContent = 'متن پیام الزامی است';
+        if (bodyEl) bodyEl.classList.add('tk-error-state');
+    } else if (body.length < TICKET_MIN_BODY) {
+        valid = false;
+        const errEl = document.getElementById('ticket-body-error');
+        if (errEl) errEl.textContent = `حداقل ${TICKET_MIN_BODY} کاراکتر نیاز است`;
+        if (bodyEl) bodyEl.classList.add('tk-error-state');
+    }
+    if (!valid) { showToast('لطفاً خطاهای فرم را برطرف کنید'); return; }
+    if (!API_BASE) { showToast(t('ticket_error')); return; }
+
+    // Prevent double-submit
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.innerHTML = '<div class="tk-mini-spinner"></div> در حال ارسال...'; }
+
     try {
         const healthy = await checkBackendHealth();
         if (!healthy) throw new Error('Backend unavailable');
@@ -7388,17 +7460,25 @@ async function submitTicket() {
             method: 'POST',
             body: JSON.stringify({ user_id: getUserId(), user_name: getUserName(), title, body })
         });
-        document.getElementById('ticket-title').value = '';
-        document.getElementById('ticket-body').value = '';
-        await fetchTickets();
-        renderTickets();
+        // Clear form
+        if (titleEl) titleEl.value = '';
+        if (bodyEl) bodyEl.value = '';
+        updateTicketCharCount();
+        // Success message
+        showToast(t('ticket_sent'));
         addNotification(t('support'), t('ticket_sent'), false);
         getTg()?.showPopup?.({ title: t('ticket_sent'), message: title, buttons: [{ type: 'ok' }] });
+        // Refresh list
+        await fetchTickets();
+        renderTickets();
     } catch (e) {
-        alert(t('ticket_error'));
+        showToast(t('ticket_error'));
         console.error('submitTicket:', e);
     } finally {
-        if (btn) { btn.disabled = false; btn.innerText = t('ticket_send'); }
+        if (btn) {
+            btn.disabled = false; btn.style.opacity = '1';
+            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><span>' + t('ticket_send') + '</span>';
+        }
     }
 }
 

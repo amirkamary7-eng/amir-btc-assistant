@@ -8212,3 +8212,231 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     .cd-chart { height: 380px !important; }
     .cd-stat-item { padding: 16px; }
 }
+
+/* ============================================================================
+   TICKET BOTTOM SHEET — Premium Dark+Gold full-height redesign
+   ============================================================================ */
+.tk-overlay {
+    position: fixed; inset: 0; z-index: 10001;
+    background: rgba(2, 6, 17, 0.75);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    display: none; align-items: flex-end; justify-content: center;
+    animation: tkFadeIn 0.3s ease;
+}
+@keyframes tkFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.tk-sheet {
+    width: 100%; max-width: 480px;
+    max-height: 92vh;
+    background: linear-gradient(180deg, #0E1623 0%, #0B1220 100%);
+    border-radius: 24px 24px 0 0;
+    border: 1px solid rgba(245, 166, 35, 0.12);
+    border-bottom: none;
+    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5), 0 0 30px rgba(245, 166, 35, 0.04);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    animation: tkSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes tkSlideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}
+
+.tk-handle {
+    width: 40px; height: 4px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+    margin: 10px auto 6px;
+    flex-shrink: 0;
+}
+
+/* Header */
+.tk-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 20px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    flex-shrink: 0;
+}
+.tk-header-icon {
+    width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(245, 166, 35, 0.1);
+    border: 1px solid rgba(245, 166, 35, 0.2);
+    color: #F5A623;
+}
+.tk-header-text { flex: 1; min-width: 0; }
+.tk-header-text h3 {
+    font-size: 16px; font-weight: 800; color: #FFFFFF;
+    margin: 0; line-height: 1.2;
+}
+.tk-header-text span {
+    font-size: 11px; color: #6B7A8D; font-weight: 500;
+}
+.tk-close {
+    width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #A5B4C7; cursor: pointer;
+    transition: all 0.2s ease;
+}
+.tk-close:hover { background: rgba(239, 68, 68, 0.1); color: #EF4444; border-color: rgba(239, 68, 68, 0.2); }
+.tk-close:active { transform: scale(0.92); }
+
+/* Body (scrollable) */
+.tk-body {
+    flex: 1; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 18px 20px 24px;
+    min-height: 0;
+}
+
+/* Form card */
+.tk-form-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+.tk-form-card-header {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 700; color: #F5A623;
+    margin-bottom: 14px;
+}
+
+/* Field group */
+.tk-field-group { margin-bottom: 14px; }
+.tk-label {
+    display: block; font-size: 12px; font-weight: 600;
+    color: #8B96A8; margin-bottom: 6px;
+    letter-spacing: 0.2px;
+}
+
+/* Input + textarea — states: normal/focus/error/success/disabled */
+.tk-input, .tk-textarea {
+    width: 100%; box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 12px 14px;
+    color: #FFFFFF; font-size: 14px; font-weight: 500;
+    font-family: inherit;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    outline: none;
+}
+.tk-input::placeholder, .tk-textarea::placeholder { color: #4A5468; font-weight: 400; }
+.tk-input:focus, .tk-textarea:focus {
+    border-color: rgba(245, 166, 35, 0.4);
+    background: rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.08);
+}
+.tk-input.tk-error-state, .tk-textarea.tk-error-state {
+    border-color: rgba(239, 68, 68, 0.5);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.08);
+}
+.tk-input.tk-success-state, .tk-textarea.tk-success-state {
+    border-color: rgba(34, 197, 94, 0.4);
+}
+.tk-input:disabled, .tk-textarea:disabled {
+    opacity: 0.5; cursor: not-allowed;
+}
+.tk-textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
+
+.tk-textarea-footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 6px;
+}
+.tk-error {
+    font-size: 11px; color: #EF4444; font-weight: 500;
+    min-height: 14px; transition: opacity 0.2s ease;
+}
+.tk-char-counter {
+    font-size: 11px; color: #6B7A8D; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.tk-char-counter.tk-limit { color: #EF4444; }
+
+/* Submit button */
+.tk-submit-btn {
+    width: 100%; height: 46px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: linear-gradient(135deg, #F5A623, #FFCC4D);
+    border: none; border-radius: 12px;
+    color: #020611; font-size: 14px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    box-shadow: 0 4px 16px rgba(245, 166, 35, 0.3);
+}
+.tk-submit-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(245, 166, 35, 0.4); filter: brightness(1.05); }
+.tk-submit-btn:active { transform: scale(0.98); }
+.tk-submit-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; filter: grayscale(0.3); }
+
+/* My tickets header */
+.tk-my-tickets-header {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 700; color: #F5A623;
+    margin-bottom: 12px;
+}
+
+/* Ticket list items */
+.tk-list { display: flex; flex-direction: column; gap: 10px; }
+.tk-list .ticket-item {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 14px;
+    padding: 14px;
+    transition: border-color 0.2s ease;
+}
+.tk-list .ticket-item:hover { border-color: rgba(245, 166, 35, 0.15); }
+.tk-list .ticket-item-header {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+}
+.tk-list .ticket-item-header strong { font-size: 14px; color: #FFFFFF; font-weight: 700; }
+.tk-list .ticket-status {
+    font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+}
+.tk-list .ticket-status.open { background: rgba(239, 68, 68, 0.12); color: #EF4444; }
+.tk-list .ticket-status.answered { background: rgba(34, 197, 94, 0.12); color: #22C55E; }
+.tk-list .ticket-status.closed { background: rgba(107, 122, 141, 0.12); color: #6B7A8D; }
+.tk-list .ticket-body-text { font-size: 13px; color: #A5B4C7; line-height: 1.5; margin-bottom: 8px; }
+.tk-list .ticket-date { font-size: 11px; color: #6B7A8D; margin-top: 6px; }
+.tk-list .ticket-thread { margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
+.tk-list .ticket-reply {
+    background: rgba(255, 255, 255, 0.03); border-radius: 10px; padding: 10px 12px;
+    font-size: 12px; color: #A5B4C7;
+}
+.tk-list .ticket-reply.admin { background: rgba(245, 166, 35, 0.06); border: 1px solid rgba(245, 166, 35, 0.12); }
+.tk-list .ticket-reply-meta { font-size: 10px; color: #6B7A8D; margin-top: 4px; }
+.tk-list .ticket-actions { margin-top: 10px; }
+.tk-list .ticket-delete-btn {
+    font-size: 11px; color: #EF4444; background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.15); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-family: inherit;
+    transition: all 0.2s ease;
+}
+.tk-list .ticket-delete-btn:hover { background: rgba(239, 68, 68, 0.15); }
+.tk-list .empty-state { text-align: center; padding: 24px 12px; color: #6B7A8D; font-size: 13px; }
+
+/* Responsive */
+@media (max-width: 360px) {
+    .tk-sheet { max-height: 95vh; border-radius: 20px 20px 0 0; }
+    .tk-body { padding: 14px 16px 20px; }
+    .tk-form-card { padding: 14px; }
+    .tk-submit-btn { height: 42px; font-size: 13px; }
+}
+
+/* Mini spinner for ticket submit button loading state */
+.tk-mini-spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(2, 6, 17, 0.3);
+    border-top-color: #020611;
+    border-radius: 50%;
+    animation: tkSpin 0.7s linear infinite;
+    vertical-align: middle;
+}
+@keyframes tkSpin { to { transform: rotate(360deg); } }

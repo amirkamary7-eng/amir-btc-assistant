@@ -1199,10 +1199,9 @@
                     <span data-i18n="support">پشتیبانی و تیکت</span>
                     <span class="setting-arrow">›</span>
                 </div>
-                <div class="setting-item" id="admin-tickets-item" style="display:none;" onclick="openAdminTicketsModal()">
-                    <span data-i18n="admin_tickets">مدیریت تیکت‌ها</span>
-                    <span class="setting-arrow">›</span>
-                </div>
+                <!-- FIX: ticket management removed from Settings — now fully in Admin Panel.
+                     The admin-tickets-item (openAdminTicketsModal) was here; removed per spec.
+                     Admins manage tickets via Admin Panel → Tickets section. -->
                 <div class="setting-item" onclick="openNotifSettingsModal()">
                     <span data-i18n="notif_settings">اعلانات</span>
                     <span class="setting-arrow">›</span>
@@ -1367,23 +1366,65 @@
         </div>
     </div>
 
-    <!-- مودال تیکت پشتیبانی -->
-    <div id="tickets-modal" class="modal full-modal" onclick="if(event.target===this) closeTicketsModal()">
-        <div class="modal-box modal-box-wide">
-            <div class="modal-header">
-                <h3 class="modal-title-with-icon">
-                    <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    <span data-i18n="support">پشتیبانی</span>
-                </h3>
-                <button class="modal-close-btn" onclick="closeTicketsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    <!-- مودال تیکت پشتیبانی — Premium full-height bottom sheet (Dark+Gold) -->
+    <div id="tickets-modal" class="tk-overlay" onclick="if(event.target===this) closeTicketsModal()">
+        <div class="tk-sheet">
+            <!-- Drag handle -->
+            <div class="tk-handle"></div>
+            <!-- Header -->
+            <div class="tk-header">
+                <div class="tk-header-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <div class="tk-header-text">
+                    <h3 data-i18n="support">پشتیبانی</h3>
+                    <span>مرکز پشتیبانی AMIRBTC</span>
+                </div>
+                <button class="tk-close" onclick="closeTicketsModal()" aria-label="بستن">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
             </div>
-            <div class="ticket-form">
-                <input type="text" id="ticket-title" class="input-field" data-i18n-placeholder="ticket_title" placeholder="عنوان تیکت">
-                <textarea id="ticket-body" class="input-field" rows="3" data-i18n-placeholder="ticket_body" placeholder="متن پیام..."></textarea>
-                <button class="submit-btn" onclick="submitTicket()" data-i18n="ticket_send">ارسال تیکت</button>
+
+            <!-- Scrollable content -->
+            <div class="tk-body">
+                <!-- New ticket form card -->
+                <div class="tk-form-card">
+                    <div class="tk-form-card-header">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F5A623" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                        <span>تیکت جدید</span>
+                    </div>
+
+                    <!-- Title field -->
+                    <div class="tk-field-group">
+                        <label class="tk-label">عنوان</label>
+                        <input type="text" id="ticket-title" class="tk-input" data-i18n-placeholder="ticket_title" placeholder="عنوان تیکت" maxlength="120" oninput="validateTicketField('title')">
+                        <span class="tk-error" id="ticket-title-error"></span>
+                    </div>
+
+                    <!-- Body field -->
+                    <div class="tk-field-group">
+                        <label class="tk-label">متن پیام</label>
+                        <textarea id="ticket-body" class="tk-textarea" data-i18n-placeholder="ticket_body" placeholder="مشکل یا سوال خود را با جزئیات توضیح دهید..." maxlength="1500" rows="4" oninput="validateTicketField('body'); updateTicketCharCount()"></textarea>
+                        <div class="tk-textarea-footer">
+                            <span class="tk-error" id="ticket-body-error"></span>
+                            <span class="tk-char-counter" id="ticket-char-counter">۰ / ۱۵۰۰</span>
+                        </div>
+                    </div>
+
+                    <!-- Submit button -->
+                    <button class="tk-submit-btn" id="ticket-submit-btn" onclick="submitTicket()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                        <span data-i18n="ticket_send">ارسال تیکت</span>
+                    </button>
+                </div>
+
+                <!-- My tickets section -->
+                <div class="tk-my-tickets-header">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5A623" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span data-i18n="my_tickets">تیکت‌های من</span>
+                </div>
+                <div id="ticket-list" class="tk-list"></div>
             </div>
-            <div class="ticket-section-title" data-i18n="my_tickets">تیکت‌های من</div>
-            <div id="ticket-list" class="ticket-list"></div>
         </div>
     </div>
 
