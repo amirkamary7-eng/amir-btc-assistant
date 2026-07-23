@@ -6287,8 +6287,8 @@ strong.down { color: var(--red); }
         linear-gradient(270deg, rgba(2, 6, 17, 0.6) 0%, rgba(2, 6, 17, 0) 45%);
 }
 /* Premium CTA — flex child of .hero-slide (NO absolute positioning).
-   Positioned at the bottom of the banner via the parent's flex-end + padding.
-   Per-banner alignment via modifier classes using align-self + margin. */
+   Positioned via the parent's flex layout + per-banner align-self/margin.
+   Safe areas verified via VLM image-composition analysis. */
 .hero-cta {
     position: relative; /* in-flow, not absolute */
     z-index: 2;
@@ -6315,17 +6315,26 @@ strong.down { color: var(--red); }
     box-shadow: 0 3px 10px rgba(245, 166, 35, 0.3);
     filter: brightness(0.95);
 }
-/* Banner 1 (AMIRBTC channel): ~12px left of center via margin-right offset.
-   The parent flex centers children; adding margin-right pushes it left. */
+/* Banner 1 (AMIRBTC channel): VLM-verified safe zone = bottom-LEFT (Top:82%,
+   Left:4%). The bottom strip left side (0-35% width) is empty black space.
+   Parent flex is column+flex-end, so CTA sits at bottom. margin-right:auto
+   pushes it to the left. */
 .hero-cta--channel {
-    margin-right: 12px;
+    margin-right: auto;
+    margin-left: 4%;
 }
-/* Banner 2 (Bitunix): aligned to the right via align-self + margin-left:auto.
-   Sits below the feature icons (parent flex-end + padding-bottom gives the gap). */
+/* Banner 2 (Bitunix): VLM-verified safe zone = UPPER-MIDDLE (Top:32%, Left:41%,
+   between the gift box and the main logo). The bottom 15% is fully occupied
+   (gift box base + coins on left, feature boxes on center/right), so the CTA
+   MUST go in the upper area. The parent has justify-content:flex-end (pushes
+   children to bottom); margin-bottom:auto absorbs all free space BELOW the CTA,
+   pushing it to the TOP of the flex column. Then margin-top:30% pushes it down
+   into the upper-middle safe zone. margin-left/right auto centers it. No absolute. */
 .hero-cta--bitunix {
-    align-self: flex-end;
+    margin-bottom: auto;
+    margin-top: 22%;
     margin-left: auto;
-    margin-right: 10px;
+    margin-right: auto;
     width: 145px;
 }
 .hero-slider-dots {
@@ -7282,8 +7291,8 @@ html[dir="rtl"] .market-ticker-track {
     #dashboard-page { padding: 10px 12px 20px; }
     .hero-banner-slider { border-radius: 18px; }
     .hero-cta { font-size: 11px; height: 40px; padding: 0 14px; width: 120px; }
-    .hero-cta--channel { margin-right: 8px; }
-    .hero-cta--bitunix { width: 130px; margin-right: 8px; }
+    .hero-cta--channel { margin-left: 4%; }
+    .hero-cta--bitunix { width: 130px; margin-top: 30%; }
     .hero-slider-dots { top: 8px; right: 10px; }
     .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }
     .dms-fg-gauge { width: 64px; }
