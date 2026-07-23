@@ -3103,17 +3103,39 @@ function refreshUI() {
     invalidateI18nCache();
     applyLanguage();
     loadUser();
-    renderMarket();
-    renderWatchlist();
+
+    // SECURITY: If data was skipped because join-lock was showing, load it now.
+    // This runs after membership is verified (recheckJoinMembership → hideJoinLock → refreshUI).
+    if (!allCoins.length) {
+        loadMarketData(true).then(() => {
+            renderMarket();
+            renderWatchlist();
+            renderDashboardMarketStatus();
+            renderMarketTicker();
+        }).catch(() => {});
+    } else {
+        renderMarket();
+        renderWatchlist();
+        renderDashboardMarketStatus();
+    }
+
     renderSummary();
     renderMarketInsights();
-    renderDashboardMarketStatus();
 
     // Defer non-critical renders to next frame to reduce main thread blocking
     requestAnimationFrame(() => {
-        renderAnalysisSlider();
-        renderAnalysisList();
-        renderDashboardFeaturedAnalysis();
+        if (!analyses.length) {
+            fetchAnalyses().then(() => {
+                renderAnalysisSlider();
+                renderAnalysisList();
+                renderAnalysisStats();
+                renderDashboardFeaturedAnalysis();
+            }).catch(() => {});
+        } else {
+            renderAnalysisSlider();
+            renderAnalysisList();
+            renderDashboardFeaturedAnalysis();
+        }
         renderDashboardCalendar();
         if (newsCache.length) renderNews(document.querySelector('.ni-tab.active')?.dataset?.news || 'all');
         loadImportantNews();
@@ -8577,35 +8599,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ── Phase 2: Bootstrap (authenticated data load) ──
-    // Public data (market, analyses, news, calendar) loads immediately.
-    // Authenticated data (alerts, bootstrap, admin) waits for auth.
-    loadMarketData(true).then(() => {
-        // Dashboard rebuild: market status + watchlist render after market data arrives
-        renderDashboardMarketStatus();
-        renderWatchlist();
-        // BUG 3 FIX: re-render ticker with REAL 24h changes once fresh data arrives.
-        // The signature guard inside renderMarketTicker skips the no-op rebuild
-        // (and avoids resetting the CSS animation) when nothing has changed.
-        renderMarketTicker();
-    }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
-    fetchAnalyses().then(changed => {
-        if (changed) {
-            renderAnalysisSlider();        // legacy — no-op if slider-track not in DOM
-            renderAnalysisFeatured();      // analysis page featured slider
-            renderAnalysisStats();
-            renderDashboardFeaturedAnalysis(); // dashboard premium featured card
-        } else {
-            // Even if no change, render dashboard featured from cache
-            renderDashboardFeaturedAnalysis();
-        }
-        // Check for deep link after first load
-        checkAnalysisDeepLink();
-    }).finally(() => { _dashboardReady.analyses = true; _checkDashboardReady(); });
-    setTimeout(() => {
-        loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
-    }, 2000);
-    // Dashboard rebuild: economic calendar — load next 3 upcoming events
-    loadCalendarEvents().then(() => renderDashboardCalendar()).catch(() => renderDashboardCalendar());
+    // SECURITY (item 7): Data endpoints (market, analyses, news, calendar) only
+    // load AFTER membership is confirmed. If join-lock is still showing, skip
+    // data loading — the user will stay on the lock screen. When the user
+    // verifies membership and hideJoinLock() is called, refreshUI() will trigger
+    // the data loads. This prevents any data from loading before membership is
+    // confirmed, both on the frontend AND the backend (which now gates these
+    // endpoints with requireChannelJoin).
+    if (!_joinLockShown) {
+        loadMarketData(true).then(() => {
+            // Dashboard rebuild: market status + watchlist render after market data arrives
+            renderDashboardMarketStatus();
+            renderWatchlist();
+            // BUG 3 FIX: re-render ticker with REAL 24h changes once fresh data arrives.
+            // The signature guard inside renderMarketTicker skips the no-op rebuild
+            // (and avoids resetting the CSS animation) when nothing has changed.
+            renderMarketTicker();
+        }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
+        fetchAnalyses().then(changed => {
+            if (changed) {
+                renderAnalysisSlider();        // legacy — no-op if slider-track not in DOM
+                renderAnalysisFeatured();      // analysis page featured slider
+                renderAnalysisStats();
+                renderDashboardFeaturedAnalysis(); // dashboard premium featured card
+            } else {
+                // Even if no change, render dashboard featured from cache
+                renderDashboardFeaturedAnalysis();
+            }
+            // Check for deep link after first load
+            checkAnalysisDeepLink();
+        }).finally(() => { _dashboardReady.analyses = true; _checkDashboardReady(); });
+        setTimeout(() => {
+            loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
+        }, 2000);
+        // Dashboard rebuild: economic calendar — load next 3 upcoming events
+        loadCalendarEvents().then(() => renderDashboardCalendar()).catch(() => renderDashboardCalendar());
+    } // end if (!_joinLockShown)
 
     // Authenticated bootstrap — runs once user is available
     await bootstrapUser();

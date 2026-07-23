@@ -752,8 +752,15 @@ async function setCachedJoinStatus(env, userId, joined) {
   }
 
   try {
+    // SECURITY: shorter TTL for 'joined' (300s / 5 min) so a user who LEAVES the
+    // channel loses access within 5 minutes. Shorter TTL for 'not joined' (60s)
+    // so a user who JOINS is detected within 1 minute. This balances Telegram
+    // API load with security freshness.
+    const ttl = joined
+      ? Math.min(getNumericEnv(env, 'JOIN_CACHE_TTL', 300), 300)  // max 5 min for joined
+      : 60;  // 1 min for not-joined
     await env.JOIN_CACHE.put(getJoinCacheKey(userId), joined ? '1' : '0', {
-      expirationTtl: getNumericEnv(env, 'JOIN_CACHE_TTL', 1800),
+      expirationTtl: ttl,
     });
   } catch (error) {
     console.warn(safeError('join-cache-write', error));
@@ -4061,6 +4068,20 @@ export default {
         }
       }
 
+      // ── SECURITY: Membership gate for data endpoints ──
+      // Public data endpoints (market, forex, analyses, calendar, farsi-news) must
+      // NOT serve data to non-members. system/status, charts/resolve, health, and
+      // bootstrap remain public (needed for maintenance check + chart loading).
+      // Admins bypass via requireChannelJoin (isAdminTelegramId check inside).
+      const _DATA_PATHS = /^\/api\/(market|forex|analyses|calendar\/events|farsi-news)(\/|$)/;
+      const _isProdEnv = String(env.APP_ENV || '').toLowerCase() === 'production';
+      if (_isProdEnv && _DATA_PATHS.test(url.pathname)) {
+        const _dataAuth = await authenticateTelegramRequest(request, env);
+        if (_dataAuth.error) return _dataAuth.error;
+        const _dataJoinBlocked = await requireChannelJoin(_dataAuth.user, env);
+        if (_dataJoinBlocked) return _dataJoinBlocked;
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/market') {
         const clientIp = request.headers.get('cf-connecting-ip') || 'unknown';
         if (await isMarketRateLimited(env, clientIp)) {
@@ -4338,10 +4359,23 @@ export default {
       }
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
+      // Rate-limited to prevent abuse: max 1 check per 3 seconds per user.
       if (request.method === 'POST' && url.pathname === '/api/users/check-join') {
         const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
-        const membership = await resolveChannelMembership(env, String(authState.user.id), { forceRefresh: true });
+        const _joinUserId = String(authState.user.id);
+        // Rate limit: 3s cooldown between checks
+        if (env.RATE_LIMITS && typeof env.RATE_LIMITS.get === 'function') {
+          try {
+            const _rlKey = `jl:${_joinUserId}`;
+            const _existing = await env.RATE_LIMITS.get(_rlKey);
+            if (_existing) {
+              return jsonResponse({ status: 'error', message: 'Too many requests. Please wait a few seconds.', code: 'RATE_LIMITED' }, { status: 429 }, env);
+            }
+            await env.RATE_LIMITS.put(_rlKey, '1', { expirationTtl: 3 });
+          } catch { /* non-fatal */ }
+        }
+        const membership = await resolveChannelMembership(env, _joinUserId, { forceRefresh: true });
         return jsonResponse({ status: 'success', channel_joined: Boolean(membership?.joined) }, {}, env);
       }
 
