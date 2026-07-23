@@ -8,6 +8,9 @@ import { createReferralRepository } from './src/repositories/referrals.js';
 import { createReferralHandlers } from './src/controllers/referrals.js';
 import { createWalletRepository } from './src/repositories/wallet.js';
 import { createWalletHandlers } from './src/controllers/wallet.js';
+import { createWheelRepository } from './src/repositories/wheel.js';
+import { createWheelHandlers } from './src/controllers/wheel.js';
+import { createEconomyService } from './src/services/economy.js';
 import { createSessionRepository } from './src/repositories/sessions.js';
 import { createSessionHandlers } from './src/controllers/sessions.js';
 import { createTicketRepository } from './src/repositories/tickets.js';
@@ -1180,17 +1183,18 @@ async function ensureUserRow(env, userId) {
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
   await diagLog(env, { scope: 'diag-creditReferralWithReward', inviterId, referralId, inviteeId, amount, alsoVerifyChannel });
   try {
-    // REFACTOR: use centralized walletRepo.creditTokens instead of raw SQL.
-    // This ensures all balance changes go through the same atomic path
-    // (balance update + transaction record in a single DB transaction).
-    const result = await walletRepo.creditTokens(
+    // REFACTOR: use Economy Layer (Reward Engine) instead of direct creditTokens.
+    // This ensures all rewards go through rule validation + event system.
+    const result = await economyService.grantReward({
+      userId: String(inviterId),
+      amount: Number(amount),
+      rewardType: 'referral_reward',
+      description: `Invite reward for user ${String(inviteeId)}`,
+      refId: String(referralId),
+      metadata: { referral_id: String(referralId), invitee_id: String(inviteeId) },
+      auditInfo: { actor: 'system' },
       env,
-      String(inviterId),
-      Number(amount),
-      'referral_reward',
-      `Invite reward for user ${String(inviteeId)}`,
-      String(referralId),
-    );
+    });
     await diagLog(env, { scope: 'diag-creditReferralWithReward-SUCCESS', newBalance: result.newBalance, txId: result.txId });
 
     // Mark referral as rewarded
@@ -2541,6 +2545,17 @@ const referralHandlers = createReferralHandlers({
   referralRepo,
 });
 const walletRepo = createWalletRepository({ queryDb, queryDbTransaction });
+const economyService = createEconomyService({ walletRepo, queryDb });
+const wheelRepo = createWheelRepository({ queryDb, queryDbTransaction });
+const wheelHandlers = createWheelHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  wheelRepo,
+  economyService,
+});
 const walletHandlers = createWalletHandlers({
   jsonResponse,
   authenticateTelegramRequest,
@@ -4487,6 +4502,19 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/referral-stats') {
         return await walletHandlers.handleReferralStats(request, env);
+      }
+
+      // ── Lucky Wheel API Routes ──
+      if (request.method === 'GET' && url.pathname === '/api/wheel/status') {
+        return await wheelHandlers.handleStatus(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/wheel/spin') {
+        return await wheelHandlers.handleSpin(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/wheel/history') {
+        return await wheelHandlers.handleHistory(request, env);
       }
 
       if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {
