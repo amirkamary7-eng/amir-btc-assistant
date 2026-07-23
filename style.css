@@ -3800,14 +3800,19 @@ strong.down { color: var(--red); }
    ════════════════════════════════════════════════════════════════════ */
 /* #region Maintenance Mode */
 
+/* ============================================================================
+   MAINTENANCE MODE — Premium Dark+Gold FinTech redesign
+   Professional duotone gear+wrench icon, balanced layout, subtle animations.
+   ============================================================================ */
 .maint-overlay {
     position: fixed; inset: 0; z-index: 999999;
-    background: radial-gradient(ellipse at center, #0d1326 0%, #050810 100%);
+    background: radial-gradient(ellipse at center, #0d1326 0%, #050810 70%, #02050b 100%);
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     padding: 24px; text-align: center;
-    animation: maintFadeIn 0.4s ease;
+    animation: maintFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     overflow: hidden;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 }
 @keyframes maintFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
@@ -3818,8 +3823,8 @@ strong.down { color: var(--red); }
 }
 .maint-particle {
     position: absolute; border-radius: 50%;
-    background: rgba(247, 185, 80, 0.4);
-    box-shadow: 0 0 8px rgba(247, 185, 80, 0.6);
+    background: rgba(245, 166, 35, 0.35);
+    box-shadow: 0 0 8px rgba(245, 166, 35, 0.5);
     animation: maintFloatUp linear infinite;
 }
 @keyframes maintFloatUp {
@@ -3831,180 +3836,79 @@ strong.down { color: var(--red); }
 
 .maint-content {
     position: relative; z-index: 2;
-    max-width: 360px; width: 100%;
+    max-width: 380px; width: 100%;
     display: flex; flex-direction: column; align-items: center;
+    background: linear-gradient(180deg, rgba(14, 22, 35, 0.85) 0%, rgba(11, 18, 32, 0.9) 100%);
+    border: 1px solid rgba(245, 166, 35, 0.15);
+    border-radius: 24px;
+    padding: 40px 28px 32px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(245, 166, 35, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    animation: maintCardIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+}
+@keyframes maintCardIn {
+    from { opacity: 0; transform: translateY(24px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* ── Robot + Gear Animation ── */
-.maint-robot-scene {
+/* ── Premium duotone gear + wrench icon ── */
+.maint-icon-scene {
     position: relative;
-    width: 180px; height: 180px;
-    margin-bottom: 28px;
+    width: 110px; height: 110px;
+    margin-bottom: 20px;
+    display: flex; align-items: center; justify-content: center;
 }
-
-/* The robot body */
-.maint-robot {
-    position: absolute; left: 20px; bottom: 10px;
-    width: 90px; height: 130px;
-    z-index: 2;
-}
-.maint-robot-head {
-    position: absolute; top: 0; left: 50%;
-    transform: translateX(-50%);
-    width: 70px; height: 56px;
-    background: linear-gradient(180deg, #e8eef5 0%, #b8c4d6 100%);
-    border-radius: 18px 18px 14px 14px;
-    border: 2px solid #8a96aa;
-    box-shadow: inset 0 -4px 8px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.3);
-}
-.maint-robot-antenna {
-    position: absolute; top: -12px; left: 50%;
-    transform: translateX(-50%);
-    width: 3px; height: 14px;
-    background: #8a96aa;
-    border-radius: 2px;
-}
-.maint-robot-antenna::before {
-    content: ''; position: absolute; top: -6px; left: 50%;
-    transform: translateX(-50%);
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #f7b950;
-    box-shadow: 0 0 12px rgba(247, 185, 80, 0.8);
-    animation: maintBlink 1.4s ease-in-out infinite;
-}
-@keyframes maintBlink {
-    0%, 100% { opacity: 1; box-shadow: 0 0 12px rgba(247, 185, 80, 0.8); }
-    50% { opacity: 0.4; box-shadow: 0 0 6px rgba(247, 185, 80, 0.4); }
-}
-.maint-robot-eyes {
-    position: absolute; top: 18px; left: 50%;
-    transform: translateX(-50%);
-    display: flex; gap: 14px;
-}
-.maint-robot-eye {
-    width: 12px; height: 12px; border-radius: 50%;
-    background: radial-gradient(circle at 30% 30%, #60a5fa, #1e40af);
-    box-shadow: 0 0 8px rgba(96, 165, 250, 0.6);
-    animation: maintEyeBlink 3s ease-in-out infinite;
-}
-@keyframes maintEyeBlink {
-    0%, 92%, 100% { transform: scaleY(1); }
-    95% { transform: scaleY(0.1); }
-}
-.maint-robot-body {
-    position: absolute; top: 54px; left: 50%;
-    transform: translateX(-50%);
-    width: 80px; height: 70px;
-    background: linear-gradient(180deg, #d4dce8 0%, #a8b4c8 100%);
-    border-radius: 14px;
-    border: 2px solid #8a96aa;
-    box-shadow: inset 0 -4px 8px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.3);
-}
-.maint-robot-chest {
-    position: absolute; top: 14px; left: 50%;
-    transform: translateX(-50%);
-    width: 26px; height: 26px; border-radius: 50%;
-    background: radial-gradient(circle, #f7b950 0%, #f7931a 70%);
-    box-shadow: 0 0 16px rgba(247, 147, 26, 0.6), inset 0 -2px 4px rgba(0,0,0,0.2);
-    animation: maintChestPulse 2s ease-in-out infinite;
-}
-@keyframes maintChestPulse {
-    0%, 100% { box-shadow: 0 0 16px rgba(247, 147, 26, 0.6), inset 0 -2px 4px rgba(0,0,0,0.2); }
-    50% { box-shadow: 0 0 26px rgba(247, 147, 26, 0.9), inset 0 -2px 4px rgba(0,0,0,0.2); }
-}
-
-/* Robot arm holding wrench — up/down motion */
-.maint-robot-arm {
-    position: absolute; top: 60px; right: -8px;
-    width: 30px; height: 50px;
-    transform-origin: top center;
-    animation: maintArmMove 1.2s ease-in-out infinite;
-    z-index: 3;
-}
-@keyframes maintArmMove {
-    0%, 100% { transform: rotate(-10deg) translateY(0); }
-    50% { transform: rotate(10deg) translateY(-8px); }
-}
-.maint-wrench {
-    position: absolute; top: 0; left: 8px;
-    width: 14px; height: 44px;
-}
-.maint-wrench-handle {
-    position: absolute; top: 10px; left: 50%;
-    transform: translateX(-50%);
-    width: 5px; height: 34px;
-    background: linear-gradient(180deg, #6b7280, #4b5563);
-    border-radius: 2px;
-}
-.maint-wrench-head {
-    position: absolute; top: 0; left: 50%;
-    transform: translateX(-50%);
-    width: 18px; height: 14px;
-    background: linear-gradient(180deg, #9ca3af, #6b7280);
-    border-radius: 4px 4px 2px 2px;
-    box-shadow: inset 0 -2px 3px rgba(0,0,0,0.2);
-}
-.maint-wrench-head::before {
-    content: ''; position: absolute; top: 3px; left: 50%;
-    transform: translateX(-50%);
-    width: 9px; height: 8px;
-    background: #0d1326;
-    border-radius: 2px;
-}
-
-/* The gear (right side, spinning) */
-.maint-gear {
-    position: absolute; right: 0; top: 30px;
-    width: 80px; height: 80px;
-    z-index: 1;
-    animation: maintGearSpin 4s linear infinite;
-}
-@keyframes maintGearSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
-.maint-gear svg { width: 100%; height: 100%; }
-
-/* Spark effects */
-.maint-spark {
-    position: absolute; width: 4px; height: 4px;
-    background: #f7b950;
-    border-radius: 50%;
-    box-shadow: 0 0 8px #f7b950, 0 0 14px #fff;
-    opacity: 0;
-    animation: maintSpark 1.2s ease-out infinite;
-}
-.maint-spark:nth-child(1) { top: 40px; right: 20px; animation-delay: 0s; }
-.maint-spark:nth-child(2) { top: 50px; right: 12px; animation-delay: 0.2s; }
-.maint-spark:nth-child(3) { top: 35px; right: 30px; animation-delay: 0.4s; }
-.maint-spark:nth-child(4) { top: 60px; right: 24px; animation-delay: 0.6s; }
-.maint-spark:nth-child(5) { top: 45px; right: 16px; animation-delay: 0.8s; }
-@keyframes maintSpark {
-    0% { opacity: 0; transform: scale(0) translate(0, 0); }
-    30% { opacity: 1; transform: scale(1) translate(-8px, -8px); }
-    100% { opacity: 0; transform: scale(0.3) translate(-20px, 12px); }
-}
-
-/* Glow behind robot */
-.maint-glow {
+.maint-icon-glow {
     position: absolute; top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 200px; height: 200px;
-    background: radial-gradient(circle, rgba(247, 147, 26, 0.25) 0%, transparent 70%);
+    width: 140px; height: 140px;
+    background: radial-gradient(circle, rgba(245, 166, 35, 0.22) 0%, transparent 65%);
     border-radius: 50%;
-    animation: maintGlowPulse 3s ease-in-out infinite;
+    animation: maintGlowPulse 3.5s ease-in-out infinite;
     z-index: 0;
+}
+.maint-icon-ring {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 96px; height: 96px;
+    border: 1.5px solid rgba(245, 166, 35, 0.2);
+    border-radius: 50%;
+    animation: maintRingPulse 3s ease-in-out infinite;
+}
+@keyframes maintRingPulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+    50% { transform: translate(-50%, -50%) scale(1.08); opacity: 0.2; }
 }
 @keyframes maintGlowPulse {
     0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(1); }
-    50% { opacity: 0.9; transform: translate(-50%, -50%) scale(1.15); }
+    50% { opacity: 0.85; transform: translate(-50%, -50%) scale(1.12); }
+}
+.maint-icon-gear {
+    position: relative; z-index: 2;
+    width: 72px; height: 72px;
+    animation: maintGearSpin 8s linear infinite;
+    filter: drop-shadow(0 0 12px rgba(245, 166, 35, 0.35));
+}
+@keyframes maintGearSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+/* ── Premium badge ── */
+.maint-badge {
+    font-size: 10px; font-weight: 800; color: #F5A623;
+    letter-spacing: 2.5px; text-transform: uppercase;
+    background: rgba(245, 166, 35, 0.08);
+    border: 1px solid rgba(245, 166, 35, 0.2);
+    padding: 4px 14px; border-radius: 20px;
+    margin-bottom: 16px;
 }
 
 /* ── Text Content ── */
 .maint-title {
-    font-size: 20px; font-weight: 800; color: #fff;
-    margin: 0 0 10px;
-    line-height: 1.3;
+    font-size: 21px; font-weight: 800; color: #FFFFFF;
+    margin: 0 0 12px;
+    line-height: 1.35;
+    letter-spacing: -0.3px;
 }
 .maint-desc {
-    font-size: 14px; color: #a8b2c5; line-height: 1.6;
+    font-size: 13.5px; color: #8B96A8; line-height: 1.65;
     margin: 0 0 28px;
     max-width: 300px;
 }
@@ -4015,28 +3919,29 @@ strong.down { color: var(--red); }
 }
 .maint-progress-label {
     display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 }
-.maint-progress-text { font-size: 12px; color: #7a8499; font-weight: 600; }
-.maint-progress-percent { font-size: 16px; font-weight: 800; color: #f7b950; font-variant-numeric: tabular-nums; }
+.maint-progress-text { font-size: 11px; color: #6B7A8D; font-weight: 600; letter-spacing: 0.3px; }
+.maint-progress-percent { font-size: 17px; font-weight: 800; color: #F5A623; font-variant-numeric: tabular-nums; }
 .maint-progress-track {
-    width: 100%; height: 10px;
-    background: rgba(255,255,255,0.06);
+    width: 100%; height: 8px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.04);
     border-radius: 10px; overflow: hidden;
     position: relative;
 }
 .maint-progress-fill {
     height: 100%; border-radius: 10px;
-    background: linear-gradient(90deg, #f7b950, #f7931a);
-    box-shadow: 0 0 14px rgba(247, 147, 26, 0.5);
+    background: linear-gradient(90deg, #F5A623, #FFCC4D);
+    box-shadow: 0 0 14px rgba(245, 166, 35, 0.5);
     transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
     position: relative;
     overflow: hidden;
 }
 .maint-progress-fill::after {
     content: ''; position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
-    animation: maintProgressShine 2s linear infinite;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+    animation: maintProgressShine 2.5s linear infinite;
 }
 @keyframes maintProgressShine {
     0% { transform: translateX(-100%); }
@@ -4046,23 +3951,29 @@ strong.down { color: var(--red); }
 /* ── Admin bypass button ── */
 .maint-admin-bypass {
     display: none;
-    margin-top: 8px;
-    padding: 10px 22px;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.12);
+    align-items: center; justify-content: center; gap: 8px;
+    margin-top: 4px;
+    padding: 12px 24px;
+    height: 44px;
+    background: linear-gradient(135deg, #F5A623, #FFCC4D);
+    border: none;
     border-radius: 12px;
-    color: #f7b950;
-    font-size: 13px; font-weight: 600;
+    color: #020611;
+    font-size: 13px; font-weight: 700;
     cursor: pointer;
-    transition: all 0.18s ease;
+    transition: transform 0.18s ease, box-shadow 0.2s ease, filter 0.2s ease;
     font-family: inherit;
+    box-shadow: 0 4px 16px rgba(245, 166, 35, 0.3);
 }
 .maint-admin-bypass:hover {
-    background: rgba(247,147,26,0.12);
-    border-color: rgba(247,147,26,0.3);
     transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(245, 166, 35, 0.45);
+    filter: brightness(1.05);
 }
-.maint-admin-bypass svg { vertical-align: middle; margin-left: 4px; }
+.maint-admin-bypass:active {
+    transform: scale(0.97);
+    box-shadow: 0 2px 8px rgba(245, 166, 35, 0.3);
+}
 
 /* #endregion Maintenance Mode */
 
