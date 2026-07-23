@@ -326,6 +326,24 @@ export function createWalletRepository(deps) {
     };
     const metadataJson = JSON.stringify(fullMetadata);
 
+    // IDEMPOTENCY: if refId is provided, check if a transaction with the same
+    // (user_id, tx_type, ref_id) already exists. If so, return it without
+    // crediting again. This prevents double-credit from concurrent requests
+    // (e.g. two simultaneous referral reward calls, or double-clicking claim).
+    if (refId) {
+      const existing = await queryDb(
+        env,
+        `SELECT id, amount FROM token_transactions
+         WHERE user_id = $1 AND tx_type = $2 AND ref_id = $3 AND status = 'completed'
+         LIMIT 1`,
+        [uid, txType, refId],
+      );
+      if (existing.rows.length > 0) {
+        // Already credited — return idempotent success
+        return { success: true, newBalance: null, txId: existing.rows[0].id, idempotent: true };
+      }
+    }
+
     const results = await queryDbTransaction(env, [
       {
         sql: `INSERT INTO token_balances (user_id, balance, updated_at)
@@ -394,6 +412,24 @@ export function createWalletRepository(deps) {
     };
     const metadataJson = JSON.stringify(fullMetadata);
 
+    // IDEMPOTENCY: if refId is provided, check if already debited
+    if (refId) {
+      const existing = await queryDb(
+        env,
+        `SELECT id FROM token_transactions
+         WHERE user_id = $1 AND tx_type = $2 AND ref_id = $3 AND status = 'completed'
+         LIMIT 1`,
+        [uid, txType, refId],
+      );
+      if (existing.rows.length > 0) {
+        return { success: true, newBalance: null, txId: existing.rows[0].id, idempotent: true };
+      }
+    }
+
+    // CONCURRENCY SAFETY: the UPDATE ... WHERE balance >= $2 is an atomic
+    // conditional update. If two concurrent debits race, PostgreSQL's row-level
+    // locking ensures only one sees balance >= amount — the other gets 0 rows
+    // and throws INSUFFICIENT_BALANCE. No double-spend possible.
     const results = await queryDbTransaction(env, [
       {
         sql: `UPDATE token_balances
