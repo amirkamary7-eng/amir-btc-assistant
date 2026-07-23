@@ -909,14 +909,18 @@ async function bootstrapUser() {
         }
 
         // ── Membership lock gate ──
-        // Backend-verified: bootstrap returns channel_joined from a real Telegram
-        // getChatMember check (src/controllers/users.js line 113-117). If false,
-        // show the join-lock with 'not-joined' state. If true, hide the lock.
-        if (data.channel_joined === false) {
-            showJoinLock();
-            setJoinLockState('not-joined');
-        } else {
+        // CRITICAL SECURITY FIX: only hide the lock when backend EXPLICITLY
+        // returns channel_joined === true. Any other value (false, undefined,
+        // null, missing field, error response) keeps the lock. Previously the
+        // else branch called hideJoinLock() for anything that wasn't false —
+        // including undefined — letting non-members in if the API response
+        // didn't include channel_joined or returned an ambiguous value.
+        if (data.channel_joined === true) {
             hideJoinLock();
+        } else {
+            showJoinLock();
+            setJoinLockState(data.channel_joined === false ? 'not-joined' : 'loading');
+            console.log('[JOIN-LOCK] Bootstrap returned channel_joined:', data.channel_joined, '— keeping lock');
         }
 
         // CRITICAL: Set bootstrapComplete BEFORE any UI re-renders.

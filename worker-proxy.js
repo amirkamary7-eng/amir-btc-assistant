@@ -1505,16 +1505,25 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
     }
 
     if (result.reason === 'api_error') {
-      if (isDatabaseConfigured(env)) {
-        const dbUser = await getDbUserJoinState(env, uid);
-        if (dbUser?.channel_joined) {
-          return { joined: true, from_db_fallback: true, reason: result.reason };
+      // SECURITY FIX: during forceRefresh (used by bootstrap + check-join), do NOT
+      // fall back to stale DB/cache values on Telegram API errors. This prevents
+      // a user who LEFT the channel from getting in via a stale DB 'true' value
+      // when the Telegram API is temporarily unavailable. Fail-closed = deny.
+      // For non-forceRefresh (used by requireChannelJoin on data endpoints),
+      // keep the fail-open behavior so legitimate members aren't locked out
+      // during transient Telegram outages.
+      if (!forceRefresh) {
+        if (isDatabaseConfigured(env)) {
+          const dbUser = await getDbUserJoinState(env, uid);
+          if (dbUser?.channel_joined) {
+            return { joined: true, from_db_fallback: true, reason: result.reason };
+          }
         }
-      }
 
-      const cached = await getCachedJoinStatus(env, uid);
-      if (cached === true) {
-        return { joined: true, cached_fallback: true, reason: result.reason };
+        const cached = await getCachedJoinStatus(env, uid);
+        if (cached === true) {
+          return { joined: true, cached_fallback: true, reason: result.reason };
+        }
       }
 
       return { ...result, joined: false };
