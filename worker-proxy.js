@@ -1180,33 +1180,26 @@ async function ensureUserRow(env, userId) {
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
   await diagLog(env, { scope: 'diag-creditReferralWithReward', inviterId, referralId, inviteeId, amount, alsoVerifyChannel });
   try {
-    await queryDbTransaction(env, [
-    {
-      sql: `
-        INSERT INTO token_balances (user_id, balance, updated_at)
-        VALUES ($1, $2, NOW())
-        ON CONFLICT (user_id) DO UPDATE
-        SET
-          balance = token_balances.balance + EXCLUDED.balance,
-          updated_at = NOW()
-      `,
-      params: [String(inviterId), Number(amount)],
-    },
-    {
-      sql: `
-        INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
-        VALUES ($1, $2, $3, $4, $5, NOW())
-      `,
-      params: [String(inviterId), Number(amount), 'referral_reward', `Invite reward for user ${String(inviteeId)}`, String(referralId)],
-    },
-    {
-      sql: alsoVerifyChannel
+    // REFACTOR: use centralized walletRepo.creditTokens instead of raw SQL.
+    // This ensures all balance changes go through the same atomic path
+    // (balance update + transaction record in a single DB transaction).
+    const result = await walletRepo.creditTokens(
+      env,
+      String(inviterId),
+      Number(amount),
+      'referral_reward',
+      `Invite reward for user ${String(inviteeId)}`,
+      String(referralId),
+    );
+    await diagLog(env, { scope: 'diag-creditReferralWithReward-SUCCESS', newBalance: result.newBalance, txId: result.txId });
+
+    // Mark referral as rewarded
+    await queryDb(env,
+      alsoVerifyChannel
         ? 'UPDATE referrals SET channel_verified = TRUE, rewarded = TRUE WHERE id = $1'
         : 'UPDATE referrals SET rewarded = TRUE WHERE id = $1',
-      params: [Number(referralId)],
-    },
-  ]);
-  await diagLog(env, { scope: 'diag-creditReferralWithReward-SUCCESS' });
+      [Number(referralId)],
+    );
 
   // Send referral + reward notifications to the inviter
   if (notificationRepo) {

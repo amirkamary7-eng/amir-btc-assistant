@@ -264,11 +264,101 @@ export function createWalletRepository(deps) {
     };
   }
 
+  /**
+   * CENTRAL TOKEN SERVICE — creditTokens
+   * ALL balance increases in the app MUST go through this function.
+   * This ensures: atomic balance update + transaction record in a single DB transaction.
+   *
+   * Future features (referral, mission, daily reward, airdrop, marketplace) call this.
+   *
+   * @param {object} env
+   * @param {string} userId - Telegram user ID
+   * @param {number} amount - positive number
+   * @param {string} txType - 'referral_reward' | 'daily_claim' | 'mission_reward' | 'airdrop' | 'purchase' | 'admin_credit'
+   * @param {string} description - human-readable description
+   * @param {string} refId - optional reference ID (e.g. referral ID, mission ID)
+   * @returns {Promise<{success: boolean, newBalance: number, txId: string}>}
+   */
+  async function creditTokens(env, userId, amount, txType, description, refId) {
+    if (!queryDbTransaction) throw new Error('queryDbTransaction not available');
+    const uid = String(userId);
+    const amt = Math.abs(Number(amount)); // always positive
+    if (amt <= 0) throw new Error('Amount must be positive');
+
+    const results = await queryDbTransaction(env, [
+      {
+        sql: `INSERT INTO token_balances (user_id, balance, updated_at)
+              VALUES ($1, $2, NOW())
+              ON CONFLICT (user_id) DO UPDATE
+              SET balance = token_balances.balance + EXCLUDED.balance, updated_at = NOW()
+              RETURNING balance`,
+        params: [uid, amt],
+      },
+      {
+        sql: `INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
+              VALUES ($1, $2, $3, $4, $5, NOW())
+              RETURNING id`,
+        params: [uid, amt, txType, description || txType, refId || null],
+      },
+    ]);
+
+    const newBalance = Number(results[0].rows[0]?.balance || 0);
+    const txId = results[1].rows[0]?.id;
+    if (!txId) throw new Error('Failed to record transaction');
+
+    return { success: true, newBalance, txId };
+  }
+
+  /**
+   * CENTRAL TOKEN SERVICE — debitTokens
+   * ALL balance decreases in the app MUST go through this function.
+   * Checks for sufficient balance before debiting.
+   *
+   * @returns {Promise<{success: boolean, newBalance: number, txId: string}>}
+   * @throws Error if insufficient balance
+   */
+  async function debitTokens(env, userId, amount, txType, description, refId) {
+    if (!queryDbTransaction) throw new Error('queryDbTransaction not available');
+    const uid = String(userId);
+    const amt = Math.abs(Number(amount)); // always positive
+    if (amt <= 0) throw new Error('Amount must be positive');
+
+    const results = await queryDbTransaction(env, [
+      // Check balance + debit atomically
+      {
+        sql: `UPDATE token_balances
+              SET balance = balance - $2, updated_at = NOW()
+              WHERE user_id = $1 AND balance >= $2
+              RETURNING balance`,
+        params: [uid, amt],
+      },
+      {
+        sql: `INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
+              SELECT $1, -$2, $3, $4, $5, NOW()
+              WHERE EXISTS (SELECT 1 FROM token_balances WHERE user_id = $1 AND balance >= 0)
+              RETURNING id`,
+        params: [uid, amt, txType, description || txType, refId || null],
+      },
+    ]);
+
+    if (!results[0].rows.length) {
+      throw Object.assign(new Error('INSUFFICIENT_BALANCE'), { code: 'INSUFFICIENT_BALANCE' });
+    }
+    const newBalance = Number(results[0].rows[0]?.balance || 0);
+    const txId = results[1].rows[0]?.id;
+    if (!txId) throw new Error('Failed to record transaction');
+
+    return { success: true, newBalance, txId };
+  }
+
   return Object.freeze({
     getWalletState,
     getTransactionHistory,
     getDailyClaimStatus,
     claimDailyReward,
     getReferralStats,
+    creditTokens,
+    debitTokens,
+    getTierForBalance,
   });
 }
