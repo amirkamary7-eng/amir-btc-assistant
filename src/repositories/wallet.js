@@ -238,12 +238,12 @@ export function createWalletRepository(deps) {
     if (!queryDbTransaction) {
       throw new Error('queryDbTransaction not available');
     }
+    await ensureSchema(env).catch(() => {});
 
     const uid = String(userId);
     const refId = `daily_${new Date().toISOString().slice(0, 10)}`;
 
     // Compute a stable 64-bit advisory lock key from user_id + today's date.
-    // md5 produces a 32-char hex string; we take the first 16 chars as a bigint.
     const lockKeyResult = await queryDb(env,
       `SELECT (('x' || SUBSTRING(MD5($1 || CURRENT_DATE::text), 1, 16))::bit(64)::bigint) AS lock_key`,
       [uid],
@@ -253,59 +253,25 @@ export function createWalletRepository(deps) {
       throw new Error('Failed to compute advisory lock key');
     }
 
-    // Single transaction: lock -> check -> upsert balance -> insert tx record
-    const results = await queryDbTransaction(env, [
-      // Step 1: Acquire per-user, per-day advisory lock
-      {
-        sql: `SELECT pg_advisory_xact_lock($1)`,
-        params: [lockKey],
-      },
-      // Step 2: Check if already claimed today
+    // Step 1: Acquire advisory lock + check if already claimed (atomic)
+    const lockResults = await queryDbTransaction(env, [
+      { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
       {
         sql: `SELECT id FROM token_transactions
               WHERE user_id = $1 AND tx_type = 'daily_claim'
-              AND created_at >= CURRENT_DATE
-              LIMIT 1`,
+              AND created_at >= CURRENT_DATE LIMIT 1`,
         params: [uid],
-      },
-      // Step 3: UPSERT balance — conditional on not already claimed
-      {
-        sql: `INSERT INTO token_balances (user_id, balance, updated_at)
-              SELECT $1, $2, NOW()
-              WHERE NOT EXISTS (
-                SELECT 1 FROM token_transactions
-                WHERE user_id = $1 AND tx_type = 'daily_claim'
-                AND created_at >= CURRENT_DATE
-              )
-              ON CONFLICT (user_id) DO UPDATE
-              SET balance = token_balances.balance + EXCLUDED.balance, updated_at = NOW()`,
-        params: [uid, Number(amount)],
-      },
-      // Step 4: INSERT transaction record — conditional, returns id on success
-      {
-        sql: `INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
-              SELECT $1, $2, 'daily_claim', 'Daily check-in reward', $3, NOW()
-              WHERE NOT EXISTS (
-                SELECT 1 FROM token_transactions
-                WHERE user_id = $1 AND tx_type = 'daily_claim'
-                AND created_at >= CURRENT_DATE
-              )
-              RETURNING id`,
-        params: [uid, Number(amount), refId],
       },
     ]);
 
-    // Step 2 result: if rows exist, already claimed before this transaction
-    if (results[1].rows.length > 0) {
+    if (lockResults[1].rows.length > 0) {
       throw Object.assign(new Error('ALREADY_CLAIMED'), { code: 'ALREADY_CLAIMED' });
     }
 
-    // Step 4 result: if RETURNING returned rows, insert succeeded
-    if (!results[3].rows.length || !results[3].rows[0]?.id) {
-      throw new Error('Failed to claim daily reward');
-    }
-
-    return { claimed: true, amount };
+    // Step 2: Use centralized creditTokens for the actual balance + transaction write.
+    // This ensures the daily claim goes through the same path as all other credits.
+    const result = await creditTokens(env, uid, amount, 'daily_claim', 'Daily check-in reward', refId, { daily_date: new Date().toISOString().slice(0, 10) });
+    return { claimed: true, amount, newBalance: result.newBalance, txId: result.txId };
   }
 
   /**
@@ -340,7 +306,7 @@ export function createWalletRepository(deps) {
    * @param {string} refId - optional reference ID (e.g. referral ID, mission ID)
    * @returns {Promise<{success: boolean, newBalance: number, txId: string}>}
    */
-  async function creditTokens(env, userId, amount, txType, description, refId, metadata = {}) {
+  async function creditTokens(env, userId, amount, txType, description, refId, metadata = {}, auditInfo = {}) {
     if (!queryDbTransaction) throw new Error('queryDbTransaction not available');
     await ensureSchema(env).catch(() => {});
     const uid = String(userId);
@@ -349,7 +315,16 @@ export function createWalletRepository(deps) {
 
     // source is derived from txType for standardization
     const source = txType.split('_')[0]; // 'referral_reward' → 'referral'
-    const metadataJson = JSON.stringify(metadata);
+
+    // AUDIT: merge audit info into metadata for traceability
+    const fullMetadata = {
+      ...metadata,
+      ...(auditInfo.actor ? { actor: auditInfo.actor } : {}),
+      ...(auditInfo.ip ? { ip: auditInfo.ip } : {}),
+      ...(auditInfo.request_id ? { request_id: auditInfo.request_id } : {}),
+      ...(auditInfo.user_agent ? { user_agent: auditInfo.user_agent } : {}),
+    };
+    const metadataJson = JSON.stringify(fullMetadata);
 
     const results = await queryDbTransaction(env, [
       {
@@ -372,6 +347,23 @@ export function createWalletRepository(deps) {
     const txId = results[1].rows[0]?.id;
     if (!txId) throw new Error('Failed to record transaction');
 
+    // AUDIT LOG
+    console.log(JSON.stringify({
+      scope: 'wallet-audit-credit',
+      user_id: uid,
+      tx_id: txId,
+      amount: amt,
+      tx_type: txType,
+      source,
+      status: 'completed',
+      ref_id: refId || null,
+      new_balance: newBalance,
+      actor: auditInfo.actor || 'system',
+      ip: auditInfo.ip || null,
+      request_id: auditInfo.request_id || null,
+      timestamp: new Date().toISOString(),
+    }));
+
     return { success: true, newBalance, txId };
   }
 
@@ -383,7 +375,7 @@ export function createWalletRepository(deps) {
    * @returns {Promise<{success: boolean, newBalance: number, txId: string}>}
    * @throws Error if insufficient balance
    */
-  async function debitTokens(env, userId, amount, txType, description, refId, metadata = {}) {
+  async function debitTokens(env, userId, amount, txType, description, refId, metadata = {}, auditInfo = {}) {
     if (!queryDbTransaction) throw new Error('queryDbTransaction not available');
     await ensureSchema(env).catch(() => {});
     const uid = String(userId);
@@ -391,7 +383,16 @@ export function createWalletRepository(deps) {
     if (amt <= 0) throw new Error('Amount must be positive');
 
     const source = txType.split('_')[0];
-    const metadataJson = JSON.stringify(metadata);
+
+    // AUDIT: merge audit info into metadata
+    const fullMetadata = {
+      ...metadata,
+      ...(auditInfo.actor ? { actor: auditInfo.actor } : {}),
+      ...(auditInfo.ip ? { ip: auditInfo.ip } : {}),
+      ...(auditInfo.request_id ? { request_id: auditInfo.request_id } : {}),
+      ...(auditInfo.user_agent ? { user_agent: auditInfo.user_agent } : {}),
+    };
+    const metadataJson = JSON.stringify(fullMetadata);
 
     const results = await queryDbTransaction(env, [
       {
@@ -411,11 +412,41 @@ export function createWalletRepository(deps) {
     ]);
 
     if (!results[0].rows.length) {
+      // AUDIT LOG for failed debit
+      console.log(JSON.stringify({
+        scope: 'wallet-audit-debit-failed',
+        user_id: uid,
+        amount: amt,
+        tx_type: txType,
+        source,
+        status: 'failed',
+        reason: 'INSUFFICIENT_BALANCE',
+        actor: auditInfo.actor || 'system',
+        ip: auditInfo.ip || null,
+        timestamp: new Date().toISOString(),
+      }));
       throw Object.assign(new Error('INSUFFICIENT_BALANCE'), { code: 'INSUFFICIENT_BALANCE' });
     }
     const newBalance = Number(results[0].rows[0]?.balance || 0);
     const txId = results[1].rows[0]?.id;
     if (!txId) throw new Error('Failed to record transaction');
+
+    // AUDIT LOG
+    console.log(JSON.stringify({
+      scope: 'wallet-audit-debit',
+      user_id: uid,
+      tx_id: txId,
+      amount: -amt,
+      tx_type: txType,
+      source,
+      status: 'completed',
+      ref_id: refId || null,
+      new_balance: newBalance,
+      actor: auditInfo.actor || 'system',
+      ip: auditInfo.ip || null,
+      request_id: auditInfo.request_id || null,
+      timestamp: new Date().toISOString(),
+    }));
 
     return { success: true, newBalance, txId };
   }
@@ -477,9 +508,79 @@ export function createWalletRepository(deps) {
     return { success: true, newBalance, txId: tid };
   }
 
+  /**
+   * Get wallet summary: balance, tier, and aggregate statistics.
+   * Statistics: total_earned, total_spent, transaction_count, by_type breakdown.
+   */
+  async function getWalletSummary(env, userId) {
+    await ensureSchema(env).catch(() => {});
+    const uid = String(userId);
+
+    const result = await queryDb(
+      env,
+      `
+        WITH bal AS (
+          SELECT COALESCE((SELECT balance FROM token_balances WHERE user_id = $1), 0) AS balance
+        ),
+        stats AS (
+          SELECT
+            COALESCE(SUM(amount) FILTER (WHERE amount > 0 AND status = 'completed'), 0) AS total_earned,
+            COALESCE(SUM(ABS(amount)) FILTER (WHERE amount < 0 AND status = 'completed'), 0) AS total_spent,
+            COUNT(*) FILTER (WHERE status = 'completed') AS tx_count,
+            COUNT(*) FILTER (WHERE status = 'completed' AND tx_type = 'referral_reward') AS referral_count,
+            COUNT(*) FILTER (WHERE status = 'completed' AND tx_type = 'daily_claim') AS daily_count,
+            COUNT(*) FILTER (WHERE status = 'completed' AND tx_type = 'mission_reward') AS mission_count,
+            COUNT(*) FILTER (WHERE status = 'reversed') AS reversed_count
+          FROM token_transactions
+          WHERE user_id = $1
+        )
+        SELECT
+          (SELECT balance FROM bal) AS balance,
+          (SELECT total_earned FROM stats) AS total_earned,
+          (SELECT total_spent FROM stats) AS total_spent,
+          (SELECT tx_count FROM stats) AS tx_count,
+          (SELECT referral_count FROM stats) AS referral_count,
+          (SELECT daily_count FROM stats) AS daily_count,
+          (SELECT mission_count FROM stats) AS mission_count,
+          (SELECT reversed_count FROM stats) AS reversed_count
+      `,
+      [uid],
+    );
+
+    const row = result.rows[0] || {};
+    const balance = Number(row.balance || 0);
+    return {
+      balance,
+      tier: getTierForBalance(balance),
+      stats: {
+        total_earned: Number(row.total_earned || 0),
+        total_spent: Number(row.total_spent || 0),
+        transaction_count: Number(row.tx_count || 0),
+        referral_count: Number(row.referral_count || 0),
+        daily_count: Number(row.daily_count || 0),
+        mission_count: Number(row.mission_count || 0),
+        reversed_count: Number(row.reversed_count || 0),
+      },
+    };
+  }
+
+  /**
+   * Get just the current balance (lightweight, no transactions).
+   */
+  async function getBalance(env, userId) {
+    const result = await queryDb(
+      env,
+      'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
+      [String(userId)],
+    );
+    return Number(result.rows[0]?.balance || 0);
+  }
+
   return Object.freeze({
     ensureSchema,
     getWalletState,
+    getWalletSummary,
+    getBalance,
     getTransactionHistory,
     getTransactionById,
     getDailyClaimStatus,

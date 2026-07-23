@@ -29,6 +29,7 @@ export function createWalletHandlers(deps) {
       );
     }
     try {
+      await walletRepo.ensureSchema(env).catch(() => {});
       const walletState = await walletRepo.getWalletState(env, authState.user.id);
       return jsonResponse({ status: 'success', ...walletState }, {}, env);
     } catch (error) {
@@ -38,8 +39,44 @@ export function createWalletHandlers(deps) {
   }
 
   /**
-   * GET /api/wallet/history — Paginated transaction history.
-   * Query params: offset (default 0), limit (default 20).
+   * GET /api/wallet/balance — Lightweight balance-only endpoint (no transactions).
+   */
+  async function handleGetBalance(request, env) {
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) return authState.error;
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse({ status: 'success', balance: 0 }, {}, env);
+    }
+    try {
+      const balance = await walletRepo.getBalance(env, authState.user.id);
+      return jsonResponse({ status: 'success', balance }, {}, env);
+    } catch (error) {
+      console.warn(safeError('get-balance', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
+  /**
+   * GET /api/wallet/summary — Balance + tier + aggregate statistics.
+   */
+  async function handleGetSummary(request, env) {
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) return authState.error;
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse({ status: 'success', balance: 0, tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 }, stats: { total_earned: 0, total_spent: 0, transaction_count: 0, referral_count: 0, daily_count: 0, mission_count: 0, reversed_count: 0 } }, {}, env);
+    }
+    try {
+      const summary = await walletRepo.getWalletSummary(env, authState.user.id);
+      return jsonResponse({ status: 'success', ...summary }, {}, env);
+    } catch (error) {
+      console.warn(safeError('get-wallet-summary', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
+  /**
+   * GET /api/wallet/history — Paginated transaction history with filtering.
+   * Query params: offset (default 0), limit (default 20), type, status.
    */
   async function handleGetHistory(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
@@ -59,6 +96,27 @@ export function createWalletHandlers(deps) {
       return jsonResponse({ status: 'success', ...result }, {}, env);
     } catch (error) {
       console.warn(safeError('get-wallet-history', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
+  /**
+   * GET /api/wallet/transaction/:id — Get a single transaction by ID.
+   */
+  async function handleGetTransaction(request, env, txId) {
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) return authState.error;
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
+    }
+    try {
+      const tx = await walletRepo.getTransactionById(env, authState.user.id, txId);
+      if (!tx) {
+        return jsonResponse({ status: 'error', message: 'Transaction not found' }, { status: 404 }, env);
+      }
+      return jsonResponse({ status: 'success', transaction: tx }, {}, env);
+    } catch (error) {
+      console.warn(safeError('get-transaction', error));
       return safeDbErrorResponse(error, {}, env);
     }
   }
@@ -92,6 +150,7 @@ export function createWalletHandlers(deps) {
     }
     try {
       const DAILY_REWARD = 10;
+      const clientIp = request.headers.get('cf-connecting-ip') || null;
       const result = await walletRepo.claimDailyReward(env, authState.user.id, DAILY_REWARD);
       return jsonResponse({ status: 'success', ...result }, {}, env);
     } catch (error) {
@@ -123,7 +182,10 @@ export function createWalletHandlers(deps) {
 
   return Object.freeze({
     handleGetWallet,
+    handleGetBalance,
+    handleGetSummary,
     handleGetHistory,
+    handleGetTransaction,
     handleGetClaimStatus,
     handleClaimDaily,
     handleReferralStats,

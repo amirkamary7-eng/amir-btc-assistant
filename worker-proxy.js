@@ -4451,8 +4451,21 @@ export default {
         return await walletHandlers.handleGetWallet(request, env);
       }
 
+      if (request.method === 'GET' && url.pathname === '/api/wallet/balance') {
+        return await walletHandlers.handleGetBalance(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/wallet/summary') {
+        return await walletHandlers.handleGetSummary(request, env);
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/wallet/history') {
         return await walletHandlers.handleGetHistory(request, env);
+      }
+
+      if (request.method === 'GET' && /^\/api\/wallet\/transaction\/[^/]+$/.test(url.pathname)) {
+        const txId = url.pathname.split('/')[3] || '';
+        return await walletHandlers.handleGetTransaction(request, env, txId);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/claim') {
