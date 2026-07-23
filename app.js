@@ -878,6 +878,17 @@ async function bootstrapUser() {
                 referrer_id: referrerId
             })
         });
+
+        // DIAGNOSTIC LOG: capture exact bootstrap response for membership debugging
+        console.log('[JOIN-LOCK DIAG] Bootstrap response:', JSON.stringify({
+            status: data?.status,
+            channel_joined: data?.channel_joined,
+            channel_joined_type: typeof data?.channel_joined,
+            is_admin: data?.is_admin,
+            user_id: data?.user?.id || data?.user?.telegram_id,
+            has_user: !!data?.user,
+        }));
+
         if (data.bot_username) {
             BOT_USERNAME = data.bot_username;
         }

@@ -1377,48 +1377,82 @@ async function getChatMemberDebugPayload(userId, env) {
   const uid = String(userId);
   const requiredChannel = resolveRequiredChannel(env);
   const chatId = getTelegramChatId(env);
+  const botToken = String(env.TELEGRAM_BOT_TOKEN || '');
+  const botConfigured = isBotConfigured(env);
+  const isAdmin = isAdminTelegramId(env, uid);
   const payload = {
     required_channel: requiredChannel,
+    chat_id_used: chatId,
     user_id: uid,
+    bot_configured: botConfigured,
+    is_admin: isAdmin,
     telegram_response: null,
     joined: false,
   };
+
+  // DIAGNOSTIC LOG: capture every detail for debugging membership issues
+  console.log(JSON.stringify({
+    scope: 'diag-getChatMember',
+    user_id: uid,
+    required_channel: requiredChannel,
+    chat_id_used: chatId,
+    bot_configured: botConfigured,
+    is_admin: isAdmin,
+    is_guest: uid.startsWith('guest_'),
+    is_numeric: /^\d+$/.test(uid),
+  }));
 
   if (uid.startsWith('guest_')) {
     payload.telegram_response = { reason: 'guest_user' };
     return payload;
   }
 
-  if (isAdminTelegramId(env, uid)) {
+  if (isAdmin) {
     payload.telegram_response = { admin: true, reason: 'admin_bypass' };
     payload.joined = true;
+    console.log(JSON.stringify({ scope: 'diag-getChatMember-result', user_id: uid, result: 'admin_bypass', joined: true }));
     return payload;
   }
 
-  if (!isBotConfigured(env)) {
+  if (!botConfigured) {
     payload.telegram_response = { reason: 'bot_not_configured' };
+    console.log(JSON.stringify({ scope: 'diag-getChatMember-result', user_id: uid, result: 'bot_not_configured', joined: false }));
     return payload;
   }
 
   if (!/^\d+$/.test(uid)) {
     payload.telegram_response = { reason: 'invalid_user_id', value: uid };
+    console.log(JSON.stringify({ scope: 'diag-getChatMember-result', user_id: uid, result: 'invalid_user_id', joined: false }));
     return payload;
   }
 
   try {
-    const telegramResponse = await fetch(
-      `https://api.telegram.org/bot${String(env.TELEGRAM_BOT_TOKEN || '')}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${encodeURIComponent(uid)}`,
-    );
+    const telegramUrl = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${encodeURIComponent(uid)}`;
+    console.log(JSON.stringify({ scope: 'diag-getChatMember-fetch', user_id: uid, url: telegramUrl.replace(botToken, 'BOT_TOKEN') }));
+    const telegramResponse = await fetch(telegramUrl);
     const data = await telegramResponse.json();
     payload.telegram_response = data;
     const status = data?.result?.status || '';
     payload.joined = Boolean(data?.ok && JOINED_STATUSES.has(status));
+
+    // DIAGNOSTIC LOG: the exact raw response from Telegram
+    console.log(JSON.stringify({
+      scope: 'diag-getChatMember-result',
+      user_id: uid,
+      telegram_ok: data?.ok,
+      telegram_status: status,
+      telegram_raw: JSON.stringify(data).slice(0, 500),
+      joined: payload.joined,
+      joined_statuses_list: [...JOINED_STATUSES],
+    }));
+
     return payload;
   } catch (error) {
     payload.telegram_response = {
       exception: error instanceof Error ? error.name : 'Error',
       message: error instanceof Error ? error.message : String(error),
     };
+    console.log(JSON.stringify({ scope: 'diag-getChatMember-error', user_id: uid, error: payload.telegram_response }));
     return payload;
   }
 }
@@ -1465,11 +1499,15 @@ async function checkChannelMembership(userId, env) {
 async function resolveChannelMembership(env, userId, { forceRefresh = false } = {}) {
   const uid = String(userId);
 
+  // DIAGNOSTIC LOG
+  console.log(JSON.stringify({ scope: 'diag-resolveMembership-start', user_id: uid, forceRefresh, is_guest: uid.startsWith('guest_'), is_admin: isAdminTelegramId(env, uid) }));
+
   if (uid.startsWith('guest_')) {
     return { joined: false, reason: 'guest_user' };
   }
 
   if (isAdminTelegramId(env, uid)) {
+    console.log(JSON.stringify({ scope: 'diag-resolveMembership-admin', user_id: uid, joined: true }));
     return { joined: true, admin: true };
   }
 
@@ -1477,19 +1515,23 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
     if (!forceRefresh) {
       const cached = await getCachedJoinStatus(env, uid);
       if (cached === true) {
+        console.log(JSON.stringify({ scope: 'diag-resolveMembership-cached', user_id: uid, joined: true, source: 'kv_cache' }));
         return { joined: true, cached: true };
       }
 
       if (isDatabaseConfigured(env)) {
         const dbUser = await getDbUserJoinState(env, uid);
+        console.log(JSON.stringify({ scope: 'diag-resolveMembership-db', user_id: uid, db_channel_joined: dbUser?.channel_joined }));
         if (dbUser?.channel_joined) {
           await setCachedJoinStatus(env, uid, true);
+          console.log(JSON.stringify({ scope: 'diag-resolveMembership-db-hit', user_id: uid, joined: true, source: 'db' }));
           return { joined: true, from_db: true };
         }
       }
     }
 
     const result = await checkChannelMembership(uid, env);
+    console.log(JSON.stringify({ scope: 'diag-resolveMembership-telegram-result', user_id: uid, joined: result.joined, reason: result.reason }));
     if (result.joined) {
       await setCachedJoinStatus(env, uid, true);
       if (isDatabaseConfigured(env)) {

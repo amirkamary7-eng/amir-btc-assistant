@@ -110,12 +110,19 @@ export function createUserHandlers(deps) {
 
       // Real-time channel membership check for the frontend lock screen
       let channelJoined = Boolean(freshUserRow?.channel_joined);
+      console.log(JSON.stringify({ scope: 'diag-bootstrap-membership', user_id: userId, db_channel_joined: freshUserRow?.channel_joined, initial_channelJoined: channelJoined }));
       if (!channelJoined && tgUser?.id) {
         try {
           const membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: true });
           channelJoined = Boolean(membership?.joined);
-        } catch { /* use DB value */ }
+          console.log(JSON.stringify({ scope: 'diag-bootstrap-membership-resolved', user_id: userId, tg_user_id: tgUser.id, membership_joined: membership?.joined, membership_reason: membership?.reason, final_channelJoined: channelJoined }));
+        } catch (e) {
+          console.log(JSON.stringify({ scope: 'diag-bootstrap-membership-error', user_id: userId, error: e?.message }));
+          /* use DB value */
+        }
       }
+
+      console.log(JSON.stringify({ scope: 'diag-bootstrap-response', user_id: userId, channel_joined: channelJoined, is_admin: isAdminTelegramId(env, userId) }));
 
       return jsonResponse({
         status: 'success',
