@@ -8510,38 +8510,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Phase 0: Telegram SDK init + user resolution ──
     await UserContext.init();
 
-    // ── Phase -1: MAINTENANCE MODE CHECK ──
-    // This runs BEFORE any other UI loads. If maintenance is enabled,
-    // the full-screen maintenance popup is shown and the rest of the app
-    // is BLOCKED from initializing. Admins can bypass via a button.
-    //
-    // CRITICAL: We check the return value and return early if maintenance
-    // is active. This prevents ALL subsequent code (Phase 1, 2, 3) from
-    // running, so no tabs, no API calls, no dashboard — only the popup.
-    const _maintOk = await checkMaintenanceMode();
-    if (!_maintOk) {
-        // Maintenance is active — STOP here. Do not load the app.
-        // The popup is already shown. Only admin bypass can continue.
-        console.log('[MAINT] App load blocked — maintenance mode active');
-        return;  // <-- This is the critical fix: actually stop execution
-    }
-
-    // ── Phase 0.5: SECURITY — Do NOT restore admin state from localStorage ──
-    // Admin status is ONLY determined by server bootstrap response.
-    // Previously this restored admin-ready from localStorage, which allowed
-    // any user to fake admin by setting localStorage.setItem('is_admin', '1').
-    // Now we wait for bootstrapUser() to confirm admin status from the server.
-
-    // ── JOIN LOCK: Show loading state as a fast splash (not a full popup) ──
-    // The overlay is already visible (display:flex in HTML). The loading state
-    // is minimal (just badge + spinner) so returning members barely see it.
-    // Bootstrap will either hideJoinLock() (if channel_joined=true) or
-    // setJoinLockState('not-joined') (if false). This runs BEFORE any app
-    // content renders, so no bypass is possible.
+    // ── JOIN LOCK: Show loading splash immediately ──
+    // The overlay is already visible (display:flex in HTML, body has jl-locked).
+    // This runs BEFORE any async work so the user sees the splash instantly.
     showJoinLock();
     setJoinLockState('loading');
 
-    // ── Phase 1: Apply language + render UI from cache immediately ──
+    // ── PARALLEL EXECUTION: maintenance check + bootstrap + data prep ──
+    // Previously these ran sequentially (maintenance → join-lock → bootstrap → data),
+    // causing a visible delay. Now they run in parallel:
+    //   - maintenance check (network)
+    //   - bootstrapUser (network, includes membership check)
+    //   - Phase 1 UI prep (synchronous: language, ticker from cache, skeletons)
+    // The join-lock stays visible until bootstrap confirms membership.
+
+    // Phase 1: Apply language + render UI from cache immediately (synchronous, ~0ms)
     applyLanguage();
     loadUser();
     updateNotifBadge();
@@ -8556,12 +8539,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (st) st.innerHTML = '<div class="slider-skeleton"><div class="slider-skeleton-img"></div><div class="slider-skeleton-text"><div class="slider-skeleton-line"></div><div class="slider-skeleton-line"></div><div class="slider-skeleton-line"></div></div></div>';
     }
 
-    // Phase C: Load cached market data for instant watchlist render
-    // BUG 3 FIX: add a 5-minute TTL. Previously the cache had NO expiry (only a
-    // version bump), so the ticker could paint with prices/changes that were
-    // hours old. Now stale caches are discarded and fresh data is fetched.
+    // Phase C: Load cached market data for instant ticker render
     const MARKET_CACHE_VERSION = 3;
-    const MARKET_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+    const MARKET_CACHE_TTL_MS = 5 * 60 * 1000;
     try {
         const cachedVersion = parseInt(localStorage.getItem('market_cache_version') || '0', 10);
         const cachedTs = parseInt(localStorage.getItem('market_cache_ts') || '0', 10);
@@ -8577,7 +8557,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Render ticker IMMEDIATELY — from cache if available, else with fallback coins
     if (!allCoins.length) {
-        // Fallback: show ticker with placeholder coins until real data arrives
         allCoins = [
             { symbol: 'BTC', changePercent24Hr: 0 }, { symbol: 'ETH', changePercent24Hr: 0 },
             { symbol: 'SOL', changePercent24Hr: 0 }, { symbol: 'BNB', changePercent24Hr: 0 },
@@ -8604,8 +8583,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         newsContainer.innerHTML = '<div class="important-news-skeleton">' + Array(3).fill('<div class="important-news-skeleton-item"><div class="important-news-skeleton-img"></div><div class="important-news-skeleton-text"><div class="important-news-skeleton-line"></div><div class="important-news-skeleton-line"></div></div></div>').join('') + '</div>';
     }
 
-    // tabLoaded.dashboard is set AFTER initial data loads succeed.
-    // This ensures revisiting the dashboard retries if initial loads failed.
+    // tabLoaded.dashboard tracking
     const _dashboardReady = { market: false, analyses: false, news: false };
     function _checkDashboardReady() {
         if (_dashboardReady.market && _dashboardReady.analyses && _dashboardReady.news) {
@@ -8613,54 +8591,63 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // ── Phase 2: Bootstrap (authenticated data load) ──
-    // SECURITY (item 7): Data endpoints (market, analyses, news, calendar) only
-    // load AFTER membership is confirmed. If join-lock is still showing, skip
-    // data loading — the user will stay on the lock screen. When the user
-    // verifies membership and hideJoinLock() is called, refreshUI() will trigger
-    // the data loads. This prevents any data from loading before membership is
-    // confirmed, both on the frontend AND the backend (which now gates these
-    // endpoints with requireChannelJoin).
-    if (!_joinLockShown) {
+    // ── Data loading function (called after membership confirmed) ──
+    // All data requests run in PARALLEL — not chained.
+    function _startDataLoading() {
         loadMarketData(true).then(() => {
-            // Dashboard rebuild: market status + watchlist render after market data arrives
             renderDashboardMarketStatus();
             renderWatchlist();
-            // BUG 3 FIX: re-render ticker with REAL 24h changes once fresh data arrives.
-            // The signature guard inside renderMarketTicker skips the no-op rebuild
-            // (and avoids resetting the CSS animation) when nothing has changed.
             renderMarketTicker();
         }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
         fetchAnalyses().then(changed => {
             if (changed) {
-                renderAnalysisSlider();        // legacy — no-op if slider-track not in DOM
-                renderAnalysisFeatured();      // analysis page featured slider
+                renderAnalysisSlider();
+                renderAnalysisFeatured();
                 renderAnalysisStats();
-                renderDashboardFeaturedAnalysis(); // dashboard premium featured card
+                renderDashboardFeaturedAnalysis();
             } else {
-                // Even if no change, render dashboard featured from cache
                 renderDashboardFeaturedAnalysis();
             }
-            // Check for deep link after first load
             checkAnalysisDeepLink();
         }).finally(() => { _dashboardReady.analyses = true; _checkDashboardReady(); });
         setTimeout(() => {
             loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
         }, 2000);
-        // Dashboard rebuild: economic calendar — load next 3 upcoming events
         loadCalendarEvents().then(() => renderDashboardCalendar()).catch(() => renderDashboardCalendar());
-    } // end if (!_joinLockShown)
+    }
 
-    // Authenticated bootstrap — runs once user is available
-    await bootstrapUser();
-    loadUser();
+    // ── PARALLEL: maintenance check + bootstrap (no await — fire and forget) ──
+    // Previously: await checkMaintenanceMode() blocked everything, then await
+    // bootstrapUser() blocked again. Now both run in parallel.
+    // Maintenance check: if maintenance is on, it shows the popup and we return.
+    // Bootstrap: resolves membership → hideJoinLock or setJoinLockState('not-joined').
 
-    // If user is pending (in Telegram but no initData yet), set up a robust
-    // retry mechanism: polling + hashchange + MutationObserver.
-    // This ensures bootstrap completes even on cold-open where initData arrives late.
+    let _maintenanceBlocked = false;
+
+    // Start maintenance check (non-blocking — we handle the result in the callback)
+    checkMaintenanceMode().then(_maintOk => {
+        if (!_maintOk) {
+            _maintenanceBlocked = true;
+            console.log('[MAINT] App load blocked — maintenance mode active');
+        }
+    }).catch(() => { /* fail open */ });
+
+    // Start bootstrap (non-blocking — membership check runs in parallel)
+    // bootstrapUser() will call hideJoinLock() or setJoinLockState('not-joined')
+    // when it completes. Data loading is triggered by refreshUI() after hideJoinLock.
+    bootstrapUser().then(() => {
+        loadUser();
+        // If bootstrap confirmed membership (hideJoinLock was called inside
+        // bootstrapUser), start data loading immediately.
+        if (!_joinLockShown && !_maintenanceBlocked) {
+            _startDataLoading();
+        }
+    }).catch(e => {
+        console.error('[BOOT] bootstrapUser FAILED:', e.message);
+    });
+
+    // If user is pending (cold open), set up retry mechanism
     if (!bootstrapComplete && (UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady()))) {
-        // Method 1: Polling retry — most reliable for cold-open scenarios
-        // NOTE: Not pushed to _pollingIntervals — must survive visibility changes.
         const _bootPollMax = 20000;
         const _bootPollStart = Date.now();
         const _bootPollInterval = setInterval(() => {
@@ -8675,7 +8662,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }, 500);
 
-        // Method 2: MutationObserver — fires when profile-name DOM updates
         const _bootObserver = new MutationObserver(() => {
             _notifyAuthStateChange();
             if (isTelegramAuthReady() && !bootstrapComplete) {
