@@ -108,21 +108,29 @@ export function createUserHandlers(deps) {
       const freshUserRow = await userRepo.getById(env, userId);
       const watchlist = await watchlistRepo.getSymbols(env, userId);
 
-      // Real-time channel membership check for the frontend lock screen
-      let channelJoined = Boolean(freshUserRow?.channel_joined);
-      console.log(JSON.stringify({ scope: 'diag-bootstrap-membership', user_id: userId, db_channel_joined: freshUserRow?.channel_joined, initial_channelJoined: channelJoined }));
-      if (!channelJoined && tgUser?.id) {
+      // CRITICAL FIX: ALWAYS do a real Telegram getChatMember check on bootstrap,
+      // regardless of what the DB says. Previously, if the DB had channel_joined=true
+      // (stale from a previous membership), bootstrap trusted it and skipped the
+      // Telegram check entirely — so a user who LEFT the channel still got in.
+      // Now we always call resolveChannelMembership with forceRefresh:true.
+      // resolveChannelMembership internally updates the DB + KV cache with the result.
+      let channelJoined = false;
+      if (tgUser?.id) {
         try {
           const membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: true });
           channelJoined = Boolean(membership?.joined);
-          console.log(JSON.stringify({ scope: 'diag-bootstrap-membership-resolved', user_id: userId, tg_user_id: tgUser.id, membership_joined: membership?.joined, membership_reason: membership?.reason, final_channelJoined: channelJoined }));
+          console.log(JSON.stringify({ scope: 'diag-bootstrap-membership-resolved', user_id: userId, tg_user_id: tgUser.id, membership_joined: membership?.joined, membership_reason: membership?.reason, final_channelJoined: channelJoined, db_had: Boolean(freshUserRow?.channel_joined) }));
         } catch (e) {
           console.log(JSON.stringify({ scope: 'diag-bootstrap-membership-error', user_id: userId, error: e?.message }));
-          /* use DB value */
+          // On error, fall back to DB value (fail-open for legitimate members during outages)
+          channelJoined = Boolean(freshUserRow?.channel_joined);
         }
+      } else {
+        // No tgUser.id (shouldn't happen in production, but handle gracefully)
+        channelJoined = Boolean(freshUserRow?.channel_joined);
       }
 
-      console.log(JSON.stringify({ scope: 'diag-bootstrap-response', user_id: userId, channel_joined: channelJoined, is_admin: isAdminTelegramId(env, userId) }));
+      console.log(JSON.stringify({ scope: 'diag-bootstrap-response', user_id: userId, channel_joined: channelJoined, is_admin: isAdminTelegramId(env, userId), db_had: Boolean(freshUserRow?.channel_joined) }));
 
       return jsonResponse({
         status: 'success',
