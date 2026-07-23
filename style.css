@@ -1571,109 +1571,89 @@ strong.down { color: var(--red); }
 /* #region رفرال */
 /* این بخش استایل‌های لینک دعوت، آمار ارجاع و پاداش‌ها را مشخص می‌کند. */
 /* ============================================================================ */
-.referral-card { border-radius: 18px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.06); padding: 18px; margin: 0 20px 16px; background: var(--bg-card); box-shadow: 0 8px 24px rgba(0,0,0,0.25); }
-.ref-header { display: flex; gap: 12px; margin-bottom: 14px; }
-.ref-header svg { flex-shrink: 0; }
-.ref-header h4 { font-size: 15px; font-weight: 700; }
-.ref-header p { font-size: 12px; color: var(--text-dim); }
-.ref-input { display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
-.ref-input input { flex: 1; padding: 10px 12px; background: transparent; border: none; color: var(--text); font-size: 12px; outline: none; }
-.ref-input button { background: rgba(255,255,255,0.05); border: none; color: var(--accent); font-weight: 600; padding: 0 16px; cursor: pointer; }
-.ref-share-btn { width: 100%; padding: 10px; background: rgba(21,28,36,0.9); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; color: var(--text-secondary); font-weight: 600; cursor: pointer; margin-bottom: 14px; backdrop-filter: blur(8px); transition: background var(--transition); }
-.ref-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
-.ref-stats div span:first-child { display: block; font-size: 11px; color: var(--text-sub); }
-.ref-stats strong { font-size: 16px; font-weight: 700; }
-.ref-rewards-soon { margin-top: 14px; border: 1px dashed rgba(255,138,0,0.2); border-radius: 12px; padding: 14px; background: rgba(255,138,0,0.02); }
-.soon-badge-row { margin-bottom: 10px; }
-.soon-badge { display: inline-block; background: var(--accent); color: #000; font-size: 9px; font-weight: 700; padding: 3px 10px; border-radius: 8px; letter-spacing: 0.3px; white-space: nowrap; box-shadow: 0 0 12px rgba(255,138,0,0.2); }
-.ref-rewards-soon h5 { font-size: 13px; margin-bottom: 6px; line-height: 1.4; text-align: center; }
-.ref-rewards-soon p { font-size: 11px; color: var(--text-dim); line-height: 1.5; text-align: center; }
+/* NOTE: .referral-card (old base class) removed — replaced by .referral-entry-card below. */
 
-/* #endregion */
-
-/* ============================================================================ */
-/* #region گردونه غیرفعال */
-/* این بخش پیش‌نمایش بصری قابلیت آینده‌دار گردونه جوایز را استایل‌دهی می‌کند. */
-/* ============================================================================ */
-.wheel-preview-wrap { display: flex; justify-content: center; margin: 12px 0 14px; }
-.wheel-preview {
-    position: relative;
-    width: 160px;
-    height: 160px;
-    opacity: 0.35;
-    filter: grayscale(0.45) saturate(0.7);
+/* Referral Entry Card — premium CTA that opens ReferralApp.openReferral() */
+.referral-entry-card {
+    position: relative; overflow: hidden; cursor: pointer;
+    border-radius: 22px; padding: 20px 18px;
+    margin: 0 20px 16px;
+    background:
+        radial-gradient(120% 100% at 100% 0%, rgba(245,166,35,0.10), transparent 55%),
+        linear-gradient(145deg, #0B1220 0%, #0F1828 55%, #0B1220 100%);
+    border: 1px solid rgba(245,166,35,0.20);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35), 0 0 40px rgba(245,166,35,0.05), inset 0 1px 0 rgba(255,255,255,0.05);
+    transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s ease, border-color 0.3s ease;
+    animation: walletCardEntry 0.55s cubic-bezier(0.16,1,0.3,1) both;
+}
+.referral-entry-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(245,166,35,0.35);
+    box-shadow: 0 14px 36px rgba(0,0,0,0.40), 0 0 50px rgba(245,166,35,0.10), inset 0 1px 0 rgba(255,255,255,0.07);
+}
+.referral-entry-card:active { transform: scale(0.985); }
+.rec-glow {
+    position: absolute; top: -40px; inset-inline-end: -40px;
+    width: 160px; height: 160px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(245,166,35,0.14), transparent 70%);
     pointer-events: none;
-    user-select: none;
 }
-.wheel-preview-ring {
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 3px solid rgba(255,138,0,0.25);
-    box-shadow: 0 0 30px rgba(255,138,0,0.08), inset 0 0 20px rgba(0,0,0,0.35);
+.rec-top { display: flex; align-items: center; gap: 12px; position: relative; z-index: 1; }
+.rec-icon-wrap { position: relative; flex-shrink: 0; }
+.rec-icon-glow {
+    position: absolute; inset: -4px; border-radius: 14px;
+    background: radial-gradient(circle, rgba(245,166,35,0.25), transparent 70%);
+    filter: blur(8px);
 }
-.wheel-preview-segments {
-    position: absolute;
-    inset: 8px;
-    border-radius: 50%;
-    overflow: hidden;
-    background: conic-gradient(
-        from 0deg,
-        rgba(255,138,0,0.35) 0deg 45deg,
-        rgba(0,200,150,0.25) 45deg 90deg,
-        rgba(255,138,0,0.2) 90deg 135deg,
-        rgba(100,116,139,0.25) 135deg 180deg,
-        rgba(255,138,0,0.3) 180deg 225deg,
-        rgba(0,200,150,0.2) 225deg 270deg,
-        rgba(255,138,0,0.25) 270deg 315deg,
-        rgba(100,116,139,0.2) 315deg 360deg
-    );
+.rec-icon {
+    position: relative; z-index: 1;
+    width: 46px; height: 46px; border-radius: 13px;
+    background: linear-gradient(135deg, rgba(245,166,35,0.20), rgba(245,166,35,0.08));
+    border: 1.5px solid rgba(245,166,35,0.35);
+    display: flex; align-items: center; justify-content: center;
+    color: #F5A623;
+    box-shadow: 0 4px 14px rgba(245,166,35,0.20);
 }
-.wheel-preview-segments span {
-    position: absolute;
-    width: 50%;
-    height: 2px;
-    background: rgba(255,255,255,0.08);
-    top: 50%;
-    left: 50%;
-    transform-origin: left center;
+.rec-info { flex: 1; min-width: 0; }
+.rec-info h4 { font-size: 15px; font-weight: 700; color: #fff; margin: 0; letter-spacing: -0.2px; }
+.rec-info p { font-size: 12px; color: #8B96A8; margin: 3px 0 0; line-height: 1.4; }
+.rec-arrow { color: #F5A623; flex-shrink: 0; opacity: 0.8; transition: transform 0.3s ease; }
+[dir="rtl"] .rec-arrow svg { transform: scaleX(-1); }
+.referral-entry-card:hover .rec-arrow { transform: translateX(3px); }
+[dir="rtl"] .referral-entry-card:hover .rec-arrow { transform: scaleX(-1) translateX(3px); }
+.rec-stats {
+    display: flex; align-items: stretch; gap: 0;
+    margin-top: 16px; padding: 12px 6px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.04);
+    border-radius: 14px; position: relative; z-index: 1;
 }
-.wheel-preview-segments span:nth-child(1) { transform: rotate(0deg); }
-.wheel-preview-segments span:nth-child(2) { transform: rotate(45deg); }
-.wheel-preview-segments span:nth-child(3) { transform: rotate(90deg); }
-.wheel-preview-segments span:nth-child(4) { transform: rotate(135deg); }
-.wheel-preview-segments span:nth-child(5) { transform: rotate(180deg); }
-.wheel-preview-segments span:nth-child(6) { transform: rotate(225deg); }
-.wheel-preview-segments span:nth-child(7) { transform: rotate(270deg); }
-.wheel-preview-segments span:nth-child(8) { transform: rotate(315deg); }
-.wheel-preview-center {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 46px;
-    height: 46px;
-    border-radius: 50%;
-    background: linear-gradient(145deg, #1a2332, #0b1220);
-    border: 2px solid rgba(255,138,0,0.3);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+.rec-stat { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 0 6px; }
+.rec-stat-num { font-size: 18px; font-weight: 800; color: #F5A623; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; }
+.rec-stat-label { font-size: 10px; color: #6B7A8D; font-weight: 600; text-align: center; }
+.rec-stat-divider { width: 1px; background: rgba(255,255,255,0.05); margin: 4px 0; }
+.rec-cta {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    width: 100%; margin-top: 14px;
+    padding: 11px; border-radius: 13px; border: none;
+    background: linear-gradient(135deg, #F5A623, #FFCC4D);
+    color: #020611; font-size: 13px; font-weight: 700; cursor: pointer;
+    font-family: inherit; position: relative; z-index: 1;
+    box-shadow: 0 4px 14px rgba(245,166,35,0.30), inset 0 1px 0 rgba(255,255,255,0.25);
+    transition: all 0.22s cubic-bezier(0.4,0,0.2,1);
 }
-.wheel-preview-pointer {
-    position: absolute;
-    top: -6px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 10px solid transparent;
-    border-right: 10px solid transparent;
-    border-top: 18px solid rgba(255,138,0,0.45);
-    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+.rec-cta:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(245,166,35,0.40), inset 0 1px 0 rgba(255,255,255,0.3); }
+.rec-cta:active { transform: scale(0.97); }
+[dir="rtl"] .rec-cta svg { transform: scaleX(-1); }
+@media (max-width: 360px) {
+    .referral-entry-card { padding: 16px 14px; margin: 0 14px 14px; }
+    .rec-stat-num { font-size: 15px; }
+    .rec-stat-label { font-size: 9px; }
 }
+/* NOTE: .ref-header / .ref-input / .ref-share-btn / .ref-stats / .ref-rewards-soon /
+   .soon-badge / .wheel-preview* classes were removed — the old referral card
+   was replaced by .referral-entry-card (premium CTA) and ReferralApp.full-page.
+   The Lucky Wheel now lives inside Referral Center with its own .rc-wheel-* styles. */
 
 /* #endregion */
 
@@ -2637,7 +2617,6 @@ strong.down { color: var(--red); }
 /* این بخش استایل‌های مرتبط با "واکنش‌گرایی" را در خود نگه می‌دارد. */
 /* ============================================================================ */
 @media (max-width: 400px) {
-    .ref-stats { grid-template-columns: 1fr 1fr; }
     /* 360px Market page optimization */
     .section-header { padding: 16px 14px 12px; }
     .market-page-header { padding: 14px 14px 10px; }
@@ -8458,6 +8437,130 @@ body.jl-locked .cd-fullscreen {
     visibility: hidden !important;
     pointer-events: none !important;
 }
+
+/* ────────────────────────────────────────────────────────────
+   SILENT MEMBERSHIP STATUS BAR — thin top bar, no overlay
+   States: checking / verified / required / error
+   ──────────────────────────────────────────────────────────── */
+.join-status-bar {
+    position: fixed; top: 0; left: 0; right: 0;
+    z-index: 10003;
+    transform: translateY(-100%);
+    opacity: 0;
+    transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.32s ease;
+    pointer-events: none;
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    background: linear-gradient(180deg, rgba(11, 18, 32, 0.96), rgba(11, 18, 32, 0.92));
+    border-bottom: 1px solid rgba(245, 166, 35, 0.18);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 30px rgba(245, 166, 35, 0.05);
+    padding-top: env(safe-area-inset-top, 0);
+}
+.join-status-bar.visible {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+}
+.join-status-bar.hiding {
+    transform: translateY(-100%);
+    opacity: 0;
+    transition: transform 0.3s ease-in, opacity 0.3s ease-in;
+}
+.join-status-bar[data-state="verified"] {
+    border-bottom-color: rgba(0, 200, 150, 0.25);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 30px rgba(0, 200, 150, 0.08);
+}
+.join-status-bar[data-state="required"] {
+    border-bottom-color: rgba(249, 115, 22, 0.30);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 30px rgba(249, 115, 22, 0.10);
+}
+.join-status-bar[data-state="error"] {
+    border-bottom-color: rgba(255, 77, 77, 0.30);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 30px rgba(255, 77, 77, 0.10);
+}
+
+.jsb-inner {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 16px;
+    min-height: 36px;
+}
+.jsb-icon {
+    width: 18px; height: 18px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+}
+.jsb-icon svg { width: 18px; height: 18px; }
+.join-status-bar[data-state="checking"] .jsb-icon { color: #F5A623; }
+.join-status-bar[data-state="verified"] .jsb-icon { color: #00C896; }
+.join-status-bar[data-state="required"] .jsb-icon { color: #F97316; }
+.join-status-bar[data-state="error"] .jsb-icon { color: #FF4D4D; }
+
+.jsb-spinner {
+    animation: jsbSpin 0.9s linear infinite;
+}
+@keyframes jsbSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.jsb-text {
+    flex: 1; min-width: 0;
+    font-size: 12px; font-weight: 600;
+    color: #FFFFFF;
+    letter-spacing: -0.1px;
+    line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.join-status-bar[data-state="verified"] .jsb-text { color: #00C896; }
+.join-status-bar[data-state="required"] .jsb-text { color: #F97316; }
+.join-status-bar[data-state="error"] .jsb-text { color: #FF4D4D; }
+
+.jsb-action {
+    display: inline-flex; align-items: center;
+    padding: 5px 12px; border-radius: 8px; border: none;
+    background: linear-gradient(135deg, #F5A623, #FFCC4D);
+    color: #020611; font-size: 11px; font-weight: 700;
+    cursor: pointer; font-family: inherit;
+    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(245, 166, 35, 0.30);
+    flex-shrink: 0;
+}
+.jsb-action:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 166, 35, 0.40);
+}
+.jsb-action:active { transform: scale(0.96); }
+
+.jsb-progress {
+    height: 2px; background: rgba(255, 255, 255, 0.04);
+    overflow: hidden;
+}
+.jsb-progress-bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #F5A623, #FFCC4D);
+    transition: width 0.3s ease;
+}
+.join-status-bar[data-state="verified"] .jsb-progress-bar {
+    background: linear-gradient(90deg, #00C896, #16A34A);
+}
+.join-status-bar[data-state="required"] .jsb-progress-bar {
+    background: linear-gradient(90deg, #F97316, #FB923C);
+}
+.join-status-bar[data-state="error"] .jsb-progress-bar {
+    background: linear-gradient(90deg, #FF4D4D, #F87171);
+}
+
+/* RTL adjustments */
+[dir="rtl"] .jsb-inner { flex-direction: row-reverse; }
+[dir="rtl"] .jsb-text { text-align: right; }
+
+/* Responsive */
+@media (max-width: 360px) {
+    .jsb-inner { padding: 8px 12px; gap: 8px; }
+    .jsb-text { font-size: 11px; }
+    .jsb-action { padding: 4px 10px; font-size: 10px; }
+}
+
 
 .join-lock-overlay {
     position: fixed; inset: 0; z-index: 999999;

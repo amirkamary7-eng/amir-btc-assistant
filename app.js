@@ -437,6 +437,7 @@ const i18n = {
         chart_unavailable: 'نمودار در دسترس نیست', close: 'بستن',
         ref_title: 'دعوت دوستان و دریافت پاداش', ref_desc: 'لینک دعوت خود را به اشتراک بگذارید.',
         ref_total: 'کل دعوت‌ها', ref_active: 'فعال', ref_reward: 'پاداش', coming_soon: 'بزودی',
+        open_referral_center: 'باز کردن مرکز دعوت',
         ref_wheel: 'گردونه شانس و جوایز', ref_wheel_desc: 'سیستم پاداش در آپدیت بعدی فعال می‌شود.',
         ticket_title: 'عنوان تیکت', ticket_body: 'متن پیام...', ticket_send: 'ارسال تیکت', my_tickets: 'تیکت‌های من',
         ticket_empty: 'تیکتی ثبت نشده است', ticket_pending: 'در انتظار', ticket_answered: 'پاسخ داده شده',
@@ -549,6 +550,7 @@ const i18n = {
         chart_unavailable: 'Chart unavailable', close: 'Close',
         ref_title: 'Invite Friends & Earn Rewards', ref_desc: 'Share your referral link with friends.',
         ref_total: 'Total Invites', ref_active: 'Active', ref_reward: 'Reward', coming_soon: 'Coming Soon',
+        open_referral_center: 'Open Referral Center',
         ref_wheel: 'Spin Wheel & Prizes', ref_wheel_desc: 'Reward system coming in next update.',
         ticket_title: 'Ticket subject', ticket_body: 'Your message...', ticket_send: 'Submit Ticket',
         my_tickets: 'My Tickets', ticket_empty: 'No tickets yet', ticket_pending: 'Pending',
@@ -926,14 +928,17 @@ async function bootstrapUser() {
         // else branch called hideJoinLock() for anything that wasn't false —
         // including undefined — letting non-members in if the API response
         // didn't include channel_joined or returned an ambiguous value.
+        //
+        // NEW UX: For members, show SILENT STATUS BAR "verified" briefly then
+        // fade out (no overlay). For non-members, show STATUS BAR "required"
+        // then FULL LOCK. The loading state never shows the big overlay.
         if (data.channel_joined === true) {
-            // Member confirmed — clear safety timer and hide lock (if shown)
+            // Member confirmed — show silent "verified" status bar (fades out)
             clearTimeout(_joinLockSafetyTimer);
-            hideJoinLock();
+            setJoinLockState('joined');
         } else {
-            // Non-member or unknown — show the join lock
+            // Non-member or unknown — show silent status bar first, then full lock
             clearTimeout(_joinLockSafetyTimer);
-            showJoinLock();
             setJoinLockState(data.channel_joined === false ? 'not-joined' : 'loading');
             console.log('[JOIN-LOCK] Bootstrap returned channel_joined:', data.channel_joined, '— showing lock');
         }
@@ -2892,7 +2897,7 @@ async function loadReferralStats() {
         const data = await apiFetch('/api/referrals/stats');
         const rt = $('ref-total'); if (rt) rt.innerText = data.total ?? 0;
         const ra = $('ref-active'); if (ra) ra.innerText = data.active ?? 0;
-        const rr = $('ref-reward'); if (rr) rr.innerText = `${data.tokens ?? 0} AB`;
+        const rr = $('ref-reward'); if (rr) rr.innerText = data.tokens ?? 0;
     } catch (e) { console.warn('loadReferralStats:', e); }
 }
 
@@ -3176,6 +3181,22 @@ function selectLang(lang) {
     refreshUI();
     loadNews(true);
     closeLangModal();
+
+    // Re-render open full-page overlays so their localized text updates live.
+    // These pages are rendered dynamically (not via data-i18n attributes) so
+    // they need an explicit re-render when the language changes mid-session.
+    try {
+        const referralPage = document.getElementById('referral-full-page');
+        if (referralPage && referralPage.classList.contains('open') && window.ReferralApp) {
+            // Re-open triggers a fresh buildPage() with the new language
+            window.ReferralApp.openReferral();
+        }
+        const walletPage = document.getElementById('wallet-full-page');
+        if (walletPage && walletPage.classList.contains('open') && window.WalletApp?.isOpen) {
+            // Wallet has its own internal state; re-render via its public API if available
+            if (typeof window.WalletApp.refresh === 'function') window.WalletApp.refresh();
+        }
+    } catch (e) { /* non-critical — overlays will update on next open */ }
 }
 /**
  * زبان را تغییر می‌دهد.
@@ -7028,7 +7049,8 @@ function loadUser() {
         const pu = $('profile-username'); if (pu) pu.innerText = user.username ? `@${user.username}` : '@guest';
         const pi = $('profile-id-num'); if (pi) pi.innerText = user.id || '000000';
         if (user.photo_url) { const pa = $('profile-avatar'); if (pa) pa.src = user.photo_url; }
-        const rl = $('ref-link'); if (rl) rl.value = `https://t.me/${BOT_USERNAME}?start=ref_${user.id}`;
+        // Referral link is now built dynamically inside Referral Center (referral.js).
+        // We still load referral stats to populate the entry card on the profile page.
         loadReferralStats();
         // Fix: reload wallet card now that the user is confirmed — resolves race condition
         // where loadProfileCard() ran earlier while UserContext was still pending
@@ -7037,15 +7059,12 @@ function loadUser() {
         const pn = $('profile-name'); if (pn) pn.innerText = t('loading_user');
         const pu = $('profile-username'); if (pu) pu.innerText = '...';
         const pi = $('profile-id-num'); if (pi) pi.innerText = '...';
-        const rl = $('ref-link'); if (rl) rl.value = `https://t.me/${BOT_USERNAME}?start=ref_`;
     } else if (UserContext.isGuest()) {
         const pn = $('profile-name'); if (pn) pn.innerText = t('guest');
         const pu = $('profile-username'); if (pu) pu.innerText = '@guest';
         const pi = $('profile-id-num'); if (pi) pi.innerText = getUserId().replace('guest_', '') || '000000';
-        // M-R5: guest users should not have a working referral link
-        const rl = $('ref-link'); if (rl) rl.value = '';
-        const refLinkInput = $('ref-link');
-        if (refLinkInput) refLinkInput.placeholder = 'Login required';
+        // M-R5: guest users do not get a working referral link — Referral Center
+        // checks for a valid Telegram user id before building the link.
     }
 
     const adminFab = document.getElementById('analysis-fab');
@@ -7072,28 +7091,9 @@ function updateAdminEntryButton() {
     // Use isAdmin() which has optimistic fallback for cold-start
     btn.style.display = isAdmin() ? 'inline-flex' : 'none';
 }
-/**
- * ارجاع لینک را کپی می‌کند.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function copyRefLink() {
-    const input = document.getElementById('ref-link');
-    input.select();
-    try { navigator.clipboard.writeText(input.value); } catch(e) { document.execCommand('copy'); }
-    getTg()?.showPopup?.({ title: t('copied'), message: t('copy_ref_msg'), buttons: [{type:'ok'}] });
-}
-/**
- * ارجاع لینک را به اشتراک می‌گذارد.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
-function shareRefLink() {
-    const link = document.getElementById('ref-link').value;
-    const text = encodeURIComponent(t('share_ref_text'));
-    getTg()?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`) ||
-    window.open(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`, '_blank');
-}
+// NOTE: copyRefLink() and shareRefLink() were removed — the referral entry card
+// now opens the full Referral Center (ReferralApp.openReferral) which has its own
+// copyLink() and shareLink() methods with proper visual feedback and QR support.
 
 //#endregion
 
@@ -8514,28 +8514,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Phase 0: Telegram SDK init + user resolution ──
     await UserContext.init();
 
-    // ── JOIN LOCK: Optimized — no unconditional overlay flash for members ──
-    // Previously: showJoinLock() + setJoinLockState('loading') ran unconditionally
-    // BEFORE bootstrap, causing a visible overlay flash even for verified members.
+    // ── JOIN LOCK: SILENT STATUS BAR approach (Production UX) ──
+    // NEW approach (no flash for members):
+    // 1. Show SILENT STATUS BAR immediately ("Checking channel membership...")
+    // 2. Body is NOT locked, no overlay shown — user sees the app render in parallel.
+    // 3. Bootstrap runs in parallel with Phase 1 UI prep.
+    // 4. If bootstrap returns channel_joined=true → Status Bar shows "Verified" → fades out.
+    // 5. If bootstrap returns channel_joined=false → Status Bar shows "Required" → then FULL LOCK.
+    // 6. Safety net: if bootstrap hasn't completed within 4s, keep status bar visible.
     //
-    // NEW approach:
-    // 1. Don't show the overlay yet — body is NOT jl-locked, overlay display:none.
-    // 2. Start bootstrap immediately (it runs in parallel with Phase 1).
-    // 3. Only show the overlay if bootstrap returns channel_joined === false.
-    // 4. If bootstrap returns channel_joined === true → hideJoinLock() (no-op,
-    //    overlay was never shown) and start data loading immediately.
-    // 5. Safety net: if bootstrap hasn't completed within 3 seconds, show the
-    //    loading overlay (in case of slow network — better to show something).
-    //
-    // This means: members see the app directly with NO flash. Non-members see
-    // the overlay only after the backend confirms they're not a member.
+    // Result: members see NO overlay/popup at all. Non-members see the lock only after backend confirms.
 
-    // Safety net: show loading overlay after 3s if bootstrap hasn't resolved
+    // Show silent status bar immediately — non-blocking, no overlay
+    setJoinLockState('loading');
+
+    // Safety net: keep status bar visible if bootstrap is slow (no overlay switch)
     const _joinLockSafetyTimer = setTimeout(() => {
         if (!bootstrapComplete && !_joinLockShown) {
-            console.log('[JOIN-LOCK] Safety timer — showing loading overlay (bootstrap slow)');
-            showJoinLock();
-            setJoinLockState('loading');
+            console.log('[JOIN-LOCK] Safety timer — bootstrap still pending, status bar remains');
         }
     }, 3000);
 
@@ -8643,7 +8639,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Previously: await checkMaintenanceMode() blocked everything, then await
     // bootstrapUser() blocked again. Now both run in parallel.
     // Maintenance check: if maintenance is on, it shows the popup and we return.
-    // Bootstrap: resolves membership → hideJoinLock or setJoinLockState('not-joined').
+    // Bootstrap: resolves membership → setJoinLockState('joined') for members
+    //            or setJoinLockState('not-joined') for non-members.
 
     let _maintenanceBlocked = false;
 
@@ -8656,12 +8653,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     }).catch(() => { /* fail open */ });
 
     // Start bootstrap (non-blocking — membership check runs in parallel)
-    // bootstrapUser() will call hideJoinLock() or setJoinLockState('not-joined')
-    // when it completes. Data loading is triggered by refreshUI() after hideJoinLock.
+    // bootstrapUser() will call setJoinLockState('joined') for members or
+    // setJoinLockState('not-joined') for non-members when it completes.
+    // Data loading is triggered here after bootstrap resolves + member confirmed.
     bootstrapUser().then(() => {
         loadUser();
-        // If bootstrap confirmed membership (hideJoinLock was called inside
-        // bootstrapUser), start data loading immediately.
+        // If bootstrap confirmed membership (setJoinLockState('joined') was called
+        // inside bootstrapUser, which sets _joinLockShown = false), start data loading.
         if (!_joinLockShown && !_maintenanceBlocked) {
             _startDataLoading();
         }
@@ -8888,8 +8886,7 @@ window.closeNotifModal = closeNotifModal;
 window.markAllRead = markAllRead;
 window.clearAllNotifications = clearAllNotifications;
 window.markNotifRead = markNotifRead;
-window.copyRefLink = copyRefLink;
-window.shareRefLink = shareRefLink;
+// copyRefLink / shareRefLink removed — use ReferralApp.copyLink() / shareLink() instead
 window.toggleSettings = openSettingsModal;
 window.openSettingsModal = openSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
@@ -8926,15 +8923,145 @@ Object.defineProperty(window, 'BOT_USERNAME', { get: () => BOT_USERNAME });
 // ============================================================================
 
 // ============================================================================
-//#region Membership Lock — Backend-verified, no client bypass
+//#region Membership Lock — Silent Status Bar + Full Lock for non-members
 // ============================================================================
+// NEW UX (Production-ready):
+//   1. App startup → show SILENT STATUS BAR (top, ~36px) "Checking...".
+//   2. Backend returns channel_joined=true → Status Bar shows "Verified" → fades out.
+//      NO overlay, NO popup, NO body lock. Members see the app instantly.
+//   3. Backend returns channel_joined=false → Status Bar shows "Required" briefly
+//      → then FULL Join Lock overlay is shown (body locked).
+//   4. Backend error/timeout → Status Bar shows "Error" → after 3s, retries silently.
+//
+// Security preserved: backend still gates every API. No client bypass.
 
 let _joinLockShown = false;
 let _joinVerifying = false; // prevent double-click on verify button
+let _statusBarHideTimer = null;
+let _statusBarProgressRaf = null;
+
+// ────────────────────────────────────────────────────────────
+// SILENT STATUS BAR — thin top bar, no overlay, no lock
+// ────────────────────────────────────────────────────────────
+const JSB_ICONS = {
+    spinner: '<svg class="jsb-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+};
 
 /**
- * Show the membership lock overlay and lock the app body.
- * Called at app startup (before bootstrap) and whenever membership is not confirmed.
+ * Show the silent Status Bar in a given state.
+ * @param {'checking'|'verified'|'required'|'error'} state
+ * @param {object} [opts] - { autoHideMs?: number, withProgress?: boolean }
+ */
+function showJoinStatusBar(state, opts = {}) {
+    const bar = document.getElementById('join-status-bar');
+    if (!bar) return;
+    const iconEl = document.getElementById('jsb-icon');
+    const textEl = document.getElementById('jsb-text');
+    const actionEl = document.getElementById('jsb-action');
+    const isFa = currentLang === 'fa';
+    if (!iconEl || !textEl || !actionEl) return;
+
+    // Clear any pending hide timer
+    if (_statusBarHideTimer) { clearTimeout(_statusBarHideTimer); _statusBarHideTimer = null; }
+    // Stop any running progress animation
+    if (_statusBarProgressRaf) { cancelAnimationFrame(_statusBarProgressRaf); _statusBarProgressRaf = null; }
+
+    bar.dataset.state = state;
+    bar.classList.add('visible');
+
+    let icon = JSB_ICONS.spinner;
+    let text = '';
+    let actionDisplay = 'none';
+    let actionText = '';
+    let actionHandler = null;
+
+    if (state === 'checking') {
+        icon = JSB_ICONS.spinner;
+        text = isFa ? 'در حال بررسی عضویت در کانال...' : 'Checking channel membership...';
+    } else if (state === 'verified') {
+        icon = JSB_ICONS.check;
+        text = isFa ? 'عضویت تأیید شد' : 'Channel verified';
+    } else if (state === 'required') {
+        icon = JSB_ICONS.alert;
+        text = isFa ? 'عضویت در کانال الزامی است' : 'Channel membership required';
+        actionDisplay = 'inline-flex';
+        actionText = isFa ? 'عضویت' : 'Join';
+        actionHandler = () => {
+            const tg = getTg();
+            tg?.openTelegramLink?.('https://t.me/amir_btc_2024') ||
+                window.open('https://t.me/amir_btc_2024', '_blank');
+        };
+    } else if (state === 'error') {
+        icon = JSB_ICONS.error;
+        text = isFa ? 'خطا در بررسی عضویت — تلاش مجدد...' : 'Verification error — retrying...';
+    }
+
+    iconEl.innerHTML = icon;
+    textEl.textContent = text;
+    if (actionDisplay === 'none') {
+        actionEl.style.display = 'none';
+        actionEl.onclick = null;
+    } else {
+        actionEl.style.display = actionDisplay;
+        actionEl.textContent = actionText;
+        actionEl.onclick = actionHandler;
+    }
+
+    // Progress bar animation (only during checking)
+    const progressBar = document.getElementById('jsb-progress-bar');
+    if (progressBar) {
+        if (state === 'checking') {
+            progressBar.style.transition = 'none';
+            progressBar.style.width = '0%';
+            // Force reflow
+            void progressBar.offsetWidth;
+            progressBar.style.transition = 'width 2.5s linear';
+            progressBar.style.width = '90%';
+        } else if (state === 'verified') {
+            progressBar.style.transition = 'width 0.3s ease';
+            progressBar.style.width = '100%';
+        } else {
+            progressBar.style.transition = 'width 0.3s ease';
+            progressBar.style.width = '100%';
+        }
+    }
+
+    // Auto-hide for verified state
+    if (state === 'verified' && opts.autoHideMs !== 0) {
+        const delay = opts.autoHideMs || 800;
+        _statusBarHideTimer = setTimeout(() => hideJoinStatusBar(), delay);
+    }
+}
+
+/**
+ * Hide the silent Status Bar with a fade-out animation.
+ */
+function hideJoinStatusBar() {
+    const bar = document.getElementById('join-status-bar');
+    if (!bar) return;
+    bar.classList.add('hiding');
+    setTimeout(() => {
+        bar.classList.remove('visible', 'hiding');
+        bar.dataset.state = 'hidden';
+        // Reset progress bar
+        const progressBar = document.getElementById('jsb-progress-bar');
+        if (progressBar) {
+            progressBar.style.transition = 'none';
+            progressBar.style.width = '0%';
+        }
+    }, 300);
+    if (_statusBarHideTimer) { clearTimeout(_statusBarHideTimer); _statusBarHideTimer = null; }
+}
+
+// ────────────────────────────────────────────────────────────
+// FULL JOIN LOCK — only shown for confirmed non-members
+// ────────────────────────────────────────────────────────────
+/**
+ * Show the FULL membership lock overlay (only for non-members).
+ * The Status Bar must have already told the user "membership required".
  */
 function showJoinLock() {
     _joinLockShown = true;
@@ -8947,6 +9074,8 @@ function showJoinLock() {
         verifyBtn.removeEventListener('click', recheckJoinMembership);
         verifyBtn.addEventListener('click', recheckJoinMembership);
     }
+    // Hide the silent status bar — the full lock takes over
+    hideJoinStatusBar();
 }
 
 /**
@@ -8961,42 +9090,69 @@ function hideJoinLock() {
 }
 
 /**
- * Set the join-lock UI state: 'loading' | 'not-joined' | 'error' | 'joined'
- * Each state shows appropriate title, desc, and action buttons.
+ * Set the join-lock UI state.
+ * NEW BEHAVIOR:
+ *   - 'loading' → show SILENT STATUS BAR (not the full overlay)
+ *   - 'not-joined' → show STATUS BAR "required" briefly, then show FULL LOCK
+ *   - 'error' → show STATUS BAR "error", retry silently
+ *   - 'joined' → show STATUS BAR "verified", fade out, NO overlay
  */
 function setJoinLockState(state, errorMsg) {
-    const titleEl = document.getElementById('join-lock-title');
-    const descEl = document.getElementById('join-lock-desc');
-    const actionsEl = document.getElementById('join-lock-actions');
-    const loadingEl = document.getElementById('join-lock-loading');
-    const errorEl = document.getElementById('join-lock-error');
     const isFa = currentLang === 'fa';
 
-    if (errorEl) {
-        if (errorMsg) { errorEl.textContent = errorMsg; errorEl.style.display = 'block'; }
-        else { errorEl.style.display = 'none'; }
+    if (state === 'loading') {
+        // Show silent status bar — NO overlay, NO body lock
+        showJoinStatusBar('checking');
+        return;
     }
 
-    if (state === 'loading') {
-        if (titleEl) titleEl.textContent = isFa ? 'در حال بررسی وضعیت عضویت...' : 'Checking membership...';
-        if (descEl) descEl.textContent = isFa ? 'لطفاً چند لحظه صبر کنید.' : 'Please wait a moment.';
-        if (actionsEl) actionsEl.style.display = 'none';
-        if (loadingEl) loadingEl.style.display = 'flex';
-    } else if (state === 'not-joined') {
+    if (state === 'joined') {
+        // Member verified — show success status bar, then fade out
+        showJoinStatusBar('verified', { autoHideMs: 800 });
+        // Make sure no full overlay is showing
+        const overlay = document.getElementById('join-lock-overlay');
+        if (overlay) overlay.style.display = 'none';
+        document.body.classList.remove('jl-locked');
+        _joinLockShown = false;
+        return;
+    }
+
+    if (state === 'not-joined') {
+        // Show "required" status bar briefly, THEN show full lock
+        showJoinStatusBar('required');
+        // Update the full lock overlay content (it will be shown after delay)
+        const titleEl = document.getElementById('join-lock-title');
+        const descEl = document.getElementById('join-lock-desc');
+        const actionsEl = document.getElementById('join-lock-actions');
+        const loadingEl = document.getElementById('join-lock-loading');
+        const errorEl = document.getElementById('join-lock-error');
         if (titleEl) titleEl.textContent = isFa ? 'عضویت در کانال الزامی است' : 'Channel membership required';
         if (descEl) descEl.textContent = isFa ? 'برای استفاده از امکانات برنامه، ابتدا باید عضو کانال رسمی شوید.' : 'To use the app, please join our official channel first.';
         if (actionsEl) actionsEl.style.display = 'flex';
         if (loadingEl) loadingEl.style.display = 'none';
-    } else if (state === 'error') {
-        if (titleEl) titleEl.textContent = isFa ? 'خطا در بررسی عضویت' : 'Verification Error';
-        if (descEl) descEl.textContent = isFa ? 'بررسی عضویت با مشکل مواجه شد. لطفاً چند لحظه دیگر دوباره تلاش کنید.' : 'Membership check failed. Please try again in a moment.';
-        if (actionsEl) actionsEl.style.display = 'flex';
-        if (loadingEl) loadingEl.style.display = 'none';
-    } else if (state === 'joined') {
-        if (titleEl) titleEl.textContent = isFa ? 'عضویت تأیید شد!' : 'Membership verified!';
-        if (descEl) descEl.textContent = isFa ? 'در حال ورود به برنامه...' : 'Entering app...';
-        if (actionsEl) actionsEl.style.display = 'none';
-        if (loadingEl) loadingEl.style.display = 'flex';
+        if (errorEl) {
+            if (errorMsg) { errorEl.textContent = errorMsg; errorEl.style.display = 'block'; }
+            else { errorEl.style.display = 'none'; }
+        }
+        // After 600ms, hide status bar and show full lock
+        setTimeout(() => {
+            if (!_joinLockShown) {
+                showJoinLock();
+            }
+        }, 600);
+        return;
+    }
+
+    if (state === 'error') {
+        // Show error in status bar — no full overlay unless error persists
+        showJoinStatusBar('error');
+        const errorEl = document.getElementById('join-lock-error');
+        const isFa = currentLang === 'fa';
+        if (errorEl && errorMsg) {
+            errorEl.textContent = errorMsg;
+            errorEl.style.display = 'block';
+        }
+        return;
     }
 }
 
@@ -9011,27 +9167,24 @@ async function recheckJoinMembership() {
 
     const btn = document.getElementById('join-lock-verify-btn');
     if (btn) { btn.disabled = true; }
-    setJoinLockState('loading');
+    // Show silent status bar during re-check
+    showJoinStatusBar('checking');
 
     try {
         const data = await apiFetch('/api/users/check-join', { method: 'POST' });
         if (data && data.channel_joined === true) {
-            setJoinLockState('joined');
-            // Brief delay so user sees the success state, then enter app
+            // Verified — show success then enter app
+            showJoinStatusBar('verified', { autoHideMs: 800 });
             setTimeout(() => {
                 hideJoinLock();
                 refreshUI();
                 getTg()?.HapticFeedback?.notificationOccurred?.('success');
             }, 600);
         } else {
-            // Still not a member
-            setJoinLockState('not-joined');
+            // Still not a member — show full lock again
             const isFa = currentLang === 'fa';
-            const errorEl = document.getElementById('join-lock-error');
-            if (errorEl) {
-                errorEl.textContent = isFa ? 'هنوز عضویت شما تأیید نشده است. لطفاً ابتدا عضو کانال شوید و سپس دوباره تأیید عضویت را انتخاب کنید.' : 'Membership not confirmed yet. Please join the channel first, then click verify again.';
-                errorEl.style.display = 'block';
-            }
+            const errorMsg = isFa ? 'هنوز عضویت شما تأیید نشده است. لطفاً ابتدا عضو کانال شوید و سپس دوباره تأیید عضویت را انتخاب کنید.' : 'Membership not confirmed yet. Please join the channel first, then click verify again.';
+            setJoinLockState('not-joined', errorMsg);
             getTg()?.HapticFeedback?.notificationOccurred?.('warning');
         }
     } catch (e) {
@@ -9047,5 +9200,7 @@ window.showJoinLock = showJoinLock;
 window.hideJoinLock = hideJoinLock;
 window.recheckJoinMembership = recheckJoinMembership;
 window.setJoinLockState = setJoinLockState;
+window.showJoinStatusBar = showJoinStatusBar;
+window.hideJoinStatusBar = hideJoinStatusBar;
 
 //#endregion
