@@ -3523,7 +3523,12 @@ async function handleTelegramWebhook(request, env) {
       });
     }
 
-    const membership = await resolveChannelMembership(env, messageContext.userId);
+    // CRITICAL: always do a real Telegram getChatMember check on /start.
+    // Previously used resolveChannelMembership without forceRefresh, which
+    // trusted stale KV cache / DB values — a user who LEFT the channel
+    // still got the "member" response and the Mini App button.
+    // Now forceRefresh:true forces a real Telegram API call every time.
+    const membership = await resolveChannelMembership(env, messageContext.userId, { forceRefresh: true });
     console.log(
       JSON.stringify({
         scope: 'telegram-start',
