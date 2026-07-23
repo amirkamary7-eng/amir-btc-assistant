@@ -1557,7 +1557,7 @@ strong.down { color: var(--red); }
 /* #region پروفایل */
 /* این بخش استایل‌های مرتبط با "پروفایل" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.profile-card { border-radius: 18px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.06); padding: 24px 20px; margin: 0 20px 16px; text-align: center; position: relative; background: var(--bg-card); box-shadow: 0 8px 24px rgba(0,0,0,0.25); min-height: 210px; }
+.profile-card { border-radius: 18px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.06); padding: 24px 20px 20px; margin: 0 20px 16px; text-align: center; position: relative; background: var(--bg-card); box-shadow: 0 8px 24px rgba(0,0,0,0.25); min-height: 240px; display: flex; flex-direction: column; align-items: center; }
 .profile-settings { position: absolute; top: 16px; right: 16px; cursor: pointer; }
 .profile-avatar { width: 80px; height: 80px; margin: 0 auto 10px; border-radius: 50%; border: 2px solid var(--accent); overflow: hidden; }
 .profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -2963,11 +2963,11 @@ strong.down { color: var(--red); }
 
 /* Admin Entry Button (inside profile card) */
 /* Admin entry button — inside the profile card, directly BELOW the Telegram ID.
-   Fit-content width (not full-width), gold bg, centered, on its own line.
-   42px height, ~128px width, 12px gap from ID, 20px+ from card bottom. */
+   In-flow flex child (no absolute). 42px height, 128px width, 12px from ID,
+   20px from card bottom. Centered via parent's align-items:center. */
 .admin-entry-btn {
     display: flex; align-items: center; justify-content: center; gap: 6px;
-    margin: 12px auto 20px; padding: 0 18px; height: 42px;
+    margin: 12px 0 20px; padding: 0 18px; height: 42px;
     width: 128px;
     font-size: 13px; font-weight: 700; letter-spacing: 0.2px;
     color: #020611;
@@ -2976,6 +2976,7 @@ strong.down { color: var(--red); }
     border-radius: 12px; cursor: pointer;
     box-shadow: 0 4px 14px rgba(245, 166, 35, 0.3);
     transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+    flex-shrink: 0;
 }
 .admin-entry-btn:hover { background: #E8941A; box-shadow: 0 6px 18px rgba(245, 166, 35, 0.4); }
 .admin-entry-btn:active { background: #D4881A; transform: scale(0.96); box-shadow: 0 2px 8px rgba(245, 166, 35, 0.25); }
@@ -6246,6 +6247,16 @@ strong.down { color: var(--red); }
     opacity: 0;
     transition: opacity 0.4s ease;
     pointer-events: none;
+    /* FIX: flexbox column layout so the CTA sits at the bottom via margin-top:auto
+       instead of absolute positioning. The image + shade remain absolute background
+       layers; the CTA is a flex child positioned by margin. Stable across all
+       mobile sizes — no overlap with baked-in image text. */
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 0 16px 18px;
+    box-sizing: border-box;
 }
 .hero-slide.active {
     opacity: 1;
@@ -6275,18 +6286,19 @@ strong.down { color: var(--red); }
         linear-gradient(180deg, rgba(2, 6, 17, 0) 50%, rgba(2, 6, 17, 0.7) 100%),
         linear-gradient(270deg, rgba(2, 6, 17, 0.6) 0%, rgba(2, 6, 17, 0) 45%);
 }
-/* Premium CTA base — compact, professional, gold gradient.
-   Placement per-banner via modifier classes based on VLM image-composition
-   analysis (only placed in empty safe areas, never on text/logos/graphics). */
+/* Premium CTA — flex child of .hero-slide (NO absolute positioning).
+   Positioned at the bottom of the banner via the parent's flex-end + padding.
+   Per-banner alignment via modifier classes using align-self + margin. */
 .hero-cta {
-    position: absolute;
+    position: relative; /* in-flow, not absolute */
     z-index: 2;
     background: linear-gradient(135deg, #F5A623, #FFCC4D);
     border: none;
     color: #020611;
     font-weight: 700;
-    padding: 10px 18px;
-    height: 42px;
+    padding: 0 18px;
+    height: 44px;
+    width: 130px;
     border-radius: 14px;
     cursor: pointer;
     font-size: 12px;
@@ -6296,39 +6308,25 @@ strong.down { color: var(--red); }
     box-shadow: 0 6px 20px rgba(245, 166, 35, 0.35);
     white-space: nowrap;
     display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
 }
 .hero-cta:active {
     transform: scale(0.95);
     box-shadow: 0 3px 10px rgba(245, 166, 35, 0.3);
     filter: brightness(0.95);
 }
-/* Banner 1 (AMIRBTC channel): moved ~16px left of center and positioned so it
-   sits completely BELOW the descriptive Persian text (bottom-left area), giving
-   the right-side graphics (laptop/coins/mug) more breathing room. 44px height,
-   ~132px width, 18px from bottom. */
+/* Banner 1 (AMIRBTC channel): ~12px left of center via margin-right offset.
+   The parent flex centers children; adding margin-right pushes it left. */
 .hero-cta--channel {
-    bottom: 18px;
-    left: calc(50% - 16px);
-    transform: translateX(-50%);
-    height: 44px;
-    width: 132px;
+    margin-right: 12px;
 }
-.hero-cta--channel:active {
-    transform: translateX(-50%) scale(0.95);
-}
-/* Banner 2 (Bitunix registration): moved ~18px lower and ~10px left so it
-   doesn't overlap the feature text/icons above. 44px height, ~145px width.
-   Uses physical `right` (image-relative safe area). */
+/* Banner 2 (Bitunix): aligned to the right via align-self + margin-left:auto.
+   Sits below the feature icons (parent flex-end + padding-bottom gives the gap). */
 .hero-cta--bitunix {
-    bottom: 34px;
-    right: 26px;
-    left: auto;
-    transform: none;
-    height: 44px;
+    align-self: flex-end;
+    margin-left: auto;
+    margin-right: 10px;
     width: 145px;
-}
-.hero-cta--bitunix:active {
-    transform: scale(0.95);
 }
 .hero-slider-dots {
     position: absolute;
@@ -7283,9 +7281,9 @@ html[dir="rtl"] .market-ticker-track {
 @media (max-width: 360px) {
     #dashboard-page { padding: 10px 12px 20px; }
     .hero-banner-slider { border-radius: 18px; }
-    .hero-cta { font-size: 11px; height: 40px; padding: 8px 14px; }
-    .hero-cta--channel { bottom: 14px; left: calc(50% - 12px); width: 120px; }
-    .hero-cta--bitunix { bottom: 26px; right: 18px; width: 130px; }
+    .hero-cta { font-size: 11px; height: 40px; padding: 0 14px; width: 120px; }
+    .hero-cta--channel { margin-right: 8px; }
+    .hero-cta--bitunix { width: 130px; margin-right: 8px; }
     .hero-slider-dots { top: 8px; right: 10px; }
     .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }
     .dms-fg-gauge { width: 64px; }
