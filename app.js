@@ -924,23 +924,35 @@ async function bootstrapUser() {
         // ── Membership lock gate ──
         // CRITICAL SECURITY FIX: only hide the lock when backend EXPLICITLY
         // returns channel_joined === true. Any other value (false, undefined,
-        // null, missing field, error response) keeps the lock. Previously the
-        // else branch called hideJoinLock() for anything that wasn't false —
-        // including undefined — letting non-members in if the API response
-        // didn't include channel_joined or returned an ambiguous value.
+        // null, missing field, error response) keeps the lock.
         //
-        // NEW UX: For members, show SILENT STATUS BAR "verified" briefly then
-        // fade out (no overlay). For non-members, show STATUS BAR "required"
-        // then FULL LOCK. The loading state never shows the big overlay.
+        // ROOT-CAUSE FIX (Task 37): Previously this block called
+        // `clearTimeout(_joinLockSafetyTimer)` — but that variable was
+        // `const`-declared inside the DOMContentLoaded handler (block scope),
+        // unreachable from this top-level function. The resulting
+        // ReferenceError was caught by the surrounding try/catch, which then
+        // short-circuited WITHOUT ever calling setJoinLockState('joined' /
+        // 'not-joined' / 'error'), leaving the Status Bar stuck on
+        // "Checking Membership…" forever. The safety timer is now module-level
+        // (see `_joinLockSafetyTimer` near the join-lock state vars) and is
+        // cleared cleanly here.
+        //
+        // NEW UX: For members, show FLOATING STATUS CARD "verified" briefly
+        // then fade out (no overlay, no lock). For non-members, show FLOATING
+        // CARD "required" then FULL LOCK after 600ms. Loading state never
+        // shows the big overlay.
+        clearJoinLockSafetyTimer();
         if (data.channel_joined === true) {
-            // Member confirmed — show silent "verified" status bar (fades out)
-            clearTimeout(_joinLockSafetyTimer);
+            // Member confirmed — show floating "verified" card (auto-fades)
             setJoinLockState('joined');
+        } else if (data.channel_joined === false) {
+            // Confirmed non-member — show "required" card, then full lock
+            setJoinLockState('not-joined');
+            console.log('[JOIN-LOCK] Bootstrap returned channel_joined=false — showing lock');
         } else {
-            // Non-member or unknown — show silent status bar first, then full lock
-            clearTimeout(_joinLockSafetyTimer);
-            setJoinLockState(data.channel_joined === false ? 'not-joined' : 'loading');
-            console.log('[JOIN-LOCK] Bootstrap returned channel_joined:', data.channel_joined, '— showing lock');
+            // Ambiguous response (missing field) — treat as not-joined, fail-closed
+            setJoinLockState('not-joined');
+            console.log('[JOIN-LOCK] Bootstrap returned ambiguous channel_joined:', data.channel_joined, '— fail-closed');
         }
 
         // CRITICAL: Set bootstrapComplete BEFORE any UI re-renders.
@@ -981,6 +993,13 @@ async function bootstrapUser() {
         }
     } catch (e) {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);
+        // ROOT-CAUSE FIX (Task 37): Previously the catch block only logged the
+        // error and called applyLanguage() — leaving the Status Bar stuck on
+        // "Checking Membership…". Now we transition the floating card to the
+        // error state so the user sees a clear "Connection Error" + Retry
+        // button instead of an infinite spinner.
+        clearJoinLockSafetyTimer();
+        setJoinLockState('error', e?.message || 'Bootstrap failed');
         // Do NOT set bootstrapComplete — let retry try again
         applyLanguage();
     }
@@ -8514,26 +8533,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Phase 0: Telegram SDK init + user resolution ──
     await UserContext.init();
 
-    // ── JOIN LOCK: SILENT STATUS BAR approach (Production UX) ──
-    // NEW approach (no flash for members):
-    // 1. Show SILENT STATUS BAR immediately ("Checking channel membership...")
+    // ── JOIN LOCK: FLOATING STATUS CARD approach (Production UX — Task 37) ──
+    // 1. Show FLOATING CARD immediately ("Checking membership…")
     // 2. Body is NOT locked, no overlay shown — user sees the app render in parallel.
     // 3. Bootstrap runs in parallel with Phase 1 UI prep.
-    // 4. If bootstrap returns channel_joined=true → Status Bar shows "Verified" → fades out.
-    // 5. If bootstrap returns channel_joined=false → Status Bar shows "Required" → then FULL LOCK.
-    // 6. Safety net: if bootstrap hasn't completed within 4s, keep status bar visible.
+    // 4. Bootstrap returns channel_joined=true → Card shows "Verified ✓" → fades out
+    //    after 800ms → fully removed. NO overlay, NO lock, NO spinner left behind.
+    // 5. Bootstrap returns channel_joined=false → Card shows "Required" → after 600ms
+    //    the FULL Join Lock overlay is shown (body locked).
+    // 6. Bootstrap errors/timeouts → Card shows "Connection error" + Retry button.
     //
-    // Result: members see NO overlay/popup at all. Non-members see the lock only after backend confirms.
+    // Result: members see NO overlay/popup at all. Non-members see the lock only
+    // after backend confirms. Error states are clearly visible with a retry CTA.
 
-    // Show silent status bar immediately — non-blocking, no overlay
+    // Show floating card immediately — non-blocking, no overlay
     setJoinLockState('loading');
 
-    // Safety net: keep status bar visible if bootstrap is slow (no overlay switch)
-    const _joinLockSafetyTimer = setTimeout(() => {
+    // Hard-cut safety net (Task 37): if bootstrap hasn't completed within 12s,
+    // transition the floating card to "Connection error" so the user sees a
+    // Retry button instead of an infinite spinner. This is a real fallback —
+    // not just a log line. Cleared by clearJoinLockSafetyTimer() once
+    // bootstrap resolves (success OR error).
+    clearJoinLockSafetyTimer();
+    _joinLockSafetyTimer = setTimeout(() => {
+        _joinLockSafetyTimer = null;
         if (!bootstrapComplete && !_joinLockShown) {
-            console.log('[JOIN-LOCK] Safety timer — bootstrap still pending, status bar remains');
+            console.warn('[JOIN-LOCK] Safety timer fired (12s) — bootstrap still pending, showing error card');
+            setJoinLockState('error', currentLang === 'fa' ? 'زمان اتصال به سرور بیش از حد طول کشید' : 'Server took too long to respond');
         }
-    }, 3000);
+    }, 12000);
 
     // ── PARALLEL EXECUTION: maintenance check + bootstrap + data prep ──
     // Previously these ran sequentially (maintenance → join-lock → bootstrap → data),
@@ -8923,37 +8951,75 @@ Object.defineProperty(window, 'BOT_USERNAME', { get: () => BOT_USERNAME });
 // ============================================================================
 
 // ============================================================================
-//#region Membership Lock — Silent Status Bar + Full Lock for non-members
+//#region Membership Lock — Floating Status Card + Full Lock for non-members
 // ============================================================================
-// NEW UX (Production-ready):
-//   1. App startup → show SILENT STATUS BAR (top, ~36px) "Checking...".
-//   2. Backend returns channel_joined=true → Status Bar shows "Verified" → fades out.
-//      NO overlay, NO popup, NO body lock. Members see the app instantly.
-//   3. Backend returns channel_joined=false → Status Bar shows "Required" briefly
-//      → then FULL Join Lock overlay is shown (body locked).
-//   4. Backend error/timeout → Status Bar shows "Error" → after 3s, retries silently.
+// FLOATING STATUS CARD UX (Task 37 — Production-ready redesign):
+//   1. App startup → show FLOATING CARD (bottom, above bottom-nav) "Checking...".
+//      Card is centered, max-width 340px, ~75% viewport width, height 44-52px,
+//      glassmorphism + blur + soft shadow + subtle border, fully rounded 20px.
+//      Smooth transform+opacity enter/exit, GPU-friendly, no layout shift.
+//   2. Backend returns channel_joined=true → Card shows "Verified ✓" → after
+//      ~800ms fades out → fully removed. NO overlay, NO body lock, NO spinner
+//      left behind. Members see the app instantly.
+//   3. Backend returns channel_joined=false → Card shows "Required" → after
+//      ~600ms the FULL Join Lock overlay is shown (body locked).
+//   4. Backend error/timeout → Card shows "Connection Error" with Retry button.
 //
+// ROOT-CAUSE FIX (Task 37): The previous implementation declared
+// `_joinLockSafetyTimer` as `const` inside DOMContentLoaded (block scope), but
+// then tried to `clearTimeout(_joinLockSafetyTimer)` from `bootstrapUser()` —
+// a top-level function. That threw a ReferenceError, was swallowed by the
+// try/catch, and the Status Bar was never advanced past "Checking…". The
+// safety timer is now a module-level variable with proper helper functions.
+//
+// Performance: single membership check per bootstrap, no timer/interval/promise
+// leaks, idempotent verify-button wiring, dead code removed.
 // Security preserved: backend still gates every API. No client bypass.
 
 let _joinLockShown = false;
 let _joinVerifying = false; // prevent double-click on verify button
 let _statusBarHideTimer = null;
-let _statusBarProgressRaf = null;
+let _joinLockSafetyTimer = null; // module-level (was block-scoped → bug)
+let _joinLockPendingShowTimer = null; // 600ms delay before showing full lock
+let _bootstrapMembershipInFlight = false; // dedupe membership checks
+
+/**
+ * Clear the bootstrap safety timer (idempotent).
+ * Prevents the hard-timeout fallback from firing after bootstrap resolves.
+ */
+function clearJoinLockSafetyTimer() {
+    if (_joinLockSafetyTimer) {
+        clearTimeout(_joinLockSafetyTimer);
+        _joinLockSafetyTimer = null;
+    }
+}
+
+/**
+ * Clear the pending "show full lock" timer (idempotent).
+ * Used when the user verifies membership before the 600ms delay fires.
+ */
+function clearJoinLockPendingShowTimer() {
+    if (_joinLockPendingShowTimer) {
+        clearTimeout(_joinLockPendingShowTimer);
+        _joinLockPendingShowTimer = null;
+    }
+}
 
 // ────────────────────────────────────────────────────────────
-// SILENT STATUS BAR — thin top bar, no overlay, no lock
+// FLOATING STATUS CARD — bottom card, no overlay, no lock
 // ────────────────────────────────────────────────────────────
 const JSB_ICONS = {
     spinner: '<svg class="jsb-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>',
-    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
-    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
-    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+    retry: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
 };
 
 /**
- * Show the silent Status Bar in a given state.
+ * Show the floating Status Card in a given state.
  * @param {'checking'|'verified'|'required'|'error'} state
- * @param {object} [opts] - { autoHideMs?: number, withProgress?: boolean }
+ * @param {object} [opts] - { autoHideMs?: number }
  */
 function showJoinStatusBar(state, opts = {}) {
     const bar = document.getElementById('join-status-bar');
@@ -8964,12 +9030,13 @@ function showJoinStatusBar(state, opts = {}) {
     const isFa = currentLang === 'fa';
     if (!iconEl || !textEl || !actionEl) return;
 
-    // Clear any pending hide timer
+    // Clear any pending hide timer (avoid double-fire)
     if (_statusBarHideTimer) { clearTimeout(_statusBarHideTimer); _statusBarHideTimer = null; }
-    // Stop any running progress animation
-    if (_statusBarProgressRaf) { cancelAnimationFrame(_statusBarProgressRaf); _statusBarProgressRaf = null; }
 
     bar.dataset.state = state;
+    // Force reflow so the enter transition runs even when re-showing
+    bar.classList.remove('visible');
+    void bar.offsetWidth;
     bar.classList.add('visible');
 
     let icon = JSB_ICONS.spinner;
@@ -8980,10 +9047,10 @@ function showJoinStatusBar(state, opts = {}) {
 
     if (state === 'checking') {
         icon = JSB_ICONS.spinner;
-        text = isFa ? 'در حال بررسی عضویت در کانال...' : 'Checking channel membership...';
+        text = isFa ? 'در حال بررسی عضویت…' : 'Checking membership…';
     } else if (state === 'verified') {
         icon = JSB_ICONS.check;
-        text = isFa ? 'عضویت تأیید شد' : 'Channel verified';
+        text = isFa ? 'عضویت تأیید شد ✓' : 'Membership verified ✓';
     } else if (state === 'required') {
         icon = JSB_ICONS.alert;
         text = isFa ? 'عضویت در کانال الزامی است' : 'Channel membership required';
@@ -8996,7 +9063,17 @@ function showJoinStatusBar(state, opts = {}) {
         };
     } else if (state === 'error') {
         icon = JSB_ICONS.error;
-        text = isFa ? 'خطا در بررسی عضویت — تلاش مجدد...' : 'Verification error — retrying...';
+        text = isFa ? 'خطای اتصال' : 'Connection error';
+        actionDisplay = 'inline-flex';
+        actionText = isFa ? 'تلاش مجدد' : 'Retry';
+        actionHandler = () => {
+            // Re-trigger bootstrap from scratch
+            setJoinLockState('loading');
+            bootstrapUser().catch(e => {
+                console.error('[JOIN-LOCK] Manual retry failed:', e.message);
+                setJoinLockState('error', e?.message || 'Retry failed');
+            });
+        };
     }
 
     iconEl.innerHTML = icon;
@@ -9006,30 +9083,11 @@ function showJoinStatusBar(state, opts = {}) {
         actionEl.onclick = null;
     } else {
         actionEl.style.display = actionDisplay;
-        actionEl.textContent = actionText;
+        actionEl.innerHTML = (state === 'error' ? JSB_ICONS.retry : '') + '<span>' + actionText + '</span>';
         actionEl.onclick = actionHandler;
     }
 
-    // Progress bar animation (only during checking)
-    const progressBar = document.getElementById('jsb-progress-bar');
-    if (progressBar) {
-        if (state === 'checking') {
-            progressBar.style.transition = 'none';
-            progressBar.style.width = '0%';
-            // Force reflow
-            void progressBar.offsetWidth;
-            progressBar.style.transition = 'width 2.5s linear';
-            progressBar.style.width = '90%';
-        } else if (state === 'verified') {
-            progressBar.style.transition = 'width 0.3s ease';
-            progressBar.style.width = '100%';
-        } else {
-            progressBar.style.transition = 'width 0.3s ease';
-            progressBar.style.width = '100%';
-        }
-    }
-
-    // Auto-hide for verified state
+    // Auto-hide for verified state — fade out after ~800ms then fully remove
     if (state === 'verified' && opts.autoHideMs !== 0) {
         const delay = opts.autoHideMs || 800;
         _statusBarHideTimer = setTimeout(() => hideJoinStatusBar(), delay);
@@ -9037,22 +9095,19 @@ function showJoinStatusBar(state, opts = {}) {
 }
 
 /**
- * Hide the silent Status Bar with a fade-out animation.
+ * Hide the floating Status Card with a fade-out animation, then fully remove.
+ * Cleans up the hide timer to prevent leaks.
  */
 function hideJoinStatusBar() {
     const bar = document.getElementById('join-status-bar');
     if (!bar) return;
-    bar.classList.add('hiding');
+    bar.classList.remove('visible');
+    // After the exit transition (300ms), reset state
     setTimeout(() => {
-        bar.classList.remove('visible', 'hiding');
-        bar.dataset.state = 'hidden';
-        // Reset progress bar
-        const progressBar = document.getElementById('jsb-progress-bar');
-        if (progressBar) {
-            progressBar.style.transition = 'none';
-            progressBar.style.width = '0%';
+        if (!bar.classList.contains('visible')) {
+            bar.dataset.state = 'hidden';
         }
-    }, 300);
+    }, 320);
     if (_statusBarHideTimer) { clearTimeout(_statusBarHideTimer); _statusBarHideTimer = null; }
 }
 
@@ -9061,7 +9116,7 @@ function hideJoinStatusBar() {
 // ────────────────────────────────────────────────────────────
 /**
  * Show the FULL membership lock overlay (only for non-members).
- * The Status Bar must have already told the user "membership required".
+ * The Status Card must have already told the user "membership required".
  */
 function showJoinLock() {
     _joinLockShown = true;
@@ -9074,7 +9129,7 @@ function showJoinLock() {
         verifyBtn.removeEventListener('click', recheckJoinMembership);
         verifyBtn.addEventListener('click', recheckJoinMembership);
     }
-    // Hide the silent status bar — the full lock takes over
+    // Hide the floating status card — the full lock takes over
     hideJoinStatusBar();
 }
 
@@ -9090,24 +9145,25 @@ function hideJoinLock() {
 }
 
 /**
- * Set the join-lock UI state.
- * NEW BEHAVIOR:
- *   - 'loading' → show SILENT STATUS BAR (not the full overlay)
- *   - 'not-joined' → show STATUS BAR "required" briefly, then show FULL LOCK
- *   - 'error' → show STATUS BAR "error", retry silently
- *   - 'joined' → show STATUS BAR "verified", fade out, NO overlay
+ * Set the join-lock UI state. Drives the floating card + full overlay.
+ *   - 'loading'    → floating card "Checking…" (NO overlay, NO body lock)
+ *   - 'joined'     → floating card "Verified ✓" → auto-fade after 800ms → removed
+ *                    (NO overlay, NO body lock, NO spinner left behind)
+ *   - 'not-joined' → floating card "Required" → after 600ms → FULL LOCK overlay
+ *   - 'error'      → floating card "Connection error" + Retry button
  */
 function setJoinLockState(state, errorMsg) {
     const isFa = currentLang === 'fa';
 
     if (state === 'loading') {
-        // Show silent status bar — NO overlay, NO body lock
+        // Show floating card — NO overlay, NO body lock
         showJoinStatusBar('checking');
         return;
     }
 
     if (state === 'joined') {
-        // Member verified — show success status bar, then fade out
+        // Member verified — show floating "verified" card, then fade out
+        clearJoinLockPendingShowTimer();
         showJoinStatusBar('verified', { autoHideMs: 800 });
         // Make sure no full overlay is showing
         const overlay = document.getElementById('join-lock-overlay');
@@ -9118,9 +9174,9 @@ function setJoinLockState(state, errorMsg) {
     }
 
     if (state === 'not-joined') {
-        // Show "required" status bar briefly, THEN show full lock
+        // Show "required" floating card briefly, THEN show full lock
         showJoinStatusBar('required');
-        // Update the full lock overlay content (it will be shown after delay)
+        // Pre-populate the full lock overlay content (shown after delay)
         const titleEl = document.getElementById('join-lock-title');
         const descEl = document.getElementById('join-lock-desc');
         const actionsEl = document.getElementById('join-lock-actions');
@@ -9134,8 +9190,10 @@ function setJoinLockState(state, errorMsg) {
             if (errorMsg) { errorEl.textContent = errorMsg; errorEl.style.display = 'block'; }
             else { errorEl.style.display = 'none'; }
         }
-        // After 600ms, hide status bar and show full lock
-        setTimeout(() => {
+        // After 600ms, hide floating card and show full lock
+        clearJoinLockPendingShowTimer();
+        _joinLockPendingShowTimer = setTimeout(() => {
+            _joinLockPendingShowTimer = null;
             if (!_joinLockShown) {
                 showJoinLock();
             }
@@ -9144,10 +9202,10 @@ function setJoinLockState(state, errorMsg) {
     }
 
     if (state === 'error') {
-        // Show error in status bar — no full overlay unless error persists
+        // Show floating card with "error" + Retry button
+        clearJoinLockPendingShowTimer();
         showJoinStatusBar('error');
         const errorEl = document.getElementById('join-lock-error');
-        const isFa = currentLang === 'fa';
         if (errorEl && errorMsg) {
             errorEl.textContent = errorMsg;
             errorEl.style.display = 'block';
@@ -9158,7 +9216,8 @@ function setJoinLockState(state, errorMsg) {
 
 /**
  * Recheck channel membership via backend.
- * Called when user clicks "تأیید عضویت" button.
+ * Called when user clicks "تأیید عضویت" button on the full lock overlay,
+ * OR when user clicks "Retry" on the floating error card.
  * Prevents double-clicks with _joinVerifying flag.
  */
 async function recheckJoinMembership() {
@@ -9167,13 +9226,14 @@ async function recheckJoinMembership() {
 
     const btn = document.getElementById('join-lock-verify-btn');
     if (btn) { btn.disabled = true; }
-    // Show silent status bar during re-check
+    // Show floating card during re-check
     showJoinStatusBar('checking');
+    const isFa = currentLang === 'fa';
 
     try {
         const data = await apiFetch('/api/users/check-join', { method: 'POST' });
         if (data && data.channel_joined === true) {
-            // Verified — show success then enter app
+            // Verified — show success, then enter app
             showJoinStatusBar('verified', { autoHideMs: 800 });
             setTimeout(() => {
                 hideJoinLock();
@@ -9181,14 +9241,15 @@ async function recheckJoinMembership() {
                 getTg()?.HapticFeedback?.notificationOccurred?.('success');
             }, 600);
         } else {
-            // Still not a member — show full lock again
-            const isFa = currentLang === 'fa';
-            const errorMsg = isFa ? 'هنوز عضویت شما تأیید نشده است. لطفاً ابتدا عضو کانال شوید و سپس دوباره تأیید عضویت را انتخاب کنید.' : 'Membership not confirmed yet. Please join the channel first, then click verify again.';
+            // Still not a member — show full lock again with explanation
+            const errorMsg = isFa
+                ? 'هنوز عضویت شما تأیید نشده است. لطفاً ابتدا عضو کانال شوید و سپس دوباره تأیید عضویت را انتخاب کنید.'
+                : 'Membership not confirmed yet. Please join the channel first, then click verify again.';
             setJoinLockState('not-joined', errorMsg);
             getTg()?.HapticFeedback?.notificationOccurred?.('warning');
         }
     } catch (e) {
-        setJoinLockState('error');
+        setJoinLockState('error', e?.message || 'Network error');
         getTg()?.HapticFeedback?.notificationOccurred?.('error');
     } finally {
         _joinVerifying = false;
@@ -9202,5 +9263,6 @@ window.recheckJoinMembership = recheckJoinMembership;
 window.setJoinLockState = setJoinLockState;
 window.showJoinStatusBar = showJoinStatusBar;
 window.hideJoinStatusBar = hideJoinStatusBar;
+window.clearJoinLockSafetyTimer = clearJoinLockSafetyTimer;
 
 //#endregion

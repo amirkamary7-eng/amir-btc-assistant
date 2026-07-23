@@ -2049,21 +2049,22 @@
     <div id="referral-full-page" class="referral-full-page"></div>
 
     <!-- ────────────────────────────────────────────────────────────
-         SILENT MEMBERSHIP STATUS BAR (New — replaces flash-popup)
-         Thin professional bar shown during async membership check.
+         FLOATING MEMBERSHIP STATUS CARD (Task 37 redesign)
+         Bottom-anchored floating glassmorphism card, sits ABOVE bottom-nav.
+         Centered, max-width 340px, ~75% viewport width, height 44-52px,
+         fully rounded 20px, smooth transform+opacity enter/exit.
          States: checking / verified / required / error
-         - For members: shows briefly then fades out (no overlay)
+         - For members: shows briefly then fades out (no overlay, no lock)
          - For non-members: shows "required" then triggers Join Lock
          ──────────────────────────────────────────────────────────── -->
-    <div id="join-status-bar" class="join-status-bar" data-state="hidden">
+    <div id="join-status-bar" class="join-status-bar" data-state="hidden" role="status" aria-live="polite">
         <div class="jsb-inner">
             <div class="jsb-icon" id="jsb-icon">
                 <svg class="jsb-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
             </div>
-            <div class="jsb-text" id="jsb-text">Checking channel membership...</div>
-            <button class="jsb-action" id="jsb-action" style="display:none;"></button>
+            <div class="jsb-text" id="jsb-text">Checking membership…</div>
+            <button class="jsb-action" id="jsb-action" type="button" style="display:none;"></button>
         </div>
-        <div class="jsb-progress"><div class="jsb-progress-bar" id="jsb-progress-bar"></div></div>
     </div>
 
     <!-- Full-Screen Membership Lock — only shown for NON-MEMBERS (channel_joined=false).
