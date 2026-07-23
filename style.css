@@ -2963,11 +2963,12 @@ strong.down { color: var(--red); }
 
 /* Admin Entry Button (inside profile card) */
 /* Admin entry button — inside the profile card, directly BELOW the Telegram ID.
-   Fit-content width (not full-width), gold bg, centered, on its own line. */
+   Fit-content width (not full-width), gold bg, centered, on its own line.
+   42px height, ~128px width, 12px gap from ID, 20px+ from card bottom. */
 .admin-entry-btn {
     display: flex; align-items: center; justify-content: center; gap: 6px;
-    margin: 14px auto 0; padding: 0 18px; height: 40px;
-    width: fit-content;
+    margin: 12px auto 20px; padding: 0 18px; height: 42px;
+    width: 128px;
     font-size: 13px; font-weight: 700; letter-spacing: 0.2px;
     color: #020611;
     background: #F5A623;
@@ -6301,26 +6302,30 @@ strong.down { color: var(--red); }
     box-shadow: 0 3px 10px rgba(245, 166, 35, 0.3);
     filter: brightness(0.95);
 }
-/* Banner 1 (AMIRBTC channel): VLM analysis — bottom-right has the branded mug,
-   bottom-left has descriptive Persian text, bottom-center (below the laptop) is
-   the only empty safe area. Per spec priority (bottom-right → bottom-left →
-   nearest empty), bottom-center is the nearest empty area. */
+/* Banner 1 (AMIRBTC channel): moved ~16px left of center and positioned so it
+   sits completely BELOW the descriptive Persian text (bottom-left area), giving
+   the right-side graphics (laptop/coins/mug) more breathing room. 44px height,
+   ~132px width, 18px from bottom. */
 .hero-cta--channel {
-    bottom: 16px;
-    left: 50%;
+    bottom: 18px;
+    left: calc(50% - 16px);
     transform: translateX(-50%);
+    height: 44px;
+    width: 132px;
 }
 .hero-cta--channel:active {
     transform: translateX(-50%) scale(0.95);
 }
-/* Banner 2 (Bitunix registration): VLM analysis — bottom-right corner (below the
-   4 feature boxes, right of the stacked coins) is empty dark space. This is the
-   preferred bottom-right placement. Uses physical `right` (image-relative). */
+/* Banner 2 (Bitunix registration): moved ~18px lower and ~10px left so it
+   doesn't overlap the feature text/icons above. 44px height, ~145px width.
+   Uses physical `right` (image-relative safe area). */
 .hero-cta--bitunix {
-    bottom: 16px;
-    right: 16px;
+    bottom: 34px;
+    right: 26px;
     left: auto;
     transform: none;
+    height: 44px;
+    width: 145px;
 }
 .hero-cta--bitunix:active {
     transform: scale(0.95);
@@ -7278,9 +7283,9 @@ html[dir="rtl"] .market-ticker-track {
 @media (max-width: 360px) {
     #dashboard-page { padding: 10px 12px 20px; }
     .hero-banner-slider { border-radius: 18px; }
-    .hero-cta { font-size: 11px; height: 38px; padding: 8px 14px; }
-    .hero-cta--channel { bottom: 12px; }
-    .hero-cta--bitunix { bottom: 12px; right: 12px; }
+    .hero-cta { font-size: 11px; height: 40px; padding: 8px 14px; }
+    .hero-cta--channel { bottom: 14px; left: calc(50% - 12px); width: 120px; }
+    .hero-cta--bitunix { bottom: 26px; right: 18px; width: 130px; }
     .hero-slider-dots { top: 8px; right: 10px; }
     .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }
     .dms-fg-gauge { width: 64px; }
@@ -7301,7 +7306,7 @@ html[dir="rtl"] .market-ticker-track {
 }
 
 @media (min-width: 412px) {
-    .hero-cta { font-size: 12px; height: 42px; }
+    .hero-cta { font-size: 12px; height: 44px; }
     .dma-card { flex: 0 0 240px; height: 210px; }
     .dfa-skel-card { flex: 0 0 240px; height: 210px; }
     .dc-card { flex: 0 0 224px; min-height: 140px; }
