@@ -831,18 +831,18 @@ function buildStartReplyPayload(env, chatId, isMember, startParam) {
   if (!isMember) {
     return {
       chat_id: chatId,
-      text: '⚠️ برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.\n\nپس از عضویت، دکمه «✅ عضو شدم» را بزنید.',
+      text: '👋 به دستیار هوشمند امیر بی‌تی‌سی خوش آمدید!\n\n📌 برای استفاده از امکانات برنامه، ابتدا عضو کانال رسمی شوید.',
       reply_markup: {
         inline_keyboard: [
           [
             {
-              text: '📌 عضویت در کانال',
+              text: '📢 عضویت در کانال',
               url: `https://t.me/${normalizeRequiredChannel(resolveRequiredChannel(env))}`,
             },
           ],
           [
             {
-              text: '✅ عضو شدم',
+              text: '✅ عضو شدم — ورود به اپلیکیشن',
               callback_data: 'check_join',
             },
           ],
@@ -854,17 +854,15 @@ function buildStartReplyPayload(env, chatId, isMember, startParam) {
 
   // Build WebApp URL with startapp parameter if referral is present
   let webAppUrl = resolveWebAppUrl(env);
-  diagLogSync(env, { scope: 'diag-buildStartReplyPayload', chatId, isMember, startParam, baseWebAppUrl: webAppUrl });
   if (startParam) {
     const url = new URL(webAppUrl);
     url.searchParams.set('startapp', startParam);
     webAppUrl = url.toString();
-    diagLogSync(env, { scope: 'diag-buildStartReplyPayload-startapp', finalUrl: webAppUrl });
   }
 
   return {
     chat_id: chatId,
-    text: '✅ خوش آمدید! دستیار هوشمند آماده خدمت‌رسانی است.',
+    text: '👋 سلام! خوش برگشتی.\n\n🚀 برای شروع، مینی‌اپ را باز کنید.',
     reply_markup: {
       inline_keyboard: [
         [
@@ -3470,7 +3468,7 @@ async function handleTelegramWebhook(request, env) {
         }
 
         await diagLog(env, { scope: 'diag-callback-join-verify-SUCCESS', user_id: userId, webAppUrl: callbackWebAppUrl, had_pending_ref: Boolean(pendingRef) });
-        await answerTelegramCallbackQuery(env, callbackQuery.id, '✅ عضویت شما تأیید شد!', false);
+        await answerTelegramCallbackQuery(env, callbackQuery.id, '✅ عضویت تأیید شد! مینی‌اپ را باز کنید.', false);
         await editTelegramMessageReplyMarkup(env, chatId, messageId, {
           inline_keyboard: [
             [
@@ -3486,7 +3484,7 @@ async function handleTelegramWebhook(request, env) {
       } else {
         // User is NOT a member
         const reason = membership?.reason || 'not_member';
-        let errorMsg = '❌ هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید و دوباره تلاش کنید.';
+        let errorMsg = '❌ هنوز عضو کانال نشده‌اید. ابتدا عضو شوید و دوباره کلیک کنید.';
         if (reason === 'bot_not_in_channel') {
           errorMsg = '⚠️ خطای سیستمی: ربات عضو کانال نیست. لطفاً به مدیر اطلاع دهید.';
         } else if (reason === 'channel_not_found') {

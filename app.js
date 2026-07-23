@@ -8532,9 +8532,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // any user to fake admin by setting localStorage.setItem('is_admin', '1').
     // Now we wait for bootstrapUser() to confirm admin status from the server.
 
-    // ── JOIN LOCK: Show loading state immediately ──
-    // The overlay is already visible (display:flex in HTML). Set the loading
-    // state so the user sees "Checking membership..." while bootstrap runs.
+    // ── JOIN LOCK: Show loading state as a fast splash (not a full popup) ──
+    // The overlay is already visible (display:flex in HTML). The loading state
+    // is minimal (just badge + spinner) so returning members barely see it.
     // Bootstrap will either hideJoinLock() (if channel_joined=true) or
     // setJoinLockState('not-joined') (if false). This runs BEFORE any app
     // content renders, so no bypass is possible.

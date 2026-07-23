@@ -8465,7 +8465,7 @@ body.jl-locked .cd-fullscreen {
     display: flex; align-items: center; justify-content: center;
     padding: 24px; text-align: center;
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    animation: jlFadeIn 0.4s ease;
+    animation: jlFadeIn 0.3s ease;
 }
 @keyframes jlFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
@@ -8477,10 +8477,10 @@ body.jl-locked .cd-fullscreen {
     border-radius: 24px;
     padding: 40px 28px 32px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(245, 166, 35, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    animation: jlCardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+    animation: jlCardIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) 0.05s both;
 }
 @keyframes jlCardIn {
-    from { opacity: 0; transform: translateY(20px) scale(0.96); }
+    from { opacity: 0; transform: translateY(12px) scale(0.97); }
     to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
