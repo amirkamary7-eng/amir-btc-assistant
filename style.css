@@ -6255,7 +6255,7 @@ strong.down { color: var(--red); }
     flex-direction: column;
     justify-content: flex-end;
     align-items: center;
-    padding: 0 16px 18px;
+    padding: 0 16px 6px;
     box-sizing: border-box;
 }
 .hero-slide.active {
@@ -6296,9 +6296,9 @@ strong.down { color: var(--red); }
     border: none;
     color: #020611;
     font-weight: 700;
-    padding: 0 18px;
-    height: 44px;
-    width: 130px;
+    padding: 0 14px;
+    height: 40px;
+    width: 122px;
     border-radius: 14px;
     cursor: pointer;
     font-size: 12px;
@@ -6315,27 +6315,21 @@ strong.down { color: var(--red); }
     box-shadow: 0 3px 10px rgba(245, 166, 35, 0.3);
     filter: brightness(0.95);
 }
-/* Banner 1 (AMIRBTC channel): VLM-verified safe zone = bottom-LEFT (Top:82%,
-   Left:4%). The bottom strip left side (0-35% width) is empty black space.
-   Parent flex is column+flex-end, so CTA sits at bottom. margin-right:auto
-   pushes it to the left. */
+/* Banner 1 (AMIRBTC channel): position UNCHANGED (bottom-left safe zone).
+   Only size reduced: 130→122px width, 44→40px height, padding tuned to 14px. */
 .hero-cta--channel {
     margin-right: auto;
     margin-left: 4%;
 }
-/* Banner 2 (Bitunix): VLM-verified safe zone = UPPER-MIDDLE (Top:32%, Left:41%,
-   between the gift box and the main logo). The bottom 15% is fully occupied
-   (gift box base + coins on left, feature boxes on center/right), so the CTA
-   MUST go in the upper area. The parent has justify-content:flex-end (pushes
-   children to bottom); margin-bottom:auto absorbs all free space BELOW the CTA,
-   pushing it to the TOP of the flex column. Then margin-top:30% pushes it down
-   into the upper-middle safe zone. margin-left/right auto centers it. No absolute. */
+/* Banner 2 (Bitunix): moved to BOTTOM-RIGHT. VLM confirmed the strip below the
+   feature boxes (79-100% height, 60-100% width) is empty dark space. The parent
+   flex is column+flex-end so the CTA sits at the bottom; margin-left:auto pushes
+   it to the right edge. The parent has 16px horizontal padding, so margin-right:-10px
+   cancels it to achieve the spec'd 6px gap from the right edge. 132px width, 40px height. */
 .hero-cta--bitunix {
-    margin-bottom: auto;
-    margin-top: 22%;
     margin-left: auto;
-    margin-right: auto;
-    width: 145px;
+    margin-right: -10px;
+    width: 132px;
 }
 .hero-slider-dots {
     position: absolute;
@@ -7290,9 +7284,9 @@ html[dir="rtl"] .market-ticker-track {
 @media (max-width: 360px) {
     #dashboard-page { padding: 10px 12px 20px; }
     .hero-banner-slider { border-radius: 18px; }
-    .hero-cta { font-size: 11px; height: 40px; padding: 0 14px; width: 120px; }
+    .hero-cta { font-size: 11px; height: 36px; padding: 0 12px; width: 112px; }
     .hero-cta--channel { margin-left: 4%; }
-    .hero-cta--bitunix { width: 130px; margin-top: 30%; }
+    .hero-cta--bitunix { width: 122px; margin-right: -10px; }
     .hero-slider-dots { top: 8px; right: 10px; }
     .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }
     .dms-fg-gauge { width: 64px; }
@@ -7313,7 +7307,7 @@ html[dir="rtl"] .market-ticker-track {
 }
 
 @media (min-width: 412px) {
-    .hero-cta { font-size: 12px; height: 44px; }
+    .hero-cta { font-size: 12px; height: 40px; }
     .dma-card { flex: 0 0 240px; height: 210px; }
     .dfa-skel-card { flex: 0 0 240px; height: 210px; }
     .dc-card { flex: 0 0 224px; min-height: 140px; }
