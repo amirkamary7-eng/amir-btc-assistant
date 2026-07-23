@@ -598,10 +598,6 @@ const WalletApp = (() => {
           <div class="wallet-action-icon earn-icon">${ICONS.gift}</div>
           <span>${esc(WT('earn'))}</span>
         </button>
-        <button class="wallet-action-btn" onclick="WalletApp.scrollToSection('wallet-referral-section')">
-          <div class="wallet-action-icon referral-icon">${ICONS.users}</div>
-          <span>${esc(WT('referral'))}</span>
-        </button>
         <button class="wallet-action-btn" onclick="WalletApp.scrollToSection('wallet-marketplace-section')">
           <div class="wallet-action-icon rewards-icon">${ICONS.star}</div>
           <span>${esc(WT('rewards'))}</span>
@@ -645,38 +641,6 @@ const WalletApp = (() => {
             <div class="earn-reward">+50 AB</div>
             <div class="earn-title">${esc(WT('invite_friend'))}</div>
             <div class="earn-desc">${esc(WT('earn_per_referral'))}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Referral Section -->
-      <div class="wallet-section" id="wallet-referral-section">
-        <div class="wallet-section-header">
-          <h3>${esc(WT('referral_program'))}</h3>
-        </div>
-        <div class="wallet-referral-box">
-          <div class="wallet-ref-link-row">
-            <input type="text" id="wallet-ref-link" readonly aria-label="${esc(WT('ref_link'))}">
-            <button class="ref-copy-btn" onclick="WalletApp.copyRefLink()" aria-label="${esc(WT('copied'))}">${ICONS.copy}</button>
-            <button class="ref-share-btn-sm" onclick="WalletApp.shareRefLink()" aria-label="Share">${ICONS.share}</button>
-          </div>
-          <div class="wallet-ref-stats-grid">
-            <div class="wallet-ref-stat">
-              <div class="stat-label">${esc(WT('invited_users'))}</div>
-              <div class="stat-value" id="wallet-ref-invited">0</div>
-            </div>
-            <div class="wallet-ref-stat">
-              <div class="stat-label">${esc(WT('active'))}</div>
-              <div class="stat-value" id="wallet-ref-active">0</div>
-            </div>
-            <div class="wallet-ref-stat">
-              <div class="stat-label">${esc(WT('total_earned'))}</div>
-              <div class="stat-value" id="wallet-ref-earned">0</div>
-            </div>
-            <div class="wallet-ref-stat">
-              <div class="stat-label">${esc(WT('pending_rewards'))}</div>
-              <div class="stat-value" id="wallet-ref-pending">0</div>
-            </div>
           </div>
         </div>
       </div>
@@ -1007,15 +971,7 @@ const WalletApp = (() => {
     if (walletRes) {
       renderWalletPage(walletRes);
       walletData = walletRes;
-      // Set referral link
-      const user = window.UserContext?.user || window.getTelegramUser?.();
-      if (user?.id) {
-        const botUsername = window.BOT_USERNAME || '';
-        const refInput = document.getElementById('wallet-ref-link');
-        if (refInput) refInput.value = `https://t.me/${botUsername}?start=ref_${user.id}`;
-      }
-      // Load referral stats
-      loadWalletReferralStats();
+      // Referral link + stats moved to Referral Center (separate module)
     } else {
       // API error — show fallback with safe defaults instead of permanent error state
       const fallbackData = {
@@ -1031,23 +987,7 @@ const WalletApp = (() => {
     }
   }
 
-  async function loadWalletReferralStats() {
-    try {
-      const data = await window.apiFetch('/api/wallet/referral-stats');
-      if (data.status === 'success') {
-        const invited = document.getElementById('wallet-ref-invited');
-        const active = document.getElementById('wallet-ref-active');
-        const earned = document.getElementById('wallet-ref-earned');
-        const pending = document.getElementById('wallet-ref-pending');
-        if (invited) invited.textContent = data.invited || 0;
-        if (active) active.textContent = data.active || 0;
-        if (earned) earned.textContent = data.earned || 0;
-        if (pending) pending.textContent = Math.max(0, (data.invited || 0) - (data.earned || 0));
-      }
-    } catch (e) {
-      // silent fail
-    }
-  }
+  // loadWalletReferralStats removed — referral moved to Referral Center module
 
   function updateClaimButton(claimed) {
     const btn = document.getElementById('daily-claim-btn');
@@ -1135,24 +1075,7 @@ const WalletApp = (() => {
     historyLoading = false;
   }
 
-  function copyRefLink() {
-    const input = document.getElementById('wallet-ref-link');
-    if (!input || !input.value) return;
-    input.select();
-    try { navigator.clipboard.writeText(input.value); } catch (e) { document.execCommand('copy'); }
-    const tg = window.getTg?.();
-    tg?.showPopup?.({ title: WT('copied'), message: WT('ref_copied'), buttons: [{ type: 'ok' }] });
-  }
-
-  function shareRefLink() {
-    const input = document.getElementById('wallet-ref-link');
-    if (!input || !input.value) return;
-    const link = input.value;
-    const text = encodeURIComponent(WT('join_amir'));
-    const tg = window.getTg?.();
-    tg?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`) ||
-    window.open(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`, '_blank');
-  }
+  // copyRefLink and shareRefLink removed — referral moved to Referral Center module
 
   function scrollToSection(id) {
     const el = document.getElementById(id);
@@ -1165,8 +1088,6 @@ const WalletApp = (() => {
     closeWallet,
     claimDaily,
     loadMoreHistory,
-    copyRefLink,
-    shareRefLink,
     scrollToSection,
     getTokenLogo,
   };
