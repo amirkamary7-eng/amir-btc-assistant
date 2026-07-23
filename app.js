@@ -927,11 +927,15 @@ async function bootstrapUser() {
         // including undefined — letting non-members in if the API response
         // didn't include channel_joined or returned an ambiguous value.
         if (data.channel_joined === true) {
+            // Member confirmed — clear safety timer and hide lock (if shown)
+            clearTimeout(_joinLockSafetyTimer);
             hideJoinLock();
         } else {
+            // Non-member or unknown — show the join lock
+            clearTimeout(_joinLockSafetyTimer);
             showJoinLock();
             setJoinLockState(data.channel_joined === false ? 'not-joined' : 'loading');
-            console.log('[JOIN-LOCK] Bootstrap returned channel_joined:', data.channel_joined, '— keeping lock');
+            console.log('[JOIN-LOCK] Bootstrap returned channel_joined:', data.channel_joined, '— showing lock');
         }
 
         // CRITICAL: Set bootstrapComplete BEFORE any UI re-renders.
@@ -8510,11 +8514,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Phase 0: Telegram SDK init + user resolution ──
     await UserContext.init();
 
-    // ── JOIN LOCK: Show loading splash immediately ──
-    // The overlay is already visible (display:flex in HTML, body has jl-locked).
-    // This runs BEFORE any async work so the user sees the splash instantly.
-    showJoinLock();
-    setJoinLockState('loading');
+    // ── JOIN LOCK: Optimized — no unconditional overlay flash for members ──
+    // Previously: showJoinLock() + setJoinLockState('loading') ran unconditionally
+    // BEFORE bootstrap, causing a visible overlay flash even for verified members.
+    //
+    // NEW approach:
+    // 1. Don't show the overlay yet — body is NOT jl-locked, overlay display:none.
+    // 2. Start bootstrap immediately (it runs in parallel with Phase 1).
+    // 3. Only show the overlay if bootstrap returns channel_joined === false.
+    // 4. If bootstrap returns channel_joined === true → hideJoinLock() (no-op,
+    //    overlay was never shown) and start data loading immediately.
+    // 5. Safety net: if bootstrap hasn't completed within 3 seconds, show the
+    //    loading overlay (in case of slow network — better to show something).
+    //
+    // This means: members see the app directly with NO flash. Non-members see
+    // the overlay only after the backend confirms they're not a member.
+
+    // Safety net: show loading overlay after 3s if bootstrap hasn't resolved
+    const _joinLockSafetyTimer = setTimeout(() => {
+        if (!bootstrapComplete && !_joinLockShown) {
+            console.log('[JOIN-LOCK] Safety timer — showing loading overlay (bootstrap slow)');
+            showJoinLock();
+            setJoinLockState('loading');
+        }
+    }, 3000);
 
     // ── PARALLEL EXECUTION: maintenance check + bootstrap + data prep ──
     // Previously these ran sequentially (maintenance → join-lock → bootstrap → data),

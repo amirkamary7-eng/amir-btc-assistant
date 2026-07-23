@@ -478,7 +478,7 @@
 /* Brand Quote */
 .wallet-brand-quote {
   text-align: center;
-  padding: 14px 24px 6px;
+  padding: 14px 24px 3px;
   font-size: 11px;
   letter-spacing: 1.4px;
   text-transform: uppercase;
@@ -486,6 +486,16 @@
   font-weight: 500;
   font-style: italic;
   animation: heroFadeIn 0.5s var(--w-ease) 0.05s both;
+}
+
+.wallet-token-slogan {
+  text-align: center;
+  padding: 0 24px 10px;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  color: rgba(255, 255, 255, 0.35);
+  font-weight: 400;
+  animation: heroFadeIn 0.5s var(--w-ease) 0.1s both;
 }
 
 /* #endregion */

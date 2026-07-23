@@ -78,6 +78,7 @@ const WalletApp = (() => {
     rewards: 'جایزه‌ها',
     history: 'تاریخچه',
     brand_quote: 'AMIRBTC — جایی که هر توکن ارزش دارد',
+    token_slogan: 'توکن AB — ارزشی بی‌نهایت، رشدی بی‌پایان.',
     tier_bronze: 'برنز',
     tier_silver: 'نقره',
     tier_gold: 'طلایی',
@@ -167,6 +168,7 @@ const WalletApp = (() => {
     rewards: 'Rewards',
     history: 'History',
     brand_quote: 'AMIRBTC — Where Every Token Has Value',
+    token_slogan: 'AB Token — Infinite Value, Endless Growth.',
     tier_bronze: 'Bronze',
     tier_silver: 'Silver',
     tier_gold: 'Gold',
@@ -529,8 +531,9 @@ const WalletApp = (() => {
         </div>
       </div>
 
-      <!-- Brand Quote -->
+      <!-- Brand Quote + Token Slogan -->
       <div class="wallet-brand-quote">${esc(WT('brand_quote'))}</div>
+      <div class="wallet-token-slogan">${esc(WT('token_slogan'))}</div>
 
       <!-- Hero Balance Card -->
       <div class="wallet-hero-card">
