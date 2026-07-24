@@ -3454,6 +3454,7 @@ async function loadMarketOverview() {
 }
 
 async function loadMarketData(force = false) {
+    console.log('[TICKER] loadMarketData called — force:', force, '| allCoins length:', allCoins.length);
     const listEl = document.getElementById('coin-list');
     const refreshBtn = document.getElementById('market-refresh-btn');
     if (refreshBtn) refreshBtn.classList.add('spinning');
@@ -3461,6 +3462,7 @@ async function loadMarketData(force = false) {
         if (!force) {
             const cached = Cache.get('market');
             if (cached?.length) {
+                console.log('[TICKER] In-memory cache hit — using cached market data (', cached.length, 'coins )');
                 allCoins = cached;
                 renderMarket();
                 renderWatchlist();
@@ -3472,6 +3474,7 @@ async function loadMarketData(force = false) {
                 return;
             }
         }
+        console.log('[TICKER] Fetching fresh market data from /api/market — force:', force);
         // Show skeleton loader while fetching (P0-1)
         if (listEl && !allCoins.length) {
             listEl.innerHTML = Array(8).fill(`
@@ -3496,7 +3499,9 @@ async function loadMarketData(force = false) {
             // Fetch CMC overview in parallel — no dependency on coin list
             const overviewPromise = loadMarketOverview();
             try {
+                console.log('[TICKER] apiFetch /api/market started');
                 const res = await apiFetch('/api/market');
+                console.log('[TICKER] apiFetch /api/market responded — status:', res?.status, '| dataSource:', res?.dataSource, '| cached:', res?.cached, '| coins:', Array.isArray(res?.data) ? res.data.length : 'n/a');
                 await overviewPromise; // wait for overview too
                 if (res.status === 'success' && Array.isArray(res.data) && res.data.length) {
                     // Backend normalizes ALL sources to percentage format:
@@ -3506,13 +3511,16 @@ async function loadMarketData(force = false) {
                     console.log('[MARKET] dataSource:', res.dataSource || 'unknown', 'coins:', res.data.length);
                     ['BTC','ETH','SOL','XRP','DOGE'].forEach(function(s) {
                         var c = res.data.find(function(x) { return x.symbol === s; });
-                        if (c) console.log('[MARKET]', s, 'changePercent24Hr:', c.changePercent24Hr);
+                        if (c) console.log('[MARKET]', s, 'price:', c.priceUsd, 'changePercent24Hr:', c.changePercent24Hr, 'hasImage:', !!c.image);
                     });
                     allCoins = res.data;
                     if (res.global && typeof res.global === 'object' && res.global !== null) globalMarketData = res.global;
+                    console.log('[TICKER] allCoins populated — length:', allCoins.length, '| sample:', allCoins[0] ? Object.keys(allCoins[0]).join(',') : 'n/a');
+                } else {
+                    console.warn('[TICKER] /api/market returned no usable data — res:', JSON.stringify({status: res?.status, dataLen: Array.isArray(res?.data) ? res.data.length : 'not-array'}));
                 }
             } catch (e) {
-                console.warn('Backend /api/market failed:', e);
+                console.warn('[TICKER] Backend /api/market failed:', e?.message || e);
             }
         }
 
@@ -8012,11 +8020,16 @@ function _buildTickerItem(c) {
 
 function renderMarketTicker() {
     const track = $('market-ticker-track');
-    if (!track) return;
+    console.log('[TICKER] renderMarketTicker called — track element:', !!track, '| allCoins length:', Array.isArray(allCoins) ? allCoins.length : 'not-array');
+    if (!track) {
+        console.warn('[TICKER] renderMarketTicker ABORTED — #market-ticker-track element NOT FOUND in DOM');
+        return;
+    }
 
     // No data at all → keep skeleton (skeleton is in DOM by default; re-add if
     // a previous render cleared it and we lost the data somehow).
     if (!Array.isArray(allCoins) || !allCoins.length) {
+        console.log('[TICKER] renderMarketTicker — no allCoins data, keeping skeleton');
         if (!_tickerSkeletonCleared) return; // skeleton already in DOM
         // Restore skeleton
         track.classList.remove('visible');
@@ -8038,13 +8051,17 @@ function renderMarketTicker() {
     const sig = tickerCoins.map(c =>
         `${c.symbol}:${(Number(c.changePercent24Hr) || 0).toFixed(2)}:${(Number(c.priceUsd) || 0).toFixed(4)}:${c.image ? '1' : '0'}`
     ).join('|');
-    if (sig === _tickerSignature && _tickerRendered) return;
+    if (sig === _tickerSignature && _tickerRendered) {
+        console.log('[TICKER] renderMarketTicker SKIP — signature unchanged (data already rendered)');
+        return;
+    }
     _tickerSignature = sig;
 
     // Build items. Duplicate TWICE so the track is exactly 2 copies wide —
     // this lets the CSS `translateX(-50%)` animation loop seamlessly.
     const itemsHtml = tickerCoins.map(_buildTickerItem).join('');
     track.innerHTML = itemsHtml + itemsHtml;
+    console.log('[TICKER] renderMarketTicker SUCCESS — rendered', tickerCoins.length, 'items × 2 = ', (tickerCoins.length * 2), 'DOM nodes');
 
     // Re-enable animation (in case it was disabled by skeleton state)
     track.style.animation = '';
@@ -8727,6 +8744,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     // arrives from the API.
     renderMarketTicker();
     renderDashboardMarketStatus();
+
+    // ROOT-CAUSE FIX (Task 38): Kick off a market data fetch IMMEDIATELY —
+    // independently of bootstrapUser(). Previously loadMarketData(true) was
+    // only called inside _startDataLoading(), which only runs after
+    // bootstrapUser().then() AND requires !_joinLockShown AND !_maintenanceBlocked.
+    // If bootstrap failed (network error, pending initData, guest user) OR
+    // the user was a non-member, _startDataLoading() was NEVER called, so
+    // loadMarketData() was NEVER called, so allCoins stayed empty forever
+    // and the ticker showed skeleton indefinitely.
+    //
+    // NEW behavior: market data is fetched in parallel with bootstrapUser().
+    // /api/market is now a PUBLIC endpoint (Task 38 backend change) — market
+    // prices are universal public data, not user-specific. The Worker
+    // rate-limits by client IP to prevent abuse.
+    //
+    // This call is safe to run regardless of bootstrap outcome:
+    //   - If allCoins is already hydrated from localStorage cache, loadMarketData
+    //     will use the in-memory Cache.get('market') short-circuit (no API call)
+    //     when force=false. We pass force=true to always get fresh prices.
+    //   - renderMarketTicker() has a signature guard — it's a no-op if data
+    //     hasn't changed, so calling it multiple times is safe.
+    //   - renderDashboardMarketStatus() also no-ops gracefully when called
+    //     before globalMarketData is loaded.
+    if (API_BASE) {
+        console.log('[TICKER] Independent market fetch fired (parallel to bootstrap)');
+        loadMarketData(true).then(() => {
+            console.log('[TICKER] Independent market fetch completed — allCoins length:', allCoins.length);
+            renderMarketTicker();
+            renderDashboardMarketStatus();
+        }).catch(e => {
+            console.warn('[TICKER] Independent market fetch failed:', e?.message || e);
+            // Ticker will keep showing skeleton (or stale cache if it hydrated)
+            // — no need to throw, the polling mechanism will retry in 180s.
+        });
+    }
 
     // Skeletons for watchlist and news
     const watchGrid = $('watchlist-grid');

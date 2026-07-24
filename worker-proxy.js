@@ -4131,11 +4131,21 @@ export default {
       }
 
       // ── SECURITY: Membership gate for data endpoints ──
-      // Public data endpoints (market, forex, analyses, calendar, farsi-news) must
+      // User-specific data endpoints (forex, analyses, calendar, farsi-news) must
       // NOT serve data to non-members. system/status, charts/resolve, health, and
       // bootstrap remain public (needed for maintenance check + chart loading).
-      // Admins bypass via requireChannelJoin (isAdminTelegramId check inside).
-      const _DATA_PATHS = /^\/api\/(market|forex|analyses|calendar\/events|farsi-news)(\/|$)/;
+      //
+      // ROOT-CAUSE FIX (Task 38): /api/market is now PUBLIC. Market prices are
+      // universal public data — every user sees the same BTC price. The ticker
+      // on the dashboard needs to render the INSTANT the app opens, not wait
+      // for bootstrapUser() → membership verification → _startDataLoading().
+      // Gating /api/market behind Telegram initData auth caused the ticker to
+      // be empty for the first 2-5 seconds of every cold open, and FOREVER for
+      // users whose bootstrap failed (network error, pending initData, guest,
+      // etc.). Market data has zero user-specific value — no auth required.
+      // The Worker still rate-limits by client IP (line 4149) so anonymous
+      // access cannot be abused.
+      const _DATA_PATHS = /^\/api\/(forex|analyses|calendar\/events|farsi-news)(\/|$)/;
       const _isProdEnv = String(env.APP_ENV || '').toLowerCase() === 'production';
       if (_isProdEnv && _DATA_PATHS.test(url.pathname)) {
         const _dataAuth = await authenticateTelegramRequest(request, env);

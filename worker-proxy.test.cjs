@@ -880,3 +880,31 @@ test('Maintenance: non-admin user gets 403', async () => {
   });
   assert.equal(res.status, 403);
 });
+// ============================================================================
+// Task 38 — /api/market is PUBLIC (no auth required)
+// Root cause: market prices are universal public data. Gating /api/market
+// behind Telegram initData auth caused the dashboard ticker to be empty
+// whenever bootstrapUser() failed or hadn't completed yet. Now /api/market
+// is reachable from production without auth — rate-limited by client IP.
+// ============================================================================
+
+test('Market: production env does NOT require auth for /api/market (root-cause fix)', async () => {
+  const worker = loadWorker();
+  // APP_ENV=production triggers the _DATA_PATHS auth gate — but /api/market
+  // was removed from the regex (Task 38), so the gate no longer applies.
+  const env = createEnv({ APP_ENV: 'production' });
+  const res = await sendRequest(worker, env, 'GET', '/api/market');
+  // Status MUST NOT be 401/403. The endpoint will attempt upstream fetches;
+  // the test environment has no internet so it'll likely return 503, but
+  // the critical assertion is that auth is NOT blocking the request.
+  assert.notEqual(res.status, 401, 'market endpoint must not require Telegram init data');
+  assert.notEqual(res.status, 403, 'market endpoint must not require channel membership');
+});
+
+test('Market: production env still requires auth for /api/forex (control)', async () => {
+  const worker = loadWorker();
+  const env = createEnv({ APP_ENV: 'production' });
+  const res = await sendRequest(worker, env, 'GET', '/api/forex');
+  // Forex is user-specific gated data — auth still required.
+  assert.equal(res.status, 401);
+});
