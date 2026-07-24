@@ -20,6 +20,8 @@ export function createAlertHandlers(deps) {
     buildBodyFieldValidationError,
     isDatabaseConfigured,
     alertRepo,
+    alertEconomyRepo,
+    economyService,
   } = deps;
 
   /**
@@ -76,8 +78,50 @@ export function createAlertHandlers(deps) {
     payload.price = rawPrice;
     payload.direction = rawDirection;
     payload.user_id = String(authState.user.id);
+
+    // ── Alert Economy: Quota Check + Token Debit ──
+    if (alertEconomyRepo) {
+      const quota = await alertEconomyRepo.checkQuota(env, payload.user_id, 'price_alert');
+      if (!quota.allowed) {
+        return jsonResponse({
+          status: 'error',
+          message: 'Price alerts are temporarily disabled',
+          code: 'SERVICE_DISABLED',
+        }, { status: 403 }, env);
+      }
+
+      // If not free, debit AB tokens BEFORE creating the alert
+      if (quota.costInTokens > 0 && economyService) {
+        try {
+          await economyService.debitUser({
+            userId: payload.user_id,
+            amount: quota.costInTokens,
+            debitType: 'alert_debit',
+            description: `Extra price alert: ${rawSymbol} ${rawDirection} ${rawPrice}`,
+            refId: `alert_${Date.now()}_${payload.user_id}`,
+            metadata: { symbol: rawSymbol, price: rawPrice, direction: rawDirection },
+            env,
+          });
+        } catch (e) {
+          // Insufficient balance or rule violation
+          return jsonResponse({
+            status: 'error',
+            message: e?.code === 'RULE_VIOLATION' ? 'Insufficient AB balance' : 'Payment failed',
+            code: 'PAYMENT_FAILED',
+            required_tokens: quota.costInTokens,
+          }, { status: 402 }, env);
+        }
+      }
+    }
+
     try {
       const alert = await alertRepo.create(env, payload.user_id, payload);
+
+      // Increment quota AFTER successful creation
+      if (alertEconomyRepo) {
+        await alertEconomyRepo.incrementQuota(env, payload.user_id, 'price_alert').catch(() => {});
+      }
+
       return jsonResponse({ status: 'success', alert }, {}, env);
     } catch (error) {
       console.warn(safeError('create-alert', error));

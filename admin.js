@@ -149,6 +149,7 @@ const _adminSectionLabels = {
     'referrals': 'رفرال',
     'reward-center': 'مرکز پاداش',
     'notification-center': 'مرکز اعلانات',
+    'alert-economy': 'اقتصاد هشدارها',
     'system-controls': 'کنترل سیستم',
     'system-health': 'سلامت سیستم',
     'logs': 'لاگ‌ها',
@@ -273,6 +274,7 @@ function switchAdminSection(section, btn) {
         case 'referrals': loadAdminReferrals(); break;
         case 'reward-center': loadRewardCenterOverview(); break;
         case 'notification-center': loadNpOverview(); break;
+        case 'alert-economy': loadAlertEconomyDashboard(); break;
         case 'system-controls': loadMaintenanceSettings(); break;
         case 'system-health': loadAdminSystemHealth(); break;
         case 'logs': loadAdminLogs(1); break;
@@ -2151,3 +2153,59 @@ async function loadNpAnalytics() {
     } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
 }
 window.loadNpAnalytics = loadNpAnalytics;
+
+// ════════════════════════════════════════════════════════════════════
+// ALERT ECONOMY — Admin alert management (quota, config, dashboard)
+// ════════════════════════════════════════════════════════════════════
+
+async function loadAlertEconomyDashboard() {
+    const grid = document.getElementById('ae-dashboard-grid');
+    if (!grid) return;
+    grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/alert-economy/dashboard');
+        if (data && data.status === 'success' && data.dashboard) {
+            const d = data.dashboard;
+            const svcHtml = (d.services || []).map(function (s) {
+                return '<div class="rc-stat-card"><div class="rc-stat-val">' + (s.is_enabled ? '✅ فعال' : '⛔ غیرفعال') + '</div><div class="rc-stat-lbl">' + adminEscapeHtml(s.alert_type) + ' (' + s.free_per_day + ' رایگان / ' + s.cost_per_extra + ' AB)</div></div>';
+            }).join('');
+            grid.innerHTML = `
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.active_alerts)}</div><div class="rc-stat-lbl">هشدارهای فعال</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.triggered_today)}</div><div class="rc-stat-lbl">اجراشده امروز</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.quota_used_today)}</div><div class="rc-stat-lbl">سهمیه استفاده شده</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.paid_alerts_today)}</div><div class="rc-stat-lbl">هشدارهای پولی</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.ab_spent_today)} AB</div><div class="rc-stat-lbl">AB مصرف شده</div></div>
+                ${svcHtml}
+            `;
+        } else { grid.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>'; }
+    } catch (e) { grid.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadAlertEconomyDashboard = loadAlertEconomyDashboard;
+
+async function loadAlertEconomyConfigs() {
+    const section = document.getElementById('ae-configs-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/alert-economy/configs');
+        if (data && data.status === 'success' && Array.isArray(data.configs)) {
+            const rows = data.configs.map(function (c) {
+                return '<tr><td>' + adminEscapeHtml(c.alert_type) + '</td><td>' + (c.is_enabled ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>') + '</td><td>' + c.free_per_day + '</td><td>' + c.cost_per_extra + ' AB</td><td><button class="adm-btn-sm" onclick="toggleAlertService(\'' + c.alert_type + '\', ' + !c.is_enabled + ')">' + (c.is_enabled ? 'غیرفعال' : 'فعال') + '</button></td></tr>';
+            }).join('');
+            section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">تنظیمات هشدارها</h4><div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>نوع هشدار</th><th>وضعیت</th><th>رایگان/روز</th><th>هزینه اضافه</th><th>عملیات</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5" class="admin-empty">داده‌ای نیست</td></tr>') + '</tbody></table></div></div>';
+        }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadAlertEconomyConfigs = loadAlertEconomyConfigs;
+
+async function toggleAlertService(alertType, enable) {
+    try {
+        const data = await apiFetch('/api/admin/alert-economy/configs/' + encodeURIComponent(alertType), {
+            method: 'PUT',
+            body: JSON.stringify({ is_enabled: enable }),
+        });
+        if (data && data.status === 'success') { adminToast('تغییر وضعیت', 'success'); loadAlertEconomyConfigs(); }
+        else { adminToast('خطا', 'error'); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.toggleAlertService = toggleAlertService;

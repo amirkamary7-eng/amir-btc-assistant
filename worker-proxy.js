@@ -29,6 +29,8 @@ import { createRewardCenterRepository } from './src/repositories/reward_center.j
 import { createRewardCenterHandlers } from './src/controllers/reward_center.js';
 import { createNotificationPlatformRepository } from './src/repositories/notification_platform.js';
 import { createNotificationPlatformHandlers } from './src/controllers/notification_platform.js';
+import { createAlertEconomyRepository } from './src/repositories/alert_economy.js';
+import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 
 /**
@@ -2554,6 +2556,18 @@ function handleHealth(env) {
 // ============================================================================
 //#region Composition Root — Wired dependencies for layered modules
 // ============================================================================
+// ── Alert Economy repository (must be created BEFORE alertHandlers) ──
+const alertEconomyRepo = createAlertEconomyRepository({
+  queryDb,
+  isDatabaseConfigured,
+  isoDate: _rcIsoDate,
+  normalizeOptionalString,
+});
+
+// ── Wallet + Economy (must be created BEFORE alertHandlers which debits tokens) ──
+const walletRepo = createWalletRepository({ queryDb, queryDbTransaction });
+const economyService = createEconomyService({ walletRepo, queryDb });
+
 const alertRepo = createAlertRepository({ queryDb, ensureUserRow, normalizeOptionalString });
 const alertHandlers = createAlertHandlers({
   jsonResponse,
@@ -2564,6 +2578,8 @@ const alertHandlers = createAlertHandlers({
   buildBodyFieldValidationError,
   isDatabaseConfigured,
   alertRepo,
+  alertEconomyRepo,
+  economyService,
 });
 const watchlistRepo = createWatchlistRepository({ queryDb, ensureUserRow });
 const watchlistHandlers = createWatchlistHandlers({
@@ -2585,8 +2601,8 @@ const referralHandlers = createReferralHandlers({
   isDatabaseConfigured,
   referralRepo,
 });
-const walletRepo = createWalletRepository({ queryDb, queryDbTransaction });
-const economyService = createEconomyService({ walletRepo, queryDb });
+
+// walletRepo + economyService already created above (before alertHandlers).
 
 // ── Reward Center repository (needed by wheel + referral + admin) ──
 // Must be created BEFORE wheelHandlers since handleSpin checks kill switches.
@@ -2608,6 +2624,7 @@ const notificationPlatformRepo = createNotificationPlatformRepository({
   normalizeOptionalString,
 });
 
+// alertEconomyRepo is already created above (before alertHandlers).
 const wheelRepo = createWheelRepository({ queryDb, queryDbTransaction });
 const wheelHandlers = createWheelHandlers({
   jsonResponse,
@@ -2775,6 +2792,19 @@ const notificationPlatformHandlers = createNotificationPlatformHandlers({
   notificationPlatformRepo,
   sendTelegramMessage,
   adminRepo,
+});
+//#endregion
+
+// ── Alert Economy handlers (admin + user) ──
+const alertEconomyHandlers = createAlertEconomyHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  requireAdmin: adminHandlers.requireAdmin,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  alertEconomyRepo,
+  economyService,
 });
 //#endregion
 
@@ -4522,6 +4552,23 @@ export default {
       if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
         const alertId = url.pathname.split('/')[3] || '';
         return await alertHandlers.handleDelete(request, env, alertId);
+      }
+
+      // ── Alert Economy: User quota status ──
+      if (request.method === 'GET' && url.pathname === '/api/alerts/quota') {
+        return await alertEconomyHandlers.handleQuotaStatus(request, env);
+      }
+
+      // ── Alert Economy: Admin config + dashboard ──
+      if (request.method === 'GET' && url.pathname === '/api/admin/alert-economy/configs') {
+        return await alertEconomyHandlers.handleListConfigs(request, env);
+      }
+      if (request.method === 'PUT' && /^\/api\/admin\/alert-economy\/configs\/[^/]+$/.test(url.pathname)) {
+        const alertType = decodeURIComponent(url.pathname.split('/').pop());
+        return await alertEconomyHandlers.handleUpdateConfig(request, env, alertType);
+      }
+      if (request.method === 'GET' && url.pathname === '/api/admin/alert-economy/dashboard') {
+        return await alertEconomyHandlers.handleDashboard(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/notifications') {

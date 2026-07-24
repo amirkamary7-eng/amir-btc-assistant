@@ -1481,6 +1481,10 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                             <span>مرکز اعلانات</span>
                         </button>
+                        <button class="adm-nav-item" data-admin-section="alert-economy" onclick="switchAdminSection('alert-economy', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                            <span>اقتصاد هشدارها</span>
+                        </button>
                         <button class="adm-nav-item" data-admin-section="system-controls" onclick="switchAdminSection('system-controls', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             <span>کنترل سیستم</span>
@@ -1970,6 +1974,18 @@
                     <div class="rc-tab-content" id="np-tab-analytics" style="display:none;">
                         <div id="np-analytics-section"></div>
                     </div>
+                </section>
+
+                <!-- Alert Economy Section -->
+                <section class="adm-section" id="admin-section-alert-economy">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">اقتصاد هشدارها</h3>
+                            <p class="adm-section-desc">مدیریت سهمیه، هزینه و فعال‌سازی هشدارها</p>
+                        </div>
+                    </div>
+                    <div id="ae-dashboard-grid" class="rc-overview-grid"><div class="admin-empty">در حال بارگذاری...</div></div>
+                    <div id="ae-configs-section" style="margin-top:16px;"></div>
                 </section>
             </main>
         </div>
