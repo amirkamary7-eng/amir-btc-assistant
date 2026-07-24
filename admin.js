@@ -8,6 +8,10 @@ let _adminPanelOpen = false;
 let _currentAdminSection = 'dashboard';
 let _adminUserSearchTimeout = null;
 let _adminReferralSearchTimeout = null;
+// Request cancellation token — increments on each section switch.
+// When a loader finishes, it checks if its token matches the current one.
+// If not, the response is stale and the loader silently discards it.
+let _adminLoadToken = 0;
 let _adminTicketsFilter = 'all';
 let _adminRewardsFilter = 'all';
 let _adminData = { is_admin: false, role: '', permissions: [] };
@@ -56,6 +60,16 @@ function showAdminToast(message, type) {
 
 function adminEmpty(message) {
     return '<div class="admin-empty">' + adminEscapeHtml(message || 'No data found') + '</div>';
+}
+
+/**
+ * Check if the current load token is still valid.
+ * Use at the start of async loaders: const token = _adminLoadToken;
+ * Then after await: if (token !== _adminLoadToken) return;
+ * This prevents stale responses from overwriting current section content.
+ */
+function _isLoadTokenStale(token) {
+    return token !== _adminLoadToken;
 }
 
 /**
@@ -256,6 +270,9 @@ function _updateAdminSidebarUser() {
 
 function switchAdminSection(section, btn) {
     _currentAdminSection = section;
+    // Increment load token — any in-flight loader from a previous section
+    // will see a stale token and discard its response.
+    _adminLoadToken++;
 
     // Update nav buttons (both new .adm-nav-item and legacy .admin-nav-item)
     const navItems = document.querySelectorAll('.adm-nav-item, .admin-nav-item');
@@ -518,6 +535,8 @@ async function loadAdminDashboard() {
     const activityList = document.getElementById('admin-activity-list');
     if (!grid) return;
 
+    const token = _adminLoadToken;
+
     // Load maintenance status banner (independent of dashboard API)
     loadDashboardMaintenanceBanner();
 
@@ -526,6 +545,7 @@ async function loadAdminDashboard() {
 
     try {
         const data = await apiFetch('/api/admin/dashboard');
+        if (_isLoadTokenStale(token)) return; // Section switched, discard stale response
         if (!data) throw new Error('No data');
 
         // Stats — use enhanced v2 cards with icons + colors
@@ -745,6 +765,8 @@ async function loadAdminUsers(page) {
     if (paginationEl) paginationEl.innerHTML = '';
     _adminUsersPage = page || 1;
 
+    const token = _adminLoadToken;
+
     const searchInput = document.getElementById('admin-user-search');
     const search = searchInput ? searchInput.value.trim() : '';
 
@@ -752,6 +774,7 @@ async function loadAdminUsers(page) {
         let url = '/api/admin/users?page=' + _adminUsersPage;
         if (search) url += '&search=' + encodeURIComponent(search);
         const data = await apiFetch(url);
+        if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.users) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty('No users found');
@@ -814,12 +837,14 @@ async function loadAdminTickets(page) {
     if (paginationEl) paginationEl.innerHTML = '';
     _adminTicketsPage = page || 1;
 
+    const token = _adminLoadToken;
     try {
         let url = '/api/admin/tickets?page=' + _adminTicketsPage;
         if (_adminTicketsFilter && _adminTicketsFilter !== 'all') {
             url += '&status=' + _adminTicketsFilter;
         }
         const data = await apiFetch(url);
+        if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.tickets) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty('No tickets found');
@@ -1034,8 +1059,10 @@ async function loadAdminBroadcasts() {
     if (!container) return;
     container.innerHTML = '<div class="admin-empty">Loading...</div>';
 
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/broadcasts');
+        if (_isLoadTokenStale(token)) return;
         if (!data || !Array.isArray(data.broadcasts) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty('No broadcasts yet');
             return;
@@ -1079,12 +1106,14 @@ async function loadAdminRewards() {
     if (!container) return;
     container.innerHTML = '<div class="admin-empty">Loading...</div>';
 
+    const token = _adminLoadToken;
     try {
         let url = '/api/admin/rewards';
         if (_adminRewardsFilter && _adminRewardsFilter !== 'all') {
             url += '?status=' + _adminRewardsFilter;
         }
         const data = await apiFetch(url);
+        if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.rewards) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty('No rewards found');
@@ -1156,11 +1185,13 @@ async function loadAdminTransactions(page) {
     const userId = userIdInput ? userIdInput.value.trim() : '';
     const txType = typeSelect ? typeSelect.value : '';
 
+    const token = _adminLoadToken;
     try {
         let url = '/api/admin/transactions?page=' + _adminTransactionsPage;
         if (userId) url += '&user_id=' + encodeURIComponent(userId);
         if (txType) url += '&type=' + encodeURIComponent(txType);
         const data = await apiFetch(url);
+        if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.transactions) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty('No transactions found');
@@ -1219,10 +1250,12 @@ async function loadAdminReferrals() {
     const searchInput = document.getElementById('admin-referral-search');
     const search = searchInput ? searchInput.value.trim() : '';
 
+    const token = _adminLoadToken;
     try {
         let url = '/api/admin/referrals';
         if (search) url += '?search=' + encodeURIComponent(search);
         const data = await apiFetch(url);
+        if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.referrals) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty('No referral data found');
@@ -1277,8 +1310,10 @@ async function loadAdminSystemHealth() {
     if (!grid) return;
     grid.innerHTML = '<div class="admin-empty">Loading...</div>';
 
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/system-health');
+        if (_isLoadTokenStale(token)) return;
         if (!data) throw new Error('No data');
 
         let html = '';
@@ -1325,9 +1360,11 @@ async function loadAdminLogs(page) {
     if (paginationEl) paginationEl.innerHTML = '';
     _adminLogsPage = page || 1;
 
+    const token = _adminLoadToken;
     try {
         const url = '/api/admin/logs?page=' + _adminLogsPage;
         const data = await apiFetch(url);
+        if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.logs) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty('No logs found');
@@ -1443,8 +1480,10 @@ async function loadRewardCenterOverview() {
     const grid = document.getElementById('rc-overview-grid');
     if (!grid) return;
     grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/reward-center/overview');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.overview) {
             const o = data.overview;
             const statusColor = o.wheel_status === 'active' ? 'green' : (o.wheel_status === 'maintenance' ? 'orange' : 'red');
@@ -1478,8 +1517,10 @@ async function loadRcWheelConfig() {
     const section = document.getElementById('rc-wheel-config-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/reward-center/wheel/config');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.config) {
             _rcWheelConfig = data.config;
             const c = data.config;
@@ -1549,8 +1590,10 @@ async function loadRcWheelRewards() {
     const section = document.getElementById('rc-wheel-rewards-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/reward-center/wheel/rewards');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.rewards)) {
             let rows = data.rewards.map(function (r) {
                 return `<tr>
@@ -1645,8 +1688,10 @@ async function loadRcReferralTiers() {
     const section = document.getElementById('rc-referral-tiers-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/reward-center/referral-tiers');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.tiers)) {
             let rows = data.tiers.map(function (t) {
                 return `<tr>
@@ -1720,8 +1765,10 @@ async function loadRcMissionRewards() {
     const section = document.getElementById('rc-mission-rewards-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/reward-center/mission-rewards');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.missions)) {
             let rows = data.missions.map(function (m) {
                 return `<tr>
@@ -1794,8 +1841,10 @@ async function loadRcCampaigns() {
     const section = document.getElementById('rc-campaigns-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/reward-center/campaigns');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.campaigns)) {
             let rows = data.campaigns.map(function (c) {
                 return `<tr>
@@ -1877,8 +1926,10 @@ async function loadRcLibrary() {
     const section = document.getElementById('rc-library-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/reward-center/library');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.library)) {
             let rows = data.library.map(function (item) {
                 return `<tr>
@@ -1952,8 +2003,10 @@ async function loadRcAnalytics() {
     const section = document.getElementById('rc-analytics-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/reward-center/analytics?range=30d');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.analytics) {
             const a = data.analytics;
             const distRows = (a.reward_distribution || []).map(function (d) {
@@ -1991,8 +2044,10 @@ async function loadRcSettings() {
     const section = document.getElementById('rc-settings-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/reward-center/emergency');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.controls) {
             _rcEmergencyControls = data.controls;
             const c = data.controls;
@@ -2057,8 +2112,10 @@ async function loadNpOverview() {
     const grid = document.getElementById('np-overview-grid');
     if (!grid) return;
     grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/notifications/analytics?range=7d');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.analytics) {
             const a = data.analytics;
             const catRows = (a.by_category || []).map(function (c) { return '<div class="rc-stat-card"><div class="rc-stat-val">' + adminFormatNumber(c.count) + '</div><div class="rc-stat-lbl">' + adminEscapeHtml(c.category) + '</div></div>'; }).join('');
@@ -2077,8 +2134,10 @@ async function loadNpBroadcast() {
     const section = document.getElementById('np-broadcast-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/notifications/broadcasts?limit=20');
+        if (_isLoadTokenStale(token)) return;
         let rows = '';
         if (data && data.status === 'success' && Array.isArray(data.broadcasts)) {
             rows = data.broadcasts.map(function (b) {
@@ -2136,8 +2195,10 @@ async function loadNpTemplates() {
     const section = document.getElementById('np-templates-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/notifications/templates');
+        if (_isLoadTokenStale(token)) return;
         let rows = '';
         if (data && data.status === 'success' && Array.isArray(data.templates)) {
             rows = data.templates.map(function (t) {
@@ -2153,8 +2214,10 @@ async function loadNpAnalytics() {
     const section = document.getElementById('np-analytics-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/notifications/analytics?range=30d');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.analytics) {
             const a = data.analytics;
             const catRows = (a.by_category || []).map(function (c) { return '<tr><td>' + adminEscapeHtml(c.category) + '</td><td>' + adminFormatNumber(c.count) + '</td></tr>'; }).join('');
@@ -2187,8 +2250,10 @@ async function loadAlertEconomyDashboard() {
     const grid = document.getElementById('ae-dashboard-grid');
     if (!grid) return;
     grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/alert-economy/dashboard');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.dashboard) {
             const d = data.dashboard;
             const svcHtml = (d.services || []).map(function (s) {
@@ -2211,8 +2276,10 @@ async function loadAlertEconomyConfigs() {
     const section = document.getElementById('ae-configs-section');
     if (!section) return;
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    const token = _adminLoadToken;
     try {
         const data = await apiFetch('/api/admin/alert-economy/configs');
+        if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.configs)) {
             const rows = data.configs.map(function (c) {
                 return '<tr><td>' + adminEscapeHtml(c.alert_type) + '</td><td>' + (c.is_enabled ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>') + '</td><td>' + c.free_per_day + '</td><td>' + c.cost_per_extra + ' AB</td><td><button class="adm-btn-sm" onclick="toggleAlertService(\'' + c.alert_type + '\', ' + !c.is_enabled + ')">' + (c.is_enabled ? 'غیرفعال' : 'فعال') + '</button></td></tr>';
