@@ -25,6 +25,8 @@ import { createAnalysisRepository } from './src/repositories/analyses.js';
 import { createAnalysisHandlers } from './src/controllers/analyses.js';
 import { createAdminRepository } from './src/repositories/admin.js';
 import { createAdminHandlers } from './src/controllers/admin.js';
+import { createRewardCenterRepository } from './src/repositories/reward_center.js';
+import { createRewardCenterHandlers } from './src/controllers/reward_center.js';
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 
 /**
@@ -2674,6 +2676,29 @@ const adminHandlers = createAdminHandlers({
   notificationRepo,
   diagLog,
 });
+
+// ── Reward Center (admin) ──
+function _rcIsoDate(val) { return val ? new Date(val).toISOString() : null; }
+const rewardCenterRepo = createRewardCenterRepository({
+  queryDb,
+  queryDbTransaction,
+  isDatabaseConfigured,
+  isoDate: _rcIsoDate,
+  normalizeOptionalString,
+});
+const rewardCenterHandlers = createRewardCenterHandlers({
+  jsonResponse,
+  requireAdmin: adminHandlers.requireAdmin,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  buildBodyFieldValidationError,
+  normalizeOptionalString,
+  getClientIp: (request) => request.headers.get('cf-connecting-ip') || null,
+  adminRepo,
+  rewardCenterRepo,
+});
 //#endregion
 
 // ── Market Overview Service (CMC) — all CMC calls centralized here ──
@@ -4086,6 +4111,99 @@ export default {
       }
       if (url.pathname === '/api/admin/logs' && request.method === 'GET') {
         return await adminHandlers.handleLogs(request, env);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // REWARD CENTER (admin) — full reward management system
+      // ─────────────────────────────────────────────────────────────
+
+      // Overview & Analytics
+      if (url.pathname === '/api/admin/reward-center/overview' && request.method === 'GET') {
+        return await rewardCenterHandlers.handleOverview(request, env);
+      }
+      if (url.pathname === '/api/admin/reward-center/analytics' && request.method === 'GET') {
+        return await rewardCenterHandlers.handleAnalytics(request, env);
+      }
+
+      // Wheel Config
+      if (url.pathname === '/api/admin/reward-center/wheel/config' && request.method === 'GET') {
+        return await rewardCenterHandlers.handleGetWheelConfig(request, env);
+      }
+      if (url.pathname === '/api/admin/reward-center/wheel/config' && (request.method === 'PUT' || request.method === 'POST')) {
+        return await rewardCenterHandlers.handleUpdateWheelConfig(request, env);
+      }
+
+      // Wheel Rewards CRUD
+      if (url.pathname === '/api/admin/reward-center/wheel/rewards' && request.method === 'GET') {
+        return await rewardCenterHandlers.handleListWheelRewards(request, env);
+      }
+      if (url.pathname === '/api/admin/reward-center/wheel/rewards' && request.method === 'POST') {
+        return await rewardCenterHandlers.handleCreateWheelReward(request, env);
+      }
+      if (/^\/api\/admin\/reward-center\/wheel\/rewards\/\d+$/.test(url.pathname)) {
+        const rewardId = url.pathname.split('/').pop();
+        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateWheelReward(request, env, rewardId);
+        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteWheelReward(request, env, rewardId);
+      }
+
+      // Reward Library CRUD
+      if (url.pathname === '/api/admin/reward-center/library' && request.method === 'GET') {
+        return await rewardCenterHandlers.handleListLibrary(request, env);
+      }
+      if (url.pathname === '/api/admin/reward-center/library' && request.method === 'POST') {
+        return await rewardCenterHandlers.handleCreateLibraryItem(request, env);
+      }
+      if (/^\/api\/admin\/reward-center\/library\/\d+$/.test(url.pathname)) {
+        const itemId = url.pathname.split('/').pop();
+        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateLibraryItem(request, env, itemId);
+        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteLibraryItem(request, env, itemId);
+      }
+
+      // Referral Reward Tiers CRUD
+      if (url.pathname === '/api/admin/reward-center/referral-tiers' && request.method === 'GET') {
+        return await rewardCenterHandlers.handleListReferralTiers(request, env);
+      }
+      if (url.pathname === '/api/admin/reward-center/referral-tiers' && request.method === 'POST') {
+        return await rewardCenterHandlers.handleCreateReferralTier(request, env);
+      }
+      if (/^\/api\/admin\/reward-center\/referral-tiers\/\d+$/.test(url.pathname)) {
+        const tierId = url.pathname.split('/').pop();
+        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateReferralTier(request, env, tierId);
+        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteReferralTier(request, env, tierId);
+      }
+
+      // Mission Rewards CRUD
+      if (url.pathname === '/api/admin/reward-center/mission-rewards' && request.method === 'GET') {
+        return await rewardCenterHandlers.handleListMissionRewards(request, env);
+      }
+      if (url.pathname === '/api/admin/reward-center/mission-rewards' && request.method === 'POST') {
+        return await rewardCenterHandlers.handleCreateMissionReward(request, env);
+      }
+      if (/^\/api\/admin\/reward-center\/mission-rewards\/\d+$/.test(url.pathname)) {
+        const missionId = url.pathname.split('/').pop();
+        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateMissionReward(request, env, missionId);
+        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteMissionReward(request, env, missionId);
+      }
+
+      // Campaigns CRUD
+      if (url.pathname === '/api/admin/reward-center/campaigns' && request.method === 'GET') {
+        return await rewardCenterHandlers.handleListCampaigns(request, env);
+      }
+      if (url.pathname === '/api/admin/reward-center/campaigns' && request.method === 'POST') {
+        return await rewardCenterHandlers.handleCreateCampaign(request, env);
+      }
+      if (/^\/api\/admin\/reward-center\/campaigns\/[^/]+$/.test(url.pathname)) {
+        const campaignId = decodeURIComponent(url.pathname.split('/').pop());
+        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateCampaign(request, env, campaignId);
+        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteCampaign(request, env, campaignId);
+      }
+
+      // Emergency Controls
+      if (url.pathname === '/api/admin/reward-center/emergency' && request.method === 'GET') {
+        return await rewardCenterHandlers.handleGetEmergencyControls(request, env);
+      }
+      if (url.pathname === '/api/admin/reward-center/emergency' && (request.method === 'PUT' || request.method === 'POST')) {
+        return await rewardCenterHandlers.handleUpdateEmergencyControls(request, env);
       }
 
       // ── Maintenance Mode Controls (admin only) ──

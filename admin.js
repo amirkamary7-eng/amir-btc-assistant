@@ -147,6 +147,7 @@ const _adminSectionLabels = {
     'rewards': 'پاداش‌ها',
     'transactions': 'تراکنش‌ها',
     'referrals': 'رفرال',
+    'reward-center': 'مرکز پاداش',
     'system-controls': 'کنترل سیستم',
     'system-health': 'سلامت سیستم',
     'logs': 'لاگ‌ها',
@@ -269,6 +270,7 @@ function switchAdminSection(section, btn) {
         case 'rewards': loadAdminRewards(); break;
         case 'transactions': loadAdminTransactions(1); break;
         case 'referrals': loadAdminReferrals(); break;
+        case 'reward-center': loadRewardCenterOverview(); break;
         case 'system-controls': loadMaintenanceSettings(); break;
         case 'system-health': loadAdminSystemHealth(); break;
         case 'logs': loadAdminLogs(1); break;
@@ -1371,3 +1373,633 @@ window.onMaintenanceToggleChange = onMaintenanceToggleChange;
 window.onMaintenanceProgressChange = onMaintenanceProgressChange;
 window.saveMaintenanceSettings = saveMaintenanceSettings;
 window.applyMaintenancePreset = applyMaintenancePreset;
+// ════════════════════════════════════════════════════════════════════
+// REWARD CENTER — Full reward management system
+// ════════════════════════════════════════════════════════════════════
+
+let _rcCurrentTab = 'overview';
+let _rcWheelConfig = null;
+let _rcEmergencyControls = null;
+
+function switchRewardCenterTab(tab, btn) {
+    _rcCurrentTab = tab;
+    // Update tab buttons
+    document.querySelectorAll('.rc-tab').forEach(function (t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    else {
+        const target = document.querySelector('.rc-tab[data-rc-tab="' + tab + '"]');
+        if (target) target.classList.add('active');
+    }
+    // Update content visibility
+    document.querySelectorAll('.rc-tab-content').forEach(function (c) { c.style.display = 'none'; });
+    const activeContent = document.getElementById('rc-tab-' + tab);
+    if (activeContent) activeContent.style.display = '';
+    // Load tab data
+    switch (tab) {
+        case 'overview': loadRewardCenterOverview(); break;
+        case 'wheel': loadRcWheelConfig(); loadRcWheelRewards(); break;
+        case 'referral': loadRcReferralTiers(); break;
+        case 'mission': loadRcMissionRewards(); break;
+        case 'campaigns': loadRcCampaigns(); break;
+        case 'library': loadRcLibrary(); break;
+        case 'analytics': loadRcAnalytics(); break;
+        case 'settings': loadRcSettings(); break;
+    }
+}
+window.switchRewardCenterTab = switchRewardCenterTab;
+
+// ─── Overview ───────────────────────────────────────────────
+
+async function loadRewardCenterOverview() {
+    const grid = document.getElementById('rc-overview-grid');
+    if (!grid) return;
+    grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/reward-center/overview');
+        if (data && data.status === 'success' && data.overview) {
+            const o = data.overview;
+            const statusColor = o.wheel_status === 'active' ? 'green' : (o.wheel_status === 'maintenance' ? 'orange' : 'red');
+            const statusText = o.wheel_status === 'active' ? 'فعال' : (o.wheel_status === 'maintenance' ? 'تعمیرات' : 'غیرفعال');
+            grid.innerHTML = `
+                <div class="rc-stat-card"><div class="rc-stat-icon green">●</div><div class="rc-stat-val">${statusText}</div><div class="rc-stat-lbl">وضعیت گردونه</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.total_spins_today)}</div><div class="rc-stat-lbl">اسپین امروز</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.rewards_given_today)}</div><div class="rc-stat-lbl">پاداش امروز</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.total_ab_distributed)} AB</div><div class="rc-stat-lbl">توکن توزیع شده امروز</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_campaigns)}</div><div class="rc-stat-lbl">کمپین‌های فعال</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_wheel_rewards)}</div><div class="rc-stat-lbl">پاداش‌های فعال گردونه</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_referral_tiers)}</div><div class="rc-stat-lbl">طبقات رفرال فعال</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_missions)}</div><div class="rc-stat-lbl">ماموریت‌های فعال</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.pending_rewards)}</div><div class="rc-stat-lbl">پاداش‌های در انتظار</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${o.most_won_reward ? adminEscapeHtml(o.most_won_reward.label || '') : '--'}</div><div class="rc-stat-lbl">پرتکرارترین پاداش</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.highest_reward)} AB</div><div class="rc-stat-lbl">بزرگ‌ترین پاداش</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminEscapeHtml(o.wheel_version || '1.0.0')}</div><div class="rc-stat-lbl">نسخه گردونه</div></div>
+            `;
+        } else {
+            grid.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>';
+        }
+    } catch (e) {
+        grid.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        console.error('loadRewardCenterOverview:', e);
+    }
+}
+
+// ─── Wheel Config ───────────────────────────────────────────
+
+async function loadRcWheelConfig() {
+    const section = document.getElementById('rc-wheel-config-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/reward-center/wheel/config');
+        if (data && data.status === 'success' && data.config) {
+            _rcWheelConfig = data.config;
+            const c = data.config;
+            section.innerHTML = `
+                <div class="rc-card">
+                    <h4 class="rc-card-title">تنظیمات عمومی گردونه</h4>
+                    <div class="rc-form-grid">
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-enabled" ${c.is_enabled ? 'checked' : ''}><span>فعال‌سازی گردونه</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-daily" ${c.daily_spin_enabled ? 'checked' : ''}><span>اسپین روزانه</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-referral" ${c.referral_spin_enabled ? 'checked' : ''}><span>اسپین رفرال</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-mission" ${c.mission_spin_enabled ? 'checked' : ''}><span>اسپین ماموریت</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-premium" ${c.premium_spin_enabled ? 'checked' : ''}><span>اسپین ویژه</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-campaign" ${c.campaign_spin_enabled ? 'checked' : ''}><span>اسپین کمپین</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-maintenance" ${c.maintenance_mode ? 'checked' : ''}><span>حالت تعمیرات</span></label>
+                    </div>
+                    <div class="rc-form-grid" style="margin-top:12px;">
+                        <div class="rc-field"><label>تعداد بخش‌ها</label><select id="rc-wc-segments"><option value="6" ${c.segment_count==6?'selected':''}>۶</option><option value="8" ${c.segment_count==8?'selected':''}>۸</option><option value="10" ${c.segment_count==10?'selected':''}>۱۰</option><option value="12" ${c.segment_count==12?'selected':''}>۱۲</option><option value="16" ${c.segment_count==16?'selected':''}>۱۶</option></select></div>
+                        <div class="rc-field"><label>نسخه</label><input type="text" id="rc-wc-version" value="${adminEscapeHtml(c.version||'1.0.0')}"></div>
+                        <div class="rc-field"><label>تم</label><input type="text" id="rc-wc-theme" value="${adminEscapeHtml(c.theme||'default')}"></div>
+                        <div class="rc-field"><label>حداکثر اسپین/کاربر</label><input type="number" id="rc-wc-maxspins" value="${c.max_spins_per_user||1}" min="1"></div>
+                        <div class="rc-field"><label>کوپل‌داون (ثانیه)</label><input type="number" id="rc-wc-cooldown" value="${c.cooldown_seconds||0}" min="0"></div>
+                        <div class="rc-field"><label>حداکثر پاداش/روز</label><input type="number" id="rc-wc-maxreward" value="${c.max_reward_per_day||1000}" min="0"></div>
+                    </div>
+                    <button class="adm-btn adm-btn-primary" onclick="saveRcWheelConfig()" style="margin-top:12px;">ذخیره تنظیمات</button>
+                </div>
+            `;
+        } else {
+            section.innerHTML = '<div class="admin-empty">خطا در بارگذاری تنظیمات</div>';
+        }
+    } catch (e) {
+        section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        console.error('loadRcWheelConfig:', e);
+    }
+}
+window.loadRcWheelConfig = loadRcWheelConfig;
+
+async function saveRcWheelConfig() {
+    const payload = {
+        is_enabled: document.getElementById('rc-wc-enabled')?.checked,
+        daily_spin_enabled: document.getElementById('rc-wc-daily')?.checked,
+        referral_spin_enabled: document.getElementById('rc-wc-referral')?.checked,
+        mission_spin_enabled: document.getElementById('rc-wc-mission')?.checked,
+        premium_spin_enabled: document.getElementById('rc-wc-premium')?.checked,
+        campaign_spin_enabled: document.getElementById('rc-wc-campaign')?.checked,
+        maintenance_mode: document.getElementById('rc-wc-maintenance')?.checked,
+        segment_count: Number(document.getElementById('rc-wc-segments')?.value || 8),
+        version: document.getElementById('rc-wc-version')?.value,
+        theme: document.getElementById('rc-wc-theme')?.value,
+        max_spins_per_user: Number(document.getElementById('rc-wc-maxspins')?.value || 1),
+        cooldown_seconds: Number(document.getElementById('rc-wc-cooldown')?.value || 0),
+        max_reward_per_day: Number(document.getElementById('rc-wc-maxreward')?.value || 1000),
+    };
+    try {
+        const data = await apiFetch('/api/admin/reward-center/wheel/config', { method: 'PUT', body: JSON.stringify(payload) });
+        if (data && data.status === 'success') {
+            adminToast('تنظیمات ذخیره شد', 'success');
+        } else {
+            adminToast('خطا در ذخیره', 'error');
+        }
+    } catch (e) { adminToast('خطا در ذخیره', 'error'); console.error(e); }
+}
+window.saveRcWheelConfig = saveRcWheelConfig;
+
+// ─── Wheel Rewards ──────────────────────────────────────────
+
+async function loadRcWheelRewards() {
+    const section = document.getElementById('rc-wheel-rewards-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/reward-center/wheel/rewards');
+        if (data && data.status === 'success' && Array.isArray(data.rewards)) {
+            let rows = data.rewards.map(function (r) {
+                return `<tr>
+                    <td>${adminEscapeHtml(r.reward_label || r.reward_type)}</td>
+                    <td>${adminEscapeHtml(r.reward_type)}</td>
+                    <td>${adminFormatNumber(r.reward_amount)}</td>
+                    <td>${adminFormatNumber(r.weight)}</td>
+                    <td>${adminEscapeHtml(r.campaign_id || '--')}</td>
+                    <td>${r.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
+                    <td>
+                        <button class="adm-btn-sm" onclick="toggleRcWheelReward(${r.id}, ${!r.is_active})">${r.is_active ? 'غیرفعال' : 'فعال'}</button>
+                        <button class="adm-btn-sm adm-btn-danger" onclick="deleteRcWheelReward(${r.id})">حذف</button>
+                    </td>
+                </tr>`;
+            }).join('');
+            section.innerHTML = `
+                <div class="rc-card">
+                    <h4 class="rc-card-title">پاداش‌های گردونه</h4>
+                    <div class="adm-table-wrap">
+                        <table class="adm-table">
+                            <thead><tr><th>نام</th><th>نوع</th><th>مقدار</th><th>وزن</th><th>کمپین</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+                            <tbody>${rows || '<tr><td colspan="7" class="admin-empty">پاداشی موجود نیست</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcWheelRewardForm()" style="margin-top:12px;">افزودن پاداش</button>
+                    <div id="rc-wheel-reward-form" style="display:none;margin-top:12px;"></div>
+                </div>
+            `;
+        }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>'; console.error(e); }
+}
+window.loadRcWheelRewards = loadRcWheelRewards;
+
+function showRcWheelRewardForm() {
+    const form = document.getElementById('rc-wheel-reward-form');
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+    form.innerHTML = `
+        <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
+            <h4 class="rc-card-title">پاداش جدید</h4>
+            <div class="rc-form-grid">
+                <div class="rc-field"><label>نام پاداش</label><input type="text" id="rc-wr-label" placeholder="+5 AB"></div>
+                <div class="rc-field"><label>نوع</label><select id="rc-wr-type"><option value="token">توکن</option><option value="spin">اسپین</option><option value="voucher">ووچر</option><option value="nft">NFT</option><option value="premium">ویژه</option><option value="coupon">کوپن</option><option value="external">خارجی</option></select></div>
+                <div class="rc-field"><label>مقدار</label><input type="number" id="rc-wr-amount" value="1" min="0"></div>
+                <div class="rc-field"><label>وزن</label><input type="number" id="rc-wr-weight" value="1" min="1"></div>
+                <div class="rc-field"><label>کمپین (اختیاری)</label><input type="text" id="rc-wr-campaign" placeholder="camp_id"></div>
+                <div class="rc-field"><label>فعال</label><select id="rc-wr-active"><option value="true">بله</option><option value="false">خیر</option></select></div>
+            </div>
+            <button class="adm-btn adm-btn-primary" onclick="createRcWheelReward()" style="margin-top:10px;">ایجاد</button>
+        </div>
+    `;
+}
+window.showRcWheelRewardForm = showRcWheelRewardForm;
+
+async function createRcWheelReward() {
+    const payload = {
+        reward_label: document.getElementById('rc-wr-label')?.value,
+        reward_type: document.getElementById('rc-wr-type')?.value,
+        reward_amount: Number(document.getElementById('rc-wr-amount')?.value || 0),
+        weight: Number(document.getElementById('rc-wr-weight')?.value || 1),
+        campaign_id: document.getElementById('rc-wr-campaign')?.value || null,
+        is_active: document.getElementById('rc-wr-active')?.value === 'true',
+    };
+    try {
+        const data = await apiFetch('/api/admin/reward-center/wheel/rewards', { method: 'POST', body: JSON.stringify(payload) });
+        if (data && data.status === 'success') { adminToast('پاداش ایجاد شد', 'success'); loadRcWheelRewards(); }
+        else { adminToast('خطا در ایجاد', 'error'); }
+    } catch (e) { adminToast('خطا در ایجاد', 'error'); console.error(e); }
+}
+window.createRcWheelReward = createRcWheelReward;
+
+async function toggleRcWheelReward(id, makeActive) {
+    try {
+        const data = await apiFetch('/api/admin/reward-center/wheel/rewards/' + id, { method: 'PUT', body: JSON.stringify({ is_active: makeActive }) });
+        if (data && data.status === 'success') { adminToast('وضعیت تغییر کرد', 'success'); loadRcWheelRewards(); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.toggleRcWheelReward = toggleRcWheelReward;
+
+async function deleteRcWheelReward(id) {
+    if (!confirm('حذف این پاداش؟')) return;
+    try {
+        const data = await apiFetch('/api/admin/reward-center/wheel/rewards/' + id, { method: 'DELETE' });
+        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcWheelRewards(); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.deleteRcWheelReward = deleteRcWheelReward;
+
+// ─── Referral Tiers ─────────────────────────────────────────
+
+async function loadRcReferralTiers() {
+    const section = document.getElementById('rc-referral-tiers-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/reward-center/referral-tiers');
+        if (data && data.status === 'success' && Array.isArray(data.tiers)) {
+            let rows = data.tiers.map(function (t) {
+                return `<tr>
+                    <td>${adminFormatNumber(t.invite_count)}</td>
+                    <td>${adminFormatNumber(t.token_amount)} AB</td>
+                    <td>${adminFormatNumber(t.bonus_spins)}</td>
+                    <td>${adminEscapeHtml(t.campaign_id || '--')}</td>
+                    <td>${t.is_enabled ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcReferralTier(${t.id})">حذف</button></td>
+                </tr>`;
+            }).join('');
+            section.innerHTML = `
+                <div class="rc-card">
+                    <h4 class="rc-card-title">طبقات پاداش رفرال</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>تعداد دعوت</th><th>توکن</th><th>اسپین رایگان</th><th>کمپین</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">طبقه‌ای موجود نیست</td></tr>'}</tbody></table></div>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcReferralTierForm()" style="margin-top:12px;">افزودن طبقه</button>
+                    <div id="rc-referral-tier-form" style="display:none;margin-top:12px;"></div>
+                </div>
+            `;
+        }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadRcReferralTiers = loadRcReferralTiers;
+
+function showRcReferralTierForm() {
+    const form = document.getElementById('rc-referral-tier-form');
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+    form.innerHTML = `
+        <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
+            <h4 class="rc-card-title">طبقه جدید</h4>
+            <div class="rc-form-grid">
+                <div class="rc-field"><label>تعداد دعوت</label><input type="number" id="rc-rt-invites" value="1" min="1"></div>
+                <div class="rc-field"><label>توکن</label><input type="number" id="rc-rt-tokens" value="3" min="0"></div>
+                <div class="rc-field"><label>اسپین رایگان</label><input type="number" id="rc-rt-spins" value="0" min="0"></div>
+                <div class="rc-field"><label>فعال</label><select id="rc-rt-enabled"><option value="true">بله</option><option value="false">خیر</option></select></div>
+            </div>
+            <button class="adm-btn adm-btn-primary" onclick="createRcReferralTier()" style="margin-top:10px;">ایجاد</button>
+        </div>
+    `;
+}
+window.showRcReferralTierForm = showRcReferralTierForm;
+
+async function createRcReferralTier() {
+    const payload = {
+        invite_count: Number(document.getElementById('rc-rt-invites')?.value || 1),
+        token_amount: Number(document.getElementById('rc-rt-tokens')?.value || 0),
+        bonus_spins: Number(document.getElementById('rc-rt-spins')?.value || 0),
+        is_enabled: document.getElementById('rc-rt-enabled')?.value === 'true',
+    };
+    try {
+        const data = await apiFetch('/api/admin/reward-center/referral-tiers', { method: 'POST', body: JSON.stringify(payload) });
+        if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcReferralTiers(); }
+        else { adminToast('خطا', 'error'); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.createRcReferralTier = createRcReferralTier;
+
+async function deleteRcReferralTier(id) {
+    if (!confirm('حذف؟')) return;
+    try {
+        const data = await apiFetch('/api/admin/reward-center/referral-tiers/' + id, { method: 'DELETE' });
+        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcReferralTiers(); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.deleteRcReferralTier = deleteRcReferralTier;
+
+// ─── Mission Rewards ────────────────────────────────────────
+
+async function loadRcMissionRewards() {
+    const section = document.getElementById('rc-mission-rewards-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/reward-center/mission-rewards');
+        if (data && data.status === 'success' && Array.isArray(data.missions)) {
+            let rows = data.missions.map(function (m) {
+                return `<tr>
+                    <td>${adminEscapeHtml(m.mission_name)}</td>
+                    <td>${adminFormatNumber(m.token_amount)} AB</td>
+                    <td>${adminFormatNumber(m.bonus_spins)}</td>
+                    <td>${m.is_enabled ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcMissionReward(${m.id})">حذف</button></td>
+                </tr>`;
+            }).join('');
+            section.innerHTML = `
+                <div class="rc-card">
+                    <h4 class="rc-card-title">پاداش ماموریت‌ها</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>ماموریت</th><th>توکن</th><th>اسپین</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="admin-empty">ماموریتی موجود نیست</td></tr>'}</tbody></table></div>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcMissionForm()" style="margin-top:12px;">افزودن ماموریت</button>
+                    <div id="rc-mission-form" style="display:none;margin-top:12px;"></div>
+                </div>
+            `;
+        }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadRcMissionRewards = loadRcMissionRewards;
+
+function showRcMissionForm() {
+    const form = document.getElementById('rc-mission-form');
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+    form.innerHTML = `
+        <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
+            <h4 class="rc-card-title">ماموریت جدید</h4>
+            <div class="rc-form-grid">
+                <div class="rc-field"><label>ID ماموریت</label><input type="text" id="rc-mr-id" placeholder="invite_5"></div>
+                <div class="rc-field"><label>نام</label><input type="text" id="rc-mr-name" placeholder="۵ دعوت موفق"></div>
+                <div class="rc-field"><label>توکن</label><input type="number" id="rc-mr-tokens" value="15" min="0"></div>
+                <div class="rc-field"><label>اسپین</label><input type="number" id="rc-mr-spins" value="0" min="0"></div>
+            </div>
+            <button class="adm-btn adm-btn-primary" onclick="createRcMissionReward()" style="margin-top:10px;">ایجاد</button>
+        </div>
+    `;
+}
+window.showRcMissionForm = showRcMissionForm;
+
+async function createRcMissionReward() {
+    const payload = {
+        mission_id: document.getElementById('rc-mr-id')?.value,
+        mission_name: document.getElementById('rc-mr-name')?.value,
+        token_amount: Number(document.getElementById('rc-mr-tokens')?.value || 0),
+        bonus_spins: Number(document.getElementById('rc-mr-spins')?.value || 0),
+    };
+    try {
+        const data = await apiFetch('/api/admin/reward-center/mission-rewards', { method: 'POST', body: JSON.stringify(payload) });
+        if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcMissionRewards(); }
+        else { adminToast('خطا', 'error'); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.createRcMissionReward = createRcMissionReward;
+
+async function deleteRcMissionReward(id) {
+    if (!confirm('حذف؟')) return;
+    try {
+        const data = await apiFetch('/api/admin/reward-center/mission-rewards/' + id, { method: 'DELETE' });
+        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcMissionRewards(); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.deleteRcMissionReward = deleteRcMissionReward;
+
+// ─── Campaigns ──────────────────────────────────────────────
+
+async function loadRcCampaigns() {
+    const section = document.getElementById('rc-campaigns-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/reward-center/campaigns');
+        if (data && data.status === 'success' && Array.isArray(data.campaigns)) {
+            let rows = data.campaigns.map(function (c) {
+                return `<tr>
+                    <td>${adminEscapeHtml(c.name)}</td>
+                    <td>${c.start_date || '--'}</td>
+                    <td>${c.end_date || '--'}</td>
+                    <td>${c.status === 'active' ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
+                    <td>${adminFormatNumber(c.priority)}</td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcCampaign('${adminEscapeHtml(c.id)}')">حذف</button></td>
+                </tr>`;
+            }).join('');
+            section.innerHTML = `
+                <div class="rc-card">
+                    <h4 class="rc-card-title">کمپین‌ها</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>نام</th><th>شروع</th><th>پایان</th><th>وضعیت</th><th>اولویت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">کمپینی موجود نیست</td></tr>'}</tbody></table></div>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcCampaignForm()" style="margin-top:12px;">افزودن کمپین</button>
+                    <div id="rc-campaign-form" style="display:none;margin-top:12px;"></div>
+                </div>
+            `;
+        }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadRcCampaigns = loadRcCampaigns;
+
+function showRcCampaignForm() {
+    const form = document.getElementById('rc-campaign-form');
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+    form.innerHTML = `
+        <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
+            <h4 class="rc-card-title">کمپین جدید</h4>
+            <div class="rc-form-grid">
+                <div class="rc-field"><label>نام</label><input type="text" id="rc-cm-name" placeholder="تابستان ۲۰۲۶"></div>
+                <div class="rc-field"><label>تاریخ شروع</label><input type="datetime-local" id="rc-cm-start"></div>
+                <div class="rc-field"><label>تاریخ پایان</label><input type="datetime-local" id="rc-cm-end"></div>
+                <div class="rc-field"><label>اولویت</label><input type="number" id="rc-cm-priority" value="0"></div>
+            </div>
+            <div class="rc-form-grid" style="margin-top:8px;">
+                <label class="rc-toggle-row"><input type="checkbox" id="rc-cm-wheel" checked><span>اعمال روی گردونه</span></label>
+                <label class="rc-toggle-row"><input type="checkbox" id="rc-cm-referral"><span>اعمال روی رفرال</span></label>
+                <label class="rc-toggle-row"><input type="checkbox" id="rc-cm-mission"><span>اعمال روی ماموریت</span></label>
+            </div>
+            <button class="adm-btn adm-btn-primary" onclick="createRcCampaign()" style="margin-top:10px;">ایجاد</button>
+        </div>
+    `;
+}
+window.showRcCampaignForm = showRcCampaignForm;
+
+async function createRcCampaign() {
+    const payload = {
+        name: document.getElementById('rc-cm-name')?.value,
+        start_date: document.getElementById('rc-cm-start')?.value || null,
+        end_date: document.getElementById('rc-cm-end')?.value || null,
+        priority: Number(document.getElementById('rc-cm-priority')?.value || 0),
+        applies_to_wheel: document.getElementById('rc-cm-wheel')?.checked,
+        applies_to_referral: document.getElementById('rc-cm-referral')?.checked,
+        applies_to_mission: document.getElementById('rc-cm-mission')?.checked,
+    };
+    try {
+        const data = await apiFetch('/api/admin/reward-center/campaigns', { method: 'POST', body: JSON.stringify(payload) });
+        if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcCampaigns(); }
+        else { adminToast('خطا', 'error'); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.createRcCampaign = createRcCampaign;
+
+async function deleteRcCampaign(id) {
+    if (!confirm('حذف؟')) return;
+    try {
+        const data = await apiFetch('/api/admin/reward-center/campaigns/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcCampaigns(); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.deleteRcCampaign = deleteRcCampaign;
+
+// ─── Reward Library ─────────────────────────────────────────
+
+async function loadRcLibrary() {
+    const section = document.getElementById('rc-library-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/reward-center/library');
+        if (data && data.status === 'success' && Array.isArray(data.library)) {
+            let rows = data.library.map(function (item) {
+                return `<tr>
+                    <td>${adminEscapeHtml(item.name)}</td>
+                    <td>${adminEscapeHtml(item.reward_type)}</td>
+                    <td>${adminFormatNumber(item.amount)}</td>
+                    <td>${adminEscapeHtml(item.category)}</td>
+                    <td>${item.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcLibraryItem(${item.id})">حذف</button></td>
+                </tr>`;
+            }).join('');
+            section.innerHTML = `
+                <div class="rc-card">
+                    <h4 class="rc-card-title">کتابخانه پاداش</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>نام</th><th>نوع</th><th>مقدار</th><th>دسته</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">آیتمی موجود نیست</td></tr>'}</tbody></table></div>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcLibraryForm()" style="margin-top:12px;">افزودن پاداش</button>
+                    <div id="rc-library-form" style="display:none;margin-top:12px;"></div>
+                </div>
+            `;
+        }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadRcLibrary = loadRcLibrary;
+
+function showRcLibraryForm() {
+    const form = document.getElementById('rc-library-form');
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+    form.innerHTML = `
+        <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
+            <h4 class="rc-card-title">پاداش جدید</h4>
+            <div class="rc-form-grid">
+                <div class="rc-field"><label>نام</label><input type="text" id="rc-lib-name" placeholder="50 AB Token"></div>
+                <div class="rc-field"><label>نوع</label><select id="rc-lib-type"><option value="token">توکن</option><option value="spin">اسپین</option><option value="voucher">ووچر</option><option value="nft">NFT</option><option value="premium">ویژه</option><option value="coupon">کوپن</option><option value="avatar">آواتار</option><option value="badge">بج</option></select></div>
+                <div class="rc-field"><label>مقدار</label><input type="number" id="rc-lib-amount" value="1" min="0"></div>
+                <div class="rc-field"><label>دسته</label><input type="text" id="rc-lib-category" value="token"></div>
+            </div>
+            <button class="adm-btn adm-btn-primary" onclick="createRcLibraryItem()" style="margin-top:10px;">ایجاد</button>
+        </div>
+    `;
+}
+window.showRcLibraryForm = showRcLibraryForm;
+
+async function createRcLibraryItem() {
+    const payload = {
+        name: document.getElementById('rc-lib-name')?.value,
+        reward_type: document.getElementById('rc-lib-type')?.value,
+        amount: Number(document.getElementById('rc-lib-amount')?.value || 0),
+        category: document.getElementById('rc-lib-category')?.value || 'general',
+    };
+    try {
+        const data = await apiFetch('/api/admin/reward-center/library', { method: 'POST', body: JSON.stringify(payload) });
+        if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcLibrary(); }
+        else { adminToast('خطا', 'error'); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.createRcLibraryItem = createRcLibraryItem;
+
+async function deleteRcLibraryItem(id) {
+    if (!confirm('حذف؟')) return;
+    try {
+        const data = await apiFetch('/api/admin/reward-center/library/' + id, { method: 'DELETE' });
+        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcLibrary(); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.deleteRcLibraryItem = deleteRcLibraryItem;
+
+// ─── Analytics ──────────────────────────────────────────────
+
+async function loadRcAnalytics() {
+    const section = document.getElementById('rc-analytics-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/reward-center/analytics?range=30d');
+        if (data && data.status === 'success' && data.analytics) {
+            const a = data.analytics;
+            const distRows = (a.reward_distribution || []).map(function (d) {
+                return `<tr><td>${adminEscapeHtml(d.label || d.type)}</td><td>${adminFormatNumber(d.count)}</td><td>${adminFormatNumber(d.total)}</td></tr>`;
+            }).join('');
+            const winnersRows = (a.top_winners || []).map(function (w, i) {
+                return `<tr><td>${i + 1}</td><td>${adminEscapeHtml(w.first_name || w.username || w.user_id)}</td><td>${adminFormatNumber(w.spins)}</td><td>${adminFormatNumber(w.total_won)} AB</td></tr>`;
+            }).join('');
+            section.innerHTML = `
+                <div class="rc-overview-grid">
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.today_spins)}</div><div class="rc-stat-lbl">اسپین امروز</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.weekly_spins)}</div><div class="rc-stat-lbl">اسپین هفته</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.monthly_spins)}</div><div class="rc-stat-lbl">اسپین ماه</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${a.average_reward}</div><div class="rc-stat-lbl">میانگین پاداش</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.highest_reward)} AB</div><div class="rc-stat-lbl">بزرگ‌ترین پاداش</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_tokens)} AB</div><div class="rc-stat-lbl">کل توکن توزیع شده</div></div>
+                </div>
+                <div class="rc-card" style="margin-top:16px;">
+                    <h4 class="rc-card-title">توزیع پاداش‌ها</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>پاداش</th><th>تعداد</th><th>کل</th></tr></thead><tbody>${distRows || '<tr><td colspan="3" class="admin-empty">داده‌ای نیست</td></tr>'}</tbody></table></div>
+                </div>
+                <div class="rc-card" style="margin-top:16px;">
+                    <h4 class="rc-card-title">برترین برندگان</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>#</th><th>کاربر</th><th>اسپین</th><th>کل پاداش</th></tr></thead><tbody>${winnersRows || '<tr><td colspan="4" class="admin-empty">داده‌ای نیست</td></tr>'}</tbody></table></div>
+                </div>
+            `;
+        }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadRcAnalytics = loadRcAnalytics;
+
+// ─── Settings (Emergency Controls) ──────────────────────────
+
+async function loadRcSettings() {
+    const section = document.getElementById('rc-settings-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/reward-center/emergency');
+        if (data && data.status === 'success' && data.controls) {
+            _rcEmergencyControls = data.controls;
+            const c = data.controls;
+            section.innerHTML = `
+                <div class="rc-card" style="border-color:rgba(255,77,77,0.3);">
+                    <h4 class="rc-card-title">کنترل‌های اضطراری</h4>
+                    <p style="font-size:12px;color:var(--admin-text-dim);margin-bottom:12px;">این کنترل‌ها فوراً اعمال می‌شوند و تمام سیستم پاداش را متوقف می‌کنند.</p>
+                    <div class="rc-form-grid">
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-wheel" ${c.disable_wheel ? 'checked' : ''}><span>غیرفعال کردن گردونه</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-referral" ${c.disable_referral_rewards ? 'checked' : ''}><span>غیرفعال کردن پاداش رفرال</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-mission" ${c.disable_mission_rewards ? 'checked' : ''}><span>غیرفعال کردن پاداش ماموریت</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-campaign" ${c.disable_campaigns ? 'checked' : ''}><span>غیرفعال کردن کمپین‌ها</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-engine" ${c.disable_reward_engine ? 'checked' : ''}><span>غیرفعال کردن کل موتور پاداش</span></label>
+                    </div>
+                    <button class="adm-btn adm-btn-primary" onclick="saveRcEmergency()" style="margin-top:12px;">ذخیره</button>
+                </div>
+            `;
+        }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadRcSettings = loadRcSettings;
+
+async function saveRcEmergency() {
+    const payload = {
+        disable_wheel: document.getElementById('rc-em-wheel')?.checked,
+        disable_referral_rewards: document.getElementById('rc-em-referral')?.checked,
+        disable_mission_rewards: document.getElementById('rc-em-mission')?.checked,
+        disable_campaigns: document.getElementById('rc-em-campaign')?.checked,
+        disable_reward_engine: document.getElementById('rc-em-engine')?.checked,
+    };
+    try {
+        const data = await apiFetch('/api/admin/reward-center/emergency', { method: 'PUT', body: JSON.stringify(payload) });
+        if (data && data.status === 'success') { adminToast('ذخیره شد', 'success'); }
+        else { adminToast('خطا', 'error'); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.saveRcEmergency = saveRcEmergency;
+
+window.loadRewardCenterOverview = loadRewardCenterOverview;

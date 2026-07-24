@@ -877,6 +877,7 @@ export function createAdminHandlers(deps) {
   }
 
   return Object.freeze({
+    requireAdmin,
     handleIsAdmin,
     handleDashboard,
     handleListAdmins,
