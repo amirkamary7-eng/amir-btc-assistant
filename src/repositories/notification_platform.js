@@ -37,6 +37,28 @@ export function createNotificationPlatformRepository(deps) {
           ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ
       `).catch(() => {}); // Columns might already exist
 
+      // ── Channel preference columns on notification_settings ──
+      // Each category gets a VARCHAR column: 'none', 'mini_app', 'telegram', 'both'
+      // This replaces the old boolean model with a 4-way channel selector.
+      // Migration is additive (ALTER TABLE ADD COLUMN IF NOT EXISTS) — no data loss.
+      const channelCategories = [
+        'referral', 'wallet', 'price_alert', 'analysis', 'breaking_news',
+        'announcements', 'promotions', 'challenges', 'tickets',
+        'calendar', 'news', 'market', 'wheel', 'mission', 'security', 'system'
+      ];
+      const defaultChannels = {
+        referral: 'mini_app', wallet: 'mini_app', price_alert: 'both',
+        analysis: 'both', breaking_news: 'both', announcements: 'mini_app',
+        promotions: 'none', challenges: 'mini_app', tickets: 'both',
+        calendar: 'both', news: 'both', market: 'both',
+        wheel: 'mini_app', mission: 'mini_app', security: 'both', system: 'mini_app',
+      };
+      for (const cat of channelCategories) {
+        const colName = `ch_${cat}`;
+        const defVal = defaultChannels[cat] || 'mini_app';
+        await queryDb(env, `ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS ${colName} VARCHAR(16) NOT NULL DEFAULT '${defVal}'`).catch(() => {});
+      }
+
       // Notification templates table
       await queryDb(env, `
         CREATE TABLE IF NOT EXISTS notification_templates (
@@ -186,32 +208,62 @@ export function createNotificationPlatformRepository(deps) {
       }
     }
 
-    // Check user notification settings — skip if category is disabled
-    if (await isCategoryDisabled(env, userId, finalCategory)) {
+    // ── Resolve effective channel based on user preference ──
+    // The user's per-category channel preference takes priority over the
+    // template/dispatch default. This allows users to choose:
+    //   'none'      → notification skipped entirely
+    //   'mini_app'  → only in-app notification
+    //   'telegram'  → only Telegram bot message (queued)
+    //   'both'      → both in-app + Telegram
+    //
+    // Admin broadcast can override with forceChannel parameter.
+    const forceChannel = params.forceChannel; // admin override
+    let effectiveChannel = finalChannel;
+
+    if (forceChannel && forceChannel !== 'auto') {
+      // Admin explicitly chose a channel — respect it
+      effectiveChannel = forceChannel;
+    } else {
+      // Check user's per-category channel preference
+      const userChannelPref = await getUserChannelPreference(env, userId, finalCategory);
+      if (userChannelPref === 'none') {
+        return { id: null, status: 'filtered' };
+      }
+      effectiveChannel = userChannelPref;
+    }
+
+    // If effective channel doesn't include mini_app, skip in-app insert
+    const deliverToMiniApp = effectiveChannel === 'mini_app' || effectiveChannel === 'both';
+    const deliverToTelegram = effectiveChannel === 'telegram' || effectiveChannel === 'both';
+
+    if (!deliverToMiniApp && !deliverToTelegram) {
       return { id: null, status: 'filtered' };
     }
 
     const notificationId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 
     try {
-      await queryDb(env, `
-        INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, action_url, icon, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, 'delivered', $10, $11, NOW())
-      `, [
-        notificationId, String(userId), finalCategory,
-        finalTitle, finalMessage, JSON.stringify(metadata),
-        finalPriority, finalCategory, finalChannel,
-        finalActionUrl || null, finalIcon || null,
-      ]);
+      if (deliverToMiniApp) {
+        await queryDb(env, `
+          INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, action_url, icon, created_at)
+          VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, 'delivered', $10, $11, NOW())
+        `, [
+          notificationId, String(userId), finalCategory,
+          finalTitle, finalMessage, JSON.stringify(metadata),
+          finalPriority, finalCategory, effectiveChannel,
+          finalActionUrl || null, finalIcon || null,
+        ]);
+      }
     } catch (e) {
       console.warn('Notification dispatch error:', e.message);
       return { id: null, status: 'error', error: e.message };
     }
 
     // If channel includes telegram, queue for bot delivery
-    if (finalChannel === 'telegram' || finalChannel === 'both') {
+    if (deliverToTelegram) {
       await enqueue(env, {
-        notificationId, userId: String(userId),
+        notificationId: deliverToMiniApp ? notificationId : null,
+        userId: String(userId),
         channel: 'telegram', priority: finalPriority,
         payload: { title: finalTitle, message: finalMessage, actionUrl: finalActionUrl },
       });
@@ -301,41 +353,89 @@ export function createNotificationPlatformRepository(deps) {
   async function updateSettings(env, userId, updates) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return _defaultSettings();
-    const fields = ['analysis', 'calendar', 'price_alert', 'market', 'news', 'referral', 'reward', 'ticket', 'system', 'marketing'];
+
+    // Upsert: ensure row exists
+    await queryDb(env, `
+      INSERT INTO notification_settings (user_id, updated_at)
+      VALUES ($1, NOW())
+      ON CONFLICT (user_id) DO NOTHING
+    `, [String(userId)]);
+
+    // Build SET clauses — support both old boolean fields AND new ch_* channel fields
     const setClauses = ['updated_at = NOW()'];
     const params = [];
     let idx = 1;
-    for (const f of fields) {
+
+    // Old boolean fields (backward compat)
+    const boolFields = ['analysis', 'calendar', 'price_alert', 'market', 'news', 'referral', 'reward', 'ticket', 'system', 'marketing'];
+    for (const f of boolFields) {
       if (updates[f] !== undefined) {
         setClauses.push(`${f} = $${idx++}`);
         params.push(!!updates[f]);
       }
     }
+
+    // New channel preference fields (ch_*)
+    const channelCategories = [
+      'referral', 'wallet', 'price_alert', 'analysis', 'breaking_news',
+      'announcements', 'promotions', 'challenges', 'tickets',
+      'calendar', 'news', 'market', 'wheel', 'mission', 'security', 'system'
+    ];
+    for (const cat of channelCategories) {
+      const colName = `ch_${cat}`;
+      if (updates[colName] !== undefined) {
+        const val = String(updates[colName]);
+        if (['none', 'mini_app', 'telegram', 'both'].includes(val)) {
+          setClauses.push(`${colName} = $${idx++}`);
+          params.push(val);
+        }
+      }
+    }
+
     params.push(String(userId));
-    // Upsert
-    await queryDb(env, `
-      INSERT INTO notification_settings (user_id, updated_at)
-      VALUES ($${idx}, NOW())
-      ON CONFLICT (user_id) DO NOTHING
-    `, [String(userId)]);
     const result = await queryDb(env, `UPDATE notification_settings SET ${setClauses.join(', ')} WHERE user_id = $${idx} RETURNING *`, params);
     return result.rows[0] ? _mapSettings(result.rows[0]) : _defaultSettings();
   }
 
-  async function isCategoryDisabled(env, userId, category) {
+  /**
+   * Get user's channel preference for a specific category.
+   * Returns 'none', 'mini_app', 'telegram', or 'both'.
+   * Falls back to default if not set.
+   */
+  async function getUserChannelPreference(env, userId, category) {
     await ensureSchema(env);
-    if (!isDatabaseConfigured(env)) return false;
+    if (!isDatabaseConfigured(env)) return 'mini_app'; // default
     try {
-      const settings = await getSettings(env, userId);
-      // Map category to settings field
-      const fieldMap = {
-        'market': 'market', 'news': 'news', 'referral': 'referral',
-        'wallet': 'reward', 'wheel': 'reward', 'mission': 'reward',
-        'security': 'system', 'system': 'system', 'announcement': 'marketing',
+      // Map dispatch category to ch_* column
+      const catMap = {
+        'referral': 'ch_referral', 'wallet': 'ch_wallet', 'wheel': 'ch_wheel',
+        'mission': 'ch_mission', 'market': 'ch_market', 'news': 'ch_news',
+        'calendar': 'ch_calendar', 'security': 'ch_security', 'system': 'ch_system',
+        'announcement': 'ch_announcements', 'announcement': 'ch_announcements',
+        'price_alert': 'ch_price_alert', 'analysis': 'ch_analysis',
+        'breaking_news': 'ch_breaking_news', 'promotions': 'ch_promotions',
+        'challenges': 'ch_challenges', 'tickets': 'ch_tickets',
       };
-      const field = fieldMap[category] || 'system';
-      return settings[field] === false;
-    } catch { return false; }
+      const col = catMap[category] || 'ch_system';
+      const result = await queryDb(env, `SELECT ${col} AS pref FROM notification_settings WHERE user_id = $1`, [String(userId)]);
+      if (result.rows[0] && result.rows[0].pref) {
+        return String(result.rows[0].pref);
+      }
+      // Return default based on category
+      const defaults = {
+        referral: 'mini_app', wallet: 'mini_app', price_alert: 'both',
+        analysis: 'both', breaking_news: 'both', announcements: 'mini_app',
+        promotions: 'none', challenges: 'mini_app', tickets: 'both',
+        calendar: 'both', news: 'both', market: 'both',
+        wheel: 'mini_app', mission: 'mini_app', security: 'both', system: 'mini_app',
+      };
+      return defaults[category] || 'mini_app';
+    } catch { return 'mini_app'; }
+  }
+
+  async function isCategoryDisabled(env, userId, category) {
+    const pref = await getUserChannelPreference(env, userId, category);
+    return pref === 'none';
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -557,14 +657,39 @@ export function createNotificationPlatformRepository(deps) {
 
   function _mapSettings(r) {
     return {
+      // Old boolean fields (backward compat)
       analysis: r.analysis, calendar: r.calendar, price_alert: r.price_alert,
       market: r.market, news: r.news, referral: r.referral,
       reward: r.reward, ticket: r.ticket, system: r.system, marketing: r.marketing,
+      // New channel preference fields
+      ch_referral: r.ch_referral || 'mini_app',
+      ch_wallet: r.ch_wallet || 'mini_app',
+      ch_price_alert: r.ch_price_alert || 'both',
+      ch_analysis: r.ch_analysis || 'both',
+      ch_breaking_news: r.ch_breaking_news || 'both',
+      ch_announcements: r.ch_announcements || 'mini_app',
+      ch_promotions: r.ch_promotions || 'none',
+      ch_challenges: r.ch_challenges || 'mini_app',
+      ch_tickets: r.ch_tickets || 'both',
+      ch_calendar: r.ch_calendar || 'both',
+      ch_news: r.ch_news || 'both',
+      ch_market: r.ch_market || 'both',
+      ch_wheel: r.ch_wheel || 'mini_app',
+      ch_mission: r.ch_mission || 'mini_app',
+      ch_security: r.ch_security || 'both',
+      ch_system: r.ch_system || 'mini_app',
     };
   }
 
   function _defaultSettings() {
-    return { analysis: true, calendar: false, price_alert: false, market: true, news: true, referral: true, reward: true, ticket: true, system: true, marketing: false };
+    return {
+      analysis: true, calendar: false, price_alert: false, market: true, news: true, referral: true, reward: true, ticket: true, system: true, marketing: false,
+      ch_referral: 'mini_app', ch_wallet: 'mini_app', ch_price_alert: 'both',
+      ch_analysis: 'both', ch_breaking_news: 'both', ch_announcements: 'mini_app',
+      ch_promotions: 'none', ch_challenges: 'mini_app', ch_tickets: 'both',
+      ch_calendar: 'both', ch_news: 'both', ch_market: 'both',
+      ch_wheel: 'mini_app', ch_mission: 'mini_app', ch_security: 'both', ch_system: 'mini_app',
+    };
   }
 
   return Object.freeze({
@@ -578,6 +703,7 @@ export function createNotificationPlatformRepository(deps) {
     deleteNotification,
     getSettings,
     updateSettings,
+    getUserChannelPreference,
     isCategoryDisabled,
     listTemplates,
     getTemplate,

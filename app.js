@@ -7278,30 +7278,112 @@ function closeNotifSettingsModal() {
 }
 
 async function renderNotifSettings() {
-    const prefs = await getNotifPrefs();
-    // Set toggle states
-    document.querySelectorAll('.ns-toggle-switch input[data-pref]').forEach(input => {
-        const key = input.getAttribute('data-pref');
-        input.checked = !!prefs[key];
-    });
+    const list = document.getElementById('ns-channel-list');
+    if (!list) return;
+
+    // Load settings from backend (new platform endpoint)
+    let settings = null;
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            const data = await apiFetch('/api/notifications/platform/settings');
+            if (data && data.status === 'success' && data.settings) {
+                settings = data.settings;
+            }
+        }
+    } catch (e) { /* fall through to defaults */ }
+
+    if (!settings) settings = _defaultChannelSettings();
+
+    // Define notification categories with icons, labels, and descriptions
+    const categories = [
+        { key: 'ch_referral', icon: '🔗', title: 'رفرال', desc: 'دعوت کاربران جدید و پاداش رفرال', default: 'mini_app' },
+        { key: 'ch_wallet', icon: '💎', title: 'کیف پول', desc: 'دریافت توکن، پاداش روزانه، بونوس', default: 'mini_app' },
+        { key: 'ch_price_alert', icon: '🔔', title: 'هشدار قیمت', desc: 'اعلان هنگام فعال شدن هشدار قیمت', default: 'both' },
+        { key: 'ch_analysis', icon: '📊', title: 'تحلیل‌ها', desc: 'اعلان انتشار تحلیل جدید بازار', default: 'both' },
+        { key: 'ch_breaking_news', icon: '📰', title: 'اخبار فوری', desc: 'خبرهای مهم و فوری بازار', default: 'both' },
+        { key: 'ch_announcements', icon: '📢', title: 'اطلاعیه‌ها', desc: 'اطلاعیه‌های سیستم و برنامه', default: 'mini_app' },
+        { key: 'ch_promotions', icon: '🎁', title: 'تبلیغات', desc: 'پیشنهادات ویژه و تبلیغات', default: 'none' },
+        { key: 'ch_challenges', icon: '🏆', title: 'مسابقات', desc: 'کمپین‌ها و رویدادهای ویژه', default: 'mini_app' },
+        { key: 'ch_tickets', icon: '🎫', title: 'تیکت‌ها', desc: 'پاسخ به تیکت‌های پشتیبانی', default: 'both' },
+        { key: 'ch_calendar', icon: '📅', title: 'تقویم اقتصادی', desc: 'هشدار رویدادهای مهم اقتصادی', default: 'both' },
+        { key: 'ch_wheel', icon: '🎡', title: 'گردونه شانس', desc: 'پاداش گردونه و اسپین رایگان', default: 'mini_app' },
+        { key: 'ch_security', icon: '🔒', title: 'امنیت', desc: 'ورود جدید و فعالیت مشکوک', default: 'both' },
+    ];
+
+    const channels = [
+        { val: 'none', label: 'خاموش', icon: '✕' },
+        { val: 'mini_app', label: 'اپ', icon: '📱' },
+        { val: 'telegram', label: 'ربات', icon: '🤖' },
+        { val: 'both', label: 'هر دو', icon: '✓' },
+    ];
+
+    let html = '';
+    for (const cat of categories) {
+        const currentVal = settings[cat.key] || cat.default;
+        let segHtml = '';
+        for (const ch of channels) {
+            const isActive = currentVal === ch.val;
+            segHtml += `<button class="ns-seg-btn ${isActive ? 'active' : ''}" data-cat="${cat.key}" data-val="${ch.val}" onclick="handleChannelPrefChange('${cat.key}','${ch.val}')">${ch.icon} ${ch.label}</button>`;
+        }
+        html += `
+            <div class="ns-channel-item">
+                <div class="ns-channel-info">
+                    <span class="ns-channel-icon">${cat.icon}</span>
+                    <div>
+                        <div class="ns-channel-title">${cat.title}</div>
+                        <div class="ns-channel-desc">${cat.desc}</div>
+                    </div>
+                </div>
+                <div class="ns-seg-control">${segHtml}</div>
+            </div>
+        `;
+    }
+    list.innerHTML = html;
+
     // Update status badge
-    const anyEnabled = Object.values(prefs).some(v => v);
+    const anyActive = categories.some(c => (settings[c.key] || c.default) !== 'none');
     const dot = document.getElementById('ns-status-dot');
     const text = document.getElementById('ns-status-text');
-    if (dot) { dot.classList.toggle('inactive', !anyEnabled); }
+    if (dot) { dot.classList.toggle('inactive', !anyActive); }
     if (text) {
-        text.textContent = anyEnabled ? t('ns_active') : t('ns_inactive');
-        text.classList.toggle('inactive', !anyEnabled);
+        text.textContent = anyActive ? (currentLang === 'fa' ? 'فعال' : 'Active') : (currentLang === 'fa' ? 'غیرفعال' : 'Inactive');
+        text.classList.toggle('inactive', !anyActive);
     }
 }
 
+function _defaultChannelSettings() {
+    return {
+        ch_referral: 'mini_app', ch_wallet: 'mini_app', ch_price_alert: 'both',
+        ch_analysis: 'both', ch_breaking_news: 'both', ch_announcements: 'mini_app',
+        ch_promotions: 'none', ch_challenges: 'mini_app', ch_tickets: 'both',
+        ch_calendar: 'both', ch_wheel: 'mini_app', ch_security: 'both', ch_system: 'mini_app',
+    };
+}
+
+async function handleChannelPrefChange(catKey, val) {
+    // Update UI immediately
+    document.querySelectorAll(`.ns-seg-btn[data-cat="${catKey}"]`).forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-val') === val);
+    });
+
+    // Save to backend
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            const updates = {};
+            updates[catKey] = val;
+            await apiFetch('/api/notifications/platform/settings', {
+                method: 'PUT',
+                body: JSON.stringify(updates),
+            });
+        }
+    } catch (e) { /* silent — UI already updated */ }
+
+    // Haptic feedback
+    getTg()?.HapticFeedback?.impactOccurred?.('light');
+}
+
 async function handleNotifPrefChange(input) {
-    const key = input.getAttribute('data-pref');
-    if (!key) return;
-    const prefs = await getNotifPrefs();
-    prefs[key] = input.checked;
-    await saveNotifPrefs(prefs);
-    renderNotifSettings();
+    // Legacy — kept for backward compat, but new UI uses handleChannelPrefChange
 }
 
 function handleNotifSubscription() {
