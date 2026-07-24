@@ -14,6 +14,7 @@ export function createWalletHandlers(deps) {
     safeError,
     isDatabaseConfigured,
     walletRepo,
+    notificationPlatformRepo,
   } = deps;
 
   /**
@@ -152,6 +153,19 @@ export function createWalletHandlers(deps) {
       const DAILY_REWARD = 10;
       const clientIp = request.headers.get('cf-connecting-ip') || null;
       const result = await walletRepo.claimDailyReward(env, authState.user.id, DAILY_REWARD);
+
+      // Dispatch notification via Notification Platform (single entry point)
+      if (notificationPlatformRepo && result && result.credited !== false) {
+        await notificationPlatformRepo.dispatch(env, {
+          userId: authState.user.id,
+          templateKey: 'wallet_received',
+          category: 'wallet',
+          priority: 'low',
+          channel: 'mini_app',
+          metadata: { amount: String(DAILY_REWARD), name: 'Daily Reward' },
+        }).catch(() => {});
+      }
+
       return jsonResponse({ status: 'success', ...result }, {}, env);
     } catch (error) {
       if (error.code === 'ALREADY_CLAIMED') {

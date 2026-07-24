@@ -2627,6 +2627,7 @@ const walletHandlers = createWalletHandlers({
   safeError,
   isDatabaseConfigured,
   walletRepo,
+  notificationPlatformRepo,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({

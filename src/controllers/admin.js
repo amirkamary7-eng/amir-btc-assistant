@@ -621,20 +621,30 @@ export function createAdminHandlers(deps) {
       let sentCount = 0;
       let failedCount = 0;
 
-      // Send to each user
+      // Send via Notification Platform (single entry point — handles settings, queue, telegram)
       for (const userId of targetUsers) {
         try {
-          const chatId = Number(userId);
-          if (!Number.isFinite(chatId)) {
-            failedCount++;
-            continue;
+          if (notificationPlatformRepo) {
+            await notificationPlatformRepo.dispatch(env, {
+              userId: String(userId),
+              category: 'announcement',
+              priority: 'high',
+              channel: 'both',
+              title: '📢 اطلاعیه مدیریت',
+              message: content,
+              metadata: { broadcast_id: String(broadcast.id), target_type },
+            });
+            sentCount++;
+          } else {
+            // Fallback: direct Telegram if platform unavailable
+            const chatId = Number(userId);
+            if (Number.isFinite(chatId)) {
+              await sendTelegramMessage(env, { chat_id: chatId, text: content, disable_web_page_preview: true });
+              sentCount++;
+            } else {
+              failedCount++;
+            }
           }
-          await sendTelegramMessage(env, {
-            chat_id: chatId,
-            text: content,
-            disable_web_page_preview: true,
-          });
-          sentCount++;
         } catch (sendErr) {
           failedCount++;
           console.warn(safeError('broadcast-send-fail', sendErr));
