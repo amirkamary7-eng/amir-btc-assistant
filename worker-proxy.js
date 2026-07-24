@@ -1106,7 +1106,37 @@ async function persistDbUserJoinState(env, userId, joined) {
   }
 }
 
-function getReferralRewardPerInvite(env) {
+/**
+ * Get referral reward per invite — DB-driven with env fallback.
+ *
+ * Reads from referral_reward_tiers table (tier for 1+ invites).
+ * Falls back to env var REFERRAL_TOKENS_PER_INVITE (default 3) if:
+ *   - Database is not configured
+ *   - Table doesn't exist or is empty
+ *   - Query fails
+ *
+ * This is the SINGLE SOURCE OF TRUTH for the base per-invite reward.
+ * Admins can change it via Reward Center → Referral Rewards tab.
+ */
+async function getReferralRewardPerInvite(env) {
+  // Try DB first
+  if (isDatabaseConfigured(env)) {
+    try {
+      const result = await queryDb(
+        env,
+        `SELECT token_amount FROM referral_reward_tiers
+         WHERE is_enabled = TRUE AND invite_count <= 1
+         ORDER BY invite_count DESC LIMIT 1`,
+      );
+      if (result.rows[0] && Number(result.rows[0].token_amount) > 0) {
+        return Number(result.rows[0].token_amount);
+      }
+    } catch (e) {
+      // Table might not exist yet — fall through to env fallback
+      console.warn('getReferralRewardPerInvite DB read failed, using env fallback:', e.message);
+    }
+  }
+  // Env fallback (still configurable, but DB takes priority)
   return Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0);
 }
 
@@ -1253,7 +1283,14 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
 async function processPendingReferralReward(env, inviteeId, channelJoined) {
   if (!channelJoined) return null;
 
-  const rewardAmount = getReferralRewardPerInvite(env);
+  // Kill switch: if referral rewards are emergency-disabled, skip
+  if (await rewardCenterRepo.isSubsystemDisabled(env, 'referral')) {
+    console.log('[REWARD] Referral rewards emergency-disabled — skipping');
+    return null;
+  }
+
+  // DB-driven reward amount (async — reads from referral_reward_tiers)
+  const rewardAmount = await getReferralRewardPerInvite(env);
   if (rewardAmount <= 0) return null;
 
   // Find unrewarded referral for this invitee
@@ -2548,6 +2585,18 @@ const referralHandlers = createReferralHandlers({
 });
 const walletRepo = createWalletRepository({ queryDb, queryDbTransaction });
 const economyService = createEconomyService({ walletRepo, queryDb });
+
+// ── Reward Center repository (needed by wheel + referral + admin) ──
+// Must be created BEFORE wheelHandlers since handleSpin checks kill switches.
+function _rcIsoDate(val) { return val ? new Date(val).toISOString() : null; }
+const rewardCenterRepo = createRewardCenterRepository({
+  queryDb,
+  queryDbTransaction,
+  isDatabaseConfigured,
+  isoDate: _rcIsoDate,
+  normalizeOptionalString,
+});
+
 const wheelRepo = createWheelRepository({ queryDb, queryDbTransaction });
 const wheelHandlers = createWheelHandlers({
   jsonResponse,
@@ -2557,6 +2606,7 @@ const wheelHandlers = createWheelHandlers({
   isDatabaseConfigured,
   wheelRepo,
   economyService,
+  rewardCenterRepo,
 });
 const walletHandlers = createWalletHandlers({
   jsonResponse,
@@ -2677,15 +2727,8 @@ const adminHandlers = createAdminHandlers({
   diagLog,
 });
 
-// ── Reward Center (admin) ──
-function _rcIsoDate(val) { return val ? new Date(val).toISOString() : null; }
-const rewardCenterRepo = createRewardCenterRepository({
-  queryDb,
-  queryDbTransaction,
-  isDatabaseConfigured,
-  isoDate: _rcIsoDate,
-  normalizeOptionalString,
-});
+// ── Reward Center (admin handlers) ──
+// rewardCenterRepo is already created above (before wheelHandlers).
 const rewardCenterHandlers = createRewardCenterHandlers({
   jsonResponse,
   requireAdmin: adminHandlers.requireAdmin,

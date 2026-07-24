@@ -155,12 +155,24 @@ export function createWheelRepository(deps) {
 
   /**
    * Select a reward based on weighted probability.
+   *
+   * The reward pool MUST come from the database (wheel_rewards table).
+   * If the pool is empty (admin disabled all rewards), we return a
+   * zero-amount 'no_reward' instead of a hardcoded consolation — this
+   * ensures the admin is the SOLE source of truth for rewards.
+   * The spin is still consumed (counted as used) so the user can't
+   * retry indefinitely; they just get nothing.
    */
   function selectReward(rewardPool) {
     if (!rewardPool || !rewardPool.length) {
-      return { type: 'bonus_reward', amount: 1, label: 'Consolation' };
+      // No rewards configured — return a zero-amount no_reward.
+      // Admin must add rewards via Reward Center → Lucky Wheel tab.
+      return { type: 'no_reward', amount: 0, label: 'No reward configured' };
     }
     const totalWeight = rewardPool.reduce((sum, r) => sum + r.weight, 0);
+    if (totalWeight <= 0) {
+      return rewardPool[0]; // All weights are 0 — return first reward
+    }
     let random = Math.random() * totalWeight;
     for (const reward of rewardPool) {
       random -= reward.weight;

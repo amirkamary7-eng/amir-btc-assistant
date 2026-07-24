@@ -94,7 +94,7 @@ export function createReferralRepository(deps) {
       flagged: Number(row.flagged || 0),
       reversed: Number(row.reversed || 0),
       pending: Number(row.total || 0) - Number(row.rewarded || 0),
-      reward_per_invite: getReferralRewardPerInvite(env),
+      reward_per_invite: await getReferralRewardPerInvite(env),
     };
   }
 
