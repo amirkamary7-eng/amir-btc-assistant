@@ -239,8 +239,12 @@ async function waitForApiReady(maxWaitMs = 8000) {
     if (!isInTelegram()) return;
     // Fast path: auth already available
     if (isTelegramAuthReady()) return;
-    // Already waited in UserContext.init() — don't cascade waits on every apiFetch.
-    if (_authWaitAttempted) return;
+    // If we already attempted AND auth is now ready, skip.
+    // But if auth is NOT ready after a previous attempt, DON'T skip —
+    // the user may have opened the admin panel before Telegram SDK
+    // finished initializing. Retry the wait so subsequent API calls
+    // get a valid initData header instead of failing with 401.
+    if (_authWaitAttempted && isTelegramAuthReady()) return;
     _authWaitAttempted = true;
     const ready = await ensureTelegramAuthReady(maxWaitMs);
     if (ready) {
@@ -709,7 +713,11 @@ const UserContext = {
         this.user = getTelegramUser();
         // Only mark ready when auth is actually available (user ID + valid initData)
         this.ready = isTelegramAuthReady();
-        _authWaitAttempted = true;
+        // BUG FIX: Only set _authWaitAttempted if auth actually succeeded.
+        // If auth failed (SDK slow), leave it false so waitForApiReady retries.
+        if (this.ready) {
+            _authWaitAttempted = true;
+        }
         this.loading = false;
         this._setLoadingUI(false);
         return this.user;
@@ -3059,18 +3067,32 @@ async function apiFetch(path, options = {}) {
     const url = `${API_BASE}${path}`;
 
     const fetchOpts = { ...options, headers };
+    // BUG FIX: Add 15s timeout — without this, a hanging Worker causes infinite Loading
+    if (!fetchOpts.signal) {
+        try { fetchOpts.signal = AbortSignal.timeout(15000); } catch(_) {}
+    }
     const doRequest = async () => {
         const res = await fetch(url, fetchOpts);
         if (!res.ok) {
             let detail = '';
             try { detail = await res.text(); } catch (_) {}
-            const err = new Error(detail || `HTTP ${res.status}`);
+            // Try to parse error as JSON for better error messages
+            let errMsg = detail || `HTTP ${res.status}`;
+            try { const j = JSON.parse(detail); if (j.detail) errMsg = j.detail; } catch(_) {}
+            const err = new Error(errMsg);
+            err.status = res.status;
             if (path === '/api/users/bootstrap') {
                 console.error('[BOOT] apiFetch bootstrap FAILED — status:', res.status, 'detail:', detail);
             }
             throw err;
         }
-        return res.json();
+        // BUG FIX: Wrap JSON parse — if response is HTML (Cloudflare error page), res.json() throws
+        try {
+            return await res.json();
+        } catch (parseErr) {
+            console.error('[API] JSON parse failed for', path, '— response was not JSON');
+            throw new Error(`Invalid JSON response from ${path}`);
+        }
     };
 
     // Track in-flight GET request
