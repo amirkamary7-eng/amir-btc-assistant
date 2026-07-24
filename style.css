@@ -1743,21 +1743,23 @@ strong.down { color: var(--red); }
 .ns-card-list { display: flex; flex-direction: column; gap: 8px; }
 
 .ns-prem-card {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 12px 14px;
-    min-height: 62px;
+    display: flex; flex-direction: column;
+    gap: 10px; padding: 12px 14px;
+    min-height: 0;
     background: rgba(15,24,40,0.70);
     border: 1px solid rgba(255,255,255,0.04);
     border-radius: 14px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.12);
     transition: border-color 0.18s ease;
-    overflow: hidden;
 }
 .ns-prem-card:hover { border-color: rgba(245,166,35,0.10); }
-.ns-prem-card:active { transform: scale(0.995); }
+.ns-prem-card:active { transform: scale(0.998); }
 
-/* Card left: icon + text */
-.ns-prem-left { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; }
+/* Row 1: Icon + Title + Description (left side) */
+.ns-prem-left { display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; }
+
+/* Row 2: Channel Selector (full width) */
+.ns-capsule { width: 100%; justify-content: space-between; }
 
 /* Premium Icon Container */
 .ns-prem-icon {
@@ -1811,23 +1813,25 @@ strong.down { color: var(--red); }
 
 /* ── Capsule Segmented Control ── */
 .ns-capsule {
-    display: flex; gap: 0; flex-shrink: 0;
+    display: flex; gap: 0;
+    width: 100%;
     background: rgba(0,0,0,0.30); border-radius: 11px; padding: 3px;
     border: 1px solid rgba(255,255,255,0.03);
+    justify-content: space-between;
 }
 .ns-cap-btn {
-    padding: 5px 7px; border: none; border-radius: 8px;
+    padding: 6px 8px; border: none; border-radius: 8px;
     background: transparent; color: #6B7A8D;
-    font-size: 9.5px; font-weight: 800; cursor: pointer;
+    font-size: 10px; font-weight: 800; cursor: pointer;
     font-family: inherit; white-space: nowrap;
     transition: background 0.18s ease, color 0.18s ease;
-    display: flex; align-items: center; gap: 2px;
-    min-width: 30px; justify-content: center;
+    display: flex; align-items: center; justify-content: center; gap: 2px;
+    flex: 1;
     letter-spacing: 0.1px;
     -webkit-tap-highlight-color: transparent;
 }
 .ns-cap-btn svg { width: 11px; height: 11px; flex-shrink: 0; }
-.ns-cap-btn span { font-size: 9.5px; }
+.ns-cap-btn span { font-size: 10px; }
 .ns-cap-btn:hover { color: #AEB7C2; }
 .ns-cap-btn:active { transform: scale(0.95); }
 
@@ -1837,14 +1841,9 @@ strong.down { color: var(--red); }
 .ns-cap-btn.active.both { background: linear-gradient(135deg, #F5A623, #FFCC4D); color: #0B1220; }
 
 /* ── Responsive ── */
-@media (max-width: 390px) {
-    .ns-prem-card { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; }
-    .ns-capsule { justify-content: center; }
-    .ns-cap-btn { flex: 1; }
-}
 @media (max-width: 320px) {
     .ns-cap-btn span { display: none; }
-    .ns-cap-btn { padding: 5px 5px; }
+    .ns-cap-btn { padding: 6px 4px; }
     .ns-cap-btn svg { width: 13px; height: 13px; }
     .ns-prem-title { font-size: 12px; }
     .ns-prem-desc { font-size: 10.5px; }
