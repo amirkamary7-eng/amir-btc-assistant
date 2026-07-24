@@ -549,7 +549,9 @@ export function createNotificationPlatformRepository(deps) {
     if (!isDatabaseConfigured(env)) return _emptyAnalytics();
     const rangeCondition = range === '30d' ? "created_at >= NOW() - INTERVAL '30 days'" : "created_at >= NOW() - INTERVAL '7 days'";
     try {
-      const [total, unread, byCategory, byPriority, byChannel, todayCount] = await Promise.all([
+      // BUG FIX: Use Promise.allSettled — if notifications table doesn't have
+      // priority/channel columns yet (pre-migration), still return partial data.
+      const results = await Promise.allSettled([
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM notifications WHERE ${rangeCondition}`),
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM notifications WHERE ${rangeCondition} AND read_status = FALSE`),
         queryDb(env, `SELECT category, COUNT(*)::int AS cnt FROM notifications WHERE ${rangeCondition} GROUP BY category ORDER BY cnt DESC`),
@@ -557,13 +559,15 @@ export function createNotificationPlatformRepository(deps) {
         queryDb(env, `SELECT channel, COUNT(*)::int AS cnt FROM notifications WHERE ${rangeCondition} GROUP BY channel ORDER BY cnt DESC`),
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM notifications WHERE created_at >= CURRENT_DATE`),
       ]);
+      const val = (r, fallback = 0) => r.status === 'fulfilled' ? Number(r.value?.rows?.[0]?.cnt || fallback) : fallback;
+      const rows = (r) => r.status === 'fulfilled' ? r.value.rows : [];
       return {
-        total_sent: Number(total.rows[0]?.cnt || 0),
-        total_unread: Number(unread.rows[0]?.cnt || 0),
-        today_count: Number(todayCount.rows[0]?.cnt || 0),
-        by_category: byCategory.rows.map(r => ({ category: r.category, count: Number(r.cnt) })),
-        by_priority: byPriority.rows.map(r => ({ priority: r.priority, count: Number(r.cnt) })),
-        by_channel: byChannel.rows.map(r => ({ channel: r.channel, count: Number(r.cnt) })),
+        total_sent: val(results[0]),
+        total_unread: val(results[1]),
+        today_count: val(results[5]),
+        by_category: rows(results[2]).map(r => ({ category: r.category, count: Number(r.cnt) })),
+        by_priority: rows(results[3]).map(r => ({ priority: r.priority, count: Number(r.cnt) })),
+        by_channel: rows(results[4]).map(r => ({ channel: r.channel, count: Number(r.cnt) })),
       };
     } catch { return _emptyAnalytics(); }
   }

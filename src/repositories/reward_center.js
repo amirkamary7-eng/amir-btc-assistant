@@ -195,9 +195,10 @@ export function createRewardCenterRepository(deps) {
     if (!isDatabaseConfigured(env)) return _emptyOverview();
 
     try {
-      const [wheelCfg, todaySpins, todayRewards, totalDistributed, activeCampaigns, activeWheelRewards, activeTiers, activeMissions, pendingRewards, mostWon, highestReward] = await Promise.all([
+      // BUG FIX: Use Promise.allSettled — if 'rewards' table doesn't exist,
+      // or wheel_history is empty, still return partial data instead of failing entirely.
+      const results = await Promise.allSettled([
         getWheelConfig(env),
-        queryDb(env, `SELECT COUNT(*)::int AS cnt FROM wheel_history WHERE created_at >= CURRENT_DATE`),
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM wheel_history WHERE created_at >= CURRENT_DATE`),
         queryDb(env, `SELECT COALESCE(SUM(reward_amount), 0)::int AS total FROM wheel_history WHERE created_at >= CURRENT_DATE`),
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM campaigns WHERE status = 'active' AND (end_date IS NULL OR end_date > NOW())`),
@@ -209,18 +210,30 @@ export function createRewardCenterRepository(deps) {
         queryDb(env, `SELECT COALESCE(MAX(reward_amount), 0)::int AS highest FROM wheel_history`),
       ]);
 
+      const val = (r, fallback = 0) => r.status === 'fulfilled' ? Number(r.value?.rows?.[0]?.cnt || r.value?.rows?.[0]?.total || r.value?.rows?.[0]?.highest || fallback) : fallback;
+      const wheelCfg = results[0].status === 'fulfilled' ? results[0].value : null;
+      const todaySpins = val(results[1]);
+      const totalDistributed = val(results[2]);
+      const activeCampaigns = val(results[3]);
+      const activeWheelRewards = val(results[4]);
+      const activeTiers = val(results[5]);
+      const activeMissions = val(results[6]);
+      const pendingRewards = val(results[7]);
+      const mostWonRow = results[8].status === 'fulfilled' ? results[8].value?.rows?.[0] : null;
+      const highestReward = val(results[9]);
+
       return {
         wheel_status: wheelCfg?.is_enabled && !wheelCfg?.maintenance_mode ? 'active' : (wheelCfg?.maintenance_mode ? 'maintenance' : 'disabled'),
-        total_spins_today: Number(todaySpins.rows[0]?.cnt || 0),
-        rewards_given_today: Number(todayRewards.rows[0]?.cnt || 0),
-        total_ab_distributed: Number(totalDistributed.rows[0]?.total || 0),
-        active_campaigns: Number(activeCampaigns.rows[0]?.cnt || 0),
-        active_wheel_rewards: Number(activeWheelRewards.rows[0]?.cnt || 0),
-        active_referral_tiers: Number(activeTiers.rows[0]?.cnt || 0),
-        active_missions: Number(activeMissions.rows[0]?.cnt || 0),
-        pending_rewards: Number(pendingRewards.rows[0]?.cnt || 0),
-        most_won_reward: mostWon.rows[0] ? { label: mostWon.rows[0].reward_label, amount: Number(mostWon.rows[0].reward_amount), count: Number(mostWon.rows[0].win_count) } : null,
-        highest_reward: Number(highestReward.rows[0]?.highest || 0),
+        total_spins_today: todaySpins,
+        rewards_given_today: todaySpins,
+        total_ab_distributed: totalDistributed,
+        active_campaigns: activeCampaigns,
+        active_wheel_rewards: activeWheelRewards,
+        active_referral_tiers: activeTiers,
+        active_missions: activeMissions,
+        pending_rewards: pendingRewards,
+        most_won_reward: mostWonRow ? { label: mostWonRow.reward_label, amount: Number(mostWonRow.reward_amount), count: Number(mostWonRow.win_count) } : null,
+        highest_reward: highestReward,
         wheel_version: wheelCfg?.version || '1.0.0',
       };
     } catch (e) {

@@ -164,16 +164,21 @@ export function createAdminHandlers(deps) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
 
-    try {
-      const [stats, activity] = await Promise.all([
-        adminRepo.getDashboardStats(env),
-        adminRepo.getRecentActivity(env, 10),
-      ]);
-      return jsonResponse({ status: 'success', stats, recent_activity: activity }, {}, env);
-    } catch (error) {
-      console.warn(safeError('admin-dashboard', error));
-      return safeDbErrorResponse(error, {}, env);
+    // BUG FIX: Use Promise.allSettled — if stats fail, still return activity (and vice versa).
+    // Previously Promise.all caused the ENTIRE dashboard to fail if either query failed.
+    const [statsResult, activityResult] = await Promise.allSettled([
+      adminRepo.getDashboardStats(env),
+      adminRepo.getRecentActivity(env, 10),
+    ]);
+
+    const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+    const recent_activity = activityResult.status === 'fulfilled' ? activityResult.value : null;
+
+    if (!stats && !recent_activity) {
+      return jsonResponse({ status: 'error', message: 'Database query failed' }, { status: 503 }, env);
     }
+
+    return jsonResponse({ status: 'success', stats, recent_activity }, {}, env);
   }
 
   // ---------------------------------------------------------------------------

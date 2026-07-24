@@ -211,22 +211,31 @@ export function createAdminRepository(deps) {
   // ---------------------------------------------------------------------------
 
   async function getDashboardStats(env) {
-    const [usersRes, usersTodayRes, analysesRes, ticketsRes, balancesRes, txRes] = await Promise.all([
+    // BUG FIX: Use Promise.allSettled — if ANY query fails (missing table, DB error),
+    // the other queries still return data. Previously Promise.all caused the ENTIRE
+    // dashboard to fail if one table didn't exist or one query timed out.
+    const results = await Promise.allSettled([
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM users'),
       queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE created_at >= CURRENT_DATE"),
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM analyses'),
       queryDb(env, "SELECT COUNT(*) AS cnt FROM tickets WHERE status = 'open'"),
       queryDb(env, 'SELECT COALESCE(SUM(balance), 0) AS total FROM token_balances'),
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM token_transactions'),
+      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users WHERE channel_joined = TRUE'),
+      queryDb(env, 'SELECT COUNT(*) AS cnt FROM admins'),
     ]);
 
+    const val = (r, fallback = 0) => r.status === 'fulfilled' ? Number(r.value?.rows?.[0]?.cnt || r.value?.rows?.[0]?.total || fallback) : fallback;
+
     return {
-      total_users: Number(usersRes.rows[0]?.cnt || 0),
-      users_today: Number(usersTodayRes.rows[0]?.cnt || 0),
-      total_analyses: Number(analysesRes.rows[0]?.cnt || 0),
-      open_tickets: Number(ticketsRes.rows[0]?.cnt || 0),
-      total_token_balances: Number(balancesRes.rows[0]?.total || 0),
-      total_transactions: Number(txRes.rows[0]?.cnt || 0),
+      total_users: val(results[0]),
+      users_today: val(results[1]),
+      total_analyses: val(results[2]),
+      open_tickets: val(results[3]),
+      total_token_balances: val(results[4]),
+      total_transactions: val(results[5]),
+      active_today: val(results[6]),
+      admins_count: val(results[7]),
     };
   }
 
@@ -749,41 +758,21 @@ export function createAdminRepository(deps) {
   async function getRecentActivity(env, limit = 20) {
     const lim = Math.max(1, Math.min(50, Number(limit) || 20));
 
-    const [logsRes, analysesRes, ticketsRes] = await Promise.all([
-      queryDb(
-        env,
-        `
-          SELECT id, admin_id, action, target_type, target_id, created_at
-          FROM admin_logs
-          ORDER BY created_at DESC
-          LIMIT $1
-        `,
-        [lim],
-      ),
-      queryDb(
-        env,
-        `
-          SELECT id, coin, author, created_at
-          FROM analyses
-          ORDER BY created_at DESC
-          LIMIT $1
-        `,
-        [lim],
-      ),
-      queryDb(
-        env,
-        `
-          SELECT id, user_id, title, status, created_at
-          FROM tickets
-          ORDER BY created_at DESC
-          LIMIT $1
-        `,
-        [lim],
-      ),
+    // BUG FIX: Use Promise.allSettled — if admin_logs table doesn't exist,
+    // still return analyses + tickets activity instead of failing everything.
+    const results = await Promise.allSettled([
+      queryDb(env, `SELECT id, admin_id, action, target_type, target_id, created_at FROM admin_logs ORDER BY created_at DESC LIMIT $1`, [lim]),
+      queryDb(env, `SELECT id, coin, author, created_at FROM analyses ORDER BY created_at DESC LIMIT $1`, [lim]),
+      queryDb(env, `SELECT id, user_id, title, status, created_at FROM tickets ORDER BY created_at DESC LIMIT $1`, [lim]),
     ]);
 
+    const rows = (r) => r.status === 'fulfilled' ? r.value.rows : [];
+    const logsRes = rows(results[0]);
+    const analysesRes = rows(results[1]);
+    const ticketsRes = rows(results[2]);
+
     return {
-      admin_logs: logsRes.rows.map((r) => ({
+      admin_logs: logsRes.map((r) => ({
         id: r.id,
         admin_id: String(r.admin_id),
         action: normalizeOptionalString(r.action),
@@ -791,13 +780,13 @@ export function createAdminRepository(deps) {
         target_id: normalizeOptionalString(r.target_id),
         created_at: isoDate(r.created_at),
       })),
-      analyses: analysesRes.rows.map((r) => ({
+      analyses: analysesRes.map((r) => ({
         id: String(r.id),
         coin: normalizeOptionalString(r.coin),
         author: normalizeOptionalString(r.author),
         created_at: isoDate(r.created_at),
       })),
-      tickets: ticketsRes.rows.map((r) => ({
+      tickets: ticketsRes.map((r) => ({
         id: String(r.id),
         user_id: String(r.user_id),
         title: normalizeOptionalString(r.title),
