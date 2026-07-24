@@ -6265,6 +6265,19 @@ strong.down { color: var(--red); }
     align-items: center;
     position: relative;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+    /* ROOT-CAUSE FIX (Task 38 follow-up): Force LTR on the ticker container.
+       When the page is RTL (Persian), `direction: rtl` on a flex container
+       makes the wide track (width: max-content) start from the RIGHT edge of
+       the parent and overflow to the LEFT — giving the track a negative
+       offsetLeft of ~-7596px. Combined with `animation-direction: reverse`
+       (which starts the animation at translateX(-50%) = -3976px), the track
+       ends up at x = -7596 + (-3976) = -11572px — completely outside the
+       viewport, so NO items are visible even though the DOM has 40 nodes.
+       Forcing `direction: ltr` here keeps the track anchored to the LEFT edge
+       of the parent (offsetLeft = 0), so the animation works correctly in
+       both LTR and RTL pages. The RTL `animation-direction: reverse` below
+       still makes the ticker scroll right-to-left for Persian readers. */
+    direction: ltr;
 }
 
 /* Edge fade mask — premium ticker feel (icons fade softly at the edges) */
