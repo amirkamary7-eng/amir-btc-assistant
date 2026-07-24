@@ -505,20 +505,16 @@ const ReferralApp = (() => {
     const tierKey = getTierKey(tier.current);
     const progressPct = tier.progress != null ? Math.max(0, Math.min(100, Number(tier.progress))) : 0;
     const progressText = tier.next
-      ? `${Math.round(progressPct)}% ${RT('progress_to')} ${displayTier(tier.next)}`
+      ? `${Math.round(progressPct)}% → ${displayTier(tier.next)}`
       : RT('max_tier');
 
     return `
       <div class="rc-hero" data-tier="${tierKey}">
-        <!-- Animated Background Layers -->
-        <div class="rc-hero-bg-1"></div>
-        <div class="rc-hero-bg-2"></div>
-        <div class="rc-hero-orb rc-hero-orb-1"></div>
-        <div class="rc-hero-orb rc-hero-orb-2"></div>
-        <div class="rc-hero-grid"></div>
+        <!-- Compact background -->
+        <div class="rc-hero-bg"></div>
 
-        <!-- Top Row: League Badge + Brand Mark -->
-        <div class="rc-hero-top">
+        <!-- Top Row: League + Total Earned (side by side) -->
+        <div class="rc-hero-row-1">
           <div class="rc-hero-league">
             <div class="rc-hero-league-icon" style="background:rgba(var(--tier-rgb),0.15);border-color:rgba(var(--tier-rgb),0.35);color:var(--tier-color)">
               ${ICONS.medal}
@@ -528,79 +524,42 @@ const ReferralApp = (() => {
               <div class="rc-hero-league-name" style="color:var(--tier-color)">${esc(displayTier(tier.current))}</div>
             </div>
           </div>
-          <div class="rc-hero-illustration" aria-hidden="true">
-            <svg viewBox="0 0 120 120" width="92" height="92" fill="none">
-              <defs>
-                <linearGradient id="rcHeroGrad" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stop-color="#F5A623" stop-opacity="0.9"/>
-                  <stop offset="100%" stop-color="#FFCC4D" stop-opacity="0.6"/>
-                </linearGradient>
-                <radialGradient id="rcHeroGlow" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stop-color="#F5A623" stop-opacity="0.4"/>
-                  <stop offset="100%" stop-color="#F5A623" stop-opacity="0"/>
-                </radialGradient>
-              </defs>
-              <circle cx="60" cy="60" r="58" fill="url(#rcHeroGlow)"/>
-              <circle cx="60" cy="60" r="42" stroke="url(#rcHeroGrad)" stroke-width="1.5" stroke-dasharray="3 5" opacity="0.5">
-                <animateTransform attributeName="transform" type="rotate" from="0 60 60" to="360 60 60" dur="40s" repeatCount="indefinite"/>
-              </circle>
-              <circle cx="60" cy="60" r="30" stroke="url(#rcHeroGrad)" stroke-width="1" opacity="0.4"/>
-              <path d="M60 30 L67 50 L88 50 L71 63 L77 84 L60 72 L43 84 L49 63 L32 50 L53 50 Z" fill="url(#rcHeroGrad)" opacity="0.85"/>
-              <circle cx="60" cy="60" r="6" fill="#FFF8E1"/>
-            </svg>
+          <div class="rc-hero-earned">
+            <div class="rc-hero-earned-label">${esc(RT('total_earned'))}</div>
+            <div class="rc-hero-earned-row">
+              <img src="${getTokenLogo()}" alt="AB" class="rc-hero-token-logo">
+              <span class="rc-hero-earned-value" data-countup="${totalEarned}">0</span>
+              <span class="rc-hero-earned-ticker">AB</span>
+            </div>
           </div>
         </div>
 
-        <!-- Total Earned with Token Icon -->
-        <div class="rc-hero-earned">
-          <div class="rc-hero-earned-label">${esc(RT('total_earned'))}</div>
-          <div class="rc-hero-earned-row">
-            <div class="rc-hero-token-logo"><img src="${getTokenLogo()}" alt="AB Token"></div>
-            <div class="rc-hero-earned-value" data-countup="${totalEarned}">0</div>
-            <div class="rc-hero-earned-ticker">AB</div>
-          </div>
-        </div>
-
-        <!-- Stats Row -->
+        <!-- Quick Stats Row (3 compact stats) -->
         <div class="rc-hero-stats">
           <div class="rc-hero-stat">
-            <div class="rc-hero-stat-icon" style="color:var(--tier-color)">${ICONS.users}</div>
             <div class="rc-hero-stat-value" data-countup="${totalInvites}">0</div>
             <div class="rc-hero-stat-label">${esc(RT('total_invites'))}</div>
           </div>
           <div class="rc-hero-stat-divider"></div>
           <div class="rc-hero-stat">
-            <div class="rc-hero-stat-icon rc-color-green">${ICONS.checkCircle}</div>
             <div class="rc-hero-stat-value" data-countup="${activeInvites}">0</div>
             <div class="rc-hero-stat-label">${esc(RT('active_invites'))}</div>
           </div>
           <div class="rc-hero-stat-divider"></div>
           <div class="rc-hero-stat">
-            <div class="rc-hero-stat-icon rc-color-gold">${ICONS.trending}</div>
             <div class="rc-hero-stat-value">${conversionRate}%</div>
             <div class="rc-hero-stat-label">${esc(RT('conversion_rate'))}</div>
           </div>
         </div>
 
-        <!-- League Progress -->
+        <!-- League Progress (compact) -->
         <div class="rc-hero-progress">
           <div class="rc-hero-progress-info">
             <span class="rc-hero-progress-text">${esc(progressText)}</span>
-            ${tier.next ? `<span class="rc-hero-progress-next">${esc(displayTier(tier.next))} ${ICONS.arrowRight}</span>` : ''}
           </div>
           <div class="rc-hero-progress-bar">
-            <div class="rc-hero-progress-fill" style="width:0%;background:linear-gradient(90deg,var(--tier-color),var(--rc-accent-2))" data-target="${progressPct}"></div>
+            <div class="rc-hero-progress-fill" style="width:${progressPct}%;background:linear-gradient(90deg,var(--tier-color),var(--rc-accent-2))"></div>
           </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="rc-hero-actions">
-          <button class="rc-hero-btn rc-hero-btn-primary" onclick="ReferralApp.shareLink()">
-            ${ICONS.share}<span>${esc(RT('share_link'))}</span>
-          </button>
-          <button class="rc-hero-btn rc-hero-btn-secondary" onclick="ReferralApp.copyLink()">
-            ${ICONS.copy}<span>${esc(RT('copy_link'))}</span>
-          </button>
         </div>
       </div>
     `;
@@ -700,7 +659,7 @@ const ReferralApp = (() => {
   }
 
   // ─────────────────────────────────────────────
-  // LUCKY WHEEL (Premium special card — production ready)
+  // LUCKY WHEEL — Single unified card with embedded wheel
   // ─────────────────────────────────────────────
   function buildWheelCard(wheel, lastPrize) {
     const totalAvailable = wheel?.total_available || 0;
@@ -708,63 +667,97 @@ const ReferralApp = (() => {
     const premiumCount = wheel?.premium_spins || 0;
     const hasSpins = totalAvailable > 0;
 
-    let statusHtml = '';
-    if (dailyAvail) {
-      statusHtml = `<span class="rc-wheel-dot rc-wheel-dot-active"></span>${esc(RT('spin_available'))}`;
-    } else if (hasSpins) {
-      statusHtml = `<span class="rc-wheel-dot rc-wheel-dot-premium"></span>${esc(RT('premium_spins'))}: ${premiumCount}`;
-    } else {
-      statusHtml = `<span class="rc-wheel-dot rc-wheel-dot-claimed"></span>${esc(RT('no_spins_available'))}`;
-    }
-
-    const enterBtnHtml = hasSpins
-      ? `<button class="rc-wheel-enter-btn">${ICONS.bolt}<span>${esc(RT('spin_now'))}</span></button>`
-      : `<button class="rc-wheel-enter-btn rc-wheel-enter-disabled" disabled>${ICONS.spinDisabled}<span>${esc(RT('spin_disabled'))}</span></button>`;
-
-    const cardClasses = hasSpins ? 'rc-wheel-card' : 'rc-wheel-card rc-wheel-card-disabled';
-
     return `
       <div class="rc-section">
-        <div class="${cardClasses}" onclick="${hasSpins ? "ReferralApp.openWheel()" : "event.preventDefault()"}" role="button" tabindex="${hasSpins ? '0' : '-1'}" aria-disabled="${!hasSpins}">
-          <div class="rc-wheel-glow"></div>
-          <div class="rc-wheel-left">
-            <div class="rc-wheel-icon-spin">${hasSpins ? ICONS.wheel : ICONS.spinDisabled}</div>
-          </div>
-          <div class="rc-wheel-info">
-            <div class="rc-wheel-title">${esc(RT('lucky_wheel'))}</div>
-            <div class="rc-wheel-status">${statusHtml}</div>
-            <div class="rc-wheel-chips">
-              <span class="rc-wheel-chip ${dailyAvail ? 'rc-chip-active' : ''}">
-                ${ICONS.clock}<span>${esc(RT('daily_spin'))}</span>
-              </span>
-              <span class="rc-wheel-chip ${premiumCount > 0 ? 'rc-chip-premium' : ''}">
-                ${ICONS.sparkles}<span>${esc(RT('premium_spin'))}: ${premiumCount}</span>
+        <div class="rc-section-header"><h3>${ICONS.wheel} ${esc(RT('lucky_wheel'))}</h3></div>
+        <div class="rc-wheel-unified ${hasSpins ? '' : 'rc-wheel-unified-disabled'}">
+          <div class="rc-wheel-unified-glow"></div>
+
+          <!-- Header Row: Title + Status -->
+          <div class="rc-wheel-unified-header">
+            <div class="rc-wheel-unified-title-row">
+              <span class="rc-wheel-unified-title">${esc(RT('lucky_wheel'))}</span>
+              <span class="rc-wheel-unified-status ${hasSpins ? 'active' : 'inactive'}">
+                <span class="rc-wheel-dot ${hasSpins ? 'rc-wheel-dot-active' : 'rc-wheel-dot-claimed'}"></span>
+                ${hasSpins ? esc(RT('spin_available')) : esc(RT('no_spins_available'))}
               </span>
             </div>
-            ${lastPrize ? `
-              <div class="rc-wheel-last-prize">
-                ${ICONS.gift}<span>${esc(RT('last_prize'))}: <strong>+${formatNumber(lastPrize.reward_amount || 0)} AB</strong></span>
-              </div>` : ''}
             ${!hasSpins ? `
-              <div class="rc-wheel-countdown" id="rc-wheel-countdown">
+              <div class="rc-wheel-unified-countdown" id="rc-wheel-countdown">
                 ${ICONS.clock}<span>${esc(RT('next_free_spin'))}:</span>
                 <span class="rc-wheel-countdown-time" id="rc-wheel-countdown-time">--:--:--</span>
               </div>` : ''}
           </div>
-          <div class="rc-wheel-right">
-            <div class="rc-wheel-spins">
-              <span class="rc-wheel-spins-num">${totalAvailable}</span>
-              <small>${esc(RT('available_spins'))}</small>
+
+          <!-- Wheel Stage: SVG wheel + pointer -->
+          <div class="rc-wheel-unified-stage" onclick="${hasSpins ? "ReferralApp.openWheel()" : "event.preventDefault()"}" role="button" tabindex="${hasSpins ? '0' : '-1'}" aria-disabled="${!hasSpins}">
+            <div class="rc-wheel-unified-pointer">${ICONS.bolt}</div>
+            <div class="rc-wheel-unified-svg-wrap">${getWheelSvgMini()}</div>
+            <div class="rc-wheel-unified-glow-ring"></div>
+          </div>
+
+          <!-- Footer Row: Stats + Spin Button -->
+          <div class="rc-wheel-unified-footer">
+            <div class="rc-wheel-unified-stats">
+              <div class="rc-wheel-unified-stat">
+                <span class="rc-wheel-unified-stat-val">${totalAvailable}</span>
+                <span class="rc-wheel-unified-stat-lbl">${esc(RT('available_spins'))}</span>
+              </div>
+              <div class="rc-wheel-unified-stat-divider"></div>
+              <div class="rc-wheel-unified-stat">
+                <span class="rc-wheel-unified-stat-val">${premiumCount}</span>
+                <span class="rc-wheel-unified-stat-lbl">${esc(RT('premium_spins'))}</span>
+              </div>
+              <div class="rc-wheel-unified-stat-divider"></div>
+              <div class="rc-wheel-unified-stat">
+                <span class="rc-wheel-unified-stat-val">${lastPrize ? '+' + formatNumber(lastPrize.reward_amount || 0) : '--'}</span>
+                <span class="rc-wheel-unified-stat-lbl">${esc(RT('last_prize'))}</span>
+              </div>
             </div>
-            ${enterBtnHtml}
+            <button class="rc-wheel-unified-btn ${hasSpins ? '' : 'rc-wheel-unified-btn-disabled'}" ${hasSpins ? '' : 'disabled'} onclick="event.stopPropagation(); ${hasSpins ? "ReferralApp.openWheel()" : ""}">
+              ${hasSpins ? ICONS.bolt : ICONS.spinDisabled}<span>${hasSpins ? esc(RT('spin_now')) : esc(RT('spin_disabled'))}</span>
+            </button>
           </div>
         </div>
       </div>
     `;
   }
 
+  // Compact wheel SVG for inline card display (smaller than modal version)
+  function getWheelSvgMini() {
+    const segments = WHEEL_SEGMENTS;
+    const segCount = segments.length;
+    const segAngle = 360 / segCount;
+    const cx = 80, cy = 80, r = 68;
+    let pathsHtml = '';
+    let labelsHtml = '';
+    for (let i = 0; i < segCount; i++) {
+      const startAngle = i * segAngle - 90;
+      const endAngle = (i + 1) * segAngle - 90;
+      const x1 = cx + r * Math.cos(startAngle * Math.PI / 180);
+      const y1 = cy + r * Math.sin(startAngle * Math.PI / 180);
+      const x2 = cx + r * Math.cos(endAngle * Math.PI / 180);
+      const y2 = cy + r * Math.sin(endAngle * Math.PI / 180);
+      const largeArc = segAngle > 180 ? 1 : 0;
+      pathsHtml += `<path d="M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z" fill="${i % 2 === 0 ? segments[i].color : segments[i].alt}" stroke="rgba(0,0,0,0.2)" stroke-width="0.5"/>`;
+      const midAngle = startAngle + segAngle / 2;
+      const labelR = r * 0.68;
+      const lx = cx + labelR * Math.cos(midAngle * Math.PI / 180);
+      const ly = cy + labelR * Math.sin(midAngle * Math.PI / 180);
+      labelsHtml += `<text x="${lx}" y="${ly}" fill="#0B1220" font-size="7" font-weight="800" text-anchor="middle" dominant-baseline="middle" transform="rotate(${midAngle + 90} ${lx} ${ly})">${segments[i].label}</text>`;
+    }
+    return `<svg class="rc-wheel-svg-mini" viewBox="0 0 160 160">
+      <circle cx="80" cy="80" r="74" fill="rgba(0,0,0,0.3)"/>
+      <circle cx="80" cy="80" r="70" fill="none" stroke="rgba(245,166,35,0.4)" stroke-width="1"/>
+      ${pathsHtml}
+      ${labelsHtml}
+      <circle cx="80" cy="80" r="10" fill="#0B1220" stroke="rgba(245,166,35,0.6)" stroke-width="1.5"/>
+      <circle cx="80" cy="80" r="4" fill="#F5A623"/>
+    </svg>`;
+  }
+
   // ─────────────────────────────────────────────
-  // LEADERBOARD — Top 10 with special top-3 styling
+  // LEADERBOARD — Compact Top 3 + View Full link
   // ─────────────────────────────────────────────
   function buildLeaderboard(leaderboard) {
     if (!leaderboard?.leaderboard?.length) {
@@ -778,12 +771,8 @@ const ReferralApp = (() => {
 
     const all = leaderboard.leaderboard;
     const top3 = all.slice(0, 3);
-    const rest = all.slice(3, 10);
     const crownColors = ['#FFD700', '#C0C0C0', '#CD7F32'];
     const currentUserId = String(window.UserContext?.user?.id || window.getTelegramUser?.()?.id || '');
-
-    // Check if current user is in the list
-    const currentUserEntry = all.find(u => String(u.user_id) === currentUserId);
 
     return `
       <div class="rc-section">
@@ -812,40 +801,15 @@ const ReferralApp = (() => {
           }).join('')}
         </div>` : ''}
 
-        ${rest.length > 0 ? `
-        <div class="rc-lb-list">
-          ${rest.map((u, i) => {
-            const rank = i + 4;
-            const isCurrentUser = String(u.user_id) === currentUserId;
-            return `
-              <div class="rc-lb-row ${isCurrentUser ? 'rc-lb-row-me' : ''}">
-                <div class="rc-lb-row-rank">${rank}</div>
-                <div class="rc-lb-row-avatar">${esc((u.first_name || u.username || '?').charAt(0).toUpperCase())}</div>
-                <div class="rc-lb-row-info">
-                  <div class="rc-lb-row-name">${esc(u.first_name || u.username || 'User')}</div>
-                  <div class="rc-lb-row-sub">${formatNumber(u.total_invites)} ${esc(RT('invites'))} · ${formatNumber(u.rewarded_invites || 0)} ${esc(RT('rewarded'))}</div>
-                </div>
-                <div class="rc-lb-row-badge">${formatNumber(u.total_invites)}</div>
-              </div>
-            `;
-          }).join('')}
-        </div>` : ''}
-
-        ${!currentUserEntry ? `
-        <div class="rc-lb-your-rank">
-          ${ICONS.target}
-          <div class="rc-lb-your-rank-info">
-            <div class="rc-lb-your-rank-label">${esc(RT('your_rank'))}</div>
-            <div class="rc-lb-your-rank-value">${esc(RT('not_ranked'))}</div>
-          </div>
-          <button class="rc-lb-share-btn" onclick="ReferralApp.shareLink()">${ICONS.share}<span>${esc(RT('share_link'))}</span></button>
-        </div>` : ''}
+        <button class="rc-view-full-btn" onclick="ReferralApp.viewFullLeaderboard()">
+          ${esc(RT('view_all'))} ${ICONS.arrowRight}
+        </button>
       </div>
     `;
   }
 
   // ─────────────────────────────────────────────
-  // MISSIONS (real mission cards — locked state)
+  // MISSIONS — Horizontal Carousel (compact, ~170px section height)
   // ─────────────────────────────────────────────
   function buildMissions(stats) {
     const totalInvites = stats?.total || 0;
@@ -872,12 +836,12 @@ const ReferralApp = (() => {
     return `
       <div class="rc-section">
         <div class="rc-section-header"><h3>${ICONS.target} ${esc(RT('missions'))}</h3></div>
-        <div class="rc-missions-grid">
+        <div class="rc-carousel">
           ${missions.map((m, idx) => {
             const isComplete = m.current >= m.target;
             const progressPct = Math.min(100, (m.current / m.target) * 100);
             return `
-              <div class="rc-mission-card ${isComplete ? 'rc-mission-done' : ''}" style="animation-delay:${0.05 * idx}s">
+              <div class="rc-mission-card ${isComplete ? 'rc-mission-done' : ''}">
                 <div class="rc-mission-top">
                   <div class="rc-mission-icon ${isComplete ? 'rc-mission-icon-done' : 'rc-mission-icon-locked'}">
                     ${isComplete ? ICONS.checkCircle : m.icon}
@@ -885,16 +849,15 @@ const ReferralApp = (() => {
                   ${isComplete ? '' : `<div class="rc-mission-lock">${ICONS.lock}</div>`}
                 </div>
                 <div class="rc-mission-title">${esc(m.title)}</div>
-                <div class="rc-mission-desc">${esc(m.desc)}</div>
                 <div class="rc-mission-progress">
                   <div class="rc-mission-progress-bar">
                     <div class="rc-mission-progress-fill" style="width:${progressPct}%;background:${isComplete ? 'linear-gradient(90deg,#22C55E,#16A34A)' : 'linear-gradient(90deg,#F5A623,#FFCC4D)'}"></div>
                   </div>
                   <div class="rc-mission-progress-text">
                     <span>${formatNumber(m.current)}/${formatNumber(m.target)}</span>
-                    <span class="rc-mission-reward">${ICONS.gift} +${formatNumber(m.reward)} AB</span>
                   </div>
                 </div>
+                <div class="rc-mission-reward">${ICONS.gift} +${formatNumber(m.reward)} AB</div>
               </div>
             `;
           }).join('')}
@@ -904,7 +867,7 @@ const ReferralApp = (() => {
   }
 
   // ─────────────────────────────────────────────
-  // ACHIEVEMENTS (real badges — locked/unlocked state)
+  // ACHIEVEMENTS — Horizontal Carousel
   // ─────────────────────────────────────────────
   function buildAchievements(stats) {
     const totalInvites = stats?.total || 0;
@@ -926,29 +889,27 @@ const ReferralApp = (() => {
     return `
       <div class="rc-section">
         <div class="rc-section-header"><h3>${ICONS.sparkles} ${esc(RT('achievements'))}</h3></div>
-        <div class="rc-achievements-grid">
+        <div class="rc-carousel">
           ${badges.map((b, idx) => {
             const isUnlocked = totalInvites >= b.threshold;
             const tierColor = getTierColor(b.tier);
             const tierRgb = getTierRgb(b.tier);
-            // Progress for next achievement
             const prevThreshold = idx > 0 ? badges[idx - 1].threshold : 0;
             const progressInTier = isUnlocked ? 100 : Math.max(0, Math.min(100, ((totalInvites - prevThreshold) / (b.threshold - prevThreshold)) * 100));
             return `
               <div class="rc-ach-card ${isUnlocked ? 'rc-ach-unlocked' : 'rc-ach-locked'}"
-                   style="--ach-color:${tierColor};--ach-rgb:${tierRgb};animation-delay:${0.05 * idx}s">
+                   style="--ach-color:${tierColor};--ach-rgb:${tierRgb}">
                 <div class="rc-ach-medal-wrap">
                   <div class="rc-ach-medal-glow"></div>
                   <div class="rc-ach-medal">${b.icon}</div>
                   ${isUnlocked ? '' : `<div class="rc-ach-lock">${ICONS.lock}</div>`}
                 </div>
                 <div class="rc-ach-title">${esc(b.title)}</div>
-                <div class="rc-ach-desc">${esc(b.desc)}</div>
                 ${isUnlocked
                   ? `<div class="rc-ach-status rc-ach-unlocked-text">${ICONS.check} ${esc(RT('claimed'))}</div>`
-                  : `<div class="rc-ach-status rc-ach-locked-text">${esc(RT('mission_locked'))} · ${b.threshold}+</div>
+                  : `<div class="rc-ach-status rc-ach-locked-text">${b.threshold}+</div>
                      <div class="rc-ach-progress">
-                       <div class="rc-ach-progress-fill" style="width:${progressInTier}%;background:linear-gradient(90deg,${tierColor},var(--rc-accent-2))"></div>
+                       <div class="rc-ach-progress-fill" style="width:${progressInTier}%"></div>
                      </div>
                      <div class="rc-ach-progress-text">${formatNumber(totalInvites)}/${formatNumber(b.threshold)}</div>`}
               </div>
@@ -1072,13 +1033,13 @@ const ReferralApp = (() => {
         <div class="rc-section-header"><h3>${ICONS.clock} ${esc(RT('referral_history'))}</h3></div>
         <div id="rc-history-list" class="rc-history-list">
           ${history && history.length > 0
-            ? history.map((r, i) => buildHistoryItem(r, i)).join('')
+            ? history.slice(0, 3).map((r, i) => buildHistoryItem(r, i)).join('')
             : buildEmptyState('history', ICONS.userPlus, RT('no_history_title'), RT('no_history_desc'))}
         </div>
-        ${historyHasMore ? `
-          <div id="rc-load-more" class="rc-load-more-wrap">
-            <button class="rc-load-more-btn" onclick="ReferralApp.loadMoreHistory()">${esc(RT('load_more'))}</button>
-          </div>` : ''}
+        ${history && history.length > 0 ? `
+          <button class="rc-view-full-btn" onclick="ReferralApp.viewFullHistory()">
+            ${esc(RT('view_all'))} ${ICONS.arrowRight}
+          </button>` : ''}
       </div>
 
       <!-- Footer Spacer for safe area -->
@@ -1651,6 +1612,11 @@ const ReferralApp = (() => {
     tg?.showPopup?.({ title: RT('leaderboard'), message: RT('loading'), buttons: [{ type: 'ok' }] });
   }
 
+  function viewFullHistory() {
+    const tg = window.getTg?.();
+    tg?.showPopup?.({ title: RT('referral_history'), message: RT('loading'), buttons: [{ type: 'ok' }] });
+  }
+
   return {
     openReferral,
     closeReferral,
@@ -1662,6 +1628,7 @@ const ReferralApp = (() => {
     doSpin,
     loadMoreHistory,
     viewFullLeaderboard,
+    viewFullHistory,
   };
 })();
 
