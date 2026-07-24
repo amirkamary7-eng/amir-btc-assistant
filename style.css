@@ -1688,139 +1688,192 @@ strong.down { color: var(--red); }
 
 .full-modal-box { max-width: 420px; max-height: 88vh; overflow-y: auto; }
 
+/* ============================================================================
+   NOTIFICATION SETTINGS — Premium Crypto Mini App Redesign
+   Binance/Bybit/OKX quality with glass cards, gradient icons, capsule controls
+   ============================================================================ */
+
+/* ── Status Card (top of page) ── */
 .ns-status-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 16px;
-    margin-bottom: 14px;
-}
-.ns-status-info { display: flex; flex-direction: column; gap: 8px; }
-.ns-status-badge-wrap { display: inline-flex; align-items: center; gap: 6px; }
-.ns-status-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 8px rgba(0,200,150,0.5);
-    transition: all 0.3s;
-}
-.ns-status-dot.inactive {
-    background: var(--text-sub);
-    box-shadow: none;
-}
-.ns-status-text {
-    font-size: 12px; font-weight: 700; color: var(--green);
-    transition: color 0.3s;
-}
-.ns-status-text.inactive { color: var(--text-sub); }
-.ns-status-desc { font-size: 12px; color: var(--text-dim); line-height: 1.6; margin: 0; }
-
-.ns-section-label {
-    font-size: 11px; font-weight: 700; color: var(--text-sub);
-    text-transform: uppercase; letter-spacing: 0.5px;
-    padding: 0 4px; margin-bottom: 10px;
-    display: flex; align-items: center; gap: 8px;
-}
-.ns-section-label::after {
-    content: ''; flex: 1; height: 1px; background: var(--border);
-}
-
-.ns-toggle-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
-
-.ns-toggle-item {
+    background: linear-gradient(135deg, rgba(15,24,40,0.95), rgba(11,18,32,0.92));
+    border: 1px solid rgba(245,166,35,0.15);
+    border-radius: 18px;
+    padding: 16px 18px;
+    margin-bottom: 20px;
     display: flex; align-items: center; gap: 12px;
-    padding: 14px 12px; border-radius: 14px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    transition: background 0.2s, border-color 0.2s;
-}
-.ns-toggle-item:active { background: var(--bg-card-hover); }
-
-.ns-toggle-icon {
-    width: 40px; height: 40px; border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-}
-.ns-icon-analysis { background: rgba(255,138,0,0.12); color: #FF8A00; }
-.ns-icon-calendar { background: rgba(0,200,150,0.12); color: #00c896; }
-.ns-icon-price { background: rgba(255,77,77,0.12); color: #ff4d4d; }
-.ns-icon-market { background: rgba(168,85,247,0.12); color: #a855f7; }
-.ns-icon-news { background: rgba(56,189,248,0.12); color: #38bdf8; }
-
-.ns-toggle-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ns-toggle-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.ns-toggle-desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-
-/* ── Toggle Switch ── */
-.ns-toggle-switch {
-    position: relative; display: inline-block;
-    width: 46px; height: 26px; flex-shrink: 0; cursor: pointer;
-}
-.ns-toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
-.ns-toggle-track {
-    position: absolute; inset: 0;
-    background: rgba(255,255,255,0.1);
-    border-radius: 26px;
-    transition: background 0.25s;
-}
-.ns-toggle-thumb {
-    position: absolute; top: 3px; left: 3px;
-    width: 20px; height: 20px; border-radius: 50%;
-    background: var(--text-sub);
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.25s;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-}
-.ns-toggle-switch input:checked + .ns-toggle-track {
-    background: var(--accent);
-}
-.ns-toggle-switch input:checked + .ns-toggle-track .ns-toggle-thumb {
-    transform: translateX(20px);
-    background: #fff;
-}
-
-/* ── Subscription Card ── */
-.ns-subscription-card {
-    background: linear-gradient(135deg, #FF8A00 0%, #FF6B00 50%, #e85d00 100%);
-    border-radius: 16px; padding: 16px;
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    box-shadow: 0 8px 24px rgba(255,138,0,0.2);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.04);
     position: relative; overflow: hidden;
 }
-.ns-subscription-card::before {
-    content: ''; position: absolute; inset: 0;
-    background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.08) 42%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.08) 58%, transparent 70%);
-    animation: ns-shimmer 4s ease-in-out infinite;
-}
-@keyframes ns-shimmer {
-    0%   { transform: translateX(-120%) skewX(-12deg); }
-    60%  { transform: translateX(120%) skewX(-12deg); }
-    100% { transform: translateX(120%) skewX(-12deg); }
-}
-.ns-subscription-card::after {
-    content: ''; position: absolute; right: -20px; top: -20px;
+.ns-status-card::before {
+    content: ''; position: absolute; top: -30px; right: -20px;
     width: 80px; height: 80px; border-radius: 50%;
-    background: rgba(255,255,255,0.08);
+    background: radial-gradient(circle, rgba(245,166,35,0.10), transparent 70%);
+    pointer-events: none;
 }
-.ns-sub-left { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; position: relative; z-index: 1; }
-.ns-sub-title { font-size: 13px; font-weight: 700; color: #fff; }
-.ns-sub-desc { font-size: 11px; color: rgba(255,255,255,0.8); line-height: 1.5; margin-top: 2px; }
-.ns-sub-btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 14px; border-radius: 12px;
-    background: rgba(255,255,255,0.2);
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(255,255,255,0.3);
-    color: #fff; font-size: 12px; font-weight: 600;
-    cursor: pointer; transition: all 0.2s; flex-shrink: 0;
-    position: relative; z-index: 1;
+.ns-status-icon-wrap {
+    width: 44px; height: 44px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; position: relative;
 }
-.ns-sub-btn:active { background: rgba(255,255,255,0.3); transform: scale(0.96); }
+.ns-status-icon-wrap.active {
+    background: linear-gradient(135deg, rgba(0,200,150,0.18), rgba(0,200,150,0.06));
+    border: 1px solid rgba(0,200,150,0.25);
+}
+.ns-status-icon-wrap.partial {
+    background: linear-gradient(135deg, rgba(245,166,35,0.18), rgba(245,166,35,0.06));
+    border: 1px solid rgba(245,166,35,0.25);
+}
+.ns-status-icon-wrap.inactive {
+    background: linear-gradient(135deg, rgba(255,77,77,0.15), rgba(255,77,77,0.05));
+    border: 1px solid rgba(255,77,77,0.20);
+}
+.ns-status-icon-wrap svg { width: 22px; height: 22px; }
+.ns-status-icon-wrap.active svg { color: #00C896; filter: drop-shadow(0 0 6px rgba(0,200,150,0.4)); }
+.ns-status-icon-wrap.partial svg { color: #F5A623; filter: drop-shadow(0 0 6px rgba(245,166,35,0.4)); }
+.ns-status-icon-wrap.inactive svg { color: #FF4D4D; filter: drop-shadow(0 0 6px rgba(255,77,77,0.3)); }
 
-@media (max-width: 400px) {
-    .ns-toggle-item { padding: 12px 10px; gap: 10px; }
-    .ns-toggle-icon { width: 36px; height: 36px; border-radius: 10px; }
-    .ns-toggle-icon svg { width: 18px; height: 18px; }
-    .ns-subscription-card { flex-direction: column; align-items: stretch; }
-    .ns-sub-btn { align-self: flex-start; }
+.ns-status-info { flex: 1; min-width: 0; position: relative; z-index: 1; }
+.ns-status-title {
+    font-size: 14px; font-weight: 800; letter-spacing: -0.2px; line-height: 1.3;
+}
+.ns-status-title.active { color: #00C896; }
+.ns-status-title.partial { color: #F5A623; }
+.ns-status-title.inactive { color: #FF4D4D; }
+.ns-status-desc {
+    font-size: 11px; color: #6B7A8D; font-weight: 500;
+    line-height: 1.4; margin-top: 2px;
+}
+
+/* ── Group Labels ── */
+.ns-group-label {
+    font-size: 10px; font-weight: 800; color: #6B7A8D;
+    text-transform: uppercase; letter-spacing: 0.8px;
+    padding: 0 4px; margin: 18px 0 10px;
+    display: flex; align-items: center; gap: 8px;
+}
+.ns-group-label::after {
+    content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, rgba(107,122,141,0.15), transparent);
+}
+.ns-group-label:first-child { margin-top: 6px; }
+
+/* ── Premium Category Cards ── */
+.ns-card-list { display: flex; flex-direction: column; gap: 10px; }
+
+.ns-prem-card {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 14px;
+    background: linear-gradient(145deg, rgba(15,24,40,0.85), rgba(11,18,32,0.80));
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 16px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 3px 12px rgba(0,0,0,0.18);
+    transition: transform 0.22s cubic-bezier(0.16,1,0.3,1), border-color 0.22s ease, box-shadow 0.22s ease;
+    animation: nsCardSlideIn 0.4s var(--rc-ease, cubic-bezier(0.16,1,0.3,1)) both;
+    position: relative; overflow: hidden;
+}
+@keyframes nsCardSlideIn {
+    0% { opacity: 0; transform: translateY(8px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+.ns-prem-card:hover {
+    border-color: rgba(245,166,35,0.12);
+    box-shadow: 0 5px 18px rgba(0,0,0,0.22), 0 0 20px rgba(245,166,35,0.03);
+    transform: translateY(-1px);
+}
+.ns-prem-card:active {
+    transform: scale(0.98);
+}
+
+/* Card left: gradient icon + text */
+.ns-prem-left { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+
+.ns-prem-icon {
+    width: 42px; height: 42px; border-radius: 13px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; position: relative;
+    font-size: 20px;
+}
+/* Gradient icon backgrounds per category */
+.ns-ic-price { background: linear-gradient(135deg, rgba(255,77,77,0.20), rgba(255,77,77,0.08)); border: 1px solid rgba(255,77,77,0.15); }
+.ns-ic-analysis { background: linear-gradient(135deg, rgba(255,138,0,0.20), rgba(255,138,0,0.08)); border: 1px solid rgba(255,138,0,0.15); }
+.ns-ic-news { background: linear-gradient(135deg, rgba(56,189,248,0.20), rgba(56,189,248,0.08)); border: 1px solid rgba(56,189,248,0.15); }
+.ns-ic-calendar { background: linear-gradient(135deg, rgba(168,85,247,0.20), rgba(168,85,247,0.08)); border: 1px solid rgba(168,85,247,0.15); }
+.ns-ic-security { background: linear-gradient(135deg, rgba(239,68,68,0.20), rgba(239,68,68,0.08)); border: 1px solid rgba(239,68,68,0.15); }
+.ns-ic-ticket { background: linear-gradient(135deg, rgba(34,197,94,0.20), rgba(34,197,94,0.08)); border: 1px solid rgba(34,197,94,0.15); }
+.ns-ic-announce { background: linear-gradient(135deg, rgba(245,166,35,0.20), rgba(245,166,35,0.08)); border: 1px solid rgba(245,166,35,0.15); }
+.ns-ic-wheel { background: linear-gradient(135deg, rgba(251,191,36,0.20), rgba(251,191,36,0.08)); border: 1px solid rgba(251,191,36,0.15); }
+.ns-ic-referral { background: linear-gradient(135deg, rgba(99,102,241,0.20), rgba(99,102,241,0.08)); border: 1px solid rgba(99,102,241,0.15); }
+.ns-ic-wallet { background: linear-gradient(135deg, rgba(16,185,129,0.20), rgba(16,185,129,0.08)); border: 1px solid rgba(16,185,129,0.15); }
+.ns-ic-challenge { background: linear-gradient(135deg, rgba(236,72,153,0.20), rgba(236,72,153,0.08)); border: 1px solid rgba(236,72,153,0.15); }
+.ns-ic-promo { background: linear-gradient(135deg, rgba(34,211,238,0.18), rgba(34,211,238,0.06)); border: 1px solid rgba(34,211,238,0.12); }
+
+.ns-prem-text { min-width: 0; flex: 1; }
+.ns-prem-title {
+    font-size: 13px; font-weight: 800; color: #E8EDF2;
+    letter-spacing: -0.1px; line-height: 1.3;
+}
+.ns-prem-desc {
+    font-size: 11px; color: #6B7A8D; font-weight: 500;
+    line-height: 1.3; margin-top: 2px;
+}
+
+/* ── Capsule Segmented Control ── */
+.ns-capsule {
+    display: flex; gap: 0;
+    background: rgba(0,0,0,0.35);
+    border-radius: 12px; padding: 3px;
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.04);
+}
+.ns-cap-btn {
+    padding: 6px 10px; border: none; border-radius: 9px;
+    background: transparent; color: #6B7A8D;
+    font-size: 10px; font-weight: 800; cursor: pointer;
+    font-family: inherit; white-space: nowrap;
+    transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+    display: flex; align-items: center; gap: 3px;
+    min-width: 32px; justify-content: center;
+    letter-spacing: 0.2px;
+}
+.ns-cap-btn:hover { color: #AEB7C2; }
+.ns-cap-btn:active { transform: scale(0.92); }
+
+.ns-cap-btn.active {
+    background: linear-gradient(135deg, #F5A623, #FFCC4D);
+    color: #0B1220;
+    box-shadow: 0 2px 8px rgba(245,166,35,0.35), inset 0 1px 0 rgba(255,255,255,0.3);
+    transform: scale(1);
+}
+.ns-cap-btn.active.off {
+    background: linear-gradient(135deg, rgba(255,77,77,0.7), rgba(239,68,68,0.5));
+    color: #FFF;
+    box-shadow: 0 2px 8px rgba(255,77,77,0.25);
+}
+.ns-cap-btn.active.bot {
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+    color: #FFF;
+    box-shadow: 0 2px 8px rgba(56,189,248,0.30);
+}
+.ns-cap-btn.active.app {
+    background: linear-gradient(135deg, #22C55E, #16A34A);
+    color: #FFF;
+    box-shadow: 0 2px 8px rgba(34,197,94,0.30);
+}
+.ns-cap-btn.active.both {
+    background: linear-gradient(135deg, #F5A623, #FFCC4D);
+    color: #0B1220;
+    box-shadow: 0 2px 8px rgba(245,166,35,0.35);
+}
+
+/* ── Responsive ── */
+@media (max-width: 380px) {
+    .ns-prem-card { flex-direction: column; align-items: stretch; gap: 10px; }
+    .ns-capsule { justify-content: center; }
+    .ns-cap-btn { flex: 1; }
 }
 
 /* #endregion */
@@ -9063,63 +9116,4 @@ body.jl-locked .cd-fullscreen {
     .rc-form-grid { grid-template-columns: 1fr; }
 }
 
-/* ============================================================================
-   NOTIFICATION SETTINGS — Channel Segmented Control (Premium Redesign)
-   ============================================================================ */
-.ns-channel-list {
-    display: flex; flex-direction: column; gap: 10px;
-    padding: 4px 0 8px;
-}
-.ns-channel-item {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 12px 14px;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 14px;
-    transition: border-color 0.2s ease;
-}
-.ns-channel-item:hover {
-    border-color: rgba(245,166,35,0.15);
-}
-.ns-channel-info {
-    display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;
-}
-.ns-channel-icon {
-    font-size: 22px; flex-shrink: 0; width: 36px; height: 36px;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 10px; background: rgba(255,255,255,0.04);
-}
-.ns-channel-title {
-    font-size: 13px; font-weight: 700; color: #E8EDF2;
-    letter-spacing: -0.1px; line-height: 1.3;
-}
-.ns-channel-desc {
-    font-size: 10px; color: #6B7A8D; font-weight: 500;
-    margin-top: 1px; line-height: 1.3;
-}
-
-/* Segmented Control */
-.ns-seg-control {
-    display: flex; gap: 2px; flex-shrink: 0;
-    background: rgba(0,0,0,0.3); border-radius: 10px; padding: 3px;
-}
-.ns-seg-btn {
-    padding: 6px 8px; border: none; border-radius: 7px;
-    background: transparent; color: #6B7A8D;
-    font-size: 10px; font-weight: 700; cursor: pointer;
-    font-family: inherit; transition: all 0.18s ease;
-    white-space: nowrap; min-width: 36px;
-    display: flex; align-items: center; gap: 2px;
-}
-.ns-seg-btn:hover { color: #AEB7C2; }
-.ns-seg-btn.active {
-    background: linear-gradient(135deg, #F5A623, #FFCC4D);
-    color: #0B1220;
-    box-shadow: 0 2px 6px rgba(245,166,35,0.30);
-}
-
-@media (max-width: 380px) {
-    .ns-channel-item { flex-direction: column; align-items: stretch; gap: 8px; }
-    .ns-seg-control { justify-content: center; }
-    .ns-seg-btn { flex: 1; justify-content: center; }
-}
+/* (Old notification channel CSS removed — replaced by premium redesign above) */

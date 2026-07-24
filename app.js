@@ -7294,60 +7294,102 @@ async function renderNotifSettings() {
 
     if (!settings) settings = _defaultChannelSettings();
 
-    // Define notification categories with icons, labels, and descriptions
-    const categories = [
-        { key: 'ch_referral', icon: '🔗', title: 'رفرال', desc: 'دعوت کاربران جدید و پاداش رفرال', default: 'mini_app' },
-        { key: 'ch_wallet', icon: '💎', title: 'کیف پول', desc: 'دریافت توکن، پاداش روزانه، بونوس', default: 'mini_app' },
-        { key: 'ch_price_alert', icon: '🔔', title: 'هشدار قیمت', desc: 'اعلان هنگام فعال شدن هشدار قیمت', default: 'both' },
-        { key: 'ch_analysis', icon: '📊', title: 'تحلیل‌ها', desc: 'اعلان انتشار تحلیل جدید بازار', default: 'both' },
-        { key: 'ch_breaking_news', icon: '📰', title: 'اخبار فوری', desc: 'خبرهای مهم و فوری بازار', default: 'both' },
-        { key: 'ch_announcements', icon: '📢', title: 'اطلاعیه‌ها', desc: 'اطلاعیه‌های سیستم و برنامه', default: 'mini_app' },
-        { key: 'ch_promotions', icon: '🎁', title: 'تبلیغات', desc: 'پیشنهادات ویژه و تبلیغات', default: 'none' },
-        { key: 'ch_challenges', icon: '🏆', title: 'مسابقات', desc: 'کمپین‌ها و رویدادهای ویژه', default: 'mini_app' },
-        { key: 'ch_tickets', icon: '🎫', title: 'تیکت‌ها', desc: 'پاسخ به تیکت‌های پشتیبانی', default: 'both' },
-        { key: 'ch_calendar', icon: '📅', title: 'تقویم اقتصادی', desc: 'هشدار رویدادهای مهم اقتصادی', default: 'both' },
-        { key: 'ch_wheel', icon: '🎡', title: 'گردونه شانس', desc: 'پاداش گردونه و اسپین رایگان', default: 'mini_app' },
-        { key: 'ch_security', icon: '🔒', title: 'امنیت', desc: 'ورود جدید و فعالیت مشکوک', default: 'both' },
+    // ── Premium categories grouped by importance ──
+    const groups = [
+        {
+            label: currentLang === 'fa' ? 'اعلان‌های حیاتی' : 'Critical Alerts',
+            items: [
+                { key: 'ch_price_alert', icon: '🚨', icClass: 'ns-ic-price', title: currentLang === 'fa' ? 'هشدار قیمت' : 'Price Alerts', desc: currentLang === 'fa' ? 'هنگام رسیدن قیمت به مقدار تعیین شده' : 'When price reaches your target', default: 'both' },
+                { key: 'ch_analysis', icon: '📊', icClass: 'ns-ic-analysis', title: currentLang === 'fa' ? 'تحلیل‌های جدید' : 'Analysis', desc: currentLang === 'fa' ? 'انتشار تحلیل جدید بازار' : 'New market analysis published', default: 'both' },
+                { key: 'ch_breaking_news', icon: '📰', icClass: 'ns-ic-news', title: currentLang === 'fa' ? 'اخبار فوری' : 'Breaking News', desc: currentLang === 'fa' ? 'خبرهای مهم و فوری بازار' : 'Important and urgent market news', default: 'both' },
+                { key: 'ch_calendar', icon: '📅', icClass: 'ns-ic-calendar', title: currentLang === 'fa' ? 'رویدادهای تقویم اقتصادی' : 'Calendar Events', desc: currentLang === 'fa' ? 'هشدار رویدادهای مهم اقتصادی' : 'Important economic events', default: 'both' },
+                { key: 'ch_security', icon: '🔒', icClass: 'ns-ic-security', title: currentLang === 'fa' ? 'هشدارهای امنیتی' : 'Security', desc: currentLang === 'fa' ? 'ورود جدید و فعالیت مشکوک' : 'New login and suspicious activity', default: 'both' },
+            ]
+        },
+        {
+            label: currentLang === 'fa' ? 'اعلان‌های حساب کاربری' : 'Account Notifications',
+            items: [
+                { key: 'ch_tickets', icon: '🎫', icClass: 'ns-ic-ticket', title: currentLang === 'fa' ? 'تیکت‌ها' : 'Tickets', desc: currentLang === 'fa' ? 'پاسخ به تیکت‌های پشتیبانی' : 'Support ticket replies', default: 'both' },
+                { key: 'ch_announcements', icon: '📢', icClass: 'ns-ic-announce', title: currentLang === 'fa' ? 'اطلاعیه‌های مهم' : 'Announcements', desc: currentLang === 'fa' ? 'اطلاعیه‌های سیستم و برنامه' : 'System and app announcements', default: 'mini_app' },
+                { key: 'ch_wheel', icon: '🎡', icClass: 'ns-ic-wheel', title: currentLang === 'fa' ? 'جوایز اسپین' : 'Spin Rewards', desc: currentLang === 'fa' ? 'پاداش گردونه و اسپین رایگان' : 'Wheel rewards and free spins', default: 'mini_app' },
+                { key: 'ch_referral', icon: '👥', icClass: 'ns-ic-referral', title: currentLang === 'fa' ? 'رفرال' : 'Referral', desc: currentLang === 'fa' ? 'دعوت کاربران جدید و پاداش رفرال' : 'New invites and referral rewards', default: 'mini_app' },
+                { key: 'ch_wallet', icon: '💰', icClass: 'ns-ic-wallet', title: currentLang === 'fa' ? 'کیف پول' : 'Wallet', desc: currentLang === 'fa' ? 'دریافت توکن، پاداش روزانه، بونوس' : 'Token received, daily reward, bonus', default: 'mini_app' },
+            ]
+        },
+        {
+            label: currentLang === 'fa' ? 'اعلان‌های تبلیغاتی' : 'Promotional',
+            items: [
+                { key: 'ch_challenges', icon: '🎯', icClass: 'ns-ic-challenge', title: currentLang === 'fa' ? 'چالش‌ها' : 'Challenges', desc: currentLang === 'fa' ? 'کمپین‌ها و رویدادهای ویژه' : 'Campaigns and special events', default: 'mini_app' },
+                { key: 'ch_promotions', icon: '🎁', icClass: 'ns-ic-promo', title: currentLang === 'fa' ? 'تبلیغات' : 'Promotions', desc: currentLang === 'fa' ? 'پیشنهادات ویژه و تبلیغات' : 'Special offers and promotions', default: 'none' },
+            ]
+        },
     ];
 
     const channels = [
-        { val: 'none', label: 'خاموش', icon: '✕' },
-        { val: 'mini_app', label: 'اپ', icon: '📱' },
-        { val: 'telegram', label: 'ربات', icon: '🤖' },
-        { val: 'both', label: 'هر دو', icon: '✓' },
+        { val: 'none', label: currentLang === 'fa' ? 'خاموش' : 'Off', icon: '✕', cls: 'off' },
+        { val: 'mini_app', label: currentLang === 'fa' ? 'اپ' : 'App', icon: '📱', cls: 'app' },
+        { val: 'telegram', label: currentLang === 'fa' ? 'ربات' : 'Bot', icon: '🤖', cls: 'bot' },
+        { val: 'both', label: currentLang === 'fa' ? 'هر دو' : 'Both', icon: '✓', cls: 'both' },
     ];
 
     let html = '';
-    for (const cat of categories) {
-        const currentVal = settings[cat.key] || cat.default;
-        let segHtml = '';
-        for (const ch of channels) {
-            const isActive = currentVal === ch.val;
-            segHtml += `<button class="ns-seg-btn ${isActive ? 'active' : ''}" data-cat="${cat.key}" data-val="${ch.val}" onclick="handleChannelPrefChange('${cat.key}','${ch.val}')">${ch.icon} ${ch.label}</button>`;
-        }
-        html += `
-            <div class="ns-channel-item">
-                <div class="ns-channel-info">
-                    <span class="ns-channel-icon">${cat.icon}</span>
-                    <div>
-                        <div class="ns-channel-title">${cat.title}</div>
-                        <div class="ns-channel-desc">${cat.desc}</div>
+    for (const group of groups) {
+        html += `<div class="ns-group-label">${group.label}</div>`;
+        html += `<div class="ns-card-list">`;
+        for (const cat of group.items) {
+            const currentVal = settings[cat.key] || cat.default;
+            let capHtml = '';
+            for (const ch of channels) {
+                const isActive = currentVal === ch.val;
+                capHtml += `<button class="ns-cap-btn ${isActive ? 'active ' + ch.cls : ''}" data-cat="${cat.key}" data-val="${ch.val}" onclick="handleChannelPrefChange('${cat.key}','${ch.val}')">${ch.icon} ${ch.label}</button>`;
+            }
+            html += `
+                <div class="ns-prem-card" style="animation-delay:${groups.indexOf(group) * 0.05 + group.items.indexOf(cat) * 0.03}s">
+                    <div class="ns-prem-left">
+                        <div class="ns-prem-icon ${cat.icClass}">${cat.icon}</div>
+                        <div class="ns-prem-text">
+                            <div class="ns-prem-title">${cat.title}</div>
+                            <div class="ns-prem-desc">${cat.desc}</div>
+                        </div>
                     </div>
+                    <div class="ns-capsule">${capHtml}</div>
                 </div>
-                <div class="ns-seg-control">${segHtml}</div>
-            </div>
-        `;
+            `;
+        }
+        html += `</div>`;
     }
     list.innerHTML = html;
 
-    // Update status badge
-    const anyActive = categories.some(c => (settings[c.key] || c.default) !== 'none');
-    const dot = document.getElementById('ns-status-dot');
-    const text = document.getElementById('ns-status-text');
-    if (dot) { dot.classList.toggle('inactive', !anyActive); }
-    if (text) {
-        text.textContent = anyActive ? (currentLang === 'fa' ? 'فعال' : 'Active') : (currentLang === 'fa' ? 'غیرفعال' : 'Inactive');
-        text.classList.toggle('inactive', !anyActive);
+    // ── Status card ──
+    const allCats = groups.flatMap(g => g.items);
+    const activeCount = allCats.filter(c => (settings[c.key] || c.default) !== 'none').length;
+    const bothCount = allCats.filter(c => (settings[c.key] || c.default) === 'both').length;
+    const statusEl = document.getElementById('ns-status-card-content');
+    if (statusEl) {
+        let statusClass, statusIcon, statusTitle, statusDesc;
+        if (activeCount === 0) {
+            statusClass = 'inactive';
+            statusIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+            statusTitle = currentLang === 'fa' ? 'همه اعلان‌ها غیرفعال هستند' : 'All notifications disabled';
+            statusDesc = currentLang === 'fa' ? 'هیچ اعلانی دریافت نخواهید کرد' : 'You will not receive any notifications';
+        } else if (bothCount >= 3) {
+            statusClass = 'active';
+            statusIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+            statusTitle = currentLang === 'fa' ? 'سیستم اعلان فعال است' : 'Notification system active';
+            statusDesc = currentLang === 'fa' ? `${activeCount} دسته فعال · ${bothCount} دسته روی هر دو کانال` : `${activeCount} active · ${bothCount} on both channels`;
+        } else {
+            statusClass = 'partial';
+            statusIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+            statusTitle = currentLang === 'fa' ? 'اعلان‌های مهم فعال هستند' : 'Important alerts active';
+            statusDesc = currentLang === 'fa' ? `${activeCount} از ${allCats.length} دسته فعال` : `${activeCount} of ${allCats.length} categories active`;
+        }
+        statusEl.innerHTML = `
+            <div class="ns-status-icon-wrap ${statusClass}">${statusIcon}</div>
+            <div class="ns-status-info">
+                <div class="ns-status-title ${statusClass}">${statusTitle}</div>
+                <div class="ns-status-desc">${statusDesc}</div>
+            </div>
+        `;
     }
 }
 
@@ -7361,9 +7403,17 @@ function _defaultChannelSettings() {
 }
 
 async function handleChannelPrefChange(catKey, val) {
-    // Update UI immediately
-    document.querySelectorAll(`.ns-seg-btn[data-cat="${catKey}"]`).forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-val') === val);
+    // Update UI immediately — capsule buttons
+    const btns = document.querySelectorAll(`.ns-cap-btn[data-cat="${catKey}"]`);
+    const channelClasses = { none: 'off', mini_app: 'app', telegram: 'bot', both: 'both' };
+    btns.forEach(btn => {
+        const btnVal = btn.getAttribute('data-val');
+        if (btnVal === val) {
+            btn.classList.add('active');
+            btn.classList.add(channelClasses[val] || '');
+        } else {
+            btn.classList.remove('active', 'off', 'app', 'bot', 'both');
+        }
     });
 
     // Save to backend
