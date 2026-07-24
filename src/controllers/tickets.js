@@ -22,6 +22,7 @@ export function createTicketHandlers(deps) {
     sendTelegramMessage,
     normalizeOptionalString,
     ticketRepo,
+    notificationPlatformRepo,
   } = deps;
 
   /**
@@ -73,13 +74,17 @@ export function createTicketHandlers(deps) {
         console.warn(safeError('create-ticket-admin-notify', notifyErr));
       }
       try {
-        const userId = Number(authState.user.id);
-        if (Number.isFinite(userId)) {
-          await sendTelegramMessage(env, {
-            chat_id: userId,
-            text: `✅ تیکت شما ثبت شد\nعنوان: ${ticket.title}\nبه زودی پاسخ داده می‌شود.`,
-            disable_web_page_preview: true,
-          });
+        // Notify user via Notification Platform (single entry point)
+        if (notificationPlatformRepo) {
+          await notificationPlatformRepo.dispatch(env, {
+            userId: authState.user.id,
+            category: 'system',
+            priority: 'low',
+            channel: 'mini_app',
+            title: `✅ تیکت شما ثبت شد`,
+            message: `عنوان: ${ticket.title}\nبه زودی پاسخ داده می‌شود.`,
+            metadata: { ticket_id: String(ticket.id), title: ticket.title },
+          }).catch(() => {});
         }
       } catch (notifyErr) {
         console.warn(safeError('create-ticket-user-notify', notifyErr));
@@ -190,15 +195,18 @@ export function createTicketHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, env);
       }
 
-      // Notify ticket owner via Telegram (Task 2.14)
+      // Notify ticket owner via Notification Platform (single entry point)
       try {
-        const ownerId = Number(ticket.user_id);
-        if (Number.isFinite(ownerId)) {
-          await sendTelegramMessage(env, {
-            chat_id: ownerId,
-            text: `💬 پاسخ تیکت: ${ticket.title}\n\n${message}`,
-            disable_web_page_preview: true,
-          });
+        if (notificationPlatformRepo) {
+          await notificationPlatformRepo.dispatch(env, {
+            userId: String(ticket.user_id),
+            category: 'system',
+            priority: 'medium',
+            channel: 'both',
+            title: `💬 پاسخ تیکت: ${ticket.title}`,
+            message,
+            metadata: { ticket_id: String(ticketId), title: ticket.title },
+          }).catch(() => {});
         }
       } catch (notifyErr) {
         console.warn(safeError('ticket-reply-user-notify', notifyErr));

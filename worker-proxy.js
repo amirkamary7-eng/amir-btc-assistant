@@ -2650,6 +2650,7 @@ const ticketHandlers = createTicketHandlers({
   sendTelegramMessage,
   normalizeOptionalString,
   ticketRepo,
+  notificationPlatformRepo,
 });
 const userRepo = createUserRepository({ queryDb, normalizeOptionalString });
 const userHandlers = createUserHandlers({
@@ -3933,23 +3934,9 @@ async function runScheduledAlertsBaseline(controller, env) {
         }
 
         if (prefsEnabled) {
-          // 1) Telegram delivery
-          const tgPayload = {
-            chat_id: chatId,
-            text,
-            disable_web_page_preview: true,
-          };
-          if (webAppUrl) {
-            tgPayload.reply_markup = {
-              inline_keyboard: [[{
-                text: 'Open Amir BTC Assistant 🚀',
-                web_app: { url: webAppUrl },
-              }]],
-            };
-          }
-          await sendTelegramMessage(env, tgPayload);
-
-          // 2) In-App notification via Notification Platform (single entry point)
+          // Send via Notification Platform ONLY (single entry point).
+          // dispatch() with channel='both' handles: in-app notification + Telegram queue.
+          // This replaces the old direct sendTelegramMessage which caused DUPLICATE messages.
           if (notificationPlatformRepo) {
             try {
               await notificationPlatformRepo.dispatch(env, {
@@ -3965,6 +3952,13 @@ async function runScheduledAlertsBaseline(controller, env) {
             } catch (notifErr) {
               console.warn('Notification Platform dispatch failed for price alert:', notifErr?.message);
             }
+          } else {
+            // Fallback: if notificationPlatformRepo not available, direct send
+            const tgPayload = { chat_id: chatId, text, disable_web_page_preview: true };
+            if (webAppUrl) {
+              tgPayload.reply_markup = { inline_keyboard: [[{ text: 'Open Amir BTC Assistant 🚀', web_app: { url: webAppUrl } }]] };
+            }
+            await sendTelegramMessage(env, tgPayload).catch(() => {});
           }
         } else {
           // User opted out of price_alert notifications — log for audit trail
