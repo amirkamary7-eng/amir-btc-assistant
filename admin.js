@@ -58,6 +58,31 @@ function adminEmpty(message) {
     return '<div class="admin-empty">' + adminEscapeHtml(message || 'No data found') + '</div>';
 }
 
+/**
+ * Show a toast notification in the admin panel.
+ * @param {string} message - The message to display
+ * @param {string} type - 'success' | 'error' | 'info'
+ */
+function adminToast(message, type) {
+    var t = document.createElement('div');
+    t.className = 'admin-toast admin-toast-' + (type || 'info');
+    t.textContent = message || '';
+    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99999;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;font-family:inherit;transition:opacity 0.3s ease,transform 0.3s ease;opacity:0;transform:translateX(-50%) translateY(10px);';
+    if (type === 'success') { t.style.background = 'rgba(0,200,150,0.95)'; t.style.color = '#020611'; }
+    else if (type === 'error') { t.style.background = 'rgba(255,77,77,0.95)'; t.style.color = '#FFF'; }
+    else { t.style.background = 'rgba(245,166,35,0.95)'; t.style.color = '#020611'; }
+    document.body.appendChild(t);
+    requestAnimationFrame(function() {
+        t.style.opacity = '1';
+        t.style.transform = 'translateX(-50%) translateY(0)';
+    });
+    setTimeout(function() {
+        t.style.opacity = '0';
+        t.style.transform = 'translateX(-50%) translateY(10px)';
+        setTimeout(function() { if (t.parentNode) t.parentNode.removeChild(t); }, 300);
+    }, 2500);
+}
+
 function adminBadge(text, color) {
     const cls = {
         green: 'admin-badge-green',
@@ -2209,3 +2234,9 @@ async function toggleAlertService(alertType, enable) {
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
 }
 window.toggleAlertService = toggleAlertService;
+
+// ── Missing window exports for ticket admin functions ──
+window.adminReplyTicket = adminReplyTicket;
+window.adminSetTicketStatus = adminSetTicketStatus;
+window.adminDeleteTicket = adminDeleteTicket;
+window.toggleAdminTicketDetail = toggleAdminTicketDetail;
