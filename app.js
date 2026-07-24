@@ -7277,119 +7277,215 @@ function closeNotifSettingsModal() {
     openSettingsModal();
 }
 
+// ── Premium SVG icons (no emoji) — uniform fintech style ──
+const NS_ICONS = {
+    price: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+    analysis: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+    news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8z"/></svg>',
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    security: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+    ticket: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v2a3 3 0 0 1 0 6v2c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/><line x1="13" y1="5" x2="13" y2="7"/><line x1="13" y1="11" x2="13" y2="13"/><line x1="13" y1="17" x2="13" y2="19"/></svg>',
+    announce: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>',
+    wheel: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="22"/><line x1="2" y1="12" x2="8" y2="12"/><line x1="16" y1="12" x2="22" y2="12"/></svg>',
+    referral: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+    wallet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg>',
+    challenge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+    promo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>',
+};
+
+// Channel selector icons
+const NS_CHAN_ICONS = {
+    none: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>',
+    mini_app: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>',
+    telegram: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 4.5L2.5 12.5l6 2 2 6 3.5-4.5 4 3z"/></svg>',
+    both: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+};
+
+// Cache for settings data — prevents re-fetch on rapid re-renders
+let _nsSettingsCache = null;
+let _nsSettingsLoading = false;
+
 async function renderNotifSettings() {
     const list = document.getElementById('ns-channel-list');
+    const statusEl = document.getElementById('ns-status-card-content');
     if (!list) return;
 
-    // Load settings from backend (new platform endpoint)
-    let settings = null;
-    try {
-        if (API_BASE && !UserContext.isGuest()) {
-            const data = await apiFetch('/api/notifications/platform/settings');
-            if (data && data.status === 'success' && data.settings) {
-                settings = data.settings;
+    // Show skeleton immediately — no blocking
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:#6B7A8D;font-size:12px;">در حال بارگذاری...</div>';
+
+    // Load settings (use cache if available for instant render)
+    let settings = _nsSettingsCache;
+    if (!settings && !_nsSettingsLoading) {
+        _nsSettingsLoading = true;
+        try {
+            if (API_BASE && !UserContext.isGuest()) {
+                const data = await apiFetch('/api/notifications/platform/settings');
+                if (data && data.status === 'success' && data.settings) {
+                    settings = data.settings;
+                    _nsSettingsCache = settings;
+                }
             }
-        }
-    } catch (e) { /* fall through to defaults */ }
+        } catch (e) { /* fall through to defaults */ }
+        _nsSettingsLoading = false;
+    }
 
     if (!settings) settings = _defaultChannelSettings();
 
-    // ── Premium categories grouped by importance ──
+    const isFa = currentLang === 'fa';
+
+    // Category definitions — grouped by importance
     const groups = [
         {
-            label: currentLang === 'fa' ? 'اعلان‌های حیاتی' : 'Critical Alerts',
+            label: isFa ? 'اعلان‌های حیاتی' : 'Critical Alerts',
             items: [
-                { key: 'ch_price_alert', icon: '🚨', icClass: 'ns-ic-price', title: currentLang === 'fa' ? 'هشدار قیمت' : 'Price Alerts', desc: currentLang === 'fa' ? 'هنگام رسیدن قیمت به مقدار تعیین شده' : 'When price reaches your target', default: 'both' },
-                { key: 'ch_analysis', icon: '📊', icClass: 'ns-ic-analysis', title: currentLang === 'fa' ? 'تحلیل‌های جدید' : 'Analysis', desc: currentLang === 'fa' ? 'انتشار تحلیل جدید بازار' : 'New market analysis published', default: 'both' },
-                { key: 'ch_breaking_news', icon: '📰', icClass: 'ns-ic-news', title: currentLang === 'fa' ? 'اخبار فوری' : 'Breaking News', desc: currentLang === 'fa' ? 'خبرهای مهم و فوری بازار' : 'Important and urgent market news', default: 'both' },
-                { key: 'ch_calendar', icon: '📅', icClass: 'ns-ic-calendar', title: currentLang === 'fa' ? 'رویدادهای تقویم اقتصادی' : 'Calendar Events', desc: currentLang === 'fa' ? 'هشدار رویدادهای مهم اقتصادی' : 'Important economic events', default: 'both' },
-                { key: 'ch_security', icon: '🔒', icClass: 'ns-ic-security', title: currentLang === 'fa' ? 'هشدارهای امنیتی' : 'Security', desc: currentLang === 'fa' ? 'ورود جدید و فعالیت مشکوک' : 'New login and suspicious activity', default: 'both' },
+                { key: 'ch_price_alert', svg: NS_ICONS.price, ic: 'ic-price', t: isFa ? 'هشدار قیمت' : 'Price Alerts', d: isFa ? 'هنگام رسیدن قیمت به مقدار تعیین شده' : 'When price reaches your target', def: 'both' },
+                { key: 'ch_analysis', svg: NS_ICONS.analysis, ic: 'ic-analysis', t: isFa ? 'تحلیل‌های جدید' : 'Analysis', d: isFa ? 'انتشار تحلیل جدید بازار' : 'New market analysis published', def: 'both' },
+                { key: 'ch_breaking_news', svg: NS_ICONS.news, ic: 'ic-news', t: isFa ? 'اخبار فوری' : 'Breaking News', d: isFa ? 'خبرهای مهم و فوری بازار' : 'Important and urgent market news', def: 'both' },
+                { key: 'ch_calendar', svg: NS_ICONS.calendar, ic: 'ic-calendar', t: isFa ? 'تقویم اقتصادی' : 'Calendar Events', d: isFa ? 'هشدار رویدادهای مهم اقتصادی' : 'Important economic events', def: 'both' },
+                { key: 'ch_security', svg: NS_ICONS.security, ic: 'ic-security', t: isFa ? 'امنیت' : 'Security', d: isFa ? 'ورود جدید و فعالیت مشکوک' : 'New login and suspicious activity', def: 'both' },
             ]
         },
         {
-            label: currentLang === 'fa' ? 'اعلان‌های حساب کاربری' : 'Account Notifications',
+            label: isFa ? 'اعلان‌های حساب کاربری' : 'Account Notifications',
             items: [
-                { key: 'ch_tickets', icon: '🎫', icClass: 'ns-ic-ticket', title: currentLang === 'fa' ? 'تیکت‌ها' : 'Tickets', desc: currentLang === 'fa' ? 'پاسخ به تیکت‌های پشتیبانی' : 'Support ticket replies', default: 'both' },
-                { key: 'ch_announcements', icon: '📢', icClass: 'ns-ic-announce', title: currentLang === 'fa' ? 'اطلاعیه‌های مهم' : 'Announcements', desc: currentLang === 'fa' ? 'اطلاعیه‌های سیستم و برنامه' : 'System and app announcements', default: 'mini_app' },
-                { key: 'ch_wheel', icon: '🎡', icClass: 'ns-ic-wheel', title: currentLang === 'fa' ? 'جوایز اسپین' : 'Spin Rewards', desc: currentLang === 'fa' ? 'پاداش گردونه و اسپین رایگان' : 'Wheel rewards and free spins', default: 'mini_app' },
-                { key: 'ch_referral', icon: '👥', icClass: 'ns-ic-referral', title: currentLang === 'fa' ? 'رفرال' : 'Referral', desc: currentLang === 'fa' ? 'دعوت کاربران جدید و پاداش رفرال' : 'New invites and referral rewards', default: 'mini_app' },
-                { key: 'ch_wallet', icon: '💰', icClass: 'ns-ic-wallet', title: currentLang === 'fa' ? 'کیف پول' : 'Wallet', desc: currentLang === 'fa' ? 'دریافت توکن، پاداش روزانه، بونوس' : 'Token received, daily reward, bonus', default: 'mini_app' },
+                { key: 'ch_tickets', svg: NS_ICONS.ticket, ic: 'ic-ticket', t: isFa ? 'تیکت‌ها' : 'Tickets', d: isFa ? 'پاسخ به تیکت‌های پشتیبانی' : 'Support ticket replies', def: 'both' },
+                { key: 'ch_announcements', svg: NS_ICONS.announce, ic: 'ic-announce', t: isFa ? 'اطلاعیه‌ها' : 'Announcements', d: isFa ? 'اطلاعیه‌های سیستم و برنامه' : 'System and app announcements', def: 'mini_app' },
+                { key: 'ch_wheel', svg: NS_ICONS.wheel, ic: 'ic-wheel', t: isFa ? 'گردونه شانس' : 'Spin Rewards', d: isFa ? 'پاداش گردونه و اسپین رایگان' : 'Wheel rewards and free spins', def: 'mini_app' },
+                { key: 'ch_referral', svg: NS_ICONS.referral, ic: 'ic-referral', t: isFa ? 'رفرال' : 'Referral', d: isFa ? 'دعوت کاربران جدید و پاداش' : 'New invites and referral rewards', def: 'mini_app' },
+                { key: 'ch_wallet', svg: NS_ICONS.wallet, ic: 'ic-wallet', t: isFa ? 'کیف پول' : 'Wallet', d: isFa ? 'دریافت توکن، پاداش روزانه' : 'Token received, daily reward', def: 'mini_app' },
             ]
         },
         {
-            label: currentLang === 'fa' ? 'اعلان‌های تبلیغاتی' : 'Promotional',
+            label: isFa ? 'اعلان‌های تبلیغاتی' : 'Promotional',
             items: [
-                { key: 'ch_challenges', icon: '🎯', icClass: 'ns-ic-challenge', title: currentLang === 'fa' ? 'چالش‌ها' : 'Challenges', desc: currentLang === 'fa' ? 'کمپین‌ها و رویدادهای ویژه' : 'Campaigns and special events', default: 'mini_app' },
-                { key: 'ch_promotions', icon: '🎁', icClass: 'ns-ic-promo', title: currentLang === 'fa' ? 'تبلیغات' : 'Promotions', desc: currentLang === 'fa' ? 'پیشنهادات ویژه و تبلیغات' : 'Special offers and promotions', default: 'none' },
+                { key: 'ch_challenges', svg: NS_ICONS.challenge, ic: 'ic-challenge', t: isFa ? 'چالش‌ها' : 'Challenges', d: isFa ? 'کمپین‌ها و رویدادهای ویژه' : 'Campaigns and special events', def: 'mini_app' },
+                { key: 'ch_promotions', svg: NS_ICONS.promo, ic: 'ic-promo', t: isFa ? 'تبلیغات' : 'Promotions', d: isFa ? 'پیشنهادات ویژه و تبلیغات' : 'Special offers and promotions', def: 'none' },
             ]
         },
     ];
 
     const channels = [
-        { val: 'none', label: currentLang === 'fa' ? 'خاموش' : 'Off', icon: '✕', cls: 'off' },
-        { val: 'mini_app', label: currentLang === 'fa' ? 'اپ' : 'App', icon: '📱', cls: 'app' },
-        { val: 'telegram', label: currentLang === 'fa' ? 'ربات' : 'Bot', icon: '🤖', cls: 'bot' },
-        { val: 'both', label: currentLang === 'fa' ? 'هر دو' : 'Both', icon: '✓', cls: 'both' },
+        { val: 'none', label: isFa ? 'خاموش' : 'Off', cls: 'off' },
+        { val: 'mini_app', label: isFa ? 'اپ' : 'App', cls: 'app' },
+        { val: 'telegram', label: isFa ? 'ربات' : 'Bot', cls: 'bot' },
+        { val: 'both', label: isFa ? 'هر دو' : 'Both', cls: 'both' },
     ];
 
-    let html = '';
+    // Use DocumentFragment for performance — no string concatenation
+    const frag = document.createDocumentFragment();
+
     for (const group of groups) {
-        html += `<div class="ns-group-label">${group.label}</div>`;
-        html += `<div class="ns-card-list">`;
+        // Group label
+        const lbl = document.createElement('div');
+        lbl.className = 'ns-group-label';
+        lbl.textContent = group.label;
+        frag.appendChild(lbl);
+
+        // Card list
+        const cardList = document.createElement('div');
+        cardList.className = 'ns-card-list';
+
         for (const cat of group.items) {
-            const currentVal = settings[cat.key] || cat.default;
-            let capHtml = '';
+            const currentVal = settings[cat.key] || cat.def;
+
+            const card = document.createElement('div');
+            card.className = 'ns-prem-card';
+
+            // Left: icon + text
+            const left = document.createElement('div');
+            left.className = 'ns-prem-left';
+
+            const iconBox = document.createElement('div');
+            iconBox.className = `ns-prem-icon ${cat.ic}`;
+            iconBox.innerHTML = cat.svg;
+
+            const textBox = document.createElement('div');
+            textBox.className = 'ns-prem-text';
+            const titleEl = document.createElement('div');
+            titleEl.className = 'ns-prem-title';
+            titleEl.textContent = cat.t;
+            const descEl = document.createElement('div');
+            descEl.className = 'ns-prem-desc';
+            descEl.textContent = cat.d;
+            textBox.appendChild(titleEl);
+            textBox.appendChild(descEl);
+
+            left.appendChild(iconBox);
+            left.appendChild(textBox);
+
+            // Right: capsule selector
+            const capsule = document.createElement('div');
+            capsule.className = 'ns-capsule';
+            capsule.setAttribute('data-cat', cat.key);
+
             for (const ch of channels) {
-                const isActive = currentVal === ch.val;
-                capHtml += `<button class="ns-cap-btn ${isActive ? 'active ' + ch.cls : ''}" data-cat="${cat.key}" data-val="${ch.val}" onclick="handleChannelPrefChange('${cat.key}','${ch.val}')">${ch.icon} ${ch.label}</button>`;
+                const btn = document.createElement('button');
+                btn.className = `ns-cap-btn${currentVal === ch.val ? ' active ' + ch.cls : ''}`;
+                btn.setAttribute('data-cat', cat.key);
+                btn.setAttribute('data-val', ch.val);
+                btn.innerHTML = NS_CHAN_ICONS[ch.val] + '<span>' + ch.label + '</span>';
+                capsule.appendChild(btn);
             }
-            html += `
-                <div class="ns-prem-card" style="animation-delay:${groups.indexOf(group) * 0.05 + group.items.indexOf(cat) * 0.03}s">
-                    <div class="ns-prem-left">
-                        <div class="ns-prem-icon ${cat.icClass}">${cat.icon}</div>
-                        <div class="ns-prem-text">
-                            <div class="ns-prem-title">${cat.title}</div>
-                            <div class="ns-prem-desc">${cat.desc}</div>
-                        </div>
-                    </div>
-                    <div class="ns-capsule">${capHtml}</div>
-                </div>
-            `;
+
+            card.appendChild(left);
+            card.appendChild(capsule);
+            cardList.appendChild(card);
         }
-        html += `</div>`;
+        frag.appendChild(cardList);
     }
-    list.innerHTML = html;
+
+    // Single DOM write — no re-render
+    list.innerHTML = '';
+    list.appendChild(frag);
+
+    // Event delegation — single listener on container (not per-button onclick)
+    list.onclick = function(e) {
+        const btn = e.target.closest('.ns-cap-btn');
+        if (!btn) return;
+        const catKey = btn.getAttribute('data-cat');
+        const val = btn.getAttribute('data-val');
+        if (catKey && val) handleChannelPrefChange(catKey, val);
+    };
 
     // ── Status card ──
     const allCats = groups.flatMap(g => g.items);
-    const activeCount = allCats.filter(c => (settings[c.key] || c.default) !== 'none').length;
-    const bothCount = allCats.filter(c => (settings[c.key] || c.default) === 'both').length;
-    const statusEl = document.getElementById('ns-status-card-content');
+    const activeCount = allCats.filter(c => (settings[c.key] || c.def) !== 'none').length;
+    const bothCount = allCats.filter(c => (settings[c.key] || c.def) === 'both').length;
+
     if (statusEl) {
-        let statusClass, statusIcon, statusTitle, statusDesc;
+        let statusClass, statusTitle, statusDesc;
         if (activeCount === 0) {
             statusClass = 'inactive';
-            statusIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
-            statusTitle = currentLang === 'fa' ? 'همه اعلان‌ها غیرفعال هستند' : 'All notifications disabled';
-            statusDesc = currentLang === 'fa' ? 'هیچ اعلانی دریافت نخواهید کرد' : 'You will not receive any notifications';
+            statusTitle = isFa ? 'همه اعلان‌ها غیرفعال هستند' : 'All notifications disabled';
+            statusDesc = isFa ? 'هیچ اعلانی دریافت نخواهید کرد' : 'You will not receive any notifications';
         } else if (bothCount >= 3) {
             statusClass = 'active';
-            statusIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
-            statusTitle = currentLang === 'fa' ? 'سیستم اعلان فعال است' : 'Notification system active';
-            statusDesc = currentLang === 'fa' ? `${activeCount} دسته فعال · ${bothCount} دسته روی هر دو کانال` : `${activeCount} active · ${bothCount} on both channels`;
+            statusTitle = isFa ? 'سیستم اعلان فعال است' : 'Notification system active';
+            statusDesc = isFa ? `${activeCount} دسته فعال · ${bothCount} روی هر دو کانال` : `${activeCount} active · ${bothCount} on both channels`;
         } else {
             statusClass = 'partial';
-            statusIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-            statusTitle = currentLang === 'fa' ? 'اعلان‌های مهم فعال هستند' : 'Important alerts active';
-            statusDesc = currentLang === 'fa' ? `${activeCount} از ${allCats.length} دسته فعال` : `${activeCount} of ${allCats.length} categories active`;
+            statusTitle = isFa ? 'اعلان‌های مهم فعال هستند' : 'Important alerts active';
+            statusDesc = isFa ? `${activeCount} از ${allCats.length} دسته فعال` : `${activeCount} of ${allCats.length} categories active`;
         }
-        statusEl.innerHTML = `
-            <div class="ns-status-icon-wrap ${statusClass}">${statusIcon}</div>
-            <div class="ns-status-info">
-                <div class="ns-status-title ${statusClass}">${statusTitle}</div>
-                <div class="ns-status-desc">${statusDesc}</div>
-            </div>
-        `;
+
+        const statusIcon = statusClass === 'active'
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
+            : statusClass === 'partial'
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+
+        // Use fragment for status too
+        const sFrag = document.createDocumentFragment();
+        const sIcon = document.createElement('div');
+        sIcon.className = `ns-status-icon-wrap ${statusClass}`;
+        sIcon.innerHTML = statusIcon;
+        const sInfo = document.createElement('div');
+        sInfo.className = 'ns-status-info';
+        sInfo.innerHTML = `<div class="ns-status-title ${statusClass}">${statusTitle}</div><div class="ns-status-desc">${statusDesc}</div>`;
+        sFrag.appendChild(sIcon);
+        sFrag.appendChild(sInfo);
+        statusEl.innerHTML = '';
+        statusEl.appendChild(sFrag);
     }
 }
 
@@ -7402,38 +7498,38 @@ function _defaultChannelSettings() {
     };
 }
 
-async function handleChannelPrefChange(catKey, val) {
-    // Update UI immediately — capsule buttons
-    const btns = document.querySelectorAll(`.ns-cap-btn[data-cat="${catKey}"]`);
+function handleChannelPrefChange(catKey, val) {
+    // Update cache
+    if (_nsSettingsCache) _nsSettingsCache[catKey] = val;
+
+    // Update UI — find capsule for this category
+    const capsule = document.querySelector(`.ns-capsule[data-cat="${catKey}"]`);
+    if (!capsule) return;
     const channelClasses = { none: 'off', mini_app: 'app', telegram: 'bot', both: 'both' };
-    btns.forEach(btn => {
+    capsule.querySelectorAll('.ns-cap-btn').forEach(btn => {
         const btnVal = btn.getAttribute('data-val');
+        btn.classList.remove('active', 'off', 'app', 'bot', 'both');
         if (btnVal === val) {
-            btn.classList.add('active');
-            btn.classList.add(channelClasses[val] || '');
-        } else {
-            btn.classList.remove('active', 'off', 'app', 'bot', 'both');
+            btn.classList.add('active', channelClasses[val] || '');
         }
     });
 
-    // Save to backend
-    try {
-        if (API_BASE && !UserContext.isGuest()) {
-            const updates = {};
-            updates[catKey] = val;
-            await apiFetch('/api/notifications/platform/settings', {
-                method: 'PUT',
-                body: JSON.stringify(updates),
-            });
-        }
-    } catch (e) { /* silent — UI already updated */ }
+    // Save to backend (fire-and-forget — no await for instant UI response)
+    if (API_BASE && !UserContext.isGuest()) {
+        const updates = {};
+        updates[catKey] = val;
+        apiFetch('/api/notifications/platform/settings', {
+            method: 'PUT',
+            body: JSON.stringify(updates),
+        }).catch(() => {});
+    }
 
     // Haptic feedback
     getTg()?.HapticFeedback?.impactOccurred?.('light');
 }
 
 async function handleNotifPrefChange(input) {
-    // Legacy — kept for backward compat, but new UI uses handleChannelPrefChange
+    // Legacy — kept for backward compat
 }
 
 function handleNotifSubscription() {
