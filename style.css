@@ -6248,66 +6248,202 @@ strong.down { color: var(--red); }
 }
 
 /* ============================================================================
-   1b. MARKET TICKER — auto-scrolling price strip (zero API calls)
+   1b. MARKET TICKER — Pro exchange-style horizontal price strip
+   Single horizontal row, infinite loop, GPU-friendly transform: translateX.
+   Each item: logo + symbol + price + 24h change% with colored arrow.
    ========================================================================== */
 .market-ticker {
     overflow: hidden;
     margin: 0 0 8px;
-    border-radius: 12px;
-    background: rgba(11, 18, 32, 0.6);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    height: 40px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(13, 20, 35, 0.85), rgba(9, 14, 26, 0.78));
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    height: 46px;
     display: flex;
     align-items: center;
+    position: relative;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
 }
+
+/* Edge fade mask — premium ticker feel (icons fade softly at the edges) */
+.market-ticker::before,
+.market-ticker::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 32px;
+    z-index: 2;
+    pointer-events: none;
+}
+.market-ticker::before {
+    left: 0;
+    background: linear-gradient(90deg, rgba(13, 20, 35, 0.95), rgba(13, 20, 35, 0));
+}
+.market-ticker::after {
+    right: 0;
+    background: linear-gradient(270deg, rgba(13, 20, 35, 0.95), rgba(13, 20, 35, 0));
+}
+
+.market-ticker-mask {
+    overflow: hidden;
+    flex: 1;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    /* Clip the track so the duplicated content scrolls out cleanly */
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+}
+
 .market-ticker-track {
     display: flex;
-    gap: 20px;
-    animation: ticker-scroll 40s linear infinite;
+    align-items: center;
+    /* CSS animation on `transform` only — GPU friendly, 60fps on mobile */
+    animation: ticker-scroll 48s linear infinite;
     white-space: nowrap;
     width: max-content;
-    padding: 0 12px;
+    padding: 0 14px;
     will-change: transform;
-    align-items: center;
+    /* Hardware acceleration hint — promotes to its own compositor layer */
+    transform: translate3d(0, 0, 0);
+    backface-visibility: hidden;
 }
+
 .market-ticker:hover .market-ticker-track {
     animation-play-state: paused;
 }
+
+/* Each ticker item — single horizontal flex row.
+   Logo + symbol + price + change% with arrow. */
 .market-ticker-item {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
+    gap: 7px;
+    padding: 0 14px;
+    height: 30px;
     flex-shrink: 0;
+    /* Subtle separator between items (kept inside padding so spacing is consistent) */
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    font-variant-numeric: tabular-nums;
 }
+.market-ticker-item:last-child {
+    border-right: none;
+}
+
+.market-ticker-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.04);
+    /* Subtle ring around the icon for premium feel */
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+}
+
 .market-ticker-symbol {
-    color: #A5B4C7;
-    letter-spacing: 0.3px;
+    color: #E8EDF2;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
 }
+
+.market-ticker-price {
+    color: #B8C3D2;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: -0.1px;
+    /* Allow natural line break of thousands separators on very narrow phones */
+    min-width: 0;
+}
+
 .market-ticker-change {
     display: inline-flex;
     align-items: center;
     gap: 2px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 6px;
+    line-height: 1;
+    flex-shrink: 0;
 }
-.market-ticker-change.up { color: #22C55E; }
-.market-ticker-change.down { color: #EF4444; }
 .market-ticker-change svg {
-    width: 8px;
-    height: 8px;
+    width: 9px;
+    height: 9px;
+    flex-shrink: 0;
 }
-@media (prefers-reduced-motion: reduce) {
-    .market-ticker-track { animation: none; }
+/* Up (positive): green */
+.market-ticker-change.up {
+    color: #16C784;
+    background: rgba(22, 199, 132, 0.10);
 }
+/* Down (negative): red */
+.market-ticker-change.down {
+    color: #EA3943;
+    background: rgba(234, 57, 67, 0.10);
+}
+/* Flat (≈0%): neutral grey/blue */
+.market-ticker-change.flat {
+    color: #8E9AAE;
+    background: rgba(142, 154, 174, 0.10);
+}
+
+/* Skeleton placeholder — shown on cold open until JS hydrates with real data */
+.market-ticker-skeleton {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    width: max-content;
+}
+.mtsk-pill {
+    width: 96px;
+    height: 18px;
+    border-radius: 8px;
+    background: linear-gradient(90deg,
+        rgba(255, 255, 255, 0.04) 0%,
+        rgba(255, 255, 255, 0.09) 50%,
+        rgba(255, 255, 255, 0.04) 100%);
+    background-size: 200% 100%;
+    animation: mtsk-shimmer 1.4s ease-in-out infinite;
+    flex-shrink: 0;
+}
+@keyframes mtsk-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
 @keyframes ticker-scroll {
-    0% { transform: translate3d(0, 0, 0); }
+    /* translateX(-50%) — track is duplicated 2x in JS, so -50% lands exactly
+       on the start of the second copy = seamless infinite loop. */
+    0%   { transform: translate3d(0, 0, 0); }
     100% { transform: translate3d(-50%, 0, 0); }
 }
+
+/* RTL — reverse scroll direction so motion matches reading direction */
 html[dir="rtl"] .market-ticker-track {
     animation-direction: reverse;
+}
+
+/* Reduced motion — keep content visible but static */
+@media (prefers-reduced-motion: reduce) {
+    .market-ticker-track { animation: none; }
+    .mtsk-pill { animation: none; background: rgba(255, 255, 255, 0.05); }
+}
+
+/* Small phones — slightly tighter spacing, smaller fonts */
+@media (max-width: 380px) {
+    .market-ticker { height: 42px; }
+    .market-ticker-item { padding: 0 10px; gap: 5px; }
+    .market-ticker-icon { width: 18px; height: 18px; }
+    .market-ticker-symbol,
+    .market-ticker-price { font-size: 11px; }
+    .market-ticker-change { font-size: 10px; padding: 2px 5px; }
+    .mtsk-pill { width: 80px; }
 }
 
 /* ============================================================================

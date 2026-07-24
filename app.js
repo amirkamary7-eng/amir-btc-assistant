@@ -3465,6 +3465,10 @@ async function loadMarketData(force = false) {
                 renderMarket();
                 renderWatchlist();
                 renderSummary();
+                // Re-render ticker from in-memory cache (signature guard skips
+                // the DOM rewrite if data is unchanged).
+                renderMarketTicker();
+                renderDashboardMarketStatus();
                 return;
             }
         }
@@ -3514,14 +3518,21 @@ async function loadMarketData(force = false) {
 
         if (!allCoins.length) throw new Error('No market data');
         Cache.set('market', allCoins, 120);
-        // Phase C: Persist market data to localStorage for instant watchlist render on cold start
+        // Phase C: Persist market data to localStorage for instant ticker render on cold start.
+        // MARKET_CACHE_VERSION must match the version read in DOMContentLoaded.
         // Defer cache write off the critical render path (2-5ms saved per market load)
-        requestIdleCallback?.(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(3)); localStorage.setItem('market_cache_ts', String(Date.now())); } catch(_) {} }) ?? setTimeout(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(3)); localStorage.setItem('market_cache_ts', String(Date.now())); } catch(_) {} }, 200);
+        requestIdleCallback?.(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(4)); localStorage.setItem('market_cache_ts', String(Date.now())); } catch(_) {} }) ?? setTimeout(() => { try { localStorage.setItem('market_data_cache', JSON.stringify(allCoins)); localStorage.setItem('market_cache_version', String(4)); localStorage.setItem('market_cache_ts', String(Date.now())); } catch(_) {} }, 200);
         lastMarketFetchTime = Date.now();
         renderMarket();
         renderWatchlist();
         renderSummary();
         renderMarketInsights();
+        // ALWAYS re-render ticker after a successful market load — this is the
+        // primary path that hydrates the ticker from cold-open (skeleton → real).
+        // The signature guard inside renderMarketTicker prevents needless DOM
+        // rewrites if the data is identical to what's already shown.
+        renderMarketTicker();
+        renderDashboardMarketStatus();
     } catch (e) {
         console.error('❌ Market load error:', e);
         if (listEl && !allCoins.length) {
@@ -7909,47 +7920,137 @@ function renderDashboardMarketStatus() {
 }
 
 /**
- * Market Ticker — auto-scrolling horizontal price strip.
- * Uses existing `allCoins` array (NO new API calls). Renders symbol + 24h change %
- * for top 10 coins, duplicated for seamless infinite scroll.
+ * Market Ticker — pro exchange-style auto-scrolling horizontal price strip.
+ *
+ * Each item shows: logo + symbol + price + 24h change% (with colored arrow).
+ * The track is duplicated 2x in the DOM so a `transform: translateX(-50%)`
+ * CSS animation produces a seamless infinite loop (the second copy lands
+ * exactly where the first one started).
+ *
+ * ROOT-CAUSE FIX (Task — Market Ticker redesign):
+ *   1. The previous implementation rendered immediately on DOMContentLoaded
+ *      with hard-coded FALLBACK coins that had ONLY symbol + changePercent24Hr=0.
+ *      No price, no logo → ticker looked empty/meaningless for the first few
+ *      seconds of every cold open.
+ *   2. Real market data was only fetched AFTER membership verification
+ *      completed (bootstrapUser → _startDataLoading), so the empty-fallback
+ *      state could persist for 2-5+ seconds.
+ *   3. Production Worker gates /api/market behind Telegram initData auth,
+ *      which is not available until the SDK is ready — so even eager
+ *      pre-fetching wouldn't help.
+ *
+ * FIX:
+ *   - Use the persistent `market_data_cache` in localStorage (5-min TTL)
+ *     to hydrate the ticker IMMEDIATELY on app start — no empty state.
+ *   - When no fresh cache exists, show a shimmering skeleton placeholder
+ *     (8 mtsk-pill elements) instead of meaningless 0.00% fallbacks.
+ *   - When real data arrives (after bootstrap), re-render with logos,
+ *     prices, and real change percentages. The signature guard prevents
+ *     needless DOM rewrites when the data hasn't actually changed.
+ *   - Format prices compactly ($118,245 / $3,845 / $0.0042) so the ticker
+ *     stays readable on narrow phones.
+ *
+ * Performance:
+ *   - Animation is pure CSS transform: translateX (GPU-only, 60fps on mobile).
+ *   - No JS rAF loop, no per-frame layout work.
+ *   - Signature guard skips innerHTML rewrite when data is unchanged — keeps
+ *     the existing animation running without restarts.
+ *   - Idempotent: calling renderMarketTicker() multiple times is safe.
  */
 let _tickerRendered = false;
 let _tickerSignature = '';
+let _tickerSkeletonCleared = false;
+
+function _formatTickerPrice(priceUsd) {
+    const p = Number(priceUsd);
+    if (!isFinite(p) || p === 0) return '--';
+    if (p >= 1000) {
+        // 118,245 — full thousands separator
+        return '$' + p.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    }
+    if (p >= 1) {
+        // 3,845.62 — 2 decimals
+        return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    if (p >= 0.01) {
+        // 0.42 — 4 decimals
+        return '$' + p.toFixed(4);
+    }
+    // Sub-cent: 0.000042 — 6 significant digits
+    return '$' + p.toFixed(6);
+}
+
+function _buildTickerItem(c) {
+    const sym = escapeHtml(c.symbol || '');
+    const pct = (typeof c.changePercent24Hr === 'number' && !isNaN(c.changePercent24Hr))
+        ? c.changePercent24Hr : 0;
+    const absPct = Math.abs(pct);
+    // "Flat" threshold: |pct| < 0.05% → neutral grey/blue
+    let cls = 'flat';
+    let arrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    if (absPct >= 0.05) {
+        if (pct > 0) {
+            cls = 'up';
+            arrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>';
+        } else {
+            cls = 'down';
+            arrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+        }
+    }
+    const changeStr = (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
+    const priceStr = _formatTickerPrice(c.priceUsd);
+    // Logo: prefer backend-provided image URL; fall back to coincap assets CDN;
+    // the <img onerror> swaps to a first-letter badge via iconFallback().
+    const imgSrc = c.image || `https://assets.coincap.io/assets/icons/${String(c.symbol || '').toLowerCase()}@2x.png`;
+    return `<div class="market-ticker-item">`
+        + `<img class="market-ticker-icon" src="${escapeHtml(imgSrc)}" alt="${sym}" loading="lazy" decoding="async" data-symbol="${sym}" onerror="iconFallback(this)">`
+        + `<span class="market-ticker-symbol">${sym}</span>`
+        + `<span class="market-ticker-price">${priceStr}</span>`
+        + `<span class="market-ticker-change ${cls}">${arrowSvg}${changeStr}</span>`
+        + `</div>`;
+}
+
 function renderMarketTicker() {
     const track = $('market-ticker-track');
     if (!track) return;
-    if (!Array.isArray(allCoins) || !allCoins.length) return;
 
-    // Take top 20 coins for ticker (allCoins is already ordered by rank from API)
+    // No data at all → keep skeleton (skeleton is in DOM by default; re-add if
+    // a previous render cleared it and we lost the data somehow).
+    if (!Array.isArray(allCoins) || !allCoins.length) {
+        if (!_tickerSkeletonCleared) return; // skeleton already in DOM
+        // Restore skeleton
+        track.classList.remove('visible');
+        track.innerHTML = `<div class="market-ticker-skeleton" id="market-ticker-skeleton">`
+            + Array(8).fill('<span class="mtsk-pill"></span>').join('')
+            + `</div>`;
+        track.style.animation = 'none';
+        _tickerSkeletonCleared = false;
+        _tickerSignature = '';
+        return;
+    }
+
+    // Take top 20 coins (allCoins is already ordered by rank from API)
     const tickerCoins = allCoins.slice(0, 20);
     if (!tickerCoins.length) return;
 
-    // BUG 3 FIX: re-render whenever the data actually changes.
-    // Previously this rendered exactly ONCE (guarded by _tickerRendered) and never
-    // updated, so the ticker permanently showed stale cached or fallback 0.00%
-    // values. Now we compare a signature of symbol+24h-change and only rebuild
-    // the DOM when something changed — this keeps the CSS infinite-scroll
-    // animation running when data is unchanged while guaranteeing the displayed
-    // % is always the real, fresh 24h change.
-    const sig = tickerCoins.map(c => `${c.symbol}:${(Number(c.changePercent24Hr) || 0).toFixed(2)}`).join('|');
-    if (sig === _tickerSignature) return;
+    // Signature guard — skip innerHTML rewrite when data hasn't changed.
+    // This keeps the CSS animation running smoothly without restarts.
+    const sig = tickerCoins.map(c =>
+        `${c.symbol}:${(Number(c.changePercent24Hr) || 0).toFixed(2)}:${(Number(c.priceUsd) || 0).toFixed(4)}:${c.image ? '1' : '0'}`
+    ).join('|');
+    if (sig === _tickerSignature && _tickerRendered) return;
     _tickerSignature = sig;
 
-    const buildItem = (c) => {
-        const sym = escapeHtml(c.symbol || '');
-        const pct = (typeof c.changePercent24Hr === 'number' && !isNaN(c.changePercent24Hr)) ? c.changePercent24Hr : 0;
-        const isPos = pct >= 0;
-        const changeStr = (isPos ? '+' : '') + pct.toFixed(2) + '%';
-        const arrowSvg = isPos
-            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>'
-            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
-        return `<div class="market-ticker-item"><span class="market-ticker-symbol">${sym}</span><span class="market-ticker-change ${isPos ? 'up' : 'down'}">${arrowSvg}${changeStr}</span></div>`;
-    };
+    // Build items. Duplicate TWICE so the track is exactly 2 copies wide —
+    // this lets the CSS `translateX(-50%)` animation loop seamlessly.
+    const itemsHtml = tickerCoins.map(_buildTickerItem).join('');
+    track.innerHTML = itemsHtml + itemsHtml;
 
-    // Duplicate the list TWICE for seamless infinite scroll (3x copy = smooth loop)
-    const items = tickerCoins.map(buildItem).join('');
-    track.innerHTML = items + items + items;
-    _tickerRendered = true; // kept for backward-compat; _tickerSignature is the real guard now
+    // Re-enable animation (in case it was disabled by skeleton state)
+    track.style.animation = '';
+
+    _tickerRendered = true;
+    _tickerSkeletonCleared = true;
 }
 
 /**
@@ -8586,8 +8687,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (st) st.innerHTML = '<div class="slider-skeleton"><div class="slider-skeleton-img"></div><div class="slider-skeleton-text"><div class="slider-skeleton-line"></div><div class="slider-skeleton-line"></div><div class="slider-skeleton-line"></div></div></div>';
     }
 
-    // Phase C: Load cached market data for instant ticker render
-    const MARKET_CACHE_VERSION = 3;
+    // Phase C: Load cached market data for INSTANT ticker render.
+    // ROOT-CAUSE FIX (Market Ticker redesign): Previously the code loaded the
+    // cache AND fell back to hard-coded `{ symbol: 'BTC', changePercent24Hr: 0 }`
+    // coins when no cache existed. Those fallbacks had no price, no logo, just
+    // symbol + 0.00% — so the ticker looked empty/meaningless for the first
+    // few seconds of every cold open.
+    //
+    // NEW behavior:
+    //   - If a fresh cache exists → hydrate allCoins from it → render ticker.
+    //   - If no cache (cold open) → leave allCoins empty → ticker shows the
+    //     shimmering skeleton placeholder from index.html (mtsk-pill elements).
+    //     Real data arrives via bootstrapUser → _startDataLoading → loadMarketData,
+    //     then renderMarketTicker replaces the skeleton with real items.
+    const MARKET_CACHE_VERSION = 4; // bumped — old cache lacked priceUsd in some entries
     const MARKET_CACHE_TTL_MS = 5 * 60 * 1000;
     try {
         const cachedVersion = parseInt(localStorage.getItem('market_cache_version') || '0', 10);
@@ -8596,27 +8709,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         const isFresh = cachedTs && (Date.now() - cachedTs) < MARKET_CACHE_TTL_MS;
         if (Array.isArray(cachedMarket) && cachedMarket.length && cachedVersion >= MARKET_CACHE_VERSION && isFresh) {
             allCoins = cachedMarket;
+            console.log('[MARKET] Hydrated ticker from localStorage cache:', cachedMarket.length, 'coins');
         } else {
+            // Stale or wrong-version cache → clear it
             localStorage.removeItem('market_data_cache');
             localStorage.removeItem('market_cache_ts');
+            localStorage.removeItem('market_cache_version');
+            // allCoins stays empty — ticker shows skeleton until real data arrives
         }
-    } catch(_) {}
-
-    // Render ticker IMMEDIATELY — from cache if available, else with fallback coins
-    if (!allCoins.length) {
-        allCoins = [
-            { symbol: 'BTC', changePercent24Hr: 0 }, { symbol: 'ETH', changePercent24Hr: 0 },
-            { symbol: 'SOL', changePercent24Hr: 0 }, { symbol: 'BNB', changePercent24Hr: 0 },
-            { symbol: 'XRP', changePercent24Hr: 0 }, { symbol: 'DOGE', changePercent24Hr: 0 },
-            { symbol: 'ADA', changePercent24Hr: 0 }, { symbol: 'TRX', changePercent24Hr: 0 },
-            { symbol: 'LINK', changePercent24Hr: 0 }, { symbol: 'AVAX', changePercent24Hr: 0 },
-            { symbol: 'SUI', changePercent24Hr: 0 }, { symbol: 'TON', changePercent24Hr: 0 },
-            { symbol: 'DOT', changePercent24Hr: 0 }, { symbol: 'ATOM', changePercent24Hr: 0 },
-            { symbol: 'HBAR', changePercent24Hr: 0 }, { symbol: 'APT', changePercent24Hr: 0 },
-            { symbol: 'NEAR', changePercent24Hr: 0 }, { symbol: 'LTC', changePercent24Hr: 0 },
-            { symbol: 'BCH', changePercent24Hr: 0 }, { symbol: 'PEPE', changePercent24Hr: 0 },
-        ];
+    } catch(_) {
+        // Bad cache JSON — ignore, skeleton will show
     }
+
+    // Render ticker IMMEDIATELY — from cache if available, else skeleton shows.
+    // NO more hard-coded fallback coins: the skeleton placeholder (in index.html)
+    // is shown when allCoins is empty, and it's replaced the moment real data
+    // arrives from the API.
     renderMarketTicker();
     renderDashboardMarketStatus();
 

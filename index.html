@@ -154,9 +154,24 @@
             </div>
         </div>
 
-        <!-- 1b. Market Ticker — auto-scrolling price strip (zero API calls) -->
-        <div class="market-ticker" id="market-ticker">
-            <div class="market-ticker-track" id="market-ticker-track"></div>
+        <!-- 1b. Market Ticker — auto-scrolling horizontal price strip.
+             Pro exchange-style ticker: logo + symbol + price + 24h change%.
+             Renders instantly from cache on app load; skeleton placeholder
+             when no cache; never empty. Single horizontal row, infinite loop,
+             GPU-friendly transform: translateX. -->
+        <div class="market-ticker" id="market-ticker" role="marquee" aria-live="off" aria-label="Market prices ticker">
+            <div class="market-ticker-mask">
+                <div class="market-ticker-track" id="market-ticker-track">
+                    <!-- Skeleton placeholder shown until JS hydrates with cache or fetch result.
+                         Never blank — even on cold open the user sees 8 shimmering cards. -->
+                    <div class="market-ticker-skeleton" id="market-ticker-skeleton">
+                        <span class="mtsk-pill"></span><span class="mtsk-pill"></span>
+                        <span class="mtsk-pill"></span><span class="mtsk-pill"></span>
+                        <span class="mtsk-pill"></span><span class="mtsk-pill"></span>
+                        <span class="mtsk-pill"></span><span class="mtsk-pill"></span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 2. Market Status (Fear & Greed + Market Trend) -->
