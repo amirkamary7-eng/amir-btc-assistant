@@ -1580,6 +1580,10 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
                             <span>مرکز پاداش</span>
                         </button>
+                        <button class="adm-nav-item" data-admin-section="notification-center" onclick="switchAdminSection('notification-center', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                            <span>مرکز اعلانات</span>
+                        </button>
                         <button class="adm-nav-item" data-admin-section="system-controls" onclick="switchAdminSection('system-controls', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             <span>کنترل سیستم</span>
@@ -2036,6 +2040,38 @@
                     </div>
                     <div class="rc-tab-content" id="rc-tab-settings" style="display:none;">
                         <div id="rc-settings-section"></div>
+                    </div>
+                </section>
+
+                <!-- Notification Center Section -->
+                <section class="adm-section" id="admin-section-notification-center">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">مرکز اعلانات</h3>
+                            <p class="adm-section-desc">مدیریت یکپارچه اعلان‌ها، پیام‌ها و broadcast</p>
+                        </div>
+                    </div>
+
+                    <!-- Sub-navigation tabs -->
+                    <div class="rc-tabs" id="np-tabs">
+                        <button class="rc-tab active" data-np-tab="overview" onclick="switchNotificationTab('overview', this)">داشبورد</button>
+                        <button class="rc-tab" data-np-tab="broadcast" onclick="switchNotificationTab('broadcast', this)">ارسال همگانی</button>
+                        <button class="rc-tab" data-np-tab="templates" onclick="switchNotificationTab('templates', this)">قالب‌ها</button>
+                        <button class="rc-tab" data-np-tab="analytics" onclick="switchNotificationTab('analytics', this)">تحلیل‌ها</button>
+                    </div>
+
+                    <!-- Tab content containers -->
+                    <div class="rc-tab-content" id="np-tab-overview">
+                        <div id="np-overview-grid" class="rc-overview-grid"><div class="admin-empty">در حال بارگذاری...</div></div>
+                    </div>
+                    <div class="rc-tab-content" id="np-tab-broadcast" style="display:none;">
+                        <div id="np-broadcast-section"></div>
+                    </div>
+                    <div class="rc-tab-content" id="np-tab-templates" style="display:none;">
+                        <div id="np-templates-section"></div>
+                    </div>
+                    <div class="rc-tab-content" id="np-tab-analytics" style="display:none;">
+                        <div id="np-analytics-section"></div>
                     </div>
                 </section>
             </main>

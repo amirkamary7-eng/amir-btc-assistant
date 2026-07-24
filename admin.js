@@ -148,6 +148,7 @@ const _adminSectionLabels = {
     'transactions': 'تراکنش‌ها',
     'referrals': 'رفرال',
     'reward-center': 'مرکز پاداش',
+    'notification-center': 'مرکز اعلانات',
     'system-controls': 'کنترل سیستم',
     'system-health': 'سلامت سیستم',
     'logs': 'لاگ‌ها',
@@ -271,6 +272,7 @@ function switchAdminSection(section, btn) {
         case 'transactions': loadAdminTransactions(1); break;
         case 'referrals': loadAdminReferrals(); break;
         case 'reward-center': loadRewardCenterOverview(); break;
+        case 'notification-center': loadNpOverview(); break;
         case 'system-controls': loadMaintenanceSettings(); break;
         case 'system-health': loadAdminSystemHealth(); break;
         case 'logs': loadAdminLogs(1); break;
@@ -2003,3 +2005,149 @@ async function saveRcEmergency() {
 window.saveRcEmergency = saveRcEmergency;
 
 window.loadRewardCenterOverview = loadRewardCenterOverview;
+
+// ════════════════════════════════════════════════════════════════════
+// NOTIFICATION PLATFORM — Admin notification management
+// ════════════════════════════════════════════════════════════════════
+
+function switchNotificationTab(tab, btn) {
+    document.querySelectorAll('#np-tabs .rc-tab').forEach(function (t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    else { const t = document.querySelector('#np-tabs .rc-tab[data-np-tab="' + tab + '"]'); if (t) t.classList.add('active'); }
+    document.querySelectorAll('#admin-section-notification-center .rc-tab-content').forEach(function (c) { c.style.display = 'none'; });
+    const active = document.getElementById('np-tab-' + tab);
+    if (active) active.style.display = '';
+    switch (tab) {
+        case 'overview': loadNpOverview(); break;
+        case 'broadcast': loadNpBroadcast(); break;
+        case 'templates': loadNpTemplates(); break;
+        case 'analytics': loadNpAnalytics(); break;
+    }
+}
+window.switchNotificationTab = switchNotificationTab;
+
+async function loadNpOverview() {
+    const grid = document.getElementById('np-overview-grid');
+    if (!grid) return;
+    grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/notifications/analytics?range=7d');
+        if (data && data.status === 'success' && data.analytics) {
+            const a = data.analytics;
+            const catRows = (a.by_category || []).map(function (c) { return '<div class="rc-stat-card"><div class="rc-stat-val">' + adminFormatNumber(c.count) + '</div><div class="rc-stat-lbl">' + adminEscapeHtml(c.category) + '</div></div>'; }).join('');
+            grid.innerHTML = `
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_sent)}</div><div class="rc-stat-lbl">کل اعلان‌ها (۷ روز)</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_unread)}</div><div class="rc-stat-lbl">خوانده نشده</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.today_count)}</div><div class="rc-stat-lbl">اعلان امروز</div></div>
+                ${catRows || '<div class="rc-stat-card"><div class="rc-stat-val">--</div><div class="rc-stat-lbl">داده‌ای نیست</div></div>'}
+            `;
+        } else { grid.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>'; }
+    } catch (e) { grid.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>'; console.error(e); }
+}
+window.loadNpOverview = loadNpOverview;
+
+async function loadNpBroadcast() {
+    const section = document.getElementById('np-broadcast-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/notifications/broadcasts?limit=20');
+        let rows = '';
+        if (data && data.status === 'success' && Array.isArray(data.broadcasts)) {
+            rows = data.broadcasts.map(function (b) {
+                return '<tr><td>' + adminEscapeHtml(b.title) + '</td><td>' + adminEscapeHtml(b.category) + '</td><td>' + adminEscapeHtml(b.priority) + '</td><td>' + adminFormatNumber(b.total_sent) + '</td><td>' + adminEscapeHtml(b.status) + '</td><td>' + (b.status === 'pending' ? '<button class="adm-btn-sm" onclick="sendNpBroadcast(' + b.id + ')">ارسال</button>' : '--') + '</td></tr>';
+            }).join('');
+        }
+        section.innerHTML = `
+            <div class="rc-card">
+                <h4 class="rc-card-title">ارسال همگانی جدید</h4>
+                <div class="rc-form-grid">
+                    <div class="rc-field"><label>عنوان</label><input type="text" id="np-bc-title" placeholder="اطلاعیه مهم"></div>
+                    <div class="rc-field"><label>دسته</label><select id="np-bc-category"><option value="announcement">اطلاعیه</option><option value="system">سیستم</option><option value="market">بازار</option><option value="news">خبر</option></select></div>
+                    <div class="rc-field"><label>اولویت</label><select id="np-bc-priority"><option value="low">پایین</option><option value="medium" selected>متوسط</option><option value="high">بالا</option><option value="critical">بحرانی</option></select></div>
+                    <div class="rc-field"><label>کانال</label><select id="np-bc-channel"><option value="mini_app">Mini App</option><option value="telegram">Telegram Bot</option><option value="both">هر دو</option></select></div>
+                    <div class="rc-field"><label>هدف</label><select id="np-bc-target"><option value="all">همه</option><option value="active">فعال</option></select></div>
+                </div>
+                <div class="rc-field" style="margin-top:10px;"><label>پیام</label><textarea id="np-bc-message" rows="3" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:9px;padding:8px 10px;color:#FFF;font-size:13px;font-family:inherit;" placeholder="متن پیام..."></textarea></div>
+                <button class="adm-btn adm-btn-primary" onclick="createNpBroadcast()" style="margin-top:10px;">ارسال</button>
+            </div>
+            <div class="rc-card" style="margin-top:16px;">
+                <h4 class="rc-card-title">تاریخچه ارسال‌ها</h4>
+                <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>عنوان</th><th>دسته</th><th>اولویت</th><th>ارسال شده</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">رکوردی موجود نیست</td></tr>'}</tbody></table></div>
+            </div>
+        `;
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadNpBroadcast = loadNpBroadcast;
+
+async function createNpBroadcast() {
+    const payload = {
+        title: document.getElementById('np-bc-title')?.value,
+        message: document.getElementById('np-bc-message')?.value,
+        category: document.getElementById('np-bc-category')?.value,
+        priority: document.getElementById('np-bc-priority')?.value,
+        channel: document.getElementById('np-bc-channel')?.value,
+        target_type: document.getElementById('np-bc-target')?.value,
+    };
+    try {
+        const data = await apiFetch('/api/admin/notifications/broadcasts', { method: 'POST', body: JSON.stringify(payload) });
+        if (data && data.status === 'success') { adminToast('ارسال شد: ' + (data.sent || 0) + ' کاربر', 'success'); loadNpBroadcast(); }
+        else { adminToast('خطا در ارسال', 'error'); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.createNpBroadcast = createNpBroadcast;
+
+async function sendNpBroadcast(id) {
+    try {
+        const data = await apiFetch('/api/admin/notifications/broadcasts/' + id + '/send', { method: 'POST' });
+        if (data && data.status === 'success') { adminToast('ارسال شد: ' + (data.sent || 0) + ' کاربر', 'success'); loadNpBroadcast(); }
+    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+}
+window.sendNpBroadcast = sendNpBroadcast;
+
+async function loadNpTemplates() {
+    const section = document.getElementById('np-templates-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/notifications/templates');
+        let rows = '';
+        if (data && data.status === 'success' && Array.isArray(data.templates)) {
+            rows = data.templates.map(function (t) {
+                return '<tr><td>' + adminEscapeHtml(t.key) + '</td><td>' + adminEscapeHtml(t.category) + '</td><td>' + adminEscapeHtml(t.priority) + '</td><td>' + adminEscapeHtml(t.channel) + '</td><td>' + (t.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>') + '</td></tr>';
+            }).join('');
+        }
+        section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">قالب‌های اعلان</h4><div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>کلید</th><th>دسته</th><th>اولویت</th><th>کانال</th><th>وضعیت</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5" class="admin-empty">قالبی موجود نیست</td></tr>') + '</tbody></table></div></div>';
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadNpTemplates = loadNpTemplates;
+
+async function loadNpAnalytics() {
+    const section = document.getElementById('np-analytics-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await apiFetch('/api/admin/notifications/analytics?range=30d');
+        if (data && data.status === 'success' && data.analytics) {
+            const a = data.analytics;
+            const catRows = (a.by_category || []).map(function (c) { return '<tr><td>' + adminEscapeHtml(c.category) + '</td><td>' + adminFormatNumber(c.count) + '</td></tr>'; }).join('');
+            const priRows = (a.by_priority || []).map(function (p) { return '<tr><td>' + adminEscapeHtml(p.priority) + '</td><td>' + adminFormatNumber(p.count) + '</td></tr>'; }).join('');
+            section.innerHTML = `
+                <div class="rc-overview-grid">
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_sent)}</div><div class="rc-stat-lbl">کل (۳۰ روز)</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_unread)}</div><div class="rc-stat-lbl">خوانده نشده</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.today_count)}</div><div class="rc-stat-lbl">امروز</div></div>
+                </div>
+                <div class="rc-card" style="margin-top:16px;">
+                    <h4 class="rc-card-title">بر اساس دسته</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>دسته</th><th>تعداد</th></tr></thead><tbody>${catRows || '<tr><td colspan="2" class="admin-empty">داده‌ای نیست</td></tr>'}</tbody></table></div>
+                </div>
+                <div class="rc-card" style="margin-top:16px;">
+                    <h4 class="rc-card-title">بر اساس اولویت</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>اولویت</th><th>تعداد</th></tr></thead><tbody>${priRows || '<tr><td colspan="2" class="admin-empty">داده‌ای نیست</td></tr>'}</tbody></table></div>
+                </div>
+            `;
+        }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+}
+window.loadNpAnalytics = loadNpAnalytics;

@@ -27,6 +27,8 @@ import { createAdminRepository } from './src/repositories/admin.js';
 import { createAdminHandlers } from './src/controllers/admin.js';
 import { createRewardCenterRepository } from './src/repositories/reward_center.js';
 import { createRewardCenterHandlers } from './src/controllers/reward_center.js';
+import { createNotificationPlatformRepository } from './src/repositories/notification_platform.js';
+import { createNotificationPlatformHandlers } from './src/controllers/notification_platform.js';
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 
 /**
@@ -2744,6 +2746,28 @@ const rewardCenterHandlers = createRewardCenterHandlers({
 });
 //#endregion
 
+// ── Notification Platform ──
+const notificationPlatformRepo = createNotificationPlatformRepository({
+  queryDb,
+  isDatabaseConfigured,
+  isoDate: _rcIsoDate,
+  normalizeOptionalString,
+});
+const notificationPlatformHandlers = createNotificationPlatformHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  requireAdmin: adminHandlers.requireAdmin,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  buildBodyFieldValidationError,
+  notificationPlatformRepo,
+  sendTelegramMessage,
+  adminRepo,
+});
+//#endregion
+
 // ── Market Overview Service (CMC) — all CMC calls centralized here ──
 const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCache, fetchJson });
 
@@ -4557,6 +4581,74 @@ export default {
       if (request.method === 'POST' && /^\/api\/notifications\/[^/]+\/read$/u.test(url.pathname)) {
         const notificationId = url.pathname.split('/')[3] || '';
         return await notificationHandlers.handleMarkRead(request, env, notificationId);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // NOTIFICATION PLATFORM — unified notification system
+      // ─────────────────────────────────────────────────────────────
+
+      // User: list notifications (with filter/search/pagination)
+      if (request.method === 'GET' && url.pathname === '/api/notifications/platform/list') {
+        return await notificationPlatformHandlers.handleList(request, env);
+      }
+      // User: unread count
+      if (request.method === 'GET' && url.pathname === '/api/notifications/platform/unread-count') {
+        return await notificationPlatformHandlers.handleUnreadCount(request, env);
+      }
+      // User: mark single notification as read
+      if (request.method === 'POST' && /^\/api\/notifications\/platform\/[^/]+\/read$/.test(url.pathname)) {
+        const notifId = url.pathname.split('/').pop();
+        return await notificationPlatformHandlers.handleMarkRead(request, env, notifId);
+      }
+      // User: mark all as read
+      if (request.method === 'POST' && url.pathname === '/api/notifications/platform/read-all') {
+        return await notificationPlatformHandlers.handleMarkAllRead(request, env);
+      }
+      // User: archive notification
+      if (request.method === 'POST' && /^\/api\/notifications\/platform\/[^/]+\/archive$/.test(url.pathname)) {
+        const notifId = url.pathname.split('/')[4];
+        return await notificationPlatformHandlers.handleArchive(request, env, notifId);
+      }
+      // User: delete notification
+      if (request.method === 'DELETE' && /^\/api\/notifications\/platform\/[^/]+$/.test(url.pathname)) {
+        const notifId = url.pathname.split('/').pop();
+        return await notificationPlatformHandlers.handleDelete(request, env, notifId);
+      }
+      // User: get notification settings
+      if (request.method === 'GET' && url.pathname === '/api/notifications/platform/settings') {
+        return await notificationPlatformHandlers.handleGetSettings(request, env);
+      }
+      // User: update notification settings
+      if (request.method === 'PUT' && url.pathname === '/api/notifications/platform/settings') {
+        return await notificationPlatformHandlers.handleUpdateSettings(request, env);
+      }
+
+      // Admin: notification analytics
+      if (request.method === 'GET' && url.pathname === '/api/admin/notifications/analytics') {
+        return await notificationPlatformHandlers.handleAdminAnalytics(request, env);
+      }
+      // Admin: templates CRUD
+      if (request.method === 'GET' && url.pathname === '/api/admin/notifications/templates') {
+        return await notificationPlatformHandlers.handleListTemplates(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/notifications/templates') {
+        return await notificationPlatformHandlers.handleCreateTemplate(request, env);
+      }
+      if (/^\/api\/admin\/notifications\/templates\/\d+$/.test(url.pathname)) {
+        const tplId = url.pathname.split('/').pop();
+        if (request.method === 'PUT' || request.method === 'PATCH') return await notificationPlatformHandlers.handleUpdateTemplate(request, env, tplId);
+        if (request.method === 'DELETE') return await notificationPlatformHandlers.handleDeleteTemplate(request, env, tplId);
+      }
+      // Admin: broadcasts
+      if (request.method === 'GET' && url.pathname === '/api/admin/notifications/broadcasts') {
+        return await notificationPlatformHandlers.handleListBroadcasts(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/notifications/broadcasts') {
+        return await notificationPlatformHandlers.handleCreateBroadcast(request, env);
+      }
+      if (request.method === 'POST' && /^\/api\/admin\/notifications\/broadcasts\/\d+\/send$/.test(url.pathname)) {
+        const bId = url.pathname.split('/')[5];
+        return await notificationPlatformHandlers.handleProcessBroadcast(request, env, bId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
