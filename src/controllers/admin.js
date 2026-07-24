@@ -24,6 +24,7 @@ export function createAdminHandlers(deps) {
     normalizeOptionalString,
     adminRepo,
     notificationRepo,
+    notificationPlatformRepo,
     diagLog,
   } = deps;
 
@@ -482,27 +483,19 @@ export function createAdminHandlers(deps) {
       try {
         const ownerId = String(ticketInfo.user_id);
         const ownerIdNum = Number(ownerId);
-        // CRITICAL FIX: Check if user has ticket notifications enabled
-        if (notificationRepo) {
-          const ticketEnabled = await notificationRepo.isPreferenceEnabled(env, ownerId, 'ticket');
-          if (ticketEnabled) {
-            // Create in-app notification
-            await notificationRepo.create(env, ownerId, 'ticket',
-              `💬 پاسخ تیکت: ${ticketInfo.title || ''}`,
-              message,
-              { ticket_id: ticketId, title: ticketInfo.title }
-            ).catch(() => {});
-            // Send Telegram message
-            if (Number.isFinite(ownerIdNum)) {
-              await sendTelegramMessage(env, {
-                chat_id: ownerIdNum,
-                text: `💬 پاسخ تیکت: ${ticketInfo.title || ''}\n\n${message}`,
-                disable_web_page_preview: true,
-              });
-            }
-          }
+        // Send ticket reply notification via Notification Platform (single entry point)
+        if (notificationPlatformRepo) {
+          await notificationPlatformRepo.dispatch(env, {
+            userId: ownerId,
+            category: 'system',
+            priority: 'medium',
+            channel: 'both',
+            title: `💬 پاسخ تیکت: ${ticketInfo.title || ''}`,
+            message,
+            metadata: { ticket_id: String(ticketId), title: ticketInfo.title || '' },
+          }).catch(() => {});
         } else if (Number.isFinite(ownerIdNum)) {
-          // Fallback: no notificationRepo, just send Telegram
+          // Fallback: no notificationPlatformRepo, just send Telegram
           await sendTelegramMessage(env, {
             chat_id: ownerIdNum,
             text: `💬 پاسخ تیکت: ${ticketInfo.title || ''}\n\n${message}`,

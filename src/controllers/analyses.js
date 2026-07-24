@@ -25,6 +25,7 @@ export function createAnalysisHandlers(deps) {
     writeAppCache,
     analysisRepo,
     notificationRepo,
+    notificationPlatformRepo,
     sendTelegramMessage,
     resolveWebAppUrl,
     queryDb,
@@ -484,38 +485,25 @@ export function createAnalysisHandlers(deps) {
       const userIds = await notificationRepo.filterUsersByPreference(env, allUserIds, 'analysis');
       if (userIds.length === 0) return;
 
-      // Create in-app notifications (batch)
-      await notificationRepo.createBulk(env, userIds, 'analysis', title, message, {
-        analysis_id: analysis.id,
-        coin: analysis.coin,
-      });
-
-      const webAppUrl = resolveWebAppUrl ? resolveWebAppUrl(env, { cacheBust: true }) : '';
-      if (!webAppUrl) return;
-
-      // Send Telegram messages with a hard timeout of 20 seconds total
-      const NOTIFY_TIMEOUT_MS = 20000;
-      const startTime = Date.now();
-      let sent = 0;
-      for (const uid of userIds) {
-        if (Date.now() - startTime > NOTIFY_TIMEOUT_MS) {
-          console.warn('notifyNewAnalysis: timeout reached, sent', sent, 'of', userIds.length);
-          break;
+      // Send via Notification Platform (single entry point — handles settings, templates, queue, telegram)
+      if (notificationPlatformRepo) {
+        const NOTIFY_TIMEOUT_MS = 20000;
+        const startTime = Date.now();
+        for (const uid of userIds) {
+          if (Date.now() - startTime > NOTIFY_TIMEOUT_MS) {
+            console.warn('notifyNewAnalysis: timeout reached');
+            break;
+          }
+          await notificationPlatformRepo.dispatch(env, {
+            userId: uid,
+            templateKey: 'analysis_published',
+            category: 'news',
+            priority: 'medium',
+            channel: 'both',
+            metadata: { coin: analysis.coin, name: analysis.title || '' },
+            title, message,
+          }).catch(() => {});
         }
-        try {
-          await sendTelegramMessage(env, {
-            chat_id: Number(uid),
-            text: `${title}\n${message}`,
-            disable_web_page_preview: true,
-            reply_markup: {
-              inline_keyboard: [[{
-                text: 'مشاهده تحلیل 🚀',
-                web_app: { url: webAppUrl },
-              }]],
-            },
-          });
-          sent++;
-        } catch { /* skip */ }
       }
     } catch (err) {
       console.warn(safeError('notify-new-analysis', err));

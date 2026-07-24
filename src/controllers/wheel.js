@@ -14,6 +14,7 @@ export function createWheelHandlers(deps) {
     wheelRepo,
     economyService,
     rewardCenterRepo,
+    notificationPlatformRepo,
   } = deps;
 
   /**
@@ -128,6 +129,18 @@ export function createWheelHandlers(deps) {
         } catch (e) {
           // If reward fails (e.g. already granted — idempotent), still return the spin result
           console.warn('Wheel reward grant failed:', e.message);
+        }
+
+        // Dispatch notification via Notification Platform (single entry point)
+        if (notificationPlatformRepo) {
+          await notificationPlatformRepo.dispatch(env, {
+            userId: authState.user.id,
+            templateKey: 'wheel_reward',
+            category: 'wheel',
+            priority: 'high',
+            channel: 'mini_app',
+            metadata: { amount: String(spinResult.reward.amount), name: spinResult.reward.label || 'Wheel' },
+          }).catch(() => {});
         }
       }
 

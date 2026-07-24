@@ -1239,27 +1239,27 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       [Number(referralId)],
     );
 
-  // Send referral + reward notifications to the inviter
-  if (notificationRepo) {
+  // Send referral + reward notifications via Notification Platform (single entry point)
+  if (notificationPlatformRepo) {
     try {
       // Referral notification (new referral created)
-      const refEnabled = await notificationRepo.isPreferenceEnabled(env, inviterId, 'referral');
-      if (refEnabled) {
-        await notificationRepo.create(env, inviterId, 'referral',
-          `🎯 دعوت جدید`,
-          `کاربر ${String(inviteeId)} با لینک دعوت شما وارد شد.`,
-          { invitee_id: String(inviteeId), referral_id: referralId }
-        ).catch(() => {});
-      }
+      await notificationPlatformRepo.dispatch(env, {
+        userId: inviterId,
+        templateKey: 'referral_new_invite',
+        category: 'referral',
+        priority: 'medium',
+        channel: 'mini_app',
+        metadata: { invitee_id: String(inviteeId), referral_id: String(referralId) },
+      }).catch(() => {});
       // Reward notification (tokens credited)
-      const rewardEnabled = await notificationRepo.isPreferenceEnabled(env, inviterId, 'reward');
-      if (rewardEnabled) {
-        await notificationRepo.create(env, inviterId, 'reward',
-          `💎 پاداش رفرال`,
-          `${amount} AB Token به عنوان پاداش دعوت به کیف پول شما اضافه شد.`,
-          { amount, referral_id: referralId, invitee_id: String(inviteeId) }
-        ).catch(() => {});
-      }
+      await notificationPlatformRepo.dispatch(env, {
+        userId: inviterId,
+        templateKey: 'referral_reward',
+        category: 'referral',
+        priority: 'high',
+        channel: 'both',
+        metadata: { amount: String(amount), referral_id: String(referralId), invitee_id: String(inviteeId) },
+      }).catch(() => {});
     } catch { /* notification failure should not break reward */ }
   }
   } catch (err) {
@@ -2599,6 +2599,15 @@ const rewardCenterRepo = createRewardCenterRepository({
   normalizeOptionalString,
 });
 
+// ── Notification Platform repository (needed by wheel + analysis + referral) ──
+// Must be created BEFORE wheelHandlers since handleSpin dispatches notifications.
+const notificationPlatformRepo = createNotificationPlatformRepository({
+  queryDb,
+  isDatabaseConfigured,
+  isoDate: _rcIsoDate,
+  normalizeOptionalString,
+});
+
 const wheelRepo = createWheelRepository({ queryDb, queryDbTransaction });
 const wheelHandlers = createWheelHandlers({
   jsonResponse,
@@ -2609,6 +2618,7 @@ const wheelHandlers = createWheelHandlers({
   wheelRepo,
   economyService,
   rewardCenterRepo,
+  notificationPlatformRepo,
 });
 const walletHandlers = createWalletHandlers({
   jsonResponse,
@@ -2672,6 +2682,7 @@ const notifyHandlers = createNotifyHandlers({
   sendTelegramMessage,
 });
 const notificationRepo = createNotificationRepository({ queryDb });
+// notificationPlatformRepo is already created above (before wheelHandlers).
 const notificationHandlers = createNotificationHandlers({
   jsonResponse,
   authenticateTelegramRequest,
@@ -2706,6 +2717,7 @@ const analysisHandlers = createAnalysisHandlers({
   writeAppCache,
   analysisRepo,
   notificationRepo,
+  notificationPlatformRepo,
   sendTelegramMessage,
   resolveWebAppUrl,
   queryDb,
@@ -2726,6 +2738,7 @@ const adminHandlers = createAdminHandlers({
   normalizeOptionalString,
   adminRepo,
   notificationRepo,
+  notificationPlatformRepo,
   diagLog,
 });
 
@@ -2746,13 +2759,8 @@ const rewardCenterHandlers = createRewardCenterHandlers({
 });
 //#endregion
 
-// ── Notification Platform ──
-const notificationPlatformRepo = createNotificationPlatformRepository({
-  queryDb,
-  isDatabaseConfigured,
-  isoDate: _rcIsoDate,
-  normalizeOptionalString,
-});
+// ── Notification Platform (admin handlers) ──
+// notificationPlatformRepo is already created above (before analysisHandlers).
 const notificationPlatformHandlers = createNotificationPlatformHandlers({
   jsonResponse,
   authenticateTelegramRequest,
@@ -3744,35 +3752,17 @@ async function runCalendarAlertsCheck(env) {
 
       const title = `🔔 رویداد مهم تقویم: ${event.title}`;
       const message = `${event.country} ${event.flag} — ${event.time || ''}`;
-      const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
 
-      // Create in-app notifications
-      await notificationRepo.createBulk(env, userIds, 'calendar_alert', title, message, {
-        event_title: event.title,
-        event_date: event.date,
-        event_time: event.time,
-        event_country: event.country,
-      });
-
-      // Send Telegram messages
-      if (webAppUrl) {
-        for (const uid of userIds) {
-          try {
-            await sendTelegramMessage(env, {
-              chat_id: Number(uid),
-              text: `${title}\n${message}`,
-              disable_web_page_preview: true,
-              reply_markup: {
-                inline_keyboard: [[{
-                  text: 'Open Amir BTC Assistant 🚀',
-                  web_app: { url: webAppUrl },
-                }]],
-              },
-            });
-          } catch {
-            // Individual send failure — skip
-          }
-        }
+      // Send via Notification Platform (single entry point — handles settings, templates, queue)
+      for (const uid of userIds) {
+        await notificationPlatformRepo.dispatch(env, {
+          userId: uid,
+          title, message,
+          category: 'calendar',
+          priority: 'medium',
+          channel: 'both',
+          metadata: { event_title: event.title, event_date: event.date, event_time: event.time, event_country: event.country },
+        }).catch(() => {});
       }
       alertedCount.sent++;
     }
@@ -3959,24 +3949,21 @@ async function runScheduledAlertsBaseline(controller, env) {
           }
           await sendTelegramMessage(env, tgPayload);
 
-          // 2) In-App notification (Mini App notification center + badge)
-          // FIX: await the create call and log on failure (was fire-and-forget, silent failures)
-          if (notificationRepo) {
+          // 2) In-App notification via Notification Platform (single entry point)
+          if (notificationPlatformRepo) {
             try {
-              await notificationRepo.create(env, userId, 'price_alert', `🔔 هشدار ${symbol}`, text, {
-                alert_id: alertId,
-                symbol,
-                target_price: targetPrice,
-                direction,
-                current_price: currentPrice,
+              await notificationPlatformRepo.dispatch(env, {
+                userId,
+                templateKey: 'price_alert_hit',
+                category: 'market',
+                priority: 'high',
+                channel: 'both',
+                metadata: { symbol, price: String(currentPrice), alert_id: String(alertId), target_price: String(targetPrice), direction },
+                title: `🔔 هشدار ${symbol}`,
+                message: text,
               });
             } catch (notifErr) {
-              console.warn('in-app alert notification failed:', {
-                alert_id: alertId,
-                user_id: userId,
-                symbol,
-                error: notifErr instanceof Error ? notifErr.message : String(notifErr),
-              });
+              console.warn('Notification Platform dispatch failed for price alert:', notifErr?.message);
             }
           }
         } else {
