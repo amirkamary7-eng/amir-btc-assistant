@@ -194,7 +194,6 @@ async function writeAppCache(env, key, value, expirationTtl) {
 }
 
 // ============================================================================
-// DIAG: Write diagnostic log entries to KV for retrieval via /api/_diag/referral-log
 // OPTIMIZATION: Use in-memory buffer + batch writes to reduce KV writes.
 // Previously each diagLog call did 1 KV read + 1 KV write = 2 KV ops.
 // With 21 calls per referral flow, that's 42 KV ops just for logging.
@@ -554,30 +553,40 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
   }
 }
 async function authenticateTelegramRequest(request, env) {
-  const initData = getTelegramInitData(request);
-  if (!initData) {
+  try {
+    const initData = getTelegramInitData(request);
+    if (!initData) {
+      return {
+        error: jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env),
+        user: null,
+      };
+    }
+
+    if (!isBotConfigured(env)) {
+      return {
+        error: jsonResponse({ detail: 'Telegram bot token is not configured' }, { status: 401 }, env),
+        user: null,
+      };
+    }
+
+    const user = await validateTelegramInitData(initData, String(env.TELEGRAM_BOT_TOKEN || ''));
+    if (!user || !user.id) {
+      return {
+        error: jsonResponse({ detail: 'Invalid Telegram init data' }, { status: 401 }, env),
+        user: null,
+      };
+    }
+
+    return { error: null, user };
+  } catch (e) {
+    // SECURITY: If validateTelegramInitData throws (malformed initData, crypto error),
+    // we must return 401 — never let the exception propagate and cause a 500.
+    console.warn('authenticateTelegramRequest error:', e?.message || String(e));
     return {
-      error: jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env),
+      error: jsonResponse({ detail: 'Authentication error' }, { status: 401 }, env),
       user: null,
     };
   }
-
-  if (!isBotConfigured(env)) {
-    return {
-      error: jsonResponse({ detail: 'Telegram bot token is not configured' }, { status: 401 }, env),
-      user: null,
-    };
-  }
-
-  const user = await validateTelegramInitData(initData, String(env.TELEGRAM_BOT_TOKEN || ''));
-  if (!user || !user.id) {
-    return {
-      error: jsonResponse({ detail: 'Invalid Telegram init data' }, { status: 401 }, env),
-      user: null,
-    };
-  }
-
-  return { error: null, user };
 }
 
 /**
@@ -4439,133 +4448,6 @@ export default {
         return jsonResponse({ status: 'success', message: 'Alert check triggered', result, dbState }, {}, env);
       }
 
-      // ── E2E Test: Create alert + trigger + return full state ──
-      if (request.method === 'POST' && url.pathname === '/api/admin/e2e-test') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || url.searchParams.get('secret') || '';
-        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-
-        const BTC_PRICE = 64000; // We'll set target below current price so it triggers immediately
-        const symbol = 'BTC';
-        const targetPrice = BTC_PRICE - 500 - Math.floor(Math.random() * 100); // Target well below current → triggers immediately
-        const userId = '831704732';
-        const direction = 'above';
-        const log = [];
-
-        try {
-          // Step 1: Ensure user exists
-          log.push('Step 1: Ensure user exists');
-          await queryDb(env, `INSERT INTO users (telegram_id, channel_joined, created_at, updated_at) VALUES ($1, TRUE, NOW(), NOW()) ON CONFLICT (telegram_id) DO NOTHING`, [userId]).catch(() => {});
-          log.push('  ✓ User ensured');
-
-          // Step 2: Ensure notification_settings with ch_price_alert='both'
-          log.push('Step 2: Ensure notification_settings');
-          await queryDb(env, `INSERT INTO notification_settings (user_id, price_alert, ch_price_alert, updated_at) VALUES ($1, TRUE, 'both', NOW()) ON CONFLICT (user_id) DO UPDATE SET price_alert = TRUE, ch_price_alert = 'both', updated_at = NOW()`, [userId]).catch(() => {});
-          log.push('  ✓ Settings ensured (ch_price_alert=both)');
-
-          // Step 3: Create alert
-          log.push('Step 3: Create alert');
-          const alertId = 'e2e_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-          await queryDb(env, `INSERT INTO price_alerts (id, user_id, symbol, price, direction, status, created_at) VALUES ($1, $2, $3, $4, $5, 'active', NOW())`, [alertId, userId, symbol, targetPrice, direction]);
-          log.push(`  ✓ Alert created: ${alertId} (${symbol} ${direction} $${targetPrice})`);
-
-          // Step 4: Run cron
-          log.push('Step 4: Run cron (runScheduledAlertsBaseline)');
-          const cronResult = await runScheduledAlertsBaseline({ cron: 'e2e-test' }, env);
-          log.push(`  ✓ Cron completed: checked=${cronResult?.checked_count} triggered=${cronResult?.triggered_count} dispatch_errors=${cronResult?.dispatch_errors?.length || 0}`);
-          if (cronResult?.dispatch_errors?.length > 0) {
-            log.push(`  ⚠️ Dispatch errors: ${JSON.stringify(cronResult.dispatch_errors)}`);
-          }
-
-          // Step 4b: Fix template + test dispatch directly
-          log.push('Step 4b: Fix template + direct dispatch test');
-
-          // ROOT CAUSE FIX: template 'price_alert_hit' has category='market' instead of 'price_alert'.
-          // This causes:
-          // 1. Notification created with category='market' (wrong — should be 'price_alert')
-          // 2. getUserChannelPreference checks ch_market instead of ch_price_alert
-          // 3. If user set ch_market='none', notification is filtered (wrong!)
-          // Fix: UPDATE the template category to 'price_alert'.
-          const templateFix = await queryDb(env, `UPDATE notification_templates SET category = 'price_alert' WHERE key = 'price_alert_hit' AND category != 'price_alert'`).catch(() => ({ rows: [] }));
-          log.push(`  Template fixed: ${templateFix.rows?.length || 0} rows updated (price_alert_hit category → price_alert)`);
-
-          // Verify fix
-          const templatesResult = await queryDb(env, `SELECT key, category, priority, channel FROM notification_templates WHERE key = 'price_alert_hit'`).catch(() => ({ rows: [] }));
-          log.push(`  Template after fix: ${JSON.stringify(templatesResult.rows[0] || 'not found')}`);
-
-          if (notificationPlatformRepo) {
-            try {
-              const directResult = await notificationPlatformRepo.dispatch(env, {
-                userId,
-                templateKey: 'price_alert_hit',
-                category: 'price_alert',
-                priority: 'high',
-                channel: 'both',
-                metadata: { symbol: 'BTC', price: '64000', alert_id: 'direct_test', target_price: '63500', direction: 'above' },
-                title: '🔔 هشدار قیمت BTC (direct)',
-                message: '🔔 هشدار قیمت فعال شد\nقیمت BTC به 64,000.00 USDT رسید.',
-              });
-              log.push(`  Direct dispatch result: ${JSON.stringify(directResult)}`);
-            } catch (e) {
-              log.push(`  Direct dispatch ERROR: ${e.message}`);
-            }
-          } else {
-            log.push('  notificationPlatformRepo is NULL!');
-          }
-
-          // Step 5: Check alert status
-          log.push('Step 5: Check alert status');
-          const alertResult = await queryDb(env, `SELECT * FROM price_alerts WHERE id = $1`, [alertId]);
-          const alert = alertResult.rows[0];
-          log.push(`  Status: ${alert?.status}`);
-          log.push(`  Triggered: ${alert?.triggered_at}`);
-          log.push(`  Last price: ${alert?.last_price}`);
-          log.push(`  Trigger price: ${alert?.last_trigger_price}`);
-
-          // Step 6: Check notifications
-          log.push('Step 6: Check notifications');
-          const notifResult = await queryDb(env, `SELECT id, title, message, category, priority, channel, created_at, metadata FROM notifications WHERE user_id = $1 AND category = 'price_alert' ORDER BY created_at DESC LIMIT 5`, [userId]);
-          log.push(`  Price alert notifications: ${notifResult.rows.length}`);
-          for (const n of notifResult.rows) {
-            log.push(`    - title="${n.title}" category="${n.category}" created="${n.created_at}"`);
-          }
-
-          // Step 6b: Test direct Telegram send
-          log.push('Step 6b: Test direct Telegram send');
-          try {
-            const tgResult = await sendTelegramMessage(env, {
-              chat_id: Number(userId),
-              text: '🔔 تست ارسال تلگرام از سیستم هشدار',
-              disable_web_page_preview: true,
-            });
-            log.push(`  Telegram result: ok=${tgResult?.ok} message_id=${tgResult?.messageId || tgResult?.result?.message_id}`);
-          } catch (e) {
-            log.push(`  Telegram ERROR: ${e.message}`);
-          }
-
-          // Step 7: Check queue
-          log.push('Step 7: Check notification_queue');
-          const queueResult = await queryDb(env, `SELECT * FROM notification_queue WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5`, [userId]).catch(() => ({ rows: [] }));
-          log.push(`  Queue items: ${queueResult.rows.length}`);
-          for (const q of queueResult.rows) {
-            log.push(`    - channel="${q.channel}" status="${q.status}" created="${q.created_at}"`);
-          }
-
-          // Step 8: Check ch_price_alert value
-          log.push('Step 8: Verify ch_price_alert');
-          const chResult = await queryDb(env, `SELECT ch_price_alert, price_alert FROM notification_settings WHERE user_id = $1`, [userId]);
-          log.push(`  ch_price_alert: ${chResult.rows[0]?.ch_price_alert}`);
-          log.push(`  price_alert (legacy): ${chResult.rows[0]?.price_alert}`);
-
-          return jsonResponse({ status: 'success', log }, {}, env);
-        } catch (e) {
-          log.push(`FATAL ERROR: ${e.message}`);
-          log.push(`Stack: ${e.stack?.slice(0, 300)}`);
-          return jsonResponse({ status: 'error', log }, { status: 500 }, env);
-        }
-      }
 
 
       // ── System Status (public — maintenance mode check) ──
@@ -4585,51 +4467,6 @@ export default {
       }
 
       // ── DIAGNOSTIC: Exchange reachability test ──
-      // Tests each exchange API individually and returns timing + status.
-      // No auth required (read-only diagnostic, no sensitive data).
-      if (request.method === 'GET' && url.pathname === '/api/_diag/exchanges') {
-        const symbol = (url.searchParams.get('symbol') || 'BTC').toUpperCase();
-        const results = [];
-        for (const [tvName, key] of EXCHANGE_ORDER) {
-          const t0 = Date.now();
-          let status = 'ok';
-          let price = null;
-          let httpStatus = null;
-          let errorMsg = null;
-          try {
-            const checker = CHART_CHECKERS[key];
-            const url2 = checker.buildUrl(symbol);
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 5000);
-            const response = await fetch(url2, {
-              signal: controller.signal,
-              headers: { Accept: 'application/json' },
-            });
-            clearTimeout(timer);
-            httpStatus = response.status;
-            const body = await response.json();
-            if (checker.isMatch(body)) {
-              price = parseSpotTickerPrice(key, body);
-              status = price ? 'found' : 'no_price';
-            } else {
-              status = 'no_match';
-            }
-          } catch (e) {
-            status = 'error';
-            errorMsg = e?.name === 'AbortError' ? 'TIMEOUT_5s' : (e?.message || String(e)).slice(0, 100);
-          }
-          results.push({
-            exchange: key,
-            tv_name: tvName,
-            status,
-            http_status: httpStatus,
-            price,
-            error: errorMsg,
-            latency_ms: Date.now() - t0,
-          });
-        }
-        return jsonResponse({ status: 'success', symbol, exchanges: results }, {}, env);
-      }
 
       if (request.method === 'GET' && url.pathname === '/api/calendar/events') {
         return await handleCalendarEvents(env);
@@ -5022,70 +4859,6 @@ export default {
         return jsonResponse({ detail: 'Not found' }, { status: 404 }, env);
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/_diag/analyses-db') {
-        try {
-          const countResult = await queryDb(env, 'SELECT COUNT(*) as total FROM analyses');
-          const total = Number(countResult.rows[0]?.total || 0);
-          let rows = [];
-          if (total > 0) {
-            const allResult = await queryDb(env, 'SELECT id, coin, timeframe, author, author_id, created_at, updated_at FROM analyses ORDER BY created_at DESC LIMIT 10');
-            rows = allResult.rows;
-          }
-          const schemaResult = await queryDb(env, "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'analyses' ORDER BY ordinal_position");
-          const constraintsResult = await queryDb(env, "SELECT tc.constraint_name, tc.constraint_type, kcu.column_name FROM information_schema.table_constraints tc LEFT JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name WHERE tc.table_name = 'analyses' ORDER BY tc.constraint_type, kcu.column_name");
-          const tablesResult = await queryDb(env, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name");
-          return jsonResponse({ db_row_count: total, rows, schema: schemaResult.rows, constraints: constraintsResult.rows, all_tables: tablesResult.rows.map(r => r.table_name), db_configured: isDatabaseConfigured(env) }, {}, env);
-        } catch (e) {
-          return jsonResponse({ error: e.message, stack: e.stack?.split('\n').slice(0, 5) }, { status: 500 }, env);
-        }
-      }
-
-      if (request.method === 'POST' && url.pathname === '/api/_diag/analyses-db') {
-        try {
-          const testId = 'diag_' + Date.now().toString(36);
-          // Step 1: INSERT
-          const insertResult = await queryDb(env,
-            'INSERT INTO analyses (id, coin, timeframe, image, text, author, author_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) RETURNING id, coin, created_at',
-            [testId, 'BTC', '1d', '', 'Diagnostic test analysis', 'System', 'diag', ]
-          );
-          const inserted = insertResult.rows[0];
-          // Step 2: Immediate SELECT
-          const selectResult = await queryDb(env, 'SELECT id, coin, text, created_at FROM analyses WHERE id = $1', [testId]);
-          const selected = selectResult.rows[0];
-          // Step 3: Count
-          const countResult = await queryDb(env, 'SELECT COUNT(*) as total FROM analyses');
-          const total = Number(countResult.rows[0]?.total || 0);
-          // Step 4: DELETE the test row
-          await queryDb(env, 'DELETE FROM analyses WHERE id = $1', [testId]);
-          // Step 5: Count after delete
-          const countAfter = await queryDb(env, 'SELECT COUNT(*) as total FROM analyses');
-          const totalAfter = Number(countAfter.rows[0]?.total || 0);
-          return jsonResponse({
-            insert_ok: Boolean(inserted),
-            inserted,
-            select_ok: Boolean(selected),
-            selected,
-            count_before_delete: total,
-            count_after_delete: totalAfter,
-            db_configured: isDatabaseConfigured(env),
-          }, {}, env);
-        } catch (e) {
-          return jsonResponse({ error: e.message, stack: e.stack?.split('\n').slice(0, 10) }, { status: 500 }, env);
-        }
-      }
-
-      // DIAG: Read referral flow logs from KV
-      if (request.method === 'GET' && url.pathname === '/api/_diag/referral-log') {
-        try {
-          const raw = await env.APP_CACHE.get(DIAG_LOG_KEY);
-          const lines = raw ? raw.split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return l; } }) : [];
-          return jsonResponse({ log_count: lines.length, logs: lines }, {
-            headers: { 'Cache-Control': 'no-store' },
-          }, env);
-        } catch (e) {
-          return jsonResponse({ error: e.message }, { status: 500 }, env);
-        }
-      }
 
       // ── Auth + Channel Join gate for protected routes (PRODUCTION ONLY) ──
       // Evaluated once; reused by all protected handlers below.
@@ -5473,11 +5246,10 @@ export default {
     // Direct Telegram send is built-in (no longer relies on queue processing).
     ctx.waitUntil(withTimeout(runScheduledAlertsBaseline(controller, env)));
 
-    // BACKUP: Process notification queue (catches anything enqueued by dispatch()
-    // but not yet sent — e.g. referral rewards, broadcast messages, etc.)
-    // This was MISSING previously — Telegram messages from dispatch() never got sent.
-    // Runs only on the 15-minute cron to avoid duplicate work with the 5-minute alert cron.
-    if (controller.cron === '*/15 * * * *' && notificationPlatformRepo?.processQueue) {
+    // Process notification queue on EVERY cron tick (both */5 and */15).
+    // Previously only ran on */15, causing queue items to stay 'pending' for
+    // up to 15 minutes. Now runs every 5 minutes for faster delivery.
+    if (notificationPlatformRepo?.processQueue) {
       ctx.waitUntil(withTimeout(
         notificationPlatformRepo.processQueue(env, sendTelegramMessage).catch((e) => {
           console.warn('Notification queue processing failed:', e?.message);

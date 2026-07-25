@@ -71,7 +71,6 @@ export function createWheelRepository(deps) {
    * Uses ON CONFLICT to prevent duplicate daily spins.
    */
   async function getOrCreateDailySpin(env, userId) {
-    await ensureSchema(env).catch(() => {});
     const uid = String(userId);
     const today = new Date().toISOString().slice(0, 10);
     const refId = `daily_spin_${uid}_${today}`;
@@ -109,7 +108,6 @@ export function createWheelRepository(deps) {
    * Get available spins for a user.
    */
   async function getAvailableSpins(env, userId) {
-    await ensureSchema(env).catch(() => {});
     const result = await queryDb(
       env,
       `SELECT id, spin_type, source, campaign_id, created_at, expires_at
@@ -133,7 +131,6 @@ export function createWheelRepository(deps) {
    * Get active reward pool (weighted).
    */
   async function getRewardPool(env, campaignId = null) {
-    await ensureSchema(env).catch(() => {});
     const params = campaignId ? [String(campaignId)] : [null];
     const result = await queryDb(
       env,
@@ -187,7 +184,6 @@ export function createWheelRepository(deps) {
    * the controller calls economyService.grantReward to credit it).
    */
   async function consumeSpin(env, userId, spinId) {
-    await ensureSchema(env).catch(() => {});
     const uid = String(userId);
     const sid = Number(spinId);
 
@@ -232,7 +228,6 @@ export function createWheelRepository(deps) {
    * Get spin history for a user (paginated).
    */
   async function getSpinHistory(env, userId, offset = 0, limit = 20) {
-    await ensureSchema(env).catch(() => {});
     const countResult = await queryDb(
       env,
       'SELECT COUNT(*)::int AS total FROM wheel_history WHERE user_id = $1',
@@ -268,7 +263,6 @@ export function createWheelRepository(deps) {
    * Grant a premium spin to a user (admin or purchase).
    */
   async function grantPremiumSpin(env, userId, source = 'admin', campaignId = null) {
-    await ensureSchema(env).catch(() => {});
     const result = await queryDb(
       env,
       `INSERT INTO wheel_spins (user_id, spin_type, source, status, campaign_id, metadata, created_at, expires_at)

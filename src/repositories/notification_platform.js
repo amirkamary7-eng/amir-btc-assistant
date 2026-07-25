@@ -281,7 +281,6 @@ export function createNotificationPlatformRepository(deps) {
   // ═══════════════════════════════════════════════════════════
 
   async function listForUser(env, userId, { limit = 20, offset = 0, category = null, unreadOnly = false, archived = false } = {}) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return { notifications: [], total: 0, hasMore: false };
 
     const conditions = ['user_id = $1'];
@@ -311,42 +310,36 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function getUnreadCount(env, userId) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return 0;
     const result = await queryDb(env, `SELECT COUNT(*)::int AS cnt FROM notifications WHERE user_id = $1 AND read_status = FALSE AND archived = FALSE`, [String(userId)]);
     return Number(result.rows[0]?.cnt || 0);
   }
 
   async function markRead(env, userId, notificationId) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return false;
     const result = await queryDb(env, `UPDATE notifications SET read_status = TRUE, read_at = NOW() WHERE id = $1 AND user_id = $2 RETURNING id`, [notificationId, String(userId)]);
     return result.rows.length > 0;
   }
 
   async function markAllRead(env, userId) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return 0;
     const result = await queryDb(env, `UPDATE notifications SET read_status = TRUE, read_at = NOW() WHERE user_id = $1 AND read_status = FALSE RETURNING id`, [String(userId)]);
     return result.rows.length;
   }
 
   async function archive(env, userId, notificationId) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return false;
     const result = await queryDb(env, `UPDATE notifications SET archived = TRUE WHERE id = $1 AND user_id = $2 RETURNING id`, [notificationId, String(userId)]);
     return result.rows.length > 0;
   }
 
   async function deleteNotification(env, userId, notificationId) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return false;
     const result = await queryDb(env, `DELETE FROM notifications WHERE id = $1 AND user_id = $2 RETURNING id`, [notificationId, String(userId)]);
     return result.rows.length > 0;
   }
 
   async function getSettings(env, userId) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return _defaultSettings();
     try {
       const result = await queryDb(env, `SELECT * FROM notification_settings WHERE user_id = $1`, [String(userId)]);
@@ -355,7 +348,6 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function updateSettings(env, userId, updates) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return _defaultSettings();
 
     // Upsert: ensure row exists
@@ -448,7 +440,6 @@ export function createNotificationPlatformRepository(deps) {
   // ═══════════════════════════════════════════════════════════
 
   async function listTemplates(env) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return [];
     const result = await queryDb(env, `SELECT * FROM notification_templates ORDER BY category, key ASC`);
     return result.rows.map(_mapTemplate);
@@ -462,7 +453,6 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function createTemplate(env, data) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return null;
     const result = await queryDb(env, `
       INSERT INTO notification_templates (key, category, title_fa, title_en, body_fa, body_en, icon, action_url, priority, channel, variables, is_active)
@@ -474,7 +464,6 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function updateTemplate(env, id, updates) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return null;
     const fields = ['key', 'category', 'title_fa', 'title_en', 'body_fa', 'body_en', 'icon', 'action_url', 'priority', 'channel', 'is_active'];
     const setClauses = ['updated_at = NOW()'];
@@ -489,7 +478,6 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function deleteTemplate(env, id) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return false;
     const result = await queryDb(env, `DELETE FROM notification_templates WHERE id = $1 RETURNING id`, [Number(id)]);
     return result.rows.length > 0;
@@ -500,7 +488,6 @@ export function createNotificationPlatformRepository(deps) {
   // ═══════════════════════════════════════════════════════════
 
   async function listBroadcasts(env, { limit = 20, offset = 0 } = {}) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return { broadcasts: [], total: 0 };
     const countResult = await queryDb(env, `SELECT COUNT(*)::int AS cnt FROM notification_broadcasts`);
     const total = Number(countResult.rows[0]?.cnt || 0);
@@ -509,7 +496,6 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function createBroadcast(env, data) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return null;
     const result = await queryDb(env, `
       INSERT INTO notification_broadcasts (admin_id, title, message, category, priority, channel, target_type, target_value, scheduled_at, status, metadata)
@@ -520,7 +506,6 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function processBroadcast(env, broadcastId) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return { sent: 0 };
     const bResult = await queryDb(env, `SELECT * FROM notification_broadcasts WHERE id = $1`, [Number(broadcastId)]);
     const b = bResult.rows[0];
@@ -550,7 +535,6 @@ export function createNotificationPlatformRepository(deps) {
   // ═══════════════════════════════════════════════════════════
 
   async function getAnalytics(env, { range = '7d' } = {}) {
-    await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return _emptyAnalytics();
     const rangeCondition = range === '30d' ? "created_at >= NOW() - INTERVAL '30 days'" : "created_at >= NOW() - INTERVAL '7 days'";
     try {
