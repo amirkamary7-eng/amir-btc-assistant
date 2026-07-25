@@ -903,8 +903,33 @@ async function sendTelegramMessage(env, payload, { retries = 1, timeoutMs = 8000
       });
 
       if (response.ok) {
+        // CRITICAL FIX: Telegram API returns HTTP 200 even when the API call
+        // fails (e.g., bot can't send to user, chat not found, etc.).
+        // We MUST parse the JSON body and check data.ok === true.
+        const data = await response.json();
+        if (data.ok === true) {
+          clearTimeout(timer);
+          return { ok: true, result: data.result, messageId: data.result?.message_id };
+        }
+        // API returned ok:false — log the error
+        console.warn('Telegram API returned ok:false:', {
+          error_code: data.error_code,
+          description: data.description,
+          chat_id: payload.chat_id,
+        });
+        // Don't retry on 403 (Forbidden — user hasn't started bot) or 400 (Bad Request)
+        if (data.error_code === 403 || data.error_code === 400) {
+          clearTimeout(timer);
+          throw new Error(`Telegram sendMessage failed: ${data.error_code} ${data.description}`);
+        }
+        // Retry on 429 (rate limit)
+        if (data.error_code === 429 && attempt < retries) {
+          const retryAfter = data.parameters?.retry_after || 2;
+          await new Promise(r => setTimeout(r, Math.min(retryAfter, 5) * 1000));
+          continue;
+        }
         clearTimeout(timer);
-        return response;
+        throw new Error(`Telegram sendMessage failed: ${data.error_code} ${data.description}`);
       }
 
       // Retry on 429 (rate limit) or 5xx (server error)
@@ -4240,8 +4265,10 @@ async function runScheduledAlertsBaseline(controller, env) {
 
         // ── (b) Direct Telegram send (belt-and-suspenders) ──
         // Even if dispatch() enqueued a Telegram message, we send directly too.
-        // The queue item will be a no-op duplicate (or processed later as backup).
         // This GUARANTEES the user gets a Telegram message within the cron window.
+        // The response is captured to verify actual delivery (not just HTTP 200).
+        let telegramMessageId = null;
+        let telegramError = null;
         if (deliverToTelegram) {
           try {
             const chatIdValue = Number(userId);
@@ -4252,10 +4279,13 @@ async function runScheduledAlertsBaseline(controller, env) {
                 inline_keyboard: [[{ text: 'Open Amir BTC Assistant 🚀', web_app: { url: webAppUrl } }]],
               };
             }
-            await sendTelegramMessage(env, tgPayload);
-            telegramDelivered = true;
+            const tgResult = await sendTelegramMessage(env, tgPayload);
+            // sendTelegramMessage now returns { ok, result, messageId } on success
+            telegramMessageId = tgResult?.messageId || tgResult?.result?.message_id || null;
+            telegramDelivered = !!telegramMessageId;
           } catch (tgErr) {
-            console.warn('Direct Telegram send failed for price alert:', tgErr?.message || tgErr);
+            telegramError = tgErr?.message || String(tgErr);
+            console.warn('Direct Telegram send failed for price alert:', telegramError);
           }
         }
 
@@ -4279,6 +4309,8 @@ async function runScheduledAlertsBaseline(controller, env) {
           user_channel: userChannel,
           in_app_delivered: inAppDelivered,
           telegram_delivered: telegramDelivered,
+          telegram_message_id: telegramMessageId,
+          telegram_error: telegramError,
           price_source: symbolSourceMap.get(symbol),
         }));
       } catch (error) {

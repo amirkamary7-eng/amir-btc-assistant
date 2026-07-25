@@ -7045,6 +7045,13 @@ async function triggerAlert(alert, currentPrice) {
     getTg()?.HapticFeedback?.notificationOccurred('warning');
     addNotification(t('price_alert'), msg.replace('🔔 ', ''), { sendToTelegram: false, playSound: true });
     getTg()?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
+
+    // CRITICAL: Immediately fetch new notifications from DB.
+    // The backend cron may have already created a DB notification for this alert.
+    // Without this, the badge and Notification Center won't update until the
+    // next heartbeat (180s). This makes the notification appear instantly.
+    loadNotificationsFromServer().catch(() => {});
+
     const symbol = _currentDetailSymbol;
     if (symbol === alert.symbol) renderActiveAlerts(symbol);
 }
@@ -8857,6 +8864,16 @@ function _startAllPolling() {
     // R3-1: Alert checking — 30s interval (was 15s), uses allCoins from memory
     // OPTIMIZATION: Doubled interval — alerts don't need 15s precision.
     _pollingIntervals.push(setInterval(checkAlerts, 30000));
+
+    // R3-1b: Notification polling — 60s interval.
+    // Fetches new notifications from DB and updates badge + Notification Center.
+    // This ensures that when the backend cron creates a notification (every 5 min),
+    // the frontend picks it up within 60s — NOT waiting for the 180s heartbeat.
+    // Without this, the badge and Notification Center would be stale for up to 3 min.
+    _pollingIntervals.push(setInterval(() => {
+        if (!_appVisible) return;
+        loadNotificationsFromServer().catch(() => {});
+    }, 60000));
 
     // R3-2: Session heartbeat — 180s (was 120s), skips if app not visible
     // OPTIMIZATION: Increased to match main polling interval, reduces KV writes.
