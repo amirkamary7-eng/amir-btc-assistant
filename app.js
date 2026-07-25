@@ -6225,12 +6225,27 @@ async function openCoinDetail(symbol) {
     // load the new one.
     resetDetailState();
 
-    // Lazy-load TradingView widget on first use
+    // Lazy-load TradingView widget on first use.
+    // CRITICAL FIX: if tv.js fails to load (network blocked, offline, etc.),
+    // we MUST NOT abort the entire openCoinDetail — the user still needs to
+    // see the coin's price, stats, and alert UI. We catch the load error and
+    // continue with a flag indicating the chart is unavailable.
+    let chartAvailable = true;
     if (!window.TradingView) {
         const s = document.createElement('script');
         s.src = 'https://s3.tradingview.com/tv.js';
         document.head.appendChild(s);
-        await new Promise((resolve, reject) => { s.onload = resolve; s.onerror = reject; });
+        try {
+            await new Promise((resolve, reject) => {
+                s.onload = resolve;
+                s.onerror = reject;
+                // Timeout after 5s — don't block the UI forever
+                setTimeout(() => reject(new Error('tv.js load timeout')), 5000);
+            });
+        } catch (e) {
+            console.warn('TradingView script failed to load — chart will be hidden, but coin detail will still show price/stats:', e?.message || e);
+            chartAvailable = false;
+        }
     }
 
     // RACE GUARD: if a newer openCoinDetail call started while we were loading tv.js, abort.
@@ -6273,17 +6288,22 @@ async function openCoinDetail(symbol) {
     // For regular coins: show USD price and 24h change
     const priceEl = document.getElementById('detail-coin-price');
     const changeEl = document.getElementById('detail-coin-change');
+    // Declare priceStr + isBtcPairDisplay in the OUTER scope so the alert
+    // section below can access them. Previously `const priceStr` was declared
+    // inside the else block (block-scoped), leaving the outer reference undefined
+    // when isBtcPair=false → caused "$undefined" in the alert price display.
+    let priceStr = '--';
+    let isBtcPairDisplay = false;
     if (isBtcPair) {
         const btc = allCoins.find(c => c.symbol === 'BTC');
         const btcPrice = btc?.priceUsd || 0;
         const btcChange = btc?.changePercent24Hr || 0;
-        let btcPairPriceStr = '--';
         if (btcPrice > 0) {
             const pairPrice = coin.priceUsd / btcPrice;
-            if (pairPrice >= 1) btcPairPriceStr = pairPrice.toFixed(6);
-            else if (pairPrice >= 0.001) btcPairPriceStr = pairPrice.toFixed(8);
-            else btcPairPriceStr = pairPrice.toExponential(2);
-            if (priceEl) priceEl.textContent = btcPairPriceStr + ' BTC';
+            if (pairPrice >= 1) priceStr = pairPrice.toFixed(6);
+            else if (pairPrice >= 0.001) priceStr = pairPrice.toFixed(8);
+            else priceStr = pairPrice.toExponential(2);
+            if (priceEl) priceEl.textContent = priceStr + ' BTC';
         } else {
             if (priceEl) priceEl.textContent = '-- BTC';
         }
@@ -6292,18 +6312,16 @@ async function openCoinDetail(symbol) {
             changeEl.textContent = (relChange >= 0 ? '+' : '') + relChange.toFixed(2) + '%';
             changeEl.className = 'cd-change ' + (relChange >= 0 ? 'up' : 'down');
         }
-        // Set priceStr for the alert section below (use pair price in BTC)
-        var priceStr = btcPairPriceStr;
-        var isBtcPairDisplay = true;
+        isBtcPairDisplay = true;
     } else {
-        const priceStr = coin.priceUsd > 1 ? coin.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : coin.priceUsd.toFixed(6);
+        priceStr = coin.priceUsd > 1 ? coin.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : coin.priceUsd.toFixed(6);
         if (priceEl) priceEl.textContent = '$' + priceStr;
         if (changeEl) {
             const chg = coin.changePercent24Hr || 0;
             changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
             changeEl.className = 'cd-change ' + (chg >= 0 ? 'up' : 'down');
         }
-        var isBtcPairDisplay = false;
+        isBtcPairDisplay = false;
     }
 
     // ── Market Statistics ──
@@ -7000,7 +7018,24 @@ async function removeAlert(id) {
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
 async function triggerAlert(alert, currentPrice) {
-    await removeAlertFromServer(alert);
+    // CRITICAL FIX: Frontend trigger only shows IN-APP notification + popup.
+    // Do NOT send to Telegram from frontend — the backend cron handles Telegram
+    // (and in-app notification via Notification Platform) to avoid DUPLICATE
+    // Telegram messages. Frontend is faster for in-app display (30s polling),
+    // backend is authoritative for Telegram delivery.
+    //
+    // ALSO: Do NOT remove the alert from the server. The backend cron needs to
+    // see the alert to:
+    //   1. Insert an in-app notification via Notification Platform (so the
+    //      notification appears in the Notification Center with proper metadata)
+    //   2. Send the Telegram message
+    //   3. Mark the alert as 'triggered' atomically (prevents duplicate triggers)
+    //
+    // If frontend removed the alert, the backend would never see it and the
+    // user would NOT receive the Telegram message or the proper in-app notif.
+    //
+    // Frontend just removes from LOCAL state (so the alert card disappears from
+    // the detail view) and shows an immediate in-app toast/popup.
     alerts = alerts.filter(a => a.id !== alert.id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     const priceStr = currentPrice >= 1 ? currentPrice.toFixed(2) : currentPrice.toFixed(6);
@@ -7008,7 +7043,7 @@ async function triggerAlert(alert, currentPrice) {
         ? `🔔 ${alert.symbol} — ${t('price_reached')} $${priceStr}`
         : `🔔 ${alert.symbol} Price reached $${priceStr}`;
     getTg()?.HapticFeedback?.notificationOccurred('warning');
-    addNotification(t('price_alert'), msg.replace('🔔 ', ''), { sendToTelegram: true, playSound: true });
+    addNotification(t('price_alert'), msg.replace('🔔 ', ''), { sendToTelegram: false, playSound: true });
     getTg()?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
     const symbol = _currentDetailSymbol;
     if (symbol === alert.symbol) renderActiveAlerts(symbol);
@@ -8774,9 +8809,11 @@ function _stopAllPolling() {
 function _startAllPolling() {
     if (_pollingIntervals.length) return; // already running
 
-    // Main data polling (market + analyses + news) — 180s, aligned with backend cache TTL
-    // OPTIMIZATION: Increased from 120s to 180s to reduce API calls by 33%.
-    // Only polls when the relevant page is active (lazy polling).
+    // ── Market polling — 60s ──
+    // FIX: Was 180s combined with analysis/news, causing prices to lag 3+ minutes
+    // behind TradingView. Now on its own 60s timer so the displayed price stays
+    // within ~30-60s of the real market price (backend cache is 30s, so total
+    // max staleness = 90s).
     _pollingIntervals.push(setInterval(() => {
         const activePage = document.querySelector('.page.active')?.id;
         if (activePage === 'market-page' || activePage === 'dashboard-page') {
@@ -8786,14 +8823,15 @@ function _startAllPolling() {
                     renderWatchlist();
                     renderMarketTicker();
                 }
-                // FEATURE: live-refresh the open Coin Detail price in place so
-                // the user sees ticks without reopening the modal. Works for
-                // both crypto (allCoins) and forex/metals (allForexPairs).
                 refreshOpenDetailPrice();
             });
-            // Refresh forex data too so open forex/metals detail views tick
             loadForexData().then(() => { refreshOpenDetailPrice(); });
         }
+    }, 60000));
+
+    // ── Analysis + News + Calendar polling — 180s (less frequent, doesn't need real-time) ──
+    _pollingIntervals.push(setInterval(() => {
+        const activePage = document.querySelector('.page.active')?.id;
         if (activePage === 'analysis-page' || activePage === 'dashboard-page') {
             fetchAnalyses().then(changed => {
                 if (changed) {
@@ -8810,9 +8848,7 @@ function _startAllPolling() {
                 calendarEvents = [];
                 loadCalendarEvents(true).then(events => renderNews('calendar'));
             }
-            // OPTIMIZATION: Don't refresh calendar when not on calendar tab
         }
-        // OPTIMIZATION: Only refresh dashboard calendar when on dashboard
         if (activePage === 'dashboard-page') {
             loadCalendarEvents(true).then(() => renderDashboardCalendar()).catch(() => {});
         }

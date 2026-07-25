@@ -2902,7 +2902,7 @@ async function handleCalendarEvents(env) {
   }, {}, env);
 }
 
-const MARKET_CACHE_TTL = 120; // 2 minutes — prices change frequently
+const MARKET_CACHE_TTL = 30; // 30 seconds — prices must stay close to TradingView for alert accuracy
 const MARKET_GLOBAL_CACHE_TTL = 300; // 5 minutes — global stats change less frequently
 const MARKET_FETCH_LIMIT = 200;
 
