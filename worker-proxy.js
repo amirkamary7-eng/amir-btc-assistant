@@ -1744,12 +1744,19 @@ function parseSpotTickerPrice(exchangeKey, body) {
   return null;
 }
 
+// Price fetch timeout — shorter than general EXTERNAL_FETCH_TIMEOUT_MS.
+// Price APIs (Binance, Bybit, OKX) are fast (<500ms typically). If they
+// don't respond in 4s, they're likely down or rate-limiting — fail fast
+// and try the next exchange. This prevents cron timeout (25s limit) when
+// multiple exchanges are slow.
+const PRICE_FETCH_TIMEOUT_MS = 4000;
+
 async function fetchSpotTickerPrice(exchangeKey, symbol) {
   const checker = CHART_CHECKERS[exchangeKey];
   if (!checker) {
     return null;
   }
-  const { ok, body } = await fetchJson(checker.buildUrl(symbol));
+  const { ok, body } = await fetchJsonWithTimeout(checker.buildUrl(symbol), PRICE_FETCH_TIMEOUT_MS);
   if (!ok || !checker.isMatch(body)) {
     return null;
   }
@@ -1764,44 +1771,40 @@ async function fetchSpotPriceUsd(env, symbol) {
   const cacheKey = `chart:exchange:${normalizedSymbol}`;
   const cachedExchange = await readAppCache(env, cacheKey);
 
-  // ── FAST PATH: Try cached exchange first (latency: 1 API call) ──
-  // Cache TTL reduced from 86400 (24h) to 3600 (1h) — if the cached exchange
-  // goes down, we recover within 1 hour instead of 24.
+  // ── FAST PATH: Try cached exchange first (latency: 1 API call, max 4s) ──
+  // Cache TTL = 1h. If cached exchange fails, we invalidate and try all exchanges.
   if (cachedExchange) {
     const cachedPrice = await fetchSpotTickerPrice(cachedExchange, normalizedSymbol);
     if (cachedPrice !== null) {
       return { price: cachedPrice, exchange: cachedExchange, cached: true };
     }
-    // Cached exchange failed — invalidate cache so we re-discover
-    await writeAppCache(env, cacheKey, '', 1).catch(() => {});
+    // Cached exchange failed — invalidate cache (min TTL 60 for KV).
+    await writeAppCache(env, cacheKey, '', 60).catch(() => {});
   }
 
-  // ── FALLBACK: Try top 3 exchanges in PARALLEL (latency: 1 round-trip) ──
-  // Old code was sequential — worst case 8s × 8 exchanges = 64s.
-  // New: race Binance, Bybit, OKX in parallel; first valid response wins.
-  // If all 3 fail, fall back to remaining exchanges sequentially.
-  const TOP_EXCHANGES = ['binance', 'bybit', 'okx'];
-  const REMAINING_EXCHANGES = ['bitget', 'kucoin', 'mexc', 'gateio', 'htx'];
+  // ── FALLBACK: Try ALL 8 exchanges in PARALLEL (max 4s total) ──
+  // CRITICAL FIX: Previously, top 3 were parallel (4s) then remaining 5 were
+  // sequential (5×4s = 20s). Total worst case = 4s (cached fail) + 4s (top 3)
+  // + 20s (remaining) = 28s → cron timeout (25s limit).
+  // Now: ALL 8 exchanges in parallel, max 4s. First valid response wins.
+  // We iterate in priority order (Binance > Bybit > OKX > ...) to pick the
+  // best exchange when multiple respond.
+  const ALL_EXCHANGES = ['binance', 'bybit', 'okx', 'bitget', 'kucoin', 'mexc', 'gateio', 'htx'];
 
-  const topResults = await Promise.allSettled(
-    TOP_EXCHANGES.map(async (exchangeKey) => {
+  const results = await Promise.allSettled(
+    ALL_EXCHANGES.map(async (exchangeKey) => {
       const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
       return { exchangeKey, price };
     })
   );
-  for (const r of topResults) {
-    if (r.status === 'fulfilled' && r.value.price !== null) {
-      await writeAppCache(env, cacheKey, r.value.exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
-      return { price: r.value.price, exchange: r.value.exchangeKey, cached: false };
-    }
-  }
 
-  // Top 3 failed — try remaining exchanges sequentially
-  for (const exchangeKey of REMAINING_EXCHANGES) {
-    const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
-    if (price !== null) {
+  // Iterate in priority order — first valid result wins
+  for (const exchangeKey of ALL_EXCHANGES) {
+    const idx = ALL_EXCHANGES.indexOf(exchangeKey);
+    const r = results[idx];
+    if (r && r.status === 'fulfilled' && r.value.price !== null) {
       await writeAppCache(env, cacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
-      return { price, exchange: exchangeKey, cached: false };
+      return { price: r.value.price, exchange: exchangeKey, cached: false };
     }
   }
 
@@ -1872,10 +1875,16 @@ const HTML_ENTITY_MAP = {
 
 const EXTERNAL_FETCH_TIMEOUT_MS = 8000;
 
-async function fetchJson(url) {
+/**
+ * fetchJson with a CUSTOM timeout (ms).
+ * Used by price fetchers which need a shorter timeout (4s) than the
+ * general 8s default — prevents cron timeout when multiple exchanges
+ * are slow.
+ */
+async function fetchJsonWithTimeout(url, timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS) {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -1896,6 +1905,10 @@ async function fetchJson(url) {
   } catch {
     return { ok: false, body: null };
   }
+}
+
+async function fetchJson(url) {
+  return fetchJsonWithTimeout(url, EXTERNAL_FETCH_TIMEOUT_MS);
 }
 
 function decodeHtmlEntities(text) {
@@ -2486,7 +2499,9 @@ async function exchangeHasSymbol(key, symbol) {
   }
 
   try {
-    const { ok, body } = await fetchJson(checker.buildUrl(symbol));
+    // Use shorter timeout (4s) for chart resolution — same as price fetch.
+    // Prevents long hangs when an exchange is slow/unreachable.
+    const { ok, body } = await fetchJsonWithTimeout(checker.buildUrl(symbol), PRICE_FETCH_TIMEOUT_MS);
     return ok && checker.isMatch(body);
   } catch {
     return false;
