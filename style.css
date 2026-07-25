@@ -7732,17 +7732,47 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     color: #F5A623;
 }
 
-/* ── Sticky Column Header (Rank | Coin | Price | 24H | ★) ── */
+/* ── Sticky Column Header — Grid MUST match .mkt-coin-row exactly ──
+   Both use the SAME grid-template-columns so columns align perfectly.
+   The horizontal padding is provided by the parent container:
+   - .mkt-coin-list has padding-x: 16px (wraps the rows)
+   - .mkt-list-header has padding-x: 16px (matches the list)
+
+   The row itself has padding-x: 12px (for internal card spacing),
+   but this does NOT affect column alignment because the grid starts
+   at the same x-position relative to the parent's content box.
+
+   Actually, the row's padding-x IS part of the grid track — so we
+   MUST use the SAME padding-x for both header and row to keep
+   columns aligned. We use --mkt-grid-pad-x for both.
+*/
+.mkt-list-header,
+.mkt-coin-row {
+    /* Shared grid definition — single source of truth */
+    --mkt-grid-cols: 28px 36px minmax(0, 1fr) 92px 64px 28px;
+    --mkt-grid-gap: 8px;
+    --mkt-grid-pad-x: 12px;
+}
+
 .mkt-list-header {
     display: grid;
-    grid-template-columns: 28px 36px minmax(0, 1fr) 92px 64px 28px;
-    gap: 8px;
+    grid-template-columns: var(--mkt-grid-cols);
+    gap: var(--mkt-grid-gap);
     align-items: center;
-    padding: 8px 16px;
+    /* padding-x MUST match .mkt-coin-row padding-x (--mkt-grid-pad-x = 12px)
+       so the grid columns start at the same x-position. Both header and row
+       are inside .mkt-coin-list (which has 16px padding-x), so they share
+       the same parent context. */
+    padding: 8px var(--mkt-grid-pad-x);
     margin: 0;
     background: rgba(11, 18, 32, 0.96);
     backdrop-filter: blur(12px) saturate(1.4);
     -webkit-backdrop-filter: blur(12px) saturate(1.4);
+    /* Invisible 1px border to MATCH the row's 1px border — keeps grid
+       columns perfectly aligned (box-sizing: border-box means the border
+       eats into the content area; without this, header content area is
+       2px wider than row content area, causing column drift). */
+    border: 1px solid transparent;
     border-top: 1px solid rgba(255,255,255,0.06);
     border-bottom: 1px solid rgba(255,255,255,0.06);
     position: sticky;
@@ -7750,16 +7780,29 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     z-index: 20;
     font-size: 10px; font-weight: 700; color: #6B7A8D;
     text-transform: uppercase; letter-spacing: 0.5px;
+    box-sizing: border-box;
+    width: 100%;
+    flex-shrink: 0; /* prevent flex parent from squishing the sticky header */
+    border-radius: 10px; /* match the card-style of rows */
 }
 .mkt-lh-rank { text-align: center; }
-.mkt-lh-coin { padding-right: 4px; }
+.mkt-lh-logo { } /* empty cell — aligns with the logo column */
+.mkt-lh-coin { padding-right: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mkt-lh-price { text-align: right; }
 .mkt-lh-change { text-align: right; }
 .mkt-lh-star { text-align: center; }
 
-/* ── Coin List (virtualized via content-visibility: auto) ── */
+/* ── Coin List (virtualized via content-visibility: auto) ──
+   .mkt-coin-list is the parent container with padding-x: 16px.
+   .mkt-list-header is INSIDE the list (sticky) and uses the same
+   --mkt-grid-pad-x (12px) as rows, so grid columns align perfectly.
+   .mkt-coin-list-rows holds the actual coin rows (rendered by JS).
+*/
 .mkt-coin-list {
     padding: 6px 16px 100px;
+    display: flex; flex-direction: column; gap: 6px;
+}
+.mkt-coin-list-rows {
     display: flex; flex-direction: column; gap: 6px;
 }
 
@@ -7788,13 +7831,17 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     display: flex; flex-direction: column; gap: 6px;
 }
 
-/* ── Coin Row (Standalone Card — Binance/Bybit style) ── */
+/* ── Coin Row (Standalone Card — Binance/Bybit style) ──
+   Uses the SAME grid variables as .mkt-list-header to guarantee
+   column alignment. Only horizontal padding matches; vertical padding
+   and visual style differ (card vs header).
+*/
 .mkt-coin-row {
     display: grid;
-    grid-template-columns: 28px 36px minmax(0, 1fr) 92px 64px 28px;
-    gap: 8px;
+    grid-template-columns: var(--mkt-grid-cols);
+    gap: var(--mkt-grid-gap);
     align-items: center;
-    padding: 10px 12px;
+    padding: 10px var(--mkt-grid-pad-x);
     background: #0B1220;
     border: 1px solid rgba(255,255,255,0.05);
     border-radius: 10px;
@@ -7804,6 +7851,8 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     content-visibility: auto;
     contain-intrinsic-size: 56px;
     min-height: 56px;
+    box-sizing: border-box;
+    width: 100%;
     animation: mktFadeIn 0.25s ease both;
 }
 .mkt-coin-row:hover {
@@ -7839,6 +7888,9 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     flex-shrink: 0; object-fit: cover;
     background: #131C2A;
     border: 1px solid rgba(255,255,255,0.06);
+    /* Center the logo within its grid cell so it aligns with the header cell */
+    justify-self: center;
+    display: block;
 }
 
 .mkt-coin-info {
@@ -7964,20 +8016,26 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 .mkt-skel-line.w-50 { width: 50%; }
 .mkt-skel-line.w-20 { width: 20%; }
 
-/* ── Responsive ── */
+/* ── Responsive ──
+   On narrow screens, we override the SHARED grid variables so header
+   and rows automatically stay in sync. This is the single source of truth —
+   changing the variables here updates BOTH header and rows.
+*/
 @media (max-width: 380px) {
     .mkt-overview-grid { gap: 6px; }
     .mkt-stat-card { padding: 7px 8px; min-height: 50px; }
     .mkt-stat-icon-wrap { width: 24px; height: 24px; border-radius: 6px; }
     .mkt-stat-label { font-size: 8px; }
     .mkt-stat-value { font-size: 12px; }
-    /* Slightly tighter grid columns on very narrow screens */
+    /* Override shared grid variables — applies to both header and rows */
     .mkt-list-header,
     .mkt-coin-row {
-        grid-template-columns: 22px 30px minmax(0, 1fr) 80px 56px 24px;
-        gap: 6px;
-        padding: 8px 10px;
+        --mkt-grid-cols: 22px 30px minmax(0, 1fr) 80px 56px 24px;
+        --mkt-grid-gap: 6px;
+        --mkt-grid-pad-x: 10px;
     }
+    .mkt-list-header { padding-top: 7px; padding-bottom: 7px; }
+    .mkt-coin-row { padding-top: 8px; padding-bottom: 8px; }
     .mkt-coin-logo { width: 28px; height: 28px; }
     .mkt-coin-symbol { font-size: 13px; }
     .mkt-coin-price { font-size: 12px; }
@@ -7987,14 +8045,17 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 @media (max-width: 320px) {
     .mkt-list-header,
     .mkt-coin-row {
-        grid-template-columns: 20px 28px minmax(0, 1fr) 70px 50px 22px;
-        gap: 5px;
-        padding: 7px 8px;
+        --mkt-grid-cols: 20px 28px minmax(0, 1fr) 70px 50px 22px;
+        --mkt-grid-gap: 5px;
+        --mkt-grid-pad-x: 8px;
     }
+    .mkt-list-header { padding-top: 6px; padding-bottom: 6px; }
+    .mkt-coin-row { padding-top: 7px; padding-bottom: 7px; }
     .mkt-coin-logo { width: 26px; height: 26px; }
     .mkt-coin-symbol { font-size: 12px; }
     .mkt-coin-price { font-size: 11px; }
     .mkt-coin-change { font-size: 10px; }
+    .mkt-coin-rank { font-size: 9px; }
 }
 
 /* ════════════════════════════════════════════════════════════════════

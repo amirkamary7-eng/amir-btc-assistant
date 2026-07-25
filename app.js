@@ -3502,7 +3502,7 @@ async function loadMarketOverview() {
 
 async function loadMarketData(force = false) {
     console.log('[TICKER] loadMarketData called — force:', force, '| allCoins length:', allCoins.length);
-    const listEl = document.getElementById('coin-list');
+    const listEl = document.getElementById('coin-list-rows');
     const refreshBtn = document.getElementById('market-refresh-btn');
     if (refreshBtn) refreshBtn.classList.add('spinning');
     try {
@@ -3827,7 +3827,7 @@ function renderTopMovers() { return; }
 let _renderIdx = 0;
 
 function renderMarket() {
-    const list = document.getElementById('coin-list');
+    const list = document.getElementById('coin-list-rows');
     if (!list) return;
 
     // Price-only diffing: if the list is already rendered with the same tab/filter/search,
@@ -4379,7 +4379,7 @@ function switchMainTab(tab, btn) {
     }
 
     // Re-render with animation
-    const list = document.getElementById('coin-list');
+    const list = document.getElementById('coin-list-rows');
     if (list) {
         list.classList.remove('fade-in');
         list.classList.add('fade-out');
@@ -4415,7 +4415,7 @@ function switchSubTab(tab, btn) {
     // BTC pairs render inline in #coin-list when btcpairs sub-tab is active.
 
     // Re-render with animation
-    const list = document.getElementById('coin-list');
+    const list = document.getElementById('coin-list-rows');
     if (list) {
         list.classList.remove('fade-in');
         list.classList.add('fade-out');

@@ -417,17 +417,25 @@
 
         <!-- ═══ MKT: Market Pulse Bar — REMOVED (redundant with filter tabs, causes truncated text) ═══ -->
 
-        <!-- ═══ MKT: Sticky Column Header (Rank | Coin | Price | 24H) ═══ -->
-        <div class="mkt-list-header" id="mkt-list-header" role="row">
-            <span class="mkt-lh-rank" role="columnheader">#</span>
-            <span class="mkt-lh-coin" role="columnheader">ارز</span>
-            <span class="mkt-lh-price" role="columnheader">قیمت</span>
-            <span class="mkt-lh-change" role="columnheader">24H</span>
-            <span class="mkt-lh-star" role="columnheader" aria-label="Watchlist"></span>
+        <!-- ═══ MKT: Coin List (virtualized via content-visibility) ═══
+             The sticky header is INSIDE the coin-list so they share the
+             same horizontal padding (16px). renderMarket() is careful to
+             preserve the header element when updating the list (it uses
+             a separate .mkt-coin-list-rows container for rows).
+        -->
+        <div class="mkt-coin-list" id="coin-list" role="list">
+            <!-- Sticky Column Header (Rank | Coin | Price | 24H | ★) -->
+            <div class="mkt-list-header" id="mkt-list-header" role="row">
+                <span class="mkt-lh-rank" role="columnheader">#</span>
+                <span class="mkt-lh-logo" role="columnheader" aria-label="Coin"></span>
+                <span class="mkt-lh-coin" role="columnheader">ارز</span>
+                <span class="mkt-lh-price" role="columnheader">قیمت</span>
+                <span class="mkt-lh-change" role="columnheader">24H</span>
+                <span class="mkt-lh-star" role="columnheader" aria-label="Watchlist"></span>
+            </div>
+            <!-- Coin rows are appended here by renderMarket() -->
+            <div class="mkt-coin-list-rows" id="coin-list-rows"></div>
         </div>
-
-        <!-- ═══ MKT: Coin List (virtualized via content-visibility) ═══ -->
-        <div class="mkt-coin-list" id="coin-list" role="list"></div>
 
         <button type="button" class="fab-add-watch fab-hidden" onclick="openAddCoinModal()" aria-label="Add to watchlist">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
