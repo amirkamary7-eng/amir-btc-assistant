@@ -7484,32 +7484,31 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 .mkt-refresh-btn.spinning svg { animation: spin 0.8s linear infinite; }
 @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 
-/* ── Overview Grid (3 stat cards with icons) ── */
+/* ── Overview Grid (3 compact equal stat cards — exchange style) ── */
 .mkt-overview-grid {
     display: grid; grid-template-columns: repeat(3, 1fr);
-    gap: 8px; padding: 0 16px 12px;
+    gap: 8px; padding: 0 16px 10px;
 }
 .mkt-stat-card {
     background: linear-gradient(180deg, #0E1623 0%, #0B1220 100%);
     border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 14px; padding: 10px 10px 12px;
-    display: flex; flex-direction: column; gap: 6px;
-    transition: all 0.2s ease;
+    border-radius: 12px;
+    padding: 8px 10px;
+    display: flex; align-items: center; gap: 8px;
+    transition: border-color 0.2s ease, transform 0.15s ease;
     position: relative; overflow: hidden;
+    min-height: 56px;
 }
 .mkt-stat-card::before {
     content: ''; position: absolute; inset: 0;
     background: radial-gradient(circle at top right, rgba(245,166,35,0.04), transparent 60%);
     pointer-events: none;
 }
-.mkt-stat-card:hover {
-    border-color: rgba(245,166,35,0.18);
-    transform: translateY(-1px);
-}
+.mkt-stat-card:active { transform: scale(0.98); }
 .mkt-stat-icon-wrap {
-    width: 28px; height: 28px; border-radius: 8px;
+    width: 26px; height: 26px; border-radius: 7px;
     display: flex; align-items: center; justify-content: center;
-    margin-bottom: 2px;
+    flex-shrink: 0;
 }
 .mkt-stat-icon-orange {
     background: rgba(245,166,35,0.12); color: #F5A623;
@@ -7523,52 +7522,57 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     background: rgba(34,197,94,0.12); color: #22C55E;
     border: 1px solid rgba(34,197,94,0.2);
 }
-.mkt-stat-content { display: flex; flex-direction: column; gap: 3px; }
-.mkt-stat-top {
-    display: flex; align-items: center; justify-content: space-between; gap: 4px;
+.mkt-stat-content {
+    display: flex; flex-direction: column; gap: 2px;
+    min-width: 0; flex: 1;
 }
-.mkt-stat-label { font-size: 9px; font-weight: 600; color: #6B7A8D; text-transform: uppercase; letter-spacing: 0.3px; }
-.mkt-stat-change { font-size: 10px; font-weight: 700; }
-.mkt-stat-change.up { color: #22C55E; }
-.mkt-stat-change.down { color: #EF4444; }
-.mkt-stat-value { font-size: 15px; font-weight: 800; color: #FFFFFF; font-variant-numeric: tabular-nums; }
-.mkt-stat-spark { height: 18px; margin-top: 2px; }
+.mkt-stat-label {
+    font-size: 9px; font-weight: 600; color: #6B7A8D;
+    text-transform: uppercase; letter-spacing: 0.3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mkt-stat-value {
+    font-size: 14px; font-weight: 800; color: #FFFFFF;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1.1;
+}
 
 /* ── Dashboard Row: F&G + Market Status ── */
 .mkt-dashboard-row {
     display: grid; grid-template-columns: 1fr 1fr;
-    gap: 8px; padding: 0 16px 12px;
+    gap: 8px; padding: 0 16px 10px;
 }
 .mkt-fg-card {
     background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 14px; padding: 14px 12px;
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    border-radius: 12px; padding: 10px 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
 }
 .mkt-fg-header { width: 100%; text-align: center; }
-.mkt-fg-title { font-size: 11px; font-weight: 700; color: #A5B4C7; text-transform: uppercase; letter-spacing: 0.5px; }
-.mkt-fg-gauge-wrap { width: 100%; max-width: 120px; }
+.mkt-fg-title { font-size: 10px; font-weight: 700; color: #A5B4C7; text-transform: uppercase; letter-spacing: 0.5px; }
+.mkt-fg-gauge-wrap { width: 100%; max-width: 110px; }
 .mkt-fg-gauge { width: 100%; height: auto; }
 .mkt-fg-meta {
     display: flex; justify-content: space-between; width: 100%;
-    font-size: 10px; color: #6B7A8D;
+    font-size: 9px; color: #6B7A8D;
 }
 .mkt-fg-meta b { color: #A5B4C7; font-weight: 700; }
 
 .mkt-status-card {
     background: linear-gradient(180deg, #0E1623 0%, #0B1220 100%);
     border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 14px; padding: 12px;
-    display: flex; flex-direction: column; gap: 10px;
+    border-radius: 12px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px;
 }
 .mkt-status-header {
     display: flex; align-items: center; justify-content: space-between;
 }
-.mkt-status-title { font-size: 11px; font-weight: 700; color: #A5B4C7; text-transform: uppercase; letter-spacing: 0.5px; }
-.mkt-status-total { font-size: 10px; font-weight: 600; color: #6B7A8D; }
-.mkt-status-body { display: flex; flex-direction: column; gap: 8px; }
+.mkt-status-title { font-size: 10px; font-weight: 700; color: #A5B4C7; text-transform: uppercase; letter-spacing: 0.5px; }
+.mkt-status-total { font-size: 9px; font-weight: 600; color: #6B7A8D; }
+.mkt-status-body { display: flex; flex-direction: column; gap: 6px; }
 .mkt-status-bar-wrap { }
 .mkt-status-bar {
-    display: flex; height: 10px; border-radius: 5px; overflow: hidden;
+    display: flex; height: 8px; border-radius: 4px; overflow: hidden;
     background: rgba(255,255,255,0.04);
     box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
 }
@@ -7577,21 +7581,21 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 .mkt-status-fill-red { background: linear-gradient(90deg, #EF4444, #dc2626); transition: width 0.5s cubic-bezier(0.16,1,0.3,1); }
 .mkt-status-labels {
     display: flex; justify-content: space-between; align-items: center;
-    font-size: 11px; font-weight: 600;
+    font-size: 10px; font-weight: 600;
 }
-.mkt-status-up { display: flex; align-items: center; gap: 4px; color: #22C55E; }
-.mkt-status-down { display: flex; align-items: center; gap: 4px; color: #EF4444; }
-.mkt-status-neutral { display: flex; align-items: center; gap: 4px; color: #6B7A8D; }
-.mkt-status-labels b { font-size: 13px; font-weight: 800; }
-.mkt-status-labels small { font-size: 10px; font-weight: 500; opacity: 0.85; }
+.mkt-status-up { display: flex; align-items: center; gap: 3px; color: #22C55E; }
+.mkt-status-down { display: flex; align-items: center; gap: 3px; color: #EF4444; }
+.mkt-status-neutral { display: flex; align-items: center; gap: 3px; color: #6B7A8D; }
+.mkt-status-labels b { font-size: 12px; font-weight: 800; }
+.mkt-status-labels small { font-size: 9px; font-weight: 500; opacity: 0.85; }
 .mkt-status-sentiment {
     display: flex; align-items: center; justify-content: space-between;
-    padding-top: 6px; margin-top: 2px;
+    padding-top: 4px; margin-top: 2px;
     border-top: 1px solid rgba(255,255,255,0.04);
 }
-.mkt-status-sentiment-label { font-size: 10px; color: #6B7A8D; font-weight: 500; }
+.mkt-status-sentiment-label { font-size: 9px; color: #6B7A8D; font-weight: 500; }
 .mkt-status-sentiment-value {
-    font-size: 12px; font-weight: 700;
+    font-size: 11px; font-weight: 700;
     padding: 2px 8px; border-radius: 6px;
 }
 .mkt-status-sentiment-value.bullish {
@@ -7606,14 +7610,14 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 
 /* ── Search Bar ── */
 .mkt-search-bar {
-    position: relative; padding: 0 16px 12px;
+    position: relative; padding: 0 16px 8px;
 }
 .mkt-search-icon {
     position: absolute; right: 30px; top: 50%; transform: translateY(-50%);
     color: #6B7A8D; pointer-events: none;
 }
 .mkt-search-input {
-    width: 100%; height: 42px; border-radius: 12px;
+    width: 100%; height: 40px; border-radius: 12px;
     background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
     color: #FFFFFF; font-size: 14px; outline: none;
     padding: 0 42px 0 14px; font-family: inherit;
@@ -7709,7 +7713,7 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 
 /* ── Filter Chips ── */
 .mkt-filters {
-    display: flex; gap: 6px; padding: 0 16px 10px;
+    display: flex; gap: 6px; padding: 0 16px 8px;
     overflow-x: auto; scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
 }
@@ -7718,7 +7722,7 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     flex-shrink: 0; padding: 6px 12px; border-radius: 8px;
     border: 1px solid rgba(255,255,255,0.06);
     background: rgba(255,255,255,0.03); color: #6B7A8D;
-    font-size: 12px; font-weight: 500; cursor: pointer;
+    font-size: 12px; font-weight: 600; cursor: pointer;
     transition: all 0.2s ease; font-family: inherit; white-space: nowrap;
 }
 .mkt-filter-chip:active { transform: scale(0.96); }
@@ -7728,10 +7732,35 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     color: #F5A623;
 }
 
-/* ── Coin List ── */
+/* ── Sticky Column Header (Rank | Coin | Price | 24H | ★) ── */
+.mkt-list-header {
+    display: grid;
+    grid-template-columns: 28px 36px minmax(0, 1fr) 92px 64px 28px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 16px;
+    margin: 0;
+    background: rgba(11, 18, 32, 0.96);
+    backdrop-filter: blur(12px) saturate(1.4);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    position: sticky;
+    top: 56px; /* sits right under the sticky app-header */
+    z-index: 20;
+    font-size: 10px; font-weight: 700; color: #6B7A8D;
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.mkt-lh-rank { text-align: center; }
+.mkt-lh-coin { padding-right: 4px; }
+.mkt-lh-price { text-align: right; }
+.mkt-lh-change { text-align: right; }
+.mkt-lh-star { text-align: center; }
+
+/* ── Coin List (virtualized via content-visibility: auto) ── */
 .mkt-coin-list {
-    padding: 0 16px 100px;
-    display: flex; flex-direction: column; gap: 2px;
+    padding: 6px 16px 100px;
+    display: flex; flex-direction: column; gap: 6px;
 }
 
 /* ── Forex Grouped List (Major / Cross / Metals / Indices / Commodities) ── */
@@ -7756,98 +7785,123 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     background: rgba(255,255,255,0.04); padding: 2px 8px; border-radius: 6px;
 }
 .mkt-forex-group-items {
-    display: flex; flex-direction: column; gap: 2px;
+    display: flex; flex-direction: column; gap: 6px;
 }
 
-/* ── Forex Row (premium, matches crypto row design) ── */
-.mkt-forex-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 12px 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.03);
-    cursor: pointer; transition: background 0.15s ease;
-    animation: mktFadeIn 0.3s ease both;
+/* ── Coin Row (Standalone Card — Binance/Bybit style) ── */
+.mkt-coin-row {
+    display: grid;
+    grid-template-columns: 28px 36px minmax(0, 1fr) 92px 64px 28px;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+    background: #0B1220;
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    /* Virtualization: skip rendering cost for off-screen rows */
+    content-visibility: auto;
+    contain-intrinsic-size: 56px;
+    min-height: 56px;
+    animation: mktFadeIn 0.25s ease both;
 }
-.mkt-forex-row:hover { background: rgba(255,255,255,0.02); }
-.mkt-forex-row:active { background: rgba(255,255,255,0.04); }
-.mkt-forex-icon {
-    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+.mkt-coin-row:hover {
+    background: #0E1623;
+    border-color: rgba(255,255,255,0.08);
+}
+.mkt-coin-row:active {
+    background: #11192A;
+    transform: scale(0.99);
+}
+@keyframes mktFadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
+
+.mkt-coin-rank {
+    font-size: 11px; font-weight: 700; color: #6B7A8D;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    min-width: 0;
+}
+
+.mkt-coin-star {
+    width: 28px; height: 28px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 800; letter-spacing: -0.5px;
+    cursor: pointer; color: #4A5668;
+    transition: color 0.2s ease, transform 0.15s ease;
+    border-radius: 6px;
+}
+.mkt-coin-star:hover { color: #F5A623; background: rgba(245,166,35,0.08); }
+.mkt-coin-star:active { transform: scale(0.85); }
+.mkt-coin-star.active { color: #F5A623; }
+
+.mkt-coin-logo {
+    width: 32px; height: 32px; border-radius: 50%;
+    flex-shrink: 0; object-fit: cover;
+    background: #131C2A;
+    border: 1px solid rgba(255,255,255,0.06);
+}
+
+.mkt-coin-info {
+    min-width: 0;
+    display: flex; flex-direction: column; gap: 1px;
+}
+.mkt-coin-symbol {
+    font-size: 14px; font-weight: 700; color: #FFFFFF;
+    letter-spacing: 0.2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1.2;
+}
+/* Hide full coin name — user spec: only symbol shown */
+.mkt-coin-name {
+    display: none !important;
+}
+/* For BTC pair rows, we show pair name (SYM/BTC) in the symbol slot
+   and a small pair-price caption underneath as the "name" */
+.mkt-coin-pair-caption {
+    font-size: 10px; font-weight: 500; color: #6B7A8D;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1.1;
+}
+
+.mkt-coin-right {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+    min-width: 0;
+}
+.mkt-coin-price {
+    font-size: 13px; font-weight: 700; color: #FFFFFF;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+.mkt-coin-change {
+    font-size: 12px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+.mkt-coin-change.up { color: #22C55E; }
+.mkt-coin-change.down { color: #EF4444; }
+
+/* ── Forex Row (matches coin row card design) ── */
+.mkt-forex-row {
+    grid-template-columns: 28px 36px minmax(0, 1fr) 92px 64px 28px;
+}
+.mkt-forex-icon {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800; letter-spacing: -0.5px;
 }
 .mkt-forex-row .mkt-coin-info { flex: 1; min-width: 0; }
 .mkt-forex-row .mkt-coin-right {
-    display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
 }
 .mkt-coin-category-tag {
     font-size: 9px; font-weight: 700;
     padding: 2px 6px; border-radius: 4px;
     text-transform: uppercase; letter-spacing: 0.3px;
-}
-
-/* ── Coin Row (Premium) ── */
-.mkt-coin-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 12px 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.03);
-    cursor: pointer; transition: background 0.15s ease;
-    animation: mktFadeIn 0.3s ease both;
-}
-.mkt-coin-row:hover { background: rgba(255,255,255,0.02); }
-.mkt-coin-row:active { background: rgba(255,255,255,0.04); }
-@keyframes mktFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-
-.mkt-coin-rank {
-    width: 28px; text-align: center;
-    font-size: 11px; font-weight: 700; color: #6B7A8D;
-    flex-shrink: 0;
-}
-
-.mkt-coin-star {
-    width: 24px; height: 24px; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; color: #6B7A8D;
-    transition: color 0.2s ease;
-}
-.mkt-coin-star:hover { color: #F5A623; }
-.mkt-coin-star.active { color: #F5A623; }
-
-.mkt-coin-logo {
-    width: 36px; height: 36px; border-radius: 50%;
-    flex-shrink: 0; object-fit: cover;
-    background: #0B1220;
-    border: 1px solid rgba(255,255,255,0.06);
-}
-
-.mkt-coin-info {
-    flex: 1; min-width: 0;
-    display: flex; flex-direction: column; gap: 2px;
-}
-.mkt-coin-symbol {
-    font-size: 14px; font-weight: 700; color: #FFFFFF;
-    display: flex; align-items: center; gap: 4px;
-}
-.mkt-coin-name {
-    font-size: 11px; color: #6B7A8D;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-.mkt-coin-right {
-    display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
-    flex-shrink: 0;
-}
-.mkt-coin-price {
-    font-size: 14px; font-weight: 700; color: #FFFFFF;
-    font-variant-numeric: tabular-nums;
-}
-.mkt-coin-change {
-    display: inline-flex; align-items: center; gap: 2px;
-    font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 6px;
-}
-.mkt-coin-change.up {
-    background: rgba(34,197,94,0.12); color: #22C55E;
-}
-.mkt-coin-change.down {
-    background: rgba(239,68,68,0.12); color: #EF4444;
 }
 
 /* ── Load More ── */
@@ -7870,60 +7924,11 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     color: #6B7A8D; font-size: 14px;
 }
 
-/* ── Market Pulse Bar (top gainer + top loser quick-pulse) ── */
-.mkt-pulse-bar {
-    display: flex; align-items: stretch; gap: 0;
-    background: linear-gradient(135deg, #0E1623 0%, #0B1220 100%);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 14px; overflow: hidden;
-    margin-bottom: 14px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.2);
-}
-.mkt-pulse-item {
-    flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
-    padding: 11px 10px; cursor: pointer;
-    transition: background 0.2s ease;
-    min-width: 0;
-}
-.mkt-pulse-item:hover { background: rgba(255,255,255,0.03); }
-.mkt-pulse-item:active { background: rgba(255,255,255,0.06); }
-.mkt-pulse-gainer { background: rgba(34,197,94,0.04); }
-.mkt-pulse-loser { background: rgba(239,68,68,0.04); }
-.mkt-pulse-divider {
-    width: 1px; background: rgba(255,255,255,0.06); flex-shrink: 0;
-}
-.mkt-pulse-label {
-    font-size: 9px; font-weight: 600; color: #6B7A8D;
-    text-transform: uppercase; letter-spacing: 0.3px;
-    white-space: nowrap;
-}
-.mkt-pulse-sym {
-    font-size: 13px; font-weight: 800; color: #FFFFFF;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    max-width: 64px;
-}
-.mkt-pulse-chg {
-    font-size: 12px; font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-}
-.mkt-pulse-chg.up { color: #22C55E; }
-.mkt-pulse-chg.down { color: #EF4444; }
-.mkt-pulse-arrow { flex-shrink: 0; }
-.mkt-pulse-gainer .mkt-pulse-arrow { color: #22C55E; }
-.mkt-pulse-loser .mkt-pulse-arrow { color: #EF4444; }
+/* ── Market Pulse Bar — REMOVED from HTML; CSS kept disabled for safety ── */
+.mkt-pulse-bar { display: none !important; }
 
-/* ── Trend-strength heat bar (left edge of each coin row) ── */
-.mkt-coin-row { position: relative; }
-.mkt-heat-bar {
-    position: absolute; left: 0; top: 0; bottom: 0;
-    width: 3px; border-radius: 0 2px 2px 0;
-    transition: opacity 0.3s ease, background 0.3s ease;
-    pointer-events: none;
-}
-.mkt-heat-bar.heat-up { background: linear-gradient(180deg, rgba(34,197,94,0.9), rgba(34,197,94,0.2)); }
-.mkt-heat-bar.heat-down { background: linear-gradient(180deg, rgba(239,68,68,0.9), rgba(239,68,68,0.2)); }
-.mkt-heat-bar.heat-neutral { background: rgba(107,122,141,0.3); }
+/* ── Trend-strength heat bar — disabled in compact card design ── */
+.mkt-heat-bar { display: none !important; }
 
 /* ── Price flash on poll update (real-time feedback) ── */
 .mkt-coin-price.flash-up {
@@ -7960,14 +7965,36 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 .mkt-skel-line.w-20 { width: 20%; }
 
 /* ── Responsive ── */
-@media (max-width: 360px) {
+@media (max-width: 380px) {
     .mkt-overview-grid { gap: 6px; }
-    .mkt-stat-card { padding: 10px 8px; }
-    .mkt-stat-value { font-size: 14px; }
-    .mkt-coin-row { gap: 8px; padding: 10px 4px; }
-    .mkt-coin-logo { width: 32px; height: 32px; }
+    .mkt-stat-card { padding: 7px 8px; min-height: 50px; }
+    .mkt-stat-icon-wrap { width: 24px; height: 24px; border-radius: 6px; }
+    .mkt-stat-label { font-size: 8px; }
+    .mkt-stat-value { font-size: 12px; }
+    /* Slightly tighter grid columns on very narrow screens */
+    .mkt-list-header,
+    .mkt-coin-row {
+        grid-template-columns: 22px 30px minmax(0, 1fr) 80px 56px 24px;
+        gap: 6px;
+        padding: 8px 10px;
+    }
+    .mkt-coin-logo { width: 28px; height: 28px; }
     .mkt-coin-symbol { font-size: 13px; }
-    .mkt-coin-price { font-size: 13px; }
+    .mkt-coin-price { font-size: 12px; }
+    .mkt-coin-change { font-size: 11px; }
+    .mkt-coin-rank { font-size: 10px; }
+}
+@media (max-width: 320px) {
+    .mkt-list-header,
+    .mkt-coin-row {
+        grid-template-columns: 20px 28px minmax(0, 1fr) 70px 50px 22px;
+        gap: 5px;
+        padding: 7px 8px;
+    }
+    .mkt-coin-logo { width: 26px; height: 26px; }
+    .mkt-coin-symbol { font-size: 12px; }
+    .mkt-coin-price { font-size: 11px; }
+    .mkt-coin-change { font-size: 10px; }
 }
 
 /* ════════════════════════════════════════════════════════════════════

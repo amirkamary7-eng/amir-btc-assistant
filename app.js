@@ -3814,6 +3814,56 @@ function renderMarket() {
             const item = items[i];
             const symbol = item.dataset.symbol;
             if (!symbol) continue;
+
+            // BTC pair rows: update relative change + pair price from allCoins
+            if (item.classList.contains('mkt-btc-pair-row')) {
+                const btc = allCoins.find(c => c.symbol === 'BTC');
+                const btcPrice = btc?.priceUsd || 0;
+                const btcChange = btc?.changePercent24Hr || 0;
+                const coin = allCoins.find(c => c.symbol === symbol);
+                if (!coin || !btcPrice) continue;
+                const pairPrice = coin.priceUsd / btcPrice;
+                const rel = (coin.changePercent24Hr || 0) - btcChange;
+                const priceEl = item.querySelector('.mkt-coin-price');
+                if (priceEl) {
+                    let pairPriceStr;
+                    if (pairPrice >= 1) pairPriceStr = pairPrice.toFixed(6);
+                    else if (pairPrice >= 0.001) pairPriceStr = pairPrice.toFixed(8);
+                    else pairPriceStr = pairPrice.toExponential(2);
+                    if (priceEl.textContent !== pairPriceStr) priceEl.textContent = pairPriceStr;
+                }
+                const changeEl = item.querySelector('.mkt-coin-change');
+                if (changeEl) {
+                    const isPos = rel >= 0;
+                    const newChange = (isPos ? '+' : '') + rel.toFixed(2) + '%';
+                    if (changeEl.textContent !== newChange) {
+                        changeEl.textContent = newChange;
+                        changeEl.className = 'mkt-coin-change ' + (isPos ? 'up' : 'down');
+                    }
+                }
+                const capEl = item.querySelector('.mkt-coin-pair-caption');
+                if (capEl) {
+                    let pairPriceStr;
+                    if (pairPrice >= 1) pairPriceStr = pairPrice.toFixed(6);
+                    else if (pairPrice >= 0.001) pairPriceStr = pairPrice.toFixed(8);
+                    else pairPriceStr = pairPrice.toExponential(2);
+                    const newCap = pairPriceStr + ' BTC';
+                    if (capEl.textContent !== newCap) capEl.textContent = newCap;
+                }
+                // Star state
+                const starEl = item.querySelector('.mkt-coin-star');
+                if (starEl) {
+                    const inWatch = watchlist.includes(symbol);
+                    if (inWatch !== starEl.classList.contains('active')) {
+                        starEl.classList.toggle('active', inWatch);
+                        const svgEl = starEl.querySelector('svg');
+                        if (svgEl) svgEl.setAttribute('fill', inWatch ? 'currentColor' : 'none');
+                    }
+                }
+                continue;
+            }
+
+            // Standard crypto row diff
             const coin = allCoins.find(c => c.symbol === symbol);
             if (!coin) continue;
 
@@ -3828,11 +3878,8 @@ function renderMarket() {
             if (changeEl && !item.dataset.forex) {
                 const isPos = coin.changePercent24Hr >= 0;
                 const newChange = (isPos ? '+' : '') + coin.changePercent24Hr.toFixed(2) + '%';
-                const changeIcon = isPos
-                    ? '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>'
-                    : '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>';
-                if (changeEl.textContent.replace(/[^\d.\-+%]/g, '') !== newChange) {
-                    changeEl.innerHTML = changeIcon + newChange;
+                if (changeEl.textContent !== newChange) {
+                    changeEl.textContent = newChange;
                     changeEl.className = 'mkt-coin-change ' + (isPos ? 'up' : 'down');
                 }
             }
@@ -3943,11 +3990,42 @@ function renderMarket() {
                 .slice(0, 15);
             break;
         case 'btcpairs':
-            // BTC pairs view — show separate Bullish/Bearish sections above the coin list.
-            // The coin list itself shows all coins that have a BTC pair (i.e., everything except BTC).
-            renderBtcPairsSection();
-            filtered = filtered.filter(c => c.symbol !== 'BTC' && c.priceUsd > 0);
-            break;
+            // BTC pairs view — show only coins paired against BTC (AVAXBTC, ETHBTC, SOLBTC, ...).
+            // No USDT or USD pricing shown. Each row is a flat BTC pair item.
+            // Sort by 24h volume descending to surface the most traded BTC pairs first.
+            {
+                const btc = allCoins.find(c => c.symbol === 'BTC');
+                const btcPrice = btc?.priceUsd || 0;
+                const btcChange = btc?.changePercent24Hr || 0;
+                if (!btcPrice) {
+                    list.innerHTML = '<div class="mkt-empty">داده BTC در دسترس نیست</div>';
+                    return;
+                }
+                const pairs = allCoins
+                    .filter(c => c.symbol !== 'BTC' && c.priceUsd > 0)
+                    .map(c => ({
+                        symbol: c.symbol,
+                        name: c.name,
+                        image: c.image,
+                        rank: c.rank,
+                        pairPrice: c.priceUsd / btcPrice,
+                        relativeChange: (c.changePercent24Hr || 0) - btcChange,
+                        volumeUsd24Hr: c.volumeUsd24Hr || 0,
+                    }))
+                    .sort((a, b) => (b.volumeUsd24Hr || 0) - (a.volumeUsd24Hr || 0));
+
+                const visibleCount = Math.min(pairs.length, marketVisibleCount);
+                const visible = pairs.slice(0, visibleCount);
+                const hasMore = visibleCount < pairs.length;
+
+                let html = visible.map((p, i) => renderBtcPairItem(p, i)).join('');
+                if (hasMore) {
+                    const remaining = pairs.length - visibleCount;
+                    html += `<div class="mkt-load-more"><button class="mkt-load-more-btn" onclick="loadMoreCoins()">${t('load_more') || 'نمایش بیشتر'} (${remaining})</button></div>`;
+                }
+                list.innerHTML = html;
+                return;
+            }
         default:
             // Performance: limit visible coins, show Load More button
             if (filtered.length > MARKET_DEFAULT_LIMIT) {
@@ -4015,28 +4093,55 @@ function renderCryptoItem(c) {
     const isPos = c.changePercent24Hr >= 0;
     const inWatch = watchlist.includes(c.symbol);
     const safeSymbol = escapeHtml(c.symbol);
-    const safeName = escapeHtml(c.name);
     const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
     const priceStr = c.priceUsd > 1 ? c.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : c.priceUsd.toFixed(6);
     const rankNum = Number(c.rank) || 0;
     const changeStr = (isPos ? '+' : '') + c.changePercent24Hr.toFixed(2) + '%';
-    const changeIcon = isPos
-        ? '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>'
-        : '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>';
     return `
-        <div class="mkt-coin-row" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem" style="animation-delay:${Math.min(_renderIdx * 0.02, 0.4)}s">
+        <div class="mkt-coin-row" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
+            <span class="mkt-coin-rank">${rankNum || '—'}</span>
+            <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="mkt-coin-logo" data-symbol="${safeSymbol}" alt="${safeSymbol}" loading="lazy" decoding="async">
+            <div class="mkt-coin-info">
+                <span class="mkt-coin-symbol">${safeSymbol}</span>
+            </div>
+            <span class="mkt-coin-price">$${priceStr}</span>
+            <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeStr}</span>
             <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="event.stopPropagation(); toggleWatchlist(this.dataset.symbol)" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </span>
-            <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="mkt-coin-logo" data-symbol="${safeSymbol}" alt="${safeSymbol}">
+        </div>
+    `;
+}
+
+/**
+ * Render a single BTC pair row (used when btcpairs sub-tab is active).
+ * Layout matches the standard coin row: Rank | Icon | SYM/BTC | pairPrice | 24h-vs-BTC% | star
+ */
+function renderBtcPairItem(p, idx) {
+    const isPos = p.relativeChange >= 0;
+    const inWatch = watchlist.includes(p.symbol);
+    const safeSymbol = escapeHtml(p.symbol);
+    const icon = p.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(p.symbol).toLowerCase()}@2x.png`;
+    // Pair price formatting: small fractions need more precision
+    let pairPriceStr;
+    if (p.pairPrice >= 1) pairPriceStr = p.pairPrice.toFixed(6);
+    else if (p.pairPrice >= 0.001) pairPriceStr = p.pairPrice.toFixed(8);
+    else pairPriceStr = p.pairPrice.toExponential(2);
+    const rankNum = idx + 1;
+    const changeStr = (isPos ? '+' : '') + p.relativeChange.toFixed(2) + '%';
+    return `
+        <div class="mkt-coin-row mkt-btc-pair-row" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
+            <span class="mkt-coin-rank">${rankNum}</span>
+            <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="mkt-coin-logo" data-symbol="${safeSymbol}" alt="${safeSymbol}" loading="lazy" decoding="async">
             <div class="mkt-coin-info">
-                <span class="mkt-coin-symbol">${safeSymbol}</span>
-                <span class="mkt-coin-name">${safeName}</span>
+                <span class="mkt-coin-symbol">${safeSymbol}<span style="color:#6B7A8D;font-weight:600;">/BTC</span></span>
+                <span class="mkt-coin-pair-caption">${pairPriceStr} BTC</span>
             </div>
-            <div class="mkt-coin-right">
-                <span class="mkt-coin-price">$${priceStr}</span>
-                <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeIcon}${changeStr}</span>
-            </div>
+            <span class="mkt-coin-price">${pairPriceStr}</span>
+            <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeStr}</span>
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="event.stopPropagation(); toggleWatchlist(this.dataset.symbol)" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            </span>
         </div>
     `;
 }
@@ -4061,10 +4166,8 @@ function renderForexItem(f) {
     let priceStr;
     if (f.price > 0) {
         if (cat === 'metal' && f.price > 1000) {
-            // Gold: $2,654.32 (with thousands separator)
             priceStr = f.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         } else if (cat === 'metal') {
-            // Silver: $30.45
             priceStr = f.price.toFixed(2);
         } else if (decimals === 0) {
             priceStr = f.price.toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -4075,31 +4178,29 @@ function renderForexItem(f) {
         priceStr = '--';
     }
 
-    // Change display: show actual change % if available, otherwise show category label
+    // Change display
     const change = f.change || 0;
     const hasChange = Math.abs(change) > 0.001;
-    const changeStr = hasChange ? (change >= 0 ? '+' : '') + change.toFixed(2) + '%' : '';
-    const catLabel = currentLang === 'fa' ? cfg.labelFa : cfg.label;
+    const changeStr = hasChange ? (change >= 0 ? '+' : '') + change.toFixed(2) + '%' : '—';
+    const changeCls = hasChange ? (change >= 0 ? 'up' : 'down') : '';
 
     // Category icon with premium styling
     const iconBg = `background:${cfg.color}15; color:${cfg.color}; border:1px solid ${cfg.color}30;`;
 
     return `
         <div class="mkt-coin-row mkt-forex-row" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" onclick="openForexDetail(this.dataset.symbol)" role="listitem">
+            <span class="mkt-coin-rank">—</span>
             <div class="mkt-forex-icon" style="${iconBg}">
                 <span>${cfg.icon}</span>
             </div>
             <div class="mkt-coin-info">
                 <span class="mkt-coin-symbol">${safeName}</span>
-                <span class="mkt-coin-name">${catLabel}</span>
             </div>
-            <div class="mkt-coin-right">
-                <span class="mkt-coin-price">${priceStr}</span>
-                ${hasChange
-                    ? `<span class="mkt-coin-change ${change >= 0 ? 'up' : 'down'}">${changeStr}</span>`
-                    : `<span class="mkt-coin-category-tag" style="color:${cfg.color}; background:${cfg.color}10;">${cfg.label.toUpperCase()}</span>`
-                }
-            </div>
+            <span class="mkt-coin-price">${priceStr}</span>
+            <span class="mkt-coin-change ${changeCls}">${changeStr}</span>
+            <span class="mkt-coin-star" data-symbol="${safeSymbol}" onclick="event.stopPropagation();" role="button" aria-label="Forex">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.4"><circle cx="12" cy="12" r="10"/></svg>
+            </span>
         </div>
     `;
 }
@@ -4206,20 +4307,13 @@ function switchMainTab(tab, btn) {
     }
 
     // Show/hide crypto sub-tabs (filters: All/Gainers/Losers/Popular/BTC Pairs)
-    // BUG FIX: previous code used classList.add('hidden') but the .hidden CSS rule
-    // was scoped to .market-sub-tabs.hidden (old class name), not .mkt-filters.hidden.
-    // The element now has class "mkt-filters" — so the hidden class never took effect.
-    // Fix: use direct display style.
     const subTabs = document.getElementById('market-sub-tabs');
     if (subTabs) {
         subTabs.style.display = (tab === 'crypto') ? '' : 'none';
     }
 
-    // Also hide the BTC Pairs section when not on crypto tab
-    const btcPairsSection = document.getElementById('mkt-btc-pairs-section');
-    if (btcPairsSection) {
-        btcPairsSection.style.display = 'none';
-    }
+    // The dedicated BTC pairs section was removed — BTC pairs now render inline
+    // in #coin-list when the 'btcpairs' sub-tab is active.
 
     // Show/hide summary bar and insights (only for crypto, not forex/watchlist)
     const summaryBar = document.getElementById('market-stats-row');
@@ -4229,6 +4323,13 @@ function switchMainTab(tab, btn) {
     const insightsRow = document.getElementById('market-insights-row');
     if (insightsRow) {
         insightsRow.style.display = (tab === 'crypto') ? '' : 'none';
+    }
+
+    // Show/hide sticky list header (only relevant for crypto/forex/watchlist, not BTC pairs view which uses same header)
+    const listHeader = document.getElementById('mkt-list-header');
+    if (listHeader) {
+        // Header is always visible — same column layout works for all tabs
+        listHeader.style.display = '';
     }
 
     // Show/hide FAB (only on watchlist tab)
@@ -4279,11 +4380,8 @@ function switchSubTab(tab, btn) {
     btn.classList.add('active');
     btn.setAttribute('aria-selected', 'true');
 
-    // Show/hide BTC Pairs section based on filter
-    const btcPairsSection = document.getElementById('mkt-btc-pairs-section');
-    if (btcPairsSection) {
-        btcPairsSection.style.display = (tab === 'btcpairs') ? 'flex' : 'none';
-    }
+    // Show/hide BTC Pairs section based on filter (section was removed — no-op now)
+    // BTC pairs render inline in #coin-list when btcpairs sub-tab is active.
 
     // Re-render with animation
     const list = document.getElementById('coin-list');
@@ -4301,74 +4399,16 @@ function switchSubTab(tab, btn) {
 }
 
 /**
- * Render the BTC Pairs section with Bullish/Bearish sub-groups.
- * Bullish = coins gaining value against BTC (24h change > 0)
- * Bearish = coins losing value against BTC (24h change < 0)
- * Real data only — derived from allCoins (no mock data).
+ * Render the BTC Pairs section — DEPRECATED.
+ * The dedicated Bullish/Bearish groups section was removed from HTML.
+ * BTC pairs are now rendered as a flat list inside #coin-list when the
+ * 'btcpairs' sub-tab is active (see renderMarket's btcpairs case).
+ * This function is kept as a no-op for backward compatibility with any
+ * callers that still reference it.
  */
 function renderBtcPairsSection() {
-    const btc = allCoins.find(c => c.symbol === 'BTC');
-    const btcPrice = btc?.priceUsd || 0;
-    if (!btcPrice) {
-        // BTC price unavailable — show empty states
-        const bullList = document.getElementById('mkt-btc-bull-list');
-        const bearList = document.getElementById('mkt-btc-bear-list');
-        const bullCount = document.getElementById('mkt-btc-bull-count');
-        const bearCount = document.getElementById('mkt-btc-bear-count');
-        if (bullList) bullList.innerHTML = '<div class="mkt-btc-pair-empty">داده BTC در دسترس نیست</div>';
-        if (bearList) bearList.innerHTML = '<div class="mkt-btc-pair-empty">داده BTC در دسترس نیست</div>';
-        if (bullCount) bullCount.textContent = '0';
-        if (bearCount) bearCount.textContent = '0';
-        return;
-    }
-
-    // Compute BTC pair price (coin/BTC) and 24h change vs BTC for each coin
-    const pairs = allCoins
-        .filter(c => c.symbol !== 'BTC' && c.priceUsd > 0)
-        .map(c => {
-            const pairPrice = c.priceUsd / btcPrice; // how many BTC per 1 coin
-            // Relative change vs BTC: if coin went up more than BTC, it's bullish vs BTC
-            const coinChange = c.changePercent24Hr || 0;
-            const btcChange = btc.changePercent24Hr || 0;
-            const relativeChange = coinChange - btcChange;
-            return {
-                symbol: c.symbol,
-                name: c.name,
-                pairPrice,
-                relativeChange,
-                isBullish: relativeChange > 0,
-            };
-        });
-
-    const bullish = pairs.filter(p => p.isBullish).sort((a, b) => b.relativeChange - a.relativeChange).slice(0, 10);
-    const bearish = pairs.filter(p => !p.isBullish).sort((a, b) => a.relativeChange - b.relativeChange).slice(0, 10);
-
-    const renderPairItem = (p) => {
-        const safeSym = escapeHtml(p.symbol);
-        const pairPriceStr = p.pairPrice >= 1 ? p.pairPrice.toFixed(6) : p.pairPrice.toFixed(8);
-        const chgStr = (p.relativeChange >= 0 ? '+' : '') + p.relativeChange.toFixed(2) + '%';
-        const cls = p.relativeChange >= 0 ? 'up' : 'down';
-        return `
-            <div class="mkt-btc-pair-item" data-symbol="${safeSym}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
-                <span class="mkt-btc-pair-symbol">${safeSym}/BTC</span>
-                <span class="mkt-btc-pair-price ${cls}">${pairPriceStr} <small>(vs BTC ${chgStr})</small></span>
-            </div>
-        `;
-    };
-
-    const bullList = document.getElementById('mkt-btc-bull-list');
-    const bearList = document.getElementById('mkt-btc-bear-list');
-    const bullCount = document.getElementById('mkt-btc-bull-count');
-    const bearCount = document.getElementById('mkt-btc-bear-count');
-
-    if (bullList) bullList.innerHTML = bullish.length
-        ? bullish.map(renderPairItem).join('')
-        : '<div class="mkt-btc-pair-empty">جفت صعودی یافت نشد</div>';
-    if (bearList) bearList.innerHTML = bearish.length
-        ? bearish.map(renderPairItem).join('')
-        : '<div class="mkt-btc-pair-empty">جفت نزولی یافت نشد</div>';
-    if (bullCount) bullCount.textContent = String(bullish.length);
-    if (bearCount) bearCount.textContent = String(bearish.length);
+    // No-op — BTC pairs now render inline in the main coin list.
+    return;
 }
 
 document.addEventListener('DOMContentLoaded', () => {

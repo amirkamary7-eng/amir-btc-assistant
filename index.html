@@ -285,46 +285,34 @@
             </button>
         </div>
 
-        <!-- ═══ MKT: Premium Overview Cards (3 stat cards with icons + trend) ═══ -->
+        <!-- ═══ MKT: Compact Overview Cards (3 equal stat cards — exchange-style) ═══ -->
         <div class="mkt-overview-grid">
-            <div class="mkt-stat-card" id="mkt-card-btc-dom">
-                <div class="mkt-stat-icon-wrap mkt-stat-icon-orange">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
+            <div class="mkt-stat-card" id="mkt-card-mcap">
+                <div class="mkt-stat-icon-wrap mkt-stat-icon-green">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                 </div>
                 <div class="mkt-stat-content">
-                    <div class="mkt-stat-top">
-                        <span class="mkt-stat-label">BTC Dominance</span>
-                        <span class="mkt-stat-change" id="mkt-btc-dom-change">--</span>
-                    </div>
-                    <span class="mkt-stat-value" id="btc-dom">--</span>
+                    <span class="mkt-stat-label">Market Cap</span>
+                    <span class="mkt-stat-value" id="global-mcap">--</span>
                 </div>
-                <div class="mkt-stat-spark" id="mkt-btc-spark"></div>
             </div>
             <div class="mkt-stat-card" id="mkt-card-volume">
                 <div class="mkt-stat-icon-wrap mkt-stat-icon-blue">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 </div>
                 <div class="mkt-stat-content">
-                    <div class="mkt-stat-top">
-                        <span class="mkt-stat-label">24h Volume</span>
-                        <span class="mkt-stat-change" id="mkt-vol-change">--</span>
-                    </div>
+                    <span class="mkt-stat-label">24H Volume</span>
                     <span class="mkt-stat-value" id="global-volume">--</span>
                 </div>
-                <div class="mkt-stat-spark" id="mkt-vol-spark"></div>
             </div>
-            <div class="mkt-stat-card" id="mkt-card-mcap">
-                <div class="mkt-stat-icon-wrap mkt-stat-icon-green">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            <div class="mkt-stat-card" id="mkt-card-btc-dom">
+                <div class="mkt-stat-icon-wrap mkt-stat-icon-orange">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
                 </div>
                 <div class="mkt-stat-content">
-                    <div class="mkt-stat-top">
-                        <span class="mkt-stat-label">Market Cap</span>
-                        <span class="mkt-stat-change" id="mkt-mcap-change">--</span>
-                    </div>
-                    <span class="mkt-stat-value" id="global-mcap">--</span>
+                    <span class="mkt-stat-label">BTC Dominance</span>
+                    <span class="mkt-stat-value" id="btc-dom">--</span>
                 </div>
-                <div class="mkt-stat-spark" id="mkt-mcap-spark"></div>
             </div>
         </div>
 
@@ -425,52 +413,20 @@
             <button type="button" class="mkt-filter-chip" data-sub-tab="btcpairs" onclick="switchSubTab('btcpairs', this)" role="tab">جفت‌های BTC</button>
         </div>
 
-        <!-- ═══ MKT: BTC Pairs Sub-Groups (only shown when btcpairs filter is active) ═══ -->
-        <div id="mkt-btc-pairs-section" class="mkt-btc-pairs-section" style="display:none;">
-            <div class="mkt-btc-pair-group">
-                <div class="mkt-btc-pair-header">
-                    <div class="mkt-btc-pair-header-left">
-                        <span class="mkt-btc-pair-badge mkt-btc-pair-bull">
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
-                        </span>
-                        <span class="mkt-btc-pair-title">Bullish BTC Pairs</span>
-                    </div>
-                    <span class="mkt-btc-pair-count" id="mkt-btc-bull-count">0</span>
-                </div>
-                <div class="mkt-btc-pair-list" id="mkt-btc-bull-list" role="list"></div>
-            </div>
-            <div class="mkt-btc-pair-group">
-                <div class="mkt-btc-pair-header">
-                    <div class="mkt-btc-pair-header-left">
-                        <span class="mkt-btc-pair-badge mkt-btc-pair-bear">
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
-                        </span>
-                        <span class="mkt-btc-pair-title">Bearish BTC Pairs</span>
-                    </div>
-                    <span class="mkt-btc-pair-count" id="mkt-btc-bear-count">0</span>
-                </div>
-                <div class="mkt-btc-pair-list" id="mkt-btc-bear-list" role="list"></div>
-            </div>
+        <!-- ═══ MKT: BTC Pairs Sub-Groups — REMOVED (BTC tab now renders flat BTC pair list) ═══ -->
+
+        <!-- ═══ MKT: Market Pulse Bar — REMOVED (redundant with filter tabs, causes truncated text) ═══ -->
+
+        <!-- ═══ MKT: Sticky Column Header (Rank | Coin | Price | 24H) ═══ -->
+        <div class="mkt-list-header" id="mkt-list-header" role="row">
+            <span class="mkt-lh-rank" role="columnheader">#</span>
+            <span class="mkt-lh-coin" role="columnheader">ارز</span>
+            <span class="mkt-lh-price" role="columnheader">قیمت</span>
+            <span class="mkt-lh-change" role="columnheader">24H</span>
+            <span class="mkt-lh-star" role="columnheader" aria-label="Watchlist"></span>
         </div>
 
-        <!-- ═══ MKT: Market Pulse Bar (top gainer + top loser quick-pulse) ═══ -->
-        <div class="mkt-pulse-bar" id="mkt-pulse-bar" role="region" aria-label="Market pulse">
-            <div class="mkt-pulse-item mkt-pulse-gainer" id="mkt-pulse-gainer" onclick="openCoinDetail(this.dataset.symbol)" role="button" tabindex="0">
-                <span class="mkt-pulse-label">بیشترین رشد</span>
-                <span class="mkt-pulse-sym" id="mkt-pulse-gainer-sym">--</span>
-                <span class="mkt-pulse-chg up" id="mkt-pulse-gainer-chg">--</span>
-                <svg class="mkt-pulse-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
-            </div>
-            <div class="mkt-pulse-divider"></div>
-            <div class="mkt-pulse-item mkt-pulse-loser" id="mkt-pulse-loser" onclick="openCoinDetail(this.dataset.symbol)" role="button" tabindex="0">
-                <svg class="mkt-pulse-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
-                <span class="mkt-pulse-chg down" id="mkt-pulse-loser-chg">--</span>
-                <span class="mkt-pulse-sym" id="mkt-pulse-loser-sym">--</span>
-                <span class="mkt-pulse-label">بیشترین ریزش</span>
-            </div>
-        </div>
-
-        <!-- ═══ MKT: Coin List ═══ -->
+        <!-- ═══ MKT: Coin List (virtualized via content-visibility) ═══ -->
         <div class="mkt-coin-list" id="coin-list" role="list"></div>
 
         <button type="button" class="fab-add-watch fab-hidden" onclick="openAddCoinModal()" aria-label="Add to watchlist">
