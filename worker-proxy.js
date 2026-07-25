@@ -4138,7 +4138,18 @@ async function runScheduledAlertsBaseline(controller, env) {
 
       // ── SEND NOTIFICATIONS ──
       try {
-        const text = `🔔 هشدار قیمت فعال شد\n${symbol} — قیمت فعلی: ${Number(currentPrice).toFixed(6)}\nهدف: ${Number(targetPrice).toFixed(6)} (${direction === 'below' ? 'ریزش' : 'صعود'})`;
+        // Professional, short, clear notification message.
+        // Format: "قیمت BTC به 64,500 USDT رسید." or "قیمت ETH از 3,250 USDT عبور کرد."
+        const priceFmt = currentPrice >= 1
+          ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : Number(currentPrice).toFixed(6);
+        const targetFmt = targetPrice >= 1
+          ? Number(targetPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : Number(targetPrice).toFixed(6);
+
+        const text = direction === 'below'
+          ? `🔔 هشدار قیمت فعال شد\nقیمت ${symbol} به ${priceFmt} USDT رسید.\nهدف شما: ${targetFmt} USDT (ریزش)`
+          : `🔔 هشدار قیمت فعال شد\nقیمت ${symbol} به ${priceFmt} USDT رسید.\nهدف شما: ${targetFmt} USDT (صعود)`;
         const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
 
         // ── PREFERENCE CHECK (corrected) ──
@@ -4180,7 +4191,6 @@ async function runScheduledAlertsBaseline(controller, env) {
             triggered: true,
             notif_skipped: 'pref_disabled',
             user_channel: userChannel,
-            legacy_pref: legacyPrefEnabled,
           }));
           resultPayload.triggered_count += 1;
           continue;
@@ -4214,7 +4224,7 @@ async function runScheduledAlertsBaseline(controller, env) {
                 direction,
                 trigger_reason: triggerReason,
               },
-              title: `🔔 هشدار ${symbol}`,
+              title: `🔔 ${symbol} — هشدار قیمت`,
               message: text,
             });
             inAppDelivered = deliverToMiniApp && Boolean(dispatchResult?.id);
@@ -4365,358 +4375,6 @@ export default {
         return jsonResponse({ status: 'success', message: 'Alert check triggered', result }, {}, env);
       }
 
-      // ── TEMPORARY TEST ENDPOINT: Create test alert (admin secret required) ──
-      // This endpoint creates a REAL alert in the production database for E2E testing.
-      // It requires ALERTS_CRON_SHARED_SECRET for authorization.
-      // Usage: POST /api/_test/create-alert?symbol=BTC&price=65000&direction=above
-      //        Header: X-Cron-Secret: <secret>
-      if (request.method === 'POST' && url.pathname === '/api/_test/create-alert') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || url.searchParams.get('secret') || '';
-        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-
-        const symbol = (url.searchParams.get('symbol') || 'BTC').toUpperCase();
-        const price = parseFloat(url.searchParams.get('price') || '0');
-        const direction = url.searchParams.get('direction') === 'below' ? 'below' : 'above';
-        const userId = url.searchParams.get('user_id') || '831704732';
-
-        if (!price || price <= 0) {
-          return jsonResponse({ status: 'error', message: 'Invalid price' }, { status: 422 }, env);
-        }
-
-        try {
-          // Ensure table exists
-          if (typeof alertRepo?.ensureTable === 'function') {
-            try { await alertRepo.ensureTable(env); } catch {}
-          }
-
-          // ALSO ensure the user exists in the users table (for notification FK)
-          await queryDb(env, `
-            INSERT INTO users (telegram_id, channel_joined, created_at, updated_at)
-            VALUES ($1, TRUE, NOW(), NOW())
-            ON CONFLICT (telegram_id) DO NOTHING
-          `, [String(userId)]).catch(() => {});
-
-          // ALSO ensure notification_settings row exists with correct defaults
-          // CRITICAL: price_alert default in DB schema is FALSE, which blocks
-          // all alerts. We must explicitly set it to TRUE.
-          // ON CONFLICT DO UPDATE ensures existing rows are also fixed.
-          await queryDb(env, `
-            INSERT INTO notification_settings (user_id, price_alert, ch_price_alert, updated_at)
-            VALUES ($1, TRUE, 'both', NOW())
-            ON CONFLICT (user_id) DO UPDATE SET
-              price_alert = TRUE,
-              ch_price_alert = 'both',
-              updated_at = NOW()
-          `, [String(userId)]).catch(() => {});
-
-          const alertId = 'e2e_test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          await queryDb(env, `
-            INSERT INTO price_alerts (id, user_id, symbol, price, direction, status, created_at)
-            VALUES ($1, $2, $3, $4, $5, 'active', NOW())
-          `, [alertId, String(userId), symbol, price, direction]);
-
-          // Count active alerts
-          const countResult = await queryDb(env, `SELECT COUNT(*)::int as cnt FROM price_alerts WHERE status = 'active'`);
-          const activeCount = countResult.rows[0]?.cnt || 0;
-
-          return jsonResponse({
-            status: 'success',
-            alert: { id: alertId, user_id: userId, symbol, price, direction, status: 'active' },
-            total_active_alerts: activeCount,
-            message: `Alert created: ${symbol} ${direction} $${price}. Waiting for cron to trigger.`
-          }, {}, env);
-        } catch (e) {
-          return jsonResponse({ status: 'error', message: e.message }, { status: 500 }, env);
-        }
-      }
-
-      // ── TEMPORARY TEST ENDPOINT: Check alert status ──
-      // Usage: GET /api/_test/check-alert?id=<alert_id>
-      //        Header: X-Cron-Secret: <secret>
-      if (request.method === 'GET' && url.pathname === '/api/_test/check-alert') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || url.searchParams.get('secret') || '';
-        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-
-        const alertId = url.searchParams.get('id');
-        if (!alertId) {
-          return jsonResponse({ status: 'error', message: 'Missing id' }, { status: 422 }, env);
-        }
-
-        try {
-          const result = await queryDb(env, `
-            SELECT id, user_id, symbol, price, direction, status, created_at, triggered_at,
-                   last_price, last_checked_at, last_trigger_price
-            FROM price_alerts WHERE id = $1
-          `, [String(alertId)]);
-
-          // Check notifications matching this alert_id in metadata
-          const notifByAlertId = await queryDb(env, `
-            SELECT id, title, message, category, priority, channel, created_at, metadata
-            FROM notifications
-            WHERE metadata->>'alert_id' = $1
-            ORDER BY created_at DESC LIMIT 5
-          `, [String(alertId)]).catch(() => ({ rows: [] }));
-
-          // ALSO check ALL recent notifications for this user (broader search)
-          const alert = result.rows[0];
-          let allUserNotifs = { rows: [] };
-          if (alert) {
-            allUserNotifs = await queryDb(env, `
-              SELECT id, title, message, category, priority, channel, created_at, metadata
-              FROM notifications
-              WHERE user_id = $1
-              ORDER BY created_at DESC LIMIT 10
-            `, [String(alert.user_id)]).catch(() => ({ rows: [] }));
-          }
-
-          return jsonResponse({
-            status: 'success',
-            alert: alert || null,
-            notifications_by_alert_id: notifByAlertId.rows,
-            all_recent_user_notifications: allUserNotifs.rows,
-          }, {}, env);
-        } catch (e) {
-          return jsonResponse({ status: 'error', message: e.message }, { status: 500 }, env);
-        }
-      }
-
-      // ── TEMPORARY TEST ENDPOINT: Full E2E cron test ──
-      // Creates an alert, triggers cron, and returns detailed results.
-      if (request.method === 'POST' && url.pathname === '/api/_test/full-e2e') {
-        const providedSecret = url.searchParams.get('secret') || '';
-        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-
-        const userId = url.searchParams.get('user_id') || '831704732';
-        const symbol = (url.searchParams.get('symbol') || 'BTC').toUpperCase();
-        const price = parseFloat(url.searchParams.get('price') || '0');
-        const direction = url.searchParams.get('direction') === 'below' ? 'below' : 'above';
-
-        if (!price || price <= 0) {
-          return jsonResponse({ status: 'error', message: 'Invalid price' }, { status: 422 }, env);
-        }
-
-        const result = { steps: [] };
-
-        try {
-          // Step 1: Create alert
-          const alertId = 'e2e_full_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          await queryDb(env, `INSERT INTO price_alerts (id, user_id, symbol, price, direction, status, created_at) VALUES ($1, $2, $3, $4, $5, 'active', NOW())`,
-            [alertId, String(userId), symbol, price, direction]);
-          result.steps.push({ step: 'create_alert', status: 'ok', alert_id: alertId });
-
-          // Step 2: Run cron
-          const cronResult = await runScheduledAlertsBaseline({ cron: 'manual-e2e' }, env);
-          result.steps.push({ step: 'run_cron', status: 'ok', cron_result: cronResult });
-
-          // Step 3: Check alert status
-          const alertResult = await queryDb(env, `SELECT * FROM price_alerts WHERE id = $1`, [alertId]);
-          result.steps.push({ step: 'check_alert', status: 'ok', alert: alertResult.rows[0] });
-
-          // Step 4: Check notifications
-          const notifResult = await queryDb(env, `SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5`, [String(userId)]);
-          result.steps.push({ step: 'check_notifications', status: 'ok', count: notifResult.rows.length, notifications: notifResult.rows.map(n => ({
-            id: n.id, title: n.title, category: n.category, created_at: n.created_at,
-            metadata: n.metadata
-          })) });
-
-          // Step 5: Check notification_queue
-          const queueResult = await queryDb(env, `SELECT * FROM notification_queue WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5`, [String(userId)]).catch(() => ({ rows: [] }));
-          result.steps.push({ step: 'check_queue', status: 'ok', count: queueResult.rows.length, items: queueResult.rows.map(q => ({
-            id: q.id, channel: q.channel, status: q.status, created_at: q.created_at
-          })) });
-
-          return jsonResponse({ status: 'success', result }, {}, env);
-        } catch (e) {
-          return jsonResponse({ status: 'error', message: e.message, stack: e.stack?.slice(0, 500), result }, { status: 500 }, env);
-        }
-      }
-
-      // ── TEMPORARY TEST ENDPOINT: Test dispatch directly ──
-      if (request.method === 'POST' && url.pathname === '/api/_test/test-dispatch') {
-        const providedSecret = url.searchParams.get('secret') || '';
-        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        const userId = url.searchParams.get('user_id') || '831704732';
-        try {
-          // Call dispatch directly
-          let dispatchResult = null;
-          let dispatchError = null;
-          if (notificationPlatformRepo) {
-            try {
-              dispatchResult = await notificationPlatformRepo.dispatch(env, {
-                userId,
-                templateKey: 'price_alert_hit',
-                category: 'price_alert',
-                priority: 'high',
-                channel: 'both',
-                metadata: { symbol: 'BTC', price: '64000', alert_id: 'test_dispatch', target_price: '64000', direction: 'above' },
-                title: '🔔 Test Dispatch',
-                message: 'Test dispatch message',
-              });
-            } catch (e) {
-              dispatchError = { message: e.message, stack: e.stack?.slice(0, 500) };
-            }
-          } else {
-            dispatchError = { message: 'notificationPlatformRepo is null' };
-          }
-
-          return jsonResponse({
-            status: 'success',
-            dispatch_result: dispatchResult,
-            dispatch_error: dispatchError,
-          }, {}, env);
-        } catch (e) {
-          return jsonResponse({ status: 'error', message: e.message, stack: e.stack?.slice(0, 500) }, { status: 500 }, env);
-        }
-      }
-
-      // ── TEMPORARY TEST ENDPOINT: Direct notification insert test ──
-      if (request.method === 'POST' && url.pathname === '/api/_test/insert-notification') {
-        const providedSecret = url.searchParams.get('secret') || '';
-        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        const userId = url.searchParams.get('user_id') || '831704732';
-        try {
-          // Try direct INSERT (same as dispatch does)
-          const notifId = 'test_notif_' + Date.now();
-          await queryDb(env, `
-            INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, 'delivered', NOW())
-          `, [
-            notifId, String(userId), 'price_alert',
-            '🔔 Test Notification', 'This is a test',
-            JSON.stringify({ alert_id: 'test', symbol: 'BTC' }),
-            'high', 'price_alert', 'both'
-          ]);
-
-          // ALSO check notification_settings columns
-          const settingsCols = await queryDb(env, `
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'notification_settings' ORDER BY ordinal_position
-          `).catch(() => ({ rows: [] }));
-
-          // Check ch_price_alert value for this user
-          let chValue = null;
-          try {
-            const chResult = await queryDb(env, `SELECT ch_price_alert FROM notification_settings WHERE user_id = $1`, [String(userId)]);
-            chValue = chResult.rows[0]?.ch_price_alert || 'ROW NOT FOUND';
-          } catch (e) {
-            chValue = 'ERROR: ' + e.message;
-          }
-
-          return jsonResponse({
-            status: 'success',
-            message: 'Notification inserted',
-            id: notifId,
-            notification_settings_columns: settingsCols.rows.map(r => r.column_name),
-            ch_price_alert_value: chValue,
-          }, {}, env);
-        } catch (e) {
-          return jsonResponse({ status: 'error', message: e.message, stack: e.stack?.slice(0, 300) }, { status: 500 }, env);
-        }
-      }
-
-      // ── TEMPORARY TEST ENDPOINT: List recent notifications for a user ──
-      if (request.method === 'GET' && url.pathname === '/api/_test/list-notifications') {
-        const providedSecret = url.searchParams.get('secret') || '';
-        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        const userId = url.searchParams.get('user_id') || '831704732';
-        try {
-          // Check table columns
-          const colsResult = await queryDb(env, `
-            SELECT column_name, data_type FROM information_schema.columns
-            WHERE table_name = 'notifications' ORDER BY ordinal_position
-          `).catch(() => ({ rows: [] }));
-
-          // Get ALL notifications for user (try with different column sets)
-          let allNotifs = { rows: [] };
-          try {
-            allNotifs = await queryDb(env, `
-              SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10
-            `, [String(userId)]);
-          } catch (e) {
-            allNotifs = { rows: [], error: e.message };
-          }
-
-          // Check notification_templates
-          let templates = { rows: [] };
-          try {
-            templates = await queryDb(env, `SELECT key, category, priority, channel FROM notification_templates`);
-          } catch (e) {
-            templates = { rows: [], error: e.message };
-          }
-
-          // Check ch_market value
-          let chMarket = null;
-          try {
-            const chResult = await queryDb(env, `SELECT ch_market FROM notification_settings WHERE user_id = $1`, [String(userId)]);
-            chMarket = chResult.rows[0]?.ch_market || 'ROW NOT FOUND';
-          } catch (e) {
-            chMarket = 'ERROR: ' + e.message;
-          }
-
-          // Also check notification_queue
-          let queueItems = { rows: [] };
-          try {
-            queueItems = await queryDb(env, `
-              SELECT * FROM notification_queue WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10
-            `, [String(userId)]);
-          } catch (e) {
-            queueItems = { rows: [], error: e.message };
-          }
-
-          return jsonResponse({
-            status: 'success',
-            notifications_table_columns: colsResult.rows,
-            user_notifications: allNotifs.rows,
-            user_notifications_error: allNotifs.error || null,
-            notification_templates: templates.rows,
-            templates_error: templates.error || null,
-            ch_market_value: chMarket,
-            queue_items: queueItems.rows,
-            queue_error: queueItems.error || null,
-          }, {}, env);
-        } catch (e) {
-          return jsonResponse({ status: 'error', message: e.message }, { status: 500 }, env);
-        }
-      }
-
-      // ── TEMPORARY TEST ENDPOINT: Delete test alert ──
-      if (request.method === 'POST' && url.pathname === '/api/_test/delete-alert') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || url.searchParams.get('secret') || '';
-        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-
-        const alertId = url.searchParams.get('id');
-        if (!alertId) {
-          return jsonResponse({ status: 'error', message: 'Missing id' }, { status: 422 }, env);
-        }
-
-        try {
-          await queryDb(env, `DELETE FROM price_alerts WHERE id = $1`, [String(alertId)]);
-          return jsonResponse({ status: 'success', message: 'Alert deleted' }, {}, env);
-        } catch (e) {
-          return jsonResponse({ status: 'error', message: e.message }, { status: 500 }, env);
-        }
-      }
 
       // ── System Status (public — maintenance mode check) ──
       // No auth required: this MUST be reachable before app load, even for
