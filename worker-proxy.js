@@ -2517,6 +2517,13 @@ async function fetchCalendarEvents(env) {
   return events;
 }
 
+// Chart resolution timeout — shorter than price fetch timeout.
+// Chart resolution is sequential (Binance → Bybit → OKX → ...).
+// If each exchange takes 4s, worst case = 8 × 4s = 32s (too slow).
+// With 2s timeout, worst case = 8 × 2s = 16s, and typically the first
+// exchange (Binance) responds in <500ms.
+const CHART_RESOLVE_TIMEOUT_MS = 2000;
+
 async function exchangeHasSymbol(key, symbol) {
   const checker = CHART_CHECKERS[key];
   if (!checker) {
@@ -2524,9 +2531,7 @@ async function exchangeHasSymbol(key, symbol) {
   }
 
   try {
-    // Use shorter timeout (4s) for chart resolution — same as price fetch.
-    // Prevents long hangs when an exchange is slow/unreachable.
-    const { ok, body } = await fetchJsonWithTimeout(checker.buildUrl(symbol), PRICE_FETCH_TIMEOUT_MS);
+    const { ok, body } = await fetchJsonWithTimeout(checker.buildUrl(symbol), CHART_RESOLVE_TIMEOUT_MS);
     return ok && checker.isMatch(body);
   } catch {
     return false;
@@ -2945,6 +2950,7 @@ async function handleCalendarEvents(env) {
 const MARKET_CACHE_TTL = 30; // 30 seconds — prices must stay close to TradingView for alert accuracy
 const MARKET_GLOBAL_CACHE_TTL = 300; // 5 minutes — global stats change less frequently
 const MARKET_FETCH_LIMIT = 200;
+const SEARCH_FETCH_LIMIT = 1500; // Extended list for search — not displayed in market list
 
 // ============================================================================
 //#region Single Flight — Request Coalescing for Market Data
@@ -4713,6 +4719,89 @@ export default {
           return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
         }
         return await handleForexData(env);
+      }
+
+      // ── Real-time price for alert checking — independent from market cache ──
+      // Returns the FRESHEST price for a symbol, fetched directly from Binance.
+      // Used by frontend checkAlerts() to get real-time prices every 30s
+      // without waiting for the 60s market polling cycle.
+      // Auth required.
+      if (request.method === 'GET' && url.pathname === '/api/market/price') {
+        const authState = await authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+
+        const symbol = (url.searchParams.get('symbol') || '').toUpperCase().trim();
+        if (!symbol) {
+          return jsonResponse({ status: 'error', message: 'Missing symbol' }, { status: 422 }, env);
+        }
+
+        // Fetch fresh price directly from Binance (no cache)
+        const priceInfo = await fetchSpotPriceUsd(env, symbol);
+        if (priceInfo && priceInfo.price) {
+          return jsonResponse({
+            status: 'success',
+            symbol,
+            price: priceInfo.price,
+            exchange: priceInfo.exchange,
+            timestamp: Date.now(),
+          }, {}, env);
+        }
+        return jsonResponse({ status: 'error', message: 'Price not available' }, { status: 404 }, env);
+      }
+
+      // ── Extended market search — 1500 coins (for search, not displayed in list) ──
+      // Returns a lightweight array of {symbol, name, rank, priceUsd} for search.
+      // Cached for 5 minutes (prices don't need to be real-time for search).
+      // Auth required to prevent abuse.
+      if (request.method === 'GET' && url.pathname === '/api/market/search') {
+        const authState = await authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+
+        const query = (url.searchParams.get('q') || '').toLowerCase().trim();
+        if (!query || query.length < 1) {
+          return jsonResponse({ status: 'success', results: [] }, {}, env);
+        }
+
+        // Check cache first
+        const searchCacheKey = `market:search:v1`;
+        const cachedSearch = await readAppCache(env, searchCacheKey);
+        let searchList = [];
+        if (cachedSearch) {
+          try { searchList = JSON.parse(cachedSearch); } catch {}
+        }
+
+        if (!searchList.length) {
+          // Fetch extended list from CoinGecko (1500 coins)
+          try {
+            const { ok, body } = await fetchJson(
+              `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${SEARCH_FETCH_LIMIT}&page=1&sparkline=false`
+            );
+            if (ok && Array.isArray(body) && body.length > 0) {
+              searchList = body
+                .filter(item => item && typeof item === 'object')
+                .map((item, index) => ({
+                  symbol: String(item.symbol || '').toUpperCase(),
+                  name: item.name || '',
+                  rank: item.market_cap_rank || (index + 1),
+                  priceUsd: item.current_price || 0,
+                }))
+                .filter(c => c.symbol && c.symbol.length >= 2);
+              await writeAppCache(env, searchCacheKey, JSON.stringify(searchList), 300); // 5 min cache
+            }
+          } catch (e) {
+            console.warn('Market search: CoinGecko extended fetch failed:', e.message);
+          }
+        }
+
+        // Filter by query (search in symbol AND name)
+        const results = searchList
+          .filter(c =>
+            c.symbol.toLowerCase().includes(query) ||
+            c.name.toLowerCase().includes(query)
+          )
+          .slice(0, 30); // Limit results to 30
+
+        return jsonResponse({ status: 'success', results }, {}, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
