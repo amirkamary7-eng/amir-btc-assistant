@@ -2561,13 +2561,12 @@ async function resolveChartExchange(env, rawSymbol) {
   const cachedExchange = await readAppCache(env, cacheKey);
 
   if (cachedExchange) {
-    // Return cached result — always use BINANCE as the TradingView prefix
-    // because TradingView charts show Binance data regardless of which
-    // exchange API we used to verify the symbol exists.
+    // Return cached result — always use BINANCE as both exchange name and
+    // TradingView prefix. This ensures the exchange badge matches the chart.
     return {
       found: true,
       symbol: normalizedSymbol,
-      exchange: cachedExchange,
+      exchange: 'binance', // Always 'binance' to match tv_symbol
       tv_symbol: `BINANCE:${normalizedSymbol}USDT`,
       cached: true,
     };
@@ -2581,14 +2580,15 @@ async function resolveChartExchange(env, rawSymbol) {
   for (const [tvName, key] of EXCHANGE_ORDER) {
     if (await exchangeHasSymbol(key, normalizedSymbol)) {
       await writeAppCache(env, cacheKey, key, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
-      // ALWAYS use BINANCE as the TradingView prefix — TradingView widget
-      // fetches chart data from its own servers, not from our Worker.
-      // BINANCE:BTCUSDT works in TradingView even if our Worker can't reach
-      // the Binance API directly.
+      // ALWAYS use BINANCE as both the exchange name AND the TradingView prefix.
+      // This ensures the exchange badge matches the actual chart.
+      // TradingView widget fetches chart data from its OWN servers — not from our Worker.
+      // So even though we verified the symbol on Bybit (because Binance API is blocked
+      // from CF Workers), the chart will show Binance data correctly.
       return {
         found: true,
         symbol: normalizedSymbol,
-        exchange: key, // The exchange that confirmed the symbol exists
+        exchange: 'binance', // Always 'binance' to match tv_symbol prefix
         tv_symbol: `BINANCE:${normalizedSymbol}USDT`, // Always BINANCE for TradingView
         cached: false,
       };
