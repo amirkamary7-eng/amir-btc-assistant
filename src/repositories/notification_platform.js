@@ -590,16 +590,28 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function processQueue(env, sendTelegramMessageFn) {
-    await ensureSchema(env);
+    // PERF: Do NOT call ensureSchema here — it runs 16+ ALTER TABLE queries
+    // (one per channel column) which adds 3+ seconds of latency.
+    // ensureSchema is called by dispatch() on first use, which is enough.
     if (!isDatabaseConfigured(env)) return { processed: 0 };
-    const queue = await queryDb(env, `
-      SELECT * FROM notification_queue
-      WHERE status = 'pending' AND attempts < max_attempts
-      AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-      ORDER BY priority DESC, created_at ASC
-      LIMIT 50
-    `);
+    let queue;
+    try {
+      queue = await queryDb(env, `
+        SELECT * FROM notification_queue
+        WHERE status = 'pending' AND attempts < max_attempts
+        AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+        ORDER BY priority DESC, created_at ASC
+        LIMIT 50
+      `);
+    } catch (e) {
+      // Table might not exist yet — skip silently
+      return { processed: 0, error: 'queue_table_missing' };
+    }
+    if (!queue.rows || queue.rows.length === 0) {
+      return { processed: 0 }; // No pending items — fast exit
+    }
     let processed = 0;
+    let failed = 0;
     for (const item of queue.rows) {
       try {
         const payload = item.payload || {};
@@ -608,16 +620,17 @@ export function createNotificationPlatformRepository(deps) {
           await sendTelegramMessageFn(env, {
             chat_id: item.user_id,
             text,
-            parse_mode: 'HTML',
+            disable_web_page_preview: true,
           });
         }
         await queryDb(env, `UPDATE notification_queue SET status = 'processed', processed_at = NOW() WHERE id = $1`, [item.id]);
         processed++;
       } catch (e) {
-        await queryDb(env, `UPDATE notification_queue SET attempts = attempts + 1, error = $2, next_retry_at = NOW() + INTERVAL '60 seconds' WHERE id = $1`, [item.id, e.message?.substring(0, 200)]);
+        await queryDb(env, `UPDATE notification_queue SET attempts = attempts + 1, error = $2, next_retry_at = NOW() + INTERVAL '60 seconds' WHERE id = $1`, [item.id, String(e.message || '').substring(0, 200)]).catch(() => {});
+        failed++;
       }
     }
-    return { processed };
+    return { processed, failed };
   }
 
   // ═══════════════════════════════════════════════════════════
