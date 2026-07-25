@@ -4322,11 +4322,32 @@ export default {
       // ── Manual Alert Trigger (admin-only, for testing) ──
       // Allows admins to force-run the alert cron without waiting 5 minutes.
       // Useful for E2E testing of alert triggers in production.
-      // Auth: requires ALERTS_CRON_SHARED_SECRET in X-Cron-Secret header.
+      // Auth method 1: ALERTS_CRON_SHARED_SECRET in X-Cron-Secret header
+      // Auth method 2: Telegram admin auth (ADMIN_TELEGRAM_ID) via X-Telegram-Init-Data
       if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/trigger-alerts') {
         const providedSecret = request.headers.get('X-Cron-Secret') || '';
         const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
+        let authorized = false;
+
+        // Method 1: shared secret
+        if (expectedSecret && providedSecret === expectedSecret) {
+          authorized = true;
+        }
+
+        // Method 2: Telegram admin auth
+        if (!authorized) {
+          try {
+            const authState = await authenticateTelegramRequest(request, env);
+            if (!authState.error && authState.user) {
+              const adminIds = String(env.ADMIN_TELEGRAM_ID || env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim());
+              if (adminIds.includes(String(authState.user.id))) {
+                authorized = true;
+              }
+            }
+          } catch {}
+        }
+
+        if (!authorized) {
           return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
         }
         // Run the alert checker immediately
