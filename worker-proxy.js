@@ -1667,7 +1667,14 @@ const EXCHANGE_ORDER = [
 const CHART_CHECKERS = {
   binance: {
     buildUrl(symbol) {
-      return `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(`${symbol}USDT`)}`;
+      // NOTE: api.binance.com returns HTTP 403 from Cloudflare Workers (IP blocked).
+      // We use data-api.binance.vision as the primary Binance endpoint.
+      // If that also fails (403), exchangeHasSymbol returns false and we
+      // fall through to Bybit/OKX/etc.
+      // IMPORTANT: Even if Binance API is unreachable, we still use
+      // "BINANCE:SYMBOLUSDT" as the tv_symbol because TradingView widget
+      // fetches chart data from its OWN servers — not from our Worker.
+      return `https://data-api.binance.vision/api/v3/ticker/price?symbol=${encodeURIComponent(`${symbol}USDT`)}`;
     },
     isMatch(body) {
       return Boolean(body && typeof body === 'object' && 'price' in body);
@@ -2554,30 +2561,35 @@ async function resolveChartExchange(env, rawSymbol) {
   const cachedExchange = await readAppCache(env, cacheKey);
 
   if (cachedExchange) {
-    const cachedMatch = EXCHANGE_ORDER.find(([, key]) => key === cachedExchange);
-    if (cachedMatch) {
-      const [tvName, key] = cachedMatch;
-      return {
-        found: true,
-        symbol: normalizedSymbol,
-        exchange: key,
-        tv_symbol: `${tvName}:${normalizedSymbol}USDT`,
-        cached: true,
-      };
-    }
+    // Return cached result — always use BINANCE as the TradingView prefix
+    // because TradingView charts show Binance data regardless of which
+    // exchange API we used to verify the symbol exists.
+    return {
+      found: true,
+      symbol: normalizedSymbol,
+      exchange: cachedExchange,
+      tv_symbol: `BINANCE:${normalizedSymbol}USDT`,
+      cached: true,
+    };
   }
 
-  // CRITICAL FIX: Check exchanges SEQUENTIALLY in strict priority order.
-  // Previous Promise.any() raced all exchanges — fastest response won, ignoring priority.
-  // Now: Binance > Bybit > OKX > KuCoin > Gate > MEXC > CoinEx (strict sequential).
+  // Check exchanges SEQUENTIALLY in strict priority order:
+  // Binance > Bybit > OKX > Bitget > KuCoin > MEXC > Gate > HTX
+  // NOTE: Binance API is blocked from CF Workers (403), so in practice
+  // Bybit will be the first to respond. But we still try Binance first
+  // in case the block is lifted in the future.
   for (const [tvName, key] of EXCHANGE_ORDER) {
     if (await exchangeHasSymbol(key, normalizedSymbol)) {
-      await writeAppCache(env, cacheKey, key, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
+      await writeAppCache(env, cacheKey, key, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
+      // ALWAYS use BINANCE as the TradingView prefix — TradingView widget
+      // fetches chart data from its own servers, not from our Worker.
+      // BINANCE:BTCUSDT works in TradingView even if our Worker can't reach
+      // the Binance API directly.
       return {
         found: true,
         symbol: normalizedSymbol,
-        exchange: key,
-        tv_symbol: `${tvName}:${normalizedSymbol}USDT`,
+        exchange: key, // The exchange that confirmed the symbol exists
+        tv_symbol: `BINANCE:${normalizedSymbol}USDT`, // Always BINANCE for TradingView
         cached: false,
       };
     }
@@ -4424,6 +4436,53 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/charts/resolve') {
         return await handleChartResolve(request, env);
+      }
+
+      // ── DIAGNOSTIC: Exchange reachability test ──
+      // Tests each exchange API individually and returns timing + status.
+      // No auth required (read-only diagnostic, no sensitive data).
+      if (request.method === 'GET' && url.pathname === '/api/_diag/exchanges') {
+        const symbol = (url.searchParams.get('symbol') || 'BTC').toUpperCase();
+        const results = [];
+        for (const [tvName, key] of EXCHANGE_ORDER) {
+          const t0 = Date.now();
+          let status = 'ok';
+          let price = null;
+          let httpStatus = null;
+          let errorMsg = null;
+          try {
+            const checker = CHART_CHECKERS[key];
+            const url2 = checker.buildUrl(symbol);
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 5000);
+            const response = await fetch(url2, {
+              signal: controller.signal,
+              headers: { Accept: 'application/json' },
+            });
+            clearTimeout(timer);
+            httpStatus = response.status;
+            const body = await response.json();
+            if (checker.isMatch(body)) {
+              price = parseSpotTickerPrice(key, body);
+              status = price ? 'found' : 'no_price';
+            } else {
+              status = 'no_match';
+            }
+          } catch (e) {
+            status = 'error';
+            errorMsg = e?.name === 'AbortError' ? 'TIMEOUT_5s' : (e?.message || String(e)).slice(0, 100);
+          }
+          results.push({
+            exchange: key,
+            tv_name: tvName,
+            status,
+            http_status: httpStatus,
+            price,
+            error: errorMsg,
+            latency_ms: Date.now() - t0,
+          });
+        }
+        return jsonResponse({ status: 'success', symbol, exchanges: results }, {}, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/calendar/events') {
