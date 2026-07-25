@@ -8017,41 +8017,130 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 @keyframes cdSlideIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes cdSlideOut { from { transform: translateY(0); } to { transform: translateY(100%); } }
 
-/* ── Top Bar ── */
+/* ── Top Bar (Premium Exchange-Style Header) ── */
 .cd-top-bar {
-    display: flex; align-items: center; gap: 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
     padding: max(12px, env(safe-area-inset-top)) 16px 12px;
-    background: #0B1220; border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: #0B1220;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
     flex-shrink: 0;
 }
-.cd-identity { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+
+/* Left column: logo + (title row + price row) */
+.cd-identity {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
 .cd-coin-logo {
-    width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
-    border: 1px solid rgba(255,255,255,0.06); background: #0B1220;
+    width: 40px; height: 40px; border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.06);
+    background: #131C2A;
+    object-fit: cover;
 }
-.cd-identity-text { min-width: 0; }
-.cd-identity-top { display: flex; align-items: center; gap: 6px; }
-.cd-title { font-size: 16px; font-weight: 700; color: #FFFFFF; margin: 0; }
+
+/* Text column: title row on top, price row below — both aligned to grid */
+.cd-identity-text {
+    display: grid;
+    grid-template-rows: auto auto;
+    gap: 4px;
+    min-width: 0;
+}
+.cd-identity-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.cd-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #FFFFFF;
+    margin: 0;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: 0.2px;
+}
 .cd-rank-badge {
-    font-size: 10px; font-weight: 700; color: #F5A623;
-    background: rgba(245,166,35,0.12); border: 1px solid rgba(245,166,35,0.2);
-    padding: 1px 6px; border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #F5A623;
+    background: rgba(245,166,35,0.12);
+    border: 1px solid rgba(245,166,35,0.2);
+    padding: 2px 7px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    line-height: 1.1;
 }
-.cd-price-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.cd-price { font-size: 18px; font-weight: 800; color: #FFFFFF; font-variant-numeric: tabular-nums; }
-.cd-change { font-size: 12px; font-weight: 700; }
+
+.cd-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+.cd-price {
+    font-size: 18px;
+    font-weight: 800;
+    color: #FFFFFF;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+    line-height: 1.2;
+    /* min-width prevents layout shift when price changes from $100 to $100000 */
+    min-width: 0;
+    white-space: nowrap;
+}
+.cd-change {
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+    line-height: 1.2;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
 .cd-change.up { color: #22C55E; }
 .cd-change.down { color: #EF4444; }
-.cd-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* Right column: action buttons */
+.cd-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+    align-items: center;
+}
 .cd-action-btn {
     width: 36px; height: 36px; border-radius: 10px;
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.06);
-    color: #A5B4C7; cursor: pointer;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: #A5B4C7;
+    cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     transition: all 0.2s ease;
+    flex-shrink: 0;
 }
 .cd-action-btn:hover { background: rgba(245,166,35,0.1); color: #F5A623; }
 .cd-action-btn:active { transform: scale(0.92); }
+
+/* Responsive: tighter spacing on very narrow screens */
+@media (max-width: 360px) {
+    .cd-top-bar { gap: 8px; padding: 10px 12px; }
+    .cd-identity { grid-template-columns: 32px minmax(0, 1fr); gap: 8px; }
+    .cd-coin-logo { width: 32px; height: 32px; }
+    .cd-title { font-size: 14px; }
+    .cd-price { font-size: 16px; }
+    .cd-change { font-size: 11px; }
+    .cd-action-btn { width: 32px; height: 32px; }
+    .cd-actions { gap: 4px; }
+}
 .cd-action-btn.active { color: #F5A623; background: rgba(245,166,35,0.12); }
 
 /* ── Scrollable Content ── */

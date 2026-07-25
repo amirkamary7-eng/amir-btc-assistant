@@ -3023,6 +3023,31 @@ async function resolveChartSymbol(symbol) {
     const cached = Cache.get(cacheKey);
     if (cached) return cached;
 
+    // ── BTC PAIR SHORTCUT ──
+    // If symbol ends with "BTC" (e.g. "ETHBTC", "SOLBTC"), resolve directly to
+    // a TradingView BTC pair symbol (e.g. "BINANCE:ETHBTC") WITHOUT calling the
+    // backend. The backend's resolveChartExchange always appends "USDT" which
+    // would turn "ETHBTC" into "ETHBTCUSDT" (wrong).
+    //
+    // TradingView supports these BTC pair symbols on Binance:
+    //   BINANCE:ETHBTC, BINANCE:SOLBTC, BINANCE:AVAXBTC, etc.
+    const symUpper = String(symbol || '').toUpperCase().trim();
+    if (symUpper !== 'BTC' && symUpper.endsWith('BTC') && symUpper.length > 3) {
+        const base = symUpper.slice(0, -3);
+        if (base.length >= 2 && /^[A-Z0-9]+$/.test(base)) {
+            const result = {
+                found: true,
+                symbol: symUpper,
+                exchange: 'binance',
+                tv_symbol: `BINANCE:${symUpper}`,
+                cached: false,
+                is_btc_pair: true,
+            };
+            Cache.set(cacheKey, result, 3600);
+            return result;
+        }
+    }
+
     // FIX 2: Fully dynamic exchange resolution via backend.
     // Backend checks exchanges in STRICT priority order (sequential, not parallel):
     // Binance > Bybit > OKX > KuCoin > Gate > MEXC > CoinEx
@@ -4116,11 +4141,17 @@ function renderCryptoItem(c) {
 /**
  * Render a single BTC pair row (used when btcpairs sub-tab is active).
  * Layout matches the standard coin row: Rank | Icon | SYM/BTC | pairPrice | 24h-vs-BTC% | star
+ *
+ * BUG FIX (2026-07-25): data-symbol now uses the FULL pair (e.g. "ETHBTC") so
+ * openCoinDetail knows to render a BTC pair chart. Previously data-symbol was
+ * just "ETH" which caused openCoinDetail to resolve the chart as "ETHUSDT"
+ * (because resolveChartExchange always appends "USDT").
  */
 function renderBtcPairItem(p, idx) {
     const isPos = p.relativeChange >= 0;
     const inWatch = watchlist.includes(p.symbol);
     const safeSymbol = escapeHtml(p.symbol);
+    const safePairSymbol = escapeHtml(p.symbol + 'BTC'); // e.g. "ETHBTC" — used for chart resolution
     const icon = p.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(p.symbol).toLowerCase()}@2x.png`;
     // Pair price formatting: small fractions need more precision
     let pairPriceStr;
@@ -4130,7 +4161,7 @@ function renderBtcPairItem(p, idx) {
     const rankNum = idx + 1;
     const changeStr = (isPos ? '+' : '') + p.relativeChange.toFixed(2) + '%';
     return `
-        <div class="mkt-coin-row mkt-btc-pair-row" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
+        <div class="mkt-coin-row mkt-btc-pair-row" data-symbol="${safePairSymbol}" data-base-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
             <span class="mkt-coin-rank">${rankNum}</span>
             <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="mkt-coin-logo" data-symbol="${safeSymbol}" alt="${safeSymbol}" loading="lazy" decoding="async">
             <div class="mkt-coin-info">
@@ -6158,6 +6189,33 @@ function setText(id, text) {
     if (el) el.textContent = text;
 }
 
+/**
+ * Detect if a symbol represents a BTC pair (e.g. "ETHBTC", "SOLBTC").
+ * Returns the base symbol ("ETH") if true, or null if not a BTC pair.
+ *
+ * Convention: a BTC pair ends with "BTC" but is not "BTC" itself, and the
+ * base symbol must be at least 2 characters (so "BTC" alone is NOT a BTC pair).
+ *
+ * Examples:
+ *   "ETHBTC" → "ETH"
+ *   "SOLBTC" → "SOL"
+ *   "BTC"    → null  (BTC itself, not a pair)
+ *   "ETH"    → null  (regular USDT-paired coin)
+ *   "ETHUSDT" → null (explicit USDT pair)
+ */
+function parseBtcPairSymbol(symbol) {
+    const sym = String(symbol || '').toUpperCase().trim();
+    if (sym === 'BTC') return null;
+    if (sym === 'BTCUSDT') return null;
+    if (!sym.endsWith('BTC')) return null;
+    const base = sym.slice(0, -3); // strip "BTC" suffix
+    if (base.length < 2) return null;
+    if (!/^[A-Z0-9]+$/.test(base)) return null;
+    // "BTC" itself is not a valid base (e.g. "BTCBTC" is meaningless)
+    if (base === 'BTC') return null;
+    return base;
+}
+
 async function openCoinDetail(symbol) {
     // Increment token to invalidate any in-flight older calls
     const token = ++_detailLoadToken;
@@ -6178,35 +6236,74 @@ async function openCoinDetail(symbol) {
     // RACE GUARD: if a newer openCoinDetail call started while we were loading tv.js, abort.
     if (token !== _detailLoadToken) return;
 
-    const coin = allCoins.find(c => c.symbol === symbol);
+    // ── BTC PAIR DETECTION ──
+    // If symbol is "ETHBTC", we render the ETH/BTC pair chart (not ETH/USDT).
+    // The coin data (price, change, market cap) still comes from the base coin (ETH).
+    const btcPairBase = parseBtcPairSymbol(symbol);
+    const isBtcPair = btcPairBase !== null;
+    const baseSymbol = isBtcPair ? btcPairBase : symbol;
+
+    const coin = allCoins.find(c => c.symbol === baseSymbol);
     if (!coin) return;
 
     // ── Top Bar: Icon, Title, Rank, Price, Change ──
     const icon = coin.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(coin.symbol).toLowerCase()}@2x.png`;
     const iconEl = document.getElementById('detail-coin-icon');
     if (iconEl) {
-        iconEl.dataset.symbol = symbol;
+        iconEl.dataset.symbol = baseSymbol;
         iconEl.src = icon;
         iconEl.style.visibility = 'visible';
         iconEl.onerror = function() { iconFallback(this); };
     }
 
-    document.getElementById('detail-coin-title').innerText = currentLang === 'fa' && coin.name ? `${coin.name} (${symbol})` : `${symbol} / USDT`;
-    _currentDetailSymbol = symbol;
+    // Title: for BTC pairs, show "ETH/BTC"; for regular coins, show "BTC / USDT"
+    if (isBtcPair) {
+        document.getElementById('detail-coin-title').innerText = `${baseSymbol} / BTC`;
+    } else {
+        document.getElementById('detail-coin-title').innerText = currentLang === 'fa' && coin.name ? `${coin.name} (${symbol})` : `${symbol} / USDT`;
+    }
+    _currentDetailSymbol = symbol; // Keep the FULL symbol (e.g. "ETHBTC") for chart resolution
 
     // Rank badge
     const rankEl = document.getElementById('detail-coin-rank');
     if (rankEl) rankEl.textContent = '#' + (Number(coin.rank) || 0);
 
     // Price + change in header
+    // For BTC pairs: show the pair price (coin/BTC) and the relative change vs BTC
+    // For regular coins: show USD price and 24h change
     const priceEl = document.getElementById('detail-coin-price');
     const changeEl = document.getElementById('detail-coin-change');
-    const priceStr = coin.priceUsd > 1 ? coin.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : coin.priceUsd.toFixed(6);
-    if (priceEl) priceEl.textContent = '$' + priceStr;
-    if (changeEl) {
-        const chg = coin.changePercent24Hr || 0;
-        changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-        changeEl.className = 'cd-change ' + (chg >= 0 ? 'up' : 'down');
+    if (isBtcPair) {
+        const btc = allCoins.find(c => c.symbol === 'BTC');
+        const btcPrice = btc?.priceUsd || 0;
+        const btcChange = btc?.changePercent24Hr || 0;
+        let btcPairPriceStr = '--';
+        if (btcPrice > 0) {
+            const pairPrice = coin.priceUsd / btcPrice;
+            if (pairPrice >= 1) btcPairPriceStr = pairPrice.toFixed(6);
+            else if (pairPrice >= 0.001) btcPairPriceStr = pairPrice.toFixed(8);
+            else btcPairPriceStr = pairPrice.toExponential(2);
+            if (priceEl) priceEl.textContent = btcPairPriceStr + ' BTC';
+        } else {
+            if (priceEl) priceEl.textContent = '-- BTC';
+        }
+        const relChange = (coin.changePercent24Hr || 0) - btcChange;
+        if (changeEl) {
+            changeEl.textContent = (relChange >= 0 ? '+' : '') + relChange.toFixed(2) + '%';
+            changeEl.className = 'cd-change ' + (relChange >= 0 ? 'up' : 'down');
+        }
+        // Set priceStr for the alert section below (use pair price in BTC)
+        var priceStr = btcPairPriceStr;
+        var isBtcPairDisplay = true;
+    } else {
+        const priceStr = coin.priceUsd > 1 ? coin.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : coin.priceUsd.toFixed(6);
+        if (priceEl) priceEl.textContent = '$' + priceStr;
+        if (changeEl) {
+            const chg = coin.changePercent24Hr || 0;
+            changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+            changeEl.className = 'cd-change ' + (chg >= 0 ? 'up' : 'down');
+        }
+        var isBtcPairDisplay = false;
     }
 
     // ── Market Statistics ──
@@ -6218,11 +6315,15 @@ async function openCoinDetail(symbol) {
 
     // ── Alert section: current price binding ──
     // CRITICAL: this must use the CURRENT coin's price, not a stale value from a previous call.
+    // For BTC pairs, show pair price in BTC; for regular coins, show USD price.
     const alertPriceVal = document.getElementById('alert-current-price-value');
-    if (alertPriceVal) alertPriceVal.textContent = '$' + priceStr;
+    if (alertPriceVal) {
+        alertPriceVal.textContent = isBtcPairDisplay ? (priceStr + ' BTC') : ('$' + priceStr);
+    }
 
     // ── Update watchlist button state ──
-    updateDetailWatchBtn(symbol);
+    // For BTC pairs, the watchlist stores the BASE symbol (e.g. "ETH"), not the pair
+    updateDetailWatchBtn(baseSymbol);
 
     // ── Show modal ──
     const modal = document.getElementById('coin-detail-modal');
@@ -6841,17 +6942,37 @@ async function setPriceAlert() {
     const input = document.getElementById('alert-price');
     if (!input) return;
     const price = parseFloat(input.value);
-    const symbol = _currentDetailSymbol || document.getElementById('detail-coin-title').innerText.split(' ')[0];
+    // For BTC pairs, _currentDetailSymbol is "ETHBTC" but alerts are tracked
+    // by the BASE symbol (ETH) because the backend fetches USD prices.
+    // The alert price the user enters is in BTC units (e.g. "0.05" = 0.05 BTC),
+    // so we convert it to USD using the current BTC price before storing.
+    const rawSymbol = _currentDetailSymbol || document.getElementById('detail-coin-title').innerText.split(' ')[0];
+    const btcPairBase = (typeof parseBtcPairSymbol === 'function') ? parseBtcPairSymbol(rawSymbol) : null;
+    const isBtcPair = btcPairBase !== null;
+    const symbol = isBtcPair ? btcPairBase : rawSymbol;
     if (!price || price <= 0) { alert(t('invalid_price')); return; }
+
+    // Convert BTC pair price to USD for backend storage
+    let usdPrice = price;
+    if (isBtcPair) {
+        const btc = allCoins.find(c => c.symbol === 'BTC');
+        const btcPrice = btc?.priceUsd || 0;
+        if (btcPrice <= 0) {
+            alert(t('invalid_price') || 'Cannot set alert: BTC price unavailable');
+            return;
+        }
+        usdPrice = price * btcPrice;
+    }
+
     const direction = (currentAlertDirection === 'below' ? 'below' : 'above');
     const userId = getUserId();
-    let newAlert = { id: Date.now().toString(), symbol, price, direction, userId, createdAt: new Date().toISOString() };
+    let newAlert = { id: Date.now().toString(), symbol, price: usdPrice, direction, userId, createdAt: new Date().toISOString() };
     newAlert = await syncAlertToServer(newAlert);
     alerts.push(newAlert);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     input.value = '';
     renderActiveAlerts(symbol);
-    const priceStr = price >= 1 ? price.toFixed(2) : price.toFixed(6);
+    const priceStr = usdPrice >= 1 ? usdPrice.toFixed(2) : usdPrice.toFixed(6);
     addNotification(t('price_alert'), `${symbol} → $${priceStr}`);
     getTg()?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${priceStr}`, buttons: [{ type: 'ok' }] });
     getTg()?.HapticFeedback?.notificationOccurred('success');
@@ -6866,7 +6987,11 @@ async function removeAlert(id) {
     if (removed) await removeAlertFromServer(removed);
     alerts = alerts.filter(a => a.id !== id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
-    const symbol = _currentDetailSymbol || document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
+    // For BTC pairs, _currentDetailSymbol is "ETHBTC" — use base symbol (ETH)
+    // to match alerts stored by base symbol.
+    const rawSymbol = _currentDetailSymbol || document.getElementById('detail-coin-title')?.innerText?.split(' ')[0];
+    const btcPairBase = (typeof parseBtcPairSymbol === 'function') ? parseBtcPairSymbol(rawSymbol) : null;
+    const symbol = btcPairBase || rawSymbol;
     if (symbol) renderActiveAlerts(symbol);
 }
 /**
@@ -8534,16 +8659,25 @@ function refreshOpenDetailPrice() {
     const symbol = _currentDetailSymbol;
     if (!symbol) return false;
 
+    // ── BTC PAIR DETECTION ──
+    // If _currentDetailSymbol is "ETHBTC", we need to compute the pair price
+    // (ETH/BTC) and relative change vs BTC, not the USD price of ETH.
+    const btcPairBase = (typeof parseBtcPairSymbol === 'function')
+        ? parseBtcPairSymbol(symbol)
+        : null;
+    const isBtcPair = btcPairBase !== null;
+    const lookupSymbol = isBtcPair ? btcPairBase : symbol;
+
     // Resolve the current price from whichever dataset owns this symbol.
     // Crypto symbols live in allCoins; forex/metals live in allForexPairs.
     let price = null;
     let change = null;
-    const coin = allCoins.find(c => c.symbol === symbol);
+    const coin = allCoins.find(c => c.symbol === lookupSymbol);
     if (coin) {
         price = coin.priceUsd;
         change = coin.changePercent24Hr;
     } else if (allForexPairs.length) {
-        const pair = allForexPairs.find(f => f.symbol === symbol);
+        const pair = allForexPairs.find(f => f.symbol === lookupSymbol);
         if (pair) {
             price = pair.price;
             change = pair.change;
@@ -8554,10 +8688,26 @@ function refreshOpenDetailPrice() {
     // Determine decimals based on asset type (mirror openCoinDetail/openForexDetail logic)
     const isCrypto = !!coin;
     let priceStr;
-    if (isCrypto) {
+    let displayPrice; // what gets shown in the header (with $ or BTC suffix)
+    let displayChange = change;
+
+    if (isBtcPair) {
+        // Compute BTC pair price and relative change vs BTC
+        const btc = allCoins.find(c => c.symbol === 'BTC');
+        const btcPrice = btc?.priceUsd || 0;
+        const btcChange = btc?.changePercent24Hr || 0;
+        if (btcPrice <= 0) return false;
+        const pairPrice = price / btcPrice;
+        if (pairPrice >= 1) priceStr = pairPrice.toFixed(6);
+        else if (pairPrice >= 0.001) priceStr = pairPrice.toFixed(8);
+        else priceStr = pairPrice.toExponential(2);
+        displayPrice = priceStr + ' BTC';
+        displayChange = (change || 0) - btcChange;
+    } else if (isCrypto) {
         priceStr = price > 1 ? price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : price.toFixed(6);
+        displayPrice = '$' + priceStr;
     } else {
-        const pair = allForexPairs.find(f => f.symbol === symbol);
+        const pair = allForexPairs.find(f => f.symbol === lookupSymbol);
         const cat = pair?.category || 'major';
         if (cat === 'metal' && price > 1000) {
             priceStr = price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -8568,6 +8718,7 @@ function refreshOpenDetailPrice() {
         } else {
             priceStr = price.toFixed(4);
         }
+        displayPrice = priceStr;
     }
 
     // Track previous price to detect direction for the pulse animation
@@ -8579,9 +8730,8 @@ function refreshOpenDetailPrice() {
     // Update header price
     const priceEl = document.getElementById('detail-coin-price');
     if (priceEl) {
-        const display = isCrypto ? '$' + priceStr : priceStr;
-        if (priceEl.textContent !== display) {
-            priceEl.textContent = display;
+        if (priceEl.textContent !== displayPrice) {
+            priceEl.textContent = displayPrice;
             priceEl.classList.remove('pulse-up', 'pulse-down');
             if (direction) {
                 // force reflow so the animation restarts
@@ -8592,21 +8742,21 @@ function refreshOpenDetailPrice() {
     }
 
     // Update header change % (crypto only — forex change already shown in stats grid)
-    if (isCrypto && change != null) {
+    if ((isCrypto || isBtcPair) && displayChange != null) {
         const changeEl = document.getElementById('detail-coin-change');
         if (changeEl) {
-            const chg = change || 0;
+            const chg = displayChange || 0;
             changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
             changeEl.className = 'cd-change ' + (chg >= 0 ? 'up' : 'down');
         }
     }
 
-    // Update alert card current price
+    // Update alert card current price — for BTC pairs show pair price in BTC
     const alertPriceVal = document.getElementById('alert-current-price-value');
     if (alertPriceVal) {
-        const display = isCrypto ? '$' + priceStr : '$' + priceStr;
-        if (alertPriceVal.textContent !== display) {
-            alertPriceVal.textContent = display;
+        const alertDisplay = isBtcPair ? (priceStr + ' BTC') : ('$' + priceStr);
+        if (alertPriceVal.textContent !== alertDisplay) {
+            alertPriceVal.textContent = alertDisplay;
         }
     }
 
