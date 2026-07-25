@@ -4163,18 +4163,14 @@ async function runScheduledAlertsBaseline(controller, env) {
 
       // ── SEND NOTIFICATIONS ──
       try {
-        // Professional, short, clear notification message.
-        // Format: "قیمت BTC به 64,500 USDT رسید." or "قیمت ETH از 3,250 USDT عبور کرد."
+        // Clean, short, professional notification text.
+        // Only shows: alert fired + symbol + current price.
+        // No target price, no direction, no extra text.
         const priceFmt = currentPrice >= 1
           ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
           : Number(currentPrice).toFixed(6);
-        const targetFmt = targetPrice >= 1
-          ? Number(targetPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-          : Number(targetPrice).toFixed(6);
 
-        const text = direction === 'below'
-          ? `🔔 هشدار قیمت فعال شد\nقیمت ${symbol} به ${priceFmt} USDT رسید.\nهدف شما: ${targetFmt} USDT (ریزش)`
-          : `🔔 هشدار قیمت فعال شد\nقیمت ${symbol} به ${priceFmt} USDT رسید.\nهدف شما: ${targetFmt} USDT (صعود)`;
+        const text = `🔔 هشدار قیمت فعال شد\nقیمت ${symbol} به ${priceFmt} USDT رسید.`;
         const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
 
         // ── PREFERENCE CHECK (corrected) ──
@@ -4249,7 +4245,7 @@ async function runScheduledAlertsBaseline(controller, env) {
                 direction,
                 trigger_reason: triggerReason,
               },
-              title: `🔔 ${symbol} — هشدار قیمت`,
+              title: `🔔 هشدار قیمت ${symbol}`,
               message: text,
             });
             inAppDelivered = deliverToMiniApp && Boolean(dispatchResult?.id);

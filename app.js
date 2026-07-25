@@ -7038,13 +7038,14 @@ async function triggerAlert(alert, currentPrice) {
     // the detail view) and shows an immediate in-app toast/popup.
     alerts = alerts.filter(a => a.id !== alert.id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
-    const priceStr = currentPrice >= 1 ? currentPrice.toFixed(2) : currentPrice.toFixed(6);
-    const msg = currentLang === 'fa'
-        ? `🔔 ${alert.symbol} — ${t('price_reached')} $${priceStr}`
-        : `🔔 ${alert.symbol} Price reached $${priceStr}`;
+    // Clean, short notification — same format as backend.
+    const priceStr = currentPrice >= 1
+        ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : Number(currentPrice).toFixed(6);
+    const msg = `🔔 هشدار قیمت فعال شد\nقیمت ${alert.symbol} به ${priceStr} USDT رسید.`;
     getTg()?.HapticFeedback?.notificationOccurred('warning');
-    addNotification(t('price_alert'), msg.replace('🔔 ', ''), { sendToTelegram: false, playSound: true });
-    getTg()?.showPopup?.({ title: t('price_alert'), message: msg, buttons: [{ type: 'ok' }] });
+    addNotification(`🔔 هشدار قیمت ${alert.symbol}`, msg, { sendToTelegram: false, playSound: true });
+    getTg()?.showPopup?.({ title: `🔔 هشدار قیمت ${alert.symbol}`, message: msg, buttons: [{ type: 'ok' }] });
 
     // CRITICAL: Immediately fetch new notifications from DB.
     // The backend cron may have already created a DB notification for this alert.
