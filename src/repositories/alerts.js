@@ -26,8 +26,23 @@ export function createAlertRepository(deps) {
   /**
    * Ensure price_alerts table + indexes exist.
    * Idempotent — runs CREATE INDEX IF NOT EXISTS on every call.
-   * AUDIT-002 FIX: Added idx_price_alerts_status_created for cron query optimization
-   * (was missing — full table scan on every cron cycle).
+   *
+   * Schema v2 (2026-07-25):
+   *   - last_price NUMERIC: last price seen by cron (for cross-detection)
+   *   - last_checked_at TIMESTAMPTZ: when cron last checked this alert
+   *   - last_trigger_price NUMERIC: price at which alert fired (audit trail)
+   *   - triggered_at TIMESTAMPTZ: when alert fired (already existed)
+   *
+   * Cross-detection works by comparing last_price to current_price against target:
+   *   - direction='above': trigger if last_price < target AND current_price >= target
+   *     OR (no last_price yet) current_price >= target
+   *   - direction='below': trigger if last_price > target AND current_price <= target
+   *     OR (no last_price yet) current_price <= target
+   *
+   * This catches cases where price JUMPED over target between cron runs (gap),
+   * and prevents re-triggering when price stays above/below target after first fire.
+   *
+   * AUDIT-002 FIX: Added idx_price_alerts_status_created for cron query optimization.
    */
   async function ensureTable(env) {
     await queryDb(env, `
@@ -39,13 +54,24 @@ export function createAlertRepository(deps) {
         direction VARCHAR(16) NOT NULL DEFAULT 'above',
         status VARCHAR(16) NOT NULL DEFAULT 'active',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        triggered_at TIMESTAMPTZ
+        triggered_at TIMESTAMPTZ,
+        last_price NUMERIC(24,8),
+        last_checked_at TIMESTAMPTZ,
+        last_trigger_price NUMERIC(24,8)
       )
     `, []);
+
+    // Schema v2 migration: add new columns if missing (idempotent)
+    await queryDb(env, `ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS last_price NUMERIC(24,8)`).catch(() => {});
+    await queryDb(env, `ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ`).catch(() => {});
+    await queryDb(env, `ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS last_trigger_price NUMERIC(24,8)`).catch(() => {});
+
     await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_price_alerts_user_status ON price_alerts (user_id, status)`, []);
     await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_price_alerts_dedup ON price_alerts (user_id, symbol, price, direction)`, []);
     // AUDIT-002 FIX: index for the cron query (status='active' ORDER BY created_at DESC)
     await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_price_alerts_status_created ON price_alerts (status, created_at DESC)`, []);
+    // Index for fast lookup by symbol (cron fetches prices per unique symbol)
+    await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_price_alerts_status_symbol ON price_alerts (status, symbol)`, []);
   }
 
   /**
@@ -155,5 +181,60 @@ export function createAlertRepository(deps) {
     await queryDb(env, 'DELETE FROM price_alerts WHERE id = $1 AND user_id = $2', [String(alertId), String(userId)]);
   }
 
-  return Object.freeze({ create, list, findById, remove, serializeRow, ensureTable });
+  /**
+   * Update last_price + last_checked_at for an alert (called by cron every cycle).
+   * Used by cross-detection logic to know what price was seen on the previous run.
+   *
+   * Atomic UPDATE — no race conditions even with overlapping cron runs.
+   */
+  async function updateLastChecked(env, alertId, lastPrice) {
+    await queryDb(env, `
+      UPDATE price_alerts
+      SET last_price = $2, last_checked_at = NOW()
+      WHERE id = $1
+    `, [String(alertId), Number(lastPrice)]);
+  }
+
+  /**
+   * Mark an alert as triggered (atomic). Sets status, triggered_at, last_trigger_price.
+   * This is the "duplicate trigger prevention" — once status='triggered',
+   * the cron query (WHERE status='active') will no longer return this alert.
+   *
+   * Returns true if the row was actually updated (i.e. it was still active),
+   * false if another cron run already triggered it (race-condition safe).
+   */
+  async function markTriggered(env, alertId, triggerPrice) {
+    const result = await queryDb(env, `
+      UPDATE price_alerts
+      SET status = 'triggered',
+          triggered_at = NOW(),
+          last_trigger_price = $2,
+          last_price = $2
+      WHERE id = $1 AND status = 'active'
+      RETURNING id
+    `, [String(alertId), Number(triggerPrice)]);
+    return result.rows.length > 0;
+  }
+
+  /**
+   * Bulk fetch active alerts for cron processing.
+   * Selects ONLY the columns the cron needs (no user PII).
+   * Returns rows ordered by created_at DESC so newer alerts are checked first.
+   */
+  async function listActiveForCron(env, limit = 500) {
+    await ensureTable(env);
+    const result = await queryDb(env, `
+      SELECT id, user_id, symbol, price, direction, last_price, last_checked_at
+      FROM price_alerts
+      WHERE status = 'active'
+      ORDER BY created_at DESC
+      LIMIT $1
+    `, [Number(limit)]);
+    return result.rows;
+  }
+
+  return Object.freeze({
+    create, list, findById, remove, serializeRow, ensureTable,
+    updateLastChecked, markTriggered, listActiveForCron,
+  });
 }

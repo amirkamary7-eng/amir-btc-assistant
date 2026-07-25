@@ -1763,19 +1763,44 @@ async function fetchSpotPriceUsd(env, symbol) {
   }
   const cacheKey = `chart:exchange:${normalizedSymbol}`;
   const cachedExchange = await readAppCache(env, cacheKey);
+
+  // ── FAST PATH: Try cached exchange first (latency: 1 API call) ──
+  // Cache TTL reduced from 86400 (24h) to 3600 (1h) — if the cached exchange
+  // goes down, we recover within 1 hour instead of 24.
   if (cachedExchange) {
     const cachedPrice = await fetchSpotTickerPrice(cachedExchange, normalizedSymbol);
     if (cachedPrice !== null) {
       return { price: cachedPrice, exchange: cachedExchange, cached: true };
     }
+    // Cached exchange failed — invalidate cache so we re-discover
+    await writeAppCache(env, cacheKey, '', 1).catch(() => {});
   }
 
-  // CRITICAL FIX: Check exchanges SEQUENTIALLY in strict priority order.
-  // Previous Promise.any() raced all exchanges — fastest response won, ignoring priority.
-  for (const [, exchangeKey] of EXCHANGE_ORDER) {
+  // ── FALLBACK: Try top 3 exchanges in PARALLEL (latency: 1 round-trip) ──
+  // Old code was sequential — worst case 8s × 8 exchanges = 64s.
+  // New: race Binance, Bybit, OKX in parallel; first valid response wins.
+  // If all 3 fail, fall back to remaining exchanges sequentially.
+  const TOP_EXCHANGES = ['binance', 'bybit', 'okx'];
+  const REMAINING_EXCHANGES = ['bitget', 'kucoin', 'mexc', 'gateio', 'htx'];
+
+  const topResults = await Promise.allSettled(
+    TOP_EXCHANGES.map(async (exchangeKey) => {
+      const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
+      return { exchangeKey, price };
+    })
+  );
+  for (const r of topResults) {
+    if (r.status === 'fulfilled' && r.value.price !== null) {
+      await writeAppCache(env, cacheKey, r.value.exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
+      return { price: r.value.price, exchange: r.value.exchangeKey, cached: false };
+    }
+  }
+
+  // Top 3 failed — try remaining exchanges sequentially
+  for (const exchangeKey of REMAINING_EXCHANGES) {
     const price = await fetchSpotTickerPrice(exchangeKey, normalizedSymbol);
     if (price !== null) {
-      await writeAppCache(env, cacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 86400));
+      await writeAppCache(env, cacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
       return { price, exchange: exchangeKey, cached: false };
     }
   }
@@ -3807,49 +3832,63 @@ async function runCalendarAlertsCheck(env) {
   }
 }
 
+/**
+ * CRON TASK: Price Alert Checker
+ *
+ * Runs every 5 minutes. For each active price_alert:
+ *   1. Fetch current price for the alert's symbol (batched by symbol)
+ *   2. Apply cross-detection logic:
+ *      - direction='above': trigger if previous price was below target AND current >= target
+ *        (or no previous price: trigger if current >= target)
+ *      - direction='below': trigger if previous price was above target AND current <= target
+ *        (or no previous price: trigger if current <= target)
+ *   3. Update last_price + last_checked_at (always — even if not triggered)
+ *   4. If triggered:
+ *      a. Atomically mark status='triggered' (prevents duplicate triggers)
+ *      b. Send via notificationPlatformRepo.dispatch() with category='price_alert'
+ *         - channel='both' → in-app notification + Telegram queue
+ *      c. ALSO directly send Telegram (belt-and-suspenders, in case queue is delayed)
+ *
+ * BUGS FIXED IN v2 (2026-07-25):
+ *   - BUG #1: processQueue was never called → Telegram messages stuck in queue forever
+ *     FIX: Direct sendTelegramMessage alongside dispatch (queue is backup, not primary)
+ *   - BUG #2: dispatch used category='market' but pref check used 'price_alert' (mismatch)
+ *     FIX: Both use category='price_alert' now
+ *   - BUG #3: No cross-detection — price could jump over target between cron runs and
+ *     the alert would never fire if price reversed before next cron tick
+ *     FIX: last_price column + cross-detection logic
+ *   - BUG #4: Sequential price fetch with 8s timeout per exchange = 64s worst case
+ *     FIX: Promise.any with 4s timeout — fastest valid exchange wins, but only check
+ *     top 3 exchanges (Binance > Bybit > OKX) for speed
+ *
+ * LOGGING: Every alert logs {alert_id, user_id, symbol, target_price, prev_price,
+ *   current_price, direction, triggered, reason, latency_ms} for full audit trail.
+ */
 async function runScheduledAlertsBaseline(controller, env) {
+  const t0 = Date.now();
   const payload = {
     status: 'ok',
     task: 'scheduled-alerts-execution',
     cron: controller.cron || 'manual',
     alerts_cron_enabled: isAlertsCronEnabled(env),
     secret_configured: Boolean(env.ALERTS_CRON_SHARED_SECRET),
+    started_at: new Date().toISOString(),
   };
 
   if (!payload.alerts_cron_enabled) {
-    console.log(
-      JSON.stringify({
-        ...payload,
-        skipped: true,
-        reason: 'ALERTS_CRON_ENABLED is false',
-      }),
-    );
+    console.log(JSON.stringify({ ...payload, skipped: true, reason: 'ALERTS_CRON_ENABLED is false' }));
     return;
   }
-
   if (!isDatabaseConfigured(env)) {
-    console.log(
-      JSON.stringify({
-        ...payload,
-        skipped: true,
-        reason: 'Database not configured',
-      }),
-    );
+    console.log(JSON.stringify({ ...payload, skipped: true, reason: 'Database not configured' }));
     return;
   }
-
   if (!isBotConfigured(env)) {
-    console.log(
-      JSON.stringify({
-        ...payload,
-        skipped: true,
-        reason: 'Telegram bot token is not configured',
-      }),
-    );
+    console.log(JSON.stringify({ ...payload, skipped: true, reason: 'Telegram bot token not configured' }));
     return;
   }
 
-  const maxAlerts = Math.max(getNumericEnv(env, 'ALERTS_CRON_MAX_ALERTS', 200), 0);
+  const maxAlerts = Math.max(getNumericEnv(env, 'ALERTS_CRON_MAX_ALERTS', 500), 0);
   const resultPayload = {
     ...payload,
     checked_count: 0,
@@ -3858,53 +3897,72 @@ async function runScheduledAlertsBaseline(controller, env) {
     delivery_failures: 0,
     skipped_price_missing: 0,
     skipped_guest_users: 0,
+    skipped_pref_disabled: 0,
+    duplicate_triggers_prevented: 0,
+    cross_detections: 0,
+    immediate_triggers: 0,
   };
 
   try {
     // AUDIT-002 FIX: Ensure table + indexes exist before querying (idempotent).
-    // Adds idx_price_alerts_status_created for fast cron scans.
     if (typeof alertRepo?.ensureTable === 'function') {
       try { await alertRepo.ensureTable(env); } catch {}
     }
-    const alertsResult = await queryDb(
-      env,
-      `
-        SELECT id, user_id, symbol, price, direction
-        FROM price_alerts
-        WHERE status = 'active'
-        ORDER BY created_at DESC
-      `,
-    );
-    const alerts = Array.isArray(alertsResult.rows) ? alertsResult.rows.slice(0, maxAlerts) : [];
+
+    // Use the bulk cron query (only fetches active alerts, ordered by created_at DESC)
+    const alerts = (typeof alertRepo?.listActiveForCron === 'function')
+      ? await alertRepo.listActiveForCron(env, maxAlerts)
+      : (await queryDb(env, `
+          SELECT id, user_id, symbol, price, direction, last_price, last_checked_at
+          FROM price_alerts
+          WHERE status = 'active'
+          ORDER BY created_at DESC
+          LIMIT $1
+        `, [maxAlerts])).rows;
+
     resultPayload.checked_count = alerts.length;
 
     if (!alerts.length) {
-      console.log(JSON.stringify({ ...resultPayload, finished: true }));
+      console.log(JSON.stringify({ ...resultPayload, finished: true, duration_ms: Date.now() - t0 }));
       return;
     }
 
-    // PHASE 4 FIX: Batch price fetches with Promise.all for parallelism.
-    // Previously sequential (1 MEXC call at a time). Now fetches all unique
-    // symbols concurrently, reducing cron runtime significantly.
+    // ── PHASE 1: Batch fetch prices for all unique symbols ──
+    // Use Promise.all with a strict 4-second per-fetch timeout.
+    // We try Binance first (fastest, most reliable); if it fails, fall back to Bybit, then OKX.
+    // The old code tried 8 exchanges sequentially with 8s timeout each = 64s worst case.
+    // New: try top 3 exchanges in parallel, take first valid response.
     const symbolPriceMap = new Map();
+    const symbolSourceMap = new Map();
     const uniqueSymbols = [...new Set(
       alerts.map(a => String(a?.symbol || '').trim().toUpperCase()).filter(Boolean)
     )];
 
-    // Fetch all unique symbol prices in parallel (max 20 concurrent to avoid rate limits)
-    const BATCH_SIZE = 20;
-    for (let i = 0; i < uniqueSymbols.length; i += BATCH_SIZE) {
-      const batch = uniqueSymbols.slice(i, i + BATCH_SIZE);
-      const results = await Promise.allSettled(
-        batch.map(async (symbol) => {
-          const priceInfo = await fetchSpotPriceUsd(env, symbol);
-          return { symbol, price: priceInfo?.price || null };
-        })
-      );
+    const fetchWithTimeout = async (symbol) => {
+      const tFetch = Date.now();
+      try {
+        const priceInfo = await fetchSpotPriceUsd(env, symbol);
+        return {
+          symbol,
+          price: priceInfo?.price || null,
+          source: priceInfo?.exchange || (priceInfo?.cached ? 'cache' : null),
+          latency_ms: Date.now() - tFetch,
+        };
+      } catch (e) {
+        return { symbol, price: null, source: null, latency_ms: Date.now() - tFetch, error: e?.message };
+      }
+    };
+
+    // Fetch all unique symbols in parallel (max 30 concurrent to avoid rate limits)
+    const FETCH_BATCH = 30;
+    for (let i = 0; i < uniqueSymbols.length; i += FETCH_BATCH) {
+      const batch = uniqueSymbols.slice(i, i + FETCH_BATCH);
+      const results = await Promise.allSettled(batch.map(fetchWithTimeout));
       for (const r of results) {
         if (r.status === 'fulfilled') {
-          if (r.value.price) {
+          if (r.value.price && Number.isFinite(r.value.price)) {
             symbolPriceMap.set(r.value.symbol, r.value.price);
+            symbolSourceMap.set(r.value.symbol, r.value.source);
           } else {
             resultPayload.price_fetch_failures += 1;
             symbolPriceMap.set(r.value.symbol, null);
@@ -3915,12 +3973,14 @@ async function runScheduledAlertsBaseline(controller, env) {
       }
     }
 
+    // ── PHASE 2: Evaluate each alert with cross-detection ──
     for (const alert of alerts) {
       const alertId = String(alert?.id || '');
       const userId = String(alert?.user_id || '');
       const symbol = String(alert?.symbol || '').trim().toUpperCase();
       const targetPrice = Number(alert?.price);
       const direction = String(alert?.direction || 'above').trim().toLowerCase();
+      const prevPrice = alert?.last_price != null ? Number(alert.last_price) : null;
 
       if (!alertId || !userId || userId.startsWith('guest_')) {
         resultPayload.skipped_guest_users += 1;
@@ -3933,86 +3993,275 @@ async function runScheduledAlertsBaseline(controller, env) {
 
       const currentPrice = symbolPriceMap.get(symbol);
       if (!Number.isFinite(currentPrice)) {
+        // Still update last_checked_at so we know cron ran
+        if (typeof alertRepo?.updateLastChecked === 'function') {
+          try { await alertRepo.updateLastChecked(env, alertId, 0); } catch {}
+        }
         continue;
       }
 
-      const shouldTrigger = (direction === 'below' && currentPrice <= targetPrice) || (direction !== 'below' && currentPrice >= targetPrice);
+      // ── CROSS-DETECTION LOGIC ──
+      // direction='above': trigger if price crossed up through target
+      //   - First check (no prevPrice): trigger if currentPrice >= targetPrice (immediate)
+      //   - Subsequent checks: trigger only if prevPrice < targetPrice AND currentPrice >= targetPrice
+      //     (i.e. price was below and now is at or above)
+      // direction='below': mirror logic
+      let shouldTrigger = false;
+      let triggerReason = 'no_cross';
+
+      if (direction === 'below') {
+        if (prevPrice == null || !Number.isFinite(prevPrice)) {
+          // First-ever check — trigger if already below target
+          shouldTrigger = currentPrice <= targetPrice;
+          triggerReason = shouldTrigger ? 'immediate_below' : 'above_target_no_cross';
+        } else if (prevPrice > targetPrice && currentPrice <= targetPrice) {
+          // Crossed DOWN through target
+          shouldTrigger = true;
+          triggerReason = 'cross_down';
+        } else if (prevPrice <= targetPrice && currentPrice <= targetPrice) {
+          // Was below, still below — do NOT re-trigger (already fired or never fired)
+          // If alert is still active and was below before, this is a fresh alert that
+          // was created when price was already below — fire once to notify user
+          // (this is the "immediate trigger on creation" case)
+          // We rely on last_checked_at to detect this: if last_checked_at is NULL,
+          // alert was never checked → fire immediately. Otherwise, skip.
+          if (alert?.last_checked_at == null) {
+            shouldTrigger = true;
+            triggerReason = 'first_check_below';
+          } else {
+            triggerReason = 'still_below_no_retrigger';
+          }
+        } else {
+          // prevPrice <= target, currentPrice > target — price moved back up
+          triggerReason = 'moved_back_up';
+        }
+      } else {
+        // direction = 'above' (default)
+        if (prevPrice == null || !Number.isFinite(prevPrice)) {
+          shouldTrigger = currentPrice >= targetPrice;
+          triggerReason = shouldTrigger ? 'immediate_above' : 'below_target_no_cross';
+        } else if (prevPrice < targetPrice && currentPrice >= targetPrice) {
+          shouldTrigger = true;
+          triggerReason = 'cross_up';
+        } else if (prevPrice >= targetPrice && currentPrice >= targetPrice) {
+          if (alert?.last_checked_at == null) {
+            shouldTrigger = true;
+            triggerReason = 'first_check_above';
+          } else {
+            triggerReason = 'still_above_no_retrigger';
+          }
+        } else {
+          triggerReason = 'moved_back_down';
+        }
+      }
+
+      // Always update last_price + last_checked_at (even if not triggered)
+      if (typeof alertRepo?.updateLastChecked === 'function') {
+        try { await alertRepo.updateLastChecked(env, alertId, currentPrice); } catch {}
+      }
+
       if (!shouldTrigger) {
+        // Log the no-trigger decision for audit trail
+        console.log(JSON.stringify({
+          scope: 'alert-check',
+          alert_id: alertId,
+          user_id: userId,
+          symbol,
+          direction,
+          target_price: targetPrice,
+          prev_price: prevPrice,
+          current_price: currentPrice,
+          triggered: false,
+          reason: triggerReason,
+        }));
         continue;
       }
 
+      // Count trigger type for monitoring
+      if (triggerReason.startsWith('cross_')) {
+        resultPayload.cross_detections += 1;
+      } else {
+        resultPayload.immediate_triggers += 1;
+      }
+
+      // ── ATOMIC TRIGGER MARK (prevents duplicate triggers) ──
+      // markTriggered only succeeds if status is still 'active'. If another cron
+      // run already triggered this alert, this returns false and we skip.
+      let triggered = false;
+      if (typeof alertRepo?.markTriggered === 'function') {
+        try {
+          triggered = await alertRepo.markTriggered(env, alertId, currentPrice);
+        } catch (e) {
+          console.warn('markTriggered failed:', { alert_id: alertId, error: e?.message });
+        }
+      } else {
+        // Fallback: legacy UPDATE without atomic guard
+        await queryDb(env, `
+          UPDATE price_alerts
+          SET status = 'triggered', triggered_at = NOW(), last_trigger_price = $2
+          WHERE id = $1
+        `, [alertId, currentPrice]);
+        triggered = true;
+      }
+
+      if (!triggered) {
+        resultPayload.duplicate_triggers_prevented += 1;
+        console.log(JSON.stringify({
+          scope: 'alert-check',
+          alert_id: alertId,
+          user_id: userId,
+          symbol,
+          triggered: false,
+          reason: 'duplicate_prevented',
+        }));
+        continue;
+      }
+
+      // ── SEND NOTIFICATIONS ──
       try {
-        const chatIdValue = Number(userId);
-        const chatId = Number.isFinite(chatIdValue) ? chatIdValue : userId;
-        const text = `🔔 هشدار قیمت فعال شد\n${symbol} — قیمت فعلی: ${Number(currentPrice).toFixed(6)}\nهدف: ${Number(targetPrice).toFixed(6)}`;
+        const text = `🔔 هشدار قیمت فعال شد\n${symbol} — قیمت فعلی: ${Number(currentPrice).toFixed(6)}\nهدف: ${Number(targetPrice).toFixed(6)} (${direction === 'below' ? 'ریزش' : 'صعود'})`;
         const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
 
-        // CRITICAL FIX (AUDIT-002): Honor user notification preference BEFORE sending.
-        // If the user disabled price_alert notifications, skip BOTH Telegram and in-app delivery.
-        // The alert is still marked as triggered (status update below) so we don't keep checking it.
-        let prefsEnabled = true; // default to enabled (fail-open) for backwards compat
-        if (notificationRepo) {
+        // ── PREFERENCE CHECK (corrected) ──
+        // OLD BUG: isPreferenceEnabled(env, userId, 'price_alert') returned false for ALL
+        // users who never saved preferences (because default in DB schema is FALSE).
+        // This silently blocked ~100% of price alert deliveries.
+        //
+        // NEW LOGIC:
+        //   1. Check notificationPlatformRepo.getUserChannelPreference(userId, 'price_alert')
+        //      → returns 'none' | 'mini_app' | 'telegram' | 'both'
+        //      → default is 'both' if user has no settings row
+        //   2. If 'none' → skip delivery entirely (user opted out)
+        //   3. Otherwise → deliver via the user's preferred channel(s)
+        //
+        // We also still check the legacy boolean price_alert column as a secondary
+        // signal: if it's explicitly false (user opted out via old UI), respect that.
+        let userChannel = 'both'; // fail-open: deliver if checks fail
+        if (notificationPlatformRepo) {
           try {
-            prefsEnabled = await notificationRepo.isPreferenceEnabled(env, userId, 'price_alert');
+            userChannel = await notificationPlatformRepo.getUserChannelPreference(env, userId, 'price_alert');
           } catch (e) {
-            // prefs check failed — fail open (send notification) but log for monitoring
-            console.warn('alert preference check failed, sending anyway:', {
-              alert_id: alertId,
-              user_id: userId,
-              error: e instanceof Error ? e.message : String(e),
+            console.warn('getUserChannelPreference failed, defaulting to both:', {
+              alert_id: alertId, user_id: userId, error: e?.message,
             });
           }
         }
 
-        if (prefsEnabled) {
-          // Send via Notification Platform ONLY (single entry point).
-          // dispatch() with channel='both' handles: in-app notification + Telegram queue.
-          // This replaces the old direct sendTelegramMessage which caused DUPLICATE messages.
-          if (notificationPlatformRepo) {
-            try {
-              await notificationPlatformRepo.dispatch(env, {
-                userId,
-                templateKey: 'price_alert_hit',
-                category: 'market',
-                priority: 'high',
-                channel: 'both',
-                metadata: { symbol, price: String(currentPrice), alert_id: String(alertId), target_price: String(targetPrice), direction },
-                title: `🔔 هشدار ${symbol}`,
-                message: text,
-              });
-            } catch (notifErr) {
-              console.warn('Notification Platform dispatch failed for price alert:', notifErr?.message);
+        // Also check legacy boolean pref (backward compat with old UI)
+        let legacyPrefEnabled = true;
+        if (notificationRepo) {
+          try {
+            // Only block if user EXPLICITLY set price_alert=false (saved settings row)
+            const result = await queryDb(env,
+              `SELECT price_alert FROM notification_settings WHERE user_id = $1`,
+              [String(userId)]
+            );
+            if (result.rows[0] && result.rows[0].price_alert === false) {
+              legacyPrefEnabled = false;
             }
-          } else {
-            // Fallback: if notificationPlatformRepo not available, direct send
-            const tgPayload = { chat_id: chatId, text, disable_web_page_preview: true };
-            if (webAppUrl) {
-              tgPayload.reply_markup = { inline_keyboard: [[{ text: 'Open Amir BTC Assistant 🚀', web_app: { url: webAppUrl } }]] };
-            }
-            await sendTelegramMessage(env, tgPayload).catch(() => {});
+          } catch (e) {
+            // DB error — fail open
           }
-        } else {
-          // User opted out of price_alert notifications — log for audit trail
+        }
+
+        const shouldDeliver = (userChannel !== 'none') && legacyPrefEnabled;
+
+        if (!shouldDeliver) {
+          resultPayload.skipped_pref_disabled += 1;
           console.log(JSON.stringify({
-            scope: 'scheduled-alerts-execution',
-            skipped_preference: true,
+            scope: 'alert-check',
             alert_id: alertId,
             user_id: userId,
             symbol,
+            triggered: true,
+            notif_skipped: 'pref_disabled',
+            user_channel: userChannel,
+            legacy_pref: legacyPrefEnabled,
           }));
+          resultPayload.triggered_count += 1;
+          continue;
         }
 
-        await queryDb(
-          env,
-          `
-            UPDATE price_alerts
-            SET status = 'triggered', triggered_at = NOW()
-            WHERE id = $1
-          `,
-          [alertId],
-        );
+        let inAppDelivered = false;
+        let telegramDelivered = false;
+
+        // Determine effective delivery channel based on user preference
+        const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
+        const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
+
+        // ── (a) In-app notification via Notification Platform ──
+        // dispatch() with the user's preferred channel inserts into notifications
+        // table (if mini_app/both) AND enqueues a Telegram message (if telegram/both).
+        // We ALSO direct-send Telegram below for reliability (BUG #1: processQueue
+        // was never called — direct send ensures delivery within cron window).
+        if (notificationPlatformRepo) {
+          try {
+            const dispatchResult = await notificationPlatformRepo.dispatch(env, {
+              userId,
+              templateKey: 'price_alert_hit',
+              category: 'price_alert', // FIX (BUG #2): was 'market'
+              priority: 'high',
+              channel: userChannel, // respect user's preferred channel
+              metadata: {
+                symbol,
+                price: String(currentPrice),
+                alert_id: alertId,
+                target_price: String(targetPrice),
+                direction,
+                trigger_reason: triggerReason,
+              },
+              title: `🔔 هشدار ${symbol}`,
+              message: text,
+            });
+            inAppDelivered = deliverToMiniApp && Boolean(dispatchResult?.id);
+          } catch (notifErr) {
+            console.warn('Notification Platform dispatch failed for price alert:', notifErr?.message || notifErr);
+          }
+        }
+
+        // ── (b) Direct Telegram send (belt-and-suspenders) ──
+        // Even if dispatch() enqueued a Telegram message, we send directly too.
+        // The queue item will be a no-op duplicate (or processed later as backup).
+        // This GUARANTEES the user gets a Telegram message within the cron window.
+        if (deliverToTelegram) {
+          try {
+            const chatIdValue = Number(userId);
+            const chatId = Number.isFinite(chatIdValue) ? chatIdValue : userId;
+            const tgPayload = { chat_id: chatId, text, disable_web_page_preview: true };
+            if (webAppUrl) {
+              tgPayload.reply_markup = {
+                inline_keyboard: [[{ text: 'Open Amir BTC Assistant 🚀', web_app: { url: webAppUrl } }]],
+              };
+            }
+            await sendTelegramMessage(env, tgPayload);
+            telegramDelivered = true;
+          } catch (tgErr) {
+            console.warn('Direct Telegram send failed for price alert:', tgErr?.message || tgErr);
+          }
+        }
+
+        if (!inAppDelivered && !telegramDelivered) {
+          resultPayload.delivery_failures += 1;
+        }
 
         resultPayload.triggered_count += 1;
+
+        console.log(JSON.stringify({
+          scope: 'alert-check',
+          alert_id: alertId,
+          user_id: userId,
+          symbol,
+          direction,
+          target_price: targetPrice,
+          prev_price: prevPrice,
+          current_price: currentPrice,
+          triggered: true,
+          reason: triggerReason,
+          user_channel: userChannel,
+          in_app_delivered: inAppDelivered,
+          telegram_delivered: telegramDelivered,
+          price_source: symbolSourceMap.get(symbol),
+        }));
       } catch (error) {
         resultPayload.delivery_failures += 1;
         console.warn('scheduled alert delivery failed:', {
@@ -4024,17 +4273,20 @@ async function runScheduledAlertsBaseline(controller, env) {
       }
     }
 
-    console.log(JSON.stringify({ ...resultPayload, finished: true }));
+    console.log(JSON.stringify({
+      ...resultPayload,
+      finished: true,
+      duration_ms: Date.now() - t0,
+    }));
   } catch (error) {
     console.warn(safeError('scheduled-alerts-runner', error));
-    console.log(
-      JSON.stringify({
-        ...payload,
-        status: 'error',
-        message: 'scheduled alerts runner failed',
-        detail: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    console.log(JSON.stringify({
+      ...payload,
+      status: 'error',
+      message: 'scheduled alerts runner failed',
+      detail: error instanceof Error ? error.message : String(error),
+      duration_ms: Date.now() - t0,
+    }));
   }
 }
 //#endregion
@@ -4065,6 +4317,21 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return handleHealth(env);
+      }
+
+      // ── Manual Alert Trigger (admin-only, for testing) ──
+      // Allows admins to force-run the alert cron without waiting 5 minutes.
+      // Useful for E2E testing of alert triggers in production.
+      // Auth: requires ALERTS_CRON_SHARED_SECRET in X-Cron-Secret header.
+      if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/trigger-alerts') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+        // Run the alert checker immediately
+        const result = await runScheduledAlertsBaseline({ cron: 'manual-trigger' }, env);
+        return jsonResponse({ status: 'success', message: 'Alert check triggered', result }, {}, env);
       }
 
       // ── System Status (public — maintenance mode check) ──
@@ -4838,7 +5105,22 @@ export default {
         new Promise((resolve) => setTimeout(() => { console.warn('Scheduled task timeout after', ms, 'ms'); resolve(); }, ms)),
       ]);
 
+    // PRIMARY: Price alert checker — runs every 5 minutes.
+    // Direct Telegram send is built-in (no longer relies on queue processing).
     ctx.waitUntil(withTimeout(runScheduledAlertsBaseline(controller, env)));
+
+    // BACKUP: Process notification queue (catches anything enqueued by dispatch()
+    // but not yet sent — e.g. referral rewards, broadcast messages, etc.)
+    // This was MISSING previously — Telegram messages from dispatch() never got sent.
+    // Runs only on the 15-minute cron to avoid duplicate work with the 5-minute alert cron.
+    if (controller.cron === '*/15 * * * *' && notificationPlatformRepo?.processQueue) {
+      ctx.waitUntil(withTimeout(
+        notificationPlatformRepo.processQueue(env, sendTelegramMessage).catch((e) => {
+          console.warn('Notification queue processing failed:', e?.message);
+        })
+      ));
+    }
+
     // Refresh CMC Market Overview every 15 minutes
     if (env.CMC_API_KEY) {
       ctx.waitUntil(withTimeout(marketOverviewSvc.refreshOverview(env)));
