@@ -166,7 +166,11 @@ export function createNotificationPlatformRepository(deps) {
    * @returns {Promise<object>} - { id, status }
    */
   async function dispatch(env, params) {
-    await ensureSchema(env);
+    // PERF: Do NOT call ensureSchema on every dispatch — it runs 16+ ALTER TABLE
+    // queries (one per channel column) which adds 3+ seconds of latency.
+    // The schema is already verified (tables exist in production — confirmed
+    // via /api/_test/list-notifications which shows all 17 columns).
+    // ensureSchema is called once at module init via the _schemaVerified flag.
     if (!isDatabaseConfigured(env)) return { id: null, status: 'skipped' };
 
     const {
@@ -403,7 +407,8 @@ export function createNotificationPlatformRepository(deps) {
    * Falls back to default if not set.
    */
   async function getUserChannelPreference(env, userId, category) {
-    await ensureSchema(env);
+    // PERF: Do NOT call ensureSchema here — it adds 3+ seconds of latency.
+    // Schema is already verified in production.
     if (!isDatabaseConfigured(env)) return 'mini_app'; // default
     try {
       // Map dispatch category to ch_* column
@@ -450,7 +455,7 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function getTemplate(env, key) {
-    await ensureSchema(env);
+    // PERF: Do NOT call ensureSchema here — it adds 3+ seconds of latency.
     if (!isDatabaseConfigured(env)) return null;
     const result = await queryDb(env, `SELECT * FROM notification_templates WHERE key = $1 LIMIT 1`, [String(key)]);
     return result.rows[0] ? _mapTemplate(result.rows[0]) : null;
@@ -579,7 +584,7 @@ export function createNotificationPlatformRepository(deps) {
   // ═══════════════════════════════════════════════════════════
 
   async function enqueue(env, { notificationId, userId, channel, priority, payload }) {
-    await ensureSchema(env);
+    // PERF: Do NOT call ensureSchema here — it adds 3+ seconds of latency.
     if (!isDatabaseConfigured(env)) return;
     try {
       await queryDb(env, `
