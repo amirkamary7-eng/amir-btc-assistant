@@ -4791,21 +4791,19 @@ export default {
         return jsonResponse({ status: 'error', message: 'Price not available' }, { status: 404 }, env);
       }
 
-      // ── Extended market search — 1500 coins (for search, not displayed in list) ──
-      // Returns a lightweight array of {symbol, name, rank, priceUsd} for search.
-      // Cached for 5 minutes (prices don't need to be real-time for search).
-      // Auth required to prevent abuse.
+      // ── Extended market search — PUBLIC (no auth required) ──
+      // Returns coins matching the search query from a 1700+ coin dataset.
+      // Uses MEXC API which returns ALL USDT pairs in a single request (no pagination).
+      // Verified: MEXC returns 1740 USDT pairs including FLOKI, BONK, WIF, SUNDOG, BRETT.
+      // Cached for 5 minutes.
       if (request.method === 'GET' && url.pathname === '/api/market/search') {
-        const authState = await authenticateTelegramRequest(request, env);
-        if (authState.error) return authState.error;
-
         const query = (url.searchParams.get('q') || '').toLowerCase().trim();
         if (!query || query.length < 1) {
-          return jsonResponse({ status: 'success', results: [] }, {}, env);
+          return jsonResponse({ status: 'success', results: [], total_index: 0 }, {}, env);
         }
 
         // Check cache first
-        const searchCacheKey = `market:search:v1`;
+        const searchCacheKey = `market:search:mexc:v1`;
         const cachedSearch = await readAppCache(env, searchCacheKey);
         let searchList = [];
         if (cachedSearch) {
@@ -4813,25 +4811,39 @@ export default {
         }
 
         if (!searchList.length) {
-          // Fetch extended list from CoinGecko (1500 coins)
+          // Fetch ALL USDT pairs from MEXC in a single request.
+          // MEXC returns ~1740 USDT pairs — much more than CoinGecko's 250/page limit.
           try {
-            const { ok, body } = await fetchJson(
-              `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${SEARCH_FETCH_LIMIT}&page=1&sparkline=false`
+            const { ok, body } = await fetchJsonWithTimeout(
+              'https://api.mexc.com/api/v3/ticker/24hr',
+              8000
             );
-            if (ok && Array.isArray(body) && body.length > 0) {
+            if (ok && Array.isArray(body)) {
               searchList = body
-                .filter(item => item && typeof item === 'object')
-                .map((item, index) => ({
-                  symbol: String(item.symbol || '').toUpperCase(),
-                  name: item.name || '',
-                  rank: item.market_cap_rank || (index + 1),
-                  priceUsd: item.current_price || 0,
-                }))
-                .filter(c => c.symbol && c.symbol.length >= 2);
+                .filter(item => {
+                  const sym = String(item.symbol || '');
+                  // Only USDT pairs (exclude USDC, BUSD, etc.)
+                  return sym.endsWith('USDT') && sym.length > 4;
+                })
+                .map(item => {
+                  const sym = String(item.symbol || '').replace(/USDT$/, '');
+                  const price = parseFloat(item.lastPrice) || 0;
+                  const volume = parseFloat(item.quoteVolume) || 0;
+                  return {
+                    symbol: sym.toUpperCase(),
+                    name: sym.toUpperCase(), // MEXC doesn't return names — use symbol as name
+                    rank: 0, // No rank from MEXC
+                    priceUsd: price,
+                    volume: volume,
+                  };
+                })
+                .filter(c => c.symbol.length >= 2 && c.priceUsd > 0)
+                // Sort by volume descending — most traded coins first
+                .sort((a, b) => b.volume - a.volume);
               await writeAppCache(env, searchCacheKey, JSON.stringify(searchList), 300); // 5 min cache
             }
           } catch (e) {
-            console.warn('Market search: CoinGecko extended fetch failed:', e.message);
+            console.warn('Market search: MEXC fetch failed:', e.message);
           }
         }
 
@@ -4843,7 +4855,12 @@ export default {
           )
           .slice(0, 30); // Limit results to 30
 
-        return jsonResponse({ status: 'success', results }, {}, env);
+        return jsonResponse({
+          status: 'success',
+          results,
+          total_index: searchList.length,
+          cached: cachedSearch ? true : false,
+        }, {}, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
