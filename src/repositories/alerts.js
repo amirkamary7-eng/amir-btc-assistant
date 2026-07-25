@@ -220,9 +220,11 @@ export function createAlertRepository(deps) {
    * Bulk fetch active alerts for cron processing.
    * Selects ONLY the columns the cron needs (no user PII).
    * Returns rows ordered by created_at DESC so newer alerts are checked first.
+   *
+   * NOTE: Does NOT call ensureTable (cron caller is responsible for that).
+   * This avoids redundant DDL queries on every 5-min cron tick.
    */
   async function listActiveForCron(env, limit = 500) {
-    await ensureTable(env);
     const result = await queryDb(env, `
       SELECT id, user_id, symbol, price, direction, last_price, last_checked_at
       FROM price_alerts

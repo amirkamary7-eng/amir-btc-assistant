@@ -3905,7 +3905,10 @@ async function runScheduledAlertsBaseline(controller, env) {
 
   try {
     // AUDIT-002 FIX: Ensure table + indexes exist before querying (idempotent).
-    if (typeof alertRepo?.ensureTable === 'function') {
+    // PERFORMANCE: Only run ensureTable on the 15-min cron (not every 5 min).
+    // CREATE INDEX IF NOT EXISTS is fast but still a DB roundtrip — 8 queries × 200ms
+    // = 1.6s of wasted latency on every 5-min cron. The 15-min cron handles it.
+    if (controller.cron === '*/15 * * * *' && typeof alertRepo?.ensureTable === 'function') {
       try { await alertRepo.ensureTable(env); } catch {}
     }
 
