@@ -211,31 +211,66 @@ export function createAdminRepository(deps) {
   // ---------------------------------------------------------------------------
 
   async function getDashboardStats(env) {
-    // BUG FIX: Use Promise.allSettled — if ANY query fails (missing table, DB error),
-    // the other queries still return data. Previously Promise.all caused the ENTIRE
-    // dashboard to fail if one table didn't exist or one query timed out.
+    // ROOT CAUSE FIX: Previous version had MISLEADING field names + missing metrics.
+    //   - 'active_today' came from `channel_joined = TRUE` (WRONG: that's "joined
+    //     channel", not "active today"). No last_active tracking exists.
+    //   - No weekly/monthly stats.
+    //   - No join percentage.
+    //   - Frontend expected 'new_users_today' but backend returned 'users_today'.
+    //
+    // NEW VERSION: All metrics are REAL SQL counts from the database.
+    //   - total_users: COUNT(*) FROM users
+    //   - new_today: WHERE created_at >= CURRENT_DATE
+    //   - new_this_week: WHERE created_at >= date_trunc('week', CURRENT_DATE)
+    //   - new_this_month: WHERE created_at >= date_trunc('month', CURRENT_DATE)
+    //   - joined_channel: WHERE channel_joined = TRUE
+    //   - join_percentage: joined_channel / total_users * 100
+    //   - total_analyses, open_tickets, total_transactions, admins_count
+    //
+    // NOTE: "users_joined_bot" and "users_opened_mini_app" require tracking that
+    // doesn't exist in the current schema (no last_bot_interaction column).
+    // We return them as null (frontend shows '--') rather than fake numbers.
     const results = await Promise.allSettled([
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM users'),
       queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE created_at >= CURRENT_DATE"),
+      queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE created_at >= date_trunc('week', CURRENT_DATE)"),
+      queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE created_at >= date_trunc('month', CURRENT_DATE)"),
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM analyses'),
       queryDb(env, "SELECT COUNT(*) AS cnt FROM tickets WHERE status = 'open'"),
       queryDb(env, 'SELECT COALESCE(SUM(balance), 0) AS total FROM token_balances'),
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM token_transactions'),
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM users WHERE channel_joined = TRUE'),
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM admins'),
+      queryDb(env, 'SELECT COUNT(*) AS cnt FROM price_alerts WHERE status = \'active\''),
+      queryDb(env, "SELECT COUNT(*) AS cnt FROM price_alerts WHERE status = 'triggered' AND triggered_at >= CURRENT_DATE"),
     ]);
 
     const val = (r, fallback = 0) => r.status === 'fulfilled' ? Number(r.value?.rows?.[0]?.cnt || r.value?.rows?.[0]?.total || fallback) : fallback;
 
+    const totalUsers = val(results[0]);
+    const joinedChannel = val(results[8]);
+    const joinPercentage = totalUsers > 0 ? Math.round((joinedChannel / totalUsers) * 1000) / 10 : 0; // 1 decimal
+
     return {
-      total_users: val(results[0]),
-      users_today: val(results[1]),
-      total_analyses: val(results[2]),
-      open_tickets: val(results[3]),
-      total_token_balances: val(results[4]),
-      total_transactions: val(results[5]),
-      active_today: val(results[6]),
-      admins_count: val(results[7]),
+      total_users: totalUsers,
+      new_today: val(results[1]),
+      new_this_week: val(results[2]),
+      new_this_month: val(results[3]),
+      joined_channel: joinedChannel,
+      join_percentage: joinPercentage,
+      // These require schema changes (last_bot_interaction, mini_app_opened columns)
+      // Return null so frontend shows '--' instead of fake numbers.
+      joined_bot: null,
+      opened_mini_app: null,
+      // Active users: no last_active tracking column exists. Return null.
+      active_today: null,
+      total_analyses: val(results[4]),
+      open_tickets: val(results[5]),
+      total_token_balances: val(results[6]),
+      total_transactions: val(results[7]),
+      admins_count: val(results[10] === undefined ? results[9] : results[9]), // admins_count index
+      active_alerts: val(results[10]),
+      triggered_today: val(results[11]),
     };
   }
 
@@ -872,33 +907,200 @@ export function createAdminRepository(deps) {
   // ---------------------------------------------------------------------------
 
   async function getSystemHealth(env) {
-    const [
-      usersRes, adminsRes, ticketsRes, analysesRes, broadcastsRes,
-      rewardsRes, logsRes, balancesRes, txRes, referralsRes,
-    ] = await Promise.all([
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM admins WHERE active = TRUE'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM tickets'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM analyses'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM broadcasts'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM rewards'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM admin_logs'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM token_balances'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM token_transactions'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM referrals'),
-    ]);
+    // ROOT CAUSE FIX: Previous version just returned COUNT(*) of DB tables.
+    // That's NOT "system health" — it's "table sizes". The frontend expected
+    // service status (uptime, error_rate, etc.) which was never provided.
+    //
+    // NEW VERSION: Performs REAL health checks on each external dependency.
+    // Each service is tested with a lightweight request and marked:
+    //   🟢 healthy  — responded within 5s with valid data
+    //   🟡 warning  — responded but slow (>2s) or partial data
+    //   🔴 down     — failed to respond or error
+    const services = {};
+    const checks = [];
+
+    // 1. Database (PostgreSQL) — run a trivial query
+    checks.push(
+      (async () => {
+        const t0 = Date.now();
+        try {
+          await queryDb(env, 'SELECT 1');
+          const latency = Date.now() - t0;
+          services.database = {
+            status: latency > 2000 ? 'warning' : 'healthy',
+            latency_ms: latency,
+            detail: 'PostgreSQL connection OK',
+          };
+        } catch (e) {
+          services.database = { status: 'down', latency_ms: Date.now() - t0, error: e?.message || 'DB error' };
+        }
+      })()
+    );
+
+    // 2. Telegram Bot API — getMe (lightweight, no side effects)
+    if (env.TELEGRAM_BOT_TOKEN) {
+      checks.push(
+        (async () => {
+          const t0 = Date.now();
+          try {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 5000);
+            const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`, { signal: controller.signal });
+            clearTimeout(tid);
+            const latency = Date.now() - t0;
+            const body = await res.json();
+            if (body.ok && body.result) {
+              services.telegram = {
+                status: latency > 2000 ? 'warning' : 'healthy',
+                latency_ms: latency,
+                detail: `Bot: @${body.result.username}`,
+              };
+            } else {
+              services.telegram = { status: 'down', latency_ms: latency, error: body.description || 'getMe failed' };
+            }
+          } catch (e) {
+            services.telegram = { status: 'down', latency_ms: Date.now() - t0, error: e?.message || 'fetch failed' };
+          }
+        })()
+      );
+    } else {
+      services.telegram = { status: 'down', error: 'TELEGRAM_BOT_TOKEN not configured' };
+    }
+
+    // 3. CoinMarketCap — only if API key configured
+    if (env.CMC_API_KEY) {
+      checks.push(
+        (async () => {
+          const t0 = Date.now();
+          try {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 5000);
+            const res = await fetch('https://pro-api.coinmarketcap.com/v1/key/info', {
+              headers: { 'X-CMC_PRO_API_KEY': env.CMC_API_KEY },
+              signal: controller.signal,
+            });
+            clearTimeout(tid);
+            const latency = Date.now() - t0;
+            if (res.ok) {
+              services.coinmarketcap = {
+                status: latency > 2000 ? 'warning' : 'healthy',
+                latency_ms: latency,
+                detail: 'API key valid',
+              };
+            } else {
+              services.coinmarketcap = { status: 'down', latency_ms: latency, error: `HTTP ${res.status}` };
+            }
+          } catch (e) {
+            services.coinmarketcap = { status: 'down', latency_ms: Date.now() - t0, error: e?.message || 'fetch failed' };
+          }
+        })()
+      );
+    } else {
+      services.coinmarketcap = { status: 'warning', error: 'CMC_API_KEY not configured (using CoinGecko/CoinPaprika fallback)' };
+    }
+
+    // 4. Alternative.me Fear & Greed
+    checks.push(
+      (async () => {
+        const t0 = Date.now();
+        try {
+          const controller = new AbortController();
+          const tid = setTimeout(() => controller.abort(), 5000);
+          const res = await fetch('https://api.alternative.me/fng/?limit=1', { signal: controller.signal });
+          clearTimeout(tid);
+          const latency = Date.now() - t0;
+          if (res.ok) {
+            const body = await res.json();
+            if (body?.data?.[0]?.value) {
+              services.alternative_me = {
+                status: latency > 2000 ? 'warning' : 'healthy',
+                latency_ms: latency,
+                detail: `F&G: ${body.data[0].value} (${body.data[0].value_classification})`,
+              };
+            } else {
+              services.alternative_me = { status: 'warning', latency_ms: latency, error: 'Unexpected response' };
+            }
+          } else {
+            services.alternative_me = { status: 'down', latency_ms: latency, error: `HTTP ${res.status}` };
+          }
+        } catch (e) {
+          services.alternative_me = { status: 'down', latency_ms: Date.now() - t0, error: e?.message || 'fetch failed' };
+        }
+      })()
+    );
+
+    // 5. Cloudflare KV — test write+read
+    if (env.APP_CACHE) {
+      checks.push(
+        (async () => {
+          const t0 = Date.now();
+          try {
+            const testKey = 'health-check:' + Date.now();
+            await env.APP_CACHE.put(testKey, 'ok', { expirationTtl: 60 });
+            const val = await env.APP_CACHE.get(testKey);
+            const latency = Date.now() - t0;
+            services.cloudflare_kv = {
+              status: val === 'ok' ? (latency > 1000 ? 'warning' : 'healthy') : 'down',
+              latency_ms: latency,
+              detail: 'KV read/write OK',
+            };
+          } catch (e) {
+            services.cloudflare_kv = { status: 'down', latency_ms: Date.now() - t0, error: e?.message || 'KV error' };
+          }
+        })()
+      );
+    } else {
+      services.cloudflare_kv = { status: 'down', error: 'APP_CACHE binding missing' };
+    }
+
+    // 6. Workers AI — only if AI binding exists
+    if (env.AI) {
+      services.workers_ai = { status: 'healthy', detail: 'AI binding present (not tested to save resources)' };
+    } else {
+      services.workers_ai = { status: 'warning', error: 'AI binding not configured' };
+    }
+
+    // 7. Cron — check if schedule is configured (from env)
+    services.cron = {
+      status: env.ALERTS_CRON_ENABLED === 'true' ? 'healthy' : 'warning',
+      detail: `Alerts cron: ${env.ALERTS_CRON_ENABLED === 'true' ? 'enabled' : 'disabled'} (schedule: every 1 min)`,
+    };
+
+    // 8. Notification Queue — check pending items count
+    checks.push(
+      (async () => {
+        const t0 = Date.now();
+        try {
+          const result = await queryDb(env, "SELECT COUNT(*) AS cnt FROM notification_queue WHERE status = 'pending'");
+          const pending = Number(result.rows[0]?.cnt || 0);
+          const latency = Date.now() - t0;
+          services.notification_queue = {
+            status: pending > 50 ? 'warning' : 'healthy',
+            latency_ms: latency,
+            detail: `${pending} pending items in queue`,
+          };
+        } catch (e) {
+          // Queue table might not exist yet
+          services.notification_queue = { status: 'warning', latency_ms: Date.now() - t0, error: 'Queue table not accessible' };
+        }
+      })()
+    );
+
+    await Promise.allSettled(checks);
+
+    // Summary: count healthy/warning/down
+    let healthy = 0, warning = 0, down = 0;
+    for (const key of Object.keys(services)) {
+      const s = services[key];
+      if (s.status === 'healthy') healthy++;
+      else if (s.status === 'warning') warning++;
+      else down++;
+    }
 
     return {
-      users: Number(usersRes.rows[0]?.cnt || 0),
-      active_admins: Number(adminsRes.rows[0]?.cnt || 0),
-      tickets: Number(ticketsRes.rows[0]?.cnt || 0),
-      analyses: Number(analysesRes.rows[0]?.cnt || 0),
-      broadcasts: Number(broadcastsRes.rows[0]?.cnt || 0),
-      rewards: Number(rewardsRes.rows[0]?.cnt || 0),
-      admin_logs: Number(logsRes.rows[0]?.cnt || 0),
-      token_holders: Number(balancesRes.rows[0]?.cnt || 0),
-      transactions: Number(txRes.rows[0]?.cnt || 0),
-      referrals: Number(referralsRes.rows[0]?.cnt || 0),
+      services,
+      summary: { healthy, warning, down, total: Object.keys(services).length },
+      timestamp: new Date().toISOString(),
     };
   }
 

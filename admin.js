@@ -545,18 +545,30 @@ async function loadAdminDashboard() {
         if (_isLoadTokenStale(token)) return; // Section switched, discard stale response
         if (!data) throw new Error('No data');
 
-        // Stats — use enhanced v2 cards with icons + colors
+        // Stats — ROOT CAUSE FIX: match new backend field names exactly.
+        // Previous version expected 'new_users_today' (didn't exist) and
+        // 'total_rewards' (didn't exist) → those cards showed nothing.
         let statsHtml = '';
         if (data.stats) {
             const s = data.stats;
-            if (s.total_users != null) statsHtml += adminStatCardV2(adminFormatNumber(s.total_users), 'کل کاربران', 'users', 'blue');
-            if (s.active_today != null) statsHtml += adminStatCardV2(adminFormatNumber(s.active_today), 'فعال امروز', 'active', 'green');
-            if (s.new_users_today != null) statsHtml += adminStatCardV2(adminFormatNumber(s.new_users_today), 'کاربران جدید', 'new', 'purple');
-            if (s.total_tickets != null) statsHtml += adminStatCardV2(adminFormatNumber(s.total_tickets), 'کل تیکت‌ها', 'tickets', 'gray');
-            if (s.open_tickets != null) statsHtml += adminStatCardV2(adminFormatNumber(s.open_tickets), 'تیکت‌های باز', 'open', 'red');
-            if (s.total_transactions != null) statsHtml += adminStatCardV2(adminFormatNumber(s.total_transactions), 'تراکنش‌ها', 'tx', 'orange');
-            if (s.total_rewards != null) statsHtml += adminStatCardV2(adminFormatNumber(s.total_rewards), 'پاداش‌ها', 'rewards', 'orange');
-            if (s.admins_count != null) statsHtml += adminStatCardV2(adminFormatNumber(s.admins_count), 'مدیران', 'admins', 'purple');
+            // Helper: show '--' for null values (metrics we can't compute)
+            const fmt = function (v) { return (v == null) ? '--' : adminFormatNumber(v); };
+            // User metrics (top row — most important)
+            statsHtml += adminStatCardV2(fmt(s.total_users), 'کل کاربران', 'users', 'blue');
+            statsHtml += adminStatCardV2(fmt(s.new_today), 'جدید امروز', 'new', 'green');
+            statsHtml += adminStatCardV2(fmt(s.new_this_week), 'جدید این هفته', 'week', 'purple');
+            statsHtml += adminStatCardV2(fmt(s.new_this_month), 'جدید این ماه', 'month', 'purple');
+            statsHtml += adminStatCardV2(fmt(s.joined_channel), 'عضو کانال', 'channel', 'green');
+            statsHtml += adminStatCardV2(fmt(s.join_percentage) + '%', 'درصد عضویت', 'percent', 'orange');
+            statsHtml += adminStatCardV2(fmt(s.joined_bot), 'کاربران بات', 'bot', 'blue');
+            statsHtml += adminStatCardV2(fmt(s.opened_mini_app), 'بازکردن Mini App', 'app', 'blue');
+            // Alert metrics
+            statsHtml += adminStatCardV2(fmt(s.active_alerts), 'هشدارهای فعال', 'alerts', 'orange');
+            statsHtml += adminStatCardV2(fmt(s.triggered_today), 'هشدارهای فعال‌شده امروز', 'triggered', 'green');
+            // Other metrics
+            statsHtml += adminStatCardV2(fmt(s.open_tickets), 'تیکت‌های باز', 'open', 'red');
+            statsHtml += adminStatCardV2(fmt(s.total_transactions), 'تراکنش‌ها', 'tx', 'orange');
+            statsHtml += adminStatCardV2(fmt(s.admins_count), 'مدیران', 'admins', 'purple');
         }
         grid.innerHTML = statsHtml || adminEmpty('آماری موجود نیست');
 
@@ -1305,7 +1317,7 @@ function debounceAdminReferralSearch() {
 async function loadAdminSystemHealth() {
     const grid = document.getElementById('admin-health-grid');
     if (!grid) return;
-    grid.innerHTML = '<div class="admin-empty">Loading...</div>';
+    grid.innerHTML = '<div class="admin-empty">در حال بررسی سرویس‌ها...</div>';
 
     const token = _adminLoadToken;
     try {
@@ -1314,35 +1326,63 @@ async function loadAdminSystemHealth() {
         if (!data) throw new Error('No data');
 
         let html = '';
-        if (data.stats) {
-            const s = data.stats;
-            if (s.uptime != null) html += adminStatCard(s.uptime, 'Uptime');
-            if (s.requests_today != null) html += adminStatCard(adminFormatNumber(s.requests_today), 'Requests Today');
-            if (s.avg_response_time != null) html += adminStatCard(s.avg_response_time + 'ms', 'Avg Response');
-            if (s.error_rate != null) html += adminStatCard(s.error_rate + '%', 'Error Rate');
-            if (s.memory_usage != null) html += adminStatCard(s.memory_usage, 'Memory Usage');
-            if (s.cpu_usage != null) html += adminStatCard(s.cpu_usage + '%', 'CPU Usage');
-            if (s.db_size != null) html += adminStatCard(s.db_size, 'DB Size');
-            if (s.cache_hit_rate != null) html += adminStatCard(s.cache_hit_rate + '%', 'Cache Hit');
-            if (s.active_connections != null) html += adminStatCard(adminFormatNumber(s.active_connections), 'Active Conn');
-            if (s.total_requests != null) html += adminStatCard(adminFormatNumber(s.total_requests), 'Total Requests');
+
+        // Summary card at top
+        if (data.summary) {
+            const sum = data.summary;
+            const overallStatus = sum.down > 0 ? '🔴' : (sum.warning > 0 ? '🟡' : '🟢');
+            const overallText = sum.down > 0 ? 'سیستم دارای مشکل' : (sum.warning > 0 ? 'سیستم با هشدار' : 'سیستم سالم');
+            html += '<div class="adm-health-summary" style="grid-column:1/-1;padding:16px;border-radius:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);margin-bottom:8px;">' +
+                '<div style="font-size:24px;">' + overallStatus + '</div>' +
+                '<div style="font-size:18px;font-weight:700;margin-top:4px;">' + overallText + '</div>' +
+                '<div style="font-size:13px;color:#a0aec0;margin-top:4px;">' +
+                '🟢 ' + sum.healthy + ' سالم &nbsp; • &nbsp; ' +
+                '🟡 ' + sum.warning + ' هشدار &nbsp; • &nbsp; ' +
+                '🔴 ' + sum.down + ' از کار افتاده' +
+                '</div>' +
+                '<div style="font-size:11px;color:#718096;margin-top:8px;">آخرین بررسی: ' + adminFormatDate(data.timestamp) + '</div>' +
+                '</div>';
         }
 
-        // Also render any status checks
+        // Service cards
         if (data.services) {
+            const labels = {
+                database: 'دیتابیس PostgreSQL',
+                telegram: 'Telegram Bot API',
+                coinmarketcap: 'CoinMarketCap',
+                alternative_me: 'Alternative.me (Fear & Greed)',
+                cloudflare_kv: 'Cloudflare KV',
+                workers_ai: 'Cloudflare Workers AI',
+                cron: 'Cron Scheduler',
+                notification_queue: 'صف اعلان‌ها',
+            };
+            const statusIcon = { healthy: '🟢', warning: '🟡', down: '🔴' };
+            const statusText = { healthy: 'سالم', warning: 'هشدار', down: 'از کار افتاده' };
+            const statusColor = { healthy: '#22c55e', warning: '#f59e0b', down: '#ef4444' };
+
             Object.keys(data.services).forEach(function (key) {
                 const svc = data.services[key];
-                const statusColor = svc.status === 'healthy' || svc.healthy === true ? 'green' : 'red';
-                html += adminStatCard(
-                    (svc.status === 'healthy' || svc.healthy === true) ? 'OK' : 'DOWN',
-                    (svc.name || key)
-                );
+                const icon = statusIcon[svc.status] || '⚪';
+                const color = statusColor[svc.status] || '#a0aec0';
+                const label = labels[key] || key;
+                const latency = svc.latency_ms != null ? svc.latency_ms + 'ms' : '';
+                const detail = svc.detail || svc.error || '';
+
+                html += '<div class="adm-health-card" style="padding:12px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);">' +
+                    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+                        '<span style="font-size:18px;">' + icon + '</span>' +
+                        '<span style="font-weight:600;font-size:14px;">' + adminEscapeHtml(label) + '</span>' +
+                    '</div>' +
+                    '<div style="font-size:12px;color:' + color + ';font-weight:600;">' + (statusText[svc.status] || svc.status) + '</div>' +
+                    (latency ? '<div style="font-size:11px;color:#a0aec0;margin-top:4px;">latency: ' + latency + '</div>' : '') +
+                    (detail ? '<div style="font-size:11px;color:#718096;margin-top:2px;">' + adminEscapeHtml(detail) + '</div>' : '') +
+                    '</div>';
             });
         }
 
-        grid.innerHTML = html || adminEmpty('No health data available');
+        grid.innerHTML = html || adminEmpty('داده‌ای موجود نیست');
     } catch (e) {
-        grid.innerHTML = adminEmpty('Failed to load system health');
+        grid.innerHTML = adminEmpty('بارگذاری وضعیت سیستم ناموفق بود');
         console.error('loadAdminSystemHealth:', e);
     }
 }
