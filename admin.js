@@ -1,6 +1,8 @@
 /* ============================================================
    Admin Control Center — Frontend Logic (Vanilla JS)
-   Uses global apiFetch() and API_BASE from app.js
+   ROOT CAUSE FIX: Uses dedicated adminApiFetch() instead of app.js apiFetch().
+   This avoids waitForApiReady blocking, request deduplication cascade failures,
+   and adds built-in retry with exponential backoff + longer timeout.
    ============================================================ */
 
 // ─── State ──────────────────────────────────────────────────
@@ -68,6 +70,89 @@ function adminEmpty(message) {
 function _isLoadTokenStale(token) {
     return token !== _adminLoadToken;
 }
+
+/**
+ * ROOT CAUSE FIX: Dedicated admin API fetch with retry + backoff + longer timeout.
+ *
+ * Previous version used app.js apiFetch() which had 3 critical problems:
+ *   1. waitForApiReady(8000) — every admin request waited up to 8s for Telegram auth
+ *   2. Request deduplication — two calls to same path shared one promise; if it
+ *      failed, BOTH failed (cascade failure)
+ *   3. No retry — one network hiccup → "Failed to load" → user must refresh
+ *
+ * adminApiFetch fixes all 3:
+ *   - No waitForApiReady (admin has its own auth via X-Telegram-Init-Data header)
+ *   - No deduplication (each call is independent)
+ *   - 3 retry attempts with exponential backoff (1s, 2s, 4s)
+ *   - 30s timeout (was 15s — too short for system-health with 8 service checks)
+ *   - Cache-Control: no-store (never use browser cache for admin data)
+ *
+ * @param {string} path - API path (e.g. '/api/admin/dashboard')
+ * @param {object} options - fetch options
+ * @returns {Promise<object>} parsed JSON response
+ */
+async function adminApiFetch(path, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    const initData = (typeof getTelegramInitData === 'function') ? getTelegramInitData() : '';
+    const headers = {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+        ...(initData ? { 'X-Telegram-Init-Data': initData } : {}),
+        ...options.headers,
+    };
+    const url = `${API_BASE}${path}`;
+    const maxRetries = 3;
+    const baseDelay = 1000; // 1s, 2s, 4s
+
+    let lastError = null;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+            const fetchOpts = { ...options, method, headers, signal: controller.signal };
+            const res = await fetch(url, fetchOpts);
+            clearTimeout(timeoutId);
+
+            if (!res.ok) {
+                let detail = '';
+                try { detail = await res.text(); } catch (_) {}
+                let errMsg = detail || `HTTP ${res.status}`;
+                try { const j = JSON.parse(detail); if (j.detail) errMsg = j.detail; } catch (_) {}
+                const err = new Error(errMsg);
+                err.status = res.status;
+                // Don't retry on 401/403/422 — these are auth/validation errors
+                if (res.status === 401 || res.status === 403 || res.status === 422) {
+                    throw err;
+                }
+                // Retry on 500/502/503/504 and network errors
+                throw err;
+            }
+
+            // Parse JSON — if response is HTML (CF error page), throw
+            try {
+                return await res.json();
+            } catch (parseErr) {
+                throw new Error(`Invalid JSON response from ${path}`);
+            }
+        } catch (e) {
+            lastError = e;
+            // Don't retry on auth errors
+            if (e.status === 401 || e.status === 403 || e.status === 422) {
+                throw e;
+            }
+            // Last attempt — throw
+            if (attempt === maxRetries - 1) {
+                throw e;
+            }
+            // Wait before retry (exponential backoff: 1s, 2s, 4s)
+            const delay = baseDelay * Math.pow(2, attempt);
+            await new Promise(r => setTimeout(r, delay));
+        }
+    }
+    throw lastError || new Error('Request failed after ' + maxRetries + ' attempts');
+}
+// Make adminApiFetch available globally
+window.adminApiFetch = adminApiFetch;
 
 /**
  * Show a toast notification in the admin panel.
@@ -329,7 +414,7 @@ function switchAdminSection(section, btn) {
 async function loadMaintenanceSettings() {
     const statusEl = document.getElementById('adm-maint-status');
     try {
-        const data = await apiFetch('/api/system/status');
+        const data = await adminApiFetch('/api/system/status');
         if (!data) throw new Error('No data');
         const maint = data.maintenance || {};
         const toggle = document.getElementById('adm-maint-toggle');
@@ -394,7 +479,7 @@ async function saveMaintenanceSettings() {
     };
 
     try {
-        const data = await apiFetch('/api/admin/maintenance', {
+        const data = await adminApiFetch('/api/admin/maintenance', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -541,7 +626,7 @@ async function loadAdminDashboard() {
     if (activityList) activityList.innerHTML = '';
 
     try {
-        const data = await apiFetch('/api/admin/dashboard');
+        const data = await adminApiFetch('/api/admin/dashboard');
         if (_isLoadTokenStale(token)) return; // Section switched, discard stale response
         if (!data) throw new Error('No data');
 
@@ -648,7 +733,7 @@ async function loadDashboardMaintenanceBanner() {
     if (!banner) return;
 
     try {
-        const data = await apiFetch('/api/system/status');
+        const data = await adminApiFetch('/api/system/status');
         if (!data || !data.maintenance) {
             titleEl.textContent = 'وضعیت نگهداری: غیرفعال';
             subEl.textContent = 'سیستم در حالت عادی';
@@ -681,7 +766,7 @@ async function loadAdminList() {
     container.innerHTML = '<div class="admin-empty">Loading...</div>';
 
     try {
-        const data = await apiFetch('/api/admin/admins');
+        const data = await adminApiFetch('/api/admin/admins');
         if (!data || !Array.isArray(data.admins) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty('No admins found');
             return;
@@ -756,7 +841,7 @@ async function submitAddAdmin() {
     });
 
     try {
-        await apiFetch('/api/admin/admins', {
+        await adminApiFetch('/api/admin/admins', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -778,7 +863,7 @@ async function submitAddAdmin() {
 
 async function toggleAdminActive(id, currentActive) {
     try {
-        await apiFetch('/api/admin/admins/' + id, {
+        await adminApiFetch('/api/admin/admins/' + id, {
             method: 'PUT',
             body: JSON.stringify({ active: !currentActive })
         });
@@ -792,7 +877,7 @@ async function toggleAdminActive(id, currentActive) {
 
 function removeAdmin(id, telegramId) {
     if (!confirm('Remove this admin? This action cannot be undone.')) return;
-    apiFetch('/api/admin/admins/' + id, { method: 'DELETE' })
+    adminApiFetch('/api/admin/admins/' + id, { method: 'DELETE' })
         .then(function () {
             showAdminToast('Admin removed', 'success');
             loadAdminList();
@@ -826,7 +911,7 @@ async function loadAdminUsers(page) {
     try {
         let url = '/api/admin/users?page=' + _adminUsersPage;
         if (search) url += '&search=' + encodeURIComponent(search);
-        const data = await apiFetch(url);
+        const data = await adminApiFetch(url);
         if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.users) && !Array.isArray(data)) {
@@ -884,9 +969,15 @@ async function loadAdminUsers(page) {
 async function loadUsersStats() {
     const grid = document.getElementById('admin-users-stats-grid');
     if (!grid) return;
+    const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/dashboard');
-        if (!data || !data.stats) { grid.innerHTML = ''; return; }
+        const data = await adminApiFetch('/api/admin/dashboard');
+        if (_isLoadTokenStale(token)) return; // Section switched, discard stale response
+        if (!data || !data.stats) {
+            // Show retry button instead of empty grid
+            grid.innerHTML = '<div class="admin-empty" style="grid-column:1/-1;">داده آماری موجود نیست. <button onclick="loadUsersStats()" class="admin-btn" style="padding:4px 12px;font-size:11px;margin-right:8px;">تلاش مجدد</button></div>';
+            return;
+        }
         const s = data.stats;
         const fmt = function (v) { return (v == null) ? '--' : adminFormatNumber(v); };
         let html = '';
@@ -903,8 +994,10 @@ async function loadUsersStats() {
         html += adminStatCardV2(fmt(s.active_this_month), 'فعال این ماه', 'active-month', 'green');
         grid.innerHTML = html;
     } catch (e) {
-        grid.innerHTML = '';
+        if (_isLoadTokenStale(token)) return; // Section switched, don't render error
         console.warn('loadUsersStats:', e);
+        // Show retry button instead of empty grid
+        grid.innerHTML = '<div class="admin-empty" style="grid-column:1/-1;color:#ef4444;">خطا در بارگذاری آمار. <button onclick="loadUsersStats()" class="admin-btn" style="padding:4px 12px;font-size:11px;margin-right:8px;">تلاش مجدد</button></div>';
     }
 }
 
@@ -933,7 +1026,7 @@ async function loadAdminTickets(page) {
         if (_adminTicketsFilter && _adminTicketsFilter !== 'all') {
             url += '&status=' + _adminTicketsFilter;
         }
-        const data = await apiFetch(url);
+        const data = await adminApiFetch(url);
         if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.tickets) && !Array.isArray(data)) {
@@ -1047,7 +1140,7 @@ function toggleAdminTicketDetail(ticketId) {
  */
 async function fetchTicketReplies(ticketId) {
     try {
-        const data = await apiFetch('/api/admin/tickets/' + ticketId + '/replies');
+        const data = await adminApiFetch('/api/admin/tickets/' + ticketId + '/replies');
         if (!data || !data.replies) return;
         const threadEl = document.querySelector('#adm-ticket-' + ticketId + ' .adm-ticket-thread');
         if (!threadEl) return; // ticket may have been collapsed
@@ -1073,7 +1166,7 @@ async function adminReplyTicket(ticketId) {
     if (!message) { showAdminToast('Reply cannot be empty', 'error'); return; }
     if (message.length > 1500) { showAdminToast('Reply too long (max 1500 chars)', 'error'); return; }
     try {
-        await apiFetch('/api/admin/tickets/' + ticketId + '/reply', {
+        await adminApiFetch('/api/admin/tickets/' + ticketId + '/reply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: message })
@@ -1089,7 +1182,7 @@ async function adminReplyTicket(ticketId) {
 
 async function adminSetTicketStatus(ticketId, status) {
     try {
-        await apiFetch('/api/admin/tickets/' + ticketId + '/status', {
+        await adminApiFetch('/api/admin/tickets/' + ticketId + '/status', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: status })
@@ -1109,7 +1202,7 @@ async function adminDeleteTicket(ticketId) {
         // PHASE 3 FIX (Bug 5): Use admin endpoint, not user endpoint.
         // Previous: /api/tickets/:id (user endpoint, no admin DELETE) → 403
         // Now: /api/admin/tickets/:id (admin DELETE)
-        await apiFetch('/api/admin/tickets/' + ticketId, { method: 'DELETE' });
+        await adminApiFetch('/api/admin/tickets/' + ticketId, { method: 'DELETE' });
         showAdminToast('Ticket deleted', 'success');
         delete _adminTicketsExpanded[ticketId];
         loadAdminTickets(_adminTicketsPage);
@@ -1170,7 +1263,7 @@ async function sendBroadcast() {
     }
 
     try {
-        await apiFetch('/api/admin/broadcasts', {
+        await adminApiFetch('/api/admin/broadcasts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1192,7 +1285,7 @@ async function loadAdminBroadcasts() {
 
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/broadcasts');
+        const data = await adminApiFetch('/api/admin/broadcasts');
         if (_isLoadTokenStale(token)) return;
         if (!data || !Array.isArray(data.broadcasts) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty('No broadcasts yet');
@@ -1249,7 +1342,7 @@ async function loadAdminRewards() {
         if (_adminRewardsFilter && _adminRewardsFilter !== 'all') {
             url += '?status=' + _adminRewardsFilter;
         }
-        const data = await apiFetch(url);
+        const data = await adminApiFetch(url);
         if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.rewards) && !Array.isArray(data)) {
@@ -1327,7 +1420,7 @@ async function loadAdminTransactions(page) {
         let url = '/api/admin/transactions?page=' + _adminTransactionsPage;
         if (userId) url += '&user_id=' + encodeURIComponent(userId);
         if (txType) url += '&type=' + encodeURIComponent(txType);
-        const data = await apiFetch(url);
+        const data = await adminApiFetch(url);
         if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.transactions) && !Array.isArray(data)) {
@@ -1400,7 +1493,7 @@ async function loadAdminReferrals() {
     try {
         let url = '/api/admin/referrals';
         if (search) url += '?search=' + encodeURIComponent(search);
-        const data = await apiFetch(url);
+        const data = await adminApiFetch(url);
         if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.referrals) && !Array.isArray(data)) {
@@ -1458,7 +1551,7 @@ async function loadAdminSystemHealth() {
 
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/system-health');
+        const data = await adminApiFetch('/api/admin/system-health');
         if (_isLoadTokenStale(token)) return;
         if (!data) throw new Error('No data');
 
@@ -1537,7 +1630,7 @@ async function loadAdminLogs(page) {
     const token = _adminLoadToken;
     try {
         const url = '/api/admin/logs?page=' + _adminLogsPage;
-        const data = await apiFetch(url);
+        const data = await adminApiFetch(url);
         if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.logs) && !Array.isArray(data)) {
@@ -1656,7 +1749,7 @@ async function loadRewardCenterOverview() {
     grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/reward-center/overview');
+        const data = await adminApiFetch('/api/admin/reward-center/overview');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.overview) {
             const o = data.overview;
@@ -1693,7 +1786,7 @@ async function loadRcWheelConfig() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/reward-center/wheel/config');
+        const data = await adminApiFetch('/api/admin/reward-center/wheel/config');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.config) {
             _rcWheelConfig = data.config;
@@ -1748,7 +1841,7 @@ async function saveRcWheelConfig() {
         max_reward_per_day: Number(document.getElementById('rc-wc-maxreward')?.value || 1000),
     };
     try {
-        const data = await apiFetch('/api/admin/reward-center/wheel/config', { method: 'PUT', body: JSON.stringify(payload) });
+        const data = await adminApiFetch('/api/admin/reward-center/wheel/config', { method: 'PUT', body: JSON.stringify(payload) });
         if (data && data.status === 'success') {
             adminToast('تنظیمات ذخیره شد', 'success');
         } else {
@@ -1766,7 +1859,7 @@ async function loadRcWheelRewards() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/reward-center/wheel/rewards');
+        const data = await adminApiFetch('/api/admin/reward-center/wheel/rewards');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.rewards)) {
             let rows = data.rewards.map(function (r) {
@@ -1832,7 +1925,7 @@ async function createRcWheelReward() {
         is_active: document.getElementById('rc-wr-active')?.value === 'true',
     };
     try {
-        const data = await apiFetch('/api/admin/reward-center/wheel/rewards', { method: 'POST', body: JSON.stringify(payload) });
+        const data = await adminApiFetch('/api/admin/reward-center/wheel/rewards', { method: 'POST', body: JSON.stringify(payload) });
         if (data && data.status === 'success') { adminToast('پاداش ایجاد شد', 'success'); loadRcWheelRewards(); }
         else { adminToast('خطا در ایجاد', 'error'); }
     } catch (e) { adminToast('خطا در ایجاد', 'error'); console.error(e); }
@@ -1841,7 +1934,7 @@ window.createRcWheelReward = createRcWheelReward;
 
 async function toggleRcWheelReward(id, makeActive) {
     try {
-        const data = await apiFetch('/api/admin/reward-center/wheel/rewards/' + id, { method: 'PUT', body: JSON.stringify({ is_active: makeActive }) });
+        const data = await adminApiFetch('/api/admin/reward-center/wheel/rewards/' + id, { method: 'PUT', body: JSON.stringify({ is_active: makeActive }) });
         if (data && data.status === 'success') { adminToast('وضعیت تغییر کرد', 'success'); loadRcWheelRewards(); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
 }
@@ -1850,7 +1943,7 @@ window.toggleRcWheelReward = toggleRcWheelReward;
 async function deleteRcWheelReward(id) {
     if (!confirm('حذف این پاداش؟')) return;
     try {
-        const data = await apiFetch('/api/admin/reward-center/wheel/rewards/' + id, { method: 'DELETE' });
+        const data = await adminApiFetch('/api/admin/reward-center/wheel/rewards/' + id, { method: 'DELETE' });
         if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcWheelRewards(); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
 }
@@ -1864,7 +1957,7 @@ async function loadRcReferralTiers() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/reward-center/referral-tiers');
+        const data = await adminApiFetch('/api/admin/reward-center/referral-tiers');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.tiers)) {
             let rows = data.tiers.map(function (t) {
@@ -1917,7 +2010,7 @@ async function createRcReferralTier() {
         is_enabled: document.getElementById('rc-rt-enabled')?.value === 'true',
     };
     try {
-        const data = await apiFetch('/api/admin/reward-center/referral-tiers', { method: 'POST', body: JSON.stringify(payload) });
+        const data = await adminApiFetch('/api/admin/reward-center/referral-tiers', { method: 'POST', body: JSON.stringify(payload) });
         if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcReferralTiers(); }
         else { adminToast('خطا', 'error'); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
@@ -1927,7 +2020,7 @@ window.createRcReferralTier = createRcReferralTier;
 async function deleteRcReferralTier(id) {
     if (!confirm('حذف؟')) return;
     try {
-        const data = await apiFetch('/api/admin/reward-center/referral-tiers/' + id, { method: 'DELETE' });
+        const data = await adminApiFetch('/api/admin/reward-center/referral-tiers/' + id, { method: 'DELETE' });
         if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcReferralTiers(); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
 }
@@ -1941,7 +2034,7 @@ async function loadRcMissionRewards() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/reward-center/mission-rewards');
+        const data = await adminApiFetch('/api/admin/reward-center/mission-rewards');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.missions)) {
             let rows = data.missions.map(function (m) {
@@ -1993,7 +2086,7 @@ async function createRcMissionReward() {
         bonus_spins: Number(document.getElementById('rc-mr-spins')?.value || 0),
     };
     try {
-        const data = await apiFetch('/api/admin/reward-center/mission-rewards', { method: 'POST', body: JSON.stringify(payload) });
+        const data = await adminApiFetch('/api/admin/reward-center/mission-rewards', { method: 'POST', body: JSON.stringify(payload) });
         if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcMissionRewards(); }
         else { adminToast('خطا', 'error'); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
@@ -2003,7 +2096,7 @@ window.createRcMissionReward = createRcMissionReward;
 async function deleteRcMissionReward(id) {
     if (!confirm('حذف؟')) return;
     try {
-        const data = await apiFetch('/api/admin/reward-center/mission-rewards/' + id, { method: 'DELETE' });
+        const data = await adminApiFetch('/api/admin/reward-center/mission-rewards/' + id, { method: 'DELETE' });
         if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcMissionRewards(); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
 }
@@ -2017,7 +2110,7 @@ async function loadRcCampaigns() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/reward-center/campaigns');
+        const data = await adminApiFetch('/api/admin/reward-center/campaigns');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.campaigns)) {
             let rows = data.campaigns.map(function (c) {
@@ -2078,7 +2171,7 @@ async function createRcCampaign() {
         applies_to_mission: document.getElementById('rc-cm-mission')?.checked,
     };
     try {
-        const data = await apiFetch('/api/admin/reward-center/campaigns', { method: 'POST', body: JSON.stringify(payload) });
+        const data = await adminApiFetch('/api/admin/reward-center/campaigns', { method: 'POST', body: JSON.stringify(payload) });
         if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcCampaigns(); }
         else { adminToast('خطا', 'error'); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
@@ -2088,7 +2181,7 @@ window.createRcCampaign = createRcCampaign;
 async function deleteRcCampaign(id) {
     if (!confirm('حذف؟')) return;
     try {
-        const data = await apiFetch('/api/admin/reward-center/campaigns/' + encodeURIComponent(id), { method: 'DELETE' });
+        const data = await adminApiFetch('/api/admin/reward-center/campaigns/' + encodeURIComponent(id), { method: 'DELETE' });
         if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcCampaigns(); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
 }
@@ -2102,7 +2195,7 @@ async function loadRcLibrary() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/reward-center/library');
+        const data = await adminApiFetch('/api/admin/reward-center/library');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.library)) {
             let rows = data.library.map(function (item) {
@@ -2155,7 +2248,7 @@ async function createRcLibraryItem() {
         category: document.getElementById('rc-lib-category')?.value || 'general',
     };
     try {
-        const data = await apiFetch('/api/admin/reward-center/library', { method: 'POST', body: JSON.stringify(payload) });
+        const data = await adminApiFetch('/api/admin/reward-center/library', { method: 'POST', body: JSON.stringify(payload) });
         if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcLibrary(); }
         else { adminToast('خطا', 'error'); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
@@ -2165,7 +2258,7 @@ window.createRcLibraryItem = createRcLibraryItem;
 async function deleteRcLibraryItem(id) {
     if (!confirm('حذف؟')) return;
     try {
-        const data = await apiFetch('/api/admin/reward-center/library/' + id, { method: 'DELETE' });
+        const data = await adminApiFetch('/api/admin/reward-center/library/' + id, { method: 'DELETE' });
         if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcLibrary(); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
 }
@@ -2179,7 +2272,7 @@ async function loadRcAnalytics() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/reward-center/analytics?range=30d');
+        const data = await adminApiFetch('/api/admin/reward-center/analytics?range=30d');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.analytics) {
             const a = data.analytics;
@@ -2220,7 +2313,7 @@ async function loadRcSettings() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/reward-center/emergency');
+        const data = await adminApiFetch('/api/admin/reward-center/emergency');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.controls) {
             _rcEmergencyControls = data.controls;
@@ -2253,7 +2346,7 @@ async function saveRcEmergency() {
         disable_reward_engine: document.getElementById('rc-em-engine')?.checked,
     };
     try {
-        const data = await apiFetch('/api/admin/reward-center/emergency', { method: 'PUT', body: JSON.stringify(payload) });
+        const data = await adminApiFetch('/api/admin/reward-center/emergency', { method: 'PUT', body: JSON.stringify(payload) });
         if (data && data.status === 'success') { adminToast('ذخیره شد', 'success'); }
         else { adminToast('خطا', 'error'); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
@@ -2288,7 +2381,7 @@ async function loadNpOverview() {
     grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/notifications/analytics?range=7d');
+        const data = await adminApiFetch('/api/admin/notifications/analytics?range=7d');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.analytics) {
             const a = data.analytics;
@@ -2310,7 +2403,7 @@ async function loadNpBroadcast() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/notifications/broadcasts?limit=20');
+        const data = await adminApiFetch('/api/admin/notifications/broadcasts?limit=20');
         if (_isLoadTokenStale(token)) return;
         let rows = '';
         if (data && data.status === 'success' && Array.isArray(data.broadcasts)) {
@@ -2350,7 +2443,7 @@ async function createNpBroadcast() {
         target_type: document.getElementById('np-bc-target')?.value,
     };
     try {
-        const data = await apiFetch('/api/admin/notifications/broadcasts', { method: 'POST', body: JSON.stringify(payload) });
+        const data = await adminApiFetch('/api/admin/notifications/broadcasts', { method: 'POST', body: JSON.stringify(payload) });
         if (data && data.status === 'success') { adminToast('ارسال شد: ' + (data.sent || 0) + ' کاربر', 'success'); loadNpBroadcast(); }
         else { adminToast('خطا در ارسال', 'error'); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
@@ -2359,7 +2452,7 @@ window.createNpBroadcast = createNpBroadcast;
 
 async function sendNpBroadcast(id) {
     try {
-        const data = await apiFetch('/api/admin/notifications/broadcasts/' + id + '/send', { method: 'POST' });
+        const data = await adminApiFetch('/api/admin/notifications/broadcasts/' + id + '/send', { method: 'POST' });
         if (data && data.status === 'success') { adminToast('ارسال شد: ' + (data.sent || 0) + ' کاربر', 'success'); loadNpBroadcast(); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
 }
@@ -2371,7 +2464,7 @@ async function loadNpTemplates() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/notifications/templates');
+        const data = await adminApiFetch('/api/admin/notifications/templates');
         if (_isLoadTokenStale(token)) return;
         let rows = '';
         if (data && data.status === 'success' && Array.isArray(data.templates)) {
@@ -2390,7 +2483,7 @@ async function loadNpAnalytics() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/notifications/analytics?range=30d');
+        const data = await adminApiFetch('/api/admin/notifications/analytics?range=30d');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.analytics) {
             const a = data.analytics;
@@ -2426,7 +2519,7 @@ async function loadAlertEconomyDashboard() {
     grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/alert-economy/dashboard');
+        const data = await adminApiFetch('/api/admin/alert-economy/dashboard');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && data.dashboard) {
             const d = data.dashboard;
@@ -2452,7 +2545,7 @@ async function loadAlertEconomyConfigs() {
     section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
     const token = _adminLoadToken;
     try {
-        const data = await apiFetch('/api/admin/alert-economy/configs');
+        const data = await adminApiFetch('/api/admin/alert-economy/configs');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.configs)) {
             const rows = data.configs.map(function (c) {
@@ -2466,7 +2559,7 @@ window.loadAlertEconomyConfigs = loadAlertEconomyConfigs;
 
 async function toggleAlertService(alertType, enable) {
     try {
-        const data = await apiFetch('/api/admin/alert-economy/configs/' + encodeURIComponent(alertType), {
+        const data = await adminApiFetch('/api/admin/alert-economy/configs/' + encodeURIComponent(alertType), {
             method: 'PUT',
             body: JSON.stringify({ is_enabled: enable }),
         });

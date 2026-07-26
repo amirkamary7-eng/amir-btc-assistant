@@ -93,6 +93,12 @@ function jsonResponse(payload, init = {}, env = null) {
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json; charset=utf-8');
   }
+  // ROOT CAUSE FIX: Prevent browser/edge caching of API responses.
+  // Without this, admin panel could show stale data from browser cache.
+  // 'no-store' ensures every request hits the server.
+  if (!headers.has('Cache-Control')) {
+    headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  }
 
   return new Response(JSON.stringify(payload), {
     ...init,
