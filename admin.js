@@ -62,6 +62,33 @@ function adminEmpty(message) {
 }
 
 /**
+ * Generate a loading skeleton grid (premium loading state).
+ * @param {number} count - Number of skeleton cards
+ * @returns {string} HTML for skeleton cards
+ */
+function adminSkeletonGrid(count) {
+    count = count || 6;
+    let html = '';
+    for (let i = 0; i < count; i++) {
+        html += '<div class="adm-skeleton adm-skeleton-card"></div>';
+    }
+    return html;
+}
+
+/**
+ * Generate an error state with retry button.
+ * @param {string} message - Error message
+ * @param {string} retryFn - Function name to call on retry (e.g. 'loadAdminUsers')
+ * @returns {string} HTML for error state
+ */
+function adminErrorState(message, retryFn) {
+    return '<div class="admin-empty" style="color:#f87171;border-color:rgba(239,68,68,0.20);">' +
+        adminEscapeHtml(message || 'خطا در بارگذاری') +
+        (retryFn ? '<button class="adm-retry-btn" onclick="' + adminEscapeHtml(retryFn) + '()">تلاش مجدد</button>' : '') +
+        '</div>';
+}
+
+/**
  * Check if the current load token is still valid.
  * Use at the start of async loaders: const token = _adminLoadToken;
  * Then after await: if (token !== _adminLoadToken) return;
@@ -622,8 +649,8 @@ async function loadAdminDashboard() {
     // Load maintenance status banner (independent of dashboard API)
     loadDashboardMaintenanceBanner();
 
-    grid.innerHTML = '<div class="admin-empty">Loading...</div>';
-    if (activityList) activityList.innerHTML = '';
+    grid.innerHTML = adminSkeletonGrid(8);
+    if (activityList) activityList.innerHTML = '<div class="adm-skeleton" style="height:60px;margin-bottom:8px;"></div><div class="adm-skeleton" style="height:60px;margin-bottom:8px;"></div><div class="adm-skeleton" style="height:60px;"></div>';
 
     try {
         const data = await adminApiFetch('/api/admin/dashboard');
@@ -716,7 +743,7 @@ async function loadAdminDashboard() {
             }
         }
     } catch (e) {
-        grid.innerHTML = adminEmpty('بارگذاری داشبورد ناموفق بود');
+        grid.innerHTML = adminErrorState('بارگذاری داشبورد ناموفق بود', 'loadAdminDashboard');
         console.error('loadAdminDashboard:', e);
     }
 }
@@ -763,7 +790,7 @@ async function loadDashboardMaintenanceBanner() {
 async function loadAdminList() {
     const container = document.getElementById('admin-list');
     if (!container) return;
-    container.innerHTML = '<div class="admin-empty">Loading...</div>';
+    container.innerHTML = adminSkeletonGrid(4);
 
     try {
         const data = await adminApiFetch('/api/admin/admins');
@@ -810,7 +837,7 @@ async function loadAdminList() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminEmpty('Failed to load admins');
+        container.innerHTML = adminErrorState('Failed to load admins', 'loadAdminList');
         console.error('loadAdminList:', e);
     }
 }
@@ -894,7 +921,7 @@ async function loadAdminUsers(page) {
     const container = document.getElementById('admin-users-list');
     const paginationEl = document.getElementById('admin-users-pagination');
     if (!container) return;
-    container.innerHTML = '<div class="admin-empty">Loading...</div>';
+    container.innerHTML = adminSkeletonGrid(4);
     if (paginationEl) paginationEl.innerHTML = '';
     _adminUsersPage = page || 1;
 
@@ -955,7 +982,7 @@ async function loadAdminUsers(page) {
         container.innerHTML = html;
         adminPagination('admin-users-pagination', _adminUsersPage, totalPages, 'loadAdminUsers');
     } catch (e) {
-        container.innerHTML = adminEmpty('Failed to load users');
+        container.innerHTML = adminErrorState('Failed to load users', 'loadAdminUsers');
         console.error('loadAdminUsers:', e);
     }
 }
@@ -1016,7 +1043,7 @@ async function loadAdminTickets(page) {
     const container = document.getElementById('admin-tickets-list');
     const paginationEl = document.getElementById('admin-tickets-pagination');
     if (!container) return;
-    container.innerHTML = '<div class="admin-empty">Loading...</div>';
+    container.innerHTML = adminSkeletonGrid(4);
     if (paginationEl) paginationEl.innerHTML = '';
     _adminTicketsPage = page || 1;
 
@@ -1118,7 +1145,7 @@ async function loadAdminTickets(page) {
         container.innerHTML = html;
         adminPagination('admin-tickets-pagination', _adminTicketsPage, totalPages, 'loadAdminTickets');
     } catch (e) {
-        container.innerHTML = adminEmpty('Failed to load tickets');
+        container.innerHTML = adminErrorState('Failed to load tickets', 'loadAdminTickets');
         console.error('loadAdminTickets:', e);
     }
 }
@@ -1281,7 +1308,7 @@ async function sendBroadcast() {
 async function loadAdminBroadcasts() {
     const container = document.getElementById('admin-broadcasts-list');
     if (!container) return;
-    container.innerHTML = '<div class="admin-empty">Loading...</div>';
+    container.innerHTML = adminSkeletonGrid(4);
 
     const token = _adminLoadToken;
     try {
@@ -1324,7 +1351,7 @@ async function loadAdminBroadcasts() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminEmpty('Failed to load broadcasts');
+        container.innerHTML = adminErrorState('Failed to load broadcasts', 'loadAdminBroadcasts');
         console.error('loadAdminBroadcasts:', e);
     }
 }
@@ -1334,7 +1361,7 @@ async function loadAdminBroadcasts() {
 async function loadAdminRewards() {
     const container = document.getElementById('admin-rewards-list');
     if (!container) return;
-    container.innerHTML = '<div class="admin-empty">Loading...</div>';
+    container.innerHTML = adminSkeletonGrid(4);
 
     const token = _adminLoadToken;
     try {
@@ -1385,7 +1412,7 @@ async function loadAdminRewards() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminEmpty('Failed to load rewards');
+        container.innerHTML = adminErrorState('Failed to load rewards', 'loadAdminRewards');
         console.error('loadAdminRewards:', e);
     }
 }
@@ -1406,7 +1433,7 @@ async function loadAdminTransactions(page) {
     const container = document.getElementById('admin-transactions-list');
     const paginationEl = document.getElementById('admin-transactions-pagination');
     if (!container) return;
-    container.innerHTML = '<div class="admin-empty">Loading...</div>';
+    container.innerHTML = adminSkeletonGrid(4);
     if (paginationEl) paginationEl.innerHTML = '';
     _adminTransactionsPage = page || 1;
 
@@ -1474,7 +1501,7 @@ async function loadAdminTransactions(page) {
         container.innerHTML = html;
         adminPagination('admin-transactions-pagination', _adminTransactionsPage, totalPages, 'loadAdminTransactions');
     } catch (e) {
-        container.innerHTML = adminEmpty('Failed to load transactions');
+        container.innerHTML = adminErrorState('Failed to load transactions', 'loadAdminTransactions');
         console.error('loadAdminTransactions:', e);
     }
 }
@@ -1484,7 +1511,7 @@ async function loadAdminTransactions(page) {
 async function loadAdminReferrals() {
     const container = document.getElementById('admin-referrals-list');
     if (!container) return;
-    container.innerHTML = '<div class="admin-empty">Loading...</div>';
+    container.innerHTML = adminSkeletonGrid(4);
 
     const searchInput = document.getElementById('admin-referral-search');
     const search = searchInput ? searchInput.value.trim() : '';
@@ -1530,7 +1557,7 @@ async function loadAdminReferrals() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminEmpty('Failed to load referrals');
+        container.innerHTML = adminErrorState('Failed to load referrals', 'loadAdminReferrals');
         console.error('loadAdminReferrals:', e);
     }
 }
@@ -1623,7 +1650,7 @@ async function loadAdminLogs(page) {
     const container = document.getElementById('admin-logs-list');
     const paginationEl = document.getElementById('admin-logs-pagination');
     if (!container) return;
-    container.innerHTML = '<div class="admin-empty">Loading...</div>';
+    container.innerHTML = adminSkeletonGrid(4);
     if (paginationEl) paginationEl.innerHTML = '';
     _adminLogsPage = page || 1;
 
@@ -1671,7 +1698,7 @@ async function loadAdminLogs(page) {
         container.innerHTML = html;
         adminPagination('admin-logs-pagination', _adminLogsPage, totalPages, 'loadAdminLogs');
     } catch (e) {
-        container.innerHTML = adminEmpty('Failed to load logs');
+        container.innerHTML = adminErrorState('Failed to load logs', 'loadAdminLogs');
         console.error('loadAdminLogs:', e);
     }
 }
