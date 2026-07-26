@@ -3946,112 +3946,71 @@ function renderMarket() {
         return '';
     }
 
-    // Unified search: search across crypto and all market types
+    // Unified search: INDEPENDENT from the 200-coin market list.
+    // The search calls /api/market/search (public, no auth needed) which
+    // queries a 1700+ coin index from MEXC API. Results are rendered
+    // directly without depending on allCoins.
     if (searchTerm) {
-        // First, search in the loaded 200 coins (instant, no API call)
-        const cryptoResults = allCoins.filter(c =>
-            c.symbol.toLowerCase().includes(searchTerm) ||
-            c.name.toLowerCase().includes(searchTerm)
-        ).slice(0, 50);
+        // Show skeleton immediately while search runs
+        list.innerHTML = '<div class="empty-state" style="padding:20px;">در حال جستجو...</div>';
 
-        const forexResults = allForexPairs.filter(f =>
-            f.symbol.toLowerCase().includes(searchTerm) ||
-            f.name.toLowerCase().includes(searchTerm) ||
-            (f.tvSymbol && f.tvSymbol.toLowerCase().includes(searchTerm))
-        ).slice(0, 30);
+        // Use plain fetch() — NOT apiFetch() — because:
+        // 1. The endpoint is PUBLIC (no auth required)
+        // 2. apiFetch requires waitForApiReady which can timeout/abort
+        // 3. We want search to work even for guest users
+        const searchUrl = `${API_BASE}/api/market/search?q=${encodeURIComponent(searchTerm)}`;
+        const currentSearch = searchTerm;
+        _lastSearchTerm = currentSearch;
 
-        let allResults = [...cryptoResults.map(c => ({...c, _type: 'crypto'})), ...forexResults.map(f => ({...f, _type: 'forex'}))];
+        fetch(searchUrl, { method: 'GET', headers: { 'Accept': 'application/json' } })
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                // Only render if this is still the current search term
+                if (currentSearch !== _lastSearchTerm) return;
 
-        // If we have results from the loaded 200 coins, show them immediately.
-        // Then asynchronously fetch from the extended 1500-coin search endpoint
-        // to add any additional matches not in the top 200.
-        if (allResults.length > 0) {
-            list.innerHTML = buildInfoBar(allResults.length, t('search_results') || 'result') + allResults.map(item => renderMarketItem(item)).join('');
-        }
+                if (!data || !data.results || data.results.length === 0) {
+                    const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
+                    list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result') || 'نتیجه‌ای یافت نشد'}</div>`;
+                    return;
+                }
 
-        // Async extended search (1500 coins) — only if we have API access
-        if (API_BASE && searchTerm.length >= 2) {
-            apiFetch(`/api/market/search?q=${encodeURIComponent(searchTerm)}`)
-                .then(data => {
-                    if (!data || !data.results || !data.results.length) return;
-                    // Filter out coins already in the loaded 200
-                    const existingSymbols = new Set(allCoins.map(c => c.symbol));
-                    const extraResults = data.results
-                        .filter(c => !existingSymbols.has(c.symbol))
-                        .map(c => ({
-                            ...c,
-                            _type: 'crypto',
-                            // Add missing fields with defaults
-                            changePercent24Hr: 0,
-                            volumeUsd24Hr: 0,
-                            marketCapUsd: 0,
-                            image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
-                        }));
-                    if (extraResults.length === 0) return;
+                // Map search results to the format expected by renderMarketItem
+                const searchResults = data.results.map(c => ({
+                    symbol: c.symbol,
+                    name: c.name || c.symbol,
+                    priceUsd: c.priceUsd || 0,
+                    changePercent24Hr: 0,
+                    volumeUsd24Hr: 0,
+                    marketCapUsd: 0,
+                    rank: c.rank || 0,
+                    image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
+                    _type: 'crypto',
+                }));
 
-                    // Merge and re-render
-                    const mergedResults = [...cryptoResults.map(c => ({...c, _type: 'crypto'})), ...extraResults, ...forexResults.map(f => ({...f, _type: 'forex'}))];
-                    // Only update if the search term hasn't changed
-                    if (searchTerm === _lastSearchTerm) {
-                        list.innerHTML = buildInfoBar(mergedResults.length, t('search_results') || 'result') + mergedResults.map(item => renderMarketItem(item)).join('');
-                    }
-                })
-                .catch(() => {});
-        }
+                // Also check forex pairs (instant, from memory)
+                const forexResults = allForexPairs.filter(f =>
+                    f.symbol.toLowerCase().includes(searchTerm) ||
+                    f.name.toLowerCase().includes(searchTerm) ||
+                    (f.tvSymbol && f.tvSymbol.toLowerCase().includes(searchTerm))
+                ).slice(0, 10).map(f => ({...f, _type: 'forex'}));
 
-        if (!allResults.length && (allCoins.length || allForexPairs.length)) {
-            // No results in top 200 — show "searching..." while extended search runs
-            const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
-            list.innerHTML = `<div class="empty-state">${icon}<br>در حال جستجو در ۱۵۰۰ ارز...</div>`;
+                const allResults = [...searchResults, ...forexResults];
+                list.innerHTML = buildInfoBar(allResults.length, `جستجو در ${data.total_index || 1700}+ ارز`) + allResults.map(item => renderMarketItem(item)).join('');
+            })
+            .catch(() => {
+                if (currentSearch !== _lastSearchTerm) return;
+                // Fallback: search in loaded 200 coins
+                const cryptoResults = allCoins.filter(c =>
+                    c.symbol.toLowerCase().includes(searchTerm) ||
+                    c.name.toLowerCase().includes(searchTerm)
+                ).slice(0, 50).map(c => ({...c, _type: 'crypto'}));
 
-            // Try extended search
-            if (API_BASE && searchTerm.length >= 2) {
-                apiFetch(`/api/market/search?q=${encodeURIComponent(searchTerm)}`)
-                    .then(data => {
-                        if (data && data.results && data.results.length) {
-                            const extendedResults = data.results.map(c => ({
-                                ...c,
-                                _type: 'crypto',
-                                changePercent24Hr: 0,
-                                volumeUsd24Hr: 0,
-                                marketCapUsd: 0,
-                                image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
-                            }));
-                            if (searchTerm === _lastSearchTerm) {
-                                list.innerHTML = buildInfoBar(extendedResults.length, t('search_results') || 'result') + extendedResults.map(item => renderMarketItem(item)).join('');
-                            }
-                        } else if (searchTerm === _lastSearchTerm) {
-                            const noResultIcon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
-                            list.innerHTML = `<div class="empty-state">${noResultIcon}<br>${t('search_no_result')}</div>`;
-                        }
-                    })
-                    .catch(() => {
-                        if (searchTerm === _lastSearchTerm) {
-                            list.innerHTML = `<div class="empty-state">${t('search_no_result')}</div>`;
-                        }
-                    });
-            }
-            return;
-        }
-        if (!allResults.length) {
-            list.innerHTML = Array(8).fill(`
-                <div class="market-skeleton">
-                    <div class="market-skeleton-left">
-                        <div class="market-skeleton-icon"></div>
-                        <div class="market-skeleton-text">
-                            <div class="market-skeleton-line"></div>
-                            <div class="market-skeleton-line"></div>
-                        </div>
-                    </div>
-                    <div class="market-skeleton-right">
-                        <div class="market-skeleton-block"></div>
-                        <div class="market-skeleton-block"></div>
-                    </div>
-                </div>
-            `).join('');
-            return;
-        }
-        list.innerHTML = buildInfoBar(allResults.length, t('search_results') || 'result') + allResults.map(item => renderMarketItem(item)).join('');
+                if (cryptoResults.length > 0) {
+                    list.innerHTML = buildInfoBar(cryptoResults.length, t('search_results') || 'result') + cryptoResults.map(item => renderMarketItem(item)).join('');
+                } else {
+                    list.innerHTML = `<div class="empty-state">${t('search_no_result') || 'نتیجه‌ای یافت نشد'}</div>`;
+                }
+            });
         return;
     }
 
