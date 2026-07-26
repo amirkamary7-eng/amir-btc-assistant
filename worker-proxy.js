@@ -2570,35 +2570,37 @@ async function resolveChartExchange(env, rawSymbol) {
   const cachedExchange = await readAppCache(env, cacheKey);
 
   if (cachedExchange) {
-    // Return cached result — always use BINANCE as both exchange name and
-    // TradingView prefix. This ensures the exchange badge matches the chart.
-    return {
-      found: true,
-      symbol: normalizedSymbol,
-      exchange: 'binance', // Always 'binance' to match tv_symbol
-      tv_symbol: `BINANCE:${normalizedSymbol}USDT`,
-      cached: true,
-    };
+    // Return cached result — use the ACTUAL exchange that confirmed the symbol.
+    // The tv_symbol uses the REAL exchange prefix (not always BINANCE).
+    const cachedMatch = EXCHANGE_ORDER.find(([tvName, key]) => key === cachedExchange);
+    if (cachedMatch) {
+      const [tvName] = cachedMatch;
+      return {
+        found: true,
+        symbol: normalizedSymbol,
+        exchange: cachedExchange,
+        tv_symbol: `${tvName}:${normalizedSymbol}USDT`,
+        cached: true,
+      };
+    }
   }
 
   // Check exchanges SEQUENTIALLY in strict priority order:
   // Binance > Bybit > OKX > Bitget > KuCoin > MEXC > Gate > HTX
-  // NOTE: Binance API is blocked from CF Workers (403), so in practice
-  // Bybit will be the first to respond. But we still try Binance first
-  // in case the block is lifted in the future.
+  // Binance API is blocked from CF Workers (403), so it will fail.
+  // The first exchange that responds successfully wins.
+  // The tv_symbol uses the REAL exchange prefix — this ensures:
+  // 1. The exchange badge matches the actual chart
+  // 2. TradingView can find the symbol (BYBIT:BTCUSDT, OKX:ETHUSDT, etc.)
+  // 3. Low-cap coins that are NOT on Binance still get a valid chart
   for (const [tvName, key] of EXCHANGE_ORDER) {
     if (await exchangeHasSymbol(key, normalizedSymbol)) {
       await writeAppCache(env, cacheKey, key, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
-      // ALWAYS use BINANCE as both the exchange name AND the TradingView prefix.
-      // This ensures the exchange badge matches the actual chart.
-      // TradingView widget fetches chart data from its OWN servers — not from our Worker.
-      // So even though we verified the symbol on Bybit (because Binance API is blocked
-      // from CF Workers), the chart will show Binance data correctly.
       return {
         found: true,
         symbol: normalizedSymbol,
-        exchange: 'binance', // Always 'binance' to match tv_symbol prefix
-        tv_symbol: `BINANCE:${normalizedSymbol}USDT`, // Always BINANCE for TradingView
+        exchange: key, // The REAL exchange that has this symbol
+        tv_symbol: `${tvName}:${normalizedSymbol}USDT`, // Real exchange prefix
         cached: false,
       };
     }
