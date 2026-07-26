@@ -457,7 +457,7 @@ const i18n = {
         cal_loading: 'در حال بارگذاری تقویم...', cal_empty: 'رویدادی موجود نیست',
         about_version: 'نسخه 1.0.0', about_desc: 'دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر.',
         official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
-        summary_mcap: 'مارکت‌کپ کل', summary_volume: 'حجم ۲۴h', summary_btc_dom: 'سلطه BTC',
+        summary_mcap: 'مارکت‌کپ کل', summary_volume: 'حجم ۲۴h', summary_btc_dom: 'BTC.D',
         market_subtitle: 'داده‌های لحظه‌ای بازار ارزهای دیجیتال',
         market_sentiment: 'وضعیت بازار',
         top_gainers: 'بیشترین رشد', top_losers: 'بیشترین ریزش',
@@ -572,7 +572,7 @@ const i18n = {
         about_version: 'Version 1.0.0',
         about_desc: 'Smart trading assistant connected to global exchange APIs.',
         official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
-        summary_mcap: 'Total Market Cap', summary_volume: '24h Volume', summary_btc_dom: 'BTC Dominance',
+        summary_mcap: 'Total Market Cap', summary_volume: '24h Volume', summary_btc_dom: 'BTC.D',
         market_subtitle: 'Live Cryptocurrency Market Data',
         market_sentiment: 'Market Sentiment',
         top_gainers: 'Top Gainers', top_losers: 'Top Losers',
@@ -7389,28 +7389,90 @@ function closeNotifModal() {
 }
 /**
  * وضعیت همه read را علامت‌گذاری می‌کند — از API استفاده می‌کند.
+ * ROOT CAUSE FIX: previously if the API call failed silently (caught by catch),
+ * the local state was still updated → on next poll, server returned unread
+ * notifications → they "reverted" to unread. Now we only update local state
+ * if the API call succeeds. If it fails, we show an error toast.
  */
 async function markAllRead() {
     try {
         if (API_BASE && !UserContext.isGuest()) {
-            await apiFetch('/api/notifications/read-all', { method: 'POST' });
+            const res = await apiFetch('/api/notifications/read-all', { method: 'POST' });
+            // Only update local state if API succeeded
+            if (res && res.status === 'success') {
+                notifications.forEach(n => n.read = true);
+                updateNotifBadge();
+                renderNotifications();
+                showMiniToast(t('done') || 'Done');
+            } else {
+                console.warn('markAllRead: API returned non-success', res);
+                showMiniToast(t('error_generic') || 'Error');
+            }
+            return;
         }
-    } catch (e) { /* fallback below */ }
-    // Update local state
+    } catch (e) {
+        console.warn('markAllRead API failed:', e);
+        showMiniToast(t('error_generic') || 'Error');
+    }
+    // Fallback for guests: update local state only
     notifications.forEach(n => n.read = true);
     updateNotifBadge();
     renderNotifications();
 }
 /**
- * همه notifications را پاک‌سازی می‌کند.
+ * همه notifications را پاک‌سازی می‌کند — از API استفاده می‌کند.
+ * ROOT CAUSE FIX: previously this only cleared the local `notifications` array
+ * with NO API call → notifications reappeared on next poll (60s). Now calls
+ * DELETE /api/notifications to actually remove them from the database.
  */
-function clearAllNotifications() {
-    if(confirm(t('confirm_clear_notif'))) {
-        notifications = [];
-        updateNotifBadge();
-        renderNotifications();
-        closeNotifModal();
+async function clearAllNotifications() {
+    if(!confirm(t('confirm_clear_notif'))) return;
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            const res = await apiFetch('/api/notifications', { method: 'DELETE' });
+            if (res && res.status === 'success') {
+                notifications = [];
+                updateNotifBadge();
+                renderNotifications();
+                closeNotifModal();
+                showMiniToast(t('done') || 'Cleared');
+            } else {
+                console.warn('clearAllNotifications: API returned non-success', res);
+                showMiniToast(t('error_generic') || 'Error');
+            }
+            return;
+        }
+    } catch (e) {
+        console.warn('clearAllNotifications API failed:', e);
+        showMiniToast(t('error_generic') || 'Error');
     }
+    // Fallback for guests: clear local state only
+    notifications = [];
+    updateNotifBadge();
+    renderNotifications();
+    closeNotifModal();
+}
+/**
+ * یک notification را حذف می‌کند — از API استفاده می‌کند.
+ * ROOT CAUSE FIX: previously no delete function existed. Now calls
+ * DELETE /api/notifications/:id to remove from DB permanently.
+ */
+async function deleteNotification(id) {
+    try {
+        if (API_BASE && !UserContext.isGuest()) {
+            const res = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' });
+            if (res && res.status === 'success') {
+                notifications = notifications.filter(n => n.id !== id);
+                updateNotifBadge();
+                renderNotifications();
+            }
+            return;
+        }
+    } catch (e) { console.warn('deleteNotification:', e); }
+    // Fallback for guests
+    notifications = notifications.filter(n => n.id !== id);
+    updateNotifBadge();
+    renderNotifications();
 }
 /**
  * Notifications را از سرور بارگذاری می‌کند — DB source of truth.
@@ -7444,6 +7506,9 @@ async function loadNotificationsFromServer() {
 }
 /**
  * notifications را در رابط کاربری رندر می‌کند.
+ * FIX: added a delete button per notification so users can permanently delete
+ * (not just mark as read). Previously there was no way to delete a single
+ * notification — only "clear all" which didn't actually call the API.
  */
 function renderNotifications() {
     const container = document.getElementById('notif-list');
@@ -7457,21 +7522,32 @@ function renderNotifications() {
             <div class="notif-title">${escapeHtml(n.title)}</div>
             <div class="notif-body">${escapeHtml(n.body)}</div>
             <div class="notif-date">${new Date(n.date).toLocaleDateString('fa-IR')}</div>
+            <button class="notif-delete-btn" onclick="event.stopPropagation(); deleteNotification('${escapeHtml(n.id)}')" aria-label="Delete">×</button>
         </div>
     `).join('');
 }
 /**
  * وضعیت اعلان read را علامت‌گذاری می‌کند — از API استفاده می‌کند.
+ * ROOT CAUSE FIX: previously if the API call failed (caught by catch), the
+ * local state was still updated → on next poll, server returned unread →
+ * notification "reverted" to unread. Now we only update local state on success.
  */
 async function markNotifRead(id) {
-    const n = notifications.find(x => x.id === id);
-    if (n) n.read = true;
-    // Sync to server
     try {
         if (API_BASE && !UserContext.isGuest()) {
-            await apiFetch(`/api/notifications/${id}/read`, { method: 'POST' });
+            const res = await apiFetch(`/api/notifications/${id}/read`, { method: 'POST' });
+            if (res && res.status === 'success') {
+                const n = notifications.find(x => x.id === id);
+                if (n) n.read = true;
+                updateNotifBadge();
+                renderNotifications();
+            }
+            return;
         }
-    } catch (e) { /* local state already updated */ }
+    } catch (e) { console.warn('markNotifRead API failed:', e); }
+    // Fallback for guests: update local state only
+    const n = notifications.find(x => x.id === id);
+    if (n) n.read = true;
     updateNotifBadge();
     renderNotifications();
 }
@@ -9766,6 +9842,7 @@ window.closeNotifModal = closeNotifModal;
 window.markAllRead = markAllRead;
 window.clearAllNotifications = clearAllNotifications;
 window.markNotifRead = markNotifRead;
+window.deleteNotification = deleteNotification;
 // copyRefLink / shareRefLink removed — use ReferralApp.copyLink() / shareLink() instead
 window.toggleSettings = openSettingsModal;
 window.openSettingsModal = openSettingsModal;

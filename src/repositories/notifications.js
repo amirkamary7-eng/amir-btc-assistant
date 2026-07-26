@@ -292,5 +292,43 @@ export function createNotificationRepository(deps) {
     return result.rowCount || 0;
   }
 
-  return Object.freeze({ create, createBulk, list, unreadCount, markRead, markAllRead, serializeRow, ensureTable, getSettings, saveSettings, isPreferenceEnabled, filterUsersByPreference });
+  /**
+   * Delete a single notification for a user.
+   * Returns true if a row was deleted, false otherwise.
+   * ROOT CAUSE FIX: previously the frontend had NO delete API — clearAllNotifications()
+   * only cleared the local array, so notifications "came back" on next poll.
+   */
+  async function deleteNotification(env, notificationId, userId) {
+    const result = await queryDb(
+      env,
+      `
+        DELETE FROM notifications
+        WHERE id = $1 AND user_id = $2
+        RETURNING id
+      `,
+      [String(notificationId), String(userId)],
+    );
+    return (result.rowCount || 0) > 0;
+  }
+
+  /**
+   * Delete ALL notifications for a user.
+   * Returns the number of rows deleted.
+   * ROOT CAUSE FIX: previously the frontend clearAllNotifications() only cleared
+   * the local array — no API call. Notifications reappeared on next poll.
+   */
+  async function deleteAll(env, userId) {
+    const result = await queryDb(
+      env,
+      `
+        DELETE FROM notifications
+        WHERE user_id = $1
+        RETURNING id
+      `,
+      [String(userId)],
+    );
+    return result.rowCount || 0;
+  }
+
+  return Object.freeze({ create, createBulk, list, unreadCount, markRead, markAllRead, deleteNotification, deleteAll, serializeRow, ensureTable, getSettings, saveSettings, isPreferenceEnabled, filterUsersByPreference });
 }

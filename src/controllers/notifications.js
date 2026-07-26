@@ -105,5 +105,62 @@ export function createNotificationHandlers(deps) {
     }
   }
 
-  return Object.freeze({ handleList, handleMarkAllRead, handleMarkRead });
+  /**
+   * DELETE /api/notifications/:id — Delete a single notification.
+   * ROOT CAUSE FIX: previously no delete endpoint existed. Frontend only
+   * cleared local state → notifications reappeared on next poll.
+   */
+  async function handleDelete(request, env, notificationId) {
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) {
+      return authState.error;
+    }
+
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse(
+        { status: 'error', message: 'Database not configured' },
+        { status: 503 }, env);
+    }
+
+    const userId = String(authState.user.id);
+    try {
+      const deleted = await notificationRepo.deleteNotification(env, notificationId, userId);
+      if (!deleted) {
+        return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
+      }
+      return jsonResponse({ status: 'success', deleted: true }, {}, env);
+    } catch (error) {
+      console.warn(safeError('delete-notification', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
+  /**
+   * DELETE /api/notifications — Delete ALL notifications for the user.
+   * ROOT CAUSE FIX: previously clearAllNotifications() in frontend only cleared
+   * the local array. No API call → notifications reappeared on next poll.
+   */
+  async function handleDeleteAll(request, env) {
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) {
+      return authState.error;
+    }
+
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse(
+        { status: 'error', message: 'Database not configured' },
+        { status: 503 }, env);
+    }
+
+    const userId = String(authState.user.id);
+    try {
+      const deleted = await notificationRepo.deleteAll(env, userId);
+      return jsonResponse({ status: 'success', deleted_count: deleted }, {}, env);
+    } catch (error) {
+      console.warn(safeError('delete-all-notifications', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
+  return Object.freeze({ handleList, handleMarkAllRead, handleMarkRead, handleDelete, handleDeleteAll });
 }

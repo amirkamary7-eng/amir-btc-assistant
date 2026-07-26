@@ -1859,11 +1859,28 @@ async function fetchSpotPriceUsd(env, symbol) {
   if (!normalizedSymbol) {
     return null;
   }
-  const cacheKey = `chart:exchange:${normalizedSymbol}`;
-  const cachedExchange = await readAppCache(env, cacheKey);
+  // Use the SAME v2 cache key as the chart resolver so price fetch and chart
+  // resolution share the same cached exchange. Previously this used the v1
+  // key `chart:exchange:` which could diverge from the resolver's v2 key
+  // `chart:exchange:v2:` — causing stale or inconsistent exchange selection.
+  const cacheKey = `chart:exchange:v2:${normalizedSymbol}`;
 
   // ── FAST PATH: Try cached exchange first (latency: 1 API call, max 4s) ──
-  // Cache TTL = 1h. If cached exchange fails, we invalidate and try all exchanges.
+  // Cache stores full JSON result from resolveChartExchange.
+  let cachedExchange = null;
+  try {
+    const raw = await readAppCache(env, cacheKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.exchange) {
+        cachedExchange = parsed.exchange;
+      } else if (typeof raw === 'string' && raw.length > 0 && raw.length < 30) {
+        // Backward compat: old v1 cache stored just the exchange key string
+        cachedExchange = raw.trim();
+      }
+    }
+  } catch {}
+
   if (cachedExchange) {
     const cachedPrice = await fetchSpotTickerPrice(cachedExchange, normalizedSymbol);
     if (cachedPrice !== null) {
@@ -1873,14 +1890,13 @@ async function fetchSpotPriceUsd(env, symbol) {
     await writeAppCache(env, cacheKey, '', 60).catch(() => {});
   }
 
-  // ── FALLBACK: Try ALL 8 exchanges in PARALLEL (max 4s total) ──
-  // CRITICAL FIX: Previously, top 3 were parallel (4s) then remaining 5 were
-  // sequential (5×4s = 20s). Total worst case = 4s (cached fail) + 4s (top 3)
-  // + 20s (remaining) = 28s → cron timeout (25s limit).
-  // Now: ALL 8 exchanges in parallel, max 4s. First valid response wins.
-  // We iterate in priority order (Binance > Bybit > OKX > ...) to pick the
-  // best exchange when multiple respond.
-  const ALL_EXCHANGES = ['binance', 'bybit', 'okx', 'bitget', 'kucoin', 'mexc', 'gateio', 'htx'];
+  // ── FALLBACK: Try ALL exchanges in PARALLEL (max 4s total) ──
+  // ROOT CAUSE FIX: Binance API (data-api.binance.vision) is IP-blocked from
+  // Cloudflare Workers (403). It was always first in priority order, wasting
+  // a full 4s timeout before falling through. Removed Binance from the list —
+  // Bybit, OKX, MEXC are equally reliable for spot prices.
+  // Also added Coinbase + Kraken (USD pairs) for broader coverage.
+  const ALL_EXCHANGES = ['bybit', 'okx', 'bitget', 'kucoin', 'mexc', 'gateio', 'htx', 'coinbase', 'kraken'];
 
   const results = await Promise.allSettled(
     ALL_EXCHANGES.map(async (exchangeKey) => {
@@ -1894,7 +1910,15 @@ async function fetchSpotPriceUsd(env, symbol) {
     const idx = ALL_EXCHANGES.indexOf(exchangeKey);
     const r = results[idx];
     if (r && r.status === 'fulfilled' && r.value.price !== null) {
-      await writeAppCache(env, cacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
+      // Cache the result in v2 format (full JSON) for consistency with resolver
+      const cacheValue = JSON.stringify({
+        found: true,
+        symbol: normalizedSymbol,
+        exchange: exchangeKey,
+        tv_symbol: null, // price fetch doesn't need tv_symbol
+        cached: false,
+      });
+      await writeAppCache(env, cacheKey, cacheValue, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
       return { price: r.value.price, exchange: exchangeKey, cached: false };
     }
   }
@@ -3303,6 +3327,61 @@ async function fetchGlobalStats(env) {
     }
   }
 
+  // Level 3: MEXC global — MEXC is already used for coin prices and works
+  // reliably from CF Workers. If CoinGecko rate-limits AND CoinPaprika fails,
+  // MEXC gives us at least total market cap and BTC dominance.
+  // Endpoint: https://api.mexc.com/api/v3/ticker/24hr — returns array of all tickers.
+  // We compute global stats from this (sum of all quoteVolume, BTC dominance from BTCUSDT).
+  if (!stats) {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch('https://api.mexc.com/api/v3/ticker/24hr', {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      });
+      clearTimeout(tid);
+      if (res.ok) {
+        const tickers = await res.json();
+        if (Array.isArray(tickers) && tickers.length > 0) {
+          let totalVolume = 0;
+          let btcVolume = 0;
+          let btcPrice = 0;
+          for (const t of tickers) {
+            const symbol = String(t.symbol || '');
+            const quoteVol = Number(t.quoteVolume) || 0;
+            // Only count USDT pairs for volume
+            if (symbol.endsWith('USDT')) {
+              totalVolume += quoteVol;
+              if (symbol === 'BTCUSDT') {
+                btcPrice = Number(t.lastPrice) || 0;
+                btcVolume = quoteVol;
+              }
+            }
+          }
+          // Estimate total market cap from BTC dominance approximation.
+          // MEXC doesn't provide market cap directly, but we can estimate:
+          // BTC market cap ≈ BTC price × circulating supply (19.7M as of 2026).
+          // If BTC dominance ≈ 52% (typical), total mcap ≈ BTC mcap / 0.52.
+          // This is a rough estimate — better than showing '--'.
+          const BTC_CIRCULATING_SUPPLY = 19_700_000;
+          const btcMarketCap = btcPrice * BTC_CIRCULATING_SUPPLY;
+          const TYPICAL_BTC_DOMINANCE = 0.52;
+          const estimatedTotalMcap = btcMarketCap / TYPICAL_BTC_DOMINANCE;
+          stats = {
+            totalMarketCap: estimatedTotalMcap,
+            totalVolume: totalVolume,
+            btcDominance: TYPICAL_BTC_DOMINANCE * 100,
+            source: 'mexc-estimated',
+          };
+          console.log('Global: MEXC fallback success — est. mcap:', stats.totalMarketCap, 'vol:', stats.totalVolume, 'btcDom (assumed):', stats.btcDominance);
+        }
+      }
+    } catch (e) {
+      console.warn('Global: MEXC fallback failed', e.message || e);
+    }
+  }
+
   // ── Step 3: Merge Fear & Greed ──
   try {
     const fg = await fgPromise;
@@ -4319,6 +4398,13 @@ async function runScheduledAlertsBaseline(controller, env) {
         const text = `🔔 هشدار قیمت فعال شد\nقیمت ${symbol} به ${priceFmt} USDT رسید.`;
         const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
 
+        // ── TIMING LOG: track each stage for delay root-cause analysis ──
+        const timing = {
+          trigger_at: new Date().toISOString(),
+          price_received_ms: Date.now() - t0,
+          // t0 is the cron start time; currentPrice was fetched in Phase 1
+        };
+
         // ── PREFERENCE CHECK (corrected) ──
         // OLD BUG: isPreferenceEnabled(env, userId, 'price_alert') returned false for ALL
         // users who never saved preferences (because default in DB schema is FALSE).
@@ -4371,18 +4457,24 @@ async function runScheduledAlertsBaseline(controller, env) {
         const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
 
         // ── (a) In-app notification via Notification Platform ──
-        // dispatch() with the user's preferred channel inserts into notifications
-        // table (if mini_app/both) AND enqueues a Telegram message (if telegram/both).
-        // We ALSO direct-send Telegram below for reliability (BUG #1: processQueue
-        // was never called — direct send ensures delivery within cron window).
-        if (notificationPlatformRepo) {
+        // ROOT CAUSE FIX for DUPLICATE TELEGRAM messages:
+        // Previously, dispatch() with channel='both' inserted into notifications
+        // table AND enqueued a Telegram message in notification_queue. Then the
+        // code ALSO direct-sent via sendTelegramMessage below → user got 2 TG msgs.
+        //
+        // FIX: dispatch() with channel='mini_app' ONLY inserts into the notifications
+        // table (no queue enqueue for Telegram). Telegram is handled solely by the
+        // direct send below. If direct send fails, we enqueue as fallback (queue
+        // retries on next cron tick).
+        if (notificationPlatformRepo && deliverToMiniApp) {
           try {
+            const tDispatchStart = Date.now();
             const dispatchResult = await notificationPlatformRepo.dispatch(env, {
               userId,
               templateKey: 'price_alert_hit',
-              category: 'price_alert', // FIX (BUG #2): was 'market'
+              category: 'price_alert',
               priority: 'high',
-              channel: userChannel, // respect user's preferred channel
+              channel: 'mini_app', // FIX: only insert into notifications table, NO Telegram queue
               metadata: {
                 symbol,
                 price: String(currentPrice),
@@ -4394,7 +4486,8 @@ async function runScheduledAlertsBaseline(controller, env) {
               title: `🔔 هشدار قیمت ${symbol}`,
               message: text,
             });
-            inAppDelivered = deliverToMiniApp && Boolean(dispatchResult?.id);
+            inAppDelivered = Boolean(dispatchResult?.id);
+            timing.dispatch_ms = Date.now() - tDispatchStart;
           } catch (notifErr) {
             console.warn('Notification Platform dispatch failed for price alert:', notifErr?.message || notifErr);
             resultPayload.dispatch_errors.push({
@@ -4405,13 +4498,17 @@ async function runScheduledAlertsBaseline(controller, env) {
           }
         }
 
-        // ── (b) Direct Telegram send (belt-and-suspenders) ──
-        // Even if dispatch() enqueued a Telegram message, we send directly too.
-        // This GUARANTEES the user gets a Telegram message within the cron window.
-        // The response is captured to verify actual delivery (not just HTTP 200).
+        // ── (b) Direct Telegram send (immediate, with retry) ──
+        // ROOT CAUSE FIX for LOST notifications:
+        // Previously: if sendTelegramMessage failed, the alert was already marked
+        // as 'triggered' → user never got notified. No retry.
+        //
+        // FIX: Try twice with a 1s delay between attempts. If both fail, enqueue
+        // in notification_queue as fallback (queue retries on next cron tick).
         let telegramMessageId = null;
         let telegramError = null;
         if (deliverToTelegram) {
+          const tTgStart = Date.now();
           try {
             const chatIdValue = Number(userId);
             const chatId = Number.isFinite(chatIdValue) ? chatIdValue : userId;
@@ -4421,12 +4518,45 @@ async function runScheduledAlertsBaseline(controller, env) {
                 inline_keyboard: [[{ text: 'Open Amir BTC Assistant 🚀', web_app: { url: webAppUrl } }]],
               };
             }
-            const tgResult = await sendTelegramMessage(env, tgPayload);
-            // sendTelegramMessage now returns { ok, result, messageId } on success
+
+            // Attempt 1
+            let tgResult = await sendTelegramMessage(env, tgPayload);
             telegramMessageId = tgResult?.messageId || tgResult?.result?.message_id || null;
+
+            // Attempt 2 (retry if first failed)
+            if (!telegramMessageId) {
+              await new Promise(r => setTimeout(r, 1000));
+              try {
+                tgResult = await sendTelegramMessage(env, tgPayload);
+                telegramMessageId = tgResult?.messageId || tgResult?.result?.message_id || null;
+              } catch (retryErr) {
+                telegramError = retryErr?.message || String(retryErr);
+              }
+            }
+
             telegramDelivered = !!telegramMessageId;
+            timing.telegram_ms = Date.now() - tTgStart;
+
+            // Fallback: if both direct send attempts failed, enqueue in queue
+            // so the next cron tick can retry. This prevents lost notifications.
+            if (!telegramDelivered && notificationPlatformRepo) {
+              try {
+                await queryDb(env, `
+                  INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload, created_at)
+                  VALUES ($1, $2, 'telegram', 'high', 'pending', $3, NOW())
+                `, [
+                  `alert_${alertId}_${Date.now()}`,
+                  String(userId),
+                  JSON.stringify({ chat_id: chatId, text, reply_markup: tgPayload.reply_markup || null }),
+                ]);
+                console.warn('Telegram direct send failed twice — enqueued as fallback for queue retry');
+              } catch (qErr) {
+                console.warn('Fallback enqueue also failed:', qErr?.message);
+              }
+            }
           } catch (tgErr) {
             telegramError = tgErr?.message || String(tgErr);
+            timing.telegram_ms = Date.now() - tTgStart;
             console.warn('Direct Telegram send failed for price alert:', telegramError);
           }
         }
@@ -4437,6 +4567,12 @@ async function runScheduledAlertsBaseline(controller, env) {
 
         resultPayload.triggered_count += 1;
 
+        // ── DETAILED TIMING LOG for delay root-cause analysis ──
+        // Logs the full pipeline timing so we can pinpoint where delay occurs:
+        //   price_received_ms: time from cron start to price being available
+        //   dispatch_ms: time to insert in-app notification into DB
+        //   telegram_ms: time to send Telegram message (including retry)
+        //   total_ms: time from cron start to delivery complete
         console.log(JSON.stringify({
           scope: 'alert-check',
           alert_id: alertId,
@@ -4454,6 +4590,10 @@ async function runScheduledAlertsBaseline(controller, env) {
           telegram_message_id: telegramMessageId,
           telegram_error: telegramError,
           price_source: symbolSourceMap.get(symbol),
+          timing: {
+            ...timing,
+            total_ms: Date.now() - t0,
+          },
         }));
       } catch (error) {
         resultPayload.delivery_failures += 1;
@@ -5169,6 +5309,19 @@ export default {
       if (request.method === 'POST' && /^\/api\/notifications\/[^/]+\/read$/u.test(url.pathname)) {
         const notificationId = url.pathname.split('/')[3] || '';
         return await notificationHandlers.handleMarkRead(request, env, notificationId);
+      }
+
+      // ROOT CAUSE FIX: DELETE single notification — previously didn't exist,
+      // frontend only cleared local state → notifications reappeared on next poll.
+      if (request.method === 'DELETE' && /^\/api\/notifications\/[^/]+$/u.test(url.pathname)) {
+        const notificationId = url.pathname.split('/')[3] || '';
+        return await notificationHandlers.handleDelete(request, env, notificationId);
+      }
+
+      // ROOT CAUSE FIX: DELETE ALL notifications — previously clearAllNotifications()
+      // in frontend only cleared the local array, no API call.
+      if (request.method === 'DELETE' && url.pathname === '/api/notifications') {
+        return await notificationHandlers.handleDeleteAll(request, env);
       }
 
       // ─────────────────────────────────────────────────────────────

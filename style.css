@@ -2217,11 +2217,21 @@ strong.down { color: var(--red); }
 /* این بخش استایل‌های مرتبط با "نوتیفیکیشن‌ها (دکمه‌های کوچک و شیک)" را در خود نگه می‌دارد. */
 /* ============================================================================ */
 .notif-list { max-height: 300px; overflow-y: auto; }
-.notif-item { padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.notif-item { padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer; position: relative; transition: background 0.15s; }
+.notif-item:hover { background: rgba(255,255,255,0.03); }
 .notif-item.unread { background: rgba(255,138,0,0.04); border-inline-start: 3px solid var(--accent); }
 .notif-title { font-weight: 600; }
 .notif-body { font-size: 12px; color: var(--text-dim); }
 .notif-date { font-size: 10px; color: var(--text-sub); text-align: right; }
+.notif-delete-btn {
+    position: absolute; top: 8px; inset-inline-end: 8px;
+    width: 24px; height: 24px; border: none; border-radius: 50%;
+    background: rgba(255,255,255,0.05); color: var(--text-dim);
+    font-size: 16px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+}
+.notif-delete-btn:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
 
 .mark-all-read-btn {
     display: inline-flex; align-items: center; gap: 5px;
