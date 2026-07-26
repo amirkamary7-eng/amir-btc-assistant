@@ -4197,9 +4197,10 @@ async function runScheduledAlertsBaseline(controller, env) {
 
   try {
     // AUDIT-002 FIX: Ensure table + indexes exist before querying (idempotent).
-    // PERFORMANCE: Only run ensureTable on the 15-min cron (not every 5 min).
+    // PERFORMANCE: Only run ensureTable on the 15-min cron (not every 1 min).
     // CREATE INDEX IF NOT EXISTS is fast but still a DB roundtrip — 8 queries × 200ms
-    // = 1.6s of wasted latency on every 5-min cron. The 15-min cron handles it.
+    // = 1.6s of wasted latency on every 1-min cron. The 15-min cron handles it.
+    // Bug 2 FIX: cron changed from */5 to * (every minute) for faster alert detection.
     if (controller.cron === '*/15 * * * *' && typeof alertRepo?.ensureTable === 'function') {
       try { await alertRepo.ensureTable(env); } catch {}
     }
@@ -4482,40 +4483,45 @@ async function runScheduledAlertsBaseline(controller, env) {
         const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
         const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
 
-        // ── (a) In-app notification via Notification Platform ──
-        // ROOT CAUSE FIX for DUPLICATE TELEGRAM messages:
-        // Previously, dispatch() with channel='both' inserted into notifications
-        // table AND enqueued a Telegram message in notification_queue. Then the
-        // code ALSO direct-sent via sendTelegramMessage below → user got 2 TG msgs.
+        // ── (a) In-app notification — DIRECT INSERT (not dispatch) ──
+        // ROOT CAUSE FIX for DUPLICATE TELEGRAM messages (Bug 3):
+        // Previously, dispatch() was called with channel='mini_app'. BUT dispatch()
+        // OVERRIDES the channel parameter with the user's per-category preference
+        // (getUserChannelPreference). If user pref = 'both' (the default), then:
+        //   - effectiveChannel = 'both'
+        //   - deliverToTelegram = true → enqueue TG message in notification_queue
+        //   - AND the alert code below direct-sends via sendTelegramMessage
+        //   → user gets 2 TG messages (1 from queue, 1 direct)
         //
-        // FIX: dispatch() with channel='mini_app' ONLY inserts into the notifications
-        // table (no queue enqueue for Telegram). Telegram is handled solely by the
-        // direct send below. If direct send fails, we enqueue as fallback (queue
-        // retries on next cron tick).
-        if (notificationPlatformRepo && deliverToMiniApp) {
+        // FIX: Replace dispatch() with a DIRECT INSERT into the notifications table.
+        // This gives us full control: in-app INSERT only, NO Telegram enqueue.
+        // Telegram is handled solely by the direct send below.
+        if (deliverToMiniApp && isDatabaseConfigured(env)) {
           try {
             const tDispatchStart = Date.now();
-            const dispatchResult = await notificationPlatformRepo.dispatch(env, {
-              userId,
-              templateKey: 'price_alert_hit',
-              category: 'price_alert',
-              priority: 'high',
-              channel: 'mini_app', // FIX: only insert into notifications table, NO Telegram queue
-              metadata: {
+            const notificationId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+            await queryDb(env, `
+              INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
+              VALUES ($1, $2, $3, $4, $5, $6, FALSE, 'high', 'price_alert', 'mini_app', 'delivered', NOW())
+            `, [
+              notificationId,
+              String(userId),
+              'price_alert',
+              `🔔 هشدار قیمت ${symbol}`,
+              text,
+              JSON.stringify({
                 symbol,
                 price: String(currentPrice),
                 alert_id: alertId,
                 target_price: String(targetPrice),
                 direction,
                 trigger_reason: triggerReason,
-              },
-              title: `🔔 هشدار قیمت ${symbol}`,
-              message: text,
-            });
-            inAppDelivered = Boolean(dispatchResult?.id);
+              }),
+            ]);
+            inAppDelivered = true;
             timing.dispatch_ms = Date.now() - tDispatchStart;
           } catch (notifErr) {
-            console.warn('Notification Platform dispatch failed for price alert:', notifErr?.message || notifErr);
+            console.warn('In-app notification INSERT failed for price alert:', notifErr?.message || notifErr);
             resultPayload.dispatch_errors.push({
               alert_id: alertId,
               error: notifErr?.message || String(notifErr),

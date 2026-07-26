@@ -98,11 +98,26 @@ export function createAlertRepository(deps) {
     const existingRow = existingResult.rows[0] || null;
 
     if (existingRow) {
+      // ROOT CAUSE FIX (Bug 1): When reactivating an existing alert, we MUST
+      // reset last_price and last_checked_at to NULL. Previously, these were
+      // NOT reset — so if the alert had previously triggered (setting
+      // last_price to a value above target), the cross-detection logic on the
+      // next cron run would see:
+      //   prevPrice >= targetPrice && currentPrice >= targetPrice
+      //   && last_checked_at != null
+      // → triggerReason = 'still_above_no_retrigger' → NO TRIGGER
+      // This caused alerts with targets below current price to NEVER fire
+      // when reactivated, even though they should trigger immediately.
       await queryDb(
         env,
         `
           UPDATE price_alerts
-          SET status = 'active', triggered_at = NULL, created_at = NOW()
+          SET status = 'active',
+              triggered_at = NULL,
+              created_at = NOW(),
+              last_price = NULL,
+              last_checked_at = NULL,
+              last_trigger_price = NULL
           WHERE id = $1
         `,
         [String(existingRow.id)],
