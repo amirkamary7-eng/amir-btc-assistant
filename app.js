@@ -7208,16 +7208,50 @@ async function setPriceAlert() {
 
     const direction = (currentAlertDirection === 'below' ? 'below' : 'above');
     const userId = getUserId();
-    let newAlert = { id: Date.now().toString(), symbol, price: usdPrice, direction, userId, createdAt: new Date().toISOString() };
-    newAlert = await syncAlertToServer(newAlert);
+
+    // ── OPTIMISTIC UI: add alert to local list + render IMMEDIATELY ──
+    // The user sees the alert in the list within <1ms. The server sync happens
+    // in the background. If it fails, we roll back (remove from list + toast error).
+    // Previously: `await syncAlertToServer(newAlert)` blocked for 200-800ms
+    // (validation + DB query + network) before the UI updated.
+    const tempId = `temp_${Date.now()}`;
+    const newAlert = { id: tempId, symbol, price: usdPrice, direction, userId, createdAt: new Date().toISOString() };
     alerts.push(newAlert);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
     input.value = '';
-    renderActiveAlerts(symbol);
+    renderActiveAlerts(symbol); // immediate UI update
+
     const priceStr = usdPrice >= 1 ? usdPrice.toFixed(2) : usdPrice.toFixed(6);
     addNotification(t('price_alert'), `${symbol} → $${priceStr}`);
-    getTg()?.showPopup?.({ title: t('alert_registered'), message: `${symbol} — $${priceStr}`, buttons: [{ type: 'ok' }] });
     getTg()?.HapticFeedback?.notificationOccurred('success');
+
+    // ── Background sync to server (non-blocking) ──
+    syncAlertToServer(newAlert)
+        .then(syncedAlert => {
+            if (syncedAlert.serverId) {
+                // Replace temp ID with real server ID
+                const idx = alerts.findIndex(a => a.id === tempId);
+                if (idx >= 0) {
+                    alerts[idx] = syncedAlert;
+                    localStorage.setItem('price_alerts', JSON.stringify(alerts));
+                    renderActiveAlerts(symbol);
+                }
+            } else {
+                // Sync failed — roll back
+                alerts = alerts.filter(a => a.id !== tempId);
+                localStorage.setItem('price_alerts', JSON.stringify(alerts));
+                renderActiveAlerts(symbol);
+                showMiniToast(t('error_generic') || 'Failed to save alert');
+            }
+        })
+        .catch(e => {
+            console.warn('syncAlertToServer failed:', e);
+            // Roll back on error
+            alerts = alerts.filter(a => a.id !== tempId);
+            localStorage.setItem('price_alerts', JSON.stringify(alerts));
+            renderActiveAlerts(symbol);
+            showMiniToast(t('error_generic') || 'Failed to save alert');
+        });
 }
 /**
  * هشدار را حذف می‌کند.
@@ -9186,9 +9220,12 @@ function _startAllPolling() {
         }
     }, 180000));
 
-    // R3-1: Alert checking — 30s interval (was 15s), uses allCoins from memory
-    // OPTIMIZATION: Doubled interval — alerts don't need 15s precision.
-    _pollingIntervals.push(setInterval(checkAlerts, 30000));
+    // R3-1: Alert checking — 15s interval (was 30s).
+    // OPTIMIZATION: Reduced from 30s to 15s for faster client-side trigger detection.
+    // Average delay reduced from 15s to 7.5s. The frontend fetches fresh prices
+    // from /api/market/price (no cache) for alert symbols, so this is independent
+    // of the backend cron (which runs every 1 minute).
+    _pollingIntervals.push(setInterval(checkAlerts, 15000));
 
     // R3-1b: Notification polling — 60s interval.
     // Fetches new notifications from DB and updates badge + Notification Center.

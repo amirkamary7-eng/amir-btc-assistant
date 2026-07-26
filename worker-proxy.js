@@ -1854,7 +1854,7 @@ async function fetchSpotTickerPrice(exchangeKey, symbol) {
   return parseSpotTickerPrice(exchangeKey, body);
 }
 
-async function fetchSpotPriceUsd(env, symbol) {
+async function fetchSpotPriceUsd(env, symbol, options = {}) {
   const normalizedSymbol = String(symbol || '').trim().toUpperCase();
   if (!normalizedSymbol) {
     return null;
@@ -1871,16 +1871,21 @@ async function fetchSpotPriceUsd(env, symbol) {
   // from CF Workers), and the chart resolver keeps 'binance' (for tv_symbol).
   // Both caches coexist without interfering with each other.
   const priceCacheKey = `price:exchange:${normalizedSymbol}`;
+  const noCache = Boolean(options.noCache);
 
   // ── FAST PATH: Try cached exchange first (latency: 1 API call, max 4s) ──
   // Cache stores just the exchange key string (e.g. 'bybit').
+  // Skip cache only when options.noCache is true (used by alert triggers to
+  // get the FRESHEST price at trigger time, avoiding stale cache issues).
   let cachedExchange = null;
-  try {
-    const raw = await readAppCache(env, priceCacheKey);
-    if (raw && typeof raw === 'string' && raw.length > 0 && raw.length < 30) {
-      cachedExchange = raw.trim();
-    }
-  } catch {}
+  if (!noCache) {
+    try {
+      const raw = await readAppCache(env, priceCacheKey);
+      if (raw && typeof raw === 'string' && raw.length > 0 && raw.length < 30) {
+        cachedExchange = raw.trim();
+      }
+    } catch {}
+  }
 
   if (cachedExchange) {
     const cachedPrice = await fetchSpotTickerPrice(cachedExchange, normalizedSymbol);
@@ -1912,7 +1917,10 @@ async function fetchSpotPriceUsd(env, symbol) {
     const r = results[idx];
     if (r && r.status === 'fulfilled' && r.value.price !== null) {
       // Cache the working exchange (not Binance) for future fast-path
-      await writeAppCache(env, priceCacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
+      // Skip cache write when noCache=true (caller wants fresh data only)
+      if (!noCache) {
+        await writeAppCache(env, priceCacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
+      }
       return { price: r.value.price, exchange: exchangeKey, cached: false };
     }
   }
@@ -4157,6 +4165,11 @@ async function runCalendarAlertsCheck(env) {
  */
 async function runScheduledAlertsBaseline(controller, env) {
   const t0 = Date.now();
+  // Stage-by-stage latency tracking for performance monitoring
+  let _tDbEnd = null;       // end of DB query phase
+  let _tPriceStart = null;  // start of price fetch phase
+  let _tPriceEnd = null;    // end of price fetch phase
+  let _tEvalStart = null;   // start of evaluation phase
   const payload = {
     status: 'ok',
     task: 'scheduled-alerts-execution',
@@ -4217,6 +4230,7 @@ async function runScheduledAlertsBaseline(controller, env) {
         `, [maxAlerts])).rows;
 
     resultPayload.checked_count = alerts.length;
+    _tDbEnd = Date.now(); // Phase 1 done: DB query
 
     if (!alerts.length) {
       console.log(JSON.stringify({ ...resultPayload, finished: true, duration_ms: Date.now() - t0 }));
@@ -4237,11 +4251,16 @@ async function runScheduledAlertsBaseline(controller, env) {
     const fetchWithTimeout = async (symbol) => {
       const tFetch = Date.now();
       try {
-        const priceInfo = await fetchSpotPriceUsd(env, symbol);
+        // OPTIMIZATION: Use noCache=true to always get the FRESHEST price from
+        // the exchange. The cache (1h TTL) could serve a price that's up to 1h
+        // old, causing the trigger to fire with a stale price that doesn't match
+        // the current market. For alert accuracy, we always fetch live.
+        const priceInfo = await fetchSpotPriceUsd(env, symbol, { noCache: true });
         return {
           symbol,
           price: priceInfo?.price || null,
           source: priceInfo?.exchange || (priceInfo?.cached ? 'cache' : null),
+          cached: Boolean(priceInfo?.cached),
           latency_ms: Date.now() - tFetch,
         };
       } catch (e) {
@@ -4251,6 +4270,7 @@ async function runScheduledAlertsBaseline(controller, env) {
 
     // Fetch all unique symbols in parallel (max 30 concurrent to avoid rate limits)
     const FETCH_BATCH = 30;
+    _tPriceStart = Date.now(); // Phase 2 start: price fetch
     for (let i = 0; i < uniqueSymbols.length; i += FETCH_BATCH) {
       const batch = uniqueSymbols.slice(i, i + FETCH_BATCH);
       const results = await Promise.allSettled(batch.map(fetchWithTimeout));
@@ -4268,6 +4288,9 @@ async function runScheduledAlertsBaseline(controller, env) {
         }
       }
     }
+
+    _tPriceEnd = Date.now(); // Phase 2 done: price fetch
+    _tEvalStart = Date.now(); // Phase 3 start: evaluation
 
     // ── PHASE 2: Evaluate each alert with cross-detection ──
     for (const alert of alerts) {
@@ -4642,6 +4665,22 @@ async function runScheduledAlertsBaseline(controller, env) {
       ...resultPayload,
       finished: true,
       duration_ms: Date.now() - t0,
+      // STAGE-BY-STAGE LATENCY for performance monitoring:
+      //   db_query_ms: time to SELECT active alerts from PostgreSQL
+      //   price_fetch_total_ms: time to fetch prices for all unique symbols
+      //   evaluation_ms: time to evaluate all alerts + trigger notifications
+      //   total_ms: cron tick total (db + price_fetch + evaluation + delivery)
+      phase_latency: {
+        db_query_start: t0,
+        db_query_end: _tDbEnd || null,
+        price_fetch_start: _tPriceStart || null,
+        price_fetch_end: _tPriceEnd || null,
+        evaluation_start: _tEvalStart || null,
+        evaluation_end: Date.now(),
+        db_query_ms: _tDbEnd ? (_tDbEnd - t0) : null,
+        price_fetch_ms: (_tPriceStart && _tPriceEnd) ? (_tPriceEnd - _tPriceStart) : null,
+        evaluation_ms: (_tEvalStart) ? (Date.now() - _tEvalStart) : null,
+      },
     }));
     return resultPayload;
   } catch (error) {
