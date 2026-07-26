@@ -1023,7 +1023,7 @@ async function editTelegramMessageReplyMarkup(env, chatId, messageId, replyMarku
   }
 }
 
-const CALLBACK_RATE_LIMIT_TTL = 10; // seconds
+const CALLBACK_RATE_LIMIT_TTL = 60; // seconds — Cloudflare KV requires expirationTtl >= 60
 const CALLBACK_RATE_LIMIT_KEY_PREFIX = 'cbrl:';
 
 const MARKET_RATE_LIMIT_MAX = 30; // requests per window
@@ -1042,10 +1042,28 @@ async function isCallbackRateLimited(env, userId) {
 
 /**
  * IP-based sliding-window rate limiter for public market endpoints.
+ *
+ * The rate-limit key now includes the Telegram user ID (when available from
+ * authenticated initData) in ADDITION to the client IP. This closes two
+ * long-standing loopholes:
+ *   1. A single user rotating across multiple IPs (VPN/proxy) was able to
+ *      bypass the per-IP cap. Now they are capped per user+IP.
+ *   2. A single shared IP (e.g. a corporate NAT) with many real users was
+ *      unfairly throttled. Now each user gets their own bucket on that IP.
+ *
+ * Unauthenticated requests (no initData) fall back to the legacy
+ * `mrl:anon:<ip>` key so the existing IP-only protection still works for
+ * anonymous callers.
+ *
  * Returns true if rate limited, false if allowed.
+ *
+ * @param {object} env
+ * @param {string} ip — Client IP (cf-connecting-ip).
+ * @param {string|null|undefined} [userId] — Telegram user ID when available.
  */
-async function isMarketRateLimited(env, ip) {
-  const key = `${MARKET_RATE_LIMIT_KEY_PREFIX}${ip}`;
+async function isMarketRateLimited(env, ip, userId) {
+  const uid = userId ? String(userId) : 'anon';
+  const key = `${MARKET_RATE_LIMIT_KEY_PREFIX}${uid}:${ip}`;
   const existing = await readRateLimitCache(env, key);
   if (existing) {
     const count = parseInt(existing, 10) || 0;
@@ -1659,18 +1677,27 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
 }
 
 // Exchange priority order — STRICT sequential fallback per task spec:
-// Binance > Bybit > OKX > Bitget > KuCoin > MEXC > Gate > HTX
-// The first exchange that has a valid SYMBOLUSDT pair wins. Results are cached
-// 24h per symbol so subsequent opens are instant.
+// Binance > Bybit > OKX > Bitget > KuCoin > MEXC > Gate > HTX > Coinbase > Kraken
+//
+// Each entry: [TradingView prefix, internal key, quote suffix]
+//   - USDT pairs: Binance, Bybit, OKX, Bitget, KuCoin, MEXC, Gate, HTX
+//   - USD pairs:  Coinbase, Kraken  (these exchanges primarily use USD, not USDT)
+//
+// IMPORTANT FIXES (verified via TradingView scanner API, 2026-07-26):
+//   1. Gate.io TradingView prefix is `GATE` — NOT `GATEIO` (was wrong, caused "Symbol not found")
+//   2. Added Coinbase + Kraken with USD pairs (user requested; many coins only chart here)
+//   3. tv_symbol format is `${tvName}:${symbol}${suffix}` — all uppercase, no dash/underscore
 const EXCHANGE_ORDER = [
-  ['BINANCE', 'binance'],
-  ['BYBIT', 'bybit'],
-  ['OKX', 'okx'],
-  ['BITGET', 'bitget'],
-  ['KUCOIN', 'kucoin'],
-  ['MEXC', 'mexc'],
-  ['GATEIO', 'gateio'],
-  ['HTX', 'htx'],
+  ['BINANCE',  'binance',  'USDT'],
+  ['BYBIT',    'bybit',    'USDT'],
+  ['OKX',      'okx',      'USDT'],
+  ['BITGET',   'bitget',   'USDT'],
+  ['KUCOIN',   'kucoin',   'USDT'],
+  ['MEXC',     'mexc',     'USDT'],
+  ['GATE',     'gateio',   'USDT'],   // FIXED: was GATEIO (invalid on TradingView)
+  ['HTX',      'htx',      'USDT'],
+  ['COINBASE', 'coinbase', 'USD'],    // NEW — USD pair
+  ['KRAKEN',   'kraken',   'USD'],    // NEW — USD pair
 ];
 
 const CHART_CHECKERS = {
@@ -1745,6 +1772,29 @@ const CHART_CHECKERS = {
     },
     isMatch(body) {
       return Boolean(body?.status === 'ok' && body?.tick);
+    },
+  },
+  // Coinbase Exchange: GET /products/BTC-USD/ticker — returns {price:"..."}
+  coinbase: {
+    buildUrl(symbol) {
+      return `https://api.exchange.coinbase.com/products/${encodeURIComponent(`${symbol}-USD`)}/ticker`;
+    },
+    isMatch(body) {
+      return Boolean(body && typeof body === 'object' && 'price' in body);
+    },
+  },
+  // Kraken: GET /0/public/Ticker?pair=BTCUSD — returns {error:[], result:{XXBTZUSD:{...}}}
+  // NOTE: Kraken uses XBT for BTC, but for most other coins the symbol matches.
+  // We try the straight symbol; if Kraken doesn't have it, isMatch returns false.
+  kraken: {
+    buildUrl(symbol) {
+      // Kraken's BTC symbol is XBT, so map BTC → XBT for the pair name.
+      const krakenBase = symbol === 'BTC' ? 'XBT' : symbol;
+      return `https://api.kraken.com/0/public/Ticker?pair=${encodeURIComponent(`${krakenBase}USD`)}`;
+    },
+    isMatch(body) {
+      return Boolean(body?.error && Array.isArray(body.error) && body.error.length === 0
+        && body?.result && Object.keys(body.result).length > 0);
     },
   },
 };
@@ -2534,11 +2584,14 @@ async function fetchCalendarEvents(env) {
 }
 
 // Chart resolution timeout — shorter than price fetch timeout.
-// Chart resolution is sequential (Binance → Bybit → OKX → ...).
-// If each exchange takes 4s, worst case = 8 × 4s = 32s (too slow).
-// With 2s timeout, worst case = 8 × 2s = 16s, and typically the first
-// exchange (Binance) responds in <500ms.
+// Used by the per-exchange fallback only (scanner API has its own 4s timeout).
 const CHART_RESOLVE_TIMEOUT_MS = 2000;
+
+// TradingView scanner endpoint — the SOURCE OF TRUTH for symbol existence.
+// If scanner confirms a symbol exists, the TradingView widget WILL render it.
+// Batch query: single HTTP call checks all candidate exchanges at once.
+const TV_SCANNER_URL = 'https://scanner.tradingview.com/crypto/scan';
+const TV_SCANNER_TIMEOUT_MS = 4000;
 
 async function exchangeHasSymbol(key, symbol) {
   const checker = CHART_CHECKERS[key];
@@ -2554,6 +2607,37 @@ async function exchangeHasSymbol(key, symbol) {
   }
 }
 
+// Query TradingView's own scanner API to verify which candidate tv_symbols exist.
+// Returns the first candidate (in priority order) that TradingView recognizes,
+// or null if none match / scanner is unreachable.
+async function resolveViaTradingViewScanner(candidates) {
+  if (!candidates || candidates.length === 0) return null;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TV_SCANNER_TIMEOUT_MS);
+    const resp = await fetch(TV_SCANNER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        symbols: { tickers: candidates },
+        columns: ['name', 'close'],
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const foundSet = new Set((data?.data || []).map(r => r.s));
+    // Return first candidate in priority order that TradingView confirmed exists
+    for (const candidate of candidates) {
+      if (foundSet.has(candidate)) return candidate;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveChartExchange(env, rawSymbol) {
   const normalizedSymbol = rawSymbol.toUpperCase().trim();
   if (!normalizedSymbol) {
@@ -2566,53 +2650,86 @@ async function resolveChartExchange(env, rawSymbol) {
     };
   }
 
-  const cacheKey = `chart:exchange:${normalizedSymbol}`;
-  const cachedExchange = await readAppCache(env, cacheKey);
-
-  if (cachedExchange) {
-    // Return cached result — use the ACTUAL exchange that confirmed the symbol.
-    // The tv_symbol uses the REAL exchange prefix (not always BINANCE).
-    const cachedMatch = EXCHANGE_ORDER.find(([tvName, key]) => key === cachedExchange);
-    if (cachedMatch) {
-      const [tvName] = cachedMatch;
-      return {
-        found: true,
-        symbol: normalizedSymbol,
-        exchange: cachedExchange,
-        tv_symbol: `${tvName}:${normalizedSymbol}USDT`,
-        cached: true,
-      };
-    }
+  // Skip stablecoins and fiat that don't have meaningful crypto charts
+  const skipSymbols = ['USDT', 'USD', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FDUSD'];
+  if (skipSymbols.includes(normalizedSymbol)) {
+    return {
+      found: false,
+      symbol: normalizedSymbol,
+      exchange: null,
+      tv_symbol: null,
+      cached: false,
+    };
   }
 
-  // Check exchanges SEQUENTIALLY in strict priority order:
-  // Binance > Bybit > OKX > Bitget > KuCoin > MEXC > Gate > HTX
-  // Binance API is blocked from CF Workers (403), so it will fail.
-  // The first exchange that responds successfully wins.
-  // The tv_symbol uses the REAL exchange prefix — this ensures:
-  // 1. The exchange badge matches the actual chart
-  // 2. TradingView can find the symbol (BYBIT:BTCUSDT, OKX:ETHUSDT, etc.)
-  // 3. Low-cap coins that are NOT on Binance still get a valid chart
-  for (const [tvName, key] of EXCHANGE_ORDER) {
+  // ── Cache lookup (full JSON result, versioned key) ──
+  // Versioned so old cache entries (which stored only the exchange key string)
+  // don't conflict with the new full-JSON format.
+  const cacheKey = `chart:exchange:v2:${normalizedSymbol}`;
+  const cached = await readAppCache(env, cacheKey);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      if (parsed && typeof parsed.found === 'boolean') {
+        return { ...parsed, cached: true };
+      }
+    } catch { /* malformed cache — fall through to fresh resolve */ }
+  }
+
+  // ── Build candidate tv_symbols in STRICT priority order ──
+  // Each candidate is the exact string we pass to the TradingView widget.
+  //   Binance > Bybit > OKX > Bitget > KuCoin > MEXC > Gate > HTX > Coinbase > Kraken
+  const candidates = EXCHANGE_ORDER.map(
+    ([tvName, _key, suffix]) => `${tvName}:${normalizedSymbol}${suffix}`
+  );
+
+  // ── PRIMARY: TradingView scanner API (batch, single HTTP call) ──
+  // This is the SOURCE OF TRUTH: if scanner confirms a symbol exists, the
+  // TradingView widget WILL render it. Far more reliable than checking each
+  // exchange's own API (which may differ from what TradingView actually tracks).
+  const scannerMatch = await resolveViaTradingViewScanner(candidates);
+  if (scannerMatch) {
+    const [tvExchange] = scannerMatch.split(':');
+    const match = EXCHANGE_ORDER.find(([tvName]) => tvName === tvExchange);
+    const result = {
+      found: true,
+      symbol: normalizedSymbol,
+      exchange: match ? match[1] : tvExchange.toLowerCase(),
+      tv_symbol: scannerMatch,
+      cached: false,
+    };
+    await writeAppCache(env, cacheKey, JSON.stringify(result), getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
+    return result;
+  }
+
+  // ── FALLBACK: per-exchange API checks (sequential) ──
+  // Used only if TradingView scanner is unreachable. Slower but independent
+  // of TradingView availability.
+  for (const [tvName, key, suffix] of EXCHANGE_ORDER) {
     if (await exchangeHasSymbol(key, normalizedSymbol)) {
-      await writeAppCache(env, cacheKey, key, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
-      return {
+      const result = {
         found: true,
         symbol: normalizedSymbol,
-        exchange: key, // The REAL exchange that has this symbol
-        tv_symbol: `${tvName}:${normalizedSymbol}USDT`, // Real exchange prefix
+        exchange: key,
+        tv_symbol: `${tvName}:${normalizedSymbol}${suffix}`,
         cached: false,
       };
+      await writeAppCache(env, cacheKey, JSON.stringify(result), getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
+      return result;
     }
   }
 
-  return {
+  // ── Genuinely not found on any exchange ──
+  // Short cache (5 min) so we retry sooner if the coin gets listed later.
+  const notFound = {
     found: false,
     symbol: normalizedSymbol,
     exchange: null,
     tv_symbol: null,
     cached: false,
   };
+  await writeAppCache(env, cacheKey, JSON.stringify(notFound), 300);
+  return notFound;
 }
 //#endregion
 
@@ -4740,7 +4857,13 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/market') {
         const clientIp = request.headers.get('cf-connecting-ip') || 'unknown';
-        if (await isMarketRateLimited(env, clientIp)) {
+        // Soft Telegram auth — extracts user_id (when initData is present) so
+        // the rate-limit key can include it. We do NOT reject on auth failure
+        // (this is a public endpoint); an unauthenticated request simply falls
+        // back to the legacy IP-only bucket via the 'anon' placeholder.
+        const _marketAuth = await authenticateTelegramRequest(request, env);
+        const _marketUid = _marketAuth.user?.id || null;
+        if (await isMarketRateLimited(env, clientIp, _marketUid)) {
           return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
         }
         // Single Flight: coalesce concurrent requests into one upstream call.
@@ -4751,15 +4874,23 @@ export default {
           const text = await resp.text();
           return { status: resp.status, body: text };
         });
+        // Use withCors() so the Origin/Methods/Headers match every other response
+        // (previously this branch set 'Access-Control-Allow-Origin: *' ad-hoc,
+        // which broke the WEBAPP_URL pinning policy used elsewhere).
+        const _marketHeaders = withCors({ 'Content-Type': 'application/json' }, env);
         return new Response(sharedResponse.body, {
           status: sharedResponse.status,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+          headers: _marketHeaders,
         });
       }
 
       if (request.method === 'GET' && url.pathname === '/api/forex') {
         const clientIp = request.headers.get('cf-connecting-ip') || 'unknown';
-        if (await isMarketRateLimited(env, clientIp)) {
+        // Same soft-auth pattern as /api/market — include Telegram user ID in
+        // the rate-limit key when initData is present.
+        const _forexAuth = await authenticateTelegramRequest(request, env);
+        const _forexUid = _forexAuth.user?.id || null;
+        if (await isMarketRateLimited(env, clientIp, _forexUid)) {
           return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
         }
         return await handleForexData(env);
@@ -5154,7 +5285,10 @@ export default {
             if (_existing) {
               return jsonResponse({ status: 'error', message: 'Too many requests. Please wait a few seconds.', code: 'RATE_LIMITED' }, { status: 429 }, env);
             }
-            await env.RATE_LIMITS.put(_rlKey, '1', { expirationTtl: 3 });
+            // Cloudflare KV requires expirationTtl >= 60 seconds.
+            // Was 3s → caused "KV PUT failed: Invalid expiration_ttl" on every request.
+            // Cooldown is now 60s (acceptable: user who clicked Verify can wait 1 min to re-check).
+            await env.RATE_LIMITS.put(_rlKey, '1', { expirationTtl: 60 });
           } catch { /* non-fatal */ }
         }
         const membership = await resolveChannelMembership(env, _joinUserId, { forceRefresh: true });

@@ -47,15 +47,12 @@ function adminFormatNumber(n) {
     return Number(n).toLocaleString('en-US');
 }
 
+/**
+ * @deprecated Use adminToast() instead. Kept as a thin alias so legacy call
+ *   sites (admin settings, tickets, broadcasts) keep working without edits.
+ */
 function showAdminToast(message, type) {
-    const existing = document.querySelector('.admin-toast');
-    if (existing) existing.remove();
-
-    const toast = document.createElement('div');
-    toast.className = 'admin-toast admin-toast-' + (type || 'success');
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    setTimeout(() => { if (toast.parentNode) toast.remove(); }, 2500);
+    adminToast(message, type);
 }
 
 function adminEmpty(message) {

@@ -3024,15 +3024,16 @@ async function resolveChartSymbol(symbol) {
     const cached = Cache.get(cacheKey);
     if (cached) return cached;
 
+    const symUpper = String(symbol || '').toUpperCase().trim();
+    if (!symUpper) {
+        return { found: false, symbol: symbol, exchange: null, tv_symbol: null };
+    }
+
     // ── BTC PAIR SHORTCUT ──
     // If symbol ends with "BTC" (e.g. "ETHBTC", "SOLBTC"), resolve directly to
     // a TradingView BTC pair symbol (e.g. "BINANCE:ETHBTC") WITHOUT calling the
-    // backend. The backend's resolveChartExchange always appends "USDT" which
-    // would turn "ETHBTC" into "ETHBTCUSDT" (wrong).
-    //
-    // TradingView supports these BTC pair symbols on Binance:
-    //   BINANCE:ETHBTC, BINANCE:SOLBTC, BINANCE:AVAXBTC, etc.
-    const symUpper = String(symbol || '').toUpperCase().trim();
+    // backend. The backend's resolveChartExchange always appends "USDT"/"USD"
+    // which would turn "ETHBTC" into "ETHBTCUSDT" (wrong).
     if (symUpper !== 'BTC' && symUpper.endsWith('BTC') && symUpper.length > 3) {
         const base = symUpper.slice(0, -3);
         if (base.length >= 2 && /^[A-Z0-9]+$/.test(base)) {
@@ -3049,42 +3050,82 @@ async function resolveChartSymbol(symbol) {
         }
     }
 
-    // FIX 2: Fully dynamic exchange resolution via backend.
-    // Backend checks exchanges in STRICT priority order (sequential, not parallel):
-    // Binance > Bybit > OKX > Bitget > KuCoin > MEXC > Gate > HTX
-    // Highest-priority exchange that has the symbol wins. Results cached 1h per symbol.
+    // Skip stablecoins and fiat that don't have meaningful crypto charts.
+    // These would return "Symbol not found" in the TradingView widget.
+    const skipSymbols = ['USDT', 'USD', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FDUSD'];
+    if (skipSymbols.includes(symUpper)) {
+        const notFound = { found: false, symbol: symUpper, exchange: null, tv_symbol: null };
+        Cache.set(cacheKey, notFound, 300);
+        return notFound;
+    }
+
+    // ── PRIMARY: backend resolver ──
+    // Backend queries TradingView scanner API (batch) across 10 exchanges:
+    //   Binance > Bybit > OKX > Bitget > KuCoin > MEXC > Gate > HTX > Coinbase > Kraken
+    // USDT pairs on crypto exchanges, USD pairs on Coinbase/Kraken.
+    // Results cached 1h per symbol in APP_CACHE.
     if (API_BASE) {
         try {
             const data = await apiFetch(`/api/charts/resolve?symbol=${encodeURIComponent(symbol)}`);
-            if (data.found && data.tv_symbol) {
+            if (data && data.found && data.tv_symbol) {
                 Cache.set(cacheKey, data, 3600);
                 return data;
             }
-        } catch (e) { console.warn('resolveChartSymbol:', e); }
+            // Backend said genuinely not found → trust it (short cache, retry later)
+            if (data && data.found === false) {
+                Cache.set(cacheKey, data, 300);
+                return data;
+            }
+        } catch (e) { console.warn('resolveChartSymbol backend failed, trying client-side scanner:', e); }
     }
 
-    // FALLBACK: If no exchange has this symbol as a USDT pair, try TradingView
-    // directly with the symbol name. TradingView has its own symbol search and
-    // can find coins on DEXes, smaller exchanges, or as index pairs.
-    // Examples: DAI → COINBASE:DAIUSD, USDT → doesn't exist (skip)
-    // We use a short cache (5 min) so we retry periodically.
-    const skipSymbols = ['USDT', 'USD', 'USDC']; // These don't have meaningful USDT pairs
-    if (!skipSymbols.includes(symUpper)) {
-        const fallbackResult = {
-            found: true,
-            symbol: symUpper,
-            exchange: 'tradingview',
-            tv_symbol: symUpper + 'USD', // TradingView auto-resolves the best exchange
-            cached: false,
-            is_fallback: true,
-        };
-        Cache.set(cacheKey, fallbackResult, 300);
-        return fallbackResult;
-    }
+    // ── LAST-RESORT FALLBACK: client-side TradingView scanner ──
+    // Used only if the backend is completely unreachable. Queries TradingView's
+    // public scanner API directly from the browser. This is the same API the
+    // backend uses, so it covers ALL 10 exchanges in one call.
+    // NOTE: The scanner API supports CORS for browser requests (TradingView's
+    // own website uses it client-side), so this works from the Mini App.
+    try {
+        const candidates = [
+            `BINANCE:${symUpper}USDT`, `BYBIT:${symUpper}USDT`,
+            `OKX:${symUpper}USDT`, `BITGET:${symUpper}USDT`,
+            `KUCOIN:${symUpper}USDT`, `MEXC:${symUpper}USDT`,
+            `GATE:${symUpper}USDT`, `HTX:${symUpper}USDT`,
+            `COINBASE:${symUpper}USD`, `KRAKEN:${symUpper}USD`,
+        ];
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const resp = await fetch('https://scanner.tradingview.com/crypto/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ symbols: { tickers: candidates }, columns: ['name', 'close'] }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (resp.ok) {
+            const data = await resp.json();
+            const foundSet = new Set((data?.data || []).map(r => r.s));
+            for (const candidate of candidates) {
+                if (foundSet.has(candidate)) {
+                    const [tvExchange] = candidate.split(':');
+                    const result = {
+                        found: true,
+                        symbol: symUpper,
+                        exchange: tvExchange.toLowerCase(),
+                        tv_symbol: candidate,
+                        cached: false,
+                        is_fallback: true,
+                    };
+                    Cache.set(cacheKey, result, 3600);
+                    return result;
+                }
+            }
+        }
+    } catch (e) { console.warn('client-side scanner fallback failed:', e); }
 
-    // No chart available for this symbol
-    const notFound = { found: false, symbol: symbol, exchange: null, tv_symbol: null };
-    Cache.set(cacheKey, notFound, 300); // Short cache — retry sooner
+    // No chart available for this symbol on ANY exchange TradingView tracks
+    const notFound = { found: false, symbol: symUpper, exchange: null, tv_symbol: null };
+    Cache.set(cacheKey, notFound, 300); // Short cache — retry sooner if listed later
     return notFound;
 }
 
@@ -6314,6 +6355,7 @@ async function openCoinDetail(symbol) {
     // If not found (e.g. coin from search outside top 200), check if the
     // search results have this coin stored in a temporary cache.
     let coin = allCoins.find(c => c.symbol === baseSymbol);
+    let coinPriceUnknown = false;
     if (!coin) {
         // Coin not in the 200-coin market list. Check search cache.
         // The search results store rich data (price, change, volume) from MEXC.
@@ -6345,7 +6387,29 @@ async function openCoinDetail(symbol) {
             }
         }
     }
-    if (!coin) return;
+    // H1 FIX: If we still don't have coin data (e.g. coin outside top-200 AND
+    // /api/market/price returned 401 because not opened in Telegram), DON'T
+    // silently abort. Build a minimal placeholder coin so the detail modal
+    // still opens and the TradingView chart can render. The chart fetches its
+    // own data from TradingView's servers — it does NOT depend on our price API.
+    // Previously this returned silently → user tapped a coin and nothing happened.
+    if (!coin) {
+        coin = {
+            symbol: baseSymbol,
+            name: baseSymbol,
+            priceUsd: 0,
+            changePercent24Hr: 0,
+            volumeUsd24Hr: 0,
+            marketCapUsd: 0,
+            rank: 0,
+            image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(baseSymbol).toLowerCase()}@2x.png`,
+        };
+        coinPriceUnknown = true;
+        // Inform the user that price data is unavailable but the chart will still load.
+        showMiniToast(currentLang === 'fa'
+            ? 'اطلاعات قیمت در دسترس نیست — نمودار بارگذاری می‌شود'
+            : 'Price data unavailable — chart will still load');
+    }
 
     // ── Top Bar: Icon, Title, Rank, Price, Change ──
     const icon = coin.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(coin.symbol).toLowerCase()}@2x.png`;
@@ -6400,12 +6464,23 @@ async function openCoinDetail(symbol) {
         }
         isBtcPairDisplay = true;
     } else {
-        priceStr = coin.priceUsd > 1 ? coin.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : coin.priceUsd.toFixed(6);
-        if (priceEl) priceEl.textContent = '$' + priceStr;
-        if (changeEl) {
-            const chg = coin.changePercent24Hr || 0;
-            changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-            changeEl.className = 'cd-change ' + (chg >= 0 ? 'up' : 'down');
+        // H1 FIX: if price is unknown (coin not in top-200 + no auth), show '--'
+        // instead of '$0.00' which is misleading.
+        if (coinPriceUnknown || !coin.priceUsd) {
+            priceStr = '--';
+            if (priceEl) priceEl.textContent = '--';
+            if (changeEl) {
+                changeEl.textContent = '--';
+                changeEl.className = 'cd-change';
+            }
+        } else {
+            priceStr = coin.priceUsd > 1 ? coin.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : coin.priceUsd.toFixed(6);
+            if (priceEl) priceEl.textContent = '$' + priceStr;
+            if (changeEl) {
+                const chg = coin.changePercent24Hr || 0;
+                changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+                changeEl.className = 'cd-change ' + (chg >= 0 ? 'up' : 'down');
+            }
         }
         isBtcPairDisplay = false;
     }
@@ -9280,8 +9355,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     _joinLockSafetyTimer = setTimeout(() => {
         _joinLockSafetyTimer = null;
         if (!bootstrapComplete && !_joinLockShown) {
-            console.warn('[JOIN-LOCK] Safety timer fired (12s) — bootstrap still pending, showing error card');
-            setJoinLockState('error', currentLang === 'fa' ? 'زمان اتصال به سرور بیش از حد طول کشید' : 'Server took too long to respond');
+            // H2 FIX: Differentiate "outside Telegram (no auth)" from a real
+            // connection error. If we're not inside Telegram at all, the
+            // bootstrap will never succeed (no init data to authenticate) —
+            // showing "Connection error" is misleading. Instead show a clear
+            // "Open in Telegram" message so the user understands the cause.
+            const insideTg = isInTelegram();
+            if (!insideTg) {
+                console.warn('[JOIN-LOCK] Safety timer fired (12s) — not inside Telegram, showing "open in Telegram" card');
+                setJoinLockState('error', currentLang === 'fa'
+                    ? 'برای دسترسی کامل، اپ را داخل تلگرام باز کنید'
+                    : 'For full access, open this app inside Telegram');
+            } else {
+                console.warn('[JOIN-LOCK] Safety timer fired (12s) — bootstrap still pending, showing error card');
+                setJoinLockState('error', currentLang === 'fa' ? 'زمان اتصال به سرور بیش از حد طول کشید' : 'Server took too long to respond');
+            }
         }
     }, 12000);
 
@@ -9827,7 +9915,10 @@ function showJoinStatusBar(state, opts = {}) {
         };
     } else if (state === 'error') {
         icon = JSB_ICONS.error;
-        text = isFa ? 'خطای اتصال' : 'Connection error';
+        // H2 FIX: allow a custom message (e.g. "Open in Telegram" when not
+        // inside Telegram). Previously hardcoded to "Connection error" which
+        // was misleading for auth-required states.
+        text = (opts.message || (isFa ? 'خطای اتصال' : 'Connection error'));
         actionDisplay = 'inline-flex';
         actionText = isFa ? 'تلاش مجدد' : 'Retry';
         actionHandler = () => {
@@ -9968,7 +10059,9 @@ function setJoinLockState(state, errorMsg) {
     if (state === 'error') {
         // Show floating card with "error" + Retry button
         clearJoinLockPendingShowTimer();
-        showJoinStatusBar('error');
+        // H2 FIX: pass the custom error message through to the status bar so
+        // it replaces the hardcoded "Connection error" text.
+        showJoinStatusBar('error', { message: errorMsg });
         const errorEl = document.getElementById('join-lock-error');
         if (errorEl && errorMsg) {
             errorEl.textContent = errorMsg;

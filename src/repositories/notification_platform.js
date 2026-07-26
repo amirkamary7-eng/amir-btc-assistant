@@ -408,7 +408,7 @@ export function createNotificationPlatformRepository(deps) {
         'referral': 'ch_referral', 'wallet': 'ch_wallet', 'wheel': 'ch_wheel',
         'mission': 'ch_mission', 'market': 'ch_market', 'news': 'ch_news',
         'calendar': 'ch_calendar', 'security': 'ch_security', 'system': 'ch_system',
-        'announcement': 'ch_announcements', 'announcement': 'ch_announcements',
+        'announcement': 'ch_announcements', 'announcements': 'ch_announcements',
         'price_alert': 'ch_price_alert', 'analysis': 'ch_analysis',
         'breaking_news': 'ch_breaking_news', 'promotions': 'ch_promotions',
         'challenges': 'ch_challenges', 'tickets': 'ch_tickets',
