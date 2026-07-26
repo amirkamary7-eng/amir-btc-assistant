@@ -779,6 +779,11 @@ async function loadAdminUsers(page) {
     const searchInput = document.getElementById('admin-user-search');
     const search = searchInput ? searchInput.value.trim() : '';
 
+    // PHASE 2: Load user stats cards at top of Users section.
+    // Uses /api/admin/dashboard which returns all user metrics in one call.
+    // No separate endpoint needed — reuses dashboard stats.
+    loadUsersStats();
+
     try {
         let url = '/api/admin/users?page=' + _adminUsersPage;
         if (search) url += '&search=' + encodeURIComponent(search);
@@ -800,12 +805,17 @@ async function loadAdminUsers(page) {
 
         let html = '';
         users.forEach(function (u) {
+            // PHASE 2: Display real fields from backend (is_premium, is_active, language,
+            // last_active, mini_app_opened_at, bot_joined_at). Previously these were blank.
+            const statusBadge = u.is_active ? adminBadge('فعال', 'green') : adminBadge('غیرفعال', 'gray');
+            const premiumBadge = u.is_premium ? adminBadge('Premium', 'orange') : '';
+            const channelBadge = u.channel_joined ? adminBadge('عضو کانال', 'green') : '';
+            const miniAppBadge = u.mini_app_opened_at ? adminBadge('Mini App', 'blue') : '';
             html += '<div class="admin-list-item">' +
                 '<div class="admin-list-item-header">' +
                 '<span class="admin-list-item-title">' + adminEscapeHtml(u.first_name || u.name || 'User') +
                 (u.last_name ? ' ' + adminEscapeHtml(u.last_name) : '') + '</span>' +
-                (u.is_premium ? adminBadge('Premium', 'orange') : '') +
-                (u.is_active ? adminBadge('Active', 'green') : adminBadge('Inactive', 'gray')) +
+                premiumBadge + statusBadge + channelBadge + miniAppBadge +
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
                 (u.username ? '@' + adminEscapeHtml(u.username) + ' &bull; ' : '') +
@@ -814,8 +824,7 @@ async function loadAdminUsers(page) {
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
                 'Joined: ' + adminFormatDate(u.created_at || u.join_date) +
-                (u.last_active ? ' &bull; Last seen: ' + adminFormatDate(u.last_active) : '') +
-                (u.referral_code ? ' &bull; Ref: ' + adminEscapeHtml(u.referral_code) : '') +
+                (u.last_active ? ' &bull; Last active: ' + adminFormatDate(u.last_active) : ' &bull; Last active: --') +
                 '</div>' +
                 '</div>';
         });
@@ -824,6 +833,39 @@ async function loadAdminUsers(page) {
     } catch (e) {
         container.innerHTML = adminEmpty('Failed to load users');
         console.error('loadAdminUsers:', e);
+    }
+}
+
+/**
+ * PHASE 2: Load user stats cards at top of Users section.
+ * Fetches dashboard stats (which include all user metrics) and renders
+ * 11 stat cards: Total, New Today/Week/Month, Joined Bot/Channel, Opened
+ * Mini App, Join %, Active Today/Week/Month.
+ */
+async function loadUsersStats() {
+    const grid = document.getElementById('admin-users-stats-grid');
+    if (!grid) return;
+    try {
+        const data = await apiFetch('/api/admin/dashboard');
+        if (!data || !data.stats) { grid.innerHTML = ''; return; }
+        const s = data.stats;
+        const fmt = function (v) { return (v == null) ? '--' : adminFormatNumber(v); };
+        let html = '';
+        html += adminStatCardV2(fmt(s.total_users), 'کل کاربران', 'users', 'blue');
+        html += adminStatCardV2(fmt(s.new_today), 'جدید امروز', 'new', 'green');
+        html += adminStatCardV2(fmt(s.new_this_week), 'جدید این هفته', 'week', 'purple');
+        html += adminStatCardV2(fmt(s.new_this_month), 'جدید این ماه', 'month', 'purple');
+        html += adminStatCardV2(fmt(s.joined_bot), 'بات را استارت زده‌اند', 'bot', 'blue');
+        html += adminStatCardV2(fmt(s.joined_channel), 'عضو کانال', 'channel', 'green');
+        html += adminStatCardV2(fmt(s.opened_mini_app), 'Mini App را باز کرده‌اند', 'app', 'blue');
+        html += adminStatCardV2(fmt(s.join_percentage) + '%', 'درصد عضویت کانال', 'percent', 'orange');
+        html += adminStatCardV2(fmt(s.active_today), 'فعال امروز', 'active-today', 'green');
+        html += adminStatCardV2(fmt(s.active_this_week), 'فعال این هفته', 'active-week', 'green');
+        html += adminStatCardV2(fmt(s.active_this_month), 'فعال این ماه', 'active-month', 'green');
+        grid.innerHTML = html;
+    } catch (e) {
+        grid.innerHTML = '';
+        console.warn('loadUsersStats:', e);
     }
 }
 

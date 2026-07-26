@@ -81,6 +81,10 @@ export function createUserHandlers(deps) {
 
     payload.user_id = userId;
     try {
+      // Phase 2: Ensure users table has new tracking columns
+      if (typeof userRepo.ensureTable === 'function') {
+        try { await userRepo.ensureTable(env); } catch {}
+      }
       // Check if user already exists — referral only allowed for new users (Design)
       const preExistingUser = await userRepo.getById(env, userId);
       const isNewUser = !preExistingUser;
@@ -90,6 +94,8 @@ export function createUserHandlers(deps) {
         first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(tgUser?.first_name),
         last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(tgUser?.last_name),
         lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
+        // Phase 2: Track Telegram premium status from initData
+        is_premium: Boolean(tgUser?.is_premium),
       });
       const referrerId = normalizeOptionalString(payload.referrer_id);
       await diagLog(env, { scope: 'diag-handleBootstrap', userId, referrer_id: referrerId, isNewUser });

@@ -1136,6 +1136,8 @@ async function persistDbUserJoinState(env, userId, joined) {
   const pool = createPool(env);
   if (!pool) return;
   try {
+    // PHASE 2: Also set bot_joined_at on first interaction (when user row is new).
+    // On conflict (existing user), COALESCE preserves the existing bot_joined_at.
     await pool.query(
       `
         INSERT INTO users (
@@ -1143,14 +1145,16 @@ async function persistDbUserJoinState(env, userId, joined) {
           lang,
           channel_joined,
           channel_verified_at,
+          bot_joined_at,
           created_at,
           updated_at
         )
-        VALUES ($1, 'fa', $2, $3, NOW(), NOW())
+        VALUES ($1, 'fa', $2, $3, NOW(), NOW(), NOW())
         ON CONFLICT (telegram_id) DO UPDATE
         SET
           channel_joined = EXCLUDED.channel_joined,
           channel_verified_at = EXCLUDED.channel_verified_at,
+          bot_joined_at = COALESCE(users.bot_joined_at, NOW()),
           updated_at = NOW()
       `,
       [String(userId), Boolean(joined), joined ? new Date().toISOString() : null],

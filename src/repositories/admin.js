@@ -218,18 +218,21 @@ export function createAdminRepository(deps) {
     //   - No join percentage.
     //   - Frontend expected 'new_users_today' but backend returned 'users_today'.
     //
-    // NEW VERSION: All metrics are REAL SQL counts from the database.
+    // PHASE 2 FIX: Now uses real tracking columns (last_active_at, bot_joined_at,
+    // mini_app_opened_at, is_premium) added by users.ensureTable().
+    //
+    // All metrics are REAL SQL counts from the database:
     //   - total_users: COUNT(*) FROM users
     //   - new_today: WHERE created_at >= CURRENT_DATE
     //   - new_this_week: WHERE created_at >= date_trunc('week', CURRENT_DATE)
     //   - new_this_month: WHERE created_at >= date_trunc('month', CURRENT_DATE)
     //   - joined_channel: WHERE channel_joined = TRUE
     //   - join_percentage: joined_channel / total_users * 100
-    //   - total_analyses, open_tickets, total_transactions, admins_count
-    //
-    // NOTE: "users_joined_bot" and "users_opened_mini_app" require tracking that
-    // doesn't exist in the current schema (no last_bot_interaction column).
-    // We return them as null (frontend shows '--') rather than fake numbers.
+    //   - joined_bot: WHERE bot_joined_at IS NOT NULL
+    //   - opened_mini_app: WHERE mini_app_opened_at IS NOT NULL
+    //   - active_today: WHERE last_active_at >= CURRENT_DATE
+    //   - active_this_week: WHERE last_active_at >= date_trunc('week', CURRENT_DATE)
+    //   - active_this_month: WHERE last_active_at >= date_trunc('month', CURRENT_DATE)
     const results = await Promise.allSettled([
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM users'),
       queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE created_at >= CURRENT_DATE"),
@@ -243,13 +246,19 @@ export function createAdminRepository(deps) {
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM admins'),
       queryDb(env, 'SELECT COUNT(*) AS cnt FROM price_alerts WHERE status = \'active\''),
       queryDb(env, "SELECT COUNT(*) AS cnt FROM price_alerts WHERE status = 'triggered' AND triggered_at >= CURRENT_DATE"),
+      // Phase 2: real activity tracking
+      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users WHERE last_active_at >= CURRENT_DATE'),
+      queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE last_active_at >= date_trunc('week', CURRENT_DATE)"),
+      queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE last_active_at >= date_trunc('month', CURRENT_DATE)"),
+      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users WHERE bot_joined_at IS NOT NULL'),
+      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users WHERE mini_app_opened_at IS NOT NULL'),
     ]);
 
     const val = (r, fallback = 0) => r.status === 'fulfilled' ? Number(r.value?.rows?.[0]?.cnt || r.value?.rows?.[0]?.total || fallback) : fallback;
 
     const totalUsers = val(results[0]);
     const joinedChannel = val(results[8]);
-    const joinPercentage = totalUsers > 0 ? Math.round((joinedChannel / totalUsers) * 1000) / 10 : 0; // 1 decimal
+    const joinPercentage = totalUsers > 0 ? Math.round((joinedChannel / totalUsers) * 1000) / 10 : 0;
 
     return {
       total_users: totalUsers,
@@ -258,17 +267,17 @@ export function createAdminRepository(deps) {
       new_this_month: val(results[3]),
       joined_channel: joinedChannel,
       join_percentage: joinPercentage,
-      // These require schema changes (last_bot_interaction, mini_app_opened columns)
-      // Return null so frontend shows '--' instead of fake numbers.
-      joined_bot: null,
-      opened_mini_app: null,
-      // Active users: no last_active tracking column exists. Return null.
-      active_today: null,
+      // Phase 2: real activity tracking (was null before, now real)
+      joined_bot: val(results[15]),
+      opened_mini_app: val(results[16]),
+      active_today: val(results[12]),
+      active_this_week: val(results[13]),
+      active_this_month: val(results[14]),
       total_analyses: val(results[4]),
       open_tickets: val(results[5]),
       total_token_balances: val(results[6]),
       total_transactions: val(results[7]),
-      admins_count: val(results[10] === undefined ? results[9] : results[9]), // admins_count index
+      admins_count: val(results[9]),
       active_alerts: val(results[10]),
       triggered_today: val(results[11]),
     };
@@ -293,12 +302,17 @@ export function createAdminRepository(deps) {
     );
     const total = Number(countResult.rows[0]?.cnt || 0);
 
+    // PHASE 2 FIX: Return ALL fields the frontend expects, including the new
+    // tracking columns (last_active_at, is_premium, lang, mini_app_opened_at).
+    // Previously frontend showed blanks for is_premium, is_active, language,
+    // last_active, referral_code.
     const dataResult = await queryDb(
       env,
       `
         SELECT
           u.telegram_id, u.username, u.first_name, u.last_name,
-          u.channel_joined, u.created_at,
+          u.lang, u.channel_joined, u.created_at,
+          u.last_active_at, u.bot_joined_at, u.mini_app_opened_at, u.is_premium,
           tb.balance
         FROM users u
         LEFT JOIN token_balances tb ON tb.user_id = u.telegram_id
@@ -319,7 +333,13 @@ export function createAdminRepository(deps) {
         username: normalizeOptionalString(r.username),
         first_name: normalizeOptionalString(r.first_name),
         last_name: normalizeOptionalString(r.last_name),
+        language: normalizeOptionalString(r.lang),
         channel_joined: Boolean(r.channel_joined),
+        is_premium: Boolean(r.is_premium),
+        is_active: r.last_active_at != null && (Date.now() - new Date(r.last_active_at).getTime()) < 24 * 60 * 60 * 1000,
+        last_active: r.last_active_at ? new Date(r.last_active_at).toISOString() : null,
+        bot_joined_at: r.bot_joined_at ? new Date(r.bot_joined_at).toISOString() : null,
+        mini_app_opened_at: r.mini_app_opened_at ? new Date(r.mini_app_opened_at).toISOString() : null,
         token_balance: Number(r.balance || 0),
         created_at: isoDate(r.created_at),
       })),
