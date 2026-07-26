@@ -4885,6 +4885,16 @@ export default {
         const ticketId = url.pathname.split('/')[4];
         return await adminHandlers.handleUpdateTicketStatus(request, env, ticketId);
       }
+      // PHASE 3 FIX (Bug 5): Admin DELETE ticket — previously didn't exist
+      if (/^\/api\/admin\/tickets\/[^/]+$/.test(url.pathname) && request.method === 'DELETE') {
+        const ticketId = url.pathname.split('/')[4];
+        return await adminHandlers.handleDeleteTicket(request, env, ticketId);
+      }
+      // PHASE 3 FIX (Bug 6): Admin GET ticket replies — for conversation thread
+      if (/^\/api\/admin\/tickets\/[^/]+\/replies$/.test(url.pathname) && request.method === 'GET') {
+        const ticketId = url.pathname.split('/')[4];
+        return await adminHandlers.handleListTicketReplies(request, env, ticketId);
+      }
       if (url.pathname === '/api/admin/broadcasts' && request.method === 'POST') {
         return await adminHandlers.handleCreateBroadcast(request, env);
       }

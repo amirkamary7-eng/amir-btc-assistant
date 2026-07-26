@@ -473,6 +473,45 @@ export function createAdminRepository(deps) {
   // 12. listBroadcasts
   // ---------------------------------------------------------------------------
 
+  /**
+   * PHASE 3 FIX (Bug 5): Admin ticket delete — previously no admin DELETE
+   * endpoint existed. Frontend called /api/tickets/:id (user endpoint) → 403.
+   */
+  async function deleteTicket(env, ticketId) {
+    const result = await queryDb(
+      env,
+      'DELETE FROM tickets WHERE id = $1 RETURNING id',
+      [String(ticketId)],
+    );
+    return (result.rowCount || 0) > 0;
+  }
+
+  /**
+   * PHASE 3 FIX (Bug 6): Fetch ticket replies for admin ticket detail view.
+   * Previously frontend expected t.replies in list response but backend
+   * didn't include them → empty conversation thread.
+   */
+  async function listTicketReplies(env, ticketId) {
+    const result = await queryDb(
+      env,
+      `
+        SELECT id, ticket_id, user_id, body, is_admin_reply, created_at
+        FROM ticket_replies
+        WHERE ticket_id = $1
+        ORDER BY created_at ASC
+      `,
+      [String(ticketId)],
+    );
+    return result.rows.map((r) => ({
+      id: String(r.id),
+      ticket_id: String(r.ticket_id),
+      user_id: String(r.user_id),
+      body: normalizeOptionalString(r.body),
+      is_admin_reply: Boolean(r.is_admin_reply),
+      created_at: isoDate(r.created_at),
+    }));
+  }
+
   async function listBroadcasts(env, { page, limit }) {
     const { offset, limit: lim, page: pg } = paginate(page, limit);
 
@@ -749,39 +788,54 @@ export function createAdminRepository(deps) {
   // ---------------------------------------------------------------------------
 
   async function listReferrals(env, { page, limit, search }) {
+    // PHASE 3 FIX (Bug 3): Previous version returned one row PER REFERRAL PAIR
+    // (inviter→invitee). Frontend expected aggregated-per-inviter rows with
+    // total_referrals, active_referrals, earned_tokens. Result: every row
+    // showed "0 refs" in the UI.
+    //
+    // NEW VERSION: GROUP BY inviter_id with COUNT/SUM aggregates.
     const { offset, limit: lim, page: pg } = paginate(page, limit);
     const term = (normalizeOptionalString(search) || '').trim();
     const whereClause = term
       ? `WHERE inv.username ILIKE $1 OR inv.first_name ILIKE $1
-            OR inv.telegram_id ILIKE $1
-            OR invi.username ILIKE $1 OR invi.first_name ILIKE $1
-            OR invi.telegram_id ILIKE $1`
+            OR inv.telegram_id ILIKE $1`
       : '';
     const pattern = `%${term}%`;
     const params = term ? [pattern] : [];
 
     const countResult = await queryDb(
       env,
-      `SELECT COUNT(*) AS cnt FROM referrals rf
-       LEFT JOIN users inv ON inv.telegram_id = rf.inviter_id
-       LEFT JOIN users invi ON invi.telegram_id = rf.invitee_id
-       ${whereClause}`,
+      `SELECT COUNT(*) AS cnt FROM (
+        SELECT rf.inviter_id
+        FROM referrals rf
+        LEFT JOIN users inv ON inv.telegram_id = rf.inviter_id
+        ${whereClause}
+        GROUP BY rf.inviter_id
+      ) sub`,
       params,
     );
     const total = Number(countResult.rows[0]?.cnt || 0);
 
+    // Aggregate per inviter: total referrals, active (verified) referrals,
+    // earned tokens (sum of referral rewards from token_transactions)
     const dataResult = await queryDb(
       env,
       `
         SELECT
-          rf.inviter_id, rf.invitee_id, rf.channel_verified, rf.rewarded, rf.created_at,
-          inv.username AS inviter_username, inv.first_name AS inviter_first_name,
-          invi.username AS invitee_username, invi.first_name AS invitee_first_name
+          rf.inviter_id,
+          inv.username AS inviter_username,
+          inv.first_name AS inviter_first_name,
+          COUNT(rf.id) AS total_referrals,
+          COUNT(rf.id) FILTER (WHERE rf.channel_verified = TRUE) AS active_referrals,
+          COUNT(rf.id) FILTER (WHERE rf.rewarded = TRUE) AS rewarded_referrals,
+          COALESCE(SUM(tt.amount), 0) AS earned_tokens,
+          MAX(rf.created_at) AS last_referral_at
         FROM referrals rf
         LEFT JOIN users inv ON inv.telegram_id = rf.inviter_id
-        LEFT JOIN users invi ON invi.telegram_id = rf.invitee_id
+        LEFT JOIN token_transactions tt ON tt.user_id = rf.inviter_id AND tt.tx_type = 'referral_reward'
         ${whereClause}
-        ORDER BY rf.created_at DESC
+        GROUP BY rf.inviter_id, inv.username, inv.first_name
+        ORDER BY total_referrals DESC, last_referral_at DESC
         LIMIT ${lim} OFFSET ${offset}
       `,
       params,
@@ -794,14 +848,14 @@ export function createAdminRepository(deps) {
       has_more: offset + lim < total,
       referrals: dataResult.rows.map((r) => ({
         inviter_id: String(r.inviter_id),
-        invitee_id: String(r.invitee_id),
-        channel_verified: Boolean(r.channel_verified),
-        rewarded: Boolean(r.rewarded),
-        created_at: isoDate(r.created_at),
-        inviter_username: normalizeOptionalString(r.inviter_username),
-        inviter_first_name: normalizeOptionalString(r.inviter_first_name),
-        invitee_username: normalizeOptionalString(r.invitee_username),
-        invitee_first_name: normalizeOptionalString(r.invitee_first_name),
+        username: normalizeOptionalString(r.inviter_username),
+        first_name: normalizeOptionalString(r.inviter_first_name),
+        user_name: normalizeOptionalString(r.inviter_first_name) || normalizeOptionalString(r.inviter_username) || r.inviter_id,
+        total_referrals: Number(r.total_referrals || 0),
+        active_referrals: Number(r.active_referrals || 0),
+        rewarded_referrals: Number(r.rewarded_referrals || 0),
+        earned_tokens: Number(r.earned_tokens || 0),
+        last_referral_at: isoDate(r.last_referral_at),
       })),
     };
   }
@@ -880,14 +934,18 @@ export function createAdminRepository(deps) {
   // ---------------------------------------------------------------------------
 
   async function getAdminLogs(env, { page, limit, action }) {
+    // PHASE 3 FIX (Bug 4): JOIN users table to expose admin_name (was missing).
+    // Frontend expected: level, message, description, event, type, user_id,
+    // telegram_id, admin_name. Backend only returned: action, admin_id, details.
+    // Now we map the fields and add admin_name via JOIN.
     const { offset, limit: lim, page: pg } = paginate(page, limit);
     const actionFilter = normalizeOptionalString(action);
-    const whereClause = actionFilter ? 'WHERE action = $1' : '';
+    const whereClause = actionFilter ? 'WHERE al.action = $1' : '';
     const params = actionFilter ? [actionFilter] : [];
 
     const countResult = await queryDb(
       env,
-      `SELECT COUNT(*) AS cnt FROM admin_logs ${whereClause}`,
+      `SELECT COUNT(*) AS cnt FROM admin_logs al ${whereClause}`,
       params,
     );
     const total = Number(countResult.rows[0]?.cnt || 0);
@@ -895,10 +953,13 @@ export function createAdminRepository(deps) {
     const dataResult = await queryDb(
       env,
       `
-        SELECT id, admin_id, action, target_type, target_id, details, ip, created_at
-        FROM admin_logs
+        SELECT al.id, al.admin_id, al.action, al.target_type, al.target_id,
+               al.details, al.ip, al.created_at,
+               u.username AS admin_username, u.first_name AS admin_first_name
+        FROM admin_logs al
+        LEFT JOIN users u ON u.telegram_id = al.admin_id
         ${whereClause}
-        ORDER BY created_at DESC
+        ORDER BY al.created_at DESC
         LIMIT ${lim} OFFSET ${offset}
       `,
       params,
@@ -912,9 +973,18 @@ export function createAdminRepository(deps) {
       logs: dataResult.rows.map((r) => ({
         id: r.id,
         admin_id: String(r.admin_id),
+        admin_name: normalizeOptionalString(r.admin_first_name) || normalizeOptionalString(r.admin_username) || String(r.admin_id),
+        // Map backend fields to frontend-expected field names
+        level: 'info', // admin_logs don't have severity; default to info
+        message: normalizeOptionalString(r.action),
+        description: r.details ? JSON.stringify(r.details) : '',
+        event: normalizeOptionalString(r.action),
+        type: normalizeOptionalString(r.target_type),
         action: normalizeOptionalString(r.action),
         target_type: normalizeOptionalString(r.target_type),
         target_id: normalizeOptionalString(r.target_id),
+        user_id: normalizeOptionalString(r.target_id),
+        telegram_id: normalizeOptionalString(r.target_type === 'user' ? r.target_id : null),
         details: typeof r.details === 'object' ? r.details : null,
         ip: normalizeOptionalString(r.ip),
         created_at: isoDate(r.created_at),
@@ -1214,6 +1284,8 @@ export function createAdminRepository(deps) {
     getSystemHealth,
     findTicketById,
     insertTicketReply,
+    deleteTicket,
+    listTicketReplies,
     getBroadcastTargetUsers,
   });
 }

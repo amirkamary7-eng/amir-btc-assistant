@@ -884,6 +884,51 @@ export function createAdminHandlers(deps) {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // PHASE 3 FIX (Bug 5): handleDeleteTicket — admin DELETE ticket
+  // ---------------------------------------------------------------------------
+
+  async function handleDeleteTicket(request, env, ticketId) {
+    const { error: authErr } = await requireAdmin(request, env, 'manage_tickets');
+    if (authErr) return authErr;
+
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
+    }
+
+    try {
+      const deleted = await adminRepo.deleteTicket(env, ticketId);
+      if (!deleted) {
+        return jsonResponse({ status: 'error', message: 'Ticket not found' }, { status: 404 }, env);
+      }
+      return jsonResponse({ status: 'success', deleted: true }, {}, env);
+    } catch (error) {
+      console.warn(safeError('admin-delete-ticket', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // PHASE 3 FIX (Bug 6): handleListTicketReplies — fetch ticket conversation
+  // ---------------------------------------------------------------------------
+
+  async function handleListTicketReplies(request, env, ticketId) {
+    const { error: authErr } = await requireAdmin(request, env, 'view_tickets');
+    if (authErr) return authErr;
+
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
+    }
+
+    try {
+      const replies = await adminRepo.listTicketReplies(env, ticketId);
+      return jsonResponse({ status: 'success', replies }, {}, env);
+    } catch (error) {
+      console.warn(safeError('admin-list-ticket-replies', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
   return Object.freeze({
     requireAdmin,
     handleIsAdmin,
@@ -897,6 +942,8 @@ export function createAdminHandlers(deps) {
     handleListTickets,
     handleReplyTicket,
     handleUpdateTicketStatus,
+    handleDeleteTicket,
+    handleListTicketReplies,
     handleCreateBroadcast,
     handleListBroadcasts,
     handleListRewards,

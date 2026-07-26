@@ -574,18 +574,57 @@ async function loadAdminDashboard() {
 
         // Activity
         if (activityList && data.recent_activity) {
-            if (data.recent_activity.length === 0) {
+            // PHASE 3 FIX (Bug 2): Backend returns an OBJECT {admin_logs, analyses, tickets},
+            // not an array. Previous code called .forEach on the object → activity feed
+            // was always empty. Now we flatten the object into a single activity array.
+            const ra = data.recent_activity;
+            const activities = [];
+            if (Array.isArray(ra.admin_logs)) {
+                ra.admin_logs.forEach(function (a) {
+                    activities.push({
+                        type: 'admin',
+                        message: 'Admin ' + adminEscapeHtml(a.admin_id) + ': ' + adminEscapeHtml(a.action) +
+                            (a.target_type ? ' → ' + adminEscapeHtml(a.target_type) : ''),
+                        created_at: a.created_at,
+                    });
+                });
+            }
+            if (Array.isArray(ra.analyses)) {
+                ra.analyses.forEach(function (a) {
+                    activities.push({
+                        type: 'analysis',
+                        message: 'تحلیل جدید: ' + adminEscapeHtml(a.coin || '') + (a.author ? ' توسط ' + adminEscapeHtml(a.author) : ''),
+                        created_at: a.created_at,
+                    });
+                });
+            }
+            if (Array.isArray(ra.tickets)) {
+                ra.tickets.forEach(function (t) {
+                    activities.push({
+                        type: 'user',
+                        message: 'تیکت: ' + adminEscapeHtml(t.title || '') + ' (' + adminEscapeHtml(t.status || '') + ')',
+                        created_at: t.created_at,
+                    });
+                });
+            }
+            // Sort by created_at DESC
+            activities.sort(function (a, b) {
+                return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+            });
+            const topActivities = activities.slice(0, 10);
+
+            if (topActivities.length === 0) {
                 activityList.innerHTML = adminEmpty('فعالیتی اخیر وجود ندارد');
             } else {
                 let actHtml = '';
-                data.recent_activity.forEach(function (act) {
+                topActivities.forEach(function (act) {
                     const dotColor = act.type === 'admin' ? 'orange' :
                         act.type === 'error' ? 'red' :
                             act.type === 'user' ? 'blue' : 'green';
                     actHtml += '<div class="admin-activity-item">' +
                         '<div class="admin-activity-dot ' + dotColor + '"></div>' +
-                        '<div style="flex:1;min-width:0;">' + adminEscapeHtml(act.message || act.description || act.action || '') + '</div>' +
-                        '<div class="admin-activity-time">' + adminFormatDate(act.created_at || act.timestamp || act.date) + '</div>' +
+                        '<div style="flex:1;min-width:0;">' + act.message + '</div>' +
+                        '<div class="admin-activity-time">' + adminFormatDate(act.created_at) + '</div>' +
                         '</div>';
                 });
                 activityList.innerHTML = actHtml;
@@ -994,7 +1033,38 @@ async function loadAdminTickets(page) {
 function toggleAdminTicketDetail(ticketId) {
     _adminTicketsExpanded[ticketId] = !_adminTicketsExpanded[ticketId];
     loadAdminTickets(_adminTicketsPage);
+    // PHASE 3 FIX (Bug 6): Fetch replies when expanding a ticket.
+    // Previously replies were expected in the list response but never included
+    // → conversation thread was always empty.
+    if (_adminTicketsExpanded[ticketId]) {
+        fetchTicketReplies(ticketId);
+    }
 }
+
+/**
+ * PHASE 3 FIX (Bug 6): Fetch ticket replies and render them into the
+ * expanded ticket detail view. Called when a ticket is expanded.
+ */
+async function fetchTicketReplies(ticketId) {
+    try {
+        const data = await apiFetch('/api/admin/tickets/' + ticketId + '/replies');
+        if (!data || !data.replies) return;
+        const threadEl = document.querySelector('#adm-ticket-' + ticketId + ' .adm-ticket-thread');
+        if (!threadEl) return; // ticket may have been collapsed
+        let html = '';
+        data.replies.forEach(function (r) {
+            const isAdmin = r.is_admin_reply;
+            html += '<div style="background:' + (isAdmin ? 'rgba(245,166,35,0.08)' : 'rgba(255,255,255,0.03)') + ';border-radius:10px;padding:10px 12px;' + (isAdmin ? 'border:1px solid rgba(245,166,35,0.15);' : '') + '">' +
+                '<div style="font-size:11px;color:' + (isAdmin ? '#F5A623' : '#6B7A8D') + ';margin-bottom:4px;">' + (isAdmin ? 'Admin' : 'User') + ' • ' + adminFormatDate(r.created_at) + '</div>' +
+                '<div style="white-space:pre-wrap;font-size:13px;color:#A5B4C7;">' + adminEscapeHtml(r.body || '') + '</div>' +
+                '</div>';
+        });
+        threadEl.innerHTML = html;
+    } catch (e) {
+        console.warn('fetchTicketReplies:', e);
+    }
+}
+window.fetchTicketReplies = fetchTicketReplies;
 
 async function adminReplyTicket(ticketId) {
     var textarea = document.getElementById('adm-reply-' + ticketId);
@@ -1036,7 +1106,10 @@ async function adminSetTicketStatus(ticketId, status) {
 async function adminDeleteTicket(ticketId) {
     if (!confirm('Delete this ticket permanently?')) return;
     try {
-        await apiFetch('/api/tickets/' + ticketId, { method: 'DELETE' });
+        // PHASE 3 FIX (Bug 5): Use admin endpoint, not user endpoint.
+        // Previous: /api/tickets/:id (user endpoint, no admin DELETE) → 403
+        // Now: /api/admin/tickets/:id (admin DELETE)
+        await apiFetch('/api/admin/tickets/' + ticketId, { method: 'DELETE' });
         showAdminToast('Ticket deleted', 'success');
         delete _adminTicketsExpanded[ticketId];
         loadAdminTickets(_adminTicketsPage);
@@ -1076,17 +1149,24 @@ async function sendBroadcast() {
         return;
     }
 
+    // PHASE 3 FIX (Bug 1 — CRITICAL): Backend expects 'target_type' + 'target_value',
+    // not 'target' + 'telegram_id'. Previous version sent wrong field names →
+    // target_type was always undefined → defaulted to 'all' → ALL broadcasts
+    // went to ALL users regardless of the dropdown selection.
+    const targetType = targetSelect ? targetSelect.value : 'all';
     const payload = {
-        target: targetSelect ? targetSelect.value : 'all',
+        target_type: targetType,
+        target_value: null,
+        message_type: 'text',
         content: contentInput.value.trim()
     };
 
-    if (payload.target === 'specific') {
+    if (targetType === 'specific') {
         if (!targetIdInput || !targetIdInput.value.trim()) {
             showAdminToast('Please enter a Telegram ID', 'error');
             return;
         }
-        payload.telegram_id = targetIdInput.value.trim();
+        payload.target_value = targetIdInput.value.trim();
     }
 
     try {
@@ -1128,15 +1208,21 @@ async function loadAdminBroadcasts() {
 
         let html = '';
         broadcasts.forEach(function (b) {
+            // PHASE 3 FIX (Bug 1): Read correct backend field names.
+            // Backend returns: sender_id, sent_count, target_type, content, created_at
+            // (was reading sent_by, recipients, target, message → all blank)
+            const targetLabel = b.target_type === 'specific' ? ('→ ' + adminEscapeHtml(b.target_value || '')) :
+                                b.target_type === 'channel_joined' ? 'عضو کانال' :
+                                b.target_type === 'all' ? 'همه' : adminEscapeHtml(b.target_type || 'all');
             html += '<div class="admin-list-item">' +
                 '<div class="admin-list-item-header">' +
                 '<span class="admin-list-item-title">' + adminEscapeHtml(b.content || b.message || '').substring(0, 60) +
                 (String(b.content || b.message || '').length > 60 ? '...' : '') + '</span>' +
-                adminBadge(b.target || 'all', 'blue') +
+                adminBadge(targetLabel, 'blue') +
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
-                'Sent by: ' + adminEscapeHtml(b.sent_by || b.admin_name || 'Admin') +
-                (b.recipients != null ? ' &bull; Recipients: ' + adminFormatNumber(b.recipients) : '') +
+                'ارسال توسط: ' + adminEscapeHtml(b.sender_id || b.sent_by || b.admin_name || 'Admin') +
+                (b.sent_count != null ? ' &bull; گیرندگان: ' + adminFormatNumber(b.sent_count) : '') +
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
                 adminFormatDate(b.created_at || b.sent_at || b.date) +
@@ -1259,26 +1345,35 @@ async function loadAdminTransactions(page) {
 
         let html = '';
         txs.forEach(function (tx) {
+            // PHASE 3 FIX: Backend returns 'tx_type' (not 'type') and 'ref_id' (not 'tx_hash').
+            // Map both for compatibility.
+            const txType = tx.tx_type || tx.type || '';
             const typeLabel = {
                 daily_claim: 'Daily Claim',
                 referral: 'Referral',
+                referral_reward: 'Referral Reward',
                 admin_grant: 'Admin Grant',
                 wheel: 'Wheel',
+                wheel_reward: 'Wheel Reward',
                 deposit: 'Deposit',
-                withdrawal: 'Withdrawal'
+                withdrawal: 'Withdrawal',
+                mission: 'Mission',
+                mission_reward: 'Mission Reward',
             };
+            const displayType = typeLabel[txType] || txType || 'Transaction';
+            const refId = tx.ref_id || tx.tx_hash || '';
             html += '<div class="admin-list-item">' +
                 '<div class="admin-list-item-header">' +
-                '<span class="admin-list-item-title">' + adminEscapeHtml(typeLabel[tx.type] || tx.type || 'Transaction') + '</span>' +
+                '<span class="admin-list-item-title">' + adminEscapeHtml(displayType) + '</span>' +
                 adminBadge(String(tx.amount || tx.tokens || 0) + ' AB', 'green') +
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
-                'User: ' + adminEscapeHtml(tx.user_name || tx.username || 'User') +
+                'کاربر: ' + adminEscapeHtml(tx.user_name || tx.username || 'User') +
                 ' (ID: ' + adminEscapeHtml(String(tx.telegram_id || tx.user_id || '')) + ')' +
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
                 adminFormatDate(tx.created_at || tx.date) +
-                (tx.tx_hash ? ' &bull; TX: ' + adminEscapeHtml(String(tx.tx_hash).substring(0, 16)) + '...' : '') +
+                (refId ? ' &bull; Ref: ' + adminEscapeHtml(String(refId).substring(0, 16)) : '') +
                 (tx.description ? ' &bull; ' + adminEscapeHtml(tx.description) : '') +
                 '</div>' +
                 '</div>';
