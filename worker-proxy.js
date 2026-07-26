@@ -1859,25 +1859,26 @@ async function fetchSpotPriceUsd(env, symbol) {
   if (!normalizedSymbol) {
     return null;
   }
-  // Use the SAME v2 cache key as the chart resolver so price fetch and chart
-  // resolution share the same cached exchange. Previously this used the v1
-  // key `chart:exchange:` which could diverge from the resolver's v2 key
-  // `chart:exchange:v2:` — causing stale or inconsistent exchange selection.
-  const cacheKey = `chart:exchange:v2:${normalizedSymbol}`;
+  // ROOT CAUSE FIX: Use a SEPARATE cache key for price fetching.
+  // Previously, this shared the chart resolver's cache key
+  // (`chart:exchange:v2:`). The chart resolver caches 'binance' because
+  // TradingView scanner confirms BINANCE:BTCUSDT exists (for chart display).
+  // But data-api.binance.vision returns 403 from CF Workers — so every price
+  // fetch would try Binance first (from cache), fail with 403, invalidate
+  // the cache, then fall through to the parallel fallback.
+  // This wasted ~200-500ms per alert check (HTTP round-trip for the 403).
+  // With a separate cache key, the price fetch caches 'bybit' (which works
+  // from CF Workers), and the chart resolver keeps 'binance' (for tv_symbol).
+  // Both caches coexist without interfering with each other.
+  const priceCacheKey = `price:exchange:${normalizedSymbol}`;
 
   // ── FAST PATH: Try cached exchange first (latency: 1 API call, max 4s) ──
-  // Cache stores full JSON result from resolveChartExchange.
+  // Cache stores just the exchange key string (e.g. 'bybit').
   let cachedExchange = null;
   try {
-    const raw = await readAppCache(env, cacheKey);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object' && parsed.exchange) {
-        cachedExchange = parsed.exchange;
-      } else if (typeof raw === 'string' && raw.length > 0 && raw.length < 30) {
-        // Backward compat: old v1 cache stored just the exchange key string
-        cachedExchange = raw.trim();
-      }
+    const raw = await readAppCache(env, priceCacheKey);
+    if (raw && typeof raw === 'string' && raw.length > 0 && raw.length < 30) {
+      cachedExchange = raw.trim();
     }
   } catch {}
 
@@ -1887,7 +1888,7 @@ async function fetchSpotPriceUsd(env, symbol) {
       return { price: cachedPrice, exchange: cachedExchange, cached: true };
     }
     // Cached exchange failed — invalidate cache (min TTL 60 for KV).
-    await writeAppCache(env, cacheKey, '', 60).catch(() => {});
+    await writeAppCache(env, priceCacheKey, '', 60).catch(() => {});
   }
 
   // ── FALLBACK: Try ALL exchanges in PARALLEL (max 4s total) ──
@@ -1910,15 +1911,8 @@ async function fetchSpotPriceUsd(env, symbol) {
     const idx = ALL_EXCHANGES.indexOf(exchangeKey);
     const r = results[idx];
     if (r && r.status === 'fulfilled' && r.value.price !== null) {
-      // Cache the result in v2 format (full JSON) for consistency with resolver
-      const cacheValue = JSON.stringify({
-        found: true,
-        symbol: normalizedSymbol,
-        exchange: exchangeKey,
-        tv_symbol: null, // price fetch doesn't need tv_symbol
-        cached: false,
-      });
-      await writeAppCache(env, cacheKey, cacheValue, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
+      // Cache the working exchange (not Binance) for future fast-path
+      await writeAppCache(env, priceCacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
       return { price: r.value.price, exchange: exchangeKey, cached: false };
     }
   }
@@ -3408,22 +3402,54 @@ async function fetchGlobalStats(env) {
 }
 
 async function handleMarketData(env) {
+  // ROOT CAUSE FIX: Prefer CMC cache for global stats to ensure CONSISTENCY
+  // with /api/market/overview. Previously, this endpoint always called
+  // fetchGlobalStats() (CoinGecko→CoinPaprika→MEXC) which returns DIFFERENT
+  // values than CMC — causing the frontend to show inconsistent data:
+  //   - /api/market/overview → CMC → volume=$36B, btcDom=58.6%
+  //   - /api/market → CoinPaprika → volume=$81B, btcDom=56.1%
+  // The frontend's loadMarketData() would OVERWRITE the CMC data (from
+  // loadMarketOverview) with CoinPaprika data, making the cards show
+  // different values depending on which API call completed last.
+  // FIX: Use CMC cache as the primary source for `global` field. Only
+  // fall back to fetchGlobalStats() if CMC cache is empty.
+  const getGlobalData = async () => {
+    try {
+      const cmcOverview = await marketOverviewSvc.getCachedOverview(env);
+      if (cmcOverview && cmcOverview.totalMarketCap > 0) {
+        // Enrich with F&G if missing (CMC doesn't provide F&G)
+        if (!cmcOverview.fearGreedValue) {
+          try {
+            const fg = await fetchFearGreed();
+            if (fg) {
+              cmcOverview.fearGreedValue = fg.value;
+              cmcOverview.fearGreedClassification = fg.classification;
+              cmcOverview.fearGreedSource = 'alternative.me';
+            }
+          } catch {}
+        }
+        return cmcOverview;
+      }
+    } catch {}
+    // Fallback: CoinGecko → CoinPaprika → MEXC
+    return await fetchGlobalStats(env);
+  };
+
   // Check KV cache first for coin data (v2 key — busts old incorrectly-normalized cache)
   const cachedRaw = await readAppCache(env, 'market:data:v3');
   if (cachedRaw) {
     try {
       const parsed = JSON.parse(cachedRaw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Fetch global stats (uses its own cache internally)
-        const globalData = await fetchGlobalStats(env);
+        // Fetch global stats — prefers CMC cache for consistency
+        const globalData = await getGlobalData();
         return jsonResponse({ status: 'success', data: parsed, cached: true, global: globalData, dataSource: 'cache' }, {}, env);
       }
     } catch {}
   }
 
-  // Fetch global stats in parallel with market data (non-blocking)
-  // fetchGlobalStats now handles its own caching, Fear & Greed, and multi-source failover
-  const globalPromise = fetchGlobalStats(env);
+  // Fetch global stats (CMC-preferred) in parallel with market data
+  const globalPromise = getGlobalData();
 
   // Primary: CoinGecko
   try {

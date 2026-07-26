@@ -3639,7 +3639,18 @@ async function loadMarketData(force = false) {
                         if (c) console.log('[MARKET]', s, 'price:', c.priceUsd, 'changePercent24Hr:', c.changePercent24Hr, 'hasImage:', !!c.image);
                     });
                     allCoins = res.data;
-                    if (res.global && typeof res.global === 'object' && res.global !== null) globalMarketData = res.global;
+                    // ROOT CAUSE FIX: Don't overwrite CMC data with less authoritative
+                    // sources. loadMarketOverview() sets globalMarketData from CMC (the
+                    // industry standard). Previously, loadMarketData() would OVERWRITE
+                    // it with CoinPaprika/CoinGecko data from /api/market, causing the
+                    // cards to show different values (e.g. volume $81B instead of $36B).
+                    // Now: only use /api/market's global as a FALLBACK when CMC data is
+                    // not yet loaded.
+                    if (res.global && typeof res.global === 'object' && res.global !== null) {
+                        if (!globalMarketData || globalMarketData.source !== 'coinmarketcap') {
+                            globalMarketData = res.global;
+                        }
+                    }
                     console.log('[TICKER] allCoins populated — length:', allCoins.length, '| sample:', allCoins[0] ? Object.keys(allCoins[0]).join(',') : 'n/a');
                 } else {
                     console.warn('[TICKER] /api/market returned no usable data — res:', JSON.stringify({status: res?.status, dataLen: Array.isArray(res?.data) ? res.data.length : 'not-array'}));
@@ -4844,6 +4855,9 @@ let newsPage = 1;
 let newsHasMore = false;
 let newsTotalCount = 0;
 let categoryCounts = { all: 0, crypto: 0, forex: 0 };
+// M1 FIX: track whether the last news fetch failed due to auth (401).
+// When true, renderNews shows "Open in Telegram" instead of misleading "no news".
+let _newsAuthFailed = false;
 
 let displayedNews = [];
 let newsLoadObserver = null;
@@ -5026,7 +5040,19 @@ async function loadNews(force = false, append = false) {
                 categoryCounts = json.categoryCounts;
                 updateNewsBadges();
             }
-        } catch (e) { console.warn('Farsi news API error:', e); }
+            // M1 FIX: clear any previous auth-error flag on success
+            _newsAuthFailed = false;
+        } catch (e) {
+            console.warn('Farsi news API error:', e);
+            // M1 FIX: Distinguish auth failure (401) from genuine "no news".
+            // Previously a 401 (outside Telegram) silently left articles=[] →
+            // renderNews showed "خبری یافت نشد" (no news found) which is
+            // misleading. Now we track the auth failure and renderNews shows
+            // a clear "Open in Telegram to see news" message instead.
+            if (e?.status === 401) {
+                _newsAuthFailed = true;
+            }
+        }
 
         if (append) {
             newsCache = [...newsCache, ...articles];
@@ -5101,6 +5127,25 @@ function renderNews(category) {
 
     // Apply active filters
     filtered = niApplyFilters(filtered);
+
+    // M1 FIX: If news fetch failed due to auth (401, outside Telegram), show
+    // a clear "Open in Telegram" message instead of the misleading "خبری یافت نشد"
+    // (no news found). This also hides the contradictory empty-state + error-bar combo.
+    if (!filtered.length && _newsAuthFailed && !isInTelegram()) {
+        const isFa = currentLang === 'fa';
+        container.innerHTML = `
+            <div class="ni-empty ni-auth-required">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="56" height="56">
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                </svg>
+                <div class="ni-auth-title">${isFa ? 'برای مشاهده اخبار، اپ را داخل تلگرام باز کنید' : 'Open in Telegram to see news'}</div>
+                <div class="ni-auth-sub">${isFa ? 'اخبار بازار به‌صورت لحظه‌ای داخل Mini App نمایش داده می‌شود' : 'Live market news is available inside the Mini App'}</div>
+                <a href="https://t.me/Amir_BTC_AssistantBot" class="ni-auth-btn" target="_blank" rel="noopener">
+                    ${isFa ? 'باز کردن در تلگرام' : 'Open in Telegram'}
+                </a>
+            </div>`;
+        return;
+    }
 
     if (!filtered.length) {
         container.innerHTML = `<div class="ni-empty">${NI_ICONS.searchEmpty}<div>خبری یافت نشد</div></div>`;
