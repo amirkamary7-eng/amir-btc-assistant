@@ -4805,7 +4805,7 @@ export default {
         }
 
         // Check cache first
-        const searchCacheKey = `market:search:mexc:v1`;
+        const searchCacheKey = `market:search:mexc:v2`;
         const cachedSearch = await readAppCache(env, searchCacheKey);
         let searchList = [];
         if (cachedSearch) {
@@ -4814,7 +4814,8 @@ export default {
 
         if (!searchList.length) {
           // Fetch ALL USDT pairs from MEXC in a single request.
-          // MEXC returns ~1740 USDT pairs — much more than CoinGecko's 250/page limit.
+          // MEXC returns ~1740 USDT pairs with FULL 24hr ticker data:
+          // lastPrice, priceChangePercent, quoteVolume, highPrice, lowPrice
           try {
             const { ok, body } = await fetchJsonWithTimeout(
               'https://api.mexc.com/api/v3/ticker/24hr',
@@ -4824,25 +4825,29 @@ export default {
               searchList = body
                 .filter(item => {
                   const sym = String(item.symbol || '');
-                  // Only USDT pairs (exclude USDC, BUSD, etc.)
                   return sym.endsWith('USDT') && sym.length > 4;
                 })
                 .map(item => {
                   const sym = String(item.symbol || '').replace(/USDT$/, '');
                   const price = parseFloat(item.lastPrice) || 0;
                   const volume = parseFloat(item.quoteVolume) || 0;
+                  // MEXC priceChangePercent is a FRACTION (0.000953 = 0.0953%)
+                  // Multiply by 100 to get percentage like CoinGecko/CoinCap
+                  const changePercent = (parseFloat(item.priceChangePercent) || 0) * 100;
                   return {
                     symbol: sym.toUpperCase(),
-                    name: sym.toUpperCase(), // MEXC doesn't return names — use symbol as name
-                    rank: 0, // No rank from MEXC
+                    name: sym.toUpperCase(),
+                    rank: 0,
                     priceUsd: price,
                     volume: volume,
+                    changePercent24Hr: changePercent,
+                    highPrice: parseFloat(item.highPrice) || 0,
+                    lowPrice: parseFloat(item.lowPrice) || 0,
                   };
                 })
                 .filter(c => c.symbol.length >= 2 && c.priceUsd > 0)
-                // Sort by volume descending — most traded coins first
                 .sort((a, b) => b.volume - a.volume);
-              await writeAppCache(env, searchCacheKey, JSON.stringify(searchList), 300); // 5 min cache
+              await writeAppCache(env, searchCacheKey, JSON.stringify(searchList), 300);
             }
           } catch (e) {
             console.warn('Market search: MEXC fetch failed:', e.message);

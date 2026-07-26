@@ -3975,17 +3975,23 @@ function renderMarket() {
                 }
 
                 // Map search results to the format expected by renderMarketItem
-                const searchResults = data.results.map(c => ({
-                    symbol: c.symbol,
-                    name: c.name || c.symbol,
-                    priceUsd: c.priceUsd || 0,
-                    changePercent24Hr: 0,
-                    volumeUsd24Hr: 0,
-                    marketCapUsd: 0,
-                    rank: c.rank || 0,
-                    image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
-                    _type: 'crypto',
-                }));
+                // Search results from MEXC now include changePercent24Hr, volume, highPrice, lowPrice
+                const searchResults = data.results.map(c => {
+                    const coinData = {
+                        symbol: c.symbol,
+                        name: c.name || c.symbol,
+                        priceUsd: c.priceUsd || 0,
+                        changePercent24Hr: c.changePercent24Hr || 0,
+                        volumeUsd24Hr: c.volume || 0,
+                        marketCapUsd: 0, // MEXC doesn't provide market cap
+                        rank: c.rank || 0,
+                        image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
+                        _type: 'crypto',
+                    };
+                    // Cache each coin for openCoinDetail to find later
+                    Cache.set(`search_coin_${c.symbol}`, coinData, 300); // 5 min cache
+                    return { ...coinData, _fromSearch: true };
+                });
 
                 // Also check forex pairs (instant, from memory)
                 const forexResults = allForexPairs.filter(f =>
@@ -6304,7 +6310,41 @@ async function openCoinDetail(symbol) {
     const isBtcPair = btcPairBase !== null;
     const baseSymbol = isBtcPair ? btcPairBase : symbol;
 
-    const coin = allCoins.find(c => c.symbol === baseSymbol);
+    // Look up coin data. First check allCoins (200 loaded coins).
+    // If not found (e.g. coin from search outside top 200), check if the
+    // search results have this coin stored in a temporary cache.
+    let coin = allCoins.find(c => c.symbol === baseSymbol);
+    if (!coin) {
+        // Coin not in the 200-coin market list. Check search cache.
+        // The search results store rich data (price, change, volume) from MEXC.
+        const searchCacheKey = `search_coin_${baseSymbol}`;
+        const cachedSearchCoin = Cache.get(searchCacheKey);
+        if (cachedSearchCoin) {
+            coin = cachedSearchCoin;
+        } else {
+            // Last resort: fetch real-time price from /api/market/price
+            // This gives us at least the current price for the coin detail.
+            try {
+                const priceData = await fetch(`${API_BASE}/api/market/price?symbol=${encodeURIComponent(baseSymbol)}`, {
+                    headers: { 'X-Telegram-Init-Data': getTelegramInitData() || '' }
+                }).then(r => r.ok ? r.json() : null);
+                if (priceData && priceData.price) {
+                    coin = {
+                        symbol: baseSymbol,
+                        name: baseSymbol,
+                        priceUsd: priceData.price,
+                        changePercent24Hr: 0,
+                        volumeUsd24Hr: 0,
+                        marketCapUsd: 0,
+                        rank: 0,
+                        image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(baseSymbol).toLowerCase()}@2x.png`,
+                    };
+                }
+            } catch (e) {
+                console.warn('openCoinDetail: failed to fetch price for', baseSymbol, e?.message);
+            }
+        }
+    }
     if (!coin) return;
 
     // ── Top Bar: Icon, Title, Rank, Price, Change ──
