@@ -3550,13 +3550,31 @@ async function fetchWithProxy(url, options = {}) {
 async function loadMarketOverview() {
     if (!API_BASE || globalMarketData?.source === 'coinmarketcap') return; // already fresh from CMC
     try {
-        const res = await apiFetch('/api/market/overview');
-        if (res.status === 'success' && (res.totalMarketCap > 0 || res.fearGreedValue > 0)) {
+        // ROOT CAUSE FIX: /api/market/overview is a PUBLIC endpoint (no auth
+        // required). Previously used apiFetch() which adds X-Telegram-Init-Data
+        // header and waits for auth to be ready. Outside Telegram, this caused
+        // the request to hang for 8s (waitForApiReady timeout) then fail.
+        // Now use plain fetch() with a 10s timeout — works with or without auth.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const resp = await fetch(`${API_BASE}/api/market/overview`, {
+            signal: controller.signal,
+            headers: { 'Accept': 'application/json' },
+        });
+        clearTimeout(timeoutId);
+        const res = await resp.json();
+        if (res && res.status === 'success' && (res.totalMarketCap > 0 || res.fearGreedValue > 0)) {
             globalMarketData = res;
-            console.log('[OVERVIEW] CMC data loaded — mcap:', res.totalMarketCap, 'fg:', res.fearGreedValue);
+            console.log('[OVERVIEW] data loaded — source:', res.source, 'mcap:', res.totalMarketCap, 'fg:', res.fearGreedValue);
+            // ROOT CAUSE FIX: re-render summary after data arrives. Previously
+            // loadMarketOverview() ran in parallel with loadMarketData() and
+            // completed AFTER renderSummary() was called → UI showed '--' until
+            // the next poll (60s). Now we re-render immediately when data arrives.
+            renderSummary();
+            renderDashboardMarketStatus();
         }
     } catch (e) {
-        console.warn('[OVERVIEW] Failed to load CMC overview:', e);
+        console.warn('[OVERVIEW] Failed to load overview:', e);
     }
 }
 
