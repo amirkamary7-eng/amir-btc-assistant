@@ -2832,13 +2832,19 @@ function renderPublisherNewsList(items) {
         const queueIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>';
         const sendIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
         return '<div class="tgpub-card' + (isSelected ? ' tgpub-card-selected' : '') + '" data-ref-id="' + adminEscapeHtml(refId) + '">' +
-            '<div class="tgpub-card-top">' +
+            '<div class="tgpub-card-header">' +
+                '<div class="tgpub-card-badges">' +
+                    '<span class="tgpub-badge tgpub-badge-type">' + newsIcon + '<span>خبر</span></span>' +
+                    aiBadge +
+                '</div>' +
+                '<label class="tgpub-card-checkbox">' +
+                    '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleNewsSelect(\'' + adminEscapeHtml(refId) + '\', this.checked)">' +
+                    '<span class="tgpub-card-checkbox-box"></span>' +
+                '</label>' +
+            '</div>' +
+            '<div class="tgpub-card-content">' +
                 img +
                 '<div class="tgpub-card-body">' +
-                    '<div class="tgpub-card-badges">' +
-                        '<span class="tgpub-badge tgpub-badge-type">' + newsIcon + '<span>خبر</span></span>' +
-                        aiBadge +
-                    '</div>' +
                     '<div class="tgpub-card-title">' + title + '</div>' +
                     (summary ? '<div class="tgpub-card-summary">' + summary + '</div>' : '') +
                     '<div class="tgpub-card-meta">' +
@@ -2846,12 +2852,6 @@ function renderPublisherNewsList(items) {
                         '<span class="tgpub-badge tgpub-badge-ref">' + adminEscapeHtml(refId) + '</span>' +
                     '</div>' +
                 '</div>' +
-            '</div>' +
-            '<div class="tgpub-card-check">' +
-                '<label class="tgpub-checkbox-pill">' +
-                    '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleNewsSelect(\'' + adminEscapeHtml(refId) + '\', this.checked)">' +
-                    '<span>انتخاب</span>' +
-                '</label>' +
             '</div>' +
             '<div class="tgpub-card-actions">' +
                 '<button class="adm-btn adm-btn-ghost" onclick="openPublisherPreview(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
@@ -2867,8 +2867,8 @@ function toggleNewsSelect(refId, checked) {
     if (checked) _pubSelectedNews.add(refId);
     else _pubSelectedNews.delete(refId);
     // Update visual state
-    const item = document.querySelector('.tgpub-item[data-ref-id="' + refId + '"]');
-    if (item) item.classList.toggle('selected', checked);
+    const item = document.querySelector('.tgpub-card[data-ref-id="' + refId + '"]');
+    if (item) item.classList.toggle('tgpub-card-selected', checked);
     updateNewsBulkButton();
     // Update "select all" checkbox state
     const selectAll = document.getElementById('tgpub-news-select-all');
@@ -2900,10 +2900,20 @@ window.toggleSelectAllNews = toggleSelectAllNews;
 function updateNewsBulkButton() {
     const btn = document.getElementById('tgpub-news-bulk-btn');
     const cnt = document.getElementById('tgpub-news-sel-count');
+    const bar = document.getElementById('tgpub-news-bulk-bar');
     const count = _pubSelectedNews.size;
     if (cnt) cnt.textContent = faNum(count);
     if (btn) btn.disabled = count === 0;
+    // Show/hide bulk bar based on selection
+    if (bar) bar.classList.toggle('tgpub-bulk-bar-active', count > 0);
 }
+
+function clearNewsSelection() {
+    _pubSelectedNews.clear();
+    renderPublisherNewsList(_pubNewsCache);
+    updateNewsBulkButton();
+}
+window.clearNewsSelection = clearNewsSelection;
 
 async function bulkPublishNews() {
     if (!_pubSelectedNews.size) return;

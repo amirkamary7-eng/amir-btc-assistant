@@ -2001,23 +2001,34 @@
 
                     <!-- ═══ News Tab ═══ -->
                     <div class="tgpub-panel active" id="tgpub-panel-news">
-                        <div class="tgpub-toolbar">
+                        <div class="tgpub-search-row">
                             <div class="tgpub-search-wrap">
                                 <svg class="tgpub-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                                 <input type="text" id="tgpub-news-search" class="adm-input tgpub-search-input" placeholder="جستجوی خبر..." oninput="filterPubNews(this.value)">
                             </div>
-                            <button class="adm-btn adm-btn-primary" onclick="loadPublisherNews(1)">
+                            <button class="adm-btn adm-btn-primary tgpub-reload-btn" onclick="loadPublisherNews(1)" title="بارگذاری">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                                 <span>بارگذاری</span>
                             </button>
-                            <button class="adm-btn adm-btn-ghost tgpub-bulk-btn" id="tgpub-news-bulk-btn" onclick="bulkPublishNews()" disabled>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="10" x2="7" y2="10"/><polyline points="14 5 19 10 14 15"/><line x1="22" y1="20" x2="7" y2="20"/><polyline points="14 15 19 20 14 25" transform="translate(0 -5)"/></svg>
-                                <span>انتخاب‌شده‌ها (<span id="tgpub-news-sel-count">۰</span>)</span>
-                            </button>
-                            <label class="tgpub-checkbox-pill">
-                                <input type="checkbox" id="tgpub-news-select-all" onchange="toggleSelectAllNews(this.checked)">
-                                <span>انتخاب همه</span>
-                            </label>
+                        </div>
+                        <div class="tgpub-bulk-bar" id="tgpub-news-bulk-bar">
+                            <div class="tgpub-bulk-info">
+                                <span class="tgpub-bulk-count"><span id="tgpub-news-sel-count">۰</span> مورد انتخاب شده</span>
+                            </div>
+                            <div class="tgpub-bulk-actions">
+                                <label class="tgpub-checkbox-pill">
+                                    <input type="checkbox" id="tgpub-news-select-all" onchange="toggleSelectAllNews(this.checked)">
+                                    <span>انتخاب همه</span>
+                                </label>
+                                <button class="adm-btn adm-btn-ghost tgpub-bulk-clear" onclick="clearNewsSelection()" title="لغو انتخاب">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                    <span>لغو انتخاب</span>
+                                </button>
+                                <button class="adm-btn adm-btn-primary" id="tgpub-news-bulk-btn" onclick="bulkPublishNews()" disabled>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                                    <span>ارسال گروهی</span>
+                                </button>
+                            </div>
                         </div>
                         <div class="tgpub-list" id="tgpub-news-list"></div>
                         <div class="tgpub-empty" id="tgpub-news-empty">
@@ -2030,7 +2041,7 @@
 
                     <!-- ═══ Calendar Tab ═══ -->
                     <div class="tgpub-panel" id="tgpub-panel-calendar">
-                        <div class="tgpub-toolbar">
+                        <div class="tgpub-search-row">
                             <div class="tgpub-info-text">رویدادهای اقتصاد کلان ۷ روز آینده</div>
                             <select id="tgpub-calendar-impact-filter" class="adm-input tgpub-select" onchange="filterPubCalendar()">
                                 <option value="">همه سطوح</option>
@@ -2054,7 +2065,7 @@
 
                     <!-- ═══ Analysis Tab ═══ -->
                     <div class="tgpub-panel" id="tgpub-panel-analysis">
-                        <div class="tgpub-toolbar">
+                        <div class="tgpub-search-row">
                             <div class="tgpub-info-text">تحلیل‌های اخیر</div>
                             <div class="tgpub-search-wrap">
                                 <svg class="tgpub-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -2076,7 +2087,7 @@
 
                     <!-- ═══ Queue Tab ═══ -->
                     <div class="tgpub-panel" id="tgpub-panel-queue">
-                        <div class="tgpub-toolbar">
+                        <div class="tgpub-search-row">
                             <div class="tgpub-search-wrap">
                                 <svg class="tgpub-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                                 <input type="text" id="tgpub-queue-search" class="adm-input tgpub-search-input" placeholder="جستجو در صف..." oninput="filterPubList('queue', this.value)">
@@ -2112,7 +2123,7 @@
 
                     <!-- ═══ Sent Tab ═══ -->
                     <div class="tgpub-panel" id="tgpub-panel-sent">
-                        <div class="tgpub-toolbar">
+                        <div class="tgpub-search-row">
                             <div class="tgpub-search-wrap">
                                 <svg class="tgpub-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                                 <input type="text" id="tgpub-sent-search" class="adm-input tgpub-search-input" placeholder="جستجو در ارسال‌شده..." oninput="filterPubList('sent', this.value)">
@@ -2140,7 +2151,7 @@
 
                     <!-- ═══ Failed Tab ═══ -->
                     <div class="tgpub-panel" id="tgpub-panel-failed">
-                        <div class="tgpub-toolbar">
+                        <div class="tgpub-search-row">
                             <div class="tgpub-search-wrap">
                                 <svg class="tgpub-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                                 <input type="text" id="tgpub-failed-search" class="adm-input tgpub-search-input" placeholder="جستجو در ناموفق..." oninput="filterPubList('failed', this.value)">
@@ -2171,7 +2182,7 @@
 
                     <!-- ═══ Logs Tab ═══ -->
                     <div class="tgpub-panel" id="tgpub-panel-logs">
-                        <div class="tgpub-toolbar">
+                        <div class="tgpub-search-row">
                             <div class="tgpub-search-wrap">
                                 <svg class="tgpub-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                                 <input type="text" id="tgpub-logs-search" class="adm-input tgpub-search-input" placeholder="جستجو در لاگ..." oninput="filterPubLogs(this.value)">
