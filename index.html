@@ -994,16 +994,36 @@
         </div>
     </div>
 
-    <!-- مودال جزئیات خبر -->
-    <div id="news-modal" class="modal" onclick="if(event.target===this) closeNewsModal()">
-        <div class="modal-box">
-            <div class="modal-header">
-                <h3 id="news-modal-title">عنوان خبر</h3>
-                <button class="modal-close-btn" onclick="closeNewsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    <!-- مودال جزئیات خبر — Professional Layout -->
+    <div id="news-modal" class="modal news-modal-pro" onclick="if(event.target===this) closeNewsModal()">
+        <div class="news-modal-container">
+            <div class="news-modal-header">
+                <h3 id="news-modal-title" class="news-modal-title">عنوان خبر</h3>
+                <button class="news-modal-close" onclick="closeNewsModal()" aria-label="بستن">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
             </div>
-            <img loading="lazy" id="news-modal-image" src="" alt="" style="width:100%; border-radius:12px; margin:10px 0; max-height:200px; object-fit:cover;">
-            <p id="news-modal-body" style="color:var(--text-dim); line-height:1.6;"></p>
-            <a id="news-modal-link" href="#" target="_blank" class="news-source-link" data-i18n="view_source">مشاهده منبع</a>
+            <div class="news-modal-meta" id="news-modal-meta">
+                <span class="news-meta-badge news-meta-time">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span id="news-modal-time">—</span>
+                </span>
+                <span class="news-meta-badge news-meta-source">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2z"/></svg>
+                    <span id="news-modal-source">—</span>
+                </span>
+                <span class="news-meta-badge news-meta-category" id="news-modal-category">خبر</span>
+            </div>
+            <div class="news-modal-hero-wrap">
+                <img loading="lazy" id="news-modal-image" class="news-modal-hero" src="" alt="">
+            </div>
+            <div id="news-modal-body" class="news-modal-body"></div>
+            <div class="news-modal-footer">
+                <a id="news-modal-link" href="#" target="_blank" class="news-modal-source-btn" data-i18n="view_source">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    <span>مشاهده منبع</span>
+                </a>
+            </div>
         </div>
     </div>
 

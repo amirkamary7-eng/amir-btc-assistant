@@ -2145,7 +2145,12 @@ function parseRssItems(rssText) {
   return [...String(rssText || '').matchAll(/<item\b[\s\S]*?<\/item>/gi)].slice(0, 6).map((match) => {
     const block = match[0];
     const title = extractFirstMatch(block, /<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>|<title>([\s\S]*?)<\/title>/i);
-    const link = extractFirstMatch(block, /<link>([\s\S]*?)<\/link>/i);
+    // FIX: Link can also be wrapped in CDATA — handle both cases
+    let link = extractFirstMatch(block, /<link><!\[CDATA\[([\s\S]*?)\]\]><\/link>|<link>([\s\S]*?)<\/link>/i);
+    // DEFENSIVE: strip any leftover CDATA markers if present
+    if (link) {
+      link = link.replace(/^<!\[CDATA\[/, '').replace(/\]\]>$/, '').trim();
+    }
     const descriptionRaw = extractFirstMatch(
       block,
       /<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>|<description>([\s\S]*?)<\/description>/i,
@@ -2501,10 +2506,12 @@ async function enrichNewsWithAISummaries(env, articles) {
  * For each article without an AI summary, generates one using Workers AI.
  */
 async function processNewsAIJobs(env, articles) {
-  if (!env.APP_CACHE || !articles.length) return;
+  if (!env.APP_CACHE || !articles.length) return { processed: 0, success: 0, failed: 0, errors: [] };
 
   const GEMINI_API_KEY = env.GEMINI_API_KEY;
   const hasWorkersAI = !!env.AI;
+  const errors = [];
+  let success = 0, failed = 0;
 
   for (const article of articles.slice(0, 3)) { // Process max 3 per cycle (25s timeout)
     if (!article.url) continue;
@@ -2516,7 +2523,7 @@ async function processNewsAIJobs(env, articles) {
     try {
       existing = await readAppCache(env, aiKey);
     } catch {}
-    if (existing) continue; // Already processed — skip
+    if (existing) { success++; continue; } // Already processed — skip
 
     console.log('[NEWS-AI-BG] Processing:', article.url.substring(0, 80));
 
@@ -2536,6 +2543,8 @@ async function processNewsAIJobs(env, articles) {
 
       if (!articleRes.ok) {
         console.warn('[NEWS-AI-BG] Article fetch failed:', articleRes.status);
+        failed++;
+        errors.push({ url: article.url.substring(0, 60), error: 'fetch_' + articleRes.status });
         continue; // Skip — will retry next cycle
       }
 
@@ -2581,7 +2590,7 @@ async function processNewsAIJobs(env, articles) {
       if (articleText.length < 100) {
         // Use RSS body as fallback for AI
         articleText = (article.title || '') + '\n\n' + (article.body || article.description || '');
-        if (articleText.length < 50) continue;
+        if (articleText.length < 50) { failed++; continue; }
       }
 
       // Step 3: Generate AI summary
@@ -2640,9 +2649,12 @@ ${articleText}`;
             } else {
               summary = null;
             }
+          } else {
+            errors.push({ url: article.url.substring(0, 60), error: 'gemini_' + geminiRes.status });
           }
         } catch (e) {
           console.warn('[NEWS-AI-BG] Gemini failed:', e.message);
+          errors.push({ url: article.url.substring(0, 60), error: 'gemini_' + e.message.substring(0, 80) });
         }
       }
 
@@ -2652,7 +2664,7 @@ ${articleText}`;
           const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
             messages: [
               { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details, numbers, and names. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
-              { role: 'user', content: articleText },
+              { role: 'user', content: articleText.substring(0, 8000) },
             ],
             max_tokens: 4096,
             temperature: 0.3,
@@ -2661,9 +2673,12 @@ ${articleText}`;
           if (aiResponse && aiResponse.response && aiResponse.response.trim().length >= 50) {
             summary = aiResponse.response;
             aiSource = 'cloudflare-workers-ai';
+          } else {
+            errors.push({ url: article.url.substring(0, 60), error: 'workers_ai_empty' });
           }
         } catch (e) {
           console.warn('[NEWS-AI-BG] Workers AI failed:', e.message);
+          errors.push({ url: article.url.substring(0, 60), error: 'workers_ai_' + e.message.substring(0, 80) });
         }
       }
 
@@ -2671,18 +2686,25 @@ ${articleText}`;
       if (summary && summary.trim().length >= 50) {
         try {
           await writeAppCache(env, aiKey, summary, NEWS_AI_CACHE_TTL);
+          success++;
           console.log('[NEWS-AI-BG] SUCCESS:', article.url.substring(0, 60), 'source:', aiSource, 'length:', summary.length);
         } catch (e) {
+          failed++;
           console.warn('[NEWS-AI-BG] KV write failed:', e.message);
+          errors.push({ url: article.url.substring(0, 60), error: 'kv_write_' + e.message.substring(0, 80) });
         }
       } else {
+        failed++;
         console.warn('[NEWS-AI-BG] All AI methods failed for:', article.url.substring(0, 60));
       }
 
     } catch (e) {
+      failed++;
       console.warn('[NEWS-AI-BG] Error processing:', article.url.substring(0, 60), e.message);
+      errors.push({ url: article.url.substring(0, 60), error: e.message.substring(0, 80) });
     }
   }
+  return { processed: success + failed, success, failed, errors: errors.slice(0, 5) };
 }
 
 /**
@@ -2741,10 +2763,28 @@ async function processNewsAIBatch(env) {
 
   console.log('[NEWS-AI-CRON] Found', deduped.length, 'articles. Checking which need AI summaries...');
 
-  // Step 2: Process AI summaries for articles that don't have one
-  await processNewsAIJobs(env, deduped);
+  // Step 1.5: Cache the articles in KV so users get instant response
+  // (Previously articles were only cached when a user requested /api/farsi-news,
+  // meaning the first user after cache expiry had to wait for live RSS fetch.)
+  const MAX_NEWS_ARTICLES = 30;
+  const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
+  try {
+    await writeAppCache(
+      env,
+      FARSI_NEWS_CACHE_KEY,
+      JSON.stringify(trimmed),
+      getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
+    );
+    console.log('[NEWS-AI-CRON] Cached', trimmed.length, 'articles in KV');
+  } catch (e) {
+    console.warn('[NEWS-AI-CRON] Failed to cache articles:', e.message);
+  }
 
-  console.log('[NEWS-AI-CRON] Batch processing complete.');
+  // Step 2: Process AI summaries for articles that don't have one
+  const aiResult = await processNewsAIJobs(env, deduped);
+
+  console.log('[NEWS-AI-CRON] Batch processing complete.', aiResult);
+  return { articlesCached: trimmed.length, ai: aiResult };
 }
 
 function parseCalendarDate(dateString) {
@@ -5930,6 +5970,74 @@ export default {
           }
         } catch (e) {
           log.push({ step: 'EXCEPTION', error: e.message });
+          return jsonResponse({ status: 'error', log, error: e.message, totalMs: Date.now() - t0 }, {}, env);
+        }
+      }
+
+      // ── DIAGNOSTIC: Full cron pipeline test (RSS → AI → KV → fetch) ──
+      if (request.method === 'GET' && url.pathname === '/api/_diag/news-cron-pipeline') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.DIAG_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+        const log = [];
+        const t0 = Date.now();
+        try {
+          // Step 1: Check if cron is configured
+          log.push({ step: 'CRON_CONFIG', crons: ['* * * * *', '*/15 * * * *'] });
+
+          // Step 1.5: Test RSS sources individually
+          log.push({ step: 'RSS_SOURCES_TEST', sourceCount: NEWS_RSS_SOURCES.length });
+          const sourceResults = await Promise.allSettled(
+            NEWS_RSS_SOURCES.map(async (source) => {
+              try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                const response = await fetch(source.url, {
+                  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)' },
+                  signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+                const text = await response.text();
+                return { name: source.name, url: source.url, status: response.status, hasItems: text.includes('<item>'), length: text.length };
+              } catch (e) {
+                return { name: source.name, url: source.url, error: e.message };
+              }
+            })
+          );
+          log.push({
+            step: 'RSS_RESULTS',
+            sources: sourceResults.map(r => r.status === 'fulfilled' ? r.value : { error: r.reason?.message }),
+          });
+
+          // Step 2: Run processNewsAIBatch (the actual cron function)
+          log.push({ step: 'BATCH_START' });
+          const batchResult = await processNewsAIBatch(env).catch(e => ({ error: e.message }));
+          log.push({ step: 'BATCH_DONE', result: batchResult });
+
+          // Step 3: Fetch news and check how many have AI summaries
+          const newsResult = await fetchFarsiNews(env, null);
+          const articles = newsResult.data || [];
+          const withAi = articles.filter(a => a.ai_summary && a.ai_summary.length > 50);
+          const withoutAi = articles.filter(a => !a.ai_summary || a.ai_summary.length <= 50);
+          log.push({
+            step: 'FETCH_NEWS',
+            source: newsResult.source,
+            totalArticles: articles.length,
+            withAiSummary: withAi.length,
+            withoutAiSummary: withoutAi.length,
+            sample: articles.slice(0, 3).map(a => ({
+              title: (a.title || '').substring(0, 60),
+              hasAi: !!(a.ai_summary && a.ai_summary.length > 50),
+              aiStatus: a.ai_status,
+            })),
+          });
+
+          log.push({ step: 'COMPLETE', totalMs: Date.now() - t0 });
+          return jsonResponse({ status: 'success', log, totalMs: Date.now() - t0 }, {}, env);
+        } catch (e) {
+          log.push({ step: 'EXCEPTION', error: e.message, stack: e.stack?.substring(0, 200) });
           return jsonResponse({ status: 'error', log, error: e.message, totalMs: Date.now() - t0 }, {}, env);
         }
       }
