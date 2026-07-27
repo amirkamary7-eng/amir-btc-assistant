@@ -514,6 +514,85 @@ export function createPublisherHandlers(deps) {
     return jsonResponse({ status: 'success', result }, {}, env);
   }
 
+  // ── Channel connection test ─────────────────────────────────────────────
+  // Tests whether the bot can send messages to the configured channel.
+  // Uses getChat API to check bot membership + permissions without sending.
+
+  async function handleTestConnection(request, env) {
+    const { error } = await requireAdmin(request, env);
+    if (error) return error;
+    const settings = await readSettings(env);
+    if (!settings.channel_id) {
+      return jsonResponse({ status: 'error', message: 'شناسه کانال تنظیم نشده' }, { status: 400 }, env);
+    }
+    const botToken = String(env.TELEGRAM_BOT_TOKEN || '');
+    if (!botToken || botToken === 'REPLACE_WITH_TOKEN') {
+      return jsonResponse({ status: 'error', message: 'TELEGRAM_BOT_TOKEN تنظیم نشده' }, { status: 400 }, env);
+    }
+    try {
+      const apiUrl = `https://api.telegram.org/bot${botToken}/getChat`;
+      const res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: settings.channel_id }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        return jsonResponse({
+          status: 'error',
+          ok: false,
+          message: 'بات نمی‌تواند به کانال دسترسی پیدا کند',
+          error_code: data.error_code,
+          description: data.description,
+        }, { status: 200 }, env);
+      }
+      const chat = data.result || {};
+      const chatType = chat.type || 'unknown';
+      // For channels, check if bot is admin
+      const isChannel = chatType === 'channel';
+      let canPost = true;
+      let botStatus = null;
+      if (isChannel) {
+        try {
+          const memberRes = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: settings.channel_id, user_id: env.BOT_USER_ID || 0 }),
+            signal: AbortSignal.timeout(8000),
+          }).catch(() => null);
+          if (memberRes && memberRes.ok) {
+            const memberData = await memberRes.json();
+            botStatus = memberData.result?.status || 'unknown';
+            canPost = ['administrator', 'creator'].includes(botStatus);
+          }
+        } catch {}
+      }
+      return jsonResponse({
+        status: 'success',
+        ok: true,
+        chat: {
+          id: chat.id,
+          type: chatType,
+          title: chat.title || chat.username || '—',
+          username: chat.username || null,
+        },
+        bot_status: botStatus,
+        can_post: canPost,
+        message: canPost
+          ? '✅ اتصال موفق — بات می‌تواند به کانال پیام ارسال کند'
+          : '⚠️ بات عضو کانال است اما دسترسی ارسال ندارد — بات را ادمین کنید',
+      }, {}, env);
+    } catch (e) {
+      return jsonResponse({
+        status: 'error',
+        ok: false,
+        message: 'خطا در ارتباط با Telegram API',
+        error: e?.message || String(e),
+      }, { status: 200 }, env);
+    }
+  }
+
   // ── Send-now (skip queue) ───────────────────────────────────────────────
 
   async function handleSendNow(request, env) {
@@ -822,6 +901,7 @@ export function createPublisherHandlers(deps) {
     handleStats,
     handleCheckDedup,
     handleProcessNow,
+    handleTestConnection,
     handleSendNow,
     processPublisherQueue,
     autoPublishCheck,

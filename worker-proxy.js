@@ -6151,6 +6151,9 @@ export default {
       if (url.pathname === '/api/admin/publisher/process' && request.method === 'POST') {
         return await publisherHandlers.handleProcessNow(request, env);
       }
+      if (url.pathname === '/api/admin/publisher/test-connection' && request.method === 'POST') {
+        return await publisherHandlers.handleTestConnection(request, env);
+      }
       if (/^\/api\/admin\/publisher\/retry\/\d+$/.test(url.pathname) && request.method === 'POST') {
         const id = url.pathname.split('/').pop();
         return await publisherHandlers.handleRetry(request, env, id);
