@@ -5684,73 +5684,246 @@ ${articleText}`;
 
           console.log('[NEWS-AI] Calling Gemini API, prompt length:', prompt.length);
 
-          const geminiController = new AbortController();
-          const geminiTimeout = setTimeout(() => geminiController.abort(), 45000);
-          const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: {
-                  temperature: 0.3,
-                  maxOutputTokens: 4096,
-                  topP: 0.8,
-                },
-              }),
-              signal: geminiController.signal,
+          let summary = null;
+          let aiSource = 'none';
+
+          // ── Method 1: Try Gemini 2.0 Flash (works but may be quota-limited) ──
+          const GEMINI_API_KEY = env.GEMINI_API_KEY;
+          if (GEMINI_API_KEY) {
+            try {
+              const t2 = Date.now();
+              const geminiController = new AbortController();
+              const geminiTimeout = setTimeout(() => geminiController.abort(), 45000);
+              const geminiRes = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: {
+                      temperature: 0.3,
+                      maxOutputTokens: 4096,
+                      topP: 0.8,
+                    },
+                  }),
+                  signal: geminiController.signal,
+                }
+              );
+              clearTimeout(geminiTimeout);
+              const geminiMs = Date.now() - t2;
+
+              console.log('[NEWS-AI] Gemini response status:', geminiRes.status, 'time:', geminiMs + 'ms');
+
+              if (geminiRes.ok) {
+                const geminiData = await geminiRes.json();
+                summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (summary && summary.trim().length >= 50) {
+                  aiSource = 'gemini-2.0-flash';
+                  console.log('[NEWS-AI] Gemini SUCCESS! Summary length:', summary.length);
+                }
+              } else {
+                const errBody = await geminiRes.text().catch(() => '');
+                console.warn('[NEWS-AI] Gemini error:', geminiRes.status, errBody.substring(0, 200));
+              }
+            } catch (geminiErr) {
+              console.warn('[NEWS-AI] Gemini exception:', geminiErr.message);
             }
-          );
-          clearTimeout(geminiTimeout);
-
-          console.log('[NEWS-AI] Gemini response status:', geminiRes.status);
-
-          if (!geminiRes.ok) {
-            const errBody = await geminiRes.text().catch(() => '');
-            console.error('[NEWS-AI] Gemini API error:', geminiRes.status, errBody.substring(0, 300));
-            throw new Error(`Gemini API error: ${geminiRes.status} — ${errBody.substring(0, 200)}`);
           }
 
-          const geminiData = await geminiRes.json();
+          // ── Method 2: Fallback to Cloudflare Workers AI (free, no quota, no location limit) ──
+          if (!summary && env.AI) {
+            try {
+              console.log('[NEWS-AI] Trying Cloudflare Workers AI fallback...');
+              const t3 = Date.now();
+              // Use @cf/meta/llama-3.3-70b-instruct-fp8-fast (fast, free, multilingual)
+              const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+                messages: [
+                  { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
+                  { role: 'user', content: articleText },
+                ],
+                max_tokens: 4096,
+                temperature: 0.3,
+              });
+              const aiMs = Date.now() - t3;
+              console.log('[NEWS-AI] Workers AI response time:', aiMs + 'ms');
 
-          // Log full response structure for debugging
-          console.log('[NEWS-AI] Gemini response keys:', Object.keys(geminiData));
-          console.log('[NEWS-AI] Candidates count:', geminiData?.candidates?.length);
-          if (geminiData?.candidates?.[0]) {
-            console.log('[NEWS-AI] Candidate finishReason:', geminiData.candidates[0].finishReason);
-            console.log('[NEWS-AI] Candidate content exists:', !!geminiData.candidates[0].content);
-            console.log('[NEWS-AI] Parts count:', geminiData.candidates[0].content?.parts?.length);
+              if (aiResponse && aiResponse.response) {
+                summary = aiResponse.response;
+                if (summary.trim().length >= 50) {
+                  aiSource = 'cloudflare-workers-ai';
+                  console.log('[NEWS-AI] Workers AI SUCCESS! Summary length:', summary.length);
+                } else {
+                  summary = null;
+                }
+              }
+            } catch (aiErr) {
+              console.warn('[NEWS-AI] Workers AI exception:', aiErr.message);
+            }
           }
 
-          const summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-          if (!summary) {
-            console.error('[NEWS-AI] Gemini returned no text. Full response:', JSON.stringify(geminiData).substring(0, 500));
-            throw new Error('Gemini returned empty response');
+          if (!summary || summary.trim().length < 50) {
+            console.error('[NEWS-AI] All AI methods failed. Returning RSS fallback.');
+            return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: 'all_ai_methods_failed' }, {}, env);
           }
-
-          if (summary.trim().length < 50) {
-            console.error('[NEWS-AI] Gemini response too short:', summary.substring(0, 100));
-            throw new Error('Gemini returned too short response: ' + summary.length + ' chars');
-          }
-
-          console.log('[NEWS-AI] SUCCESS! Summary length:', summary.length, 'first 100 chars:', summary.substring(0, 100));
 
           // Step 4: Cache in KV for 7 days (604800 seconds)
           try {
             await writeAppCache(env, cacheKey, summary, 604800);
-            console.log('[NEWS-AI] Cached in KV for 7 days');
+            console.log('[NEWS-AI] Cached in KV for 7 days, source:', aiSource);
           } catch (e) {
             console.warn('[NEWS-AI] KV cache write failed:', e.message);
           }
 
-          return jsonResponse({ status: 'success', summary, cached: false }, {}, env);
+          console.log('[NEWS-AI] DONE! source:', aiSource, 'length:', summary.length);
+          return jsonResponse({ status: 'success', summary, cached: false, aiSource }, {}, env);
 
         } catch (error) {
-          console.error('[NEWS-AI] Gemini call FAILED:', error.message);
+          console.error('[NEWS-AI] All AI failed:', error.message);
           // Fallback to RSS body
           return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: error.message }, {}, env);
+        }
+      }
+
+      // ── DIAGNOSTIC: Find working Workers AI text generation model ──
+      if (request.method === 'GET' && url.pathname === '/api/_diag/ai-models') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.DIAG_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+        if (!env.AI) {
+          return jsonResponse({ status: 'error', error: 'AI binding not configured' }, {}, env);
+        }
+        const modelsToTry = [
+          '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+          '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+          '@cf/meta/llama-3-8b-instruct',
+          '@cf/meta/llama-2-7b-chat-int8',
+          '@hf/thebloke/neural-chat-7b-v3-1-awq',
+          '@cf/meta/mistral-7b-instruct-v0.1',
+          '@cf/qwen/qwen1.5-14b-chat-awq',
+          '@cf/qwen/qwen1.5-7b-chat-awq',
+          '@cf/meta/llama-3.1-8b-instruct',
+          '@cf/deepseek-ai/deepseek-coder-6.7b-instruct-awq',
+        ];
+        const results = [];
+        for (const model of modelsToTry) {
+          try {
+            const response = await env.AI.run(model, {
+              messages: [
+                { role: 'user', content: 'Say "hello" in Persian (Farsi). Just one word.' },
+              ],
+              max_tokens: 20,
+            });
+            const text = response?.response || response?.generated_text || '';
+            results.push({ model, status: 'OK', responseLength: text.length, sample: text.substring(0, 50) });
+          } catch (e) {
+            results.push({ model, status: 'FAIL', error: e.message?.substring(0, 100) });
+          }
+        }
+        return jsonResponse({ status: 'success', results }, {}, env);
+      }
+
+      // ── DIAGNOSTIC: Test news summarization end-to-end ──
+      if (request.method === 'GET' && url.pathname === '/api/_diag/news-ai-test') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.DIAG_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+
+        const testArticle = 'Bitcoin price surged 5% today, reaching $65,000. The rally was driven by institutional inflows into spot ETFs. BlackRock led with $218 million in daily inflows, followed by Fidelity with $89 million. Analysts at JPMorgan predict further upside if BTC breaks the $67,000 resistance level. The total crypto market cap now stands at $2.3 trillion. Ethereum also gained 3%, trading at $3,450. The Fear and Greed Index moved from 26 (Fear) to 34 (Fear), indicating improving sentiment.';
+
+        const log = [];
+        const t0 = Date.now();
+
+        try {
+          log.push({ step: 'AI_REQUEST', model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', articleLength: testArticle.length });
+
+          const t1 = Date.now();
+          const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+            messages: [
+              { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details, numbers, and names. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
+              { role: 'user', content: testArticle },
+            ],
+            max_tokens: 4096,
+            temperature: 0.3,
+          });
+          const aiMs = Date.now() - t1;
+
+          log.push({ step: 'AI_RESPONSE', timeMs: aiMs, hasResponse: !!aiResponse?.response });
+
+          if (aiResponse && aiResponse.response) {
+            log.push({ step: 'SUCCESS', summaryLength: aiResponse.response.length, first200: aiResponse.response.substring(0, 200) });
+            return jsonResponse({ status: 'success', log, summary: aiResponse.response, totalMs: Date.now() - t0 }, {}, env);
+          } else {
+            log.push({ step: 'EMPTY_RESPONSE', fullResponse: JSON.stringify(aiResponse).substring(0, 300) });
+            return jsonResponse({ status: 'error', log, error: 'Empty AI response', totalMs: Date.now() - t0 }, {}, env);
+          }
+        } catch (e) {
+          log.push({ step: 'EXCEPTION', error: e.message });
+          return jsonResponse({ status: 'error', log, error: e.message, totalMs: Date.now() - t0 }, {}, env);
+        }
+      }
+
+      // ── DIAGNOSTIC: List available Gemini models ──
+      if (request.method === 'GET' && url.pathname === '/api/_diag/gemini-models') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.DIAG_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+        const GEMINI_API_KEY = env.GEMINI_API_KEY;
+        if (!GEMINI_API_KEY) {
+          return jsonResponse({ status: 'error', error: 'no_api_key' }, {}, env);
+        }
+        try {
+          // Try multiple model names — Google keeps renaming/deprecating
+          const modelNames = [
+            'gemini-2.5-flash',
+            'gemini-2.0-flash',
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-latest',
+            'gemini-flash-latest',
+          ];
+          let geminiRes = null;
+          let modelUsed = null;
+          const modelErrors = [];
+          for (const modelName of modelNames) {
+            try {
+              const testRes = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ parts: [{ text: 'Say hello' }] }],
+                    generationConfig: { temperature: 0, maxOutputTokens: 10 },
+                  }),
+                  signal: AbortSignal.timeout(10000),
+                }
+              );
+              if (testRes.ok) {
+                geminiRes = testRes;
+                modelUsed = modelName;
+                break;
+              } else {
+                const errBody = await testRes.text().catch(() => '');
+                modelErrors.push({ model: modelName, status: testRes.status, error: errBody.substring(0, 200) });
+              }
+            } catch (e) {
+              modelErrors.push({ model: modelName, error: e.message });
+            }
+          }
+
+          if (!geminiRes || !modelUsed) {
+            return jsonResponse({ status: 'error', error: 'No working Gemini model found', testedModels: modelNames, modelErrors: modelErrors, apiKeyPrefix: GEMINI_API_KEY.substring(0, 10) + '...' }, {}, env);
+          }
+
+          return jsonResponse({ status: 'success', workingModel: modelUsed, testedModels: modelNames }, {}, env);
+        } catch (e) {
+          return jsonResponse({ status: 'error', error: e.message }, {}, env);
         }
       }
 
