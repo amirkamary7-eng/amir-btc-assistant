@@ -4327,7 +4327,7 @@ function renderCryptoItem(c) {
     const rankNum = Number(c.rank) || 0;
     const changeStr = (isPos ? '+' : '') + c.changePercent24Hr.toFixed(2) + '%';
     return `
-        <div class="mkt-coin-row" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
+        <div class="mkt-coin-row" data-symbol="${safeSymbol}" data-action="open-coin" role="listitem">
             <span class="mkt-coin-rank">${rankNum || '—'}</span>
             <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="mkt-coin-logo" data-symbol="${safeSymbol}" alt="${safeSymbol}" loading="lazy" decoding="async">
             <div class="mkt-coin-info">
@@ -4335,7 +4335,7 @@ function renderCryptoItem(c) {
             </div>
             <span class="mkt-coin-price">$${priceStr}</span>
             <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeStr}</span>
-            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="event.stopPropagation(); toggleWatchlist(this.dataset.symbol)" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </span>
         </div>
@@ -4365,7 +4365,7 @@ function renderBtcPairItem(p, idx) {
     const rankNum = idx + 1;
     const changeStr = (isPos ? '+' : '') + p.relativeChange.toFixed(2) + '%';
     return `
-        <div class="mkt-coin-row mkt-btc-pair-row" data-symbol="${safePairSymbol}" data-base-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)" role="listitem">
+        <div class="mkt-coin-row mkt-btc-pair-row" data-symbol="${safePairSymbol}" data-base-symbol="${safeSymbol}" data-action="open-coin" role="listitem">
             <span class="mkt-coin-rank">${rankNum}</span>
             <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="mkt-coin-logo" data-symbol="${safeSymbol}" alt="${safeSymbol}" loading="lazy" decoding="async">
             <div class="mkt-coin-info">
@@ -4374,7 +4374,7 @@ function renderBtcPairItem(p, idx) {
             </div>
             <span class="mkt-coin-price">${pairPriceStr}</span>
             <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeStr}</span>
-            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" onclick="event.stopPropagation(); toggleWatchlist(this.dataset.symbol)" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </span>
         </div>
@@ -4423,7 +4423,7 @@ function renderForexItem(f) {
     const iconBg = `background:${cfg.color}15; color:${cfg.color}; border:1px solid ${cfg.color}30;`;
 
     return `
-        <div class="mkt-coin-row mkt-forex-row" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" onclick="openForexDetail(this.dataset.symbol)" role="listitem">
+        <div class="mkt-coin-row mkt-forex-row" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" data-action="open-forex" role="listitem">
             <span class="mkt-coin-rank">—</span>
             <div class="mkt-forex-icon" style="${iconBg}">
                 <span>${cfg.icon}</span>
@@ -9629,6 +9629,34 @@ window.adminBypassMaintenance = adminBypassMaintenance;
 //#region راه‌اندازی برنامه
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
+    // ── PERFORMANCE: Event delegation for Market list ──
+    // Instead of 400+ inline onclick attributes (200 coins × 2 handlers each),
+    // use a single event listener on the coin-list-rows container.
+    // This reduces DOM parse time, memory usage, and improves interaction speed.
+    const coinListEl = document.getElementById('coin-list-rows');
+    if (coinListEl) {
+        coinListEl.addEventListener('click', function(e) {
+            // Find the closest element with data-action
+            const actionEl = e.target.closest('[data-action]');
+            if (!actionEl) return;
+            const action = actionEl.dataset.action;
+            const symbol = actionEl.dataset.symbol;
+            if (!symbol) return;
+
+            if (action === 'open-coin') {
+                e.stopPropagation();
+                openCoinDetail(symbol);
+            } else if (action === 'open-forex') {
+                e.stopPropagation();
+                openForexDetail(symbol);
+            } else if (action === 'toggle-watch') {
+                e.stopPropagation();
+                toggleWatchlist(symbol);
+            }
+        });
+        console.log('[PERF] Market event delegation installed (replaces ~400 inline onclick)');
+    }
+
     // ── Phase 0: Telegram SDK init + user resolution ──
     await UserContext.init();
 
