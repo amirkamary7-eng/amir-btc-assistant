@@ -2410,11 +2410,13 @@ async function fetchFarsiNews(env, categoryFilter) {
         getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
       );
 
-      // ── AI NEWS: Queue background AI summarization for new articles ──
-      // For each article, check if AI summary exists in KV. If not, queue it.
-      ctx_waitUntil_safe(env, processNewsAIJobs(env, trimmed));
+      // ── AI NEWS: Background AI summarization is handled by CRON, not here ──
+      // Previously tried to run processNewsAIJobs via ctx_waitUntil_safe (fire-and-forget),
+      // but Cloudflare Workers kill the isolate after HTTP response is sent.
+      // Now the cron handler (scheduled) calls processNewsAIJobs with real ctx.waitUntil.
+      // This ensures AI summaries are generated within 1 minute of article appearing.
 
-      // Enrich with AI summaries (from KV cache — instant if pre-processed)
+      // Enrich with AI summaries (from KV cache — instant if pre-processed by cron)
       const enriched = await enrichNewsWithAISummaries(env, trimmed);
 
       const categoryCounts = {
@@ -2687,6 +2689,58 @@ function ctx_waitUntil_safe(env, promise) {
   // But fetchFarsiNews doesn't have access to ctx. So we just fire-and-forget.
   // The promise runs in the background and writes to KV when done.
   promise.catch(() => {}); // Silent fail — don't crash the request
+}
+
+/**
+ * CRON-BASED AI NEWS PROCESSING
+ *
+ * Called from the scheduled handler (cron) with real ctx.waitUntil.
+ * Fetches latest news from RSS, then processes AI summaries for articles
+ * that don't have one yet.
+ *
+ * This is the correct architecture because:
+ * 1. Cron handler has ctx.waitUntil — Worker stays alive until processing completes
+ * 2. Cron runs every 1 minute — articles get processed within 60s of appearing
+ * 3. User HTTP requests only read from KV — instant response, no AI calls
+ */
+async function processNewsAIBatch(env) {
+  if (!env.APP_CACHE) return;
+
+  console.log('[NEWS-AI-CRON] Starting batch processing...');
+
+  // Step 1: Fetch latest news articles from RSS
+  const sources = await fetchAllNewsRss();
+  if (!sources || sources.length === 0) {
+    console.log('[NEWS-AI-CRON] No RSS sources available');
+    return;
+  }
+
+  // Build articles from all sources
+  const allArticles = (
+    await Promise.all(
+      sources.map((s) => buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env, s.skipTranslate))
+    )
+  ).flat();
+
+  // Deduplicate by URL
+  const seen = new Set();
+  const deduped = allArticles.filter((a) => {
+    if (!a.url || seen.has(a.url)) return false;
+    seen.add(a.url);
+    return true;
+  });
+
+  if (deduped.length === 0) {
+    console.log('[NEWS-AI-CRON] No articles to process');
+    return;
+  }
+
+  console.log('[NEWS-AI-CRON] Found', deduped.length, 'articles. Checking which need AI summaries...');
+
+  // Step 2: Process AI summaries for articles that don't have one
+  await processNewsAIJobs(env, deduped);
+
+  console.log('[NEWS-AI-CRON] Batch processing complete.');
 }
 
 function parseCalendarDate(dateString) {
@@ -6348,6 +6402,13 @@ export default {
     }
     // Phase 3 — Check for upcoming high-impact calendar events
     ctx.waitUntil(withTimeout(runCalendarAlertsCheck(env)));
+
+    // ── AI NEWS: Background processing of news articles ──
+    // Runs on EVERY cron tick (every 1 minute). Fetches latest news from RSS,
+    // then processes AI summaries for any articles that don't have one yet.
+    // Uses ctx.waitUntil (real) — Worker stays alive until processing completes.
+    // This ensures AI summaries are ready BEFORE any user opens the article.
+    ctx.waitUntil(withTimeout(processNewsAIBatch(env), 25000));
   },
 };
 //#endregion
