@@ -954,14 +954,28 @@ async function bootstrapUser() {
         if (data.channel_joined === true) {
             // Member confirmed — show floating "verified" card (auto-fades)
             setJoinLockState('joined');
+            // Cache membership status for 5 minutes (frontend cache)
+            try {
+                localStorage.setItem('membership_status_cache', JSON.stringify({
+                    status: 'joined',
+                    timestamp: Date.now(),
+                }));
+            } catch {}
         } else if (data.channel_joined === false) {
             // Confirmed non-member — show "required" card, then full lock
             setJoinLockState('not-joined');
+            // Invalidate cache
+            try { localStorage.removeItem('membership_status_cache'); } catch {}
             console.log('[JOIN-LOCK] Bootstrap returned channel_joined=false — showing lock');
         } else {
-            // Ambiguous response (missing field) — treat as not-joined, fail-closed
-            setJoinLockState('not-joined');
-            console.log('[JOIN-LOCK] Bootstrap returned ambiguous channel_joined:', data.channel_joined, '— fail-closed');
+            // Ambiguous response (missing field) — DON'T show lock.
+            // Previously this called setJoinLockState('not-joined') which was
+            // too aggressive — it showed the lock even for undefined/null/missing
+            // responses (network issues, partial responses).
+            // Now: allow access, backend gates APIs. Will retry on next bootstrap.
+            console.warn('[JOIN-LOCK] Bootstrap returned ambiguous channel_joined:', data.channel_joined, '— allowing access, backend gates APIs');
+            hideJoinStatusBar();
+            _joinLockShown = false;
         }
 
         // CRITICAL: Set bootstrapComplete BEFORE any UI re-renders.
@@ -1002,13 +1016,14 @@ async function bootstrapUser() {
         }
     } catch (e) {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);
-        // ROOT-CAUSE FIX (Task 37): Previously the catch block only logged the
-        // error and called applyLanguage() — leaving the Status Bar stuck on
-        // "Checking Membership…". Now we transition the floating card to the
-        // error state so the user sees a clear "Connection Error" + Retry
-        // button instead of an infinite spinner.
+        // PERFORMANCE + UX FIX: Don't show error card on bootstrap failure.
+        // Previously this called setJoinLockState('error') which showed a
+        // "Connection Error" floating card — interrupting the user experience.
+        // Now: just hide any status bar, allow access. Backend gates APIs.
+        // Bootstrap will retry automatically (tryLateBootstrap / _bootstrapLongTimer).
         clearJoinLockSafetyTimer();
-        setJoinLockState('error', e?.message || 'Bootstrap failed');
+        hideJoinStatusBar();
+        _joinLockShown = false;
         // Do NOT set bootstrapComplete — let retry try again
         applyLanguage();
     }
@@ -9673,35 +9688,61 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Result: members see NO overlay/popup at all. Non-members see the lock only
     // after backend confirms. Error states are clearly visible with a retry CTA.
 
-    // Show floating card immediately — non-blocking, no overlay
-    setJoinLockState('loading');
+    // ── MEMBERSHIP CHECK: Background, non-blocking, cache-first ──
+    // PERFORMANCE + UX FIX: Instead of showing "Checking membership…" immediately,
+    // we show the app instantly and run the membership check in the background.
+    //
+    // Flow:
+    //   1. Check frontend cache (5 min TTL) — if cached as "joined", skip UI entirely
+    //   2. Show app immediately (no loading card)
+    //   3. Run bootstrap in background (includes membership check)
+    //   4. If channel_joined === false → show Join Lock (only confirmed non-members)
+    //   5. If channel_joined === true → update cache, no UI change
+    //   6. If timeout/error → allow access, check later (don't block)
+    //
+    // Security: backend still gates every API. This only affects the UI overlay.
 
-    // Hard-cut safety net (Task 37): if bootstrap hasn't completed within 12s,
-    // transition the floating card to "Connection error" so the user sees a
-    // Retry button instead of an infinite spinner. This is a real fallback —
-    // not just a log line. Cleared by clearJoinLockSafetyTimer() once
-    // bootstrap resolves (success OR error).
+    const MEMBERSHIP_CACHE_KEY = 'membership_status_cache';
+    const MEMBERSHIP_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+    // Check frontend cache first
+    let cachedMembership = null;
+    try {
+        const raw = localStorage.getItem(MEMBERSHIP_CACHE_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp) < MEMBERSHIP_CACHE_TTL) {
+                cachedMembership = parsed;
+            }
+        }
+    } catch {}
+
+    if (cachedMembership && cachedMembership.status === 'joined') {
+        // Cache says "joined" — skip loading card entirely, show app immediately
+        console.log('[JOIN-LOCK] Using cached membership: joined — skipping loading card');
+        _joinLockShown = false;
+    } else {
+        // No cache or expired — still don't show loading card.
+        // App renders immediately. Bootstrap will verify in background.
+        // Only show Join Lock if bootstrap explicitly returns channel_joined === false.
+        console.log('[JOIN-LOCK] No valid cache — app renders immediately, bootstrap verifies in background');
+    }
+
+    // Safety timer: if bootstrap doesn't complete in 2s, allow access (don't block)
+    // Previously was 12s which showed "Connection error" — now we just allow access
+    // and retry later. Security is maintained by backend gating every API call.
     clearJoinLockSafetyTimer();
     _joinLockSafetyTimer = setTimeout(() => {
         _joinLockSafetyTimer = null;
-        if (!bootstrapComplete && !_joinLockShown) {
-            // H2 FIX: Differentiate "outside Telegram (no auth)" from a real
-            // connection error. If we're not inside Telegram at all, the
-            // bootstrap will never succeed (no init data to authenticate) —
-            // showing "Connection error" is misleading. Instead show a clear
-            // "Open in Telegram" message so the user understands the cause.
-            const insideTg = isInTelegram();
-            if (!insideTg) {
-                console.warn('[JOIN-LOCK] Safety timer fired (12s) — not inside Telegram, showing "open in Telegram" card');
-                setJoinLockState('error', currentLang === 'fa'
-                    ? 'برای دسترسی کامل، اپ را داخل تلگرام باز کنید'
-                    : 'For full access, open this app inside Telegram');
-            } else {
-                console.warn('[JOIN-LOCK] Safety timer fired (12s) — bootstrap still pending, showing error card');
-                setJoinLockState('error', currentLang === 'fa' ? 'زمان اتصال به سرور بیش از حد طول کشید' : 'Server took too long to respond');
-            }
+        if (!bootstrapComplete) {
+            // Timeout — don't show lock, just allow access
+            // Backend will still gate APIs that require membership
+            console.warn('[JOIN-LOCK] Bootstrap timeout (2s) — allowing access, will retry');
+            // Hide any floating card if visible
+            hideJoinStatusBar();
+            _joinLockShown = false;
         }
-    }, 12000);
+    }, 2000); // 2s timeout (was 12s)
 
     // ── PARALLEL EXECUTION: maintenance check + bootstrap + data prep ──
     // Previously these ran sequentially (maintenance → join-lock → bootstrap → data),
