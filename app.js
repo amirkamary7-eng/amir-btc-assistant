@@ -3130,26 +3130,57 @@ async function resolveChartSymbol(symbol) {
 }
 
 /**
- * PERFORMANCE: Shared promise cache for in-flight requests.
- * Prevents duplicate API calls when multiple components request the same endpoint
- * simultaneously. Keyed by URL. Promise is removed after completion (success or error).
+ * PERFORMANCE: Two-layer request optimizer.
  *
- * Usage: const data = await sharedFetch('/api/market/overview');
- * If another call to sharedFetch('/api/market/overview') is already in-flight,
- * both callers receive the same promise (single network request).
+ * Layer 1 — Request Deduplication:
+ *   If the same URL is already being fetched, reuse the in-flight promise.
+ *   Prevents duplicate network requests when multiple components request
+ *   the same endpoint simultaneously.
+ *
+ * Layer 2 — Short TTL Cache:
+ *   After a successful response, the result is cached for a short TTL.
+ *   Subsequent calls within the TTL window return cached data instantly
+ *   (zero network requests). TTL is configurable per-endpoint.
+ *
+ * TTL defaults (overridable via options.ttlMs):
+ *   /api/market/overview → 30s   (BTC.D, F&G, market cap — changes slowly)
+ *   /api/forex           → 60s   (forex pairs — moderate frequency)
+ *   /api/market          → 30s   (coin prices — 30s matches backend cache)
+ *   /api/market/prices   → 15s   (alert prices — needs freshness)
+ *   default              → 0     (no cache, just dedup)
  */
 const _sharedPromises = {};
+const _sharedCache = {}; // { [url]: { data, expiry } }
+
+function _getTtlForUrl(url) {
+  if (url.includes('/api/market/overview')) return 30000;    // 30s
+  if (url.includes('/api/forex')) return 60000;              // 60s
+  if (url.includes('/api/market/prices')) return 15000;      // 15s
+  if (url.includes('/api/market') && !url.includes('/api/market/')) return 30000; // 30s
+  if (url.includes('fear-and-greed') || url.includes('fearGreed')) return 300000; // 300s (5min)
+  if (url.includes('dominance') || url.includes('btc-dominance')) return 900000;  // 900s (15min)
+  return 0; // no cache by default
+}
 
 async function sharedFetch(url, options = {}) {
   // Only deduplicate GET requests
   const method = (options.method || 'GET').toUpperCase();
   if (method !== 'GET') {
-    // Non-GET: just fetch directly
     const res = await fetch(url, options);
     return res.json();
   }
 
-  // Check if this URL is already being fetched
+  // Layer 2: Check TTL cache first
+  const ttlMs = options.ttlMs !== undefined ? options.ttlMs : _getTtlForUrl(url);
+  if (ttlMs > 0 && _sharedCache[url]) {
+    const cached = _sharedCache[url];
+    if (Date.now() < cached.expiry) {
+      return cached.data; // Return cached data — zero network requests
+    }
+    delete _sharedCache[url]; // expired
+  }
+
+  // Layer 1: Check if this URL is already being fetched (dedup)
   if (_sharedPromises[url]) {
     return _sharedPromises[url];
   }
@@ -3167,15 +3198,31 @@ async function sharedFetch(url, options = {}) {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
-      return await res.json();
+      const data = await res.json();
+
+      // Store in TTL cache if TTL > 0
+      if (ttlMs > 0) {
+        _sharedCache[url] = { data, expiry: Date.now() + ttlMs };
+      }
+
+      return data;
     } finally {
-      // Remove from shared cache after completion (success or error)
+      // Remove from in-flight cache after completion (success or error)
       delete _sharedPromises[url];
     }
   })();
 
   _sharedPromises[url] = promise;
   return promise;
+}
+
+// Allow manual cache invalidation (e.g., after user action that changes data)
+function invalidateSharedCache(urlPattern) {
+  for (const key of Object.keys(_sharedCache)) {
+    if (!urlPattern || key.includes(urlPattern)) {
+      delete _sharedCache[key];
+    }
+  }
 }
 // R3-6: Request deduplication — if the same GET request is already in-flight, reuse its promise
 const _requestInFlight = {};
@@ -4802,7 +4849,7 @@ function renderWatchlist() {
         return `
         <div class="watch-card" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
             <div class="watch-card-header">
-                <img src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-card-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">
+                <img loading="lazy" src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-card-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">
                 <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" aria-label="Remove">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </span>
@@ -8659,7 +8706,7 @@ async function loadImportantNews() {
             const safeImg = escapeHtml(n.image || getAmirbtcFallbackSvg(64, 64, 'AMIRBTC'));
             return `
             <div class="important-news-item priority-${pKey}" style="animation-delay:${i * 0.06}s" onclick="openDashboardNewsModal(${i})">
-                <img src="${safeImg}" class="important-news-img" alt="${safeTitle}" onerror="newsImageFallback(this)">
+                <img loading="lazy" src="${safeImg}" class="important-news-img" alt="${safeTitle}" onerror="newsImageFallback(this)">
                 <div class="important-news-content">
                     <span class="important-news-priority priority-${pKey}">${priorityIcons[pKey]}<span>${priorityLabels[pKey]}</span></span>
                     <div class="important-news-title">${safeTitle}</div>
@@ -8909,7 +8956,7 @@ function _buildTickerItem(c) {
     const changeStr = (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
     const priceStr = _formatTickerPrice(c.priceUsd);
     // Logo: prefer backend-provided image URL; fall back to coincap assets CDN;
-    // the <img onerror> swaps to a first-letter badge via iconFallback().
+    // the <img loading="lazy" onerror> swaps to a first-letter badge via iconFallback().
     const imgSrc = c.image || `https://assets.coincap.io/assets/icons/${String(c.symbol || '').toLowerCase()}@2x.png`;
     return `<div class="market-ticker-item">`
         + `<img class="market-ticker-icon" src="${escapeHtml(imgSrc)}" alt="${sym}" loading="lazy" decoding="async" data-symbol="${sym}" onerror="iconFallback(this)">`
@@ -9261,11 +9308,9 @@ function _startAllPolling() {
     if (_pollingIntervals.length) return; // already running
 
     // ── Market polling — 60s ──
-    // FIX: Was 180s combined with analysis/news, causing prices to lag 3+ minutes
-    // behind TradingView. Now on its own 60s timer so the displayed price stays
-    // within ~30-60s of the real market price (backend cache is 30s, so total
-    // max staleness = 90s).
+    // PERFORMANCE: Pauses when app not visible (visibilitychange → _stopAllPolling)
     _pollingIntervals.push(setInterval(() => {
+        if (!_appVisible) return; // PERFORMANCE: skip when tab hidden
         const activePage = document.querySelector('.page.active')?.id;
         if (activePage === 'market-page' || activePage === 'dashboard-page') {
             loadMarketData().then(() => {
@@ -9280,8 +9325,10 @@ function _startAllPolling() {
         }
     }, 60000));
 
-    // ── Analysis + News + Calendar polling — 180s (less frequent, doesn't need real-time) ──
+    // ── Analysis + News + Calendar polling — 180s ──
+    // PERFORMANCE: Pauses when app not visible
     _pollingIntervals.push(setInterval(() => {
+        if (!_appVisible) return; // PERFORMANCE: skip when tab hidden
         const activePage = document.querySelector('.page.active')?.id;
         if (activePage === 'analysis-page' || activePage === 'dashboard-page') {
             fetchAnalyses().then(changed => {
@@ -9305,32 +9352,26 @@ function _startAllPolling() {
         }
     }, 180000));
 
-    // R3-1: Alert checking — 15s interval (was 30s).
-    // OPTIMIZATION: Reduced from 30s to 15s for faster client-side trigger detection.
-    // Average delay reduced from 15s to 7.5s. The frontend fetches fresh prices
-    // from /api/market/price (no cache) for alert symbols, so this is independent
-    // of the backend cron (which runs every 1 minute).
-    _pollingIntervals.push(setInterval(checkAlerts, 15000));
+    // ── Alert checking — 15s ──
+    // PERFORMANCE: Pauses when app not visible — backend cron handles alerts when app is closed
+    _pollingIntervals.push(setInterval(() => {
+        if (!_appVisible) return; // PERFORMANCE: skip when tab hidden
+        checkAlerts();
+    }, 15000));
 
-    // R3-1b: Notification polling — 60s interval.
-    // Fetches new notifications from DB and updates badge + Notification Center.
-    // This ensures that when the backend cron creates a notification (every 5 min),
-    // the frontend picks it up within 60s — NOT waiting for the 180s heartbeat.
-    // Without this, the badge and Notification Center would be stale for up to 3 min.
+    // ── Notification polling — 60s ──
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
         loadNotificationsFromServer().catch(() => {});
     }, 60000));
 
-    // R3-2: Session heartbeat — 180s (was 120s), skips if app not visible
-    // OPTIMIZATION: Increased to match main polling interval, reduces KV writes.
+    // ── Session heartbeat — 180s ──
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
         sendSessionHeartbeat();
     }, 180000));
 
-    // R3-3: Online count — 600s (was 300s), only polls when Profile tab is active
-    // OPTIMIZATION: Doubled interval — online count is non-critical display data.
+    // ── Online count — 600s (only when Profile tab is active) ──
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
         const activePage = document.querySelector('.page.active')?.id;

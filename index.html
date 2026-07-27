@@ -824,7 +824,7 @@
 
         <!-- AB Token Wallet Card -->
         <div id="wallet-preview-card" class="wallet-preview-card skeleton-loading" onclick="if(window.WalletApp)WalletApp.openWallet()">
-            <div class="wallet-watermark"><img src="assets/token-logo.png" alt=""></div>
+            <div class="wallet-watermark"><img loading="lazy" src="assets/token-logo.png" alt=""></div>
         </div>
 
         <div class="referral-entry-card" id="referral-entry-card" onclick="if(window.ReferralApp)ReferralApp.openReferral()">
@@ -1001,7 +1001,7 @@
                 <h3 id="news-modal-title">عنوان خبر</h3>
                 <button class="modal-close-btn" onclick="closeNewsModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
-            <img id="news-modal-image" src="" alt="" style="width:100%; border-radius:12px; margin:10px 0; max-height:200px; object-fit:cover;">
+            <img loading="lazy" id="news-modal-image" src="" alt="" style="width:100%; border-radius:12px; margin:10px 0; max-height:200px; object-fit:cover;">
             <p id="news-modal-body" style="color:var(--text-dim); line-height:1.6;"></p>
             <a id="news-modal-link" href="#" target="_blank" class="news-source-link" data-i18n="view_source">مشاهده منبع</a>
         </div>
