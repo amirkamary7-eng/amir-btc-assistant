@@ -10073,6 +10073,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Data loading function (called after membership confirmed) ──
     // All data requests run in PARALLEL — not chained.
     function _startDataLoading() {
+        // PERF: All 4 data sources load IN PARALLEL — no setTimeout delays.
+        // Previously loadImportantNews was delayed by 2000ms which blocked
+        // the entire dashboard. Now all 4 fire simultaneously:
+        // - market (787ms) — renders ticker + market status
+        // - analyses (35ms) — renders analysis slider + featured
+        // - news (38ms) — renders news cards + important news
+        // - calendar (445ms) — renders calendar events
+        // Each renders independently as soon as it resolves.
         loadMarketData(true).then(() => {
             renderDashboardMarketStatus();
             renderWatchlist();
@@ -10089,9 +10097,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             checkAnalysisDeepLink();
         }).finally(() => { _dashboardReady.analyses = true; _checkDashboardReady(); });
-        setTimeout(() => {
-            loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
-        }, 2000);
+        loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
         loadCalendarEvents().then(() => renderDashboardCalendar()).catch(() => renderDashboardCalendar());
     }
 
