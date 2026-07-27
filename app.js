@@ -6335,9 +6335,63 @@ function openNewsModal(idx) {
     const el = (id) => $(id);
     const titleEl = el('news-modal-title'); if (titleEl) titleEl.innerText = n.title;
     const imgEl = el('news-modal-image'); if (imgEl) { imgEl.src = n.image || getAmirbtcFallbackSvg(400, 250, 'AMIRBTC'); imgEl.onerror = function() { newsImageFallback(this); }; }
-    const bodyEl = el('news-modal-body'); if (bodyEl) bodyEl.innerText = n.body || t('news_unavailable');
+    // Show RSS body immediately as placeholder
+    const bodyEl = el('news-modal-body');
+    if (bodyEl) {
+        bodyEl.innerText = n.body || t('news_unavailable');
+        // Add a subtle loading indicator if we're going to fetch AI summary
+        if (n.url && n.body) {
+            bodyEl.style.opacity = '0.7';
+        }
+    }
     const linkEl = el('news-modal-link'); if (linkEl) { linkEl.href = n.url || '#'; linkEl.innerText = t('view_source'); }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
+
+    // AI SUMMARY: Fetch Gemini-generated Persian summary in background
+    // If cached (KV), response is instant. If not, Gemini generates (takes ~5-10s).
+    // On any error, the RSS body (already displayed) remains — no UX disruption.
+    if (n.url && API_BASE && !UserContext.isGuest()) {
+        fetchNewsSummary(n);
+    }
+}
+
+/**
+ * Fetch AI-generated Persian summary for a news article.
+ * Calls POST /api/news/summarize with the article URL + RSS body (fallback).
+ * On success, replaces the modal body with the AI summary.
+ * On any error, the RSS body (already shown) remains untouched.
+ *
+ * @param {object} newsItem - { url, body, title }
+ */
+async function fetchNewsSummary(newsItem) {
+    try {
+        const data = await apiFetch('/api/news/summarize', {
+            method: 'POST',
+            body: JSON.stringify({
+                url: newsItem.url,
+                title: newsItem.title,
+                body: newsItem.body || '',
+            }),
+        });
+
+        if (data && data.status === 'success' && data.summary && data.summary.trim().length > 50) {
+            // Only update if modal is still open
+            const modal = document.getElementById('news-modal');
+            if (modal && modal.style.display === 'flex') {
+                const bodyEl = document.getElementById('news-modal-body');
+                if (bodyEl) {
+                    bodyEl.innerText = data.summary;
+                    bodyEl.style.opacity = '1';
+                }
+            }
+            console.log('[NEWS-AI] Summary loaded:', data.cached ? 'cached' : 'fresh', data.fallback ? '(fallback)' : '(gemini)');
+        }
+    } catch (e) {
+        // Silent fail — RSS body remains
+        console.warn('[NEWS-AI] Failed to load summary:', e.message);
+        const bodyEl = document.getElementById('news-modal-body');
+        if (bodyEl) bodyEl.style.opacity = '1';
+    }
 }
 /**
  * اخبار مودال را می‌بندد.
@@ -8751,9 +8805,20 @@ function openNewsModalWith(n) {
     const el = (id) => $(id);
     const titleEl = el('news-modal-title'); if (titleEl) titleEl.innerText = n.title;
     const imgEl = el('news-modal-image'); if (imgEl) { imgEl.src = n.image || getAmirbtcFallbackSvg(400, 250, 'AMIRBTC'); imgEl.onerror = function() { newsImageFallback(this); }; }
-    const bodyEl = el('news-modal-body'); if (bodyEl) bodyEl.innerText = n.body || n.summary || t('news_unavailable');
+    const bodyEl = el('news-modal-body');
+    if (bodyEl) {
+        bodyEl.innerText = n.body || n.summary || t('news_unavailable');
+        if (n.url && (n.body || n.summary)) {
+            bodyEl.style.opacity = '0.7';
+        }
+    }
     const linkEl = el('news-modal-link'); if (linkEl) { linkEl.href = n.url || '#'; linkEl.innerText = t('view_source'); }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
+
+    // AI SUMMARY: same as openNewsModal
+    if (n.url && API_BASE && !UserContext.isGuest()) {
+        fetchNewsSummary(n);
+    }
 }
 
 // ============================================================================

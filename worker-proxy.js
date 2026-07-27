@@ -5517,6 +5517,154 @@ export default {
         return await handleFarsiNews(request, env);
       }
 
+      // ── AI News Summary — Gemini 2.5 Flash ──
+      // Fetches full article from source URL, extracts text, summarizes to Persian
+      // via Gemini API, caches in KV for 7 days. Falls back to RSS text on error.
+      if (request.method === 'POST' && url.pathname === '/api/news/summarize') {
+        const authState = await authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+
+        const bodyResult = await readJsonBody(request, 10240, env);
+        if (bodyResult.error) return bodyResult.error;
+        const { url: articleUrl, title: articleTitle, body: rssBody } = bodyResult.payload || {};
+
+        if (!articleUrl) {
+          return jsonResponse({ status: 'error', message: 'Missing url' }, { status: 422 }, env);
+        }
+
+        // Generate cache key from URL hash
+        const cacheKey = `news:summary:${articleUrl}`;
+
+        // Check KV cache first (7 day TTL)
+        try {
+          const cached = await readAppCache(env, cacheKey);
+          if (cached) {
+            console.log('[NEWS-AI] Cache hit for:', articleUrl.substring(0, 60));
+            return jsonResponse({ status: 'success', summary: cached, cached: true }, {}, env);
+          }
+        } catch {}
+
+        // No cache — fetch article, extract text, call Gemini
+        const GEMINI_API_KEY = env.GEMINI_API_KEY;
+        if (!GEMINI_API_KEY) {
+          // No Gemini key — fallback to RSS body
+          return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true }, {}, env);
+        }
+
+        try {
+          // Step 1: Fetch the article page
+          const fetchController = new AbortController();
+          const fetchTimeout = setTimeout(() => fetchController.abort(), 8000);
+          const articleRes = await fetch(articleUrl, {
+            signal: fetchController.signal,
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)', 'Accept': 'text/html' },
+          });
+          clearTimeout(fetchTimeout);
+
+          if (!articleRes.ok) {
+            throw new Error(`Failed to fetch article: HTTP ${articleRes.status}`);
+          }
+
+          const html = await articleRes.text();
+
+          // Step 2: Extract text from HTML (simple extraction — no Readability lib in Workers)
+          // Remove script, style, nav, footer, header tags, then strip all HTML
+          let articleText = html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+            .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+            .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+            .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
+            .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
+            .replace(/<[^>]+>/g, ' ') // Strip all HTML tags
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          // Limit to 12000 characters
+          if (articleText.length > 12000) {
+            articleText = articleText.substring(0, 12000);
+          }
+
+          if (articleText.length < 100) {
+            throw new Error('Article text too short after extraction');
+          }
+
+          // Step 3: Call Gemini 2.5 Flash API
+          const prompt = `You are a professional crypto news editor.
+
+Read the following news article.
+
+Generate the response in Persian.
+
+Rules:
+- Keep all important facts.
+- Do not invent information.
+- Do not change numbers.
+- Do not add opinions.
+- Maximum 450 words.
+- Use short paragraphs.
+- Keep names in English if needed.
+- End with one sentence:
+"برای مطالعه نسخه کامل، لینک منبع را مشاهده کنید."
+
+Article:
+
+${articleText}`;
+
+          const geminiController = new AbortController();
+          const geminiTimeout = setTimeout(() => geminiController.abort(), 30000);
+          const geminiRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                  temperature: 0.3,
+                  maxOutputTokens: 1024,
+                  topP: 0.8,
+                },
+              }),
+              signal: geminiController.signal,
+            }
+          );
+          clearTimeout(geminiTimeout);
+
+          if (!geminiRes.ok) {
+            const errBody = await geminiRes.text().catch(() => '');
+            throw new Error(`Gemini API error: ${geminiRes.status} ${errBody.substring(0, 200)}`);
+          }
+
+          const geminiData = await geminiRes.json();
+          const summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+          if (!summary || summary.trim().length < 50) {
+            throw new Error('Gemini returned empty or too short response');
+          }
+
+          // Step 4: Cache in KV for 7 days (604800 seconds)
+          try {
+            await writeAppCache(env, cacheKey, summary, 604800);
+          } catch {}
+
+          console.log('[NEWS-AI] Generated summary for:', articleUrl.substring(0, 60), 'length:', summary.length);
+          return jsonResponse({ status: 'success', summary, cached: false }, {}, env);
+
+        } catch (error) {
+          console.warn('[NEWS-AI] Failed for', articleUrl.substring(0, 60), ':', error.message);
+          // Fallback to RSS body
+          return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: error.message }, {}, env);
+        }
+      }
+
       // Future: /api/news/stream SSE endpoint for breaking news push.
       // Requires Durable Object for true WebSocket, or simple SSE stream.
       // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
