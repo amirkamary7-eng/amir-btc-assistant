@@ -5218,13 +5218,19 @@ async function loadNews(force = false, append = false) {
                     image: a.image, url: a.url, time: a.time_ago,
                     category: a.category || 'crypto',
                     sentiment: a.sentiment || 'neutral',
-                    summary: a.summary || ''
+                    summary: a.summary || '',
+                    ai_summary: a.ai_summary || null,
+                    ai_status: a.ai_status || 'pending',
+                    source_name: a.source_name || a.source || '',
                 }));
             }
             hasMore = json.pagination?.hasMore || false;
             total = json.pagination?.total || 0;
             if (json.categoryCounts) {
                 categoryCounts = json.categoryCounts;
+                updateNewsBadges();
+            } else if (json.category_counts) {
+                categoryCounts = json.category_counts;
                 updateNewsBadges();
             }
             // M1 FIX: clear any previous auth-error flag on success
