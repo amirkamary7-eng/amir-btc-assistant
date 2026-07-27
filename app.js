@@ -6335,63 +6335,55 @@ function openNewsModal(idx) {
     const el = (id) => $(id);
     const titleEl = el('news-modal-title'); if (titleEl) titleEl.innerText = n.title;
     const imgEl = el('news-modal-image'); if (imgEl) { imgEl.src = n.image || getAmirbtcFallbackSvg(400, 250, 'AMIRBTC'); imgEl.onerror = function() { newsImageFallback(this); }; }
-    // Show RSS body immediately as placeholder
     const bodyEl = el('news-modal-body');
+
+    // ── AI SUMMARY ARCHITECTURE ──
+    // AI summary is pre-processed in the background and included in the news data.
+    // If ai_summary exists → show it immediately (no delay).
+    // If ai_status is 'pending' → show skeleton loading (AI is processing in background).
+    // If ai_status is 'failed' or no AI data → show RSS body as fallback.
     if (bodyEl) {
-        bodyEl.innerText = n.body || t('news_unavailable');
-        // Add a subtle loading indicator if we're going to fetch AI summary
-        if (n.url && n.body) {
-            bodyEl.style.opacity = '0.7';
+        if (n.ai_summary && n.ai_summary.trim().length > 50) {
+            // AI summary is ready — show immediately
+            bodyEl.innerText = n.ai_summary;
+            bodyEl.style.opacity = '1';
+        } else if (n.ai_status === 'pending') {
+            // AI is processing in background — show skeleton loading
+            bodyEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:#94a3b8;font-size:13px;padding:12px 0;">' +
+                '<svg class="jsb-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:16px;height:16px;animation:spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>' +
+                '<span>در حال آماده‌سازی خلاصه هوشمند...</span></div>';
+            bodyEl.style.opacity = '1';
+
+            // Poll for AI summary availability (every 5s, max 3 attempts)
+            let pollCount = 0;
+            const pollInterval = setInterval(async () => {
+                pollCount++;
+                if (pollCount > 3 || !document.getElementById('news-modal') || document.getElementById('news-modal').style.display === 'none') {
+                    clearInterval(pollInterval);
+                    // If still no summary after 15s, show RSS body
+                    if (pollCount > 3 && bodyEl && bodyEl.innerHTML.includes('در حال آماده‌سازی')) {
+                        bodyEl.innerText = n.body || t('news_unavailable');
+                    }
+                    return;
+                }
+                // Re-fetch news data to check if AI summary is ready
+                try {
+                    const data = await apiFetch('/api/farsi-news?page=1&limit=1');
+                    if (data && data.data && data.data[0] && data.data[0].ai_summary) {
+                        bodyEl.innerText = data.data[0].ai_summary;
+                        bodyEl.style.opacity = '1';
+                        clearInterval(pollInterval);
+                    }
+                } catch {}
+            }, 5000);
+        } else {
+            // No AI data — show RSS body
+            bodyEl.innerText = n.body || t('news_unavailable');
+            bodyEl.style.opacity = '1';
         }
     }
     const linkEl = el('news-modal-link'); if (linkEl) { linkEl.href = n.url || '#'; linkEl.innerText = t('view_source'); }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
-
-    // AI SUMMARY: Fetch Gemini-generated Persian summary in background
-    // If cached (KV), response is instant. If not, Gemini generates (takes ~5-10s).
-    // On any error, the RSS body (already displayed) remains — no UX disruption.
-    if (n.url && API_BASE && !UserContext.isGuest()) {
-        fetchNewsSummary(n);
-    }
-}
-
-/**
- * Fetch AI-generated Persian summary for a news article.
- * Calls POST /api/news/summarize with the article URL + RSS body (fallback).
- * On success, replaces the modal body with the AI summary.
- * On any error, the RSS body (already shown) remains untouched.
- *
- * @param {object} newsItem - { url, body, title }
- */
-async function fetchNewsSummary(newsItem) {
-    try {
-        const data = await apiFetch('/api/news/summarize', {
-            method: 'POST',
-            body: JSON.stringify({
-                url: newsItem.url,
-                title: newsItem.title,
-                body: newsItem.body || '',
-            }),
-        });
-
-        if (data && data.status === 'success' && data.summary && data.summary.trim().length > 50) {
-            // Only update if modal is still open
-            const modal = document.getElementById('news-modal');
-            if (modal && modal.style.display === 'flex') {
-                const bodyEl = document.getElementById('news-modal-body');
-                if (bodyEl) {
-                    bodyEl.innerText = data.summary;
-                    bodyEl.style.opacity = '1';
-                }
-            }
-            console.log('[NEWS-AI] Summary loaded:', data.cached ? 'cached' : 'fresh', data.fallback ? '(fallback)' : '(gemini)');
-        }
-    } catch (e) {
-        // Silent fail — RSS body remains
-        console.warn('[NEWS-AI] Failed to load summary:', e.message);
-        const bodyEl = document.getElementById('news-modal-body');
-        if (bodyEl) bodyEl.style.opacity = '1';
-    }
 }
 /**
  * اخبار مودال را می‌بندد.
@@ -8807,18 +8799,21 @@ function openNewsModalWith(n) {
     const imgEl = el('news-modal-image'); if (imgEl) { imgEl.src = n.image || getAmirbtcFallbackSvg(400, 250, 'AMIRBTC'); imgEl.onerror = function() { newsImageFallback(this); }; }
     const bodyEl = el('news-modal-body');
     if (bodyEl) {
-        bodyEl.innerText = n.body || n.summary || t('news_unavailable');
-        if (n.url && (n.body || n.summary)) {
-            bodyEl.style.opacity = '0.7';
+        if (n.ai_summary && n.ai_summary.trim().length > 50) {
+            bodyEl.innerText = n.ai_summary;
+            bodyEl.style.opacity = '1';
+        } else if (n.ai_status === 'pending') {
+            bodyEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:#94a3b8;font-size:13px;padding:12px 0;">' +
+                '<svg class="jsb-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:16px;height:16px;animation:spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>' +
+                '<span>در حال آماده‌سازی خلاصه هوشمند...</span></div>';
+            bodyEl.style.opacity = '1';
+        } else {
+            bodyEl.innerText = n.body || n.summary || t('news_unavailable');
+            bodyEl.style.opacity = '1';
         }
     }
     const linkEl = el('news-modal-link'); if (linkEl) { linkEl.href = n.url || '#'; linkEl.innerText = t('view_source'); }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
-
-    // AI SUMMARY: same as openNewsModal
-    if (n.url && API_BASE && !UserContext.isGuest()) {
-        fetchNewsSummary(n);
-    }
 }
 
 // ============================================================================

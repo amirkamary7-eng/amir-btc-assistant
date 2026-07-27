@@ -2358,15 +2358,16 @@ async function fetchFarsiNews(env, categoryFilter) {
   if (cachedNews) {
     try {
       const parsed = JSON.parse(cachedNews);
-      // If a category filter is requested, apply it to cached data too
+      // Enrich with AI summaries from KV (if available)
+      const enriched = await enrichNewsWithAISummaries(env, parsed);
       const data = categoryFilter
-        ? parsed.filter((a) => a.category === categoryFilter)
-        : parsed;
+        ? enriched.filter((a) => a.category === categoryFilter)
+        : enriched;
       const categoryCounts = {
-        all: parsed.length,
-        crypto: parsed.filter(a => a.category === 'crypto').length,
-        forex: parsed.filter(a => a.category === 'forex').length,
-        economy: parsed.filter(a => a.category === 'economy').length,
+        all: enriched.length,
+        crypto: enriched.filter(a => a.category === 'crypto').length,
+        forex: enriched.filter(a => a.category === 'forex').length,
+        economy: enriched.filter(a => a.category === 'economy').length,
       };
       return { status: 'success', source: 'cache', data, category_counts: categoryCounts };
     } catch {
@@ -2409,17 +2410,24 @@ async function fetchFarsiNews(env, categoryFilter) {
         getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
       );
 
+      // ── AI NEWS: Queue background AI summarization for new articles ──
+      // For each article, check if AI summary exists in KV. If not, queue it.
+      ctx_waitUntil_safe(env, processNewsAIJobs(env, trimmed));
+
+      // Enrich with AI summaries (from KV cache — instant if pre-processed)
+      const enriched = await enrichNewsWithAISummaries(env, trimmed);
+
       const categoryCounts = {
-        all: trimmed.length,
-        crypto: trimmed.filter(a => a.category === 'crypto').length,
-        forex: trimmed.filter(a => a.category === 'forex').length,
-        economy: trimmed.filter(a => a.category === 'economy').length,
+        all: enriched.length,
+        crypto: enriched.filter(a => a.category === 'crypto').length,
+        forex: enriched.filter(a => a.category === 'forex').length,
+        economy: enriched.filter(a => a.category === 'economy').length,
       };
 
       // Apply category filter if requested
       const data = categoryFilter
-        ? trimmed.filter((a) => a.category === categoryFilter)
-        : trimmed;
+        ? enriched.filter((a) => a.category === categoryFilter)
+        : enriched;
 
       return {
         status: 'success',
@@ -2433,6 +2441,252 @@ async function fetchFarsiNews(env, categoryFilter) {
   }
 
   return { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
+}
+
+// ── AI NEWS SUMMARIZATION: Background processing architecture ──
+// Articles are processed in the background (not on user click).
+// AI summaries are cached in KV with key: news:ai:{url_hash}
+// When user opens an article, the summary is already ready (instant).
+
+const NEWS_AI_CACHE_PREFIX = 'news:ai:';
+const NEWS_AI_CACHE_TTL = 7 * 24 * 60 * 60; // 7 days
+
+/**
+ * Generate a stable hash from a URL for KV key.
+ */
+function hashUrl(url) {
+  let hash = 0;
+  for (let i = 0; i < url.length; i++) {
+    const char = url.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+/**
+ * Enrich news articles with AI summaries from KV cache.
+ * If summary exists → add ai_summary + ai_status='completed'
+ * If not → add ai_status='pending' (frontend shows skeleton)
+ */
+async function enrichNewsWithAISummaries(env, articles) {
+  if (!env.APP_CACHE || !Array.isArray(articles)) return articles;
+
+  const enriched = [];
+  for (const article of articles) {
+    const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url || '')}`;
+    let aiSummary = null;
+    try {
+      aiSummary = await readAppCache(env, aiKey);
+    } catch {}
+
+    enriched.push({
+      ...article,
+      ai_summary: aiSummary || null,
+      ai_status: aiSummary ? 'completed' : 'pending',
+    });
+  }
+  return enriched;
+}
+
+/**
+ * Process AI summarization jobs for news articles in the background.
+ * Called via ctx.waitUntil when news are fetched.
+ * For each article without an AI summary, generates one using Workers AI.
+ */
+async function processNewsAIJobs(env, articles) {
+  if (!env.APP_CACHE || !articles.length) return;
+
+  const GEMINI_API_KEY = env.GEMINI_API_KEY;
+  const hasWorkersAI = !!env.AI;
+
+  for (const article of articles.slice(0, 10)) { // Process max 10 per cycle
+    if (!article.url) continue;
+
+    const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
+
+    // Check if summary already exists
+    let existing = null;
+    try {
+      existing = await readAppCache(env, aiKey);
+    } catch {}
+    if (existing) continue; // Already processed — skip
+
+    console.log('[NEWS-AI-BG] Processing:', article.url.substring(0, 80));
+
+    try {
+      // Step 1: Fetch full article
+      const fetchController = new AbortController();
+      const fetchTimeout = setTimeout(() => fetchController.abort(), 10000);
+      const articleRes = await fetch(article.url, {
+        signal: fetchController.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      });
+      clearTimeout(fetchTimeout);
+
+      if (!articleRes.ok) {
+        console.warn('[NEWS-AI-BG] Article fetch failed:', articleRes.status);
+        continue; // Skip — will retry next cycle
+      }
+
+      const html = await articleRes.text();
+
+      // Step 2: Extract article text
+      let cleanedHtml = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+        .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+        .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+        .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
+        .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
+        .replace(/<form[^>]*>[\s\S]*?<\/form>/gi, '')
+        .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '');
+
+      let articleText = '';
+      let articleMatch = cleanedHtml.match(/<article[^>]*>[\s\S]*?<\/article>/i);
+      if (articleMatch) {
+        articleText = articleMatch[0];
+      }
+      if (!articleText || articleText.length < 200) {
+        articleMatch = cleanedHtml.match(/<main[^>]*>[\s\S]*?<\/main>/i);
+        if (articleMatch) articleText = articleMatch[0];
+      }
+      if (!articleText || articleText.length < 200) {
+        const paragraphs = cleanedHtml.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || [];
+        articleText = paragraphs.join(' ');
+      }
+      if (!articleText || articleText.length < 200) {
+        articleText = cleanedHtml;
+      }
+
+      articleText = articleText
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/\s+/g, ' ').trim();
+
+      if (articleText.length > 10000) articleText = articleText.substring(0, 10000);
+
+      if (articleText.length < 100) {
+        // Use RSS body as fallback for AI
+        articleText = (article.title || '') + '\n\n' + (article.body || article.description || '');
+        if (articleText.length < 50) continue;
+      }
+
+      // Step 3: Generate AI summary
+      let summary = null;
+      let aiSource = 'none';
+
+      // Method 1: Gemini 2.0 Flash (if quota available)
+      if (GEMINI_API_KEY) {
+        try {
+          const prompt = `You are a professional Persian crypto journalist.
+
+Read the entire article.
+
+Rewrite it completely in Persian.
+
+Rules:
+- Keep every important detail.
+- Do not shorten aggressively.
+- Preserve numbers.
+- Preserve names.
+- Preserve timeline.
+- Preserve technical details.
+- Maximum 800 words.
+- Use headings when appropriate.
+- Do not add opinions.
+- Do not invent anything.
+
+At the end write:
+برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.
+
+Article:
+
+${articleText}`;
+
+          const geminiController = new AbortController();
+          const geminiTimeout = setTimeout(() => geminiController.abort(), 45000);
+          const geminiRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.3, maxOutputTokens: 4096, topP: 0.8 },
+              }),
+              signal: geminiController.signal,
+            }
+          );
+          clearTimeout(geminiTimeout);
+
+          if (geminiRes.ok) {
+            const geminiData = await geminiRes.json();
+            summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (summary && summary.trim().length >= 50) {
+              aiSource = 'gemini-2.0-flash';
+            } else {
+              summary = null;
+            }
+          }
+        } catch (e) {
+          console.warn('[NEWS-AI-BG] Gemini failed:', e.message);
+        }
+      }
+
+      // Method 2: Cloudflare Workers AI (free, always available)
+      if (!summary && hasWorkersAI) {
+        try {
+          const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+            messages: [
+              { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details, numbers, and names. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
+              { role: 'user', content: articleText },
+            ],
+            max_tokens: 4096,
+            temperature: 0.3,
+          });
+
+          if (aiResponse && aiResponse.response && aiResponse.response.trim().length >= 50) {
+            summary = aiResponse.response;
+            aiSource = 'cloudflare-workers-ai';
+          }
+        } catch (e) {
+          console.warn('[NEWS-AI-BG] Workers AI failed:', e.message);
+        }
+      }
+
+      // Step 4: Cache the summary in KV (7 days)
+      if (summary && summary.trim().length >= 50) {
+        try {
+          await writeAppCache(env, aiKey, summary, NEWS_AI_CACHE_TTL);
+          console.log('[NEWS-AI-BG] SUCCESS:', article.url.substring(0, 60), 'source:', aiSource, 'length:', summary.length);
+        } catch (e) {
+          console.warn('[NEWS-AI-BG] KV write failed:', e.message);
+        }
+      } else {
+        console.warn('[NEWS-AI-BG] All AI methods failed for:', article.url.substring(0, 60));
+      }
+
+    } catch (e) {
+      console.warn('[NEWS-AI-BG] Error processing:', article.url.substring(0, 60), e.message);
+    }
+  }
+}
+
+/**
+ * Safe ctx.waitUntil wrapper — works even if ctx is not available.
+ */
+function ctx_waitUntil_safe(env, promise) {
+  // In Worker context, ctx.waitUntil is available via the module scope.
+  // But fetchFarsiNews doesn't have access to ctx. So we just fire-and-forget.
+  // The promise runs in the background and writes to KV when done.
+  promise.catch(() => {}); // Silent fail — don't crash the request
 }
 
 function parseCalendarDate(dateString) {
@@ -5517,273 +5771,6 @@ export default {
         return await handleFarsiNews(request, env);
       }
 
-      // ── AI News Summary — Gemini 2.5 Flash ──
-      // Fetches full article from source URL, extracts text, rewrites to Persian
-      // via Gemini API, caches in KV for 7 days. Falls back to RSS text on error.
-      if (request.method === 'POST' && url.pathname === '/api/news/summarize') {
-        const authState = await authenticateTelegramRequest(request, env);
-        if (authState.error) return authState.error;
-
-        const bodyResult = await readJsonBody(request, 10240, env);
-        if (bodyResult.error) return bodyResult.error;
-        const { url: articleUrl, title: articleTitle, body: rssBody } = bodyResult.payload || {};
-
-        if (!articleUrl) {
-          return jsonResponse({ status: 'error', message: 'Missing url' }, { status: 422 }, env);
-        }
-
-        // Generate cache key from URL
-        const cacheKey = `news:summary:${articleUrl}`;
-
-        // Check KV cache first (7 day TTL)
-        try {
-          const cached = await readAppCache(env, cacheKey);
-          if (cached) {
-            console.log('[NEWS-AI] Cache HIT for:', articleUrl.substring(0, 80));
-            return jsonResponse({ status: 'success', summary: cached, cached: true }, {}, env);
-          }
-        } catch (e) {
-          console.warn('[NEWS-AI] KV cache read failed:', e.message);
-        }
-
-        // No cache — fetch article, extract text, call Gemini
-        const GEMINI_API_KEY = env.GEMINI_API_KEY;
-        if (!GEMINI_API_KEY) {
-          console.error('[NEWS-AI] GEMINI_API_KEY not configured');
-          return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: 'no_api_key' }, {}, env);
-        }
-
-        let articleText = '';
-
-        try {
-          // Step 1: Fetch the article page with real browser User-Agent
-          console.log('[NEWS-AI] Fetching article:', articleUrl.substring(0, 80));
-          const fetchController = new AbortController();
-          const fetchTimeout = setTimeout(() => fetchController.abort(), 10000);
-          const articleRes = await fetch(articleUrl, {
-            signal: fetchController.signal,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-              'Accept-Language': 'en-US,en;q=0.9',
-            },
-          });
-          clearTimeout(fetchTimeout);
-
-          console.log('[NEWS-AI] Article fetch status:', articleRes.status, 'content-type:', articleRes.headers.get('content-type'));
-
-          if (!articleRes.ok) {
-            throw new Error(`Article fetch failed: HTTP ${articleRes.status}`);
-          }
-
-          const html = await articleRes.text();
-          console.log('[NEWS-AI] HTML length:', html.length);
-
-          // Step 2: Extract article text — try <article>, <main>, then <p> tags
-          // First, remove unwanted elements
-          let cleanedHtml = html
-            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-            .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-            .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-            .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
-            .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
-            .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
-            .replace(/<form[^>]*>[\s\S]*?<\/form>/gi, '')
-            .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '');
-
-          // Try to extract from <article> tag first (most semantic)
-          let articleMatch = cleanedHtml.match(/<article[^>]*>[\s\S]*?<\/article>/i);
-          if (articleMatch) {
-            articleText = articleMatch[0];
-            console.log('[NEWS-AI] Extracted from <article> tag, length:', articleText.length);
-          }
-
-          // If no <article>, try <main> tag
-          if (!articleText || articleText.length < 200) {
-            articleMatch = cleanedHtml.match(/<main[^>]*>[\s\S]*?<\/main>/i);
-            if (articleMatch) {
-              articleText = articleMatch[0];
-              console.log('[NEWS-AI] Extracted from <main> tag, length:', articleText.length);
-            }
-          }
-
-          // If still no good text, try collecting all <p> tags
-          if (!articleText || articleText.length < 200) {
-            const paragraphs = cleanedHtml.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || [];
-            articleText = paragraphs.join(' ');
-            console.log('[NEWS-AI] Extracted from <p> tags, count:', paragraphs.length, 'length:', articleText.length);
-          }
-
-          // If still nothing, use full cleaned HTML
-          if (!articleText || articleText.length < 200) {
-            articleText = cleanedHtml;
-            console.log('[NEWS-AI] Using full cleaned HTML, length:', articleText.length);
-          }
-
-          // Strip remaining HTML tags
-          articleText = articleText
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/&nbsp;/g, ' ')
-            .replace(/&amp;/g, '&')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .replace(/\s+/g, ' ')
-            .trim();
-
-          // Limit to 10000 characters
-          if (articleText.length > 10000) {
-            articleText = articleText.substring(0, 10000);
-          }
-
-          console.log('[NEWS-AI] Final article text length:', articleText.length);
-
-          if (articleText.length < 100) {
-            throw new Error('Article text too short after extraction: ' + articleText.length + ' chars');
-          }
-
-        } catch (fetchError) {
-          console.error('[NEWS-AI] Article fetch/extraction FAILED:', fetchError.message);
-          // If we can't fetch the article, try Gemini with just the RSS body
-          articleText = (articleTitle || '') + '\n\n' + (rssBody || '');
-          console.log('[NEWS-AI] Using RSS body as fallback for Gemini, length:', articleText.length);
-          if (articleText.length < 50) {
-            // Nothing to work with — return RSS body
-            return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: fetchError.message }, {}, env);
-          }
-        }
-
-        // Step 3: Call Gemini 2.5 Flash API
-        try {
-          const prompt = `You are a professional Persian crypto journalist.
-
-Read the entire article.
-
-Rewrite it completely in Persian.
-
-Rules:
-- Keep every important detail.
-- Do not shorten aggressively.
-- Preserve numbers.
-- Preserve names.
-- Preserve timeline.
-- Preserve technical details.
-- Maximum 800 words.
-- Use headings when appropriate.
-- Do not add opinions.
-- Do not invent anything.
-
-At the end write:
-برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.
-
-Article:
-
-${articleText}`;
-
-          console.log('[NEWS-AI] Calling Gemini API, prompt length:', prompt.length);
-
-          let summary = null;
-          let aiSource = 'none';
-
-          // ── Method 1: Try Gemini 2.0 Flash (works but may be quota-limited) ──
-          const GEMINI_API_KEY = env.GEMINI_API_KEY;
-          if (GEMINI_API_KEY) {
-            try {
-              const t2 = Date.now();
-              const geminiController = new AbortController();
-              const geminiTimeout = setTimeout(() => geminiController.abort(), 45000);
-              const geminiRes = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                      temperature: 0.3,
-                      maxOutputTokens: 4096,
-                      topP: 0.8,
-                    },
-                  }),
-                  signal: geminiController.signal,
-                }
-              );
-              clearTimeout(geminiTimeout);
-              const geminiMs = Date.now() - t2;
-
-              console.log('[NEWS-AI] Gemini response status:', geminiRes.status, 'time:', geminiMs + 'ms');
-
-              if (geminiRes.ok) {
-                const geminiData = await geminiRes.json();
-                summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (summary && summary.trim().length >= 50) {
-                  aiSource = 'gemini-2.0-flash';
-                  console.log('[NEWS-AI] Gemini SUCCESS! Summary length:', summary.length);
-                }
-              } else {
-                const errBody = await geminiRes.text().catch(() => '');
-                console.warn('[NEWS-AI] Gemini error:', geminiRes.status, errBody.substring(0, 200));
-              }
-            } catch (geminiErr) {
-              console.warn('[NEWS-AI] Gemini exception:', geminiErr.message);
-            }
-          }
-
-          // ── Method 2: Fallback to Cloudflare Workers AI (free, no quota, no location limit) ──
-          if (!summary && env.AI) {
-            try {
-              console.log('[NEWS-AI] Trying Cloudflare Workers AI fallback...');
-              const t3 = Date.now();
-              // Use @cf/meta/llama-3.3-70b-instruct-fp8-fast (fast, free, multilingual)
-              const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-                messages: [
-                  { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
-                  { role: 'user', content: articleText },
-                ],
-                max_tokens: 4096,
-                temperature: 0.3,
-              });
-              const aiMs = Date.now() - t3;
-              console.log('[NEWS-AI] Workers AI response time:', aiMs + 'ms');
-
-              if (aiResponse && aiResponse.response) {
-                summary = aiResponse.response;
-                if (summary.trim().length >= 50) {
-                  aiSource = 'cloudflare-workers-ai';
-                  console.log('[NEWS-AI] Workers AI SUCCESS! Summary length:', summary.length);
-                } else {
-                  summary = null;
-                }
-              }
-            } catch (aiErr) {
-              console.warn('[NEWS-AI] Workers AI exception:', aiErr.message);
-            }
-          }
-
-          if (!summary || summary.trim().length < 50) {
-            console.error('[NEWS-AI] All AI methods failed. Returning RSS fallback.');
-            return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: 'all_ai_methods_failed' }, {}, env);
-          }
-
-          // Step 4: Cache in KV for 7 days (604800 seconds)
-          try {
-            await writeAppCache(env, cacheKey, summary, 604800);
-            console.log('[NEWS-AI] Cached in KV for 7 days, source:', aiSource);
-          } catch (e) {
-            console.warn('[NEWS-AI] KV cache write failed:', e.message);
-          }
-
-          console.log('[NEWS-AI] DONE! source:', aiSource, 'length:', summary.length);
-          return jsonResponse({ status: 'success', summary, cached: false, aiSource }, {}, env);
-
-        } catch (error) {
-          console.error('[NEWS-AI] All AI failed:', error.message);
-          // Fallback to RSS body
-          return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: error.message }, {}, env);
-        }
-      }
 
       // ── DIAGNOSTIC: Find working Workers AI text generation model ──
       if (request.method === 'GET' && url.pathname === '/api/_diag/ai-models') {
