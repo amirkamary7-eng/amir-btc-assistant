@@ -2502,7 +2502,7 @@ async function processNewsAIJobs(env, articles) {
   const GEMINI_API_KEY = env.GEMINI_API_KEY;
   const hasWorkersAI = !!env.AI;
 
-  for (const article of articles.slice(0, 10)) { // Process max 10 per cycle
+  for (const article of articles.slice(0, 3)) { // Process max 3 per cycle (25s timeout)
     if (!article.url) continue;
 
     const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;

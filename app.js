@@ -7910,6 +7910,9 @@ async function openAdminPanelLazy() {
         window._realOpenAdminPanel();
     }
 }
+// ROOT CAUSE FIX: This assignment was accidentally removed during code reorganization.
+// Without it, window.openAdminPanel is undefined → Admin Panel can't open.
+window.openAdminPanel = openAdminPanelLazy;
 // NOTE: copyRefLink() and shareRefLink() were removed — the referral entry card
 // now opens the full Referral Center (ReferralApp.openReferral) which has its own
 // copyLink() and shareLink() methods with proper visual feedback and QR support.
