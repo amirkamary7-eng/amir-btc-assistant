@@ -2756,7 +2756,7 @@ function pubSkeleton(rows) {
     rows = rows || 3;
     let html = '';
     for (let i = 0; i < rows; i++) {
-        html += '<div class="pub-card tgpub-skeleton">' +
+        html += '<div class="pub-card pub-skeleton">' +
             '<div class="pub-card-top">' +
                 '<div class="pub-sk-media"></div>' +
                 '<div class="pub-card-body">' +
@@ -2785,7 +2785,7 @@ function pubShowListEmpty(tabName, hasItems, emptyMsg) {
     const listEl = document.getElementById('tgpub-' + tabName + '-list');
     if (!listEl) return;
     if (!hasItems) {
-        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline">' + (emptyMsg || 'موردی یافت نشد') + '</div>';
+        listEl.innerHTML = '<div class="pub-empty pub-empty-inline">' + (emptyMsg || 'موردی یافت نشد') + '</div>';
     }
 }
 
@@ -2872,11 +2872,11 @@ async function loadPublisherNews(page) {
         _pubSelectedNews = new Set();
         renderPublisherNewsList(items);
     } catch (e) {
-        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline">' +
+        listEl.innerHTML = '<div class="pub-empty pub-empty-inline">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' +
             '<h4>خطا در بارگذاری اخبار</h4>' +
             '<p>' + adminEscapeHtml((e.message || 'خطای ناشناخته').slice(0, 200)) + '</p>' +
-            '<button class="adm-btn adm-btn-primary" onclick="loadPublisherNews(1)">تلاش مجدد</button>' +
+            '<button class="pub-btn pub-btn-primary" onclick="loadPublisherNews(1)">تلاش مجدد</button>' +
         '</div>';
         console.error(e);
     }
@@ -2940,43 +2940,42 @@ function renderPublisherNewsList(items) {
         const aiSvg = hasAi
             ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>'
             : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-        const aiBadge = '<span class="pub-badge ' + (hasAi ? 'tgpub-badge-ai' : 'tgpub-badge-pending') + '">' + aiSvg + '<span>' + (hasAi ? 'AI' : 'در انتظار') + '</span></span>';
+        const aiBadge = '<span class="pub-badge ' + (hasAi ? 'pub-badge-ai' : 'pub-badge-pending') + '">' + aiSvg + '<span>' + (hasAi ? 'AI' : 'در انتظار') + '</span></span>';
         const img = a.image
             ? '<div class="pub-card-media"><img src="' + adminEscapeHtml(a.image) + '" loading="lazy" onerror="this.parentElement.style.display=\'none\'"></div>'
-            : '<div class="pub-card-media tgpub-card-media-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>';
+            : '<div class="pub-card-media pub-card-media-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>';
         const title = adminEscapeHtml((a.title || '').slice(0, 120));
         const summary = adminEscapeHtml((a.ai_summary || a.body || '').slice(0, 150));
         const source = adminEscapeHtml(a.source_name || a.source || '—');
+        const timeAgo = adminEscapeHtml(a.time || a.time_ago || '');
         const newsIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/></svg>';
         const previewIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-        const queueIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>';
+        const queueIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>';
         const sendIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
-        return '<div class="pub-card' + (isSelected ? ' tgpub-card-selected' : '') + '" data-ref-id="' + adminEscapeHtml(refId) + '">' +
-            '<div class="pub-card-header">' +
-                '<div class="pub-card-badges">' +
-                    '<span class="pub-badge tgpub-badge-type">' + newsIcon + '<span>خبر</span></span>' +
-                    aiBadge +
-                '</div>' +
+        return '<div class="pub-card' + (isSelected ? ' pub-card-selected' : '') + '" data-ref-id="' + adminEscapeHtml(refId) + '">' +
+            '<div class="pub-card-content">' +
                 '<label class="pub-card-checkbox">' +
                     '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleNewsSelect(\'' + adminEscapeHtml(refId) + '\', this.checked)">' +
                     '<span class="pub-card-checkbox-box"></span>' +
                 '</label>' +
-            '</div>' +
-            '<div class="pub-card-content">' +
                 img +
                 '<div class="pub-card-body">' +
+                    '<div class="pub-card-badges">' +
+                        '<span class="pub-badge pub-badge-type">' + newsIcon + '<span>خبر</span></span>' +
+                        aiBadge +
+                    '</div>' +
                     '<div class="pub-card-title">' + title + '</div>' +
                     (summary ? '<div class="pub-card-summary">' + summary + '</div>' : '') +
                     '<div class="pub-card-meta">' +
-                        '<span class="pub-badge tgpub-badge-src">' + source + '</span>' +
-                        '<span class="pub-badge tgpub-badge-ref">' + adminEscapeHtml(refId) + '</span>' +
+                        '<span class="pub-badge pub-badge-src">' + source + '</span>' +
+                        (timeAgo ? '<span class="pub-card-time">' + timeAgo + '</span>' : '') +
                     '</div>' +
                 '</div>' +
             '</div>' +
             '<div class="pub-card-actions">' +
-                '<button class="adm-btn adm-btn-ghost" onclick="openPublisherPreview(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
-                '<button class="adm-btn adm-btn-ghost" onclick="enqueuePublisher(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + queueIcon + '<span>به صف</span></button>' +
-                '<button class="adm-btn adm-btn-primary" onclick="sendNowPublisher(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + sendIcon + '<span>ارسال فوری</span></button>' +
+                '<button class="pub-btn pub-btn-ghost" onclick="openPublisherPreview(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
+                '<button class="pub-btn pub-btn-ghost" onclick="enqueuePublisher(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + queueIcon + '<span>به صف</span></button>' +
+                '<button class="pub-btn pub-btn-primary" onclick="sendNowPublisher(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + sendIcon + '<span>ارسال</span></button>' +
             '</div>' +
         '</div>';
     }).join('');
@@ -2988,7 +2987,7 @@ function toggleNewsSelect(refId, checked) {
     else _pubSelectedNews.delete(refId);
     // Update visual state
     const item = document.querySelector('.pub-card[data-ref-id="' + refId + '"]');
-    if (item) item.classList.toggle('tgpub-card-selected', checked);
+    if (item) item.classList.toggle('pub-card-selected', checked);
     updateNewsBulkButton();
     // Update "select all" checkbox state
     const selectAll = document.getElementById('tgpub-news-select-all');
@@ -3070,11 +3069,11 @@ async function loadPublisherCalendar() {
         _pubCalendarCache = items;
         renderPublisherCalendarList(items);
     } catch (e) {
-        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline">' +
+        listEl.innerHTML = '<div class="pub-empty pub-empty-inline">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' +
             '<h4>خطا در بارگذاری</h4>' +
             '<p>' + adminEscapeHtml((e.message || 'خطای ناشناخته').slice(0, 200)) + '</p>' +
-            '<button class="adm-btn adm-btn-primary" onclick="loadPublisherCalendar()">تلاش مجدد</button>' +
+            '<button class="pub-btn pub-btn-primary" onclick="loadPublisherCalendar()">تلاش مجدد</button>' +
         '</div>';
         console.error(e);
     }
@@ -3103,7 +3102,7 @@ function renderPublisherCalendarList(items) {
     listEl.innerHTML = items.slice(0, 30).map(e => {
         const refId = String(e.id || e.event_id || '').slice(0, 64) || String(e.title || '').slice(0, 64);
         const impact = String(e.impact || '').toLowerCase();
-        const impactClass = 'tgpub-badge-impact-' + (impact || 'low');
+        const impactClass = 'pub-badge-impact-' + (impact || 'low');
         const impactLabel = impact === 'high' ? 'High' : impact === 'medium' ? 'Medium' : 'Low';
         const impactDot = impact === 'high' ? '#ef4444' : impact === 'medium' ? '#f5a623' : '#22c55e';
         const calIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
@@ -3120,21 +3119,21 @@ function renderPublisherCalendarList(items) {
         return '<div class="pub-card" data-ref-id="' + adminEscapeHtml(refId) + '">' +
             '<div class="pub-card-body">' +
                 '<div class="pub-card-badges">' +
-                    '<span class="pub-badge tgpub-badge-type">' + calIcon + '<span>تقویم</span></span>' +
+                    '<span class="pub-badge pub-badge-type">' + calIcon + '<span>تقویم</span></span>' +
                     impactBadge +
-                    (country ? '<span class="pub-badge tgpub-badge-src">' + country + '</span>' : '') +
+                    (country ? '<span class="pub-badge pub-badge-src">' + country + '</span>' : '') +
                 '</div>' +
                 '<div class="pub-card-title">' + title + '</div>' +
                 '<div class="pub-card-meta">' +
-                    '<span class="pub-badge tgpub-badge-ref">' + timeIcon + '<span>' + time + '</span></span>' +
-                    (e.forecast ? '<span class="pub-badge tgpub-badge-forecast">Forecast: ' + forecast + '</span>' : '') +
-                    (e.previous ? '<span class="pub-badge tgpub-badge-forecast">Previous: ' + previous + '</span>' : '') +
+                    '<span class="pub-badge pub-badge-ref">' + timeIcon + '<span>' + time + '</span></span>' +
+                    (e.forecast ? '<span class="pub-badge pub-badge-forecast">Forecast: ' + forecast + '</span>' : '') +
+                    (e.previous ? '<span class="pub-badge pub-badge-forecast">Previous: ' + previous + '</span>' : '') +
                 '</div>' +
             '</div>' +
             '<div class="pub-card-actions">' +
-                '<button class="adm-btn adm-btn-ghost" onclick="openPublisherPreview(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
-                '<button class="adm-btn adm-btn-ghost" onclick="enqueuePublisher(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">' + queueIcon + '<span>به صف</span></button>' +
-                '<button class="adm-btn adm-btn-primary" onclick="sendNowPublisher(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">' + sendIcon + '<span>ارسال فوری</span></button>' +
+                '<button class="pub-btn pub-btn-ghost" onclick="openPublisherPreview(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
+                '<button class="pub-btn pub-btn-ghost" onclick="enqueuePublisher(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">' + queueIcon + '<span>به صف</span></button>' +
+                '<button class="pub-btn pub-btn-primary" onclick="sendNowPublisher(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">' + sendIcon + '<span>ارسال فوری</span></button>' +
             '</div>' +
         '</div>';
     }).join('');
@@ -3154,11 +3153,11 @@ async function loadPublisherAnalysis() {
         _pubAnalysisCache = items;
         renderPublisherAnalysisList(items);
     } catch (e) {
-        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline">' +
+        listEl.innerHTML = '<div class="pub-empty pub-empty-inline">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' +
             '<h4>خطا در بارگذاری</h4>' +
             '<p>' + adminEscapeHtml((e.message || 'خطای ناشناخته').slice(0, 200)) + '</p>' +
-            '<button class="adm-btn adm-btn-primary" onclick="loadPublisherAnalysis()">تلاش مجدد</button>' +
+            '<button class="pub-btn pub-btn-primary" onclick="loadPublisherAnalysis()">تلاش مجدد</button>' +
         '</div>';
         console.error(e);
     }
@@ -3201,7 +3200,7 @@ function renderPublisherAnalysisList(items) {
         const summary = adminEscapeHtml((a.content || '').slice(0, 150));
         const hasImg = !!a.image;
         const analysisIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>';
-        const imgBadge = hasImg ? '<span class="pub-badge tgpub-badge-ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><span>تصویر</span></span>' : '';
+        const imgBadge = hasImg ? '<span class="pub-badge pub-badge-ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><span>تصویر</span></span>' : '';
         const previewIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
         const queueIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>';
         const sendIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
@@ -3213,21 +3212,21 @@ function renderPublisherAnalysisList(items) {
                 imgHtml +
                 '<div class="pub-card-body">' +
                     '<div class="pub-card-badges">' +
-                        '<span class="pub-badge tgpub-badge-type">' + analysisIcon + '<span>تحلیل</span></span>' +
-                        '<span class="pub-badge tgpub-badge-src">' + coin + '</span>' +
+                        '<span class="pub-badge pub-badge-type">' + analysisIcon + '<span>تحلیل</span></span>' +
+                        '<span class="pub-badge pub-badge-src">' + coin + '</span>' +
                         imgBadge +
                     '</div>' +
                     '<div class="pub-card-title">' + title + '</div>' +
                     (summary ? '<div class="pub-card-summary">' + summary + '</div>' : '') +
                     '<div class="pub-card-meta">' +
-                        '<span class="pub-badge tgpub-badge-ref">' + adminEscapeHtml(refId) + '</span>' +
+                        '<span class="pub-badge pub-badge-ref">' + adminEscapeHtml(refId) + '</span>' +
                     '</div>' +
                 '</div>' +
             '</div>' +
             '<div class="pub-card-actions">' +
-                '<button class="adm-btn adm-btn-ghost" onclick="openPublisherPreview(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
-                '<button class="adm-btn adm-btn-ghost" onclick="enqueuePublisher(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">' + queueIcon + '<span>به صف</span></button>' +
-                '<button class="adm-btn adm-btn-primary" onclick="sendNowPublisher(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">' + sendIcon + '<span>ارسال فوری</span></button>' +
+                '<button class="pub-btn pub-btn-ghost" onclick="openPublisherPreview(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
+                '<button class="pub-btn pub-btn-ghost" onclick="enqueuePublisher(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">' + queueIcon + '<span>به صف</span></button>' +
+                '<button class="pub-btn pub-btn-primary" onclick="sendNowPublisher(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">' + sendIcon + '<span>ارسال فوری</span></button>' +
             '</div>' +
         '</div>';
     }).join('');
@@ -3246,7 +3245,7 @@ async function loadPublisherQueue() {
         _pubQueueCache = (data && data.items) || [];
         renderPublisherQueueList(_pubQueueCache, 'queue');
     } catch (e) {
-        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherQueue()">تلاش مجدد</button></div>';
+        listEl.innerHTML = '<div class="pub-empty pub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="pub-btn pub-btn-primary" onclick="loadPublisherQueue()">تلاش مجدد</button></div>';
     }
 }
 window.loadPublisherQueue = loadPublisherQueue;
@@ -3263,7 +3262,7 @@ async function loadPublisherSent() {
         _pubSentCache = (data && data.items) || [];
         renderPublisherQueueList(_pubSentCache, 'sent');
     } catch (e) {
-        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherSent()">تلاش مجدد</button></div>';
+        listEl.innerHTML = '<div class="pub-empty pub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="pub-btn pub-btn-primary" onclick="loadPublisherSent()">تلاش مجدد</button></div>';
     }
 }
 window.loadPublisherSent = loadPublisherSent;
@@ -3280,7 +3279,7 @@ async function loadPublisherFailed() {
         _pubFailedCache = (data && data.items) || [];
         renderPublisherQueueList(_pubFailedCache, 'failed');
     } catch (e) {
-        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherFailed()">تلاش مجدد</button></div>';
+        listEl.innerHTML = '<div class="pub-empty pub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="pub-btn pub-btn-primary" onclick="loadPublisherFailed()">تلاش مجدد</button></div>';
     }
 }
 window.loadPublisherFailed = loadPublisherFailed;
@@ -3326,42 +3325,42 @@ function renderPublisherQueueList(items, mode) {
             announcement: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/></svg>',
         };
         const typeIcon = typeIcons[item.type] || typeIcons.announcement;
-        const statusBadge = '<span class="pub-badge tgpub-badge-status-' + item.status + '"><span>' + item.status + '</span></span>';
+        const statusBadge = '<span class="pub-badge pub-badge-status-' + item.status + '"><span>' + item.status + '</span></span>';
         // Priority badge (1=urgent, 10=breaking, 20=important, 50=normal, 100=low)
         const priority = Number(item.priority || 100);
         let priorityLabel = '', priorityClass = '';
-        if (priority <= 10) { priorityLabel = 'فوری'; priorityClass = 'tgpub-badge-priority-urgent'; }
-        else if (priority <= 20) { priorityLabel = 'مهم'; priorityClass = 'tgpub-badge-priority-high'; }
-        else if (priority <= 50) { priorityLabel = 'عادی'; priorityClass = 'tgpub-badge-priority-normal'; }
-        else { priorityLabel = 'کم'; priorityClass = 'tgpub-badge-priority-low'; }
+        if (priority <= 10) { priorityLabel = 'فوری'; priorityClass = 'pub-badge-priority-urgent'; }
+        else if (priority <= 20) { priorityLabel = 'مهم'; priorityClass = 'pub-badge-priority-high'; }
+        else if (priority <= 50) { priorityLabel = 'عادی'; priorityClass = 'pub-badge-priority-normal'; }
+        else { priorityLabel = 'کم'; priorityClass = 'pub-badge-priority-low'; }
         const priorityBadge = (mode === 'queue') ? '<span class="pub-badge ' + priorityClass + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/></svg><span>' + priorityLabel + '</span></span>' : '';
         // Scheduled time badge
         const scheduledBadge = (mode === 'queue' && item.scheduled_at && new Date(item.scheduled_at) > new Date())
-            ? '<span class="pub-badge tgpub-badge-scheduled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>' + adminFormatDatePub(item.scheduled_at) + '</span></span>'
+            ? '<span class="pub-badge pub-badge-scheduled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>' + adminFormatDatePub(item.scheduled_at) + '</span></span>'
             : '';
         const ref = adminEscapeHtml(item.ref_id || '');
         const time = mode === 'sent' ? adminFormatDatePub(item.sent_at) : adminFormatDatePub(item.created_at);
         const textPreview = adminEscapeHtml((item.final_text || item.payload?.built?.text || '').slice(0, 150));
         const actions = [];
         if (mode === 'queue') {
-            actions.push('<button class="adm-btn adm-btn-ghost" onclick="cancelPublisherItem(' + item.id + ')" title="لغو"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span>لغو</span></button>');
+            actions.push('<button class="pub-btn pub-btn-ghost" onclick="cancelPublisherItem(' + item.id + ')" title="لغو"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span>لغو</span></button>');
         }
         if (mode === 'failed') {
-            actions.push('<button class="adm-btn adm-btn-primary" onclick="retryPublisherItem(' + item.id + ')" title="ارسال مجدد"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg><span>ارسال مجدد</span></button>');
+            actions.push('<button class="pub-btn pub-btn-primary" onclick="retryPublisherItem(' + item.id + ')" title="ارسال مجدد"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg><span>ارسال مجدد</span></button>');
         }
         if (mode === 'sent') {
-            actions.push('<button class="adm-btn adm-btn-ghost" onclick="deletePublisherSent(' + item.id + ')" title="حذف"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>حذف</span></button>');
+            actions.push('<button class="pub-btn pub-btn-ghost" onclick="deletePublisherSent(' + item.id + ')" title="حذف"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>حذف</span></button>');
         }
         const errLine = (mode === 'failed' && item.error) ? '<div class="pub-card-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>' + adminEscapeHtml(item.error.slice(0, 200)) + '</span></div>' : '';
         return '<div class="pub-card">' +
             '<div class="pub-card-body">' +
                 '<div class="pub-card-badges">' +
-                    '<span class="pub-badge tgpub-badge-type">' + typeIcon + '<span>' + adminEscapeHtml(item.type) + '</span></span>' +
+                    '<span class="pub-badge pub-badge-type">' + typeIcon + '<span>' + adminEscapeHtml(item.type) + '</span></span>' +
                     statusBadge +
                     priorityBadge +
-                    '<span class="pub-badge tgpub-badge-ref">#' + item.id + '</span>' +
-                    '<span class="pub-badge tgpub-badge-src">ref: ' + ref + '</span>' +
-                    (item.attempts > 0 ? '<span class="pub-badge tgpub-badge-attempts">سعی: ' + item.attempts + '/' + item.max_attempts + '</span>' : '') +
+                    '<span class="pub-badge pub-badge-ref">#' + item.id + '</span>' +
+                    '<span class="pub-badge pub-badge-src">ref: ' + ref + '</span>' +
+                    (item.attempts > 0 ? '<span class="pub-badge pub-badge-attempts">سعی: ' + item.attempts + '/' + item.max_attempts + '</span>' : '') +
                 '</div>' +
                 '<div class="pub-card-summary">' + (textPreview || '—') + '</div>' +
                 errLine +
@@ -3386,7 +3385,7 @@ async function loadPublisherLogs() {
         _pubLogsCache = (data && data.items) || [];
         renderPublisherLogs(_pubLogsCache);
     } catch (e) {
-        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherLogs()">تلاش مجدد</button></div>';
+        listEl.innerHTML = '<div class="pub-empty pub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="pub-btn pub-btn-primary" onclick="loadPublisherLogs()">تلاش مجدد</button></div>';
     }
 }
 window.loadPublisherLogs = loadPublisherLogs;
@@ -3410,7 +3409,7 @@ function renderPublisherLogs(items) {
             announcement: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/></svg>',
         };
         const typeIcon = typeIcons[log.type] || typeIcons.announcement;
-        const statusBadge = '<span class="pub-badge tgpub-badge-status-' + log.status + '"><span>' + log.status + '</span></span>';
+        const statusBadge = '<span class="pub-badge pub-badge-status-' + log.status + '"><span>' + log.status + '</span></span>';
         const err = log.error ? '<span class="pub-log-err">' + adminEscapeHtml(log.error.slice(0, 150)) + '</span>' : '';
         return '<div class="pub-log-row">' +
             '<span class="pub-log-time">' + adminFormatDatePub(log.created_at) + '</span>' +
