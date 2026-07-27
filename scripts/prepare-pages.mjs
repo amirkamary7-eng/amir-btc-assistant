@@ -266,6 +266,20 @@ async function main() {
   indexHtml = replaceReferences(indexHtml, jsRenameMap, assetRenameMap);
   indexHtml = await injectApiBase(indexHtml);
   indexHtml = injectBuildId(indexHtml, buildId);
+
+  // ROOT CAUSE FIX: Inject ADMIN_JS_URL so app.js can lazy-load admin.js
+  // prepare-pages.mjs hashes filenames (admin.js → admin.744b8c4e.js)
+  // app.js needs to know the hashed filename to load it dynamically.
+  const adminHashed = jsRenameMap.get('admin.js');
+  if (adminHashed) {
+    const adminUrlScript = `<script>window.ADMIN_JS_URL = "${adminHashed}";</script>`;
+    indexHtml = indexHtml.replace(
+      /<\/head>/,
+      `${adminUrlScript}\n<\/head>`,
+    );
+    console.log(`  Injected ADMIN_JS_URL: ${adminHashed}`);
+  }
+
   await writeFile(path.join(outputDir, 'index.html'), indexHtml, 'utf8');
   console.log('  Updated references, API_BASE, and BUILD_ID in index.html');
 

@@ -7874,23 +7874,26 @@ async function openAdminPanelLazy() {
         if (_adminJsLoading) return; // already loading, wait
         _adminJsLoading = true;
 
-        // Show loading indicator
+        // Show loading indicator — but DON'T destroy the container HTML!
+        // ROOT CAUSE FIX: Previously, container.innerHTML was replaced with a loading
+        // message, which destroyed the admin panel's HTML structure (sidebar, header,
+        // sections, etc.). When admin.js loaded and called _realOpenAdminPanel(), it
+        // couldn't find the DOM elements it expected → panel appeared empty/broken.
+        // Now we just show the panel with an overlay loading indicator on top.
         const panel = document.getElementById('admin-panel');
         if (panel) {
             panel.style.display = 'flex';
-            const container = panel.querySelector('.admin-panel-container');
-            if (container) {
-                container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#94a3b8;font-size:14px;">در حال بارگذاری پنل مدیریت...</div>';
-            }
         }
 
         try {
             // Load admin.js via script tag injection
+            // ROOT CAUSE FIX: prepare-pages.mjs hashes filenames (admin.js → admin.744b8c4e.js)
+            // The hashed filename is injected as window.ADMIN_JS_URL by prepare-pages.mjs.
             await new Promise((resolve, reject) => {
                 const s = document.createElement('script');
-                s.src = 'admin.js';
+                s.src = window.ADMIN_JS_URL || 'admin.js';
                 s.onload = resolve;
-                s.onerror = () => reject(new Error('Failed to load admin.js'));
+                s.onerror = () => reject(new Error('Failed to load admin.js from: ' + s.src));
                 document.head.appendChild(s);
             });
             _adminJsLoaded = true;
