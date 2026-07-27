@@ -5518,7 +5518,7 @@ export default {
       }
 
       // ── AI News Summary — Gemini 2.5 Flash ──
-      // Fetches full article from source URL, extracts text, summarizes to Persian
+      // Fetches full article from source URL, extracts text, rewrites to Persian
       // via Gemini API, caches in KV for 7 days. Falls back to RSS text on error.
       if (request.method === 'POST' && url.pathname === '/api/news/summarize') {
         const authState = await authenticateTelegramRequest(request, env);
@@ -5532,44 +5532,56 @@ export default {
           return jsonResponse({ status: 'error', message: 'Missing url' }, { status: 422 }, env);
         }
 
-        // Generate cache key from URL hash
+        // Generate cache key from URL
         const cacheKey = `news:summary:${articleUrl}`;
 
         // Check KV cache first (7 day TTL)
         try {
           const cached = await readAppCache(env, cacheKey);
           if (cached) {
-            console.log('[NEWS-AI] Cache hit for:', articleUrl.substring(0, 60));
+            console.log('[NEWS-AI] Cache HIT for:', articleUrl.substring(0, 80));
             return jsonResponse({ status: 'success', summary: cached, cached: true }, {}, env);
           }
-        } catch {}
+        } catch (e) {
+          console.warn('[NEWS-AI] KV cache read failed:', e.message);
+        }
 
         // No cache — fetch article, extract text, call Gemini
         const GEMINI_API_KEY = env.GEMINI_API_KEY;
         if (!GEMINI_API_KEY) {
-          // No Gemini key — fallback to RSS body
-          return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true }, {}, env);
+          console.error('[NEWS-AI] GEMINI_API_KEY not configured');
+          return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: 'no_api_key' }, {}, env);
         }
 
+        let articleText = '';
+
         try {
-          // Step 1: Fetch the article page
+          // Step 1: Fetch the article page with real browser User-Agent
+          console.log('[NEWS-AI] Fetching article:', articleUrl.substring(0, 80));
           const fetchController = new AbortController();
-          const fetchTimeout = setTimeout(() => fetchController.abort(), 8000);
+          const fetchTimeout = setTimeout(() => fetchController.abort(), 10000);
           const articleRes = await fetch(articleUrl, {
             signal: fetchController.signal,
-            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)', 'Accept': 'text/html' },
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
           });
           clearTimeout(fetchTimeout);
 
+          console.log('[NEWS-AI] Article fetch status:', articleRes.status, 'content-type:', articleRes.headers.get('content-type'));
+
           if (!articleRes.ok) {
-            throw new Error(`Failed to fetch article: HTTP ${articleRes.status}`);
+            throw new Error(`Article fetch failed: HTTP ${articleRes.status}`);
           }
 
           const html = await articleRes.text();
+          console.log('[NEWS-AI] HTML length:', html.length);
 
-          // Step 2: Extract text from HTML (simple extraction — no Readability lib in Workers)
-          // Remove script, style, nav, footer, header tags, then strip all HTML
-          let articleText = html
+          // Step 2: Extract article text — try <article>, <main>, then <p> tags
+          // First, remove unwanted elements
+          let cleanedHtml = html
             .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
             .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
             .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
@@ -5577,7 +5589,41 @@ export default {
             .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
             .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
             .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
-            .replace(/<[^>]+>/g, ' ') // Strip all HTML tags
+            .replace(/<form[^>]*>[\s\S]*?<\/form>/gi, '')
+            .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '');
+
+          // Try to extract from <article> tag first (most semantic)
+          let articleMatch = cleanedHtml.match(/<article[^>]*>[\s\S]*?<\/article>/i);
+          if (articleMatch) {
+            articleText = articleMatch[0];
+            console.log('[NEWS-AI] Extracted from <article> tag, length:', articleText.length);
+          }
+
+          // If no <article>, try <main> tag
+          if (!articleText || articleText.length < 200) {
+            articleMatch = cleanedHtml.match(/<main[^>]*>[\s\S]*?<\/main>/i);
+            if (articleMatch) {
+              articleText = articleMatch[0];
+              console.log('[NEWS-AI] Extracted from <main> tag, length:', articleText.length);
+            }
+          }
+
+          // If still no good text, try collecting all <p> tags
+          if (!articleText || articleText.length < 200) {
+            const paragraphs = cleanedHtml.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || [];
+            articleText = paragraphs.join(' ');
+            console.log('[NEWS-AI] Extracted from <p> tags, count:', paragraphs.length, 'length:', articleText.length);
+          }
+
+          // If still nothing, use full cleaned HTML
+          if (!articleText || articleText.length < 200) {
+            articleText = cleanedHtml;
+            console.log('[NEWS-AI] Using full cleaned HTML, length:', articleText.length);
+          }
+
+          // Strip remaining HTML tags
+          articleText = articleText
+            .replace(/<[^>]+>/g, ' ')
             .replace(/&nbsp;/g, ' ')
             .replace(/&amp;/g, '&')
             .replace(/&lt;/g, '<')
@@ -5587,41 +5633,61 @@ export default {
             .replace(/\s+/g, ' ')
             .trim();
 
-          // Limit to 12000 characters
-          if (articleText.length > 12000) {
-            articleText = articleText.substring(0, 12000);
+          // Limit to 10000 characters
+          if (articleText.length > 10000) {
+            articleText = articleText.substring(0, 10000);
           }
+
+          console.log('[NEWS-AI] Final article text length:', articleText.length);
 
           if (articleText.length < 100) {
-            throw new Error('Article text too short after extraction');
+            throw new Error('Article text too short after extraction: ' + articleText.length + ' chars');
           }
 
-          // Step 3: Call Gemini 2.5 Flash API
-          const prompt = `You are a professional crypto news editor.
+        } catch (fetchError) {
+          console.error('[NEWS-AI] Article fetch/extraction FAILED:', fetchError.message);
+          // If we can't fetch the article, try Gemini with just the RSS body
+          articleText = (articleTitle || '') + '\n\n' + (rssBody || '');
+          console.log('[NEWS-AI] Using RSS body as fallback for Gemini, length:', articleText.length);
+          if (articleText.length < 50) {
+            // Nothing to work with — return RSS body
+            return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: fetchError.message }, {}, env);
+          }
+        }
 
-Read the following news article.
+        // Step 3: Call Gemini 2.5 Flash API
+        try {
+          const prompt = `You are a professional Persian crypto journalist.
 
-Generate the response in Persian.
+Read the entire article.
+
+Rewrite it completely in Persian.
 
 Rules:
-- Keep all important facts.
-- Do not invent information.
-- Do not change numbers.
+- Keep every important detail.
+- Do not shorten aggressively.
+- Preserve numbers.
+- Preserve names.
+- Preserve timeline.
+- Preserve technical details.
+- Maximum 800 words.
+- Use headings when appropriate.
 - Do not add opinions.
-- Maximum 450 words.
-- Use short paragraphs.
-- Keep names in English if needed.
-- End with one sentence:
-"برای مطالعه نسخه کامل، لینک منبع را مشاهده کنید."
+- Do not invent anything.
+
+At the end write:
+برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.
 
 Article:
 
 ${articleText}`;
 
+          console.log('[NEWS-AI] Calling Gemini API, prompt length:', prompt.length);
+
           const geminiController = new AbortController();
-          const geminiTimeout = setTimeout(() => geminiController.abort(), 30000);
+          const geminiTimeout = setTimeout(() => geminiController.abort(), 45000);
           const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -5629,7 +5695,7 @@ ${articleText}`;
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: {
                   temperature: 0.3,
-                  maxOutputTokens: 1024,
+                  maxOutputTokens: 4096,
                   topP: 0.8,
                 },
               }),
@@ -5638,28 +5704,51 @@ ${articleText}`;
           );
           clearTimeout(geminiTimeout);
 
+          console.log('[NEWS-AI] Gemini response status:', geminiRes.status);
+
           if (!geminiRes.ok) {
             const errBody = await geminiRes.text().catch(() => '');
-            throw new Error(`Gemini API error: ${geminiRes.status} ${errBody.substring(0, 200)}`);
+            console.error('[NEWS-AI] Gemini API error:', geminiRes.status, errBody.substring(0, 300));
+            throw new Error(`Gemini API error: ${geminiRes.status} — ${errBody.substring(0, 200)}`);
           }
 
           const geminiData = await geminiRes.json();
+
+          // Log full response structure for debugging
+          console.log('[NEWS-AI] Gemini response keys:', Object.keys(geminiData));
+          console.log('[NEWS-AI] Candidates count:', geminiData?.candidates?.length);
+          if (geminiData?.candidates?.[0]) {
+            console.log('[NEWS-AI] Candidate finishReason:', geminiData.candidates[0].finishReason);
+            console.log('[NEWS-AI] Candidate content exists:', !!geminiData.candidates[0].content);
+            console.log('[NEWS-AI] Parts count:', geminiData.candidates[0].content?.parts?.length);
+          }
+
           const summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-          if (!summary || summary.trim().length < 50) {
-            throw new Error('Gemini returned empty or too short response');
+          if (!summary) {
+            console.error('[NEWS-AI] Gemini returned no text. Full response:', JSON.stringify(geminiData).substring(0, 500));
+            throw new Error('Gemini returned empty response');
           }
+
+          if (summary.trim().length < 50) {
+            console.error('[NEWS-AI] Gemini response too short:', summary.substring(0, 100));
+            throw new Error('Gemini returned too short response: ' + summary.length + ' chars');
+          }
+
+          console.log('[NEWS-AI] SUCCESS! Summary length:', summary.length, 'first 100 chars:', summary.substring(0, 100));
 
           // Step 4: Cache in KV for 7 days (604800 seconds)
           try {
             await writeAppCache(env, cacheKey, summary, 604800);
-          } catch {}
+            console.log('[NEWS-AI] Cached in KV for 7 days');
+          } catch (e) {
+            console.warn('[NEWS-AI] KV cache write failed:', e.message);
+          }
 
-          console.log('[NEWS-AI] Generated summary for:', articleUrl.substring(0, 60), 'length:', summary.length);
           return jsonResponse({ status: 'success', summary, cached: false }, {}, env);
 
         } catch (error) {
-          console.warn('[NEWS-AI] Failed for', articleUrl.substring(0, 60), ':', error.message);
+          console.error('[NEWS-AI] Gemini call FAILED:', error.message);
           // Fallback to RSS body
           return jsonResponse({ status: 'success', summary: rssBody || '', fallback: true, error: error.message }, {}, env);
         }
