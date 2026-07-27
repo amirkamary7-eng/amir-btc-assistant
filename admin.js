@@ -3306,18 +3306,30 @@ function renderPublisherQueueList(items, mode) {
         };
         const typeIcon = typeIcons[item.type] || typeIcons.announcement;
         const statusBadge = '<span class="tgpub-badge tgpub-badge-status-' + item.status + '"><span>' + item.status + '</span></span>';
+        // Priority badge (1=urgent, 10=breaking, 20=important, 50=normal, 100=low)
+        const priority = Number(item.priority || 100);
+        let priorityLabel = '', priorityClass = '';
+        if (priority <= 10) { priorityLabel = 'فوری'; priorityClass = 'tgpub-badge-priority-urgent'; }
+        else if (priority <= 20) { priorityLabel = 'مهم'; priorityClass = 'tgpub-badge-priority-high'; }
+        else if (priority <= 50) { priorityLabel = 'عادی'; priorityClass = 'tgpub-badge-priority-normal'; }
+        else { priorityLabel = 'کم'; priorityClass = 'tgpub-badge-priority-low'; }
+        const priorityBadge = (mode === 'queue') ? '<span class="tgpub-badge ' + priorityClass + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/></svg><span>' + priorityLabel + '</span></span>' : '';
+        // Scheduled time badge
+        const scheduledBadge = (mode === 'queue' && item.scheduled_at && new Date(item.scheduled_at) > new Date())
+            ? '<span class="tgpub-badge tgpub-badge-scheduled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>' + adminFormatDatePub(item.scheduled_at) + '</span></span>'
+            : '';
         const ref = adminEscapeHtml(item.ref_id || '');
         const time = mode === 'sent' ? adminFormatDatePub(item.sent_at) : adminFormatDatePub(item.created_at);
         const textPreview = adminEscapeHtml((item.final_text || item.payload?.built?.text || '').slice(0, 150));
         const actions = [];
         if (mode === 'queue') {
-            actions.push('<button class="adm-btn adm-btn-ghost" onclick="cancelPublisherItem(' + item.id + ')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span>لغو</span></button>');
+            actions.push('<button class="adm-btn adm-btn-ghost" onclick="cancelPublisherItem(' + item.id + ')" title="لغو"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span>لغو</span></button>');
         }
         if (mode === 'failed') {
-            actions.push('<button class="adm-btn adm-btn-primary" onclick="retryPublisherItem(' + item.id + ')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg><span>ارسال مجدد</span></button>');
+            actions.push('<button class="adm-btn adm-btn-primary" onclick="retryPublisherItem(' + item.id + ')" title="ارسال مجدد"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg><span>ارسال مجدد</span></button>');
         }
         if (mode === 'sent') {
-            actions.push('<button class="adm-btn adm-btn-ghost" onclick="deletePublisherSent(' + item.id + ')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>حذف</span></button>');
+            actions.push('<button class="adm-btn adm-btn-ghost" onclick="deletePublisherSent(' + item.id + ')" title="حذف"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>حذف</span></button>');
         }
         const errLine = (mode === 'failed' && item.error) ? '<div class="tgpub-card-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>' + adminEscapeHtml(item.error.slice(0, 200)) + '</span></div>' : '';
         return '<div class="tgpub-card">' +
@@ -3325,12 +3337,14 @@ function renderPublisherQueueList(items, mode) {
                 '<div class="tgpub-card-badges">' +
                     '<span class="tgpub-badge tgpub-badge-type">' + typeIcon + '<span>' + adminEscapeHtml(item.type) + '</span></span>' +
                     statusBadge +
+                    priorityBadge +
                     '<span class="tgpub-badge tgpub-badge-ref">#' + item.id + '</span>' +
                     '<span class="tgpub-badge tgpub-badge-src">ref: ' + ref + '</span>' +
                     (item.attempts > 0 ? '<span class="tgpub-badge tgpub-badge-attempts">سعی: ' + item.attempts + '/' + item.max_attempts + '</span>' : '') +
                 '</div>' +
                 '<div class="tgpub-card-summary">' + (textPreview || '—') + '</div>' +
                 errLine +
+                '<div class="tgpub-card-meta">' + scheduledBadge + '</div>' +
                 '<div class="tgpub-card-time">' + time + (item.tg_message_id ? ' · msg #' + item.tg_message_id : '') + '</div>' +
             '</div>' +
             (actions.length ? '<div class="tgpub-card-actions">' + actions.join('') + '</div>' : '') +
