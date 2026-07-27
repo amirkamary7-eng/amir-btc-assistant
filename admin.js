@@ -419,7 +419,6 @@ function switchAdminSection(section, btn) {
         case 'admins': loadAdminList(); break;
         case 'users': loadAdminUsers(1); break;
         case 'tickets': loadAdminTickets(1); break;
-        case 'broadcast': loadAdminBroadcasts(); break;
         case 'rewards': loadAdminRewards(); break;
         case 'transactions': loadAdminTransactions(1); break;
         case 'referrals': loadAdminReferrals(); break;
@@ -2575,26 +2574,60 @@ async function loadAlertEconomyConfigs() {
         const data = await adminApiFetch('/api/admin/alert-economy/configs');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.configs)) {
-            const rows = data.configs.map(function (c) {
-                return '<tr><td>' + adminEscapeHtml(c.alert_type) + '</td><td>' + (c.is_enabled ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>') + '</td><td>' + c.free_per_day + '</td><td>' + c.cost_per_extra + ' AB</td><td><button class="adm-btn-sm" onclick="toggleAlertService(\'' + c.alert_type + '\', ' + !c.is_enabled + ')">' + (c.is_enabled ? 'غیرفعال' : 'فعال') + '</button></td></tr>';
+            // PHASE 5: Full config UI — each alert type has a card with toggle + inputs
+            const labels = {
+                price_alert: 'هشدار قیمت',
+                calendar_alert: 'هشدار تقویم اقتصادی',
+                breaking_news: 'هشدار اخبار فوری',
+            };
+            const cards = data.configs.map(function (c) {
+                const label = labels[c.alert_type] || c.alert_type;
+                const enabledChecked = c.is_enabled ? 'checked' : '';
+                return '<div class="rc-config-card" style="padding:16px;border-radius:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);">' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">' +
+                        '<div style="font-weight:700;font-size:14px;">' + adminEscapeHtml(label) + '</div>' +
+                        '<label class="adm-switch" style="position:relative;display:inline-block;width:44px;height:24px;">' +
+                            '<input type="checkbox" id="ae-cfg-enabled-' + adminEscapeHtml(c.alert_type) + '" ' + enabledChecked + ' style="opacity:0;width:0;height:0;">' +
+                            '<span class="adm-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:' + (c.is_enabled ? '#22c55e' : '#475569') + ';border-radius:24px;transition:0.3s;">' +
+                                '<span style="position:absolute;height:18px;width:18px;left:3px;top:3px;background:white;border-radius:50%;transition:0.3s;' + (c.is_enabled ? 'transform:translateX(20px);' : '') + '"></span>' +
+                            '</span>' +
+                        '</label>' +
+                    '</div>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+                        '<div><label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">رایگان در روز</label>' +
+                            '<input type="number" id="ae-cfg-free-' + adminEscapeHtml(c.alert_type) + '" value="' + c.free_per_day + '" min="0" class="adm-input" style="padding:8px;border-radius:8px;">' +
+                        '</div>' +
+                        '<div><label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">هزینه اضافه (AB)</label>' +
+                            '<input type="number" id="ae-cfg-cost-' + adminEscapeHtml(c.alert_type) + '" value="' + c.cost_per_extra + '" min="0" class="adm-input" style="padding:8px;border-radius:8px;">' +
+                        '</div>' +
+                    '</div>' +
+                    '<button class="adm-btn adm-btn-primary" onclick="saveAlertConfig(\'' + adminEscapeHtml(c.alert_type) + '\')" style="margin-top:12px;padding:8px 20px;font-size:12px;">ذخیره</button>' +
+                '</div>';
             }).join('');
-            section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">تنظیمات هشدارها</h4><div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>نوع هشدار</th><th>وضعیت</th><th>رایگان/روز</th><th>هزینه اضافه</th><th>عملیات</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5" class="admin-empty">داده‌ای نیست</td></tr>') + '</tbody></table></div></div>';
+            section.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;">' + (cards || '<div class="admin-empty">داده‌ای نیست</div>') + '</div>';
         }
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = adminErrorState('خطا در بارگذاری', 'loadAlertEconomyConfigs'); console.error(e); }
 }
 window.loadAlertEconomyConfigs = loadAlertEconomyConfigs;
 
-async function toggleAlertService(alertType, enable) {
+async function saveAlertConfig(alertType) {
+    const isEnabled = document.getElementById('ae-cfg-enabled-' + alertType)?.checked;
+    const freePerDay = Number(document.getElementById('ae-cfg-free-' + alertType)?.value || 0);
+    const costPerExtra = Number(document.getElementById('ae-cfg-cost-' + alertType)?.value || 0);
     try {
         const data = await adminApiFetch('/api/admin/alert-economy/configs/' + encodeURIComponent(alertType), {
             method: 'PUT',
-            body: JSON.stringify({ is_enabled: enable }),
+            body: JSON.stringify({
+                is_enabled: isEnabled,
+                free_per_day: freePerDay,
+                cost_per_extra: costPerExtra,
+            }),
         });
-        if (data && data.status === 'success') { adminToast('تغییر وضعیت', 'success'); loadAlertEconomyConfigs(); }
-        else { adminToast('خطا', 'error'); }
+        if (data && data.status === 'success') { adminToast('تنظیمات ذخیره شد', 'success'); loadAlertEconomyConfigs(); }
+        else { adminToast('خطا در ذخیره', 'error'); }
     } catch (e) { adminToast('خطا', 'error'); console.error(e); }
 }
-window.toggleAlertService = toggleAlertService;
+window.saveAlertConfig = saveAlertConfig;
 
 // ── Missing window exports for ticket admin functions ──
 window.adminReplyTicket = adminReplyTicket;

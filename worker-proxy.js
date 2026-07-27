@@ -27,7 +27,7 @@ import { createAdminRepository } from './src/repositories/admin.js';
 import { createAdminHandlers } from './src/controllers/admin.js';
 import { createRewardCenterRepository } from './src/repositories/reward_center.js';
 import { createRewardCenterHandlers } from './src/controllers/reward_center.js';
-import { createNotificationPlatformRepository } from './src/repositories/notification_platform.js';
+import { createNotificationPlatformRepository, setEnvSendTelegramMessage } from './src/repositories/notification_platform.js';
 import { createNotificationPlatformHandlers } from './src/controllers/notification_platform.js';
 import { createAlertEconomyRepository } from './src/repositories/alert_economy.js';
 import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
@@ -4815,6 +4815,10 @@ export default {
     // Set env accessors for fetchFearGreed (called from various places)
     env_CMC_API_KEY = env.CMC_API_KEY || null;
     env_APP_CACHE = env.APP_CACHE || null;
+    // Set sendTelegramMessage for notification_platform.processBroadcast
+    if (typeof setEnvSendTelegramMessage === 'function') {
+      setEnvSendTelegramMessage(sendTelegramMessage);
+    }
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,

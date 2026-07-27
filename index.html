@@ -1419,10 +1419,6 @@
 
                     <div class="adm-sidebar-section">
                         <div class="adm-sidebar-label">محتوا</div>
-                        <button class="adm-nav-item" data-admin-section="broadcast" onclick="switchAdminSection('broadcast', this)">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
-                            <span>پیام همگانی</span>
-                        </button>
                         <button class="adm-nav-item" data-admin-section="rewards" onclick="switchAdminSection('rewards', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89 7 23l5-3 5 3-1.21-9.12"/></svg>
                             <span>پاداش‌ها</span>
@@ -1615,44 +1611,7 @@
                 </section>
 
                 <!-- Broadcast Section -->
-                <section class="adm-section" id="admin-section-broadcast">
-                    <div class="adm-section-head">
-                        <div>
-                            <h3 class="adm-section-title">پیام همگانی</h3>
-                            <p class="adm-section-desc">ارسال پیام به کاربران به صورت گروهی یا فردی</p>
-                        </div>
-                    </div>
-                    <div class="adm-form-card">
-                        <div class="adm-form-field">
-                            <label class="adm-form-label">مخاطب</label>
-                            <select id="admin-broadcast-target" class="adm-input" onchange="toggleBroadcastTargetId()">
-                                <option value="all">همه کاربران</option>
-                                <option value="active">کاربران فعال امروز</option>
-                                <option value="token_holders">دارندگان توکن</option>
-                                <option value="specific">کاربر خاص</option>
-                            </select>
-                        </div>
-                        <div class="adm-form-field" id="admin-broadcast-target-id-wrap" style="display:none;">
-                            <label class="adm-form-label">شناسه تلگرام کاربر</label>
-                            <input type="text" id="admin-broadcast-target-id" placeholder="مثال: 123456789" class="adm-input">
-                        </div>
-                        <div class="adm-form-field">
-                            <label class="adm-form-label">متن پیام</label>
-                            <textarea id="admin-broadcast-content" placeholder="متن پیام خود را وارد کنید..." class="adm-input adm-textarea" rows="4"></textarea>
-                        </div>
-                        <button class="adm-btn adm-btn-primary adm-btn-block" onclick="sendBroadcast()">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                            ارسال پیام
-                        </button>
-                    </div>
-                    <div class="adm-card">
-                        <div class="adm-card-head">
-                            <h4 class="adm-card-title">تاریخچه پیام‌ها</h4>
-                        </div>
-                        <div class="adm-list" id="admin-broadcasts-list"></div>
-                    </div>
-                </section>
-
+                <!-- Broadcast section removed — unified into Notification Center -->
                 <!-- Rewards Section -->
                 <section class="adm-section" id="admin-section-rewards">
                     <div class="adm-section-head">

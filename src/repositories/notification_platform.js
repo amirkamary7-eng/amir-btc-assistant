@@ -13,6 +13,13 @@
  * This extends the existing notifications table (adds columns if missing).
  */
 
+// Module-level env accessors (set in fetch handler, used by processBroadcast)
+let env_sendTelegramMessage = null;
+
+export function setEnvSendTelegramMessage(fn) {
+  env_sendTelegramMessage = fn;
+}
+
 export function createNotificationPlatformRepository(deps) {
   const { queryDb, isDatabaseConfigured, isoDate, normalizeOptionalString } = deps;
 
@@ -506,28 +513,88 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   async function processBroadcast(env, broadcastId) {
-    if (!isDatabaseConfigured(env)) return { sent: 0 };
+    if (!isDatabaseConfigured(env)) return { sent: 0, failed: 0 };
     const bResult = await queryDb(env, `SELECT * FROM notification_broadcasts WHERE id = $1`, [Number(broadcastId)]);
     const b = bResult.rows[0];
-    if (!b) return { sent: 0 };
+    if (!b) return { sent: 0, failed: 0 };
 
     // Get target users
     let userQuery = `SELECT telegram_id FROM users WHERE 1=1`;
-    const params = [];
     if (b.target_type === 'active') { userQuery += ` AND channel_joined = TRUE`; }
+    else if (b.target_type === 'specific' && b.target_value) { userQuery += ` AND telegram_id = '${b.target_value}'`; }
     // Add more targeting as needed
     const users = await queryDb(env, userQuery);
     let sent = 0;
+    let failed = 0;
+    const text = `${b.title}\n\n${b.message}`;
+
     for (const u of users.rows) {
-      await dispatch(env, {
-        userId: u.telegram_id,
-        title: b.title, message: b.message,
-        category: b.category, priority: b.priority, channel: b.channel,
-      });
-      sent++;
+      try {
+        // 1. Insert in-app notification (if channel includes mini_app)
+        if (b.channel === 'mini_app' || b.channel === 'both') {
+          try {
+            const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+            await queryDb(env, `
+              INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
+              VALUES ($1, $2, 'announcement', $3, $4, $5, FALSE, $6, $7, $8, 'delivered', NOW())
+            `, [
+              notifId, String(u.telegram_id),
+              b.title, b.message,
+              JSON.stringify({ broadcast_id: String(b.id) }),
+              b.priority, b.category, b.channel,
+            ]);
+          } catch (e) {
+            console.warn('Broadcast in-app insert failed for user', u.telegram_id, e.message);
+          }
+        }
+
+        // 2. Send Telegram message directly (not via queue — for immediate delivery)
+        if (b.channel === 'telegram' || b.channel === 'both') {
+          const chatId = Number(u.telegram_id);
+          if (Number.isFinite(chatId)) {
+            try {
+              // Use sendTelegramMessage if available, otherwise queue
+              if (typeof env_sendTelegramMessage === 'function') {
+                const tgResult = await env_sendTelegramMessage(env, {
+                  chat_id: chatId,
+                  text: text,
+                  disable_web_page_preview: true,
+                });
+                if (tgResult && (tgResult.ok || tgResult.messageId || tgResult.result)) {
+                  sent++;
+                } else {
+                  failed++;
+                }
+              } else {
+                // Fallback: enqueue for queue processing
+                await enqueue(env, {
+                  notificationId: null,
+                  userId: String(u.telegram_id),
+                  channel: 'telegram', priority: b.priority,
+                  payload: { title: b.title, message: b.message },
+                });
+                sent++;
+              }
+            } catch (tgErr) {
+              failed++;
+              console.warn('Broadcast Telegram send failed for user', u.telegram_id, tgErr.message);
+            }
+          } else {
+            failed++;
+          }
+        } else {
+          // mini_app only — count as sent
+          sent++;
+        }
+      } catch (e) {
+        failed++;
+        console.warn('Broadcast delivery failed for user', u.telegram_id, e.message);
+      }
     }
+
+    // Update broadcast status
     await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW(), total_sent = $1 WHERE id = $2`, [sent, Number(broadcastId)]);
-    return { sent };
+    return { sent, failed };
   }
 
   // ═══════════════════════════════════════════════════════════
