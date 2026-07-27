@@ -1116,6 +1116,35 @@ function createPool(env) {
   });
 }
 
+// ── ROOT CAUSE FIX: Per-request Pool sharing ──
+// Previously, queryDb created a new Pool for EVERY query call. When dashboard
+// runs 17 parallel queries (Promise.allSettled), 17 WebSocket connections open
+// simultaneously to Neon DB → connection exhaustion → "All attempts to open a
+// WebSocket to connect to the database failed" errors.
+//
+// FIX: Pool is created ONCE per Worker fetch invocation and stored in a
+// WeakMap keyed by the env object. All queryDb calls within the same request
+// share the same Pool (reusing the WebSocket connection). Pool is closed
+// after the fetch handler completes (in the finally block).
+const _poolCache = new WeakMap();
+
+function getSharedPool(env) {
+  if (!env) return null;
+  if (_poolCache.has(env)) return _poolCache.get(env);
+  const pool = createPool(env);
+  if (pool) _poolCache.set(env, pool);
+  return pool;
+}
+
+function closeSharedPool(env) {
+  if (!env) return;
+  const pool = _poolCache.get(env);
+  if (pool) {
+    pool.end().catch(() => {});
+    _poolCache.delete(env);
+  }
+}
+
 async function getDbUserJoinState(env, userId) {
   const pool = createPool(env);
   if (!pool) return null;
@@ -1207,7 +1236,10 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  const pool = createPool(env);
+  // ROOT CAUSE FIX: Use shared pool instead of creating a new Pool per call.
+  // This prevents WebSocket connection exhaustion when multiple queries run
+  // in parallel (e.g., dashboard's 17 parallel COUNT queries).
+  const pool = getSharedPool(env);
   if (!pool) throw new Error('Database not configured');
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -1226,8 +1258,11 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
         await new Promise((r) => setTimeout(r, ms));
       }
     }
-  } finally {
-    pool.end().catch(() => {});
+  } catch (error) {
+    // If the shared pool's connection is broken, invalidate it so the next
+    // queryDb call creates a fresh pool.
+    closeSharedPool(env);
+    throw error;
   }
 }
 
@@ -3161,25 +3196,90 @@ function singleFlight(key, fn) {
 }
 
 /**
- * Fetch Fear & Greed Index from Alternative.me (free, no API key required).
- * Returns { value: number, classification: string } or null.
+ * Fetch Fear & Greed Index from CoinMarketCap (official API).
+ * Uses CMC_API_KEY from env. Falls back to cached value if API fails.
+ * If no cache, returns null (frontend shows 'Unknown').
+ *
+ * CMC endpoint: https://pro-api.coinmarketcap.com/v3/fear-and-greed/historical
+ * Cache TTL: 5 minutes (300s) — F&G doesn't change more often than hourly
+ *
+ * Returns { value: number, classification: string, timestamp: string } or null.
  */
+const FG_CACHE_KEY = 'fear-greed:cmc';
+const FG_CACHE_TTL = 300; // 5 minutes
+
 async function fetchFearGreed() {
-  try {
-    const { ok, body } = await fetchJson('https://api.alternative.me/fng/?limit=1');
-    if (ok && body?.data?.[0]) {
-      const d = body.data[0];
-      return {
-        value: parseInt(d.value, 10) || 0,
-        classification: d.value_classification || 'Neutral',
-        timestamp: d.timestamp || null,
-      };
+  // ── Step 1: Try CMC API ──
+  const apiKey = env_CMC_API_KEY || null;
+  if (apiKey) {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch('https://pro-api.coinmarketcap.com/v3/fear-and-greed/historical', {
+        headers: {
+          'Accept': 'application/json',
+          'X-CMC_PRO_API_KEY': apiKey,
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(tid);
+      if (res.ok) {
+        const body = await res.json();
+        const data = body?.data;
+        if (data && Array.isArray(data) && data.length > 0) {
+          const latest = data[0]; // Most recent entry
+          const value = parseInt(latest.value, 10) || 0;
+          const classification = latest.value_classification || _classifyFG(value);
+          const timestamp = latest.timestamp || new Date().toISOString();
+          const result = { value, classification, timestamp, source: 'coinmarketcap' };
+          // Cache the result
+          if (typeof env_APP_CACHE !== 'undefined' && env_APP_CACHE && typeof env_APP_CACHE.put === 'function') {
+            try {
+              await env_APP_CACHE.put(FG_CACHE_KEY, JSON.stringify(result), { expirationTtl: FG_CACHE_TTL });
+            } catch {}
+          }
+          return result;
+        }
+      } else {
+        console.warn('CMC F&G API returned HTTP', res.status);
+      }
+    } catch (e) {
+      console.warn('CMC F&G fetch failed:', e?.message || e);
     }
-  } catch (e) {
-    console.warn('Global: Alternative.me F&G failed', e.message || e);
   }
+
+  // ── Step 2: API failed — try cached value ──
+  if (typeof env_APP_CACHE !== 'undefined' && env_APP_CACHE && typeof env_APP_CACHE.get === 'function') {
+    try {
+      const cached = await env_APP_CACHE.get(FG_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        console.log('F&G: using cached value (API failed):', parsed.value, parsed.classification);
+        return parsed;
+      }
+    } catch {}
+  }
+
+  // ── Step 3: No cache, no API — return null (frontend shows 'Unknown') ──
+  console.warn('F&G: no API key, no cache — returning null');
   return null;
 }
+
+/**
+ * Classify F&G value if API doesn't provide classification.
+ * Standard ranges: 0-24 Extreme Fear, 25-44 Fear, 45-55 Neutral, 56-75 Greed, 76-100 Extreme Greed
+ */
+function _classifyFG(value) {
+  if (value <= 24) return 'Extreme Fear';
+  if (value <= 44) return 'Fear';
+  if (value <= 55) return 'Neutral';
+  if (value <= 75) return 'Greed';
+  return 'Extreme Greed';
+}
+
+// Module-level env accessors (set in fetch handler, used by fetchFearGreed)
+let env_CMC_API_KEY = null;
+let env_APP_CACHE = null;
 
 /**
  * Fetch global market stats with multi-source failover.
@@ -3401,7 +3501,7 @@ async function fetchGlobalStats(env) {
       if (!stats) stats = {}; // FG available even if mcap sources all failed
       stats.fearGreedValue = fg.value;
       stats.fearGreedClassification = fg.classification;
-      stats.fearGreedSource = 'alternative.me';
+      stats.fearGreedSource = 'coinmarketcap';
       stats.fearGreedTimestamp = fg.timestamp;
       console.log('Global: Fear & Greed =', fg.value, fg.classification, 'ts:', fg.timestamp);
     }
@@ -3442,7 +3542,7 @@ async function handleMarketData(env) {
             if (fg) {
               cmcOverview.fearGreedValue = fg.value;
               cmcOverview.fearGreedClassification = fg.classification;
-              cmcOverview.fearGreedSource = 'alternative.me';
+              cmcOverview.fearGreedSource = 'coinmarketcap';
             }
           } catch {}
         }
@@ -4712,6 +4812,9 @@ async function runScheduledAlertsBaseline(controller, env) {
 export default {
   async fetch(request, env, ctx) {
     _currentRequestOrigin = request.headers.get('Origin');
+    // Set env accessors for fetchFearGreed (called from various places)
+    env_CMC_API_KEY = env.CMC_API_KEY || null;
+    env_APP_CACHE = env.APP_CACHE || null;
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
@@ -4732,6 +4835,145 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return handleHealth(env);
+      }
+
+      // ── DIAGNOSTIC: Admin endpoint tester (temp, for root cause analysis) ──
+      // Auth: X-Cron-Secret header must match ALERTS_CRON_SHARED_SECRET
+      // Tests ALL admin endpoints internally and returns exact HTTP status + response body
+      if (request.method === 'GET' && url.pathname === '/api/_diag/admin-test') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.DIAG_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+
+        const results = {};
+        const endpoints = [
+          { name: 'dashboard', path: '/api/admin/dashboard', method: 'GET' },
+          { name: 'users', path: '/api/admin/users?page=1', method: 'GET' },
+          { name: 'admins', path: '/api/admin/admins', method: 'GET' },
+          { name: 'tickets', path: '/api/admin/tickets?page=1', method: 'GET' },
+          { name: 'broadcasts', path: '/api/admin/broadcasts', method: 'GET' },
+          { name: 'rewards', path: '/api/admin/rewards', method: 'GET' },
+          { name: 'transactions', path: '/api/admin/transactions?page=1', method: 'GET' },
+          { name: 'referrals', path: '/api/admin/referrals?page=1', method: 'GET' },
+          { name: 'logs', path: '/api/admin/logs?page=1', method: 'GET' },
+          { name: 'system-health', path: '/api/admin/system-health', method: 'GET' },
+          { name: 'reward-center/overview', path: '/api/admin/reward-center/overview', method: 'GET' },
+          { name: 'reward-center/wheel/config', path: '/api/admin/reward-center/wheel/config', method: 'GET' },
+          { name: 'reward-center/wheel/rewards', path: '/api/admin/reward-center/wheel/rewards', method: 'GET' },
+          { name: 'reward-center/library', path: '/api/admin/reward-center/library', method: 'GET' },
+          { name: 'reward-center/referral-tiers', path: '/api/admin/reward-center/referral-tiers', method: 'GET' },
+          { name: 'reward-center/mission-rewards', path: '/api/admin/reward-center/mission-rewards', method: 'GET' },
+          { name: 'reward-center/campaigns', path: '/api/admin/reward-center/campaigns', method: 'GET' },
+          { name: 'reward-center/emergency', path: '/api/admin/reward-center/emergency', method: 'GET' },
+          { name: 'reward-center/analytics', path: '/api/admin/reward-center/analytics', method: 'GET' },
+          { name: 'notifications/analytics', path: '/api/admin/notifications/analytics', method: 'GET' },
+          { name: 'notifications/templates', path: '/api/admin/notifications/templates', method: 'GET' },
+          { name: 'notifications/broadcasts', path: '/api/admin/notifications/broadcasts', method: 'GET' },
+          { name: 'alert-economy/dashboard', path: '/api/admin/alert-economy/dashboard', method: 'GET' },
+          { name: 'alert-economy/configs', path: '/api/admin/alert-economy/configs', method: 'GET' },
+          { name: 'maintenance', path: '/api/admin/maintenance', method: 'GET' },
+        ];
+
+        for (const ep of endpoints) {
+          try {
+            // Build a fake admin request to test the endpoint internally
+            const testReq = new Request(`https://worker.dev${ep.path}`, { method: ep.method });
+            // Simulate super-admin by setting the env ADMIN_TELEGRAM_ID as the caller
+            const adminId = String(env.ADMIN_TELEGRAM_ID || '0');
+            // We need to bypass auth — call the handler directly with a mock auth
+            const mockAuthState = { error: null, user: { id: adminId } };
+
+            // For each endpoint, call the handler directly
+            let response;
+            const url = new URL(testReq.url);
+
+            if (ep.name === 'dashboard') {
+              const stats = await adminRepo.getDashboardStats(env).catch(e => ({ error: e.message }));
+              const activity = await adminRepo.getRecentActivity(env, 10).catch(e => ({ error: e.message }));
+              response = { status: 'success', stats, recent_activity: activity };
+            } else if (ep.name === 'users') {
+              response = await adminRepo.searchUsers(env, { search: '', page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
+            } else if (ep.name === 'admins') {
+              response = { admins: await adminRepo.listAdmins(env).catch(e => ({ error: e.message })) };
+            } else if (ep.name === 'tickets') {
+              response = await adminRepo.listTicketsAdmin(env, { page: 1, limit: 20, status: '' }).catch(e => ({ status: 'error', error: e.message }));
+            } else if (ep.name === 'broadcasts') {
+              response = await adminRepo.listBroadcasts(env, { page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
+            } else if (ep.name === 'rewards') {
+              response = await adminRepo.listRewards(env, { status: '', page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
+            } else if (ep.name === 'transactions') {
+              response = await adminRepo.listTransactions(env, { page: 1, limit: 20, user_id: '', tx_type: '' }).catch(e => ({ status: 'error', error: e.message }));
+            } else if (ep.name === 'referrals') {
+              response = await adminRepo.listReferrals(env, { search: '', page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
+            } else if (ep.name === 'logs') {
+              response = await adminRepo.getAdminLogs(env, { action: '', page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
+            } else if (ep.name === 'system-health') {
+              response = await adminRepo.getSystemHealth(env).catch(e => ({ status: 'error', error: e.message }));
+            } else if (ep.name === 'maintenance') {
+              response = await getMaintenanceState(env).catch(e => ({ status: 'error', error: e.message }));
+            } else if (ep.path.startsWith('/api/admin/reward-center/')) {
+              if (typeof rewardCenterRepo !== 'undefined') {
+                if (ep.name === 'reward-center/overview') {
+                  response = await rewardCenterRepo.getOverview(env).catch(e => ({ status: 'error', error: e.message }));
+                } else if (ep.name === 'reward-center/wheel/config') {
+                  response = await rewardCenterRepo.getWheelConfig(env).catch(e => ({ status: 'error', error: e.message }));
+                } else if (ep.name === 'reward-center/wheel/rewards') {
+                  response = { rewards: await rewardCenterRepo.listWheelRewards(env).catch(e => ({ error: e.message })) };
+                } else if (ep.name === 'reward-center/library') {
+                  response = { library: await rewardCenterRepo.listRewardLibrary(env).catch(e => ({ error: e.message })) };
+                } else if (ep.name === 'reward-center/referral-tiers') {
+                  response = { tiers: await rewardCenterRepo.listReferralTiers(env).catch(e => ({ error: e.message })) };
+                } else if (ep.name === 'reward-center/mission-rewards') {
+                  response = { missions: await rewardCenterRepo.listMissionRewards(env).catch(e => ({ error: e.message })) };
+                } else if (ep.name === 'reward-center/campaigns') {
+                  response = { campaigns: await rewardCenterRepo.listCampaigns(env).catch(e => ({ error: e.message })) };
+                } else if (ep.name === 'reward-center/emergency') {
+                  response = await rewardCenterRepo.getEmergencyControls(env).catch(e => ({ status: 'error', error: e.message }));
+                } else if (ep.name === 'reward-center/analytics') {
+                  response = await rewardCenterRepo.getAnalytics(env, { range: '7d' }).catch(e => ({ status: 'error', error: e.message }));
+                }
+              } else {
+                response = { error: 'rewardCenterRepo not defined' };
+              }
+            } else if (ep.path.startsWith('/api/admin/notifications/')) {
+              if (typeof notificationPlatformRepo !== 'undefined') {
+                if (ep.name === 'notifications/analytics') {
+                  response = await notificationPlatformRepo.getAnalytics(env, { range: '7d' }).catch(e => ({ status: 'error', error: e.message }));
+                } else if (ep.name === 'notifications/templates') {
+                  response = { templates: await notificationPlatformRepo.listTemplates(env).catch(e => ({ error: e.message })) };
+                } else if (ep.name === 'notifications/broadcasts') {
+                  response = await notificationPlatformRepo.listBroadcasts(env, { limit: 20, offset: 0 }).catch(e => ({ status: 'error', error: e.message }));
+                }
+              } else {
+                response = { error: 'notificationPlatformRepo not defined' };
+              }
+            } else if (ep.path.startsWith('/api/admin/alert-economy/')) {
+              if (typeof alertEconomyRepo !== 'undefined') {
+                if (ep.name === 'alert-economy/dashboard') {
+                  response = await alertEconomyRepo.getDashboard(env).catch(e => ({ status: 'error', error: e.message }));
+                } else if (ep.name === 'alert-economy/configs') {
+                  response = { configs: await alertEconomyRepo.getAllConfigs(env).catch(e => ({ error: e.message })) };
+                }
+              } else {
+                response = { error: 'alertEconomyRepo not defined' };
+              }
+            } else {
+              response = { error: 'not implemented in diag' };
+            }
+
+            const hasError = response && (response.error || response.status === 'error');
+            results[ep.name] = {
+              status: hasError ? 'ERROR' : 'OK',
+              response: typeof response === 'object' ? JSON.stringify(response).substring(0, 500) : String(response).substring(0, 500),
+            };
+          } catch (e) {
+            results[ep.name] = { status: 'EXCEPTION', error: e.message };
+          }
+        }
+
+        return jsonResponse({ status: 'success', results }, {}, env);
       }
 
       // ── Manual Alert Trigger (admin-only, for testing) ──
@@ -4816,7 +5058,7 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/market/overview') {
         const overview = await marketOverviewSvc.getCachedOverview(env);
         if (overview) {
-          // PHASE 5 FIX: Enrich with Fear & Greed from alternative.me
+          // PHASE 5 FIX: Enrich with Fear & Greed from CMC API
           // (not included in CMC global metrics)
           if (!overview.fearGreedValue) {
             try {
@@ -4824,7 +5066,7 @@ export default {
               if (fg) {
                 overview.fearGreedValue = fg.value;
                 overview.fearGreedClassification = fg.classification;
-                overview.fearGreedSource = 'alternative.me';
+                overview.fearGreedSource = 'coinmarketcap';
               }
             } catch { /* F&G is optional — don't fail overview if it fails */ }
           }
@@ -5633,6 +5875,11 @@ export default {
           message: 'Internal server error',
         },
         { status: 500 }, env);
+    } finally {
+      // ROOT CAUSE FIX: Close the shared DB pool after each request to
+      // prevent WebSocket connection leaks. The pool is recreated on the
+      // next request via getSharedPool().
+      closeSharedPool(env);
     }
   },
 
