@@ -2656,6 +2656,100 @@ let _pubFailedCache = [];
 let _pubLogsCache = [];
 let _pubAutoRefreshTimer = null;
 let _pubStatsLastError = null;
+let _pubSmartFilters = { news: new Set(), calendar: new Set(), analysis: new Set() };
+
+// Smart filter toggle — adds/removes filter from active set, re-renders list
+function toggleSmartFilter(tab, filter, btn) {
+    const activeSet = _pubSmartFilters[tab];
+    if (!activeSet) return;
+    if (activeSet.has(filter)) {
+        activeSet.delete(filter);
+        btn.classList.remove('active');
+    } else {
+        activeSet.add(filter);
+        btn.classList.add('active');
+    }
+    // Re-apply filters to the cached list
+    if (tab === 'news' && _pubNewsCache.length) {
+        const searchQ = document.getElementById('tgpub-news-search')?.value || '';
+        if (searchQ) filterPubNews(searchQ);
+        else renderPublisherNewsList(_pubNewsCache);
+    } else if (tab === 'calendar' && _pubCalendarCache.length) {
+        renderPublisherCalendarList(_pubCalendarCache);
+    } else if (tab === 'analysis' && _pubAnalysisCache.length) {
+        const searchQ = document.getElementById('tgpub-analysis-search')?.value || '';
+        if (searchQ) filterPubAnalysis(searchQ);
+        else renderPublisherAnalysisList(_pubAnalysisCache);
+    }
+}
+window.toggleSmartFilter = toggleSmartFilter;
+
+// Apply smart filters to news items
+function applyNewsSmartFilters(items) {
+    const filters = _pubSmartFilters.news;
+    if (!filters.size) return items;
+    const now = new Date();
+    const todayStr = now.toDateString();
+    return items.filter(a => {
+        for (const f of filters) {
+            if (f === 'breaking' && !(a.is_breaking || a.priority === 'breaking')) return false;
+            if (f === 'important' && !(a.priority === 'important' || a.important)) return false;
+            if (f === 'ai-ready' && !(a.ai_summary && a.ai_summary.length > 50)) return false;
+            if (f === 'unpublished' && a.published) return false;
+            if (f === 'today') {
+                const aDate = a.published_at || a.created_at;
+                if (!aDate || new Date(aDate).toDateString() !== todayStr) return false;
+            }
+        }
+        return true;
+    });
+}
+
+// Apply smart filters to calendar items
+function applyCalendarSmartFilters(items) {
+    const filters = _pubSmartFilters.calendar;
+    if (!filters.size) return items;
+    const now = new Date();
+    const todayStr = now.toDateString();
+    return items.filter(e => {
+        for (const f of filters) {
+            if (f === 'high' && String(e.impact || '').toLowerCase() !== 'high') return false;
+            if (f === 'medium' && String(e.impact || '').toLowerCase() !== 'medium') return false;
+            if (f === 'low' && String(e.impact || '').toLowerCase() !== 'low') return false;
+            if (f === 'today') {
+                const eDate = e.timestamp || e.time;
+                if (!eDate || new Date(eDate).toDateString() !== todayStr) return false;
+            }
+            if (f === 'future') {
+                const eDate = e.timestamp || e.time;
+                if (!eDate || new Date(eDate) <= now) return false;
+            }
+        }
+        return true;
+    });
+}
+
+// Apply smart filters to analysis items
+function applyAnalysisSmartFilters(items) {
+    const filters = _pubSmartFilters.analysis;
+    if (!filters.size) return items;
+    const now = Date.now();
+    const dayAgo = now - 24 * 60 * 60 * 1000;
+    return items.filter(a => {
+        for (const f of filters) {
+            if (f === 'btc' && String(a.coin || '').toUpperCase() !== 'BTC') return false;
+            if (f === 'eth' && String(a.coin || '').toUpperCase() !== 'ETH') return false;
+            if (f === 'buy' && !/buy|خرید|long|صعود/i.test(a.title + ' ' + (a.content || ''))) return false;
+            if (f === 'sell' && !/sell|فروش|short|نزول/i.test(a.title + ' ' + (a.content || ''))) return false;
+            if (f === 'new') {
+                const cDate = a.created_at ? new Date(a.created_at).getTime() : 0;
+                if (cDate < dayAgo) return false;
+            }
+            if (f === 'featured' && !a.featured) return false;
+        }
+        return true;
+    });
+}
 
 // Skeleton loader HTML generator (card-shaped shimmer placeholders)
 function pubSkeleton(rows) {
@@ -2791,16 +2885,21 @@ window.loadPublisherNews = loadPublisherNews;
 
 function filterPubNews(q) {
     if (!_pubNewsCache.length) return;
+    // First apply smart filters
+    let items = applyNewsSmartFilters(_pubNewsCache);
     const qq = String(q || '').toLowerCase().trim();
-    if (!qq) { renderPublisherNewsList(_pubNewsCache); return; }
-    const filtered = _pubNewsCache.filter(a =>
-        (a.title || '').toLowerCase().includes(qq) || (a.body || '').toLowerCase().includes(qq)
-    );
-    renderPublisherNewsList(filtered);
+    if (qq) {
+        items = items.filter(a =>
+            (a.title || '').toLowerCase().includes(qq) || (a.body || '').toLowerCase().includes(qq)
+        );
+    }
+    renderPublisherNewsList(items);
 }
 window.filterPubNews = filterPubNews;
 
 function renderPublisherNewsList(items) {
+    // Apply smart filters if any are active
+    items = applyNewsSmartFilters(items);
     const listEl = document.getElementById('tgpub-news-list');
     const emptyEl = document.getElementById('tgpub-news-empty');
     if (!listEl) return;
@@ -2963,14 +3062,13 @@ window.loadPublisherCalendar = loadPublisherCalendar;
 
 function filterPubCalendar() {
     if (!_pubCalendarCache.length) return;
-    const filterEl = document.getElementById('tgpub-calendar-impact-filter');
-    const impact = filterEl ? filterEl.value : '';
-    const filtered = impact ? _pubCalendarCache.filter(e => String(e.impact || '').toLowerCase() === impact) : _pubCalendarCache;
-    renderPublisherCalendarList(filtered);
+    renderPublisherCalendarList(_pubCalendarCache);
 }
 window.filterPubCalendar = filterPubCalendar;
 
 function renderPublisherCalendarList(items) {
+    // Apply smart filters if any are active
+    items = applyCalendarSmartFilters(items);
     const listEl = document.getElementById('tgpub-calendar-list');
     const emptyEl = document.getElementById('tgpub-calendar-empty');
     if (!listEl) return;
@@ -3048,18 +3146,23 @@ window.loadPublisherAnalysis = loadPublisherAnalysis;
 
 function filterPubAnalysis(q) {
     if (!_pubAnalysisCache.length) return;
+    // First apply smart filters
+    let items = applyAnalysisSmartFilters(_pubAnalysisCache);
     const qq = String(q || '').toLowerCase().trim();
-    if (!qq) { renderPublisherAnalysisList(_pubAnalysisCache); return; }
-    const filtered = _pubAnalysisCache.filter(a =>
-        (a.title || '').toLowerCase().includes(qq) ||
-        (a.coin || '').toLowerCase().includes(qq) ||
-        (a.content || '').toLowerCase().includes(qq)
-    );
-    renderPublisherAnalysisList(filtered);
+    if (qq) {
+        items = items.filter(a =>
+            (a.title || '').toLowerCase().includes(qq) ||
+            (a.coin || '').toLowerCase().includes(qq) ||
+            (a.content || '').toLowerCase().includes(qq)
+        );
+    }
+    renderPublisherAnalysisList(items);
 }
 window.filterPubAnalysis = filterPubAnalysis;
 
 function renderPublisherAnalysisList(items) {
+    // Apply smart filters if any are active
+    items = applyAnalysisSmartFilters(items);
     const listEl = document.getElementById('tgpub-analysis-list');
     const emptyEl = document.getElementById('tgpub-analysis-empty');
     if (!listEl) return;

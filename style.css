@@ -10386,3 +10386,48 @@ body.jl-locked .cd-fullscreen {
         font-size: 9px;
     }
 }
+
+/* ── Smart Filters (toggle chips) ── */
+.tgpub-smart-filters {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    box-sizing: border-box;
+}
+.tgpub-smart-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 7px 12px;
+    border-radius: 9px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+    color: #a8b2c5;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.18s ease;
+    font-family: inherit;
+    flex-shrink: 0;
+}
+.tgpub-smart-filter svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+}
+.tgpub-smart-filter:hover {
+    background: rgba(255,255,255,0.06);
+    color: #e4e9f2;
+    border-color: rgba(255,255,255,0.12);
+}
+.tgpub-smart-filter.active {
+    background: linear-gradient(135deg, rgba(247,147,26,0.18), rgba(247,147,26,0.08));
+    color: #f7b950;
+    border-color: rgba(247,147,26,0.35);
+    box-shadow: 0 2px 8px rgba(247,147,26,0.15);
+}
+.tgpub-smart-filter.active svg {
+    color: #f7b950;
+}
