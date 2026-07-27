@@ -7220,6 +7220,11 @@ function openForexDetail(symbol) {
 }
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+        const newsModal = document.getElementById('news-modal');
+        if (newsModal && (newsModal.style.display === 'flex' || newsModal.style.display === 'block')) {
+            closeNewsModal();
+            return;
+        }
         if (document.getElementById('coin-detail-modal').style.display === 'flex') closeCoinDetail();
     }
 });
