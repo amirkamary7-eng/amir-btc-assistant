@@ -2756,19 +2756,19 @@ function pubSkeleton(rows) {
     rows = rows || 3;
     let html = '';
     for (let i = 0; i < rows; i++) {
-        html += '<div class="tgpub-card tgpub-skeleton">' +
-            '<div class="tgpub-card-top">' +
-                '<div class="tgpub-sk-media"></div>' +
-                '<div class="tgpub-card-body">' +
-                    '<div class="tgpub-sk-line" style="width:' + (50 + Math.random() * 30) + '%"></div>' +
-                    '<div class="tgpub-sk-line" style="width:80%;margin-top:8px"></div>' +
-                    '<div class="tgpub-sk-line" style="width:60%;margin-top:6px"></div>' +
+        html += '<div class="pub-card tgpub-skeleton">' +
+            '<div class="pub-card-top">' +
+                '<div class="pub-sk-media"></div>' +
+                '<div class="pub-card-body">' +
+                    '<div class="pub-sk-line" style="width:' + (50 + Math.random() * 30) + '%"></div>' +
+                    '<div class="pub-sk-line" style="width:80%;margin-top:8px"></div>' +
+                    '<div class="pub-sk-line" style="width:60%;margin-top:6px"></div>' +
                 '</div>' +
             '</div>' +
-            '<div class="tgpub-card-actions">' +
-                '<div class="tgpub-sk-btn"></div>' +
-                '<div class="tgpub-sk-btn"></div>' +
-                '<div class="tgpub-sk-btn"></div>' +
+            '<div class="pub-card-actions">' +
+                '<div class="pub-sk-btn"></div>' +
+                '<div class="pub-sk-btn"></div>' +
+                '<div class="pub-sk-btn"></div>' +
             '</div>' +
         '</div>';
     }
@@ -2785,7 +2785,7 @@ function pubShowListEmpty(tabName, hasItems, emptyMsg) {
     const listEl = document.getElementById('tgpub-' + tabName + '-list');
     if (!listEl) return;
     if (!hasItems) {
-        listEl.innerHTML = '<div class="tgpub-empty tgpub-empty-inline">' + (emptyMsg || 'موردی یافت نشد') + '</div>';
+        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline">' + (emptyMsg || 'موردی یافت نشد') + '</div>';
     }
 }
 
@@ -2835,10 +2835,10 @@ window.loadPublisherStats = loadPublisherStats;
 
 function switchPublisherTab(tab, btn) {
     _pubCurrentTab = tab;
-    document.querySelectorAll('.tgpub-segment').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.pub-tab').forEach(t => t.classList.remove('active'));
     if (btn) btn.classList.add('active');
     else {
-        const target = document.querySelector('.tgpub-tab[data-pub-tab="' + tab + '"]');
+        const target = document.querySelector('.pub-tab[data-pub-tab="' + tab + '"]');
         if (target) target.classList.add('active');
     }
     document.querySelectorAll('.tgpub-panel').forEach(c => c.classList.remove('active'));
@@ -2872,7 +2872,7 @@ async function loadPublisherNews(page) {
         _pubSelectedNews = new Set();
         renderPublisherNewsList(items);
     } catch (e) {
-        listEl.innerHTML = '<div class="tgpub-empty tgpub-empty-inline">' +
+        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' +
             '<h4>خطا در بارگذاری اخبار</h4>' +
             '<p>' + adminEscapeHtml((e.message || 'خطای ناشناخته').slice(0, 200)) + '</p>' +
@@ -2882,6 +2882,27 @@ async function loadPublisherNews(page) {
     }
 }
 window.loadPublisherNews = loadPublisherNews;
+
+let _pubNewsSearchDebounce = null;
+function debounceFilterNews(q) {
+    // Show/hide clear button
+    const clearBtn = document.getElementById('pub-news-clear');
+    if (clearBtn) clearBtn.style.display = q ? 'flex' : 'none';
+    // Debounce 250ms
+    if (_pubNewsSearchDebounce) clearTimeout(_pubNewsSearchDebounce);
+    _pubNewsSearchDebounce = setTimeout(() => filterPubNews(q), 250);
+}
+window.debounceFilterNews = debounceFilterNews;
+
+function clearPubSearch(tab) {
+    const input = document.getElementById('tgpub-' + tab + '-search');
+    if (input) { input.value = ''; input.focus(); }
+    const clearBtn = document.getElementById('pub-' + tab + '-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    if (tab === 'news') filterPubNews('');
+    else if (tab === 'analysis') filterPubAnalysis('');
+}
+window.clearPubSearch = clearPubSearch;
 
 function filterPubNews(q) {
     if (!_pubNewsCache.length) return;
@@ -2919,10 +2940,10 @@ function renderPublisherNewsList(items) {
         const aiSvg = hasAi
             ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>'
             : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-        const aiBadge = '<span class="tgpub-badge ' + (hasAi ? 'tgpub-badge-ai' : 'tgpub-badge-pending') + '">' + aiSvg + '<span>' + (hasAi ? 'AI' : 'در انتظار') + '</span></span>';
+        const aiBadge = '<span class="pub-badge ' + (hasAi ? 'tgpub-badge-ai' : 'tgpub-badge-pending') + '">' + aiSvg + '<span>' + (hasAi ? 'AI' : 'در انتظار') + '</span></span>';
         const img = a.image
-            ? '<div class="tgpub-card-media"><img src="' + adminEscapeHtml(a.image) + '" loading="lazy" onerror="this.parentElement.style.display=\'none\'"></div>'
-            : '<div class="tgpub-card-media tgpub-card-media-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>';
+            ? '<div class="pub-card-media"><img src="' + adminEscapeHtml(a.image) + '" loading="lazy" onerror="this.parentElement.style.display=\'none\'"></div>'
+            : '<div class="pub-card-media tgpub-card-media-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>';
         const title = adminEscapeHtml((a.title || '').slice(0, 120));
         const summary = adminEscapeHtml((a.ai_summary || a.body || '').slice(0, 150));
         const source = adminEscapeHtml(a.source_name || a.source || '—');
@@ -2930,29 +2951,29 @@ function renderPublisherNewsList(items) {
         const previewIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
         const queueIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>';
         const sendIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
-        return '<div class="tgpub-card' + (isSelected ? ' tgpub-card-selected' : '') + '" data-ref-id="' + adminEscapeHtml(refId) + '">' +
-            '<div class="tgpub-card-header">' +
-                '<div class="tgpub-card-badges">' +
-                    '<span class="tgpub-badge tgpub-badge-type">' + newsIcon + '<span>خبر</span></span>' +
+        return '<div class="pub-card' + (isSelected ? ' tgpub-card-selected' : '') + '" data-ref-id="' + adminEscapeHtml(refId) + '">' +
+            '<div class="pub-card-header">' +
+                '<div class="pub-card-badges">' +
+                    '<span class="pub-badge tgpub-badge-type">' + newsIcon + '<span>خبر</span></span>' +
                     aiBadge +
                 '</div>' +
-                '<label class="tgpub-card-checkbox">' +
+                '<label class="pub-card-checkbox">' +
                     '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleNewsSelect(\'' + adminEscapeHtml(refId) + '\', this.checked)">' +
-                    '<span class="tgpub-card-checkbox-box"></span>' +
+                    '<span class="pub-card-checkbox-box"></span>' +
                 '</label>' +
             '</div>' +
-            '<div class="tgpub-card-content">' +
+            '<div class="pub-card-content">' +
                 img +
-                '<div class="tgpub-card-body">' +
-                    '<div class="tgpub-card-title">' + title + '</div>' +
-                    (summary ? '<div class="tgpub-card-summary">' + summary + '</div>' : '') +
-                    '<div class="tgpub-card-meta">' +
-                        '<span class="tgpub-badge tgpub-badge-src">' + source + '</span>' +
-                        '<span class="tgpub-badge tgpub-badge-ref">' + adminEscapeHtml(refId) + '</span>' +
+                '<div class="pub-card-body">' +
+                    '<div class="pub-card-title">' + title + '</div>' +
+                    (summary ? '<div class="pub-card-summary">' + summary + '</div>' : '') +
+                    '<div class="pub-card-meta">' +
+                        '<span class="pub-badge tgpub-badge-src">' + source + '</span>' +
+                        '<span class="pub-badge tgpub-badge-ref">' + adminEscapeHtml(refId) + '</span>' +
                     '</div>' +
                 '</div>' +
             '</div>' +
-            '<div class="tgpub-card-actions">' +
+            '<div class="pub-card-actions">' +
                 '<button class="adm-btn adm-btn-ghost" onclick="openPublisherPreview(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
                 '<button class="adm-btn adm-btn-ghost" onclick="enqueuePublisher(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + queueIcon + '<span>به صف</span></button>' +
                 '<button class="adm-btn adm-btn-primary" onclick="sendNowPublisher(\'news\',\'' + adminEscapeHtml(refId) + '\')">' + sendIcon + '<span>ارسال فوری</span></button>' +
@@ -2966,7 +2987,7 @@ function toggleNewsSelect(refId, checked) {
     if (checked) _pubSelectedNews.add(refId);
     else _pubSelectedNews.delete(refId);
     // Update visual state
-    const item = document.querySelector('.tgpub-card[data-ref-id="' + refId + '"]');
+    const item = document.querySelector('.pub-card[data-ref-id="' + refId + '"]');
     if (item) item.classList.toggle('tgpub-card-selected', checked);
     updateNewsBulkButton();
     // Update "select all" checkbox state
@@ -3004,7 +3025,7 @@ function updateNewsBulkButton() {
     if (cnt) cnt.textContent = faNum(count);
     if (btn) btn.disabled = count === 0;
     // Show/hide bulk bar based on selection
-    if (bar) bar.classList.toggle('tgpub-bulk-bar-active', count > 0);
+    if (bar) bar.classList.toggle('pub-bulk-bar-active', count > 0);
 }
 
 function clearNewsSelection() {
@@ -3049,7 +3070,7 @@ async function loadPublisherCalendar() {
         _pubCalendarCache = items;
         renderPublisherCalendarList(items);
     } catch (e) {
-        listEl.innerHTML = '<div class="tgpub-empty tgpub-empty-inline">' +
+        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' +
             '<h4>خطا در بارگذاری</h4>' +
             '<p>' + adminEscapeHtml((e.message || 'خطای ناشناخته').slice(0, 200)) + '</p>' +
@@ -3086,7 +3107,7 @@ function renderPublisherCalendarList(items) {
         const impactLabel = impact === 'high' ? 'High' : impact === 'medium' ? 'Medium' : 'Low';
         const impactDot = impact === 'high' ? '#ef4444' : impact === 'medium' ? '#f5a623' : '#22c55e';
         const calIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
-        const impactBadge = '<span class="tgpub-badge ' + impactClass + '"><span class="tgpub-impact-dot" style="background:' + impactDot + '"></span><span>' + adminEscapeHtml(impactLabel) + '</span></span>';
+        const impactBadge = '<span class="pub-badge ' + impactClass + '"><span class="pub-impact-dot" style="background:' + impactDot + '"></span><span>' + adminEscapeHtml(impactLabel) + '</span></span>';
         const country = adminEscapeHtml(e.country || '');
         const title = adminEscapeHtml((e.title || e.event || '').slice(0, 120));
         const time = adminEscapeHtml(e.time || '—');
@@ -3096,21 +3117,21 @@ function renderPublisherCalendarList(items) {
         const queueIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>';
         const sendIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
         const timeIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-        return '<div class="tgpub-card" data-ref-id="' + adminEscapeHtml(refId) + '">' +
-            '<div class="tgpub-card-body">' +
-                '<div class="tgpub-card-badges">' +
-                    '<span class="tgpub-badge tgpub-badge-type">' + calIcon + '<span>تقویم</span></span>' +
+        return '<div class="pub-card" data-ref-id="' + adminEscapeHtml(refId) + '">' +
+            '<div class="pub-card-body">' +
+                '<div class="pub-card-badges">' +
+                    '<span class="pub-badge tgpub-badge-type">' + calIcon + '<span>تقویم</span></span>' +
                     impactBadge +
-                    (country ? '<span class="tgpub-badge tgpub-badge-src">' + country + '</span>' : '') +
+                    (country ? '<span class="pub-badge tgpub-badge-src">' + country + '</span>' : '') +
                 '</div>' +
-                '<div class="tgpub-card-title">' + title + '</div>' +
-                '<div class="tgpub-card-meta">' +
-                    '<span class="tgpub-badge tgpub-badge-ref">' + timeIcon + '<span>' + time + '</span></span>' +
-                    (e.forecast ? '<span class="tgpub-badge tgpub-badge-forecast">Forecast: ' + forecast + '</span>' : '') +
-                    (e.previous ? '<span class="tgpub-badge tgpub-badge-forecast">Previous: ' + previous + '</span>' : '') +
+                '<div class="pub-card-title">' + title + '</div>' +
+                '<div class="pub-card-meta">' +
+                    '<span class="pub-badge tgpub-badge-ref">' + timeIcon + '<span>' + time + '</span></span>' +
+                    (e.forecast ? '<span class="pub-badge tgpub-badge-forecast">Forecast: ' + forecast + '</span>' : '') +
+                    (e.previous ? '<span class="pub-badge tgpub-badge-forecast">Previous: ' + previous + '</span>' : '') +
                 '</div>' +
             '</div>' +
-            '<div class="tgpub-card-actions">' +
+            '<div class="pub-card-actions">' +
                 '<button class="adm-btn adm-btn-ghost" onclick="openPublisherPreview(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
                 '<button class="adm-btn adm-btn-ghost" onclick="enqueuePublisher(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">' + queueIcon + '<span>به صف</span></button>' +
                 '<button class="adm-btn adm-btn-primary" onclick="sendNowPublisher(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">' + sendIcon + '<span>ارسال فوری</span></button>' +
@@ -3133,7 +3154,7 @@ async function loadPublisherAnalysis() {
         _pubAnalysisCache = items;
         renderPublisherAnalysisList(items);
     } catch (e) {
-        listEl.innerHTML = '<div class="tgpub-empty tgpub-empty-inline">' +
+        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' +
             '<h4>خطا در بارگذاری</h4>' +
             '<p>' + adminEscapeHtml((e.message || 'خطای ناشناخته').slice(0, 200)) + '</p>' +
@@ -3180,30 +3201,30 @@ function renderPublisherAnalysisList(items) {
         const summary = adminEscapeHtml((a.content || '').slice(0, 150));
         const hasImg = !!a.image;
         const analysisIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>';
-        const imgBadge = hasImg ? '<span class="tgpub-badge tgpub-badge-ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><span>تصویر</span></span>' : '';
+        const imgBadge = hasImg ? '<span class="pub-badge tgpub-badge-ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><span>تصویر</span></span>' : '';
         const previewIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
         const queueIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>';
         const sendIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
         const imgHtml = hasImg
-            ? '<div class="tgpub-card-media"><img src="' + adminEscapeHtml(a.image) + '" loading="lazy" onerror="this.parentElement.style.display=\'none\'"></div>'
+            ? '<div class="pub-card-media"><img src="' + adminEscapeHtml(a.image) + '" loading="lazy" onerror="this.parentElement.style.display=\'none\'"></div>'
             : '';
-        return '<div class="tgpub-card" data-ref-id="' + adminEscapeHtml(refId) + '">' +
-            '<div class="tgpub-card-top">' +
+        return '<div class="pub-card" data-ref-id="' + adminEscapeHtml(refId) + '">' +
+            '<div class="pub-card-top">' +
                 imgHtml +
-                '<div class="tgpub-card-body">' +
-                    '<div class="tgpub-card-badges">' +
-                        '<span class="tgpub-badge tgpub-badge-type">' + analysisIcon + '<span>تحلیل</span></span>' +
-                        '<span class="tgpub-badge tgpub-badge-src">' + coin + '</span>' +
+                '<div class="pub-card-body">' +
+                    '<div class="pub-card-badges">' +
+                        '<span class="pub-badge tgpub-badge-type">' + analysisIcon + '<span>تحلیل</span></span>' +
+                        '<span class="pub-badge tgpub-badge-src">' + coin + '</span>' +
                         imgBadge +
                     '</div>' +
-                    '<div class="tgpub-card-title">' + title + '</div>' +
-                    (summary ? '<div class="tgpub-card-summary">' + summary + '</div>' : '') +
-                    '<div class="tgpub-card-meta">' +
-                        '<span class="tgpub-badge tgpub-badge-ref">' + adminEscapeHtml(refId) + '</span>' +
+                    '<div class="pub-card-title">' + title + '</div>' +
+                    (summary ? '<div class="pub-card-summary">' + summary + '</div>' : '') +
+                    '<div class="pub-card-meta">' +
+                        '<span class="pub-badge tgpub-badge-ref">' + adminEscapeHtml(refId) + '</span>' +
                     '</div>' +
                 '</div>' +
             '</div>' +
-            '<div class="tgpub-card-actions">' +
+            '<div class="pub-card-actions">' +
                 '<button class="adm-btn adm-btn-ghost" onclick="openPublisherPreview(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">' + previewIcon + '<span>پیش‌نمایش</span></button>' +
                 '<button class="adm-btn adm-btn-ghost" onclick="enqueuePublisher(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">' + queueIcon + '<span>به صف</span></button>' +
                 '<button class="adm-btn adm-btn-primary" onclick="sendNowPublisher(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">' + sendIcon + '<span>ارسال فوری</span></button>' +
@@ -3225,7 +3246,7 @@ async function loadPublisherQueue() {
         _pubQueueCache = (data && data.items) || [];
         renderPublisherQueueList(_pubQueueCache, 'queue');
     } catch (e) {
-        listEl.innerHTML = '<div class="tgpub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherQueue()">تلاش مجدد</button></div>';
+        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherQueue()">تلاش مجدد</button></div>';
     }
 }
 window.loadPublisherQueue = loadPublisherQueue;
@@ -3242,7 +3263,7 @@ async function loadPublisherSent() {
         _pubSentCache = (data && data.items) || [];
         renderPublisherQueueList(_pubSentCache, 'sent');
     } catch (e) {
-        listEl.innerHTML = '<div class="tgpub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherSent()">تلاش مجدد</button></div>';
+        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherSent()">تلاش مجدد</button></div>';
     }
 }
 window.loadPublisherSent = loadPublisherSent;
@@ -3259,7 +3280,7 @@ async function loadPublisherFailed() {
         _pubFailedCache = (data && data.items) || [];
         renderPublisherQueueList(_pubFailedCache, 'failed');
     } catch (e) {
-        listEl.innerHTML = '<div class="tgpub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherFailed()">تلاش مجدد</button></div>';
+        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherFailed()">تلاش مجدد</button></div>';
     }
 }
 window.loadPublisherFailed = loadPublisherFailed;
@@ -3305,7 +3326,7 @@ function renderPublisherQueueList(items, mode) {
             announcement: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/></svg>',
         };
         const typeIcon = typeIcons[item.type] || typeIcons.announcement;
-        const statusBadge = '<span class="tgpub-badge tgpub-badge-status-' + item.status + '"><span>' + item.status + '</span></span>';
+        const statusBadge = '<span class="pub-badge tgpub-badge-status-' + item.status + '"><span>' + item.status + '</span></span>';
         // Priority badge (1=urgent, 10=breaking, 20=important, 50=normal, 100=low)
         const priority = Number(item.priority || 100);
         let priorityLabel = '', priorityClass = '';
@@ -3313,10 +3334,10 @@ function renderPublisherQueueList(items, mode) {
         else if (priority <= 20) { priorityLabel = 'مهم'; priorityClass = 'tgpub-badge-priority-high'; }
         else if (priority <= 50) { priorityLabel = 'عادی'; priorityClass = 'tgpub-badge-priority-normal'; }
         else { priorityLabel = 'کم'; priorityClass = 'tgpub-badge-priority-low'; }
-        const priorityBadge = (mode === 'queue') ? '<span class="tgpub-badge ' + priorityClass + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/></svg><span>' + priorityLabel + '</span></span>' : '';
+        const priorityBadge = (mode === 'queue') ? '<span class="pub-badge ' + priorityClass + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/></svg><span>' + priorityLabel + '</span></span>' : '';
         // Scheduled time badge
         const scheduledBadge = (mode === 'queue' && item.scheduled_at && new Date(item.scheduled_at) > new Date())
-            ? '<span class="tgpub-badge tgpub-badge-scheduled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>' + adminFormatDatePub(item.scheduled_at) + '</span></span>'
+            ? '<span class="pub-badge tgpub-badge-scheduled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>' + adminFormatDatePub(item.scheduled_at) + '</span></span>'
             : '';
         const ref = adminEscapeHtml(item.ref_id || '');
         const time = mode === 'sent' ? adminFormatDatePub(item.sent_at) : adminFormatDatePub(item.created_at);
@@ -3331,23 +3352,23 @@ function renderPublisherQueueList(items, mode) {
         if (mode === 'sent') {
             actions.push('<button class="adm-btn adm-btn-ghost" onclick="deletePublisherSent(' + item.id + ')" title="حذف"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>حذف</span></button>');
         }
-        const errLine = (mode === 'failed' && item.error) ? '<div class="tgpub-card-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>' + adminEscapeHtml(item.error.slice(0, 200)) + '</span></div>' : '';
-        return '<div class="tgpub-card">' +
-            '<div class="tgpub-card-body">' +
-                '<div class="tgpub-card-badges">' +
-                    '<span class="tgpub-badge tgpub-badge-type">' + typeIcon + '<span>' + adminEscapeHtml(item.type) + '</span></span>' +
+        const errLine = (mode === 'failed' && item.error) ? '<div class="pub-card-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>' + adminEscapeHtml(item.error.slice(0, 200)) + '</span></div>' : '';
+        return '<div class="pub-card">' +
+            '<div class="pub-card-body">' +
+                '<div class="pub-card-badges">' +
+                    '<span class="pub-badge tgpub-badge-type">' + typeIcon + '<span>' + adminEscapeHtml(item.type) + '</span></span>' +
                     statusBadge +
                     priorityBadge +
-                    '<span class="tgpub-badge tgpub-badge-ref">#' + item.id + '</span>' +
-                    '<span class="tgpub-badge tgpub-badge-src">ref: ' + ref + '</span>' +
-                    (item.attempts > 0 ? '<span class="tgpub-badge tgpub-badge-attempts">سعی: ' + item.attempts + '/' + item.max_attempts + '</span>' : '') +
+                    '<span class="pub-badge tgpub-badge-ref">#' + item.id + '</span>' +
+                    '<span class="pub-badge tgpub-badge-src">ref: ' + ref + '</span>' +
+                    (item.attempts > 0 ? '<span class="pub-badge tgpub-badge-attempts">سعی: ' + item.attempts + '/' + item.max_attempts + '</span>' : '') +
                 '</div>' +
-                '<div class="tgpub-card-summary">' + (textPreview || '—') + '</div>' +
+                '<div class="pub-card-summary">' + (textPreview || '—') + '</div>' +
                 errLine +
-                '<div class="tgpub-card-meta">' + scheduledBadge + '</div>' +
-                '<div class="tgpub-card-time">' + time + (item.tg_message_id ? ' · msg #' + item.tg_message_id : '') + '</div>' +
+                '<div class="pub-card-meta">' + scheduledBadge + '</div>' +
+                '<div class="pub-card-time">' + time + (item.tg_message_id ? ' · msg #' + item.tg_message_id : '') + '</div>' +
             '</div>' +
-            (actions.length ? '<div class="tgpub-card-actions">' + actions.join('') + '</div>' : '') +
+            (actions.length ? '<div class="pub-card-actions">' + actions.join('') + '</div>' : '') +
         '</div>';
     }).join('');
 }
@@ -3365,7 +3386,7 @@ async function loadPublisherLogs() {
         _pubLogsCache = (data && data.items) || [];
         renderPublisherLogs(_pubLogsCache);
     } catch (e) {
-        listEl.innerHTML = '<div class="tgpub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherLogs()">تلاش مجدد</button></div>';
+        listEl.innerHTML = '<div class="pub-empty tgpub-empty-inline"><h4>خطا در بارگذاری</h4><p>' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</p><button class="adm-btn adm-btn-primary" onclick="loadPublisherLogs()">تلاش مجدد</button></div>';
     }
 }
 window.loadPublisherLogs = loadPublisherLogs;
@@ -3389,14 +3410,14 @@ function renderPublisherLogs(items) {
             announcement: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/></svg>',
         };
         const typeIcon = typeIcons[log.type] || typeIcons.announcement;
-        const statusBadge = '<span class="tgpub-badge tgpub-badge-status-' + log.status + '"><span>' + log.status + '</span></span>';
-        const err = log.error ? '<span class="tgpub-log-err">' + adminEscapeHtml(log.error.slice(0, 150)) + '</span>' : '';
-        return '<div class="tgpub-log-row">' +
-            '<span class="tgpub-log-time">' + adminFormatDatePub(log.created_at) + '</span>' +
-            '<span class="tgpub-log-type">' + typeIcon + '</span>' +
+        const statusBadge = '<span class="pub-badge tgpub-badge-status-' + log.status + '"><span>' + log.status + '</span></span>';
+        const err = log.error ? '<span class="pub-log-err">' + adminEscapeHtml(log.error.slice(0, 150)) + '</span>' : '';
+        return '<div class="pub-log-row">' +
+            '<span class="pub-log-time">' + adminFormatDatePub(log.created_at) + '</span>' +
+            '<span class="pub-log-type">' + typeIcon + '</span>' +
             statusBadge +
-            '<span class="tgpub-log-ref">#' + adminEscapeHtml(log.queue_id || '—') + ' · ' + adminEscapeHtml(log.ref_id) + '</span>' +
-            '<span class="tgpub-log-dur">' + faNum(log.duration_ms) + 'ms</span>' +
+            '<span class="pub-log-ref">#' + adminEscapeHtml(log.queue_id || '—') + ' · ' + adminEscapeHtml(log.ref_id) + '</span>' +
+            '<span class="pub-log-dur">' + faNum(log.duration_ms) + 'ms</span>' +
             err +
         '</div>';
     }).join('');
@@ -3603,7 +3624,7 @@ window.savePublisherSettings = savePublisherSettings;
 function onPreviewTypeChange() {
     // Clear preview when type changes
     const bubble = document.getElementById('tgpub-preview-bubble');
-    if (bubble) bubble.innerHTML = '<div class="tgpub-empty">پیش‌نمایش اینجا نمایش داده می‌شود</div>';
+    if (bubble) bubble.innerHTML = '<div class="pub-empty">پیش‌نمایش اینجا نمایش داده می‌شود</div>';
     _pubLastPreview = null;
     updatePublishButtons();
 }
@@ -3611,7 +3632,7 @@ window.onPreviewTypeChange = onPreviewTypeChange;
 
 function openPublisherPreview(type, refId) {
     // Switch to preview tab and pre-fill
-    switchPublisherTab('preview', document.querySelector('.tgpub-tab[data-pub-tab="preview"]'));
+    switchPublisherTab('preview', document.querySelector('.pub-tab[data-pub-tab="preview"]'));
     const typeEl = document.getElementById('tgpub-preview-type');
     const refEl = document.getElementById('tgpub-preview-ref');
     if (typeEl) typeEl.value = type;
@@ -3665,20 +3686,20 @@ function renderTelegramPreview(preview) {
     // Strip <b> tags for display — show as bold via CSS instead
     let html = adminEscapeHtml(preview.text || '')
         .replace(/&lt;b&gt;/g, '<strong>').replace(/&lt;\/b&gt;/g, '</strong>')
-        .replace(/&lt;code&gt;/g, '<code class="tgpub-tg-code">').replace(/&lt;\/code&gt;/g, '</code>')
+        .replace(/&lt;code&gt;/g, '<code class="pub-tg-code">').replace(/&lt;\/code&gt;/g, '</code>')
         .replace(/\n/g, '<br>');
     let imgHtml = '';
     if (preview.image_url) {
-        imgHtml = '<img src="' + adminEscapeHtml(preview.image_url) + '" class="tgpub-tg-img" onerror="this.style.display=\'none\'">';
+        imgHtml = '<img src="' + adminEscapeHtml(preview.image_url) + '" class="pub-tg-img" onerror="this.style.display=\'none\'">';
     }
     let buttonsHtml = '';
     if (preview.buttons && preview.buttons.length) {
-        buttonsHtml = '<div class="tgpub-tg-buttons">' +
-            preview.buttons.map(row => row.map(b => '<a href="' + adminEscapeHtml(b.url) + '" target="_blank" class="tgpub-tg-btn">' + adminEscapeHtml(b.text) + '</a>').join('')).join('') +
+        buttonsHtml = '<div class="pub-tg-buttons">' +
+            preview.buttons.map(row => row.map(b => '<a href="' + adminEscapeHtml(b.url) + '" target="_blank" class="pub-tg-btn">' + adminEscapeHtml(b.text) + '</a>').join('')).join('') +
         '</div>';
     }
-    bubble.innerHTML = imgHtml + '<div class="tgpub-tg-text">' + html + '</div>' + buttonsHtml +
-        '<div class="tgpub-tg-meta">' + faNum(preview.text_length) + ' / ۴۰۹۶ کاراکتر</div>';
+    bubble.innerHTML = imgHtml + '<div class="pub-tg-text">' + html + '</div>' + buttonsHtml +
+        '<div class="pub-tg-meta">' + faNum(preview.text_length) + ' / ۴۰۹۶ کاراکتر</div>';
 }
 
 function renderValidation(validation, dedup, textLen) {
@@ -3687,15 +3708,15 @@ function renderValidation(validation, dedup, textLen) {
     let html = '';
     if (validation && validation.valid) {
         const checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
-        html += '<div class="tgpub-valid">' + checkSvg + '<span>همه بررسی‌ها گذشتند (' + faNum(textLen) + ' کاراکتر)</span></div>';
+        html += '<div class="pub-valid">' + checkSvg + '<span>همه بررسی‌ها گذشتند (' + faNum(textLen) + ' کاراکتر)</span></div>';
     } else if (validation && validation.issues) {
         const xSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
-        html += '<div class="tgpub-invalid">' + xSvg + '<span>مشکلات:</span></div><ul class="tgpub-issues">' +
+        html += '<div class="pub-invalid">' + xSvg + '<span>مشکلات:</span></div><ul class="pub-issues">' +
             validation.issues.map(i => '<li>' + adminEscapeHtml(i) + '</li>').join('') + '</ul>';
     }
     if (dedup && dedup.published) {
         const warnSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
-        html += '<div class="tgpub-warn">' + warnSvg + '<span>این مورد قبلاً ارسال شده (' + adminFormatDatePub(dedup.lastSentAt) + ' · msg #' + dedup.messageId + ')</span></div>';
+        html += '<div class="pub-warn">' + warnSvg + '<span>این مورد قبلاً ارسال شده (' + adminFormatDatePub(dedup.lastSentAt) + ' · msg #' + dedup.messageId + ')</span></div>';
     }
     el.innerHTML = html;
 }
@@ -3749,7 +3770,7 @@ window.sendNowFromPreview = sendNowFromPreview;
 async function testChannelConnection() {
     const resultEl = document.getElementById('tgpub-conn-test-result');
     if (resultEl) {
-        resultEl.innerHTML = '<div class="tgpub-conn-testing">⏳ در حال تست اتصال...</div>';
+        resultEl.innerHTML = '<div class="pub-conn-testing">⏳ در حال تست اتصال...</div>';
         resultEl.style.display = 'block';
     }
     try {
@@ -3758,41 +3779,41 @@ async function testChannelConnection() {
         if (data && data.ok && data.can_post) {
             const chat = data.chat || {};
             const okSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
-            resultEl.innerHTML = '<div class="tgpub-conn-success">' +
-                '<div class="tgpub-conn-icon">' + okSvg + '</div>' +
+            resultEl.innerHTML = '<div class="pub-conn-success">' +
+                '<div class="pub-conn-icon">' + okSvg + '</div>' +
                 '<div>' +
-                    '<div class="tgpub-conn-title">اتصال موفق</div>' +
-                    '<div class="tgpub-conn-detail">کانال: <b>' + adminEscapeHtml(chat.title || chat.username || '—') + '</b> · نوع: ' + adminEscapeHtml(chat.type || '—') + '</div>' +
-                    '<div class="tgpub-conn-detail">وضعیت بات: <b>' + adminEscapeHtml(data.bot_status || 'admin') + '</b></div>' +
+                    '<div class="pub-conn-title">اتصال موفق</div>' +
+                    '<div class="pub-conn-detail">کانال: <b>' + adminEscapeHtml(chat.title || chat.username || '—') + '</b> · نوع: ' + adminEscapeHtml(chat.type || '—') + '</div>' +
+                    '<div class="pub-conn-detail">وضعیت بات: <b>' + adminEscapeHtml(data.bot_status || 'admin') + '</b></div>' +
                 '</div>' +
             '</div>';
         } else if (data && data.ok && !data.can_post) {
             const warnSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
-            resultEl.innerHTML = '<div class="tgpub-conn-warn">' +
-                '<div class="tgpub-conn-icon">' + warnSvg + '</div>' +
+            resultEl.innerHTML = '<div class="pub-conn-warn">' +
+                '<div class="pub-conn-icon">' + warnSvg + '</div>' +
                 '<div>' +
-                    '<div class="tgpub-conn-title">بات ادمین نیست</div>' +
-                    '<div class="tgpub-conn-detail">' + adminEscapeHtml(data.message || '') + '</div>' +
-                    '<div class="tgpub-conn-detail">بات را در کانال ادمین کنید با دسترسی ارسال پیام</div>' +
+                    '<div class="pub-conn-title">بات ادمین نیست</div>' +
+                    '<div class="pub-conn-detail">' + adminEscapeHtml(data.message || '') + '</div>' +
+                    '<div class="pub-conn-detail">بات را در کانال ادمین کنید با دسترسی ارسال پیام</div>' +
                 '</div>' +
             '</div>';
         } else {
             const errSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
-            resultEl.innerHTML = '<div class="tgpub-conn-error">' +
-                '<div class="tgpub-conn-icon">' + errSvg + '</div>' +
+            resultEl.innerHTML = '<div class="pub-conn-error">' +
+                '<div class="pub-conn-icon">' + errSvg + '</div>' +
                 '<div>' +
-                    '<div class="tgpub-conn-title">اتصال ناموفق</div>' +
-                    '<div class="tgpub-conn-detail">' + adminEscapeHtml(data.message || data.description || 'خطای ناشناخته') + '</div>' +
-                    (data.error_code ? '<div class="tgpub-conn-detail">کد: ' + data.error_code + '</div>' : '') +
+                    '<div class="pub-conn-title">اتصال ناموفق</div>' +
+                    '<div class="pub-conn-detail">' + adminEscapeHtml(data.message || data.description || 'خطای ناشناخته') + '</div>' +
+                    (data.error_code ? '<div class="pub-conn-detail">کد: ' + data.error_code + '</div>' : '') +
                 '</div>' +
             '</div>';
         }
     } catch (e) {
         if (resultEl) {
             const errSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
-            resultEl.innerHTML = '<div class="tgpub-conn-error">' +
-                '<div class="tgpub-conn-icon">' + errSvg + '</div>' +
-                '<div><div class="tgpub-conn-title">خطا</div><div class="tgpub-conn-detail">' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</div></div>' +
+            resultEl.innerHTML = '<div class="pub-conn-error">' +
+                '<div class="pub-conn-icon">' + errSvg + '</div>' +
+                '<div><div class="pub-conn-title">خطا</div><div class="pub-conn-detail">' + adminEscapeHtml((e.message || '').slice(0, 200)) + '</div></div>' +
             '</div>';
         }
     }
@@ -3876,7 +3897,7 @@ document.addEventListener('keydown', function (e) {
     const tabMap = { '1': 'news', '2': 'calendar', '3': 'analysis', '4': 'queue', '5': 'sent', '6': 'failed', '7': 'logs', '8': 'preview', '9': 'settings' };
     if (tabMap[e.key]) {
         e.preventDefault();
-        const target = document.querySelector('.tgpub-tab[data-pub-tab="' + tabMap[e.key] + '"]');
+        const target = document.querySelector('.pub-tab[data-pub-tab="' + tabMap[e.key] + '"]');
         if (target) switchPublisherTab(tabMap[e.key], target);
     }
 });
