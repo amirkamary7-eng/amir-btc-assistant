@@ -3130,10 +3130,53 @@ async function resolveChartSymbol(symbol) {
 }
 
 /**
- * درخواست HTTP داخلی را با هدر احراز هویت تلگرام و مدیریت خطا به API ارسال می‌کند.
- * ورودی: پارامترهای `path, options = {}` را دریافت می‌کند.
- * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ * PERFORMANCE: Shared promise cache for in-flight requests.
+ * Prevents duplicate API calls when multiple components request the same endpoint
+ * simultaneously. Keyed by URL. Promise is removed after completion (success or error).
+ *
+ * Usage: const data = await sharedFetch('/api/market/overview');
+ * If another call to sharedFetch('/api/market/overview') is already in-flight,
+ * both callers receive the same promise (single network request).
  */
+const _sharedPromises = {};
+
+async function sharedFetch(url, options = {}) {
+  // Only deduplicate GET requests
+  const method = (options.method || 'GET').toUpperCase();
+  if (method !== 'GET') {
+    // Non-GET: just fetch directly
+    const res = await fetch(url, options);
+    return res.json();
+  }
+
+  // Check if this URL is already being fetched
+  if (_sharedPromises[url]) {
+    return _sharedPromises[url];
+  }
+
+  // Create the promise and store it
+  const promise = (async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 10000);
+      const res = await fetch(url, {
+        ...options,
+        signal: options.signal || controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      return await res.json();
+    } finally {
+      // Remove from shared cache after completion (success or error)
+      delete _sharedPromises[url];
+    }
+  })();
+
+  _sharedPromises[url] = promise;
+  return promise;
+}
 // R3-6: Request deduplication — if the same GET request is already in-flight, reuse its promise
 const _requestInFlight = {};
 
@@ -3550,19 +3593,12 @@ async function fetchWithProxy(url, options = {}) {
 async function loadMarketOverview() {
     if (!API_BASE || globalMarketData?.source === 'coinmarketcap') return; // already fresh from CMC
     try {
-        // ROOT CAUSE FIX: /api/market/overview is a PUBLIC endpoint (no auth
-        // required). Previously used apiFetch() which adds X-Telegram-Init-Data
-        // header and waits for auth to be ready. Outside Telegram, this caused
-        // the request to hang for 8s (waitForApiReady timeout) then fail.
-        // Now use plain fetch() with a 10s timeout — works with or without auth.
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-        const resp = await fetch(`${API_BASE}/api/market/overview`, {
-            signal: controller.signal,
+        // PERFORMANCE: Use sharedFetch to prevent duplicate /api/market/overview calls.
+        // Previously, loadMarketOverview() and loadMarketData() could both trigger
+        // this endpoint simultaneously → 2 identical network requests.
+        const res = await sharedFetch(`${API_BASE}/api/market/overview`, {
             headers: { 'Accept': 'application/json' },
         });
-        clearTimeout(timeoutId);
-        const res = await resp.json();
         if (res && res.status === 'success' && (res.totalMarketCap > 0 || res.fearGreedValue > 0)) {
             globalMarketData = res;
             console.log('[OVERVIEW] data loaded — source:', res.source, 'mcap:', res.totalMarketCap, 'fg:', res.fearGreedValue);
@@ -7341,32 +7377,27 @@ async function checkAlerts() {
         allForexPairs.forEach(f => { if (f.price > 0) priceMap[f.symbol] = f.price; });
     }
 
-    // INDEPENDENT PRICE FETCH: Fetch real-time prices for alert symbols directly
-    // from the backend /api/market/price endpoint. This bypasses the 60s market
-    // cache and gets the FRESHEST price from Binance. The alert system is now
-    // INDEPENDENT from market polling — it fetches its own prices every 30s.
+    // PERFORMANCE: Batch price fetch — replaces N+1 pattern.
+    // Previously: each alert symbol fetched individually via /api/market/price?symbol=X
+    //   → 10 alerts = 10 API calls every 15s = 2400 requests/hour
+    // Now: single batch call via /api/market/prices?symbols=BTC,ETH,SOL
+    //   → 10 alerts = 1 API call every 15s = 240 requests/hour (90% reduction)
     const alertSymbols = [...new Set(userAlerts.map(a => a.symbol))];
 
     if (API_BASE && !isGuestUserId(userId) && !isPendingTelegramUserId(userId) && alertSymbols.length > 0) {
-        // Fetch fresh prices for up to 10 alert symbols per cycle (to avoid rate limits)
-        const symbolsToRefresh = alertSymbols.slice(0, 10);
-        const priceResults = await Promise.allSettled(
-            symbolsToRefresh.map(async (sym) => {
-                try {
-                    const data = await apiFetch(`/api/market/price?symbol=${encodeURIComponent(sym)}`);
-                    if (data && data.price) {
-                        return { symbol: sym, price: data.price };
+        // Fetch fresh prices for up to 20 alert symbols in ONE request
+        const symbolsToRefresh = alertSymbols.slice(0, 20);
+        try {
+            const data = await apiFetch(`/api/market/prices?symbols=${encodeURIComponent(symbolsToRefresh.join(','))}`);
+            if (data && data.status === 'success' && data.prices) {
+                // Merge fresh prices into priceMap (override cached prices)
+                for (const [sym, info] of Object.entries(data.prices)) {
+                    if (info && info.price) {
+                        priceMap[sym] = info.price;
                     }
-                } catch (e) { /* silent fail */ }
-                return null;
-            })
-        );
-        // Merge fresh prices into priceMap (override cached prices)
-        for (const r of priceResults) {
-            if (r.status === 'fulfilled' && r.value && r.value.price) {
-                priceMap[r.value.symbol] = r.value.price;
+                }
             }
-        }
+        } catch (e) { /* silent fail — fall back to cached prices */ }
     }
 
     // If we still don't have prices for some alert symbols, try loading forex
@@ -7716,6 +7747,60 @@ function updateAdminEntryButton() {
     if (!btn) return;
     // Use isAdmin() which has optimistic fallback for cold-start
     btn.style.display = isAdmin() ? 'inline-flex' : 'none';
+}
+
+/**
+ * PERFORMANCE: Lazy-load admin.js only when admin panel is opened.
+ * Previously, admin.js (27KB gzip, 144KB decoded) was loaded for EVERY user
+ * on page init, even non-admins. Now it's loaded on-demand via script injection.
+ *
+ * The first time openAdminPanel is called, it injects admin.js as a script tag,
+ * then calls the real openAdminPanel from admin.js. Subsequent calls go directly
+ * to the real function (which is now attached to window by admin.js).
+ */
+let _adminJsLoaded = false;
+let _adminJsLoading = false;
+
+async function openAdminPanelLazy() {
+    if (!_adminJsLoaded) {
+        if (_adminJsLoading) return; // already loading, wait
+        _adminJsLoading = true;
+
+        // Show loading indicator
+        const panel = document.getElementById('admin-panel');
+        if (panel) {
+            panel.style.display = 'flex';
+            const container = panel.querySelector('.admin-panel-container');
+            if (container) {
+                container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#94a3b8;font-size:14px;">در حال بارگذاری پنل مدیریت...</div>';
+            }
+        }
+
+        try {
+            // Load admin.js via script tag injection
+            await new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'admin.js';
+                s.onload = resolve;
+                s.onerror = () => reject(new Error('Failed to load admin.js'));
+                document.head.appendChild(s);
+            });
+            _adminJsLoaded = true;
+            _adminJsLoading = false;
+        } catch (e) {
+            console.error('Failed to load admin.js:', e);
+            _adminJsLoading = false;
+            if (panel) panel.style.display = 'none';
+            return;
+        }
+    }
+
+    // Now call the real openAdminPanel (defined in admin.js, attached to window)
+    // admin.js defines openAdminPanel and may overwrite our window.openAdminPanel
+    // So we need to save the real one and call it
+    if (_adminJsLoaded && typeof window._realOpenAdminPanel === 'function') {
+        window._realOpenAdminPanel();
+    }
 }
 // NOTE: copyRefLink() and shareRefLink() were removed — the referral entry card
 // now opens the full Referral Center (ReferralApp.openReferral) which has its own

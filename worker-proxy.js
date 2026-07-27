@@ -5401,6 +5401,41 @@ export default {
         return jsonResponse({ status: 'error', message: 'Price not available' }, { status: 404 }, env);
       }
 
+      // ── PERFORMANCE: Batch price fetch — eliminates N+1 pattern in checkAlerts ──
+      // Frontend sends: GET /api/market/prices?symbols=BTC,ETH,SOL
+      // Backend fetches all prices in parallel, returns { BTC: {price, exchange}, ETH: {...} }
+      // This reduces 10 API calls to 1 for users with multiple alerts.
+      if (request.method === 'GET' && url.pathname === '/api/market/prices') {
+        const authState = await authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+
+        const symbolsParam = (url.searchParams.get('symbols') || '').toUpperCase().trim();
+        if (!symbolsParam) {
+          return jsonResponse({ status: 'success', prices: {} }, {}, env);
+        }
+
+        const symbols = symbolsParam.split(',').map(s => s.trim()).filter(Boolean).slice(0, 20);
+        const results = await Promise.allSettled(
+          symbols.map(async (sym) => {
+            try {
+              const priceInfo = await fetchSpotPriceUsd(env, sym);
+              return { symbol: sym, price: priceInfo?.price || null, exchange: priceInfo?.exchange || null };
+            } catch {
+              return { symbol: sym, price: null, exchange: null };
+            }
+          })
+        );
+
+        const prices = {};
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value.price) {
+            prices[r.value.symbol] = { price: r.value.price, exchange: r.value.exchange };
+          }
+        }
+
+        return jsonResponse({ status: 'success', prices, timestamp: Date.now() }, {}, env);
+      }
+
       // ── Extended market search — PUBLIC (no auth required) ──
       // Returns coins matching the search query from a 1700+ coin dataset.
       // Uses MEXC API which returns ALL USDT pairs in a single request (no pagination).

@@ -1703,8 +1703,10 @@ async function loadAdminLogs(page) {
 }
 
 // ─── Register all functions on window for inline onclick ────
-
-window.openAdminPanel = openAdminPanel;
+// PERFORMANCE: Use _realOpenAdminPanel instead of openAdminPanel so that
+// app.js's lazy loader (openAdminPanelLazy) can call the real function
+// after admin.js is dynamically loaded.
+window._realOpenAdminPanel = openAdminPanel;
 window.closeAdminPanel = closeAdminPanel;
 window.switchAdminSection = switchAdminSection;
 window.initAdminPanel = initAdminPanel;

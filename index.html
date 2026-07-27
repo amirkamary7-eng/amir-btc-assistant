@@ -89,8 +89,7 @@
 
     <link rel="stylesheet" href="style.css">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- Preload TradingView script — avoids 5s delay when user first opens coin detail -->
-    <script src="https://s3.tradingview.com/tv.js" async></script>
+    <!-- PERFORMANCE: TradingView tv.js lazy-loaded in openCoinDetail() — saves ~200KB on initial page load -->
     <link rel="stylesheet" href="wallet.css">
     <link rel="stylesheet" href="referral.css">
     <!-- Build-time: prepare-pages.mjs replaces this with WORKER_API_URL if set -->
@@ -1353,7 +1352,7 @@
     <script src="assistant.js"></script>
     <script src="wallet.js"></script>
     <script src="referral.js"></script>
-    <script src="admin.js"></script>
+    <!-- PERFORMANCE: admin.js lazy-loaded via dynamic import in openAdminPanel() -->
     <script src="app.js"></script>
     <!-- #endregion -->
     <!-- #endregion -->
