@@ -298,6 +298,7 @@ const _adminSectionLabels = {
     'reward-center': 'مرکز پاداش',
     'notification-center': 'مرکز اعلانات',
     'alert-economy': 'اقتصاد هشدارها',
+    'publisher': 'انتشار تلگرام',
     'system-controls': 'کنترل سیستم',
     'system-health': 'سلامت سیستم',
     'logs': 'لاگ‌ها',
@@ -425,6 +426,7 @@ function switchAdminSection(section, btn) {
         case 'reward-center': loadRewardCenterOverview(); break;
         case 'notification-center': loadNpOverview(); break;
         case 'alert-economy': loadAlertEconomyDashboard(); break;
+        case 'publisher': loadPublisherOverview(); break;
         case 'system-controls': loadMaintenanceSettings(); break;
         case 'system-health': loadAdminSystemHealth(); break;
         case 'logs': loadAdminLogs(1); break;
@@ -2636,3 +2638,648 @@ window.adminReplyTicket = adminReplyTicket;
 window.adminSetTicketStatus = adminSetTicketStatus;
 window.adminDeleteTicket = adminDeleteTicket;
 window.toggleAdminTicketDetail = toggleAdminTicketDetail;
+
+// ════════════════════════════════════════════════════════════════════
+// TELEGRAM PUBLISHER — channel publishing system
+// All UI logic for the Publisher admin section.
+// ════════════════════════════════════════════════════════════════════
+
+let _pubCurrentTab = 'news';
+let _pubNewsCache = [];
+let _pubCalendarCache = [];
+let _pubAnalysisCache = [];
+let _pubLastPreview = null;
+
+function faNum(n) {
+    try { return String(Number(n) || 0).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]); } catch { return '۰'; }
+}
+
+function adminFormatDatePub(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(iso);
+        return d.toLocaleString('fa-IR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+}
+
+// ── Entry point: called by switchAdminSection when 'publisher' is selected ──
+async function loadPublisherOverview() {
+    await loadPublisherStats();
+    // Don't auto-load heavy lists — wait for user to click load buttons.
+    // But if news tab is active, auto-load news (most common entry point).
+    if (_pubCurrentTab === 'news') {
+        loadPublisherNews(1);
+    }
+}
+window.loadPublisherOverview = loadPublisherOverview;
+
+async function loadPublisherStats() {
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/stats');
+        if (data && data.status === 'success' && data.stats) {
+            const el = (id) => document.getElementById(id);
+            if (el('adm-pub-stat-pending')) el('adm-pub-stat-pending').textContent = faNum(data.stats.pending || 0);
+            if (el('adm-pub-stat-sent')) el('adm-pub-stat-sent').textContent = faNum(data.stats.sent_24h || 0);
+            if (el('adm-pub-stat-failed')) el('adm-pub-stat-failed').textContent = faNum(data.stats.failed_24h || 0);
+        }
+    } catch (e) { console.warn('loadPublisherStats:', e); }
+}
+window.loadPublisherStats = loadPublisherStats;
+
+function switchPublisherTab(tab, btn) {
+    _pubCurrentTab = tab;
+    document.querySelectorAll('.adm-pub-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    else {
+        const target = document.querySelector('.adm-pub-tab[data-pub-tab="' + tab + '"]');
+        if (target) target.classList.add('active');
+    }
+    document.querySelectorAll('.adm-pub-content').forEach(c => c.classList.remove('active'));
+    const content = document.getElementById('adm-pub-tab-' + tab);
+    if (content) content.classList.add('active');
+
+    // Auto-load when entering a tab
+    if (tab === 'settings') loadPublisherSettings();
+    if (tab === 'queue') loadPublisherQueue();
+    if (tab === 'sent') loadPublisherSent();
+    if (tab === 'failed') loadPublisherFailed();
+    if (tab === 'logs') loadPublisherLogs();
+    loadPublisherStats();
+}
+window.switchPublisherTab = switchPublisherTab;
+
+// ── News tab ──
+async function loadPublisherNews(page) {
+    page = page || 1;
+    const listEl = document.getElementById('adm-pub-news-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="admin-empty">در حال بارگذاری اخبار...</div>';
+    try {
+        const data = await adminApiFetch('/api/farsi-news?page=1&limit=50');
+        const items = (data && data.data) || [];
+        _pubNewsCache = items;
+        renderPublisherNewsList(items);
+    } catch (e) {
+        listEl.innerHTML = adminErrorState('خطا در بارگذاری اخبار', 'loadPublisherNews');
+        console.error(e);
+    }
+}
+window.loadPublisherNews = loadPublisherNews;
+
+function filterPubNews(q) {
+    if (!_pubNewsCache.length) return;
+    const qq = String(q || '').toLowerCase().trim();
+    if (!qq) { renderPublisherNewsList(_pubNewsCache); return; }
+    const filtered = _pubNewsCache.filter(a =>
+        (a.title || '').toLowerCase().includes(qq) || (a.body || '').toLowerCase().includes(qq)
+    );
+    renderPublisherNewsList(filtered);
+}
+window.filterPubNews = filterPubNews;
+
+function renderPublisherNewsList(items) {
+    const listEl = document.getElementById('adm-pub-news-list');
+    if (!listEl) return;
+    if (!items || !items.length) {
+        listEl.innerHTML = '<div class="admin-empty">خبری یافت نشد</div>';
+        return;
+    }
+    listEl.innerHTML = items.slice(0, 30).map(a => {
+        let h = 0; const s = String(a.url || '');
+        for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i); h = ((h << 5) - h) + ch; h = h & h; }
+        const refId = a.url_hash || Math.abs(h).toString(36);
+        const hasAi = !!(a.ai_summary && a.ai_summary.length > 50);
+        const aiBadge = hasAi ? '<span class="adm-pub-badge ai">AI ✓</span>' : '<span class="adm-pub-badge pending">AI ⏳</span>';
+        const img = a.image ? '<img src="' + adminEscapeHtml(a.image) + '" class="adm-pub-thumb" onerror="this.style.display=\'none\'">' : '';
+        const title = adminEscapeHtml((a.title || '').slice(0, 100));
+        const source = adminEscapeHtml(a.source_name || a.source || '—');
+        return '<div class="adm-pub-item">' +
+            img +
+            '<div class="adm-pub-item-main">' +
+                '<div class="adm-pub-item-title">' + title + '</div>' +
+                '<div class="adm-pub-item-meta">' +
+                    '<span class="adm-pub-badge type">📰 خبر</span>' +
+                    aiBadge +
+                    '<span class="adm-pub-badge src">' + source + '</span>' +
+                    '<span class="adm-pub-badge ref" title="ref_id">' + adminEscapeHtml(refId) + '</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="adm-pub-item-actions">' +
+                '<button class="adm-btn" onclick="openPublisherPreview(\'news\',\'' + adminEscapeHtml(refId) + '\')">👁 پیش‌نمایش</button>' +
+                '<button class="adm-btn adm-btn-success" onclick="enqueuePublisher(\'news\',\'' + adminEscapeHtml(refId) + '\')">📤 به صف</button>' +
+                '<button class="adm-btn adm-btn-primary" onclick="sendNowPublisher(\'news\',\'' + adminEscapeHtml(refId) + '\')">⚡ ارسال فوری</button>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+// ── Calendar tab ──
+async function loadPublisherCalendar() {
+    const listEl = document.getElementById('adm-pub-calendar-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="admin-empty">در حال بارگذاری رویدادها...</div>';
+    try {
+        const data = await adminApiFetch('/api/calendar/events');
+        const items = (data && data.events) || data || [];
+        _pubCalendarCache = items;
+        renderPublisherCalendarList(items);
+    } catch (e) {
+        listEl.innerHTML = adminErrorState('خطا در بارگذاری', 'loadPublisherCalendar');
+        console.error(e);
+    }
+}
+window.loadPublisherCalendar = loadPublisherCalendar;
+
+function renderPublisherCalendarList(items) {
+    const listEl = document.getElementById('adm-pub-calendar-list');
+    if (!listEl) return;
+    if (!items || !items.length) {
+        listEl.innerHTML = '<div class="admin-empty">رویدادی یافت نشد</div>';
+        return;
+    }
+    listEl.innerHTML = items.slice(0, 30).map(e => {
+        const refId = String(e.id || e.event_id || '').slice(0, 64) || String(e.title || '').slice(0, 64);
+        const impact = String(e.impact || '').toLowerCase();
+        const impactEmoji = impact === 'high' ? '🔴' : impact === 'medium' ? '🟡' : '🟢';
+        const impactBadge = '<span class="adm-pub-badge impact-' + (impact || 'low') + '">' + impactEmoji + ' ' + adminEscapeHtml(impact || '?') + '</span>';
+        const country = adminEscapeHtml(e.country || '');
+        const title = adminEscapeHtml((e.title || e.event || '').slice(0, 80));
+        const time = adminEscapeHtml(e.time || '—');
+        return '<div class="adm-pub-item">' +
+            '<div class="adm-pub-item-main">' +
+                '<div class="adm-pub-item-title">' + title + '</div>' +
+                '<div class="adm-pub-item-meta">' +
+                    '<span class="adm-pub-badge type">📅 تقویم</span>' +
+                    impactBadge +
+                    '<span class="adm-pub-badge src">' + country + '</span>' +
+                    '<span class="adm-pub-badge ref">⏰ ' + time + '</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="adm-pub-item-actions">' +
+                '<button class="adm-btn" onclick="openPublisherPreview(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">👁 پیش‌نمایش</button>' +
+                '<button class="adm-btn adm-btn-success" onclick="enqueuePublisher(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">📤 به صف</button>' +
+                '<button class="adm-btn adm-btn-primary" onclick="sendNowPublisher(\'calendar\',\'' + adminEscapeHtml(refId) + '\')">⚡ ارسال فوری</button>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+// ── Analysis tab ──
+async function loadPublisherAnalysis() {
+    const listEl = document.getElementById('adm-pub-analysis-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="admin-empty">در حال بارگذاری تحلیل‌ها...</div>';
+    try {
+        const data = await adminApiFetch('/api/analyses?page=1&limit=50');
+        const items = (data && data.analyses) || (data && data.data) || [];
+        _pubAnalysisCache = items;
+        renderPublisherAnalysisList(items);
+    } catch (e) {
+        listEl.innerHTML = adminErrorState('خطا در بارگذاری', 'loadPublisherAnalysis');
+        console.error(e);
+    }
+}
+window.loadPublisherAnalysis = loadPublisherAnalysis;
+
+function renderPublisherAnalysisList(items) {
+    const listEl = document.getElementById('adm-pub-analysis-list');
+    if (!listEl) return;
+    if (!items || !items.length) {
+        listEl.innerHTML = '<div class="admin-empty">تحلیلی یافت نشد</div>';
+        return;
+    }
+    listEl.innerHTML = items.slice(0, 30).map(a => {
+        const refId = String(a.id || '').slice(0, 64);
+        const coin = adminEscapeHtml((a.coin || '—').toUpperCase());
+        const title = adminEscapeHtml((a.title || '').slice(0, 80));
+        const hasImg = !!a.image;
+        const imgBadge = hasImg ? '<span class="adm-pub-badge ai">🖼 تصویر</span>' : '';
+        return '<div class="adm-pub-item">' +
+            '<div class="adm-pub-item-main">' +
+                '<div class="adm-pub-item-title">' + title + '</div>' +
+                '<div class="adm-pub-item-meta">' +
+                    '<span class="adm-pub-badge type">📈 تحلیل</span>' +
+                    '<span class="adm-pub-badge src">' + coin + '</span>' +
+                    imgBadge +
+                    '<span class="adm-pub-badge ref">' + adminEscapeHtml(refId) + '</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="adm-pub-item-actions">' +
+                '<button class="adm-btn" onclick="openPublisherPreview(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">👁 پیش‌نمایش</button>' +
+                '<button class="adm-btn adm-btn-success" onclick="enqueuePublisher(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">📤 به صف</button>' +
+                '<button class="adm-btn adm-btn-primary" onclick="sendNowPublisher(\'analysis\',\'' + adminEscapeHtml(refId) + '\')">⚡ ارسال فوری</button>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+// ── Queue / Sent / Failed tabs ──
+async function loadPublisherQueue() {
+    const listEl = document.getElementById('adm-pub-queue-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="admin-empty">در حال بارگذاری صف...</div>';
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/queue?limit=50');
+        renderPublisherQueueList(data && data.items, 'queue');
+    } catch (e) {
+        listEl.innerHTML = adminErrorState('خطا', 'loadPublisherQueue');
+    }
+}
+window.loadPublisherQueue = loadPublisherQueue;
+
+async function loadPublisherSent() {
+    const listEl = document.getElementById('adm-pub-sent-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/sent?limit=50');
+        renderPublisherQueueList(data && data.items, 'sent');
+    } catch (e) {
+        listEl.innerHTML = adminErrorState('خطا', 'loadPublisherSent');
+    }
+}
+window.loadPublisherSent = loadPublisherSent;
+
+async function loadPublisherFailed() {
+    const listEl = document.getElementById('adm-pub-failed-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/failed?limit=50');
+        renderPublisherQueueList(data && data.items, 'failed');
+    } catch (e) {
+        listEl.innerHTML = adminErrorState('خطا', 'loadPublisherFailed');
+    }
+}
+window.loadPublisherFailed = loadPublisherFailed;
+
+function renderPublisherQueueList(items, mode) {
+    let listEl;
+    if (mode === 'queue') listEl = document.getElementById('adm-pub-queue-list');
+    else if (mode === 'sent') listEl = document.getElementById('adm-pub-sent-list');
+    else if (mode === 'failed') listEl = document.getElementById('adm-pub-failed-list');
+    if (!listEl) return;
+    if (!items || !items.length) {
+        listEl.innerHTML = '<div class="admin-empty">' + (mode === 'queue' ? 'صف خالی است' : mode === 'sent' ? 'هنوز پیامی ارسال نشده' : 'پیام ناموفقی وجود ندارد') + '</div>';
+        return;
+    }
+    listEl.innerHTML = items.map(item => {
+        const typeEmoji = item.type === 'news' ? '📰' : item.type === 'calendar' ? '📅' : item.type === 'analysis' ? '📈' : '📢';
+        const statusBadge = '<span class="adm-pub-badge status-' + item.status + '">' + item.status + '</span>';
+        const ref = adminEscapeHtml(item.ref_id || '');
+        const time = mode === 'sent' ? adminFormatDatePub(item.sent_at) : adminFormatDatePub(item.created_at);
+        const textPreview = adminEscapeHtml((item.final_text || item.payload?.built?.text || '').slice(0, 120));
+        const actions = [];
+        if (mode === 'queue') {
+            actions.push('<button class="adm-btn" onclick="cancelPublisherItem(' + item.id + ')">❌ لغو</button>');
+        }
+        if (mode === 'failed') {
+            actions.push('<button class="adm-btn adm-btn-primary" onclick="retryPublisherItem(' + item.id + ')">🔄 ارسال مجدد</button>');
+        }
+        if (mode === 'sent') {
+            actions.push('<button class="adm-btn" onclick="deletePublisherSent(' + item.id + ')">🗑 حذف</button>');
+        }
+        const errLine = (mode === 'failed' && item.error) ? '<div class="adm-pub-item-error">⚠️ ' + adminEscapeHtml(item.error.slice(0, 200)) + '</div>' : '';
+        return '<div class="adm-pub-item">' +
+            '<div class="adm-pub-item-main">' +
+                '<div class="adm-pub-item-meta">' +
+                    '<span class="adm-pub-badge type">' + typeEmoji + ' ' + adminEscapeHtml(item.type) + '</span>' +
+                    statusBadge +
+                    '<span class="adm-pub-badge ref">#' + item.id + '</span>' +
+                    '<span class="adm-pub-badge src">ref: ' + ref + '</span>' +
+                    (item.attempts > 0 ? '<span class="adm-pub-badge attempts">سعی: ' + item.attempts + '/' + item.max_attempts + '</span>' : '') +
+                '</div>' +
+                '<div class="adm-pub-item-title">' + (textPreview || '—') + '</div>' +
+                errLine +
+                '<div class="adm-pub-item-time">' + time + (item.tg_message_id ? ' · msg #' + item.tg_message_id : '') + '</div>' +
+            '</div>' +
+            (actions.length ? '<div class="adm-pub-item-actions">' + actions.join('') + '</div>' : '') +
+        '</div>';
+    }).join('');
+}
+
+// ── Logs tab ──
+async function loadPublisherLogs() {
+    const listEl = document.getElementById('adm-pub-logs-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="admin-empty">در حال بارگذاری لاگ‌ها...</div>';
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/logs?limit=100');
+        const items = (data && data.items) || [];
+        if (!items.length) {
+            listEl.innerHTML = '<div class="admin-empty">لاگی وجود ندارد</div>';
+            return;
+        }
+        listEl.innerHTML = items.map(log => {
+            const typeEmoji = log.type === 'news' ? '📰' : log.type === 'calendar' ? '📅' : log.type === 'analysis' ? '📈' : '📢';
+            const statusBadge = '<span class="adm-pub-badge status-' + log.status + '">' + log.status + '</span>';
+            const err = log.error ? '<div class="adm-pub-item-error">⚠️ ' + adminEscapeHtml(log.error.slice(0, 200)) + '</div>' : '';
+            return '<div class="adm-pub-log-row">' +
+                '<span class="adm-pub-log-time">' + adminFormatDatePub(log.created_at) + '</span>' +
+                '<span class="adm-pub-badge type">' + typeEmoji + '</span>' +
+                statusBadge +
+                '<span class="adm-pub-log-ref">#' + adminEscapeHtml(log.queue_id || '—') + ' · ' + adminEscapeHtml(log.ref_id) + '</span>' +
+                '<span class="adm-pub-log-dur">' + faNum(log.duration_ms) + 'ms</span>' +
+                err +
+            '</div>';
+        }).join('');
+    } catch (e) {
+        listEl.innerHTML = adminErrorState('خطا', 'loadPublisherLogs');
+    }
+}
+window.loadPublisherLogs = loadPublisherLogs;
+
+// ── Actions ──
+async function enqueuePublisher(type, refId) {
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/queue', {
+            method: 'POST',
+            body: JSON.stringify({ type, ref_id: refId }),
+        });
+        if (data && data.status === 'success') {
+            adminToast('✅ به صف اضافه شد #' + (data.queue && data.queue.id), 'success');
+            loadPublisherStats();
+        } else if (data && data.issues) {
+            adminToast('❌ اعتبارسنجی: ' + data.issues.join('، '), 'error');
+        } else {
+            adminToast('❌ خطا', 'error');
+        }
+    } catch (e) {
+        adminToast('❌ ' + (e.message || 'خطا'), 'error');
+        console.error(e);
+    }
+}
+window.enqueuePublisher = enqueuePublisher;
+
+async function sendNowPublisher(type, refId) {
+    if (!confirm('ارسال فوری به کانال؟ این پیام مستقیم ارسال می‌شود.')) return;
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/send-now', {
+            method: 'POST',
+            body: JSON.stringify({ type, ref_id: refId }),
+        });
+        if (data && data.status === 'success') {
+            adminToast('✅ ارسال شد! msg #' + data.message_id + ' (' + faNum(data.duration_ms) + 'ms)', 'success');
+            loadPublisherStats();
+        } else if (data && data.issues) {
+            adminToast('❌ اعتبارسنجی: ' + data.issues.join('، '), 'error');
+        } else if (data && data.message) {
+            adminToast('❌ ' + data.message, 'error');
+        } else {
+            adminToast('❌ خطا', 'error');
+        }
+    } catch (e) {
+        adminToast('❌ ' + (e.message || 'خطا'), 'error');
+        console.error(e);
+    }
+}
+window.sendNowPublisher = sendNowPublisher;
+
+async function cancelPublisherItem(id) {
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/cancel/' + id, { method: 'POST' });
+        if (data && data.status === 'success') {
+            adminToast('✅ لغو شد', 'success');
+            loadPublisherQueue();
+            loadPublisherStats();
+        } else { adminToast('❌ خطا', 'error'); }
+    } catch (e) { adminToast('❌ ' + (e.message || 'خطا'), 'error'); }
+}
+window.cancelPublisherItem = cancelPublisherItem;
+
+async function retryPublisherItem(id) {
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/retry/' + id, { method: 'POST' });
+        if (data && data.status === 'success') {
+            adminToast('✅ برای ارسال مجدد آماده شد', 'success');
+            loadPublisherFailed();
+            loadPublisherStats();
+        } else { adminToast('❌ خطا', 'error'); }
+    } catch (e) { adminToast('❌ ' + (e.message || 'خطا'), 'error'); }
+}
+window.retryPublisherItem = retryPublisherItem;
+
+async function deletePublisherSent(id) {
+    if (!confirm('حذف این رکورد از تاریخچه؟')) return;
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/sent/' + id, { method: 'DELETE' });
+        if (data && data.status === 'success') {
+            adminToast('✅ حذف شد', 'success');
+            loadPublisherSent();
+        } else { adminToast('❌ خطا', 'error'); }
+    } catch (e) { adminToast('❌ ' + (e.message || 'خطا'), 'error'); }
+}
+window.deletePublisherSent = deletePublisherSent;
+
+async function processPublisherNow() {
+    try {
+        adminToast('⏳ در حال پردازش صف...', 'info');
+        const data = await adminApiFetch('/api/admin/publisher/process', { method: 'POST' });
+        if (data && data.status === 'success' && data.result) {
+            const r = data.result;
+            adminToast('✅ پردازش: ' + faNum(r.sent) + ' ارسال، ' + faNum(r.failed) + ' ناموفق، ' + faNum(r.skipped) + ' رد شده', 'success');
+            loadPublisherQueue();
+            loadPublisherStats();
+        } else { adminToast('❌ خطا', 'error'); }
+    } catch (e) { adminToast('❌ ' + (e.message || 'خطا'), 'error'); }
+}
+window.processPublisherNow = processPublisherNow;
+
+// ── Settings tab ──
+async function loadPublisherSettings() {
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/settings');
+        if (!data || !data.settings) return;
+        const s = data.settings;
+        const el = (id) => document.getElementById(id);
+        if (el('adm-pub-channel-id')) el('adm-pub-channel-id').value = s.channel_id || '';
+        if (el('adm-pub-rate-limit')) el('adm-pub-rate-limit').value = s.rate_limit_ms || 3000;
+        if (el('adm-pub-enabled')) el('adm-pub-enabled').checked = !!s.enabled;
+        if (el('adm-pub-auto-news')) el('adm-pub-auto-news').checked = !!s.auto_publish_news;
+        if (el('adm-pub-auto-calendar')) el('adm-pub-auto-calendar').checked = !!s.auto_publish_calendar;
+        if (el('adm-pub-auto-analysis')) el('adm-pub-auto-analysis').checked = !!s.auto_publish_analysis;
+        const nf = s.news_filters || {};
+        document.querySelectorAll('[data-news-filter]').forEach(cb => {
+            const k = cb.getAttribute('data-news-filter');
+            cb.checked = !!nf[k];
+        });
+        const ci = s.calendar_impacts || {};
+        document.querySelectorAll('[data-cal-impact]').forEach(cb => {
+            const k = cb.getAttribute('data-cal-impact');
+            cb.checked = !!ci[k];
+        });
+    } catch (e) { console.error(e); adminToast('خطا در بارگذاری تنظیمات', 'error'); }
+}
+window.loadPublisherSettings = loadPublisherSettings;
+
+async function savePublisherSettings() {
+    const el = (id) => document.getElementById(id);
+    const news_filters = {};
+    document.querySelectorAll('[data-news-filter]').forEach(cb => { news_filters[cb.getAttribute('data-news-filter')] = !!cb.checked; });
+    const calendar_impacts = {};
+    document.querySelectorAll('[data-cal-impact]').forEach(cb => { calendar_impacts[cb.getAttribute('data-cal-impact')] = !!cb.checked; });
+    const payload = {
+        enabled: !!(el('adm-pub-enabled') && el('adm-pub-enabled').checked),
+        channel_id: (el('adm-pub-channel-id') && el('adm-pub-channel-id').value || '').trim(),
+        rate_limit_ms: Number(el('adm-pub-rate-limit') && el('adm-pub-rate-limit').value) || 3000,
+        auto_publish_news: !!(el('adm-pub-auto-news') && el('adm-pub-auto-news').checked),
+        auto_publish_calendar: !!(el('adm-pub-auto-calendar') && el('adm-pub-auto-calendar').checked),
+        auto_publish_analysis: !!(el('adm-pub-auto-analysis') && el('adm-pub-auto-analysis').checked),
+        news_filters,
+        calendar_impacts,
+    };
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/settings', {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
+        if (data && data.status === 'success') {
+            adminToast('✅ تنظیمات ذخیره شد', 'success');
+        } else { adminToast('❌ خطا', 'error'); }
+    } catch (e) { adminToast('❌ ' + (e.message || 'خطا'), 'error'); console.error(e); }
+}
+window.savePublisherSettings = savePublisherSettings;
+
+// ── Preview tab ──
+function onPreviewTypeChange() {
+    // Clear preview when type changes
+    const bubble = document.getElementById('adm-pub-preview-bubble');
+    if (bubble) bubble.innerHTML = '<div class="adm-pub-empty">پیش‌نمایش اینجا نمایش داده می‌شود</div>';
+    _pubLastPreview = null;
+    updatePublishButtons();
+}
+window.onPreviewTypeChange = onPreviewTypeChange;
+
+function openPublisherPreview(type, refId) {
+    // Switch to preview tab and pre-fill
+    switchPublisherTab('preview', document.querySelector('.adm-pub-tab[data-pub-tab="preview"]'));
+    const typeEl = document.getElementById('adm-pub-preview-type');
+    const refEl = document.getElementById('adm-pub-preview-ref');
+    if (typeEl) typeEl.value = type;
+    if (refEl) refEl.value = refId;
+    setTimeout(() => generatePreview(), 300);
+}
+window.openPublisherPreview = openPublisherPreview;
+
+async function generatePreview() {
+    const type = document.getElementById('adm-pub-preview-type')?.value;
+    const refId = document.getElementById('adm-pub-preview-ref')?.value.trim();
+    const title = document.getElementById('adm-pub-preview-title')?.value.trim();
+    const summary = document.getElementById('adm-pub-preview-summary')?.value.trim();
+    const note = document.getElementById('adm-pub-preview-note')?.value.trim();
+    const showSource = document.getElementById('adm-pub-preview-source')?.checked;
+    if (!type || !refId) {
+        adminToast('نوع و شناسه را پر کنید', 'error');
+        return;
+    }
+    const overrides = {};
+    if (title) overrides.title = title;
+    if (summary) overrides.summary = summary;
+    if (note) overrides.custom_note = note;
+    overrides.show_source = showSource;
+
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/preview', {
+            method: 'POST',
+            body: JSON.stringify({ type, ref_id: refId, overrides }),
+        });
+        if (data && data.status === 'success' && data.preview) {
+            _pubLastPreview = { type, ref_id: refId, overrides, preview: data.preview };
+            renderTelegramPreview(data.preview);
+            renderValidation(data.preview.validation, data.preview.dedup, data.preview.text_length);
+            updatePublishButtons();
+        } else if (data && data.message) {
+            adminToast('❌ ' + data.message, 'error');
+        } else {
+            adminToast('❌ خطا', 'error');
+        }
+    } catch (e) {
+        adminToast('❌ ' + (e.message || 'خطا'), 'error');
+        console.error(e);
+    }
+}
+window.generatePreview = generatePreview;
+
+function renderTelegramPreview(preview) {
+    const bubble = document.getElementById('adm-pub-preview-bubble');
+    if (!bubble) return;
+    // Strip <b> tags for display — show as bold via CSS instead
+    // Also render <code> as inline code styling
+    let html = adminEscapeHtml(preview.text || '')
+        .replace(/&lt;b&gt;/g, '<strong>').replace(/&lt;\/b&gt;/g, '</strong>')
+        .replace(/&lt;code&gt;/g, '<code class="adm-pub-tg-code">').replace(/&lt;\/code&gt;/g, '</code>')
+        .replace(/\n/g, '<br>');
+    let imgHtml = '';
+    if (preview.image_url) {
+        imgHtml = '<img src="' + adminEscapeHtml(preview.image_url) + '" class="adm-pub-tg-img" onerror="this.style.display=\'none\'">';
+    }
+    let buttonsHtml = '';
+    if (preview.buttons && preview.buttons.length) {
+        buttonsHtml = '<div class="adm-pub-tg-buttons">' +
+            preview.buttons.map(row => row.map(b => '<a href="' + adminEscapeHtml(b.url) + '" target="_blank" class="adm-pub-tg-btn">' + adminEscapeHtml(b.text) + '</a>').join('')).join('') +
+        '</div>';
+    }
+    bubble.innerHTML = imgHtml + '<div class="adm-pub-tg-text">' + html + '</div>' + buttonsHtml +
+        '<div class="adm-pub-tg-meta">' + faNum(preview.text_length) + ' / ۴۰۹۶ کاراکتر</div>';
+}
+
+function renderValidation(validation, dedup, textLen) {
+    const el = document.getElementById('adm-pub-validation');
+    if (!el) return;
+    let html = '';
+    if (validation && validation.valid) {
+        html += '<div class="adm-pub-valid">✅ همه بررسی‌ها گذشتند (' + faNum(textLen) + ' کاراکتر)</div>';
+    } else if (validation && validation.issues) {
+        html += '<div class="adm-pub-invalid">❌ مشکلات:</div><ul class="adm-pub-issues">' +
+            validation.issues.map(i => '<li>' + adminEscapeHtml(i) + '</li>').join('') + '</ul>';
+    }
+    if (dedup && dedup.published) {
+        html += '<div class="adm-pub-warn">⚠️ این مورد قبلاً ارسال شده (' + adminFormatDatePub(dedup.lastSentAt) + ' · msg #' + dedup.messageId + ')</div>';
+    }
+    el.innerHTML = html;
+}
+
+function updatePublishButtons() {
+    const ok = !!(_pubLastPreview && _pubLastPreview.preview && _pubLastPreview.preview.validation && _pubLastPreview.preview.validation.valid);
+    const publishBtn = document.getElementById('adm-pub-publish-btn');
+    const sendNowBtn = document.getElementById('adm-pub-sendnow-btn');
+    if (publishBtn) publishBtn.disabled = !ok;
+    if (sendNowBtn) sendNowBtn.disabled = !ok;
+}
+
+async function publishFromPreview() {
+    if (!_pubLastPreview) return;
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/queue', {
+            method: 'POST',
+            body: JSON.stringify({ type: _pubLastPreview.type, ref_id: _pubLastPreview.ref_id, overrides: _pubLastPreview.overrides }),
+        });
+        if (data && data.status === 'success') {
+            adminToast('✅ به صف اضافه شد #' + (data.queue && data.queue.id), 'success');
+            loadPublisherStats();
+        } else if (data && data.issues) {
+            adminToast('❌ ' + data.issues.join('، '), 'error');
+        } else { adminToast('❌ خطا', 'error'); }
+    } catch (e) { adminToast('❌ ' + (e.message || 'خطا'), 'error'); }
+}
+window.publishFromPreview = publishFromPreview;
+
+async function sendNowFromPreview() {
+    if (!_pubLastPreview) return;
+    if (!confirm('ارسال فوری به کانال؟')) return;
+    try {
+        const data = await adminApiFetch('/api/admin/publisher/send-now', {
+            method: 'POST',
+            body: JSON.stringify({ type: _pubLastPreview.type, ref_id: _pubLastPreview.ref_id, overrides: _pubLastPreview.overrides }),
+        });
+        if (data && data.status === 'success') {
+            adminToast('✅ ارسال شد! msg #' + data.message_id, 'success');
+            loadPublisherStats();
+        } else if (data && data.issues) {
+            adminToast('❌ ' + data.issues.join('، '), 'error');
+        } else if (data && data.message) {
+            adminToast('❌ ' + data.message, 'error');
+        } else { adminToast('❌ خطا', 'error'); }
+    } catch (e) { adminToast('❌ ' + (e.message || 'خطا'), 'error'); }
+}
+window.sendNowFromPreview = sendNowFromPreview;

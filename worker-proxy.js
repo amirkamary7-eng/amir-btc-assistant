@@ -31,6 +31,8 @@ import { createNotificationPlatformRepository, setEnvSendTelegramMessage } from 
 import { createNotificationPlatformHandlers } from './src/controllers/notification_platform.js';
 import { createAlertEconomyRepository } from './src/repositories/alert_economy.js';
 import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
+import { createPublisherRepository } from './src/repositories/publisher.js';
+import { createPublisherHandlers } from './src/controllers/publisher.js';
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 
 /**
@@ -3397,6 +3399,28 @@ const alertEconomyHandlers = createAlertEconomyHandlers({
 });
 //#endregion
 
+// ── Telegram Publisher (admin) — channel publishing with queue + preview ──
+const publisherRepo = createPublisherRepository({ queryDb, normalizeOptionalString });
+const publisherHandlers = createPublisherHandlers({
+  jsonResponse,
+  requireAdmin: adminHandlers.requireAdmin,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  buildBodyFieldValidationError,
+  normalizeOptionalString,
+  publisherRepo,
+  sendTelegramMessage,
+  readAppCache,
+  writeAppCache,
+  resolveWebAppUrl,
+  fetchFarsiNews,
+  fetchCalendarEvents,
+  analysisRepo,
+});
+//#endregion
+
 // ── Market Overview Service (CMC) — all CMC calls centralized here ──
 const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCache, fetchJson });
 
@@ -6093,6 +6117,59 @@ export default {
         return await alertEconomyHandlers.handleDashboard(request, env);
       }
 
+      // ─────────────────────────────────────────────────────────────
+      // TELEGRAM PUBLISHER — channel publishing system (admin-only)
+      // ─────────────────────────────────────────────────────────────
+      if (url.pathname === '/api/admin/publisher/settings' && (request.method === 'GET' || request.method === 'PUT' || request.method === 'POST')) {
+        if (request.method === 'GET') return await publisherHandlers.handleGetSettings(request, env);
+        return await publisherHandlers.handleUpdateSettings(request, env);
+      }
+      if (url.pathname === '/api/admin/publisher/preview' && request.method === 'POST') {
+        return await publisherHandlers.handlePreview(request, env);
+      }
+      if (url.pathname === '/api/admin/publisher/queue' && request.method === 'POST') {
+        return await publisherHandlers.handleEnqueue(request, env);
+      }
+      if (url.pathname === '/api/admin/publisher/send-now' && request.method === 'POST') {
+        return await publisherHandlers.handleSendNow(request, env);
+      }
+      if (url.pathname === '/api/admin/publisher/queue' && request.method === 'GET') {
+        return await publisherHandlers.handleListQueue(request, env, 'pending');
+      }
+      if (url.pathname === '/api/admin/publisher/sent' && request.method === 'GET') {
+        return await publisherHandlers.handleListQueue(request, env, 'sent');
+      }
+      if (url.pathname === '/api/admin/publisher/failed' && request.method === 'GET') {
+        return await publisherHandlers.handleListQueue(request, env, 'failed');
+      }
+      if (url.pathname === '/api/admin/publisher/logs' && request.method === 'GET') {
+        return await publisherHandlers.handleListLogs(request, env);
+      }
+      if (url.pathname === '/api/admin/publisher/stats' && request.method === 'GET') {
+        return await publisherHandlers.handleStats(request, env);
+      }
+      if (url.pathname === '/api/admin/publisher/process' && request.method === 'POST') {
+        return await publisherHandlers.handleProcessNow(request, env);
+      }
+      if (/^\/api\/admin\/publisher\/retry\/\d+$/.test(url.pathname) && request.method === 'POST') {
+        const id = url.pathname.split('/').pop();
+        return await publisherHandlers.handleRetry(request, env, id);
+      }
+      if (/^\/api\/admin\/publisher\/cancel\/\d+$/.test(url.pathname) && request.method === 'POST') {
+        const id = url.pathname.split('/').pop();
+        return await publisherHandlers.handleCancel(request, env, id);
+      }
+      if (/^\/api\/admin\/publisher\/sent\/\d+$/.test(url.pathname) && request.method === 'DELETE') {
+        const id = url.pathname.split('/').pop();
+        return await publisherHandlers.handleDeleteSent(request, env, id);
+      }
+      if (/^\/api\/admin\/publisher\/dedup\/[^/]+\/[^/]+$/.test(url.pathname) && request.method === 'GET') {
+        const parts = url.pathname.split('/');
+        const type = decodeURIComponent(parts[parts.length - 2]);
+        const refId = decodeURIComponent(parts[parts.length - 1]);
+        return await publisherHandlers.handleCheckDedup(request, env, type, refId);
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/notifications') {
         return await notificationHandlers.handleList(request, env);
       }
@@ -6409,6 +6486,19 @@ export default {
     // Uses ctx.waitUntil (real) — Worker stays alive until processing completes.
     // This ensures AI summaries are ready BEFORE any user opens the article.
     ctx.waitUntil(withTimeout(processNewsAIBatch(env), 25000));
+
+    // ── TELEGRAM PUBLISHER: process queue + auto-publish new content ──
+    // Runs on EVERY cron tick (every 1 minute).
+    // 1. Process pending queue items (rate-limited sends to channel)
+    // 2. Auto-publish hook: when auto-publish is enabled, new news/calendar/
+    //    analysis items are detected and enqueued for publishing.
+    if (publisherHandlers?.processPublisherQueue) {
+      ctx.waitUntil(withTimeout(
+        publisherHandlers.processPublisherQueue(env, { maxItems: 8 }).catch((e) => {
+          console.warn('Publisher queue processing failed:', e?.message);
+        })
+      , 25000));
+    }
   },
 };
 //#endregion

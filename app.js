@@ -2444,6 +2444,8 @@ function applyImageViewerTransform() {
 })();
 
 // ── Deep Link Handler ──
+// Supports: analysis_<id>, news_<urlHash>, calendar_<eventId>, announcement_<id>
+// Each dispatches to the matching detail view after loading required data.
 function checkAnalysisDeepLink() {
     const tg = window.Telegram?.WebApp;
     let startParam = tg?.initDataUnsafe?.start_param;
@@ -2453,18 +2455,105 @@ function checkAnalysisDeepLink() {
         const urlParams = new URLSearchParams(window.location.search);
         startParam = urlParams.get('startapp') || urlParams.get('tgWebAppStartParam');
     }
+    if (!startParam) return false;
 
-    if (startParam && startParam.startsWith('analysis_')) {
-        const analysisId = startParam.replace('analysis_', '');
-        if (analysisId && /^[a-zA-Z0-9]+$/.test(analysisId)) {
-            // Load analyses first, then open the detail
+    const sp = String(startParam);
+
+    // ── Analysis deep link ──
+    if (sp.startsWith('analysis_')) {
+        const analysisId = sp.replace('analysis_', '');
+        if (analysisId && /^[a-zA-Z0-9_-]+$/.test(analysisId)) {
             fetchAnalyses(true).then(() => {
                 openAnalysisDetailPage(analysisId);
-            });
+            }).catch(() => {});
             return true;
         }
     }
+
+    // ── News deep link (hashUrl of article URL) ──
+    if (sp.startsWith('news_')) {
+        const newsHash = sp.replace('news_', '');
+        if (newsHash && /^[a-zA-Z0-9_-]+$/.test(newsHash)) {
+            openNewsByHash(newsHash);
+            return true;
+        }
+    }
+
+    // ── Calendar event deep link ──
+    if (sp.startsWith('calendar_')) {
+        const eventId = sp.replace('calendar_', '');
+        if (eventId && /^[a-zA-Z0-9_-]+$/.test(eventId)) {
+            openCalendarEventById(eventId);
+            return true;
+        }
+    }
+
+    // ── Announcement deep link ──
+    if (sp.startsWith('announcement_')) {
+        const annId = sp.replace('announcement_', '');
+        if (annId && /^[a-zA-Z0-9_-]+$/.test(annId)) {
+            // Switch to home/announcements tab + scroll to announcement
+            switchTab('home-page');
+            setTimeout(() => {
+                const el = document.getElementById('announcement-' + annId) || document.querySelector('[data-announcement-id="' + annId + '"]');
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.classList.add('flash-highlight');
+                    setTimeout(() => el.classList.remove('flash-highlight'), 2500);
+                }
+            }, 600);
+            return true;
+        }
+    }
+
     return false;
+}
+
+// Open a news article by URL hash (used by deep links from Telegram channel posts)
+async function openNewsByHash(hash) {
+    try {
+        // Switch to news tab first so user sees loading state there
+        switchTab('news-page');
+        // Fetch latest news (uses app cache — fast)
+        const data = await apiFetch('/api/farsi-news?page=1&limit=50');
+        if (!data || !Array.isArray(data.data)) return;
+        const idx = data.data.findIndex(a => {
+            // Mirror server-side hashUrl (worker-proxy.js)
+            let h = 0;
+            const s = String(a.url || '');
+            for (let i = 0; i < s.length; i++) {
+                const ch = s.charCodeAt(i);
+                h = ((h << 5) - h) + ch;
+                h = h & h;
+            }
+            return Math.abs(h).toString(36) === hash;
+        });
+        if (idx >= 0) {
+            // Set displayedNews so openNewsModal(idx) works
+            displayedNews = data.data;
+            openNewsModal(idx);
+        }
+    } catch (e) {
+        console.warn('[DEEP-LINK] openNewsByHash failed:', e);
+    }
+}
+
+// Open a calendar event by ID (used by deep links from Telegram channel posts)
+async function openCalendarEventById(eventId) {
+    try {
+        switchTab('calendar-page');
+        // Wait a moment for calendar page to render, then find the event card
+        setTimeout(() => {
+            const card = document.querySelector('[data-calendar-event-id="' + eventId + '"]')
+                || document.querySelector('[data-event-id="' + eventId + '"]');
+            if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.click();
+            }
+        }, 800);
+    } catch (e) {
+        console.warn('[DEEP-LINK] openCalendarEventById failed:', e);
+    }
 }
 
 // ── Admin: Create / Edit ──

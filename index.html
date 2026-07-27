@@ -1446,6 +1446,10 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                             <span>اقتصاد هشدارها</span>
                         </button>
+                        <button class="adm-nav-item" data-admin-section="publisher" onclick="switchAdminSection('publisher', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+                            <span>انتشار تلگرام</span>
+                        </button>
                         <button class="adm-nav-item" data-admin-section="system-controls" onclick="switchAdminSection('system-controls', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             <span>کنترل سیستم</span>
@@ -1912,6 +1916,216 @@
                     </div>
                     <div id="ae-dashboard-grid" class="rc-overview-grid"><div class="admin-empty">در حال بارگذاری...</div></div>
                     <div id="ae-configs-section" style="margin-top:16px;"></div>
+                </section>
+
+                <!-- ══════════════════════════════════════════════════════════
+                     TELEGRAM PUBLISHER SECTION
+                     Channel publishing system with queue, preview, logs
+                     ══════════════════════════════════════════════════════════ -->
+                <section class="adm-section" id="admin-section-publisher">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">انتشار تلگرام</h3>
+                            <p class="adm-section-desc">انتشار حرفه‌ای اخبار، تقویم و تحلیل‌ها در کانال</p>
+                        </div>
+                        <div class="adm-pub-stats" id="adm-pub-stats">
+                            <span class="adm-pub-stat"><span class="adm-pub-stat-label">در صف</span><span class="adm-pub-stat-val" id="adm-pub-stat-pending">۰</span></span>
+                            <span class="adm-pub-stat"><span class="adm-pub-stat-label">ارسال‌شده ۲۴س</span><span class="adm-pub-stat-val" id="adm-pub-stat-sent">۰</span></span>
+                            <span class="adm-pub-stat"><span class="adm-pub-stat-label">ناموفق ۲۴س</span><span class="adm-pub-stat-val failed" id="adm-pub-stat-failed">۰</span></span>
+                        </div>
+                    </div>
+
+                    <!-- Publisher tabs -->
+                    <div class="adm-pub-tabs">
+                        <button class="adm-pub-tab active" data-pub-tab="news" onclick="switchPublisherTab('news', this)">📰 اخبار</button>
+                        <button class="adm-pub-tab" data-pub-tab="calendar" onclick="switchPublisherTab('calendar', this)">📅 تقویم</button>
+                        <button class="adm-pub-tab" data-pub-tab="analysis" onclick="switchPublisherTab('analysis', this)">📈 تحلیل‌ها</button>
+                        <button class="adm-pub-tab" data-pub-tab="queue" onclick="switchPublisherTab('queue', this)">⏱ صف ارسال</button>
+                        <button class="adm-pub-tab" data-pub-tab="sent" onclick="switchPublisherTab('sent', this)">✅ ارسال‌شده</button>
+                        <button class="adm-pub-tab" data-pub-tab="failed" onclick="switchPublisherTab('failed', this)">❌ ناموفق</button>
+                        <button class="adm-pub-tab" data-pub-tab="logs" onclick="switchPublisherTab('logs', this)">📋 لاگ‌ها</button>
+                        <button class="adm-pub-tab" data-pub-tab="preview" onclick="switchPublisherTab('preview', this)">👁 پیش‌نمایش</button>
+                        <button class="adm-pub-tab" data-pub-tab="settings" onclick="switchPublisherTab('settings', this)">⚙️ تنظیمات</button>
+                    </div>
+
+                    <!-- Tab content containers -->
+                    <div class="adm-pub-content active" id="adm-pub-tab-news">
+                        <div class="adm-pub-toolbar">
+                            <input type="text" id="adm-pub-news-search" placeholder="🔍 جستجوی خبر..." class="adm-input" oninput="filterPubNews(this.value)">
+                            <button class="adm-btn adm-btn-primary" onclick="loadPublisherNews(1)">↻ بارگذاری</button>
+                        </div>
+                        <div id="adm-pub-news-list" class="adm-pub-list"><div class="admin-empty">برای مشاهده اخبار، روی بارگذاری کلیک کنید</div></div>
+                        <div id="adm-pub-news-pagination" class="adm-pagination"></div>
+                    </div>
+
+                    <div class="adm-pub-content" id="adm-pub-tab-calendar">
+                        <div class="adm-pub-toolbar">
+                            <span class="adm-pub-info">رویدادهای اقتصاد کلان ۷ روز آینده</span>
+                            <button class="adm-btn adm-btn-primary" onclick="loadPublisherCalendar()">↻ بارگذاری</button>
+                        </div>
+                        <div id="adm-pub-calendar-list" class="adm-pub-list"><div class="admin-empty">برای مشاهده رویدادها، روی بارگذاری کلیک کنید</div></div>
+                    </div>
+
+                    <div class="adm-pub-content" id="adm-pub-tab-analysis">
+                        <div class="adm-pub-toolbar">
+                            <span class="adm-pub-info">تحلیل‌های اخیر</span>
+                            <button class="adm-btn adm-btn-primary" onclick="loadPublisherAnalysis()">↻ بارگذاری</button>
+                        </div>
+                        <div id="adm-pub-analysis-list" class="adm-pub-list"><div class="admin-empty">برای مشاهده تحلیل‌ها، روی بارگذاری کلیک کنید</div></div>
+                    </div>
+
+                    <div class="adm-pub-content" id="adm-pub-tab-queue">
+                        <div class="adm-pub-toolbar">
+                            <span class="adm-pub-info">آیتم‌های در انتظار ارسال</span>
+                            <button class="adm-btn" onclick="loadPublisherQueue()">↻ بارگذاری</button>
+                            <button class="adm-btn adm-btn-primary" onclick="processPublisherNow()">⚡ پردازش فوری</button>
+                        </div>
+                        <div id="adm-pub-queue-list" class="adm-pub-list"><div class="admin-empty">صف خالی است</div></div>
+                    </div>
+
+                    <div class="adm-pub-content" id="adm-pub-tab-sent">
+                        <div class="adm-pub-toolbar">
+                            <span class="adm-pub-info">پیام‌های ارسال‌شده به کانال</span>
+                            <button class="adm-btn" onclick="loadPublisherSent()">↻ بارگذاری</button>
+                        </div>
+                        <div id="adm-pub-sent-list" class="adm-pub-list"><div class="admin-empty">هنوز پیامی ارسال نشده است</div></div>
+                    </div>
+
+                    <div class="adm-pub-content" id="adm-pub-tab-failed">
+                        <div class="adm-pub-toolbar">
+                            <span class="adm-pub-info">پیام‌های ناموفق — امکان ارسال مجدد</span>
+                            <button class="adm-btn" onclick="loadPublisherFailed()">↻ بارگذاری</button>
+                        </div>
+                        <div id="adm-pub-failed-list" class="adm-pub-list"><div class="admin-empty">هیچ پیام ناموفقی وجود ندارد</div></div>
+                    </div>
+
+                    <div class="adm-pub-content" id="adm-pub-tab-logs">
+                        <div class="adm-pub-toolbar">
+                            <span class="adm-pub-info">لاگ کامل ارسال‌ها</span>
+                            <button class="adm-btn" onclick="loadPublisherLogs()">↻ بارگذاری</button>
+                        </div>
+                        <div id="adm-pub-logs-list" class="adm-pub-logs"><div class="admin-empty">لاگی وجود ندارد</div></div>
+                    </div>
+
+                    <div class="adm-pub-content" id="adm-pub-tab-preview">
+                        <div class="adm-pub-preview-wrap">
+                            <div class="adm-pub-preview-editor">
+                                <h4 class="adm-pub-editor-title">✏️ ویرایشگر پیش از انتشار</h4>
+                                <div class="adm-pub-form">
+                                    <label class="adm-pub-field">
+                                        <span>نوع محتوا</span>
+                                        <select id="adm-pub-preview-type" class="adm-input" onchange="onPreviewTypeChange()">
+                                            <option value="news">📰 خبر</option>
+                                            <option value="analysis">📈 تحلیل</option>
+                                            <option value="calendar">📅 تقویم</option>
+                                            <option value="announcement">📢 اطلاعیه</option>
+                                        </select>
+                                    </label>
+                                    <label class="adm-pub-field">
+                                        <span>شناسه (ref_id)</span>
+                                        <input type="text" id="adm-pub-preview-ref" class="adm-input" placeholder="مثلاً hash خبر یا ID تحلیل">
+                                    </label>
+                                    <label class="adm-pub-field">
+                                        <span>عنوان (دل‌بخواه)</span>
+                                        <input type="text" id="adm-pub-preview-title" class="adm-input" placeholder="خالی = استفاده از عنوان اصلی">
+                                    </label>
+                                    <label class="adm-pub-field">
+                                        <span>خلاصه (دل‌بخواه)</span>
+                                        <textarea id="adm-pub-preview-summary" class="adm-input" rows="4" placeholder="خالی = استفاده از خلاصه اصلی"></textarea>
+                                    </label>
+                                    <label class="adm-pub-field">
+                                        <span>یادداشت سفارشی (اختیاری)</span>
+                                        <input type="text" id="adm-pub-preview-note" class="adm-input" placeholder="مثلاً: تأیید مدیریت">
+                                    </label>
+                                    <label class="adm-pub-field adm-pub-checkbox">
+                                        <input type="checkbox" id="adm-pub-preview-source" checked>
+                                        <span>نمایش بخش منبع</span>
+                                    </label>
+                                    <div class="adm-pub-form-actions">
+                                        <button class="adm-btn" onclick="generatePreview()">👁 تولید پیش‌نمایش</button>
+                                        <button class="adm-btn adm-btn-success" id="adm-pub-publish-btn" onclick="publishFromPreview()" disabled>✅ انتشار در صف</button>
+                                        <button class="adm-btn adm-btn-primary" id="adm-pub-sendnow-btn" onclick="sendNowFromPreview()" disabled>⚡ ارسال فوری</button>
+                                    </div>
+                                </div>
+                                <div id="adm-pub-validation" class="adm-pub-validation"></div>
+                            </div>
+                            <div class="adm-pub-preview-render">
+                                <h4 class="adm-pub-editor-title">📱 پیش‌نمایش تلگرام</h4>
+                                <div id="adm-pub-preview-phone" class="adm-pub-phone">
+                                    <div class="adm-pub-phone-header">
+                                        <span class="adm-pub-phone-back">‹</span>
+                                        <span class="adm-pub-phone-title">کانال</span>
+                                        <span class="adm-pub-phone-menu">⋮</span>
+                                    </div>
+                                    <div class="adm-pub-phone-body">
+                                        <div id="adm-pub-preview-bubble" class="adm-pub-bubble">
+                                            <div class="adm-pub-empty">پیش‌نمایش اینجا نمایش داده می‌شود</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="adm-pub-content" id="adm-pub-tab-settings">
+                        <div class="adm-pub-settings-wrap">
+                            <div class="adm-pub-settings-card">
+                                <h4 class="adm-pub-card-title">⚙️ تنظیمات کلی</h4>
+                                <label class="adm-pub-field">
+                                    <span>شناسه کانال</span>
+                                    <input type="text" id="adm-pub-channel-id" class="adm-input" placeholder="@username یا -100123456">
+                                </label>
+                                <label class="adm-pub-field">
+                                    <span>فاصله بین ارسال‌ها (میلی‌ثانیه) — ۱۰۰۰ تا ۱۰۰۰۰</span>
+                                    <input type="number" id="adm-pub-rate-limit" class="adm-input" min="1000" max="10000" step="500" value="3000">
+                                </label>
+                                <label class="adm-pub-checkbox">
+                                    <input type="checkbox" id="adm-pub-enabled">
+                                    <span>فعال‌سازی سیستم انتشار</span>
+                                </label>
+                                <button class="adm-btn adm-btn-primary" onclick="savePublisherSettings()">💾 ذخیره تنظیمات</button>
+                            </div>
+
+                            <div class="adm-pub-settings-card">
+                                <h4 class="adm-pub-card-title">📰 انتشار خودکار اخبار</h4>
+                                <label class="adm-pub-checkbox">
+                                    <input type="checkbox" id="adm-pub-auto-news">
+                                    <span>فعال‌سازی انتشار خودکار اخبار</span>
+                                </label>
+                                <div class="adm-pub-filters">
+                                    <span class="adm-pub-filter-label">فیلترهای انتشار:</span>
+                                    <label class="adm-pub-checkbox"><input type="checkbox" data-news-filter="breaking"><span>🚨 فوری</span></label>
+                                    <label class="adm-pub-checkbox"><input type="checkbox" data-news-filter="important"><span>⚠️ مهم</span></label>
+                                    <label class="adm-pub-checkbox"><input type="checkbox" data-news-filter="high"><span>🔴 اهمیت بالا</span></label>
+                                    <label class="adm-pub-checkbox"><input type="checkbox" data-news-filter="featured"><span>⭐ منتخب</span></label>
+                                    <label class="adm-pub-checkbox"><input type="checkbox" data-news-filter="normal"><span>📄 معمولی</span></label>
+                                    <label class="adm-pub-checkbox"><input type="checkbox" data-news-filter="low"><span>⚪ کم اهمیت</span></label>
+                                </div>
+                            </div>
+
+                            <div class="adm-pub-settings-card">
+                                <h4 class="adm-pub-card-title">📅 انتشار خودکار تقویم</h4>
+                                <label class="adm-pub-checkbox">
+                                    <input type="checkbox" id="adm-pub-auto-calendar">
+                                    <span>فعال‌سازی انتشار خودکار رویدادها</span>
+                                </label>
+                                <div class="adm-pub-filters">
+                                    <span class="adm-pub-filter-label">سطوح تأثیر:</span>
+                                    <label class="adm-pub-checkbox"><input type="checkbox" data-cal-impact="high"><span>🔴 High</span></label>
+                                    <label class="adm-pub-checkbox"><input type="checkbox" data-cal-impact="medium"><span>🟡 Medium</span></label>
+                                    <label class="adm-pub-checkbox"><input type="checkbox" data-cal-impact="low"><span>🟢 Low</span></label>
+                                </div>
+                            </div>
+
+                            <div class="adm-pub-settings-card">
+                                <h4 class="adm-pub-card-title">📈 انتشار خودکار تحلیل‌ها</h4>
+                                <label class="adm-pub-checkbox">
+                                    <input type="checkbox" id="adm-pub-auto-analysis">
+                                    <span>فعال‌سازی انتشار خودکار تحلیل‌های جدید</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
                 </section>
             </main>
         </div>
