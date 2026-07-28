@@ -481,15 +481,21 @@ export function createAnalysisHandlers(deps) {
       const allUserIds = usersResult.rows.map((r) => String(r.telegram_id));
       if (allUserIds.length === 0) return;
 
-      // CRITICAL FIX: Filter users who have analysis notifications enabled
-      const userIds = await notificationRepo.filterUsersByPreference(env, allUserIds, 'analysis');
-      if (userIds.length === 0) return;
-
-      // Send via Notification Platform (single entry point — handles settings, templates, queue, telegram)
+      // ROOT CAUSE FIX (notification settings compliance):
+      // Previously called `notificationRepo.filterUsersByPreference(env, allUserIds, 'analysis')`
+      // which reads the LEGACY boolean `analysis` column (default TRUE, but users
+      // who toggled it off in the old settings UI have analysis=FALSE). This
+      // pre-filtered users BEFORE dispatch, so dispatch's own
+      // getUserChannelPreference('analysis') check on the NEW ch_analysis
+      // column was never reached for filtered users.
+      //
+      // Now we pass ALL joined users to dispatch and let it internally check
+      // ch_analysis (default 'both' — fail-open). Users with ch_analysis='none'
+      // are filtered inside dispatch. Same pattern as the calendar fix (RC-4).
       if (notificationPlatformRepo) {
         const NOTIFY_TIMEOUT_MS = 20000;
         const startTime = Date.now();
-        for (const uid of userIds) {
+        for (const uid of allUserIds) {
           if (Date.now() - startTime > NOTIFY_TIMEOUT_MS) {
             console.warn('notifyNewAnalysis: timeout reached');
             break;
@@ -497,7 +503,13 @@ export function createAnalysisHandlers(deps) {
           await notificationPlatformRepo.dispatch(env, {
             userId: uid,
             templateKey: 'analysis_published',
-            category: 'news',
+            // ROOT CAUSE FIX: was 'news' — but the UI toggle is ch_analysis.
+            // The template 'analysis_published' seed has category='news' which
+            // would override this via finalCategory = template.category.
+            // Both are now fixed: category here is 'analysis', and the
+            // template seed is updated to category='analysis' in
+            // notification_platform.js.
+            category: 'analysis',
             priority: 'medium',
             channel: 'both',
             metadata: { coin: analysis.coin, name: analysis.title || '' },

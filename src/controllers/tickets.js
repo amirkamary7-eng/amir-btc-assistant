@@ -78,7 +78,9 @@ export function createTicketHandlers(deps) {
         if (notificationPlatformRepo) {
           await notificationPlatformRepo.dispatch(env, {
             userId: authState.user.id,
-            category: 'system',
+            // FIX: was 'system' — but the UI toggle is ch_tickets.
+            // Now matches the settings page so users can opt out.
+            category: 'tickets',
             priority: 'low',
             channel: 'mini_app',
             title: `✅ تیکت شما ثبت شد`,
@@ -200,7 +202,8 @@ export function createTicketHandlers(deps) {
         if (notificationPlatformRepo) {
           await notificationPlatformRepo.dispatch(env, {
             userId: String(ticket.user_id),
-            category: 'system',
+            // FIX: was 'system' → now 'tickets' to match UI toggle ch_tickets
+            category: 'tickets',
             priority: 'medium',
             channel: 'both',
             title: `💬 پاسخ تیکت: ${ticket.title}`,

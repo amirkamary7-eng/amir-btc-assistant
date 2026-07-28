@@ -492,7 +492,8 @@ export function createAdminHandlers(deps) {
         if (notificationPlatformRepo) {
           await notificationPlatformRepo.dispatch(env, {
             userId: ownerId,
-            category: 'system',
+            // FIX: was 'system' → now 'tickets' to match UI toggle ch_tickets
+            category: 'tickets',
             priority: 'medium',
             channel: 'both',
             title: `💬 پاسخ تیکت: ${ticketInfo.title || ''}`,

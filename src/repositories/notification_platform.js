@@ -146,10 +146,12 @@ export function createNotificationPlatformRepository(deps) {
             ('wallet_received', 'wallet', 'دریافت توکن', 'Tokens Received', 'موجودی شما +{amount} AB افزایش یافت.', 'Your balance increased by +{amount} AB.', 'arrow-down-circle', 'low', 'mini_app'),
             ('price_alert_hit', 'market', 'هشدار قیمت', 'Price Alert', '{symbol} به {price} رسید.', '{symbol} reached {price}.', 'trending-up', 'high', 'both'),
             ('news_important', 'news', 'خبر مهم', 'Important News', '{title}', '{title}', 'alert-circle', 'high', 'both'),
-            ('analysis_published', 'news', 'تحلیل جدید', 'New Analysis', 'تحلیل جدید {coin} منتشر شد.', 'New {coin} analysis published.', 'bar-chart', 'medium', 'mini_app'),
+            ('analysis_published', 'analysis', 'تحلیل جدید', 'New Analysis', 'تحلیل جدید {coin} منتشر شد.', 'New {coin} analysis published.', 'bar-chart', 'medium', 'both'),
             ('security_login', 'security', 'ورود جدید', 'New Login', 'ورود از دستگاه جدید.', 'Login from new device.', 'shield', 'critical', 'both'),
             ('announcement', 'system', 'اطلاعیه', 'Announcement', '{message}', '{message}', 'megaphone', 'high', 'both')
-          ON CONFLICT (key) DO NOTHING
+          ON CONFLICT (key) DO UPDATE SET
+            category = EXCLUDED.category,
+            default_channel = EXCLUDED.default_channel
         `);
       }
 
@@ -522,73 +524,43 @@ export function createNotificationPlatformRepository(deps) {
     let userQuery = `SELECT telegram_id FROM users WHERE 1=1`;
     if (b.target_type === 'active') { userQuery += ` AND channel_joined = TRUE`; }
     else if (b.target_type === 'specific' && b.target_value) { userQuery += ` AND telegram_id = '${b.target_value}'`; }
-    // Add more targeting as needed
     const users = await queryDb(env, userQuery);
     let sent = 0;
     let failed = 0;
-    const text = `${b.title}\n\n${b.message}`;
 
+    // ROOT CAUSE FIX (notification settings compliance):
+    // Previously this function directly INSERTed into notifications and
+    // called sendTelegramMessage, BYPASSING getUserChannelPreference entirely.
+    // Users who set ch_<category>='none' still received broadcasts.
+    //
+    // Now we route through dispatch() which internally checks
+    // getUserChannelPreference(env, userId, b.category). Users with
+    // ch_<category>='none' are filtered out. channel:'both' with
+    // forceChannel:'auto' lets dispatch respect the user's per-category
+    // channel preference (mini_app / telegram / both).
     for (const u of users.rows) {
       try {
-        // 1. Insert in-app notification (if channel includes mini_app)
-        if (b.channel === 'mini_app' || b.channel === 'both') {
-          try {
-            const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-            await queryDb(env, `
-              INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
-              VALUES ($1, $2, 'announcement', $3, $4, $5, FALSE, $6, $7, $8, 'delivered', NOW())
-            `, [
-              notifId, String(u.telegram_id),
-              b.title, b.message,
-              JSON.stringify({ broadcast_id: String(b.id) }),
-              b.priority, b.category, b.channel,
-            ]);
-          } catch (e) {
-            console.warn('Broadcast in-app insert failed for user', u.telegram_id, e.message);
-          }
-        }
-
-        // 2. Send Telegram message directly (not via queue — for immediate delivery)
-        if (b.channel === 'telegram' || b.channel === 'both') {
-          const chatId = Number(u.telegram_id);
-          if (Number.isFinite(chatId)) {
-            try {
-              // Use sendTelegramMessage if available, otherwise queue
-              if (typeof env_sendTelegramMessage === 'function') {
-                const tgResult = await env_sendTelegramMessage(env, {
-                  chat_id: chatId,
-                  text: text,
-                  disable_web_page_preview: true,
-                });
-                if (tgResult && (tgResult.ok || tgResult.messageId || tgResult.result)) {
-                  sent++;
-                } else {
-                  failed++;
-                }
-              } else {
-                // Fallback: enqueue for queue processing
-                await enqueue(env, {
-                  notificationId: null,
-                  userId: String(u.telegram_id),
-                  channel: 'telegram', priority: b.priority,
-                  payload: { title: b.title, message: b.message },
-                });
-                sent++;
-              }
-            } catch (tgErr) {
-              failed++;
-              console.warn('Broadcast Telegram send failed for user', u.telegram_id, tgErr.message);
-            }
-          } else {
-            failed++;
-          }
-        } else {
-          // mini_app only — count as sent
+        const result = await dispatch(env, {
+          userId: String(u.telegram_id),
+          category: b.category || 'announcement',
+          channel: 'both',
+          forceChannel: 'auto',
+          title: b.title,
+          message: b.message,
+          priority: b.priority || 'medium',
+          icon: 'megaphone',
+          metadata: { broadcast_id: String(b.id) },
+        });
+        if (result && result.status && result.status !== 'filtered' && result.status !== 'error') {
           sent++;
+        } else if (result && result.status === 'filtered') {
+          // User opted out of this category — don't count as failed
+        } else {
+          failed++;
         }
       } catch (e) {
         failed++;
-        console.warn('Broadcast delivery failed for user', u.telegram_id, e.message);
+        console.warn('Broadcast dispatch failed for user', u.telegram_id, e.message);
       }
     }
 

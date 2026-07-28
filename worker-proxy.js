@@ -5466,13 +5466,24 @@ async function runScheduledAlertsBaseline(controller, env) {
             // so the next cron tick can retry. This prevents lost notifications.
             if (!telegramDelivered && notificationPlatformRepo) {
               try {
+                // ROOT CAUSE FIX: payload must include title+message fields
+                // because processQueue (notification_platform.js:673-680)
+                // reconstructs the Telegram text as `${payload.title}\n${payload.message}`.
+                // The old payload shape ({chat_id, text, reply_markup}) caused
+                // processQueue to send an EMPTY message on retry.
+                const alertTitle = title || 'Price Alert';
                 await queryDb(env, `
                   INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload, created_at)
                   VALUES ($1, $2, 'telegram', 'high', 'pending', $3, NOW())
                 `, [
                   `alert_${alertId}_${Date.now()}`,
                   String(userId),
-                  JSON.stringify({ chat_id: chatId, text, reply_markup: tgPayload.reply_markup || null }),
+                  JSON.stringify({
+                    chat_id: chatId,
+                    title: alertTitle,
+                    message: text,
+                    reply_markup: tgPayload.reply_markup || null,
+                  }),
                 ]);
                 console.warn('Telegram direct send failed twice — enqueued as fallback for queue retry');
               } catch (qErr) {

@@ -3176,6 +3176,11 @@ async function loadCalendarEvents(force = false) {
         // line of defence.
         if (fresh.length > 0) {
             calendarEvents = fresh;
+            // DASHBOARD SPEED OPTIMIZATION: persist to localStorage so the
+            // next cold open can render the dashboard calendar instantly.
+            try {
+                localStorage.setItem('calendar_cache', JSON.stringify({ data: calendarEvents, ts: Date.now() }));
+            } catch (_) {}
         } else if (calendarEvents.length === 0) {
             // No previous data and fresh is empty — keep calendarEvents as []
             // so the empty state shows. This is the true "no data" case.
@@ -9174,61 +9179,92 @@ async function loadImportantNews() {
             return;
         }
 
-        // Priority sort: Urgent (breaking) → Important (bullish/bearish/macro) → Latest (neutral/other)
-        const priorityRank = (n) => {
-            const s = (n.sentiment || '').toLowerCase();
-            if (s === 'breaking') return 0; // urgent
-            if (s === 'bullish' || s === 'bearish' || s === 'macro') return 1; // important
-            return 2; // latest
-        };
-        const sorted = newsCache.slice().sort((a, b) => {
-            const pa = priorityRank(a), pb = priorityRank(b);
-            if (pa !== pb) return pa - pb;
-            // within same priority, keep original order (already by recency from API)
-            return 0;
-        });
-        const important = sorted.slice(0, 3);
-        if (!important.length) {
-            container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
-            return;
-        }
+        // DASHBOARD SPEED OPTIMIZATION: persist news to localStorage so the
+        // next cold open can render instantly without waiting for the API.
+        try {
+            localStorage.setItem('news_cache', JSON.stringify({ data: newsCache, ts: Date.now() }));
+        } catch (_) {}
 
-        // Store in a separate array for dashboard to avoid race with News page's displayedNews
-        _dashboardDisplayedNews = important;
-
-        const priorityLabels = {
-            urgent: t('dashboard_priority_urgent'),
-            important: t('dashboard_priority_important'),
-            latest: t('dashboard_priority_latest')
-        };
-        const priorityIcons = {
-            urgent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
-            important: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
-            latest: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
-        };
-
-        container.innerHTML = important.map((n, i) => {
-            const rank = priorityRank(n);
-            const pKey = rank === 0 ? 'urgent' : (rank === 1 ? 'important' : 'latest');
-            const safeTitle = escapeHtml(n.title || '');
-            const safeSource = escapeHtml(n.source || '');
-            const safeImg = escapeHtml(n.image || getAmirbtcFallbackSvg(64, 64, 'AMIRBTC'));
-            return `
-            <div class="important-news-item priority-${pKey}" style="animation-delay:${i * 0.06}s" onclick="openDashboardNewsModal(${i})">
-                <img loading="lazy" src="${safeImg}" class="important-news-img" alt="${safeTitle}" onerror="newsImageFallback(this)">
-                <div class="important-news-content">
-                    <span class="important-news-priority priority-${pKey}">${priorityIcons[pKey]}<span>${priorityLabels[pKey]}</span></span>
-                    <div class="important-news-title">${safeTitle}</div>
-                    <div class="important-news-source">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
-                        <span>${safeSource}</span>
-                    </div>
-                </div>
-            </div>`;
-        }).join('');
+        _renderImportantNewsInto(container);
     } catch (e) {
         const c = document.getElementById('important-news');
         if (c) c.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
+    }
+}
+
+/**
+ * Render the top 3 important news items into the given container.
+ * Extracted from loadImportantNews so it can be called from
+ * renderImportantNewsFromCache() for instant cold-open rendering.
+ */
+function _renderImportantNewsInto(container) {
+    if (!newsCache.length) {
+        container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
+        return;
+    }
+    // Priority sort: Urgent (breaking) → Important (bullish/bearish/macro) → Latest (neutral/other)
+    const priorityRank = (n) => {
+        const s = (n.sentiment || '').toLowerCase();
+        if (s === 'breaking') return 0; // urgent
+        if (s === 'bullish' || s === 'bearish' || s === 'macro') return 1; // important
+        return 2; // latest
+    };
+    const sorted = newsCache.slice().sort((a, b) => {
+        const pa = priorityRank(a), pb = priorityRank(b);
+        if (pa !== pb) return pa - pb;
+        return 0;
+    });
+    const important = sorted.slice(0, 3);
+    if (!important.length) {
+        container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
+        return;
+    }
+
+    // Store in a separate array for dashboard to avoid race with News page's displayedNews
+    _dashboardDisplayedNews = important;
+
+    const priorityLabels = {
+        urgent: t('dashboard_priority_urgent'),
+        important: t('dashboard_priority_important'),
+        latest: t('dashboard_priority_latest')
+    };
+    const priorityIcons = {
+        urgent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+        important: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+        latest: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+    };
+
+    container.innerHTML = important.map((n, i) => {
+        const rank = priorityRank(n);
+        const pKey = rank === 0 ? 'urgent' : (rank === 1 ? 'important' : 'latest');
+        const safeTitle = escapeHtml(n.title || '');
+        const safeSource = escapeHtml(n.source || '');
+        const safeImg = escapeHtml(n.image || getAmirbtcFallbackSvg(64, 64, 'AMIRBTC'));
+        return `
+        <div class="important-news-item priority-${pKey}" style="animation-delay:${i * 0.06}s" onclick="openDashboardNewsModal(${i})">
+            <img loading="lazy" src="${safeImg}" class="important-news-img" alt="${safeTitle}" onerror="newsImageFallback(this)">
+            <div class="important-news-content">
+                <span class="important-news-priority priority-${pKey}">${priorityIcons[pKey]}<span>${priorityLabels[pKey]}</span></span>
+                <div class="important-news-title">${safeTitle}</div>
+                <div class="important-news-source">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+                    <span>${safeSource}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+/**
+ * DASHBOARD SPEED OPTIMIZATION: render important news from localStorage cache
+ * on cold open, before the API response arrives. Called from DOMContentLoaded
+ * if news_cache exists and is fresh (< 5min).
+ */
+function renderImportantNewsFromCache() {
+    const container = document.getElementById('important-news');
+    if (!container) return;
+    if (newsCache.length) {
+        _renderImportantNewsInto(container);
     }
 }
 
@@ -10338,6 +10374,47 @@ document.addEventListener('DOMContentLoaded', async () => {
     // arrives from the API.
     renderMarketTicker();
     renderDashboardMarketStatus();
+
+    // ── DASHBOARD SPEED OPTIMIZATION ──
+    // Hydrate analysis, news, and calendar from localStorage on cold open
+    // so sections render INSTANTLY instead of showing skeleton for 200ms-4s.
+    // Each section then updates with fresh data when the API response arrives.
+
+    // Analysis: analysisFeatured is already hydrated at module load (line ~366).
+    // Render the dashboard featured analysis section NOW from cached data.
+    renderDashboardFeaturedAnalysis();
+
+    // News: hydrate from localStorage and render important news immediately.
+    try {
+        const newsCacheStr = localStorage.getItem('news_cache');
+        if (newsCacheStr) {
+            const parsed = JSON.parse(newsCacheStr);
+            // 5-minute TTL (matches backend KV cache)
+            if (parsed && parsed.ts && (Date.now() - parsed.ts < 5 * 60 * 1000) && Array.isArray(parsed.data)) {
+                newsCache = parsed.data;
+                // Render important news from cache (non-blocking, instant)
+                renderImportantNewsFromCache();
+            }
+        }
+    } catch (_) { /* bad cache — ignore */ }
+
+    // Calendar: hydrate from localStorage and render dashboard calendar immediately.
+    try {
+        const calCacheStr = localStorage.getItem('calendar_cache');
+        if (calCacheStr) {
+            const parsed = JSON.parse(calCacheStr);
+            // 10-minute TTL (matches backend KV cache)
+            if (parsed && parsed.ts && (Date.now() - parsed.ts < 10 * 60 * 1000) && Array.isArray(parsed.data)) {
+                calendarEvents = parsed.data;
+                renderDashboardCalendar();
+            }
+        }
+    } catch (_) { /* bad cache — ignore */ }
+
+    // Watchlist: render from cached allCoins + cached watchlist symbols
+    if (allCoins.length && watchlist.length) {
+        renderWatchlist();
+    }
 
     // ROOT-CAUSE FIX (Task 38): Kick off a market data fetch IMMEDIATELY —
     // independently of bootstrapUser(). Previously loadMarketData(true) was
