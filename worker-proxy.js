@@ -217,6 +217,7 @@ function _trackKvSkip() {
 
 async function writeAppCache(env, key, value, expirationTtl) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.put !== 'function') {
+    console.warn('[writeAppCache] KV not available, skipping write:', key);
     return;
   }
 
@@ -228,7 +229,13 @@ async function writeAppCache(env, key, value, expirationTtl) {
   }
 
   try {
-    await env.APP_CACHE.put(key, value, { expirationTtl });
+    // CRITICAL: Cloudflare KV rejects expirationTtl: 0 (means "delete").
+    // Use undefined instead of 0 for "no expiration".
+    const putOpts = {};
+    if (expirationTtl && expirationTtl > 0) {
+      putOpts.expirationTtl = expirationTtl;
+    }
+    await env.APP_CACHE.put(key, value, putOpts);
     _trackKvWrite(key);
     if (_kvWriteCache.size >= _KV_WRITE_CACHE_MAX) {
       const firstKey = _kvWriteCache.keys().next().value;
@@ -236,7 +243,7 @@ async function writeAppCache(env, key, value, expirationTtl) {
     }
     _kvWriteCache.set(key, value);
   } catch (e) {
-    console.warn('writeAppCache failed:', e.message || e);
+    console.warn('[writeAppCache] KV.put FAILED for key:', key, '| error:', e.message || e);
   }
 }
 
@@ -2828,6 +2835,12 @@ async function processNewsAIBatch(env) {
   const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
   const newsJson = JSON.stringify(trimmed);
   const newsWriteBefore = _kvWriteStats.totalWrites;
+  const newsSkippedBefore = _kvWriteStats.totalSkipped;
+  // Check if KV is available
+  const kvAvailable = !!(env.APP_CACHE && typeof env.APP_CACHE.put === 'function');
+  // Check if in-memory cache has this key
+  const inMemoryCached = _kvWriteCache.has(FARSI_NEWS_CACHE_KEY);
+  const inMemoryMatches = _kvWriteCache.get(FARSI_NEWS_CACHE_KEY) === newsJson;
   try {
     await writeAppCache(
       env,
@@ -2839,6 +2852,7 @@ async function processNewsAIBatch(env) {
     console.warn('[NEWS-AI-CRON] Failed to cache articles:', e.message);
   }
   const newsWriteActuallyWritten = _kvWriteStats.totalWrites > newsWriteBefore;
+  const newsWriteWasSkipped = _kvWriteStats.totalSkipped > newsSkippedBefore;
 
   // Step 2: Process AI summaries for articles that don't have one
   const aiResult = await processNewsAIJobs(env, deduped);
@@ -2848,11 +2862,17 @@ async function processNewsAIBatch(env) {
     articlesPrepared: trimmed.length,
     newsCacheWritten: newsWriteActuallyWritten,
     newsCacheSkipped: !newsWriteActuallyWritten,
+    newsWriteWasSkipped: newsWriteWasSkipped,
+    kvAvailable: kvAvailable,
+    inMemoryCached: inMemoryCached,
+    inMemoryMatches: inMemoryMatches,
+    newsJsonLength: newsJson.length,
     ai: aiResult,
     kvWriteStats: {
       totalWrites: _kvWriteStats.totalWrites,
       totalSkipped: _kvWriteStats.totalSkipped,
       byPrefix: Object.entries(_kvWriteStats.byPrefix).sort((a,b) => b[1]-a[1]).slice(0, 10).map(([k,v]) => ({key:k, writes:v})),
+      byKey: Object.entries(_kvWriteStats.byKey).sort((a,b) => b[1]-a[1]).slice(0, 15).map(([k,v]) => ({key:k, writes:v})),
     },
   };
 }
