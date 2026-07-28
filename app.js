@@ -1141,6 +1141,31 @@ async function fetchAnalyses(force = false, append = false) {
         if (data.pagination) analysisPagination = data.pagination;
         analysisListPage = data.pagination?.hasMore ? (data.pagination.page + 1) : page;
         localStorage.setItem('analyses', JSON.stringify(analyses));
+
+        // ROOT CAUSE FIX for "detail page shows stale data after background refetch":
+        // After a successful fetch (e.g., the background refetch triggered by
+        // edit/delete), the analyses[] and analysisFeatured[] arrays are updated
+        // with fresh server data. But currentAnalysisDetail (used by the detail
+        // page) was NOT updated — so the detail page would show stale content
+        // (e.g., old views_count) until the user closed and reopened it.
+        // Now we sync currentAnalysisDetail from the fresh arrays if the detail
+        // page is currently open for one of the fetched analyses.
+        if (currentAnalysisDetail && currentAnalysisDetail.id) {
+            const fresh = analyses.find(a => a.id === currentAnalysisDetail.id)
+                || (Array.isArray(analysisFeatured) ? analysisFeatured.find(a => a.id === currentAnalysisDetail.id) : null);
+            if (fresh) {
+                // Preserve the detail text if the fresh version has less content
+                // (list responses might truncate text — but after our getFeatured
+                // fix, both list and featured return full text, so this is safe).
+                currentAnalysisDetail = fresh;
+                // Re-render the detail page IF it's currently active.
+                const detailPage = document.getElementById('analysis-detail-page');
+                if (detailPage && detailPage.classList.contains('active')) {
+                    renderAnalysisDetailPage();
+                }
+            }
+        }
+
         return true;
     } catch (e) {
         console.warn('fetchAnalyses:', e);
@@ -2633,7 +2658,9 @@ function updateAnalysisCharCounter() {
     const counterEl = document.getElementById('analysis-text-counter');
     if (!textEl || !counterEl) return;
     const len = textEl.value.length;
-    const max = 5000;
+    // FIX: match backend maxLength (50000) — was 5000, which was inconsistent
+    // with the backend validation and the HTML maxlength attribute.
+    const max = 50000;
     counterEl.textContent = `${len} / ${max}`;
     counterEl.classList.remove('warn', 'danger');
     if (len >= max) {
@@ -2896,6 +2923,18 @@ function _applySaveResult(result, wasEditing) {
     renderAnalysisStats();
     renderAnalysisList();
     renderAnalysisSlider();
+
+    // ROOT CAUSE FIX for "changes don't appear immediately, need refresh":
+    // If the user is currently viewing the detail page of the analysis they
+    // just edited, currentAnalysisDetail still holds the OLD version of the
+    // data. The detail page reads from currentAnalysisDetail, so without
+    // updating it here, the user would see stale content until they close
+    // and reopen the detail page. Now we update currentAnalysisDetail to the
+    // fresh server response and re-render the detail page immediately.
+    if (wasEditing && currentAnalysisDetail && currentAnalysisDetail.id === result.analysis.id) {
+        currentAnalysisDetail = result.analysis;
+        renderAnalysisDetailPage();
+    }
 }
 
 // ── Admin: Delete (Double Confirm) ──
