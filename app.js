@@ -8873,12 +8873,71 @@ async function deleteTicket(ticketId, isAdminView = false) {
 // ============================================================================
 //#region نویگیشن و محتوای داشبورد
 // ============================================================================
+
 /**
- * نمایش یا وضعیت تب را تعویض می‌کند.
- * ورودی: پارامترهای `pageId, btn` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ * بستن تمام overlay ها و modal های باز.
+ *
+ * BUG FIX (Task ID: WEB-DEV-REVIEW-1):
+ * قبل از این تابع، وقتی کاربر coin-detail-modal را باز می‌کرد و سپس از
+ * طریق bottom-nav به تب دیگری می‌رفت (بدون X)، modal در DOM باقی می‌ماند.
+ * چون `.cd-fullscreen` دارای `position: fixed; inset: 0; z-index: 10000;
+ * pointer-events: auto` است، modal نامرئی روی کل viewport قرار می‌گرفت و
+ * تمام click های تب مقصد را intercept می‌کرد → کاربر گیر می‌کرد و نمی‌توانست
+ * با صفحه تعامل داشته باشد.
+ *
+ * این تابع یک defence-in-depth است:
+ *   1. coin-detail-modal را مستقیماً display:none می‌کند (بدون فراخوانی
+ *      closeCoinDetail() که خود switchTab را فرامی‌خواند → infinite recursion).
+ *   2. تمام modal های دیگر را اگر باز هستند می‌بندد.
+ *   3. تابع destroyTvWidget() را فرامی‌خواند تا منابع TradingView آزاد شود.
+ *
+ * این تابع idempotent است و در هر switchTab فراخوانی می‌شود.
  */
+function closeAllOverlays() {
+    // 1) Coin detail modal (the buggy .cd-fullscreen overlay)
+    const cdModal = document.getElementById('coin-detail-modal');
+    if (cdModal && cdModal.style.display !== 'none') {
+        // Direct hide — bypass closeCoinDetail() to avoid switchTab recursion.
+        cdModal.classList.remove('slide-up', 'slide-down');
+        cdModal.style.display = 'none';
+        // Free TradingView widget resources (no-op if not initialised).
+        try { if (typeof destroyTvWidget === 'function') destroyTvWidget(); } catch (_) {}
+        try { currentTvChartInfo = null; _currentDetailSymbol = null; } catch (_) {}
+        const _alertPriceReset = document.getElementById('alert-current-price-value');
+        if (_alertPriceReset) _alertPriceReset.textContent = '--';
+    }
+
+    // 2) Standard `.modal` overlays — each has display:none default in CSS,
+    //    so we just restore it. We use a list to keep this maintainable.
+    const standardModalIds = [
+        'add-coin-modal', 'add-analysis-modal', 'news-modal',
+        'notif-modal', 'settings-modal', 'notif-settings-modal',
+        'lang-modal', 'tickets-modal', 'admin-tickets-modal', 'about-modal',
+    ];
+    for (const id of standardModalIds) {
+        const m = document.getElementById(id);
+        if (m && m.style.display !== 'none') {
+            m.style.display = 'none';
+            // Some modals toggle a `body` lock class; remove it for safety.
+            document.body.classList.remove('modal-open', 'jl-locked', 'body-locked');
+        }
+    }
+
+    // 3) Restore Telegram BackButton if it was armed by an overlay.
+    try {
+        const tg = window.Telegram?.WebApp;
+        if (tg?.BackButton && typeof tg.BackButton.hide === 'function') {
+            tg.BackButton.hide();
+            tg.BackButton.offClick();
+        }
+    } catch (_) {}
+}
+
 function switchTab(pageId, btn) {
+    // BUG FIX: dismiss any open overlay/modal BEFORE switching tabs. Otherwise
+    // fixed overlays like coin-detail-modal stay on top and intercept clicks.
+    closeAllOverlays();
+
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(pageId)?.classList.add('active');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
