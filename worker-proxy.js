@@ -4270,17 +4270,21 @@ const FOREX_PAIRS = [
 
 const FOREX_CACHE_TTL = 120; // 2 minutes
 
-async function handleForexData(env) {
-  // Check KV cache
-  const cachedRaw = await readAppCache(env, 'forex:data');
-  if (cachedRaw) {
-    try {
-      const parsed = JSON.parse(cachedRaw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return jsonResponse({ status: 'success', data: parsed, cached: true }, {}, env);
-      }
-    } catch {}
-  }
+async function handleForexData(env, options = {}) {
+  const skipCache = options.skipCache === true;
+
+  // Check KV cache (unless skipCache is set)
+  if (!skipCache) {
+    const cachedRaw = await readAppCache(env, 'forex:data');
+    if (cachedRaw) {
+      try {
+        const parsed = JSON.parse(cachedRaw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return jsonResponse({ status: 'success', data: parsed, cached: true }, {}, env);
+        }
+      } catch {}
+    }
+  } // end if (!skipCache)
 
   // Fetch from exchangerate-api or fallback
   let data = null;
@@ -4387,10 +4391,39 @@ async function handleForexData(env) {
       .catch(() => null);
 
     // Use frankfurter.app (free, no API key, reliable) for fiat pairs
-    const { ok, body } = await fetchJson('https://api.frankfurter.app/latest?from=USD');
-    if (ok && body?.rates) {
-      const rates = body.rates;
-      const metals = await metalsPromise;
+    // ROOT CAUSE FIX: frankfurter.app redirects HTTP→HTTPS with 301.
+    // Cloudflare Workers' fetch() does NOT follow 301 redirects automatically
+    // when the URL is already HTTPS (it follows http→https but not https→https).
+    // The original code used fetchJson() which returned {ok: false} on 301
+    // because response.ok is false for 301. This caused ALL forex prices to
+    // fall through to the fallback (price=0).
+    // FIX: Use fetch() with redirect: 'follow' (which is the default in Workers
+    // but was being overridden by fetchJsonWithTimeout's explicit signal).
+    // Also add detailed error logging.
+    let frankfurterOk = false;
+    let frankfurterRates = null;
+    try {
+      const ffResp = await fetch('https://api.frankfurter.app/latest?from=USD', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        redirect: 'follow',
+      });
+      if (ffResp.ok) {
+        const ffBody = await ffResp.json();
+        if (ffBody?.rates) {
+          frankfurterOk = true;
+          frankfurterRates = ffBody.rates;
+        }
+      } else {
+        console.warn('[Forex] frankfurter.app returned HTTP', ffResp.status);
+      }
+    } catch (ffErr) {
+      console.warn('[Forex] frankfurter.app fetch error:', ffErr.message);
+    }
+
+    if (frankfurterOk && frankfurterRates) {
+      const rates = frankfurterRates;
+      const metals = await yahooMetals;
       const prevRates = await histPromise;
 
       // Helper: compute a fiat pair price from a frankfurter rates object
@@ -6140,6 +6173,45 @@ export default {
           log.push({ step: 'EXCEPTION', error: e.message });
           return jsonResponse({ status: 'error', log, error: e.message, totalMs: Date.now() - t0 }, {}, env);
         }
+      }
+
+      // ── DIAGNOSTIC: Forex data test (bypasses auth for debugging) ──
+      if (request.method === 'GET' && url.pathname === '/api/_diag/forex-data') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.DIAG_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+        // Call handleForexData directly with skipCache=true to force fresh fetch
+        const result = await handleForexData(env, { skipCache: true });
+        const body = await result.json();
+        const data = body.data || [];
+        const report = data.map(item => ({
+          symbol: item.symbol,
+          category: item.category,
+          price: item.price,
+          change: item.change,
+          tvSymbol: item.tvSymbol,
+          hasPrice: item.price > 0,
+        }));
+        // Summary
+        const byCategory = {};
+        for (const item of data) {
+          const cat = item.category;
+          if (!byCategory[cat]) byCategory[cat] = { total: 0, withPrice: 0, withoutPrice: 0 };
+          byCategory[cat].total++;
+          if (item.price > 0) byCategory[cat].withPrice++;
+          else byCategory[cat].withoutPrice++;
+        }
+        return jsonResponse({
+          status: 'success',
+          cached: body.cached,
+          totalSymbols: data.length,
+          symbolsWithPrice: data.filter(d => d.price > 0).length,
+          symbolsWithoutPrice: data.filter(d => d.price === 0).length,
+          byCategory,
+          symbols: report,
+        }, {}, env);
       }
 
       // ── DIAGNOSTIC: Real KV Write Stats ──
