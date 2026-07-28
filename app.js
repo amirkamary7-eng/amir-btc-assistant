@@ -5002,64 +5002,93 @@ function showToast(msg) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// DAILY MISSIONS SYSTEM — FULLY GENERIC EVENT-DRIVEN
+// DAILY MISSIONS SYSTEM — CENTRAL EVENT BUS
 // ════════════════════════════════════════════════════════════════════════
-// The frontend emits GENERIC EVENTS at known interaction points.
-// The backend's mission_rewards.metadata.trigger field maps each mission
-// to one of these events. When an event fires, the frontend checks which
-// missions are triggered by that event (from cached _missionStatusList)
-// and fires completion for ALL matching missions.
+// A central Event Bus that auto-discovers events from backend metadata.
+// The frontend instruments known interaction points (tab switches, modal
+// opens, bootstrap) with a SINGLE call: MissionBus.fire('event_name').
+// The bus checks the cached mission list for matching triggers and fires
+// completion for ALL matching missions.
 //
-// Adding a new mission requires ONLY a DB insert with the right trigger:
+// The bus also auto-instruments ALL tab switches via switchTab hook —
+// so 'market_open', 'profile_open', 'news_open', 'analysis_open',
+// 'dashboard_open' fire automatically without any manual fireMissionEvent
+// calls at those points.
+//
+// Adding a new mission requires ONLY a DB insert:
 //   INSERT INTO mission_rewards (mission_id, mission_name, token_amount,
 //     is_enabled, metadata) VALUES (
 //     'read_3_news', '۳ خبر بخوان', 10, TRUE,
 //     '{"trigger":"news_open","target_count":3}')
 //
-// The frontend already emits 'news_open' — no code change needed.
+// Adding a new EVENT TYPE that doesn't map to a tab switch requires adding
+// ONE MissionBus.fire('new_event') call at the interaction point. But
+// reusing an existing event type for a new mission = ZERO code change.
 
 const _completedMissionsToday = new Set();
 let _missionsLoaded = false;
 let _missionStatusList = [];
 
-// Generic event types emitted by the frontend. Adding a new event type
-// requires adding ONE fireEvent() call at the interaction point — but
-// adding a new MISSION that uses an EXISTING event type requires ZERO
-// frontend changes.
-const MISSION_EVENTS = {
-  NEWS_OPEN: 'news_open',
-  ANALYSIS_OPEN: 'analysis_open',
-  CALENDAR_OPEN: 'calendar_open',
-  DAILY_OPEN: 'daily_open',
-  PROFILE_OPEN: 'profile_open',
-  MARKET_OPEN: 'market_open',
-  WATCHLIST_OPEN: 'watchlist_open',
+// Tab-to-event mapping: when user switches to a tab, this event fires.
+// This covers ALL 5 main tabs + calendar sub-tab automatically.
+const TAB_EVENT_MAP = {
+    'dashboard-page': 'dashboard_open',
+    'market-page': 'market_open',
+    'analysis-page': 'analysis_open',
+    'news-page': 'news_open',         // fires when user opens the News tab
+    'profile-page': 'profile_open',
 };
 
 /**
- * Fire a generic mission event. Checks all missions from backend whose
- * metadata.trigger matches this event, and fires completion for each.
- * This is the ONLY function the frontend calls — no hardcoded mission IDs.
- *
- * @param {string} eventType - One of MISSION_EVENTS values
+ * Central Mission Event Bus.
+ * - fire(eventType): emits an event, triggers all matching missions
+ * - autoInstrumentTabs(): hooks into switchTab to auto-fire tab events
+ * - Events are NOT hardcoded in the bus — they come from backend metadata
  */
-function fireMissionEvent(eventType) {
-    if (!eventType || !API_BASE) return;
+const MissionBus = {
+    /**
+     * Fire a mission event. Checks all missions from backend whose
+     * metadata.trigger matches this event, and fires completion for each.
+     */
+    fire(eventType) {
+        if (!eventType || !API_BASE) return;
 
-    // Find all missions triggered by this event (from cached backend data)
-    const matchingMissions = _missionStatusList.filter(m =>
-        m.trigger === eventType && !m.completed && !_completedMissionsToday.has(m.mission_id)
-    );
+        const matching = _missionStatusList.filter(m =>
+            m.trigger === eventType && !m.completed && !_completedMissionsToday.has(m.mission_id)
+        );
 
-    // Fire completion for each matching mission
-    for (const mission of matchingMissions) {
-        completeMission(mission.mission_id);
-    }
-}
+        for (const mission of matching) {
+            completeMission(mission.mission_id);
+        }
+    },
+
+    /**
+     * Hook into switchTab to auto-fire events for tab switches.
+     * Called once during initialization. Wraps the original switchTab.
+     */
+    _tabHooked: false,
+    autoInstrumentTabs() {
+        if (this._tabHooked) return;
+        this._tabHooked = true;
+
+        const origSwitchTab = window.switchTab;
+        if (typeof origSwitchTab !== 'function') return;
+
+        window.switchTab = function(pageId, btn) {
+            // Call original switchTab
+            origSwitchTab.call(this, pageId, btn);
+
+            // Auto-fire the corresponding mission event
+            const eventType = TAB_EVENT_MAP[pageId];
+            if (eventType) {
+                MissionBus.fire(eventType);
+            }
+        };
+    },
+};
 
 /**
  * Load today's mission status from the server. Called once on bootstrap.
- * Populates _completedMissionsToday and _missionStatusList from backend.
  */
 async function loadMissionStatus() {
     if (_missionsLoaded || !API_BASE || !canRunSessionRequests()) return;
@@ -5073,13 +5102,14 @@ async function loadMissionStatus() {
             updateMissionCards();
         }
         _missionsLoaded = true;
+        // Now that we have mission data, auto-instrument tab switches
+        MissionBus.autoInstrumentTabs();
     } catch (_) {}
 }
 
 /**
- * Complete a daily mission. Called by fireMissionEvent — not directly
- * from interaction points. Fires the API call, shows popup on reward,
- * updates wallet in real-time.
+ * Complete a daily mission. Called by MissionBus.fire — not directly
+ * from interaction points.
  */
 async function completeMission(missionId) {
     if (_completedMissionsToday.has(missionId)) return;
@@ -5112,6 +5142,19 @@ async function completeMission(missionId) {
         }
     } catch (_) {}
 }
+
+// Backward-compatible alias
+const MISSION_EVENTS = {
+  NEWS_OPEN: 'news_open',
+  ANALYSIS_OPEN: 'analysis_open',
+  CALENDAR_OPEN: 'calendar_open',
+  DAILY_OPEN: 'daily_open',
+  PROFILE_OPEN: 'profile_open',
+  MARKET_OPEN: 'market_open',
+  WATCHLIST_OPEN: 'watchlist_open',
+  DASHBOARD_OPEN: 'dashboard_open',
+};
+function fireMissionEvent(eventType) { MissionBus.fire(eventType); }
 
 /**
  * Refresh wallet display after a mission reward.
@@ -5294,7 +5337,8 @@ function showMissionRewardPopup(label, amount) {
     try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch {}
 }
 
-// Expose globally for wallet.js and other modules
+// Expose globally
+window.MissionBus = MissionBus;
 window.completeMission = completeMission;
 window.loadMissionStatus = loadMissionStatus;
 window.updateMissionCards = updateMissionCards;
