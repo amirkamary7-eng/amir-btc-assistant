@@ -632,6 +632,11 @@ const WalletApp = (() => {
             <div class="earn-title">${esc(WT('view_news'))}</div>
             <div class="earn-desc">${esc(WT('stay_updated'))}</div>
           </div>
+          <div class="wallet-earn-card" id="mission-calendar-view">
+            <div class="earn-reward">+2 AB</div>
+            <div class="earn-title">مشاهده تقویم اقتصادی</div>
+            <div class="earn-desc">رویدادهای بازار را دنبال کنید</div>
+          </div>
           <div class="wallet-earn-card" id="mission-daily-open">
             <div class="earn-reward">+10 AB</div>
             <div class="earn-title">${esc(WT('open_app_daily'))}</div>
@@ -1220,6 +1225,7 @@ const WalletApp = (() => {
     loadMoreHistory,
     scrollToSection,
     getTokenLogo,
+    _invalidateCache: invalidateWalletCache,
   };
 })();
 

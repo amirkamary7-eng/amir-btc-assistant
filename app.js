@@ -5012,19 +5012,24 @@ function showToast(msg) {
 
 const _completedMissionsToday = new Set();
 let _missionsLoaded = false;
+let _missionStatusList = []; // Full mission status from backend
 
 /**
  * Load today's mission status from the server. Called once on bootstrap.
  * Populates _completedMissionsToday so we don't fire redundant API calls.
+ * Also stores full status list for wallet card rendering.
  */
 async function loadMissionStatus() {
     if (_missionsLoaded || !API_BASE || !canRunSessionRequests()) return;
     try {
         const data = await apiFetch('/api/wallet/missions');
         if (data?.status === 'success' && Array.isArray(data.missions)) {
+            _missionStatusList = data.missions;
             for (const m of data.missions) {
                 if (m.completed) _completedMissionsToday.add(m.mission_id);
             }
+            // Update wallet mission cards if wallet is open
+            updateMissionCards();
         }
         _missionsLoaded = true;
     } catch (_) { /* non-fatal — missions will still fire, just may get idempotent responses */ }
@@ -5032,8 +5037,8 @@ async function loadMissionStatus() {
 
 /**
  * Complete a daily mission. Fires the API call, shows a premium popup on
- * first completion, and tracks the completion locally to prevent
- * redundant calls.
+ * first completion, updates wallet in real-time, and tracks the completion
+ * locally to prevent redundant calls.
  *
  * @param {string} missionId - 'news_view' | 'analysis_read' | 'calendar_view' | 'daily_open'
  */
@@ -5051,17 +5056,107 @@ async function completeMission(missionId) {
         if (data?.status === 'success') {
             _completedMissionsToday.add(missionId);
 
-            // Only show popup on FIRST completion (not idempotent)
+            // Update local mission status list
+            const idx = _missionStatusList.findIndex(m => m.mission_id === missionId);
+            if (idx >= 0) _missionStatusList[idx].completed = true;
+            else _missionStatusList.push({ mission_id: missionId, completed: true, reward_amount: data.reward_amount, reward_label: data.reward_label });
+
+            // Only show popup + refresh wallet on FIRST completion (not idempotent)
             if (data.is_new_completion) {
                 showMissionRewardPopup(data.reward_label, data.reward_amount);
+                refreshWalletAfterMission(data.new_balance);
             }
+
+            // Update mission cards in wallet if open
+            updateMissionCards();
         }
     } catch (_) { /* silent fail — mission tracking is non-critical */ }
 }
 
 /**
- * Premium mission reward popup — slides in from the top, auto-dismisses
- * after 2.5s. Non-blocking, doesn't interfere with user interaction.
+ * Refresh wallet display after a mission reward.
+ * Updates balance, transaction history, and summary without full page reload.
+ */
+function refreshWalletAfterMission(newBalance) {
+    // 1. Invalidate wallet cache so next fetch hits the API
+    if (window.WalletApp && typeof window.WalletApp._invalidateCache === 'function') {
+        window.WalletApp._invalidateCache();
+    }
+
+    // 2. If wallet page is open, refresh the balance display immediately
+    const balanceEl = document.querySelector('.wallet-balance-value, .hero-balance');
+    if (balanceEl && newBalance != null) {
+        const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
+        animateBalanceChange(balanceEl, currentBalance, newBalance);
+    }
+
+    // 3. If profile card is visible, refresh it from cache (will fetch fresh data in background)
+    if (typeof window.WalletApp?.loadProfileCard === 'function') {
+        // Delay slightly so the popup animation isn't interrupted
+        setTimeout(() => window.WalletApp.loadProfileCard(), 300);
+    }
+}
+
+/**
+ * Animate balance number change (count-up effect).
+ */
+function animateBalanceChange(el, from, to) {
+    const duration = 600;
+    const startTime = performance.now();
+    const diff = to - from;
+
+    function update(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / duration);
+        const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+        const current = Math.round(from + diff * eased);
+        el.textContent = current.toLocaleString('en-US');
+        if (progress < 1) requestAnimationFrame(update);
+        else el.textContent = to.toLocaleString('en-US');
+    }
+    requestAnimationFrame(update);
+}
+
+/**
+ * Update mission cards in the wallet to show completed/in-progress status.
+ * Called after mission status loads or after a mission is completed.
+ */
+function updateMissionCards() {
+    const missionCardMap = {
+        'news_view': 'mission-news-view',
+        'analysis_read': 'mission-analysis-read',
+        'calendar_view': 'mission-calendar-view',
+        'daily_open': 'mission-daily-open',
+    };
+
+    for (const [missionId, cardId] of Object.entries(missionCardMap)) {
+        const card = document.getElementById(cardId);
+        if (!card) continue;
+
+        const status = _missionStatusList.find(m => m.mission_id === missionId);
+        const isCompleted = _completedMissionsToday.has(missionId) || status?.completed;
+
+        if (isCompleted) {
+            card.classList.add('mission-completed');
+            // Add checkmark badge if not already present
+            if (!card.querySelector('.mission-checkmark')) {
+                const checkmark = document.createElement('div');
+                checkmark.className = 'mission-checkmark';
+                checkmark.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+                card.appendChild(checkmark);
+            }
+        } else {
+            card.classList.remove('mission-completed');
+            const checkmark = card.querySelector('.mission-checkmark');
+            if (checkmark) checkmark.remove();
+        }
+    }
+}
+
+/**
+ * Premium mission reward popup — slides in from the top with a coin burst
+ * animation, auto-dismisses after 2.5s. Non-blocking, doesn't interfere
+ * with user interaction.
  */
 function showMissionRewardPopup(label, amount) {
     // Remove any existing popup
@@ -5071,16 +5166,32 @@ function showMissionRewardPopup(label, amount) {
     const popup = document.createElement('div');
     popup.id = 'mission-reward-popup';
     popup.innerHTML = `
+        <div class="mrp-coin-burst">
+            <span class="mrp-coin">🪙</span>
+            <span class="mrp-coin">✨</span>
+            <span class="mrp-coin">🪙</span>
+            <span class="mrp-coin">✨</span>
+            <span class="mrp-coin">🪙</span>
+        </div>
         <div class="mrp-icon">🎉</div>
         <div class="mrp-content">
             <div class="mrp-title">ماموریت کامل شد!</div>
-            <div class="mrp-desc">${escapeHtml(label)} — <b>+${amount} AB</b> دریافت کردید</div>
+            <div class="mrp-desc">${escapeHtml(label)}</div>
+            <div class="mrp-reward">+${amount} AB</div>
         </div>
     `;
     document.body.appendChild(popup);
 
     // Trigger entrance animation
     requestAnimationFrame(() => popup.classList.add('mrp-show'));
+
+    // Trigger coin burst
+    setTimeout(() => {
+        popup.querySelectorAll('.mrp-coin').forEach((coin, i) => {
+            coin.style.animationDelay = (i * 0.06) + 's';
+            coin.classList.add('mrp-coin-fly');
+        });
+    }, 100);
 
     // Auto-dismiss after 2.5s
     setTimeout(() => {
@@ -5095,6 +5206,7 @@ function showMissionRewardPopup(label, amount) {
 // Expose globally for wallet.js and other modules
 window.completeMission = completeMission;
 window.loadMissionStatus = loadMissionStatus;
+window.updateMissionCards = updateMissionCards;
 /**
  * واچ‌لیست را در رابط کاربری رندر می‌کند.
  * ورودی: بدون ورودی.

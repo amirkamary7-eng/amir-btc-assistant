@@ -10256,3 +10256,73 @@ body.jl-locked .cd-fullscreen {
     color: #22C55E;
     font-weight: 700;
 }
+
+/* Mission reward amount */
+#mission-reward-popup .mrp-reward {
+    font-size: 18px;
+    font-weight: 900;
+    color: #22C55E;
+    line-height: 1.2;
+    margin-top: 2px;
+}
+
+/* Coin burst animation */
+#mission-reward-popup .mrp-coin-burst {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    pointer-events: none;
+}
+
+#mission-reward-popup .mrp-coin {
+    position: absolute;
+    font-size: 16px;
+    opacity: 0;
+    top: 0;
+    left: 0;
+}
+
+#mission-reward-popup .mrp-coin.mrp-coin-fly {
+    animation: mrpCoinFly 0.8s ease-out forwards;
+}
+
+@keyframes mrpCoinFly {
+    0% { opacity: 1; transform: translate(0, 0) scale(0.5); }
+    50% { opacity: 1; transform: translate(var(--tx, 30px), var(--ty, -40px)) scale(1.2); }
+    100% { opacity: 0; transform: translate(var(--tx, 60px), var(--ty, -80px)) scale(0.3); }
+}
+
+/* Mission completed card state */
+.wallet-earn-card.mission-completed {
+    opacity: 0.5;
+    border-color: rgba(34, 197, 94, 0.2);
+}
+
+.wallet-earn-card.mission-completed .earn-reward {
+    color: #22C55E;
+}
+
+.wallet-earn-card.mission-completed .earn-title {
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Mission checkmark badge */
+.mission-checkmark {
+    position: absolute;
+    top: 8px;
+    inset-inline-end: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(34, 197, 94, 0.2);
+    border: 1.5px solid rgba(34, 197, 94, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #22C55E;
+}
+
+.wallet-earn-card {
+    position: relative;
+}
