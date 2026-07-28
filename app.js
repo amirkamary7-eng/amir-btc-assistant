@@ -4617,7 +4617,7 @@ function renderForexGroupedList() {
     }
 
     // Render each non-empty group
-    const groupOrder = ['major', 'cross', 'metal', 'index', 'commodity'];
+    const groupOrder = ['metal', 'major', 'cross', 'index', 'commodity'];
     let html = '';
     for (const cat of groupOrder) {
         const g = groups[cat];
