@@ -1226,6 +1226,7 @@ const WalletApp = (() => {
     scrollToSection,
     getTokenLogo,
     _invalidateCache: invalidateWalletCache,
+    _refreshWalletData: loadWalletData,
   };
 })();
 

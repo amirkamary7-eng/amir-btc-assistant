@@ -3677,6 +3677,7 @@ const walletHandlers = createWalletHandlers({
   walletRepo,
   notificationPlatformRepo,
   economyService,
+  rewardCenterRepo,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({

@@ -5075,7 +5075,8 @@ async function completeMission(missionId) {
 
 /**
  * Refresh wallet display after a mission reward.
- * Updates balance, transaction history, and summary without full page reload.
+ * Updates balance, transaction history, summary, tier, and progress bar
+ * without full page reload.
  */
 function refreshWalletAfterMission(newBalance) {
     // 1. Invalidate wallet cache so next fetch hits the API
@@ -5090,10 +5091,23 @@ function refreshWalletAfterMission(newBalance) {
         animateBalanceChange(balanceEl, currentBalance, newBalance);
     }
 
-    // 3. If profile card is visible, refresh it from cache (will fetch fresh data in background)
+    // 3. Refresh profile card (balance + tier on the profile page)
     if (typeof window.WalletApp?.loadProfileCard === 'function') {
-        // Delay slightly so the popup animation isn't interrupted
         setTimeout(() => window.WalletApp.loadProfileCard(), 300);
+    }
+
+    // 4. If wallet full page is open, refresh ALL wallet data in background
+    //    This updates: balance, tier, progress bar, transaction history, summary strip
+    const walletPage = document.getElementById('wallet-full-page');
+    if (walletPage && walletPage.classList.contains('open')) {
+        // Re-fetch wallet data (balance + history) and summary in parallel
+        setTimeout(async () => {
+            try {
+                if (typeof window.WalletApp?._refreshWalletData === 'function') {
+                    await window.WalletApp._refreshWalletData();
+                }
+            } catch (_) {}
+        }, 500);
     }
 }
 
@@ -5119,26 +5133,23 @@ function animateBalanceChange(el, from, to) {
 
 /**
  * Update mission cards in the wallet to show completed/in-progress status.
+ * GENERIC: Reads mission status from _missionStatusList (populated from backend).
+ * Matches missions to wallet cards by ID prefix 'mission-'.
  * Called after mission status loads or after a mission is completed.
  */
 function updateMissionCards() {
-    const missionCardMap = {
-        'news_view': 'mission-news-view',
-        'analysis_read': 'mission-analysis-read',
-        'calendar_view': 'mission-calendar-view',
-        'daily_open': 'mission-daily-open',
-    };
-
-    for (const [missionId, cardId] of Object.entries(missionCardMap)) {
-        const card = document.getElementById(cardId);
-        if (!card) continue;
+    // Find all mission cards in the wallet (any element with id starting with 'mission-')
+    const missionCards = document.querySelectorAll('[id^="mission-"]');
+    for (const card of missionCards) {
+        // Extract mission_id from card id: 'mission-news-view' → 'news_view'
+        const cardId = card.id;
+        const missionId = cardId.replace(/^mission-/, '').replace(/-/g, '_');
 
         const status = _missionStatusList.find(m => m.mission_id === missionId);
         const isCompleted = _completedMissionsToday.has(missionId) || status?.completed;
 
         if (isCompleted) {
             card.classList.add('mission-completed');
-            // Add checkmark badge if not already present
             if (!card.querySelector('.mission-checkmark')) {
                 const checkmark = document.createElement('div');
                 checkmark.className = 'mission-checkmark';

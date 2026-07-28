@@ -597,12 +597,33 @@ export function createRewardCenterRepository(deps) {
 
   async function getMissionReward(env, missionId) {
     await ensureSchema(env);
-    if (!isDatabaseConfigured(env)) return { token_amount: 0, bonus_spins: 0 };
+    if (!isDatabaseConfigured(env)) return { token_amount: 0, bonus_spins: 0, mission_name: '' };
     try {
-      const result = await queryDb(env, `SELECT token_amount, bonus_spins FROM mission_rewards WHERE mission_id = $1 AND is_enabled = TRUE LIMIT 1`, [String(missionId)]);
-      if (result.rows[0]) return { token_amount: Number(result.rows[0].token_amount), bonus_spins: Number(result.rows[0].bonus_spins) };
-      return { token_amount: 0, bonus_spins: 0 };
-    } catch { return { token_amount: 0, bonus_spins: 0 }; }
+      const result = await queryDb(env, `SELECT token_amount, bonus_spins, mission_name FROM mission_rewards WHERE mission_id = $1 AND is_enabled = TRUE LIMIT 1`, [String(missionId)]);
+      if (result.rows[0]) return { token_amount: Number(result.rows[0].token_amount), bonus_spins: Number(result.rows[0].bonus_spins), mission_name: result.rows[0].mission_name };
+      return { token_amount: 0, bonus_spins: 0, mission_name: '' };
+    } catch { return { token_amount: 0, bonus_spins: 0, mission_name: '' }; }
+  }
+
+  /**
+   * Get ALL active (enabled) mission reward configurations.
+   * Used by GET /api/wallet/missions to dynamically list all missions
+   * without hardcoding them in the frontend.
+   */
+  async function getActiveMissionRewards(env) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return [];
+    try {
+      const result = await queryDb(env, `SELECT mission_id, mission_name, token_amount, bonus_spins, sort_order, metadata FROM mission_rewards WHERE is_enabled = TRUE ORDER BY sort_order ASC`);
+      return result.rows.map(r => ({
+        mission_id: r.mission_id,
+        mission_name: r.mission_name,
+        token_amount: Number(r.token_amount),
+        bonus_spins: Number(r.bonus_spins),
+        sort_order: Number(r.sort_order),
+        metadata: r.metadata || {},
+      }));
+    } catch { return []; }
   }
 
   function _mapMissionReward(r) {
@@ -763,6 +784,7 @@ export function createRewardCenterRepository(deps) {
     updateMissionReward,
     deleteMissionReward,
     getMissionReward,
+    getActiveMissionRewards,
     listCampaigns,
     getCampaign,
     createCampaign,
