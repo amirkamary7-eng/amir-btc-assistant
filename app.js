@@ -6318,17 +6318,39 @@ function renderCalendarV2() {
     const container = document.getElementById('news-list');
     if (!container) return;
 
-    if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
-
-    // Segmented control (today/tomorrow/week)
-    const segmentsHtml = `
-    <div class="ni-cal-segments">
-        <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
-        <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
-        <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
-    </div>`;
+    // ROOT CAUSE FIX for calendar jumping:
+    // Previously, every call to renderCalendarV2 replaced the entire
+    // container.innerHTML — even if the data was IDENTICAL to the previous
+    // render. This caused:
+    //   - Scroll position reset (user thrown to top)
+    //   - Visual flash (content disappears then reappears)
+    //   - Countdown interval cleared and restarted (timer hiccup)
+    //
+    // FIX: Compute a signature of everything that affects the rendered HTML.
+    // If the signature matches the last render, skip the innerHTML replacement
+    // entirely — just keep the countdown running. Only re-render when the data
+    // actually changed (new events, different tab, different country filter).
+    //
+    // The signature includes:
+    //   - currentCalendarTab (today/tomorrow/week)
+    //   - currentCalCountry (all/USD/EUR/...)
+    //   - calendarEvents content (titles + timestamps + actuals + forecasts)
+    //   - _niCalendarReminders keys (reminder button state)
+    //   - calendarLoading state
+    //   - currentLang (labels change on language switch)
 
     if (calendarLoading) {
+        // Show skeleton — but only if not already showing skeleton
+        const skelSig = '__loading__';
+        if (container.dataset.calSignature === skelSig) return;
+        container.dataset.calSignature = skelSig;
+        if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+        const segmentsHtml = `
+        <div class="ni-cal-segments">
+            <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
+            <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
+            <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
+        </div>`;
         container.innerHTML = segmentsHtml + `
             <div class="ni-skeleton-card"></div>
             <div class="ni-skeleton-card"></div>
@@ -6339,6 +6361,16 @@ function renderCalendarV2() {
 
     loadCalendarEvents().then(events => {
         if (!events.length) {
+            const emptySig = '__empty_' + currentCalendarTab + '_' + currentCalCountry + '_' + currentLang;
+            if (container.dataset.calSignature === emptySig) return;
+            container.dataset.calSignature = emptySig;
+            if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+            const segmentsHtml = `
+            <div class="ni-cal-segments">
+                <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
+                <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
+                <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
+            </div>`;
             container.innerHTML = segmentsHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویداد اقتصادی یافت نشد</div></div>`;
             return;
         }
@@ -6370,27 +6402,59 @@ function renderCalendarV2() {
             allCountries.push(...availableCountries.filter(c => !MAJOR_CURRENCIES.includes(c)));
         }
 
-        const countriesHtml = `
-        <div class="ni-cal-countries">
-            <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">همه</button>
-            ${allCountries.filter(c => c !== 'all').map(c => {
-                const flag = filteredEvents.find(e => e.country === c)?.flag || '';
-                return `<button class="ni-cal-country${currentCalCountry === c ? ' active' : ''}" onclick="filterCalCountry('${escapeHtml(c)}', this)">${flag} ${escapeHtml(c)}</button>`;
-            }).join('')}
-        </div>`;
-
         // Apply country filter
         if (currentCalCountry && currentCalCountry !== 'all') {
             filteredEvents = filteredEvents.filter(e => e.country === currentCalCountry);
         }
 
         if (!filteredEvents.length) {
+            const noMatchSig = '__nomatch_' + currentCalendarTab + '_' + currentCalCountry + '_' + currentLang;
+            if (container.dataset.calSignature === noMatchSig) return;
+            container.dataset.calSignature = noMatchSig;
+            if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+            const segmentsHtml = `
+            <div class="ni-cal-segments">
+                <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
+                <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
+                <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
+            </div>`;
+            const countriesHtml = `
+            <div class="ni-cal-countries">
+                <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">همه</button>
+                ${allCountries.filter(c => c !== 'all').map(c => {
+                    const flag = filteredEvents.find(e => e.country === c)?.flag || '';
+                    return `<button class="ni-cal-country${currentCalCountry === c ? ' active' : ''}" onclick="filterCalCountry('${escapeHtml(c)}', this)">${flag} ${escapeHtml(c)}</button>`;
+                }).join('')}
+            </div>`;
             container.innerHTML = segmentsHtml + countriesHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویدادی برای این فیلتر یافت نشد</div></div>`;
             return;
         }
 
         // Sort by time
         filteredEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        // ── SIGNATURE GUARD ──
+        // Build a compact signature of everything that affects the rendered HTML.
+        // If this signature matches the last render, skip innerHTML replacement.
+        const reminderKeys = Object.keys(_niCalendarReminders).sort().join(',');
+        const eventsSig = filteredEvents.map(e =>
+            `${e.title}|${e.timestamp}|${e.actual||''}|${e.forecast||''}|${e.previous||''}|${e.status||''}`
+        ).join(';;');
+        const signature = `${currentCalendarTab}|${currentCalCountry}|${currentLang}|${eventsSig}|${reminderKeys}`;
+
+        if (container.dataset.calSignature === signature) {
+            // Data unchanged — do NOT re-render. This prevents:
+            //   - Scroll position reset
+            //   - Visual flash
+            //   - Countdown interval disruption
+            // Just ensure countdown is running (it might have been cleared).
+            if (!calCountdownInterval) startCalCountdown();
+            return;
+        }
+        container.dataset.calSignature = signature;
+
+        // Clear countdown before full re-render (will restart after innerHTML)
+        if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
 
         // Group by time period
         const groups = {};
@@ -6406,6 +6470,23 @@ function renderCalendarV2() {
         const labels = timeGroupLabels[lang] || timeGroupLabels.fa;
         const impactLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
         const statusLabel = { past: 'گذشته', live: 'در حال اجرا', upcoming: 'در انتظار' };
+
+        // Segmented control (today/tomorrow/week)
+        const segmentsHtml = `
+        <div class="ni-cal-segments">
+            <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
+            <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
+            <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
+        </div>`;
+
+        const countriesHtml = `
+        <div class="ni-cal-countries">
+            <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">همه</button>
+            ${allCountries.filter(c => c !== 'all').map(c => {
+                const flag = filteredEvents.find(e => e.country === c)?.flag || '';
+                return `<button class="ni-cal-country${currentCalCountry === c ? ' active' : ''}" onclick="filterCalCountry('${escapeHtml(c)}', this)">${flag} ${escapeHtml(c)}</button>`;
+            }).join('')}
+        </div>`;
 
         let eventsHtml = '';
         const groupOrder = ['morning', 'afternoon', 'evening'];
@@ -10521,20 +10602,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── Data loading function (called after membership confirmed) ──
     // All data requests run in PARALLEL — not chained.
+    // WARM-START FIX: loadMarketData is already fired independently above
+    // (line ~10574). Skip it here to avoid duplicate API call — the
+    // apiFetch dedup would catch it anyway, but skipping saves the
+    // function call overhead and the redundant render calls.
     function _startDataLoading() {
-        // PERF: All 4 data sources load IN PARALLEL — no setTimeout delays.
-        // Previously loadImportantNews was delayed by 2000ms which blocked
-        // the entire dashboard. Now all 4 fire simultaneously:
-        // - market (787ms) — renders ticker + market status
-        // - analyses (35ms) — renders analysis slider + featured
-        // - news (38ms) — renders news cards + important news
-        // - calendar (445ms) — renders calendar events
-        // Each renders independently as soon as it resolves.
-        loadMarketData(true).then(() => {
-            renderDashboardMarketStatus();
-            renderWatchlist();
-            renderMarketTicker();
-        }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
+        // Skip loadMarketData — already fired independently above
+        // Just mark market as ready (it was already started)
+        _dashboardReady.market = true;
+        _checkDashboardReady();
+
         fetchAnalyses().then(changed => {
             if (changed) {
                 renderAnalysisSlider();
@@ -10550,16 +10627,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadCalendarEvents().then(() => renderDashboardCalendar()).catch(() => renderDashboardCalendar());
     }
 
-    // ── PARALLEL: maintenance check + bootstrap (no await — fire and forget) ──
-    // Previously: await checkMaintenanceMode() blocked everything, then await
-    // bootstrapUser() blocked again. Now both run in parallel.
-    // Maintenance check: if maintenance is on, it shows the popup and we return.
-    // Bootstrap: resolves membership → setJoinLockState('joined') for members
-    //            or setJoinLockState('not-joined') for non-members.
+    // ── WARM-START OPTIMIZATION ──
+    // ROOT CAUSE: _startDataLoading() was called AFTER bootstrapUser().then(),
+    // meaning all API calls (analyses, news, calendar) waited for bootstrap
+    // to complete before even starting — adding 200-500ms to warm-start.
+    //
+    // FIX: Fire _startDataLoading() in PARALLEL with bootstrapUser().
+    // The API calls inside will use apiFetch → waitForApiReady(8000) which
+    // naturally waits for Telegram auth to be ready. By the time auth is
+    // ready, the calls are already in-flight — no extra round-trip.
+    //
+    // This cuts warm-start critical path from:
+    //   auth_wait → bootstrap → API calls → render
+    // to:
+    //   auth_wait → max(bootstrap, API calls) → render
+    //
+    // Cached data is already rendered on DOMContentLoaded (above), so the
+    // user sees content INSTANTLY. The API calls just refresh in background.
 
     let _maintenanceBlocked = false;
 
-    // Start maintenance check (non-blocking — we handle the result in the callback)
+    // Start maintenance check (non-blocking)
     checkMaintenanceMode().then(_maintOk => {
         if (!_maintOk) {
             _maintenanceBlocked = true;
@@ -10568,19 +10656,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     }).catch(() => { /* fail open */ });
 
     // Start bootstrap (non-blocking — membership check runs in parallel)
-    // bootstrapUser() will call setJoinLockState('joined') for members or
-    // setJoinLockState('not-joined') for non-members when it completes.
-    // Data loading is triggered here after bootstrap resolves + member confirmed.
     bootstrapUser().then(() => {
         loadUser();
-        // If bootstrap confirmed membership (setJoinLockState('joined') was called
-        // inside bootstrapUser, which sets _joinLockShown = false), start data loading.
-        if (!_joinLockShown && !_maintenanceBlocked) {
-            _startDataLoading();
+        if (_joinLockShown && !_maintenanceBlocked) {
+            // Bootstrap confirmed membership — but _startDataLoading already
+            // fired below. Just update admin UI here.
+            updateAnalysisFabVisibility();
         }
     }).catch(e => {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);
     });
+
+    // ROOT CAUSE FIX (warm-start speed): Fire data loading IMMEDIATELY —
+    // in parallel with bootstrapUser(). Previously this waited for
+    // bootstrap to complete, adding 200-500ms to the critical path.
+    // Now apiFetch's waitForApiReady handles the auth wait naturally.
+    // Cached data is already rendered above — these calls just refresh.
+    if (API_BASE) {
+        _startDataLoading();
+    }
 
     // If user is pending (cold open), set up retry mechanism
     if (!bootstrapComplete && (UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady()))) {
