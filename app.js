@@ -2032,7 +2032,7 @@ async function openAnalysisDetailPage(id) {
     }
 
     // Fire daily mission: analysis_read (non-blocking, idempotent)
-    if (typeof completeMission === 'function') completeMission('analysis_read');
+    if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.ANALYSIS_OPEN);
 
     // Fetch fresh detail from server in background (for view-count increment
     // and to pick up any edits made after the list was cached). Includes
@@ -5002,22 +5002,64 @@ function showToast(msg) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// DAILY MISSIONS SYSTEM
+// DAILY MISSIONS SYSTEM — FULLY GENERIC EVENT-DRIVEN
 // ════════════════════════════════════════════════════════════════════════
-// Tracks daily mission completions server-side and shows a premium popup.
-// Missions are idempotent per user per UTC day (refId includes date).
-// The frontend fires the completion API call at the right moment; the
-// backend grants the reward through creditTokens (UNIQUE constraint
-// prevents double-payment).
+// The frontend emits GENERIC EVENTS at known interaction points.
+// The backend's mission_rewards.metadata.trigger field maps each mission
+// to one of these events. When an event fires, the frontend checks which
+// missions are triggered by that event (from cached _missionStatusList)
+// and fires completion for ALL matching missions.
+//
+// Adding a new mission requires ONLY a DB insert with the right trigger:
+//   INSERT INTO mission_rewards (mission_id, mission_name, token_amount,
+//     is_enabled, metadata) VALUES (
+//     'read_3_news', '۳ خبر بخوان', 10, TRUE,
+//     '{"trigger":"news_open","target_count":3}')
+//
+// The frontend already emits 'news_open' — no code change needed.
 
 const _completedMissionsToday = new Set();
 let _missionsLoaded = false;
-let _missionStatusList = []; // Full mission status from backend
+let _missionStatusList = [];
+
+// Generic event types emitted by the frontend. Adding a new event type
+// requires adding ONE fireEvent() call at the interaction point — but
+// adding a new MISSION that uses an EXISTING event type requires ZERO
+// frontend changes.
+const MISSION_EVENTS = {
+  NEWS_OPEN: 'news_open',
+  ANALYSIS_OPEN: 'analysis_open',
+  CALENDAR_OPEN: 'calendar_open',
+  DAILY_OPEN: 'daily_open',
+  PROFILE_OPEN: 'profile_open',
+  MARKET_OPEN: 'market_open',
+  WATCHLIST_OPEN: 'watchlist_open',
+};
+
+/**
+ * Fire a generic mission event. Checks all missions from backend whose
+ * metadata.trigger matches this event, and fires completion for each.
+ * This is the ONLY function the frontend calls — no hardcoded mission IDs.
+ *
+ * @param {string} eventType - One of MISSION_EVENTS values
+ */
+function fireMissionEvent(eventType) {
+    if (!eventType || !API_BASE) return;
+
+    // Find all missions triggered by this event (from cached backend data)
+    const matchingMissions = _missionStatusList.filter(m =>
+        m.trigger === eventType && !m.completed && !_completedMissionsToday.has(m.mission_id)
+    );
+
+    // Fire completion for each matching mission
+    for (const mission of matchingMissions) {
+        completeMission(mission.mission_id);
+    }
+}
 
 /**
  * Load today's mission status from the server. Called once on bootstrap.
- * Populates _completedMissionsToday so we don't fire redundant API calls.
- * Also stores full status list for wallet card rendering.
+ * Populates _completedMissionsToday and _missionStatusList from backend.
  */
 async function loadMissionStatus() {
     if (_missionsLoaded || !API_BASE || !canRunSessionRequests()) return;
@@ -5028,22 +5070,18 @@ async function loadMissionStatus() {
             for (const m of data.missions) {
                 if (m.completed) _completedMissionsToday.add(m.mission_id);
             }
-            // Update wallet mission cards if wallet is open
             updateMissionCards();
         }
         _missionsLoaded = true;
-    } catch (_) { /* non-fatal — missions will still fire, just may get idempotent responses */ }
+    } catch (_) {}
 }
 
 /**
- * Complete a daily mission. Fires the API call, shows a premium popup on
- * first completion, updates wallet in real-time, and tracks the completion
- * locally to prevent redundant calls.
- *
- * @param {string} missionId - 'news_view' | 'analysis_read' | 'calendar_view' | 'daily_open'
+ * Complete a daily mission. Called by fireMissionEvent — not directly
+ * from interaction points. Fires the API call, shows popup on reward,
+ * updates wallet in real-time.
  */
 async function completeMission(missionId) {
-    // Skip if already completed locally (prevents redundant API calls)
     if (_completedMissionsToday.has(missionId)) return;
     if (!API_BASE || !canRunSessionRequests()) return;
 
@@ -5054,38 +5092,25 @@ async function completeMission(missionId) {
         });
 
         if (data?.status === 'success') {
-            // Update local mission status list with new progress
             const idx = _missionStatusList.findIndex(m => m.mission_id === missionId);
             if (idx >= 0) {
                 _missionStatusList[idx].progress_count = data.progress_count;
                 _missionStatusList[idx].target_count = data.target_count;
                 _missionStatusList[idx].completed = data.completed;
-            } else {
-                _missionStatusList.push({
-                    mission_id: missionId,
-                    completed: data.completed,
-                    progress_count: data.progress_count,
-                    target_count: data.target_count,
-                    reward_amount: data.reward_amount,
-                    reward_label: data.reward_label,
-                });
             }
 
-            // If fully completed, add to completed set
             if (data.completed) {
                 _completedMissionsToday.add(missionId);
             }
 
-            // Show popup + refresh wallet only on FIRST completion (reward granted)
             if (data.is_new_completion) {
                 showMissionRewardPopup(data.reward_label, data.reward_amount);
                 refreshWalletAfterMission(data.new_balance);
             }
 
-            // Update mission cards in wallet if open
             updateMissionCards();
         }
-    } catch (_) { /* silent fail — mission tracking is non-critical */ }
+    } catch (_) {}
 }
 
 /**
@@ -5273,6 +5298,8 @@ function showMissionRewardPopup(label, amount) {
 window.completeMission = completeMission;
 window.loadMissionStatus = loadMissionStatus;
 window.updateMissionCards = updateMissionCards;
+window.fireMissionEvent = fireMissionEvent;
+window.MISSION_EVENTS = MISSION_EVENTS;
 /**
  * واچ‌لیست را در رابط کاربری رندر می‌کند.
  * ورودی: بدون ورودی.
@@ -6997,8 +7024,8 @@ function switchNewsTab(category, btn) {
     _niRestoreScrollPosition(category);
 
     // Fire daily mission: calendar_view (non-blocking, idempotent)
-    if (category === 'calendar' && typeof completeMission === 'function') {
-        completeMission('calendar_view');
+    if (category === 'calendar' && typeof fireMissionEvent === 'function') {
+        fireMissionEvent(MISSION_EVENTS.CALENDAR_OPEN);
     }
 }
 
@@ -9692,7 +9719,7 @@ function openNewsModalWith(n) {
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
 
     // Fire daily mission: news_view (non-blocking, idempotent)
-    if (typeof completeMission === 'function') completeMission('news_view');
+    if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.NEWS_OPEN);
 }
 
 // ============================================================================
@@ -10995,7 +11022,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Load today's mission status + fire daily_open mission
             if (typeof loadMissionStatus === 'function') {
                 loadMissionStatus().then(() => {
-                    if (typeof completeMission === 'function') completeMission('daily_open');
+                    if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.DAILY_OPEN);
                 });
             }
         }
