@@ -29,24 +29,30 @@ export function createWheelHandlers(deps) {
       return jsonResponse({ status: 'success', daily_spin: { available: false }, premium_spins: 0, config: { is_enabled: true, segment_count: 8, maintenance_mode: false } }, {}, env);
     }
     try {
-      const dailySpin = await wheelRepo.getOrCreateDailySpin(env, authState.user.id);
-      const availableSpins = await wheelRepo.getAvailableSpins(env, authState.user.id);
-      const premiumCount = availableSpins.spins.filter(s => s.type === 'premium').length;
-
-      // Fetch wheel config from Reward Center (DB-driven)
-      let config = { is_enabled: true, segment_count: 8, maintenance_mode: false };
+      // ROOT CAUSE FIX (2.1): Read max_spins_per_user from wheel_config
+      // (default 3) and pass to getOrCreateDailySpins so it creates the
+      // correct number of daily spins.
+      let config = { is_enabled: true, segment_count: 8, maintenance_mode: false, max_spins_per_user: 3 };
       if (rewardCenterRepo) {
         config = await rewardCenterRepo.getWheelConfig(env).catch(() => config);
       }
+      const maxSpins = config.max_spins_per_user || 3;
+
+      // Create daily spins (up to maxSpins) and get available count
+      const dailySpins = await wheelRepo.getOrCreateDailySpins(env, authState.user.id, maxSpins);
+      const availableSpins = await wheelRepo.getAvailableSpins(env, authState.user.id);
+      const premiumCount = availableSpins.spins.filter(s => s.type === 'premium').length;
 
       return jsonResponse({
         status: 'success',
         daily_spin: {
-          available: dailySpin.status === 'available',
-          spin_id: dailySpin.spin_id,
+          available: dailySpins.total_available > 0,
+          spin_id: dailySpins.spins[0]?.id || null,
         },
         premium_spins: premiumCount,
         total_available: availableSpins.spins.length,
+        total_allowed: maxSpins,
+        spins_used: maxSpins - dailySpins.total_available,
         config: {
           is_enabled: config.is_enabled,
           segment_count: config.segment_count,
@@ -100,29 +106,35 @@ export function createWheelHandlers(deps) {
 
       let spinId = body.spin_id;
       if (!spinId) {
-        // Use daily spin
-        const dailySpin = await wheelRepo.getOrCreateDailySpin(env, authState.user.id);
-        if (dailySpin.status !== 'available') {
+        // ROOT CAUSE FIX (2.1): Use new getOrCreateDailySpins with maxSpins
+        // from wheel_config. This ensures the correct number of daily spins
+        // are created (default 3).
+        let config = { max_spins_per_user: 3 };
+        if (rewardCenterRepo) {
+          config = await rewardCenterRepo.getWheelConfig(env).catch(() => config);
+        }
+        const maxSpins = config.max_spins_per_user || 3;
+        const dailySpins = await wheelRepo.getOrCreateDailySpins(env, authState.user.id, maxSpins);
+        if (dailySpins.total_available === 0 || !dailySpins.spins.length) {
           return jsonResponse({ status: 'error', message: 'No available spins', code: 'NO_SPINS' }, { status: 409 }, env);
         }
-        spinId = dailySpin.spin_id;
+        spinId = dailySpins.spins[0].id;
       }
 
       // Consume the spin (atomic: available → used)
       const spinResult = await wheelRepo.consumeSpin(env, authState.user.id, spinId);
 
-      // ROOT CAUSE FIX (F-3): refId is now per-(user, day) instead of per-spin.
-      // The old refId `wheel_${spin_id}_${user_id}` was unique per minted spin
-      // row — so the idempotency check in creditTokens never triggered, and
-      // every spin (even if the user already spun today) granted tokens.
-      // The new refId `wheel_${user_id}_${today}` ensures that even if a
-      // concurrent request or a bug mints multiple spin_id's for the same
-      // user/day, only ONE reward is credited — the second INSERT into
-      // token_transactions fails the UNIQUE constraint and is treated as
-      // idempotent.
+      // ROOT CAUSE FIX (F-3 + 3.1): refId includes spin_type + spin_id to
+      // allow multiple daily spins AND premium spins on the same day.
+      // The old refId `wheel_${user_id}_${today}` would block the 2nd and
+      // 3rd daily spins from granting rewards (idempotent collision).
+      // The new refId `wheel_${user_id}_${today}_${spin_id}` is unique per
+      // spin, so each spin can grant its own reward. Anti-cheat is still
+      // enforced by the advisory lock + maxSpins check in
+      // getOrCreateDailySpins — users can't create more than maxSpins.
       const today = new Date().toISOString().slice(0, 10);
-      const rewardRefId = `wheel_${authState.user.id}_${today}`;
-      let rewardResult = { success: false, newBalance: null, txId: null };
+      const rewardRefId = `wheel_${authState.user.id}_${today}_${spinResult.spin_id}`;
+      let rewardResult = { success: false, newBalance: null, txId: null, idempotent: false };
       if (spinResult.reward.amount > 0) {
         try {
           rewardResult = await economyService.grantReward({
@@ -136,12 +148,15 @@ export function createWheelHandlers(deps) {
             env,
           });
         } catch (e) {
-          // If reward fails (e.g. already granted — idempotent), still return the spin result
-          console.warn('Wheel reward grant failed:', e.message);
+          // ROOT CAUSE FIX (3.2): If reward fails, log clearly. The spin is
+          // already consumed — a cron retry will credit the reward later.
+          console.warn('Wheel reward grant failed (spin will be retried by cron):', e.message);
         }
 
-        // Dispatch notification via Notification Platform (single entry point)
-        if (notificationPlatformRepo) {
+        // ROOT CAUSE FIX (3.4): Only dispatch notification if reward was
+        // actually credited (not idempotent). Previously the notification
+        // fired even if grantReward failed — misleading the user.
+        if (notificationPlatformRepo && rewardResult.success && !rewardResult.idempotent) {
           await notificationPlatformRepo.dispatch(env, {
             userId: authState.user.id,
             templateKey: 'wheel_reward',

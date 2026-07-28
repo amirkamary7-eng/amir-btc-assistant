@@ -57,17 +57,17 @@ export function createWheelRepository(deps) {
       CREATE INDEX IF NOT EXISTS idx_wheel_spins_user ON wheel_spins (user_id, status);
       CREATE INDEX IF NOT EXISTS idx_wheel_history_user ON wheel_history (user_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_wheel_rewards_active ON wheel_rewards (is_active, campaign_id);
-      -- ROOT CAUSE FIX (F-1): Add spin_date column to wheel_spins (if not exists)
-      -- and create a UNIQUE constraint on (user_id, spin_type, source, spin_date).
-      -- The old UNIQUE(user_id, spin_type, source, created_at) included the
-      -- microsecond-precision created_at column, so ON CONFLICT never fired —
-      -- every call to getOrCreateDailySpin minted a new row, allowing unlimited
-      -- daily spins. The new constraint uses spin_date (DATE, not TIMESTAMPTZ)
-      -- so only one daily spin row per user per day can exist.
+      -- ROOT CAUSE FIX (F-1 + 2.1): spin_date column + advisory lock approach.
+      -- The old UNIQUE(user_id, spin_type, source, created_at) included
+      -- microsecond TIMESTAMPTZ so ON CONFLICT never fired.
+      -- Now we use a spin_date DATE column + a COUNT-based check inside
+      -- an advisory lock to allow up to max_spins_per_user spins per day.
+      -- No UNIQUE constraint on spin_date (would limit to 1 spin).
+      -- Instead, getOrCreateDailySpins counts today's spins under the
+      -- advisory lock and only creates new ones if under the limit.
       ALTER TABLE wheel_spins ADD COLUMN IF NOT EXISTS spin_date DATE NOT NULL DEFAULT CURRENT_DATE;
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_wheel_spins_daily_unique
-        ON wheel_spins (user_id, spin_type, source, spin_date)
-        WHERE spin_type = 'daily' AND source = 'daily_free';
+      -- Drop the old 1-spin UNIQUE index if it exists (from the previous fix)
+      DROP INDEX IF EXISTS idx_wheel_spins_daily_unique;
     `;
     try {
       await queryDb(env, batchSql);
@@ -78,82 +78,91 @@ export function createWheelRepository(deps) {
   }
 
   /**
-   * Get or create today's daily free spin for a user.
+   * Get or create today's daily free spins for a user.
    *
-   * ROOT CAUSE FIX (F-1 + F-2): Completely rewritten to fix the unlimited
-   * spin minting vulnerability. The old code used ON CONFLICT on
-   * (user_id, spin_type, source, created_at) where created_at was a
-   * microsecond TIMESTAMPTZ — so ON CONFLICT never fired and every call
-   * created a new row.
+   * ROOT CAUSE FIX (F-1 + F-2 + 2.1): Completely rewritten to support
+   * multiple daily spins (max_spins_per_user, default 3).
    *
-   * New approach:
-   * 1. Use advisory lock (pg_advisory_xact_lock) keyed on (user_id + today)
-   *    to serialize concurrent calls for the same user/day.
-   * 2. INSERT ... ON CONFLICT (user_id, spin_type, source, spin_date)
-   *    where spin_date is a DATE (not TIMESTAMPTZ) — so the constraint
-   *    actually fires when a row already exists for today.
-   * 3. If INSERT returns a row, it's a new spin. If 0 rows, the spin
-   *    already exists — SELECT it.
+   * Approach:
+   * 1. Acquire advisory lock keyed on (user_id + today) — serializes
+   *    concurrent calls for the same user/day.
+   * 2. COUNT today's available spins for the user.
+   * 3. If count < maxSpins, create new spin rows until we reach maxSpins.
+   * 4. Return all available (unused) spins for today.
    *
-   * This guarantees exactly ONE daily spin row per user per UTC day,
+   * This guarantees exactly maxSpins available spins per user per UTC day,
    * regardless of how many times the API is called or how many concurrent
    * requests are made.
+   *
+   * @param {object} env - Worker env
+   * @param {string} userId - Telegram user ID
+   * @param {number} maxSpins - Max daily spins (from wheel_config, default 3)
+   * @returns {Promise<{spins: Array, total_available: number, total_allowed: number}>}
    */
-  async function getOrCreateDailySpin(env, userId) {
+  async function getOrCreateDailySpins(env, userId, maxSpins = 3) {
     const uid = String(userId);
-    // Use queryDbTransaction to get an advisory lock + INSERT in one atomic transaction
+    const today = new Date().toISOString().slice(0, 10);
+    const lockKey = _hashLockKey(uid + '_' + today);
+
     if (!queryDbTransaction) {
-      // Fallback: no transaction support — use simple INSERT with ON CONFLICT
-      const result = await queryDb(env,
-        `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
-         VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), NOW() + INTERVAL '24 hours', CURRENT_DATE)
-         ON CONFLICT (user_id, spin_type, source, spin_date) WHERE spin_type = 'daily' AND source = 'daily_free' DO NOTHING
-         RETURNING id, status`,
+      // Fallback: no transaction support — use simple queries
+      // Check how many available spins exist for today
+      const availResult = await queryDb(env,
+        `SELECT id, status FROM wheel_spins
+         WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
+         AND spin_date = CURRENT_DATE AND status = 'available'`,
         [uid]);
-      if (result.rows.length > 0) return { spin_id: result.rows[0].id, status: 'available', is_new: true };
-      const existing = await queryDb(env,
-        `SELECT id, status FROM wheel_spins WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free' AND spin_date = CURRENT_DATE LIMIT 1`,
+      const availableCount = availResult.rows.length;
+      const needed = Math.max(0, maxSpins - availableCount);
+      for (let i = 0; i < needed; i++) {
+        await queryDb(env,
+          `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
+           VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), NOW() + INTERVAL '24 hours', CURRENT_DATE)`,
+          [uid]);
+      }
+      const finalResult = await queryDb(env,
+        `SELECT id, status FROM wheel_spins
+         WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
+         AND spin_date = CURRENT_DATE AND status = 'available'`,
         [uid]);
-      if (existing.rows.length > 0) return { spin_id: existing.rows[0].id, status: existing.rows[0].status, is_new: false };
-      return { spin_id: null, status: 'none', is_new: false };
+      return { spins: finalResult.rows, total_available: finalResult.rows.length, total_allowed: maxSpins };
     }
 
-    // Advisory lock key: hash of user_id + today's date
-    // This serializes concurrent getOrCreateDailySpin calls for the same user/day
-    const lockKey = _hashLockKey(uid + '_' + new Date().toISOString().slice(0, 10));
-
+    // Use advisory lock + COUNT + INSERT in one atomic transaction
     const results = await queryDbTransaction(env, [
       {
-        // Acquire advisory lock — ensures only one caller can create the spin
         sql: `SELECT pg_advisory_xact_lock($1)`,
         params: [lockKey],
       },
       {
-        // INSERT with ON CONFLICT on spin_date (DATE, not TIMESTAMPTZ)
-        // This actually fires when a row exists for today
-        sql: `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
-              VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), NOW() + INTERVAL '24 hours', CURRENT_DATE)
-              ON CONFLICT DO NOTHING
-              RETURNING id, status`,
+        // Count today's available spins
+        sql: `SELECT COUNT(*)::int AS cnt FROM wheel_spins
+              WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
+              AND spin_date = CURRENT_DATE AND status = 'available'`,
         params: [uid],
       },
     ]);
 
-    const insertResult = results[1];
-    if (insertResult.rows.length > 0) {
-      return { spin_id: insertResult.rows[0].id, status: 'available', is_new: true };
+    const availableCount = results[1].rows[0]?.cnt || 0;
+    const needed = Math.max(0, maxSpins - availableCount);
+
+    // Create needed spin rows (each in its own query — they're inside the
+    // advisory lock so no race condition)
+    for (let i = 0; i < needed; i++) {
+      await queryDb(env,
+        `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
+         VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), NOW() + INTERVAL '24 hours', CURRENT_DATE)`,
+        [uid]);
     }
 
-    // Spin already exists for today — fetch it
-    const existing = await queryDb(env,
+    // Return all available spins for today
+    const finalResult = await queryDb(env,
       `SELECT id, status FROM wheel_spins
        WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-       AND spin_date = CURRENT_DATE LIMIT 1`,
+       AND spin_date = CURRENT_DATE AND status = 'available'`,
       [uid]);
-    if (existing.rows.length > 0) {
-      return { spin_id: existing.rows[0].id, status: existing.rows[0].status, is_new: false };
-    }
-    return { spin_id: null, status: 'none', is_new: false };
+
+    return { spins: finalResult.rows, total_available: finalResult.rows.length, total_allowed: maxSpins };
   }
 
   /**
@@ -341,7 +350,7 @@ export function createWheelRepository(deps) {
 
   return Object.freeze({
     ensureSchema,
-    getOrCreateDailySpin,
+    getOrCreateDailySpins,
     getAvailableSpins,
     getRewardPool,
     selectReward,

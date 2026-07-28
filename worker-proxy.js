@@ -1416,26 +1416,33 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
     );
 
   // Send referral + reward notifications via Notification Platform (single entry point)
-  if (notificationPlatformRepo) {
+  // ROOT CAUSE FIX (4.5): Only dispatch notifications if the reward was NOT
+  // idempotent (i.e., this is the first time the reward is credited). If
+  // creditTokens returned idempotent:true, a concurrent caller already
+  // dispatched the notifications — dispatching again would spam the inviter
+  // with duplicate notifications.
+  if (notificationPlatformRepo && result && !result.idempotent) {
     try {
-      // Referral notification (new referral created)
-      await notificationPlatformRepo.dispatch(env, {
-        userId: inviterId,
-        templateKey: 'referral_new_invite',
-        category: 'referral',
-        priority: 'medium',
-        channel: 'mini_app',
-        metadata: { invitee_id: String(inviteeId), referral_id: String(referralId) },
-      }).catch(() => {});
-      // Reward notification (tokens credited)
-      await notificationPlatformRepo.dispatch(env, {
-        userId: inviterId,
-        templateKey: 'referral_reward',
-        category: 'referral',
-        priority: 'high',
-        channel: 'both',
-        metadata: { amount: String(amount), referral_id: String(referralId), invitee_id: String(inviteeId) },
-      }).catch(() => {});
+      // Referral notification (new referral created) + Reward notification
+      // dispatched in parallel for efficiency
+      await Promise.all([
+        notificationPlatformRepo.dispatch(env, {
+          userId: inviterId,
+          templateKey: 'referral_new_invite',
+          category: 'referral',
+          priority: 'medium',
+          channel: 'mini_app',
+          metadata: { invitee_id: String(inviteeId), referral_id: String(referralId) },
+        }).catch(() => {}),
+        notificationPlatformRepo.dispatch(env, {
+          userId: inviterId,
+          templateKey: 'referral_reward',
+          category: 'referral',
+          priority: 'high',
+          channel: 'both',
+          metadata: { amount: String(amount), referral_id: String(referralId), invitee_id: String(inviteeId) },
+        }).catch(() => {}),
+      ]);
     } catch { /* notification failure should not break reward */ }
   }
   } catch (err) {

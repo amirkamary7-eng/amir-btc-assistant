@@ -104,7 +104,7 @@ export function createRewardCenterRepository(deps) {
         segment_count SMALLINT NOT NULL DEFAULT 8,
         version VARCHAR(32) NOT NULL DEFAULT '1.0.0',
         theme VARCHAR(32) NOT NULL DEFAULT 'default',
-        max_spins_per_user INTEGER NOT NULL DEFAULT 1,
+        max_spins_per_user INTEGER NOT NULL DEFAULT 3,
         cooldown_seconds INTEGER NOT NULL DEFAULT 0,
         max_reward_per_day INTEGER NOT NULL DEFAULT 1000,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -331,7 +331,7 @@ export function createRewardCenterRepository(deps) {
   }
 
   function _defaultWheelConfig() {
-    return { is_enabled: true, daily_spin_enabled: true, referral_spin_enabled: false, mission_spin_enabled: false, premium_spin_enabled: true, campaign_spin_enabled: true, maintenance_mode: false, segment_count: 8, version: '1.0.0', theme: 'default', max_spins_per_user: 1, cooldown_seconds: 0, max_reward_per_day: 1000 };
+    return { is_enabled: true, daily_spin_enabled: true, referral_spin_enabled: false, mission_spin_enabled: false, premium_spin_enabled: true, campaign_spin_enabled: true, maintenance_mode: false, segment_count: 8, version: '1.0.0', theme: 'default', max_spins_per_user: 3, cooldown_seconds: 0, max_reward_per_day: 1000 };
   }
 
   function _mapWheelConfig(r) {
