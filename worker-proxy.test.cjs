@@ -291,8 +291,12 @@ test('Auth: valid initData returns user object', async () => {
   const initData = buildInitData('test-bot-token', user);
   const result = await validate(initData, 'test-bot-token');
   assert.ok(result);
-  assert.equal(result.id, 123456);
-  assert.equal(result.first_name, 'Test');
+  // ROOT CAUSE FIX (R-1.1): validateTelegramInitData now returns
+  // { user, startParam } instead of just user. The test must access
+  // result.user.id instead of result.id.
+  const extractedUser = result.user || result;
+  assert.equal(extractedUser.id, 123456);
+  assert.equal(extractedUser.first_name, 'Test');
 });
 
 test('Auth: wrong bot token returns null', async () => {

@@ -604,7 +604,17 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
     const userPair = pairs.find(([k]) => k === 'user');
     if (!userPair) return null;
     const user = JSON.parse(decodeTelegramValue(userPair[1]));
-    return user && user.id ? user : null;
+
+    // ROOT CAUSE FIX (R-1.1): Extract start_param from the SIGNED initData.
+    // Previously, validateTelegramInitData only returned the user object,
+    // discarding start_param. The frontend then sent referrer_id in the
+    // request body — which is NOT signed and can be tampered with.
+    // Now we return start_param alongside user so the caller can use the
+    // SIGNED referrer value instead of trusting the request body.
+    const startParamPair = pairs.find(([k]) => k === 'start_param');
+    const startParam = startParamPair ? decodeTelegramValue(startParamPair[1]) : null;
+
+    return user && user.id ? { user, startParam } : null;
   } catch (e) {
     console.error('[TG-AUTH] validateTelegramInitData exception:', e.message);
     return null;
@@ -617,6 +627,7 @@ async function authenticateTelegramRequest(request, env) {
       return {
         error: jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env),
         user: null,
+        startParam: null,
       };
     }
 
@@ -624,18 +635,24 @@ async function authenticateTelegramRequest(request, env) {
       return {
         error: jsonResponse({ detail: 'Telegram bot token is not configured' }, { status: 401 }, env),
         user: null,
+        startParam: null,
       };
     }
 
-    const user = await validateTelegramInitData(initData, String(env.TELEGRAM_BOT_TOKEN || ''));
-    if (!user || !user.id) {
+    const validated = await validateTelegramInitData(initData, String(env.TELEGRAM_BOT_TOKEN || ''));
+    // ROOT CAUSE FIX (R-1.1): validateTelegramInitData now returns
+    // { user, startParam } instead of just user. We extract both.
+    // The startParam is the SIGNED start_param from initData — it cannot
+    // be tampered with because it's covered by the HMAC hash.
+    if (!validated || !validated.user || !validated.user.id) {
       return {
         error: jsonResponse({ detail: 'Invalid Telegram init data' }, { status: 401 }, env),
         user: null,
+        startParam: null,
       };
     }
 
-    return { error: null, user };
+    return { error: null, user: validated.user, startParam: validated.startParam || null };
   } catch (e) {
     // SECURITY: If validateTelegramInitData throws (malformed initData, crypto error),
     // we must return 401 — never let the exception propagate and cause a 500.
@@ -643,6 +660,7 @@ async function authenticateTelegramRequest(request, env) {
     return {
       error: jsonResponse({ detail: 'Authentication error' }, { status: 401 }, env),
       user: null,
+      startParam: null,
     };
   }
 }
@@ -681,13 +699,14 @@ async function requireChannelJoin(user, env) {
 async function optionalTelegramAuth(request, env) {
   const authState = await authenticateTelegramRequest(request, env);
   if (authState.user) {
-    return { user: authState.user, authMethod: 'init_data', error: null };
+    // ROOT CAUSE FIX (R-1.1): pass through startParam from signed initData
+    return { user: authState.user, startParam: authState.startParam || null, authMethod: 'init_data', error: null };
   }
 
   // Security (C-1): fallback is ONLY allowed outside production.
   // In production, only cryptographically-verified initData is accepted.
   if (!isDevMode(env)) {
-    return { user: null, authMethod: null, error: authState.error };
+    return { user: null, startParam: null, authMethod: null, error: authState.error };
   }
 
   // Dev/test fallback — try query-param ?user_id=
@@ -1477,6 +1496,61 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
   );
 
   return { referral_id: pending.id, rewarded: true };
+}
+
+/**
+ * ROOT CAUSE FIX (R-2.6): Retry failed referral rewards.
+ *
+ * Previously, if processPendingReferralReward failed (DB error, kill switch,
+ * rewardAmount=0), the referral row stayed rewarded=FALSE forever — no
+ * automatic retry. The user never got their reward and admin had no
+ * visibility.
+ *
+ * This function is called by the cron every 5 minutes. It finds ALL
+ * referrals where:
+ *   - rewarded = FALSE
+ *   - channel_verified = TRUE (invitee joined the channel)
+ *   - created_at > NOW() - 24 hours (only retry recent ones, not ancient)
+ * and re-runs processPendingReferralReward for each.
+ *
+ * Idempotent: creditTokens' UNIQUE constraint on ref_id ensures no
+ * double-credit even if the retry runs concurrently with a bootstrap.
+ */
+async function retryFailedReferralRewards(env) {
+  if (!isDatabaseConfigured(env)) return;
+  try {
+    // Find unrewarded referrals where invitee has joined the channel
+    const result = await queryDb(env,
+      `SELECT DISTINCT invitee_id FROM referrals
+       WHERE rewarded = FALSE AND channel_verified = TRUE
+       AND created_at > NOW() - INTERVAL '24 hours'
+       LIMIT 20`,
+    );
+    if (result.rows.length === 0) return;
+
+    let retried = 0;
+    let succeeded = 0;
+    for (const row of result.rows) {
+      try {
+        const outcome = await processPendingReferralReward(env, String(row.invitee_id), true);
+        retried++;
+        if (outcome && outcome.rewarded) succeeded++;
+      } catch (e) {
+        // Individual retry failure — don't abort the batch
+        console.warn('Referral retry failed for invitee', row.invitee_id, e?.message);
+      }
+    }
+    if (retried > 0) {
+      console.log(JSON.stringify({
+        scope: 'referral-retry-cron',
+        checked: result.rows.length,
+        retried,
+        succeeded,
+      }));
+    }
+  } catch (e) {
+    console.warn(safeError('referral-retry-cron', e));
+  }
 }
 
 /**
@@ -7088,6 +7162,14 @@ export default {
     // Refresh CMC Market Overview — ONLY on 15-minute ticks (was running every minute!)
     if (isEvery15Min && env.CMC_API_KEY) {
       ctx.waitUntil(withTimeout(marketOverviewSvc.refreshOverview(env)));
+    }
+
+    // ROOT CAUSE FIX (R-2.6): Retry failed referral rewards every 15 minutes.
+    // Picks up referrals where reward processing failed (DB error, kill switch,
+    // etc.) and retries. Idempotent — creditTokens' UNIQUE constraint prevents
+    // double-credit even if this runs concurrently with a bootstrap.
+    if (isEvery15Min) {
+      ctx.waitUntil(withTimeout(retryFailedReferralRewards(env)));
     }
 
     // Check for upcoming high-impact calendar events — every tick

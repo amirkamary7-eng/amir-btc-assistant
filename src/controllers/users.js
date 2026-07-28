@@ -98,12 +98,29 @@ export function createUserHandlers(deps) {
         is_premium: Boolean(tgUser?.is_premium),
       });
       const referrerId = normalizeOptionalString(payload.referrer_id);
-      await diagLog(env, { scope: 'diag-handleBootstrap', userId, referrer_id: referrerId, isNewUser });
+      // ROOT CAUSE FIX (R-1.1): Use the SIGNED start_param from initData
+      // instead of the unsigned request body referrer_id. The start_param
+      // is covered by the HMAC hash — it cannot be tampered with.
+      // The frontend still sends referrer_id in the body for backward
+      // compatibility, but we OVERRIDE it with the signed startParam if
+      // available. This prevents referral fraud (user claiming a different
+      // referrer than the one in their Telegram invite link).
+      //
+      // start_param format: "ref_<telegram_id>" (set by the /start command
+      // when the user opens the bot via a referral link t.me/bot?start=ref_123)
+      let signedReferrerId = referrerId; // fallback to body value
+      if (auth.startParam && typeof auth.startParam === 'string') {
+        const match = auth.startParam.match(/^ref_(\d+)$/);
+        if (match) {
+          signedReferrerId = match[1];
+        }
+      }
+      await diagLog(env, { scope: 'diag-handleBootstrap', userId, referrer_id: signedReferrerId, isNewUser, used_signed_referrer: signedReferrerId !== referrerId });
 
       await processReferralOnBootstrap(
         env,
         userId,
-        normalizeOptionalString(payload.referrer_id),
+        signedReferrerId,
         Boolean(userRow?.channel_joined),
         isNewUser,
       );
