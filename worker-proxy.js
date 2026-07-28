@@ -1954,6 +1954,45 @@ async function fetchSpotPriceUsd(env, symbol, options = {}) {
   if (!normalizedSymbol) {
     return null;
   }
+
+  // ── FOREX/INDEX/COMMODITY PRICE FETCH ──
+  // For non-crypto symbols (EURUSD, XAUUSD, DXY, SPX, etc.), use Yahoo Finance
+  // instead of crypto exchanges (Bybit, OKX). Crypto exchanges only have
+  // ${symbol}USDT pairs — forex symbols like EURUSD would fail silently.
+  const FOREX_YAHOO_MAP = {
+    'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
+    'DXY': 'DX-Y.NYB', 'SPX': '^GSPC', 'NASDAQ': '^IXIC', 'DJI': '^DJI',
+    'VIX': '^VIX', 'US10Y': '^TNX', 'CL1': 'CL=F', 'NG1': 'NG=F',
+    'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
+    'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
+    'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
+    'EURGBP': 'EURGBP=X', 'AUDJPY': 'AUDJPY=X', 'EURCHF': 'EURCHF=X',
+    'GBPCAD': 'GBPCAD=X', 'AUDNZD': 'AUDNZD=X', 'EURCAD': 'EURCAD=X',
+  };
+  if (FOREX_YAHOO_MAP[normalizedSymbol]) {
+    try {
+      const yahooSym = FOREX_YAHOO_MAP[normalizedSymbol];
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const resp = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSym}?interval=1d&range=5d`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+          'Accept': 'application/json',
+        },
+        signal: ctrl.signal,
+      });
+      clearTimeout(t);
+      if (resp.ok) {
+        const body = await resp.json();
+        const meta = body?.chart?.result?.[0]?.meta || {};
+        const price = Number(meta.regularMarketPrice) || 0;
+        if (price > 0) {
+          return { price, exchange: 'yahoo', cached: false };
+        }
+      }
+    } catch {}
+    return null; // Forex symbol not found on Yahoo — don't try crypto exchanges
+  }
   // ROOT CAUSE FIX: Use a SEPARATE cache key for price fetching.
   // Previously, this shared the chart resolver's cache key
   // (`chart:exchange:v2:`). The chart resolver caches 'binance' because

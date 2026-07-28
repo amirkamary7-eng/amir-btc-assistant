@@ -4313,7 +4313,16 @@ function renderMarket() {
             filtered = filtered.filter(c => c.changePercent24Hr < 0).sort((a, b) => a.changePercent24Hr - b.changePercent24Hr).slice(0, 30);
             break;
         case 'watchlist':
+            // Show both crypto AND forex symbols that are in the watchlist
             filtered = filtered.filter(c => watchlist.includes(c.symbol));
+            // Also show forex symbols that are watchlisted
+            const forexWatched = allForexPairs.filter(f => watchlist.includes(f.symbol));
+            if (forexWatched.length) {
+                const cryptoItems = filtered.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
+                const forexItems = forexWatched.map(f => renderForexItem(f)).join('');
+                list.innerHTML = buildInfoBar(filtered.length + forexWatched.length, t('watchlist') || 'Watchlist') + cryptoItems + forexItems;
+                return;
+            }
             break;
         case 'popular':
             // Popular = top 15 by 24h volume (real data, not mock)
@@ -4514,7 +4523,7 @@ function renderForexItem(f) {
             priceStr = f.price.toFixed(decimals);
         }
     } else {
-        priceStr = '--';
+        priceStr = 'Unknown';
     }
 
     // Change display
