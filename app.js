@@ -9231,6 +9231,13 @@ function switchTab(pageId, btn) {
         if (!tabLoaded.news) {
             loadNews();
             tabLoaded.news = true;
+        } else {
+            // ROOT CAUSE FIX (F-7): Returning to News page should re-render
+            // the active sub-tab, in case calendarEvents was updated in the
+            // background by polling or bootstrap. Without this, the user
+            // could see stale DOM (or skeleton) from a previous visit.
+            const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news;
+            if (activeTab) renderNews(activeTab);
         }
     } else if (pageId === 'profile-page') {
         // R3-5: Profile tab guard — API calls only on first visit.
@@ -10555,14 +10562,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const calCacheStr = localStorage.getItem('calendar_cache');
         if (calCacheStr) {
             const parsed = JSON.parse(calCacheStr);
-            // ROOT CAUSE FIX (RC-C): TTL bumped from 10 min to 1 hour.
-            // The old 10-min TTL matched the backend KV TTL, so after 10 min
-            // the localStorage cache was considered stale and the user saw no
-            // calendar data until the API responded (8-16s if upstream was slow).
-            // Calendar data changes slowly (weekly feed), so 1-hour-old data is
-            // still useful — stale data is better than no data. The API will
-            // refresh it in the background; the cached data renders instantly.
-            if (parsed && parsed.ts && (Date.now() - parsed.ts < 60 * 60 * 1000) && Array.isArray(parsed.data)) {
+            // ROOT CAUSE FIX (F-2): Render stale cache as a placeholder even
+            // if >1h old. Calendar data changes weekly — 24h-old data is
+            // still useful. The API will refresh in the background.
+            // Previously, if cache was >1h old, calendarEvents stayed []
+            // and the user saw skeleton/empty until the API responded.
+            if (parsed && parsed.ts && Array.isArray(parsed.data) && parsed.data.length > 0) {
                 calendarEvents = parsed.data;
                 renderDashboardCalendar();
             }
@@ -10651,7 +10656,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             checkAnalysisDeepLink();
         }).finally(() => { _dashboardReady.analyses = true; _checkDashboardReady(); });
         loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
-        loadCalendarEvents().then(() => renderDashboardCalendar()).catch(() => renderDashboardCalendar());
+        loadCalendarEvents().then(() => {
+            // ROOT CAUSE FIX (F-5, CRITICAL): Previously this only called
+            // renderDashboardCalendar(), ignoring the News > Calendar tab.
+            // If the user navigated to News > Calendar during the fetch,
+            // the skeleton stayed for up to 180s (until next poll).
+            // Now we mirror the polling path (RC-E fix) and re-render
+            // whichever page is CURRENTLY active.
+            const currentActive = document.querySelector('.page.active')?.id;
+            if (currentActive === 'news-page') {
+                const currentTab = document.querySelector('.ni-tab.active')?.dataset?.news;
+                if (currentTab === 'calendar') renderNews('calendar');
+            } else {
+                renderDashboardCalendar();
+            }
+        }).catch(() => renderDashboardCalendar());
     }
 
     // ── WARM-START OPTIMIZATION ──

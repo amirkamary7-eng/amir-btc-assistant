@@ -966,15 +966,42 @@ const WalletApp = (() => {
       return;
     }
 
-    renderProfileCardSkeleton();
+    // ROOT CAUSE FIX (wallet P0): Hydrate from localStorage BEFORE fetching.
+    // Other dashboard sections (Market, News, Analysis, Calendar) all hydrate
+    // from localStorage and render instantly. Wallet was the only section
+    // that showed skeleton until the API responded (150-300ms).
+    // Now we render from cached wallet data immediately, then refresh in
+    // background — matching the perceived speed of other sections.
+    try {
+      const cachedStr = localStorage.getItem('wallet_state_cache');
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr);
+        if (cached && cached.data && cached.data.status === 'success') {
+          // Render from cache immediately — no skeleton
+          renderProfileCard(cached.data);
+        }
+      }
+    } catch (_) { /* bad cache — fall through to skeleton + fetch */ }
+
+    // If cache didn't render, show skeleton
+    if (card.classList.contains('skeleton-loading') || !card.querySelector('.wallet-preview-balance')) {
+      renderProfileCardSkeleton();
+    }
+
     const data = await fetchWallet();
     if (data) {
       renderProfileCard(data);
+      // Persist to localStorage for instant render on next open
+      try {
+        localStorage.setItem('wallet_state_cache', JSON.stringify({ data, ts: Date.now() }));
+      } catch (_) {}
     } else {
-      // API error or transient failure — show fallback with safe defaults
-      card.classList.remove('skeleton-loading');
-      const fallbackData = { balance: 0, tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 } };
-      renderProfileCard(fallbackData);
+      // API error — show fallback only if no cached data was rendered
+      if (!card.querySelector('.wallet-preview-balance')) {
+        card.classList.remove('skeleton-loading');
+        const fallbackData = { balance: 0, tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 } };
+        renderProfileCard(fallbackData);
+      }
     }
   }
 
@@ -1012,29 +1039,79 @@ const WalletApp = (() => {
 
   async function loadWalletData() {
     walletSummary = null;
-    const [walletRes, claimRes, summaryRes] = await Promise.all([
-      fetchWallet(),
-      fetchClaimStatus(),
-      fetchSummary(),
-    ]);
 
-    if (walletRes) {
-      renderWalletPage(walletRes);
-      walletData = walletRes;
-      // Referral link + stats moved to Referral Center (separate module)
-    } else {
-      // API error — show fallback with safe defaults instead of permanent error state
+    // ROOT CAUSE FIX (wallet P1): Progressive rendering.
+    // Previously, Promise.all waited for ALL 3 API calls before rendering
+    // anything. The slowest call (usually fetchSummary with its aggregate
+    // SQL query) blocked the entire wallet page.
+    //
+    // Now we fire all 3 in parallel but render each section independently
+    // as soon as it resolves:
+    //   1. fetchWallet resolves first (often cached) → render full page immediately
+    //   2. fetchClaimStatus resolves → update claim button
+    //   3. fetchSummary resolves → update summary strip
+    //
+    // This cuts perceived time-to-content from max(call1,call2,call3)
+    // to just call1 (typically 30-50ms from in-memory cache).
+
+    // Fire all 3 in parallel
+    const walletPromise = fetchWallet();
+    const claimPromise = fetchClaimStatus();
+    const summaryPromise = fetchSummary();
+
+    // Render wallet page as soon as wallet data arrives (don't wait for others)
+    walletPromise.then(walletRes => {
+      if (walletRes) {
+        renderWalletPage(walletRes);
+        walletData = walletRes;
+        // Persist to localStorage for instant render on next open
+        try {
+          localStorage.setItem('wallet_state_cache', JSON.stringify({ data: walletRes, ts: Date.now() }));
+        } catch (_) {}
+      } else {
+        // API error — show fallback
+        const fallbackData = {
+          balance: 0,
+          tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 },
+          history: [],
+        };
+        renderWalletPage(fallbackData);
+      }
+    }).catch(() => {
       const fallbackData = {
         balance: 0,
         tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 },
         history: [],
       };
       renderWalletPage(fallbackData);
-    }
+    });
 
-    if (claimRes) {
-      updateClaimButton(claimRes.claimed_today);
-    }
+    // Update claim button when claim status arrives
+    claimPromise.then(claimRes => {
+      if (claimRes) {
+        updateClaimButton(claimRes.claimed_today);
+      }
+    }).catch(() => {});
+
+    // Update summary strip when summary arrives (optional — buildSummaryStrip
+    // handles null walletSummary gracefully)
+    summaryPromise.then(summaryRes => {
+      if (summaryRes) {
+        walletSummary = summaryRes;
+        // Re-render just the summary strip if the page is open
+        const summaryStrip = document.querySelector('.wallet-summary-strip');
+        if (summaryStrip && walletData) {
+          // Only update if the wallet page is already rendered
+          const newHtml = buildSummaryStrip(summaryRes.tier || walletData.tier);
+          if (newHtml) {
+            const temp = document.createElement('div');
+            temp.innerHTML = newHtml;
+            const newStrip = temp.firstElementChild;
+            if (newStrip) summaryStrip.replaceWith(newStrip);
+          }
+        }
+      }
+    }).catch(() => {});
   }
 
   // loadWalletReferralStats removed — referral moved to Referral Center module
