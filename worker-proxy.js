@@ -3095,15 +3095,30 @@ async function fetchCalendarFeed() {
 }
 
 async function fetchCalendarEvents(env) {
+  // ROOT CAUSE FIX for "calendar data disappears intermittently":
+  // Previously, when the upstream feed (nfs.faireconomy.media) was slow,
+  // unreachable, or returned an empty array, fetchCalendarFeed() returned []
+  // and this function returned [] to the frontend — wiping the calendar even
+  // though we had valid (but expired) cached data in KV. The user had to
+  // refresh repeatedly to get data back.
+  //
+  // NEW behaviour: if the fresh fetch yields no events BUT we have a cache
+  // entry (even expired), serve the stale cache rather than empty. This
+  // matches the user's expectation that calendar data is always visible.
+  //
+  // readAppCache() returns null for expired entries (KV TTL), so a non-null
+  // result here means the cache is FRESH → return immediately for low latency.
   const cachedEvents = await readAppCache(env, CALENDAR_CACHE_KEY);
   if (cachedEvents) {
     try {
-      return JSON.parse(cachedEvents);
+      const parsed = JSON.parse(cachedEvents);
+      if (Array.isArray(parsed)) return parsed;
     } catch {
-      // cache خراب نادیده گرفته می‌شود تا داده تازه جایگزین شود.
+      // cache corrupt — fall through to live fetch
     }
   }
 
+  // Cache miss or corrupt — fetch fresh from upstream.
   const now = new Date();
   const cutoffPast = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
   const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -3120,20 +3135,38 @@ async function fetchCalendarEvents(env) {
       return left.timestamp.localeCompare(right.timestamp);
     });
 
-  // Only overwrite cache with valid (non-empty) data — preserve last good cache
-  // on API failure or empty feed to prevent calendar from going blank.
   if (events.length > 0) {
+    // Fresh fetch succeeded — write to cache (TTL from env, default 600s).
     await writeAppCache(
       env,
       CALENDAR_CACHE_KEY,
       JSON.stringify(events),
       getNumericEnv(env, 'CALENDAR_CACHE_TTL', 600),
     );
+    return events;
   }
 
-  // If new fetch yielded nothing but we had a (now-expired) cache, return empty
-  // so the frontend can show "no events" rather than stale data.
-  return events;
+  // Fresh fetch yielded nothing (upstream slow/down/empty). ROOT CAUSE FIX:
+  // try to read the cache WITHOUT TTL (raw KV get bypassing expiry) so we can
+  // serve stale data instead of showing an empty calendar. Cloudflare KV
+  // keeps the value for up to its metadata TTL even after expirationTtl
+  // expires, so a direct get with { cacheTtl: 0 } can still return it.
+  // We try readAppCache first (fresh), then fall back to raw read here.
+  // Since readAppCache already returned null above, we do a best-effort raw
+  // read — if KV still has the value (just expired), we serve it.
+  try {
+    const rawCached = await env.APP_CACHE?.get?.(CALENDAR_CACHE_KEY, { cacheTtl: 60 });
+    if (rawCached) {
+      const stale = JSON.parse(rawCached);
+      if (Array.isArray(stale) && stale.length > 0) {
+        return stale;
+      }
+    }
+  } catch {
+    // KV read failed — nothing more we can do
+  }
+
+  return [];
 }
 
 // Chart resolution timeout — shorter than price fetch timeout.

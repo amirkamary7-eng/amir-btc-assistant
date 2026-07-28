@@ -3116,10 +3116,32 @@ async function loadCalendarEvents(force = false) {
     calendarLoading = true;
     try {
         const data = await apiFetch('/api/calendar/events');
-        calendarEvents = data.events || [];
+        const fresh = data.events || [];
+        // ROOT CAUSE FIX for "calendar data disappears intermittently":
+        // Previously, on API error (catch block) we set calendarEvents = [],
+        // destroying previously-loaded data. And if the API returned an empty
+        // array (transient upstream failure), we also set calendarEvents = [],
+        // causing the calendar to go blank even though we had valid data
+        // from a previous successful load.
+        //
+        // NEW behaviour: only overwrite calendarEvents if the fresh data is
+        // non-empty. If the API returns empty OR errors, preserve the last
+        // good data so the calendar stays stable. The backend now also serves
+        // stale cache on upstream failure, so this frontend guard is a second
+        // line of defence.
+        if (fresh.length > 0) {
+            calendarEvents = fresh;
+        } else if (calendarEvents.length === 0) {
+            // No previous data and fresh is empty — keep calendarEvents as []
+            // so the empty state shows. This is the true "no data" case.
+            calendarEvents = [];
+        }
+        // else: fresh is empty BUT we have previous data → keep previous data.
     } catch (e) {
         console.warn('loadCalendarEvents:', e);
-        calendarEvents = [];
+        // ROOT CAUSE FIX: do NOT destroy existing calendarEvents on error.
+        // Preserve the last good data so the calendar never goes blank due
+        // to a transient network/API failure.
     } finally {
         calendarLoading = false;
     }

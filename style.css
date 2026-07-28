@@ -1064,6 +1064,18 @@ strong.down { color: var(--red); }
 
 /* ── Featured News Hero Slider ── */
 .ni-hero-slider {
+    /* ROOT CAUSE FIX: force LTR so flex items lay out left-to-right.
+       The slider math (translateX(-index * 100%)) assumes slide 0 is at
+       the left edge, slide 1 to its right, etc. Under inherited RTL
+       (the page is dir="rtl"), flex-direction:row reverses the main axis,
+       placing slide 0 at the RIGHT and subsequent slides to the LEFT —
+       so translateX(-100%) moves the track in the wrong direction and
+       only slide 0 is ever visible. Setting direction:ltr on the slider
+       + track restores the left-to-right layout the transform expects,
+       without affecting the RTL text inside each slide (headlines stay
+       right-aligned because .ni-hero-slide-content is position:absolute
+       with left:0;right:0 and inherits its own text direction from body). */
+    direction: ltr;
     position: relative; border-radius: 24px; overflow: hidden;
     margin-bottom: 16px; height: 240px;
     background: #0B1220; cursor: grab;
@@ -1074,6 +1086,7 @@ strong.down { color: var(--red); }
 .ni-hero-single { cursor: default; }
 .ni-hero-single .ni-hero-track { transition: none; }
 .ni-hero-track {
+    /* direction:ltr inherited from .ni-hero-slider — slides lay out LTR. */
     display: flex; height: 100%;
     transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     will-change: transform;
@@ -1093,6 +1106,10 @@ strong.down { color: var(--red); }
 .ni-hero-slide-content {
     position: absolute; bottom: 0; left: 0; right: 0;
     padding: 16px; z-index: 2;
+    /* Restore RTL for Persian headline text — the parent .ni-hero-slider
+       is forced LTR for correct slide layout, but the text inside each
+       slide must remain right-aligned for Persian readability. */
+    direction: rtl;
 }
 .ni-hero-badges {
     display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;
