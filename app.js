@@ -2031,6 +2031,9 @@ async function openAnalysisDetailPage(id) {
         window.scrollTo(0, 0);
     }
 
+    // Fire daily mission: analysis_read (non-blocking, idempotent)
+    if (typeof completeMission === 'function') completeMission('analysis_read');
+
     // Fetch fresh detail from server in background (for view-count increment
     // and to pick up any edits made after the list was cached). Includes
     // retry: if first attempt fails, waits 1.5s and retries once.
@@ -4997,6 +5000,101 @@ function showToast(msg) {
     // Also trigger haptic feedback if available
     try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch {}
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// DAILY MISSIONS SYSTEM
+// ════════════════════════════════════════════════════════════════════════
+// Tracks daily mission completions server-side and shows a premium popup.
+// Missions are idempotent per user per UTC day (refId includes date).
+// The frontend fires the completion API call at the right moment; the
+// backend grants the reward through creditTokens (UNIQUE constraint
+// prevents double-payment).
+
+const _completedMissionsToday = new Set();
+let _missionsLoaded = false;
+
+/**
+ * Load today's mission status from the server. Called once on bootstrap.
+ * Populates _completedMissionsToday so we don't fire redundant API calls.
+ */
+async function loadMissionStatus() {
+    if (_missionsLoaded || !API_BASE || !canRunSessionRequests()) return;
+    try {
+        const data = await apiFetch('/api/wallet/missions');
+        if (data?.status === 'success' && Array.isArray(data.missions)) {
+            for (const m of data.missions) {
+                if (m.completed) _completedMissionsToday.add(m.mission_id);
+            }
+        }
+        _missionsLoaded = true;
+    } catch (_) { /* non-fatal — missions will still fire, just may get idempotent responses */ }
+}
+
+/**
+ * Complete a daily mission. Fires the API call, shows a premium popup on
+ * first completion, and tracks the completion locally to prevent
+ * redundant calls.
+ *
+ * @param {string} missionId - 'news_view' | 'analysis_read' | 'calendar_view' | 'daily_open'
+ */
+async function completeMission(missionId) {
+    // Skip if already completed locally (prevents redundant API calls)
+    if (_completedMissionsToday.has(missionId)) return;
+    if (!API_BASE || !canRunSessionRequests()) return;
+
+    try {
+        const data = await apiFetch('/api/wallet/mission/complete', {
+            method: 'POST',
+            body: JSON.stringify({ mission_id: missionId }),
+        });
+
+        if (data?.status === 'success') {
+            _completedMissionsToday.add(missionId);
+
+            // Only show popup on FIRST completion (not idempotent)
+            if (data.is_new_completion) {
+                showMissionRewardPopup(data.reward_label, data.reward_amount);
+            }
+        }
+    } catch (_) { /* silent fail — mission tracking is non-critical */ }
+}
+
+/**
+ * Premium mission reward popup — slides in from the top, auto-dismisses
+ * after 2.5s. Non-blocking, doesn't interfere with user interaction.
+ */
+function showMissionRewardPopup(label, amount) {
+    // Remove any existing popup
+    const existing = document.getElementById('mission-reward-popup');
+    if (existing) existing.remove();
+
+    const popup = document.createElement('div');
+    popup.id = 'mission-reward-popup';
+    popup.innerHTML = `
+        <div class="mrp-icon">🎉</div>
+        <div class="mrp-content">
+            <div class="mrp-title">ماموریت کامل شد!</div>
+            <div class="mrp-desc">${escapeHtml(label)} — <b>+${amount} AB</b> دریافت کردید</div>
+        </div>
+    `;
+    document.body.appendChild(popup);
+
+    // Trigger entrance animation
+    requestAnimationFrame(() => popup.classList.add('mrp-show'));
+
+    // Auto-dismiss after 2.5s
+    setTimeout(() => {
+        popup.classList.remove('mrp-show');
+        setTimeout(() => popup.remove(), 300);
+    }, 2500);
+
+    // Haptic feedback
+    try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch {}
+}
+
+// Expose globally for wallet.js and other modules
+window.completeMission = completeMission;
+window.loadMissionStatus = loadMissionStatus;
 /**
  * واچ‌لیست را در رابط کاربری رندر می‌کند.
  * ورودی: بدون ورودی.
@@ -6719,6 +6817,11 @@ function switchNewsTab(category, btn) {
 
     // BUG #2 FIX: Restore scroll position for the new tab
     _niRestoreScrollPosition(category);
+
+    // Fire daily mission: calendar_view (non-blocking, idempotent)
+    if (category === 'calendar' && typeof completeMission === 'function') {
+        completeMission('calendar_view');
+    }
 }
 
 function switchCalendarTab(tab, btn) {
@@ -9409,6 +9512,9 @@ function openNewsModalWith(n) {
         if (spanEl) spanEl.innerText = t('view_source');
     }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
+
+    // Fire daily mission: news_view (non-blocking, idempotent)
+    if (typeof completeMission === 'function') completeMission('news_view');
 }
 
 // ============================================================================
@@ -10708,6 +10814,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Bootstrap confirmed membership — but _startDataLoading already
             // fired below. Just update admin UI here.
             updateAnalysisFabVisibility();
+            // Load today's mission status + fire daily_open mission
+            if (typeof loadMissionStatus === 'function') {
+                loadMissionStatus().then(() => {
+                    if (typeof completeMission === 'function') completeMission('daily_open');
+                });
+            }
         }
     }).catch(e => {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);

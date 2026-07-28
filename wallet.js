@@ -622,22 +622,22 @@ const WalletApp = (() => {
             </div>
             <button class="checkin-btn" id="daily-claim-btn" onclick="WalletApp.claimDaily()">${esc(WT('claim'))}</button>
           </div>
-          <div class="wallet-earn-card">
+          <div class="wallet-earn-card" id="mission-analysis-read">
             <div class="earn-reward">+5 AB</div>
             <div class="earn-title">${esc(WT('read_analysis'))}</div>
             <div class="earn-desc">${esc(WT('view_premium_reports'))}</div>
           </div>
-          <div class="wallet-earn-card">
+          <div class="wallet-earn-card" id="mission-news-view">
             <div class="earn-reward">+3 AB</div>
             <div class="earn-title">${esc(WT('view_news'))}</div>
             <div class="earn-desc">${esc(WT('stay_updated'))}</div>
           </div>
-          <div class="wallet-earn-card">
+          <div class="wallet-earn-card" id="mission-daily-open">
             <div class="earn-reward">+10 AB</div>
             <div class="earn-title">${esc(WT('open_app_daily'))}</div>
             <div class="earn-desc">${esc(WT('active_daily'))}</div>
           </div>
-          <div class="wallet-earn-card">
+          <div class="wallet-earn-card" id="mission-invite-friend">
             <div class="earn-reward">+50 AB</div>
             <div class="earn-title">${esc(WT('invite_friend'))}</div>
             <div class="earn-desc">${esc(WT('earn_per_referral'))}</div>

@@ -681,5 +681,6 @@ export function createWalletRepository(deps) {
     debitTokens,
     reverseTransaction,
     getTierForBalance,
+    queryDb,
   });
 }

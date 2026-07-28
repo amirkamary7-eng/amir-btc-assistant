@@ -15,6 +15,7 @@ export function createWalletHandlers(deps) {
     isDatabaseConfigured,
     walletRepo,
     notificationPlatformRepo,
+    economyService,
   } = deps;
 
   /**
@@ -194,6 +195,137 @@ export function createWalletHandlers(deps) {
     }
   }
 
+  /**
+   * POST /api/wallet/mission/complete — Complete a daily mission and grant reward.
+   *
+   * Body: { mission_id: 'news_view' | 'analysis_read' | 'calendar_view' | 'daily_open' }
+   *
+   * Idempotent: refId = `mission_${userId}_${missionId}_${utcDate}` — the UNIQUE
+   * index on token_transactions(user_id, tx_type, ref_id) prevents double-reward
+   * even under concurrent requests.
+   *
+   * Daily reset: implicit — the refId changes at UTC midnight, so a new completion
+   * is allowed each UTC day.
+   */
+  const MISSION_REWARDS = {
+    news_view:      { amount: 3,  label: 'مشاهده خبر' },
+    analysis_read:  { amount: 5,  label: 'مطالعه تحلیل' },
+    calendar_view:  { amount: 2,  label: 'مشاهده تقویم' },
+    daily_open:     { amount: 10, label: 'ورود روزانه' },
+  };
+
+  async function handleMissionComplete(request, env) {
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) return authState.error;
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
+    }
+
+    let body;
+    try { body = await request.json(); } catch {
+      return jsonResponse({ status: 'error', message: 'Invalid JSON' }, { status: 422 }, env);
+    }
+
+    const missionId = String(body?.mission_id || '').trim();
+    const config = MISSION_REWARDS[missionId];
+    if (!config) {
+      return jsonResponse({ status: 'error', message: 'Unknown mission', code: 'UNKNOWN_MISSION' }, { status: 422 }, env);
+    }
+
+    try {
+      const userId = String(authState.user.id);
+      const today = new Date().toISOString().slice(0, 10);
+      const refId = `mission_${userId}_${missionId}_${today}`;
+
+      // grantReward → creditTokens → INSERT with ON CONFLICT DO NOTHING
+      // If already completed today, creditTokens returns {idempotent: true}
+      const result = await economyService.grantReward({
+        userId,
+        amount: config.amount,
+        rewardType: 'mission_reward',
+        description: `ماموریت: ${config.label}`,
+        refId,
+        metadata: { mission_id: missionId, mission_label: config.label, daily_date: today },
+        auditInfo: { actor: 'system', ip: request.headers.get('cf-connecting-ip') || null },
+        env,
+      });
+
+      const isNew = result.success && !result.idempotent;
+
+      // Dispatch notification only on first completion (not idempotent)
+      if (isNew && notificationPlatformRepo) {
+        notificationPlatformRepo.dispatch(env, {
+          userId,
+          category: 'wallet',
+          priority: 'low',
+          channel: 'mini_app',
+          title: '🎉 ماموریت کامل شد',
+          message: `${config.label} — ${config.amount} AB دریافت کردید`,
+          metadata: { mission_id: missionId, amount: config.amount },
+        }).catch(() => {});
+      }
+
+      return jsonResponse({
+        status: 'success',
+        mission_id: missionId,
+        reward_amount: config.amount,
+        reward_label: config.label,
+        is_new_completion: isNew,
+        new_balance: result.newBalance,
+      }, {}, env);
+    } catch (error) {
+      console.warn(safeError('wallet-mission-complete', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
+  /**
+   * GET /api/wallet/missions — Get today's mission status for the user.
+   * Returns which missions have been completed today (based on token_transactions).
+   */
+  async function handleGetMissions(request, env) {
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) return authState.error;
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse({ status: 'success', missions: [] }, {}, env);
+    }
+
+    try {
+      const userId = String(authState.user.id);
+      const today = new Date().toISOString().slice(0, 10);
+
+      // Check which missions have been completed today by looking for
+      // token_transactions with ref_id matching `mission_${userId}_${missionId}_${today}`
+      const result = await walletRepo.queryDb(env,
+        `SELECT ref_id FROM token_transactions
+         WHERE user_id = $1 AND tx_type = 'mission_reward'
+         AND ref_id LIKE $2 AND status = 'completed'`,
+        [userId, `mission_${userId}_%_${today}`],
+      );
+
+      const completedSet = new Set();
+      for (const row of result.rows) {
+        // ref_id format: mission_{userId}_{missionId}_{date}
+        const parts = row.ref_id.split('_');
+        if (parts.length >= 4) {
+          completedSet.add(parts[2]); // missionId is the 3rd segment
+        }
+      }
+
+      const missions = Object.entries(MISSION_REWARDS).map(([id, config]) => ({
+        mission_id: id,
+        reward_amount: config.amount,
+        reward_label: config.label,
+        completed: completedSet.has(id),
+      }));
+
+      return jsonResponse({ status: 'success', missions, date: today }, {}, env);
+    } catch (error) {
+      console.warn(safeError('wallet-get-missions', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
   return Object.freeze({
     handleGetWallet,
     handleGetBalance,
@@ -203,5 +335,7 @@ export function createWalletHandlers(deps) {
     handleGetClaimStatus,
     handleClaimDaily,
     handleReferralStats,
+    handleMissionComplete,
+    handleGetMissions,
   });
 }
