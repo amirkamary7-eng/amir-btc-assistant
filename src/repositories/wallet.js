@@ -106,7 +106,7 @@ export function createWalletRepository(deps) {
           FROM token_transactions
           WHERE user_id = $1
           ORDER BY created_at DESC
-          LIMIT 50
+          LIMIT 20
         )
         SELECT
           COALESCE((SELECT balance FROM bal), 0) AS balance,

@@ -3214,6 +3214,16 @@ async function fetchCalendarEvents(env) {
     if (_calendarIsolateCache && _calendarIsolateCache.length > 0) {
       console.log('[calendar] upstream empty — serving isolate cache ' +
         `(${Math.round((Date.now() - _calendarIsolateCacheAt) / 1000)}s old)`);
+      // ROOT CAUSE FIX (RC-B): Write the isolate cache back to KV with a
+      // short TTL (120s) so subsequent requests get a fast KV hit instead
+      // of re-paying the 8-16s upstream timeout on every single request.
+      // Without this, every user request after KV expiry incurs the full
+      // upstream timeout — even though the isolate cache has the data.
+      // The short TTL ensures we retry the upstream soon, while keeping
+      // the calendar responsive during transient outages.
+      try {
+        await writeAppCache(env, CALENDAR_CACHE_KEY, JSON.stringify(_calendarIsolateCache), 120);
+      } catch {}
       return _calendarIsolateCache;
     }
 

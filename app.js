@@ -9681,6 +9681,16 @@ function renderDashboardFeaturedAnalysis() {
 function renderDashboardCalendar() {
     const container = $('dashboard-calendar');
     if (!container) return;
+    // ROOT CAUSE FIX (RC-D): Show skeleton (not empty state) when a fetch
+    // is in-flight. Previously this showed "تقویمی یافت نشد" (no calendar)
+    // whenever calendarEvents was empty — even if a fetch was actively
+    // loading. This was perceived as "no data" by the user. Now we show
+    // a skeleton while loading, and only show the empty state if the fetch
+    // completed and returned no events.
+    if (calendarLoading) {
+        container.innerHTML = `<div class="dc-skeleton-calendar">${Array(3).fill('<div class="dc-skeleton-item"></div>').join('')}</div>`;
+        return;
+    }
     if (!Array.isArray(calendarEvents) || !calendarEvents.length) {
         container.innerHTML = `<div class="dc-empty">${escapeHtml(t('dashboard_no_calendar'))}</div>`;
         return;
@@ -9925,12 +9935,46 @@ function _startAllPolling() {
             loadNews();
             const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news;
             if (activeTab === 'calendar') {
-                calendarEvents = [];
-                loadCalendarEvents(true).then(events => renderNews('calendar'));
+                // ROOT CAUSE FIX (RC-A): Previously this line did `calendarEvents = [];`
+                // BEFORE calling loadCalendarEvents(true). This DESTROYED the good cached
+                // data, so if the force-refresh failed (network error, 8s timeout, 401,
+                // empty upstream), the preserve-on-error fix in loadCalendarEvents had
+                // nothing to preserve (calendarEvents was already []). The user saw
+                // "رویداد اقتصادی یافت نشد" (no events) until the next successful fetch.
+                //
+                // Now we just call loadCalendarEvents(true) WITHOUT clearing first.
+                // The force=true parameter bypasses the in-memory cache short-circuit
+                // and fetches fresh data. If the fetch fails, loadCalendarEvents
+                // preserves the existing calendarEvents array (app.js:3190-3194).
+                //
+                // ROOT CAUSE FIX (RC-E): After fetch, re-render whatever page is
+                // CURRENTLY active (not the page that was active when fetch started).
+                // If the user switched tabs during the 8s fetch, this ensures the
+                // correct page gets the fresh data.
+                loadCalendarEvents(true).then(() => {
+                    const currentActive = document.querySelector('.page.active')?.id;
+                    if (currentActive === 'news-page') {
+                        const currentTab = document.querySelector('.ni-tab.active')?.dataset?.news;
+                        if (currentTab === 'calendar') renderNews('calendar');
+                    } else if (currentActive === 'dashboard-page') {
+                        renderDashboardCalendar();
+                    }
+                });
             }
         }
         if (activePage === 'dashboard-page') {
-            loadCalendarEvents(true).then(() => renderDashboardCalendar()).catch(() => {});
+            loadCalendarEvents(true).then(() => {
+                // ROOT CAUSE FIX (RC-E): Re-render whatever page is currently active,
+                // not just the dashboard. If the user switched to News > Calendar
+                // during the fetch, that page needs the fresh data too.
+                const currentActive = document.querySelector('.page.active')?.id;
+                if (currentActive === 'dashboard-page') {
+                    renderDashboardCalendar();
+                } else if (currentActive === 'news-page') {
+                    const currentTab = document.querySelector('.ni-tab.active')?.dataset?.news;
+                    if (currentTab === 'calendar') renderNews('calendar');
+                }
+            }).catch(() => {});
         }
     }, 180000));
 
@@ -10403,8 +10447,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const calCacheStr = localStorage.getItem('calendar_cache');
         if (calCacheStr) {
             const parsed = JSON.parse(calCacheStr);
-            // 10-minute TTL (matches backend KV cache)
-            if (parsed && parsed.ts && (Date.now() - parsed.ts < 10 * 60 * 1000) && Array.isArray(parsed.data)) {
+            // ROOT CAUSE FIX (RC-C): TTL bumped from 10 min to 1 hour.
+            // The old 10-min TTL matched the backend KV TTL, so after 10 min
+            // the localStorage cache was considered stale and the user saw no
+            // calendar data until the API responded (8-16s if upstream was slow).
+            // Calendar data changes slowly (weekly feed), so 1-hour-old data is
+            // still useful — stale data is better than no data. The API will
+            // refresh it in the background; the cached data renders instantly.
+            if (parsed && parsed.ts && (Date.now() - parsed.ts < 60 * 60 * 1000) && Array.isArray(parsed.data)) {
                 calendarEvents = parsed.data;
                 renderDashboardCalendar();
             }

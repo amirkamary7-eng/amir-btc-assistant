@@ -7457,6 +7457,23 @@ html[dir="rtl"] .market-ticker-track {
     border: 1px dashed rgba(255, 255, 255, 0.06);
 }
 
+/* Dashboard calendar skeleton — shown while calendar data is loading */
+.dc-skeleton-calendar {
+    display: flex;
+    gap: 10px;
+    padding: 4px 0;
+    overflow: hidden;
+}
+.dc-skeleton-item {
+    flex: 0 0 140px;
+    height: 80px;
+    border-radius: 14px;
+    background: linear-gradient(90deg, #0B1220 0%, #131E2E 50%, #0B1220 100%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
 /* ============================================================================
    RESPONSIVE — 320 / 360 / 390 / 412 / 430
    ========================================================================== */
