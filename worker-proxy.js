@@ -1561,6 +1561,76 @@ async function retryFailedReferralRewards(env) {
 }
 
 /**
+ * ROOT CAUSE FIX (3.5): Retry failed wheel rewards.
+ *
+ * If consumeSpin succeeds but grantReward fails (DB error, kill switch),
+ * the spin is marked 'used' but the user gets no tokens. This function
+ * finds wheel_history rows where reward_amount > 0 but no matching
+ * token_transactions row exists, and re-grants the reward.
+ *
+ * Idempotent: creditTokens' UNIQUE constraint on ref_id prevents
+ * double-credit even if this runs concurrently with a spin.
+ */
+async function retryFailedWheelRewards(env) {
+  if (!isDatabaseConfigured(env)) return;
+  if (!economyService || !walletRepo) return;
+  try {
+    // Find wheel_history rows from the last 24h where reward_amount > 0
+    // and no matching token_transaction exists for the expected refId.
+    // refId format: wheel_${user_id}_${today}_${spin_id}
+    const result = await queryDb(env,
+      `SELECT wh.id, wh.user_id, wh.spin_id, wh.reward_amount, wh.reward_type,
+              wh.reward_label, wh.created_at,
+              to_char(wh.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS spin_date_str
+       FROM wheel_history wh
+       WHERE wh.reward_amount > 0
+       AND wh.created_at > NOW() - INTERVAL '24 hours'
+       AND NOT EXISTS (
+         SELECT 1 FROM token_transactions tt
+         WHERE tt.user_id = wh.user_id
+         AND tt.tx_type = 'wheel_reward'
+         AND tt.ref_id = 'wheel_' || wh.user_id || '_' || to_char(wh.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') || '_' || wh.spin_id
+         AND tt.status = 'completed'
+       )
+       LIMIT 20`,
+    );
+    if (result.rows.length === 0) return;
+
+    let retried = 0;
+    let succeeded = 0;
+    for (const row of result.rows) {
+      try {
+        const refId = `wheel_${row.user_id}_${row.spin_date_str}_${row.spin_id}`;
+        const grantResult = await economyService.grantReward({
+          userId: row.user_id,
+          amount: Number(row.reward_amount),
+          rewardType: row.reward_type,
+          description: `Wheel reward (retry): ${row.reward_label || row.reward_type}`,
+          refId: refId,
+          metadata: { spin_id: row.spin_id, retry: true },
+          auditInfo: { actor: 'cron-retry' },
+          env,
+        });
+        retried++;
+        if (grantResult && (grantResult.success || grantResult.idempotent)) succeeded++;
+      } catch (e) {
+        console.warn('Wheel reward retry failed for spin', row.spin_id, e?.message);
+      }
+    }
+    if (retried > 0) {
+      console.log(JSON.stringify({
+        scope: 'wheel-reward-retry-cron',
+        checked: result.rows.length,
+        retried,
+        succeeded,
+      }));
+    }
+  } catch (e) {
+    console.warn(safeError('wheel-reward-retry-cron', e));
+  }
+}
+
+/**
  * Process referral on user bootstrap.
  *
  * Key design decisions:
@@ -7171,12 +7241,13 @@ export default {
       ctx.waitUntil(withTimeout(marketOverviewSvc.refreshOverview(env)));
     }
 
-    // ROOT CAUSE FIX (R-2.6): Retry failed referral rewards every 15 minutes.
-    // Picks up referrals where reward processing failed (DB error, kill switch,
-    // etc.) and retries. Idempotent — creditTokens' UNIQUE constraint prevents
-    // double-credit even if this runs concurrently with a bootstrap.
+    // ROOT CAUSE FIX (R-2.6 + 3.5): Retry failed referral + wheel rewards
+    // every 15 minutes. Picks up rewards where processing failed (DB error,
+    // kill switch, etc.) and retries. Idempotent — UNIQUE constraint prevents
+    // double-credit even if this runs concurrently with a user request.
     if (isEvery15Min) {
       ctx.waitUntil(withTimeout(retryFailedReferralRewards(env)));
+      ctx.waitUntil(withTimeout(retryFailedWheelRewards(env)));
     }
 
     // Check for upcoming high-impact calendar events — every tick
