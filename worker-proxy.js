@@ -194,22 +194,42 @@ async function readAppCache(env, key) {
 const _kvWriteCache = new Map();
 const _KV_WRITE_CACHE_MAX = 200;
 
+// ── REAL KV WRITE TRACKING ──
+// Counts actual KV.put calls per key prefix. Survives per isolate.
+// Reported via /api/_diag/kv-write-stats
+const _kvWriteStats = {
+  startedAt: null, // Set on first write (lazy init)
+  totalWrites: 0,
+  totalSkipped: 0,
+  byKey: {},       // exact key → count
+  byPrefix: {},    // prefix (first 2 segments) → count
+};
+function _trackKvWrite(key) {
+  if (!_kvWriteStats.startedAt) _kvWriteStats.startedAt = new Date().toISOString();
+  _kvWriteStats.totalWrites++;
+  const parts = String(key || '').split(':').slice(0, 2).join(':');
+  _kvWriteStats.byPrefix[parts] = (_kvWriteStats.byPrefix[parts] || 0) + 1;
+  _kvWriteStats.byKey[key] = (_kvWriteStats.byKey[key] || 0) + 1;
+}
+function _trackKvSkip() {
+  _kvWriteStats.totalSkipped++;
+}
+
 async function writeAppCache(env, key, value, expirationTtl) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.put !== 'function') {
     return;
   }
 
   // SKIP-WRITTEN: If the value hasn't changed since last write, skip the KV put.
-  // This is the #1 KV write optimization — prevents redundant writes when
-  // cron re-processes the same data every minute.
   const cachedValue = _kvWriteCache.get(key);
   if (cachedValue === value) {
+    _trackKvSkip();
     return; // Value unchanged — skip write
   }
 
   try {
     await env.APP_CACHE.put(key, value, { expirationTtl });
-    // Track what we wrote so we can skip next time
+    _trackKvWrite(key);
     if (_kvWriteCache.size >= _KV_WRITE_CACHE_MAX) {
       const firstKey = _kvWriteCache.keys().next().value;
       _kvWriteCache.delete(firstKey);
@@ -250,6 +270,7 @@ async function flushDiagLog(env) {
     lines = lines.concat(_diagBuffer);
     if (lines.length > DIAG_LOG_MAX) lines = lines.slice(-DIAG_LOG_MAX);
     await env.APP_CACHE.put(DIAG_LOG_KEY, lines.join('\n'), { expirationTtl: 600 });
+    _trackKvWrite(DIAG_LOG_KEY);
     _diagBuffer.length = 0; // Clear buffer after successful flush
   } catch { /* KV write failure should not break the flow */ }
 }
@@ -345,6 +366,7 @@ async function setMaintenanceState(env, patch, updatedBy) {
   if (env?.APP_CACHE && typeof env.APP_CACHE.put === 'function') {
     try {
       await env.APP_CACHE.put(MAINT_KV_KEY, JSON.stringify(next));
+      _trackKvWrite(MAINT_KV_KEY);
       kvWriteSuccess = true;
       _maintKvWriteFailed = false;
     } catch (err) {
@@ -381,8 +403,8 @@ async function writeRateLimitCache(env, key, value, expirationTtl) {
 
   try {
     await env.RATE_LIMITS.put(key, value, { expirationTtl });
+    _trackKvWrite('RATE_LIMITS:' + key);
   } catch (e) {
-    // KV write limit exceeded — degrade gracefully
     console.warn('writeRateLimitCache failed:', e.message || e);
   }
 }
@@ -2525,24 +2547,27 @@ async function enrichNewsWithAISummaries(env, articles) {
  * For each article without an AI summary, generates one using Workers AI.
  */
 async function processNewsAIJobs(env, articles) {
-  if (!env.APP_CACHE || !articles.length) return { processed: 0, success: 0, failed: 0, errors: [] };
+  if (!env.APP_CACHE || !articles.length) return { processed: 0, success: 0, failed: 0, errors: [], stats: { scanned: 0, alreadyCompleted: 0, skippedBeforeAI: 0, aiRequestsExecuted: 0, kvWrites: 0 } };
 
   const GEMINI_API_KEY = env.GEMINI_API_KEY;
   const hasWorkersAI = !!env.AI;
   const errors = [];
   let success = 0, failed = 0;
+  let aiRequestsExecuted = 0;
+  let alreadyCompleted = 0;
 
   for (const article of articles.slice(0, 3)) { // Process max 3 per cycle (25s timeout)
     if (!article.url) continue;
 
     const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
 
-    // Check if summary already exists
+    // Check if summary already exists — SKIP ENTIRE PIPELINE if so
+    // (no fetch, no extract, no AI call, no write)
     let existing = null;
     try {
       existing = await readAppCache(env, aiKey);
     } catch {}
-    if (existing) { success++; continue; } // Already processed — skip
+    if (existing) { success++; alreadyCompleted++; continue; } // Already processed — skip ENTIRE pipeline
 
     console.log('[NEWS-AI-BG] Processing:', article.url.substring(0, 80));
 
@@ -2646,6 +2671,7 @@ ${articleText}`;
 
           const geminiController = new AbortController();
           const geminiTimeout = setTimeout(() => geminiController.abort(), 45000);
+          aiRequestsExecuted++;
           const geminiRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
             {
@@ -2680,6 +2706,7 @@ ${articleText}`;
       // Method 2: Cloudflare Workers AI (free, always available)
       if (!summary && hasWorkersAI) {
         try {
+          aiRequestsExecuted++;
           const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
             messages: [
               { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details, numbers, and names. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
@@ -2723,7 +2750,19 @@ ${articleText}`;
       errors.push({ url: article.url.substring(0, 60), error: e.message.substring(0, 80) });
     }
   }
-  return { processed: success + failed, success, failed, errors: errors.slice(0, 5) };
+  return {
+    processed: success + failed,
+    success,
+    failed,
+    errors: errors.slice(0, 5),
+    stats: {
+      scanned: articles.length,
+      alreadyCompleted,
+      skippedBeforeAI: alreadyCompleted,
+      aiRequestsExecuted,
+      kvWrites: success - alreadyCompleted, // only new summaries cause KV writes
+    },
+  };
 }
 
 /**
@@ -2787,23 +2826,35 @@ async function processNewsAIBatch(env) {
   // meaning the first user after cache expiry had to wait for live RSS fetch.)
   const MAX_NEWS_ARTICLES = 30;
   const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
+  const newsJson = JSON.stringify(trimmed);
+  const newsWriteBefore = _kvWriteStats.totalWrites;
   try {
     await writeAppCache(
       env,
       FARSI_NEWS_CACHE_KEY,
-      JSON.stringify(trimmed),
+      newsJson,
       getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
     );
-    console.log('[NEWS-AI-CRON] Cached', trimmed.length, 'articles in KV');
   } catch (e) {
     console.warn('[NEWS-AI-CRON] Failed to cache articles:', e.message);
   }
+  const newsWriteActuallyWritten = _kvWriteStats.totalWrites > newsWriteBefore;
 
   // Step 2: Process AI summaries for articles that don't have one
   const aiResult = await processNewsAIJobs(env, deduped);
 
   console.log('[NEWS-AI-CRON] Batch processing complete.', aiResult);
-  return { articlesCached: trimmed.length, ai: aiResult };
+  return {
+    articlesPrepared: trimmed.length,
+    newsCacheWritten: newsWriteActuallyWritten,
+    newsCacheSkipped: !newsWriteActuallyWritten,
+    ai: aiResult,
+    kvWriteStats: {
+      totalWrites: _kvWriteStats.totalWrites,
+      totalSkipped: _kvWriteStats.totalSkipped,
+      byPrefix: Object.entries(_kvWriteStats.byPrefix).sort((a,b) => b[1]-a[1]).slice(0, 10).map(([k,v]) => ({key:k, writes:v})),
+    },
+  };
 }
 
 function parseCalendarDate(dateString) {
@@ -5991,6 +6042,35 @@ export default {
           log.push({ step: 'EXCEPTION', error: e.message });
           return jsonResponse({ status: 'error', log, error: e.message, totalMs: Date.now() - t0 }, {}, env);
         }
+      }
+
+      // ── DIAGNOSTIC: Real KV Write Stats ──
+      if (request.method === 'GET' && url.pathname === '/api/_diag/kv-write-stats') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.DIAG_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+        // Sort by count descending
+        const byPrefixSorted = Object.entries(_kvWriteStats.byPrefix)
+          .sort((a, b) => b[1] - a[1])
+          .map(([key, count]) => ({ key, writes: count }));
+        const byKeySorted = Object.entries(_kvWriteStats.byKey)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 30)
+          .map(([key, count]) => ({ key, writes: count }));
+        const uptimeMs = _kvWriteStats.startedAt ? Date.now() - new Date(_kvWriteStats.startedAt).getTime() : 0;
+        const uptimeMin = Math.max(1, Math.round(uptimeMs / 60000));
+        return jsonResponse({
+          status: 'success',
+          isolateStartedAt: _kvWriteStats.startedAt || 'no writes yet',
+          uptimeMinutes: uptimeMin,
+          totalWrites: _kvWriteStats.totalWrites,
+          totalSkipped: _kvWriteStats.totalSkipped,
+          writesPerMinute: uptimeMin > 0 ? Math.round(_kvWriteStats.totalWrites / uptimeMin * 10) / 10 : 0,
+          byPrefix: byPrefixSorted,
+          topKeys: byKeySorted,
+        }, {}, env);
       }
 
       // ── DIAGNOSTIC: Full cron pipeline test (RSS → AI → KV → fetch) ──
