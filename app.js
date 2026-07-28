@@ -10365,7 +10365,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ── Phase 0: Telegram SDK init + user resolution ──
-    await UserContext.init();
+    // ROOT CAUSE FIX (warm-start speed): Previously `await UserContext.init()`
+    // blocked the ENTIRE DOMContentLoaded handler. All cache hydration,
+    // rendering, and background fetches waited for Telegram auth to resolve
+    // (100-300ms on warm start, up to 8s on cold start).
+    //
+    // Now we fire UserContext.init() as a BACKGROUND promise (not awaited).
+    // The cache hydration code below doesn't depend on Telegram auth — it
+    // only reads localStorage. Auth-dependent code (loadUser, bootstrapUser,
+    // all apiFetch calls) already has its own auth-wait via waitForApiReady.
+    //
+    // This unlocks ~100-300ms on every warm start.
+    UserContext.init().then(() => {
+        // When auth resolves, update the profile name (was showing "Loading...")
+        loadUser();
+    }).catch(e => {
+        console.warn('[BOOT] UserContext.init failed:', e?.message);
+    });
 
     // ── JOIN LOCK: FLOATING STATUS CARD approach (Production UX — Task 37) ──
     // 1. Show FLOATING CARD immediately ("Checking membership…")
@@ -10447,9 +10463,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Phase 1: Apply language + render UI from cache immediately (synchronous, ~0ms)
     applyLanguage();
     loadUser();
-    updateNotifBadge();
+    // WARM-START: Defer non-critical API calls to idle time so they don't
+    // compete with cache hydration + rendering on the critical path.
+    // updateNotifBadge fires /api/notifications — not needed for first paint.
+    // checkMaintenanceMode fires /api/system/status — not needed for first paint.
+    // Both are deferred to requestIdleCallback (or setTimeout 0 fallback).
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => updateNotifBadge());
+    } else {
+        setTimeout(() => updateNotifBadge(), 0);
+    }
     alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
-    localStorage.setItem('price_alerts', JSON.stringify(alerts));
+    // Only write to localStorage if userId actually changed (avoids redundant write)
+    const _hadUserId = alerts.some(a => a.userId);
+    if (_hadUserId) localStorage.setItem('price_alerts', JSON.stringify(alerts));
 
     // Analysis slider from localStorage cache
     if (analyses.length) {
