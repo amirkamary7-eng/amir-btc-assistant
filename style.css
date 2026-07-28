@@ -6157,7 +6157,7 @@ strong.down { color: var(--red); }
    1. HERO SLIDER — image-based banner slides, aspect-ratio for CLS=0
    ========================================================================== */
 .hero-banner-slider {
-    margin: 0 0 8px;
+    margin: 0 0 22px; /* 22px gap to ticker (was 8px → 14px → 22px) */
     border-radius: 24px;
     position: relative;
     overflow: hidden;
@@ -6173,15 +6173,11 @@ strong.down { color: var(--red); }
     opacity: 0;
     transition: opacity 0.4s ease;
     pointer-events: none;
-    /* FIX: flexbox column layout so the CTA sits at the bottom via margin-top:auto
-       instead of absolute positioning. The image + shade remain absolute background
-       layers; the CTA is a flex child positioned by margin. Stable across all
-       mobile sizes — no overlap with baked-in image text. */
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
     align-items: center;
-    padding: 0 16px 6px;
+    padding: 0 16px 10px; /* moved CTA up: 6px → 10px from bottom */
     box-sizing: border-box;
 }
 .hero-slide.active {
@@ -6216,22 +6212,23 @@ strong.down { color: var(--red); }
    Positioned via the parent's flex layout + per-banner align-self/margin.
    Safe areas verified via VLM image-composition analysis. */
 .hero-cta {
-    position: relative; /* in-flow, not absolute */
+    position: relative;
     z-index: 2;
     background: linear-gradient(135deg, #F5A623, #FFCC4D);
     border: none;
     color: #020611;
     font-weight: 700;
-    padding: 0 14px;
-    height: 40px;
-    width: 122px;
-    border-radius: 14px;
+    padding: 0 10px; /* reduced horizontal padding (14px → 10px) */
+    height: 36px; /* reduced from 40px */
+    width: auto; /* auto width to fit content */
+    min-width: 110px;
+    border-radius: 10px; /* reduced from 14px */
     cursor: pointer;
     font-size: 12px;
     line-height: 1;
     pointer-events: auto;
     transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
-    box-shadow: 0 6px 20px rgba(245, 166, 35, 0.35);
+    box-shadow: 0 4px 14px rgba(245, 166, 35, 0.3);
     white-space: nowrap;
     display: inline-flex; align-items: center; justify-content: center;
     flex-shrink: 0;
@@ -6247,15 +6244,9 @@ strong.down { color: var(--red); }
     margin-right: auto;
     margin-left: 4%;
 }
-/* Banner 2 (Bitunix): moved to BOTTOM-RIGHT. VLM confirmed the strip below the
-   feature boxes (79-100% height, 60-100% width) is empty dark space. The parent
-   flex is column+flex-end so the CTA sits at the bottom; margin-left:auto pushes
-   it to the right edge. The parent has 16px horizontal padding, so margin-right:-10px
-   cancels it to achieve the spec'd 6px gap from the right edge. 132px width, 40px height. */
 .hero-cta--bitunix {
     margin-left: auto;
     margin-right: -10px;
-    width: 132px;
 }
 .hero-slider-dots {
     position: absolute;
@@ -6290,7 +6281,7 @@ strong.down { color: var(--red); }
    ========================================================================== */
 .market-ticker {
     overflow: hidden;
-    margin: 0 0 8px;
+    margin: 0 0 22px; /* 22px gap to market status cards below (was 8px) */
     border-radius: 14px;
     background: linear-gradient(180deg, rgba(13, 20, 35, 0.85), rgba(9, 14, 26, 0.78));
     backdrop-filter: blur(12px) saturate(160%);
