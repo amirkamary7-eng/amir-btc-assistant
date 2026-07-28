@@ -4506,9 +4506,29 @@ function renderForexItem(f) {
         metal:     { color: '#FFD700', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14h8M8 10h8M12 6v12"/></svg>', label: 'Metal',     labelFa: 'فلز گران‌بها', decimals: 2 },
         index:     { color: '#60A5FA', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>', label: 'Index',     labelFa: 'شاخص',       decimals: 0 },
         commodity: { color: '#F97316', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18M5 22V8l5-4 5 4v14M9 22v-6h4v6M14 22V10l3-2 3 2v12"/></svg>', label: 'Commodity', labelFa: 'کالا',       decimals: 0 },
+        // Per-symbol icons (override category default)
+        // These are checked first in renderForexItem
     };
     const cfg = catConfig[cat] || catConfig.major;
     const decimals = cfg.decimals;
+
+    // Per-symbol custom icons for well-known assets
+    const symbolIcons = {
+        'XAUUSD': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14h8M8 10h8M12 6v12"/></svg>',
+        'XAGUSD': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M8 10h8M8 14h8"/></svg>',
+        'CL1':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18M5 22V8l5-4 5 4v14M9 22v-6h4v6"/></svg>',
+        'NG1':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v8M8 10h8M6 14h12M4 18h16M3 22h18"/></svg>',
+        'DXY':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M8 9h4a2 2 0 0 1 0 4H8M8 13h4a2 2 0 0 1 0 4H8"/></svg>',
+        'SPX':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 6-6"/></svg>',
+        'NASDAQ': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 10 4 4 4-4 6 6"/></svg>',
+        'DJI':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 12 4 4 4-4 6-6"/></svg>',
+        'VIX':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>',
+        'US10Y':  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 3v6M11 3v10M15 3v4M19 3v14"/></svg>',
+        'GER40':  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 6-6"/></svg>',
+        'JP225':  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12"/></svg>',
+        'BCOM':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/></svg>',
+    };
+    const iconSvg = symbolIcons[f.symbol] || cfg.svg;
 
     // Format price with appropriate precision
     let priceStr;
@@ -4545,7 +4565,7 @@ function renderForexItem(f) {
         <div class="mkt-coin-row mkt-forex-row" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" data-action="open-forex" role="listitem">
             <span class="mkt-coin-rank">—</span>
             <div class="mkt-forex-icon" style="${iconBg}">
-                ${cfg.svg}
+                ${iconSvg}
             </div>
             <div class="mkt-coin-info">
                 <span class="mkt-coin-symbol">${safeName}</span>

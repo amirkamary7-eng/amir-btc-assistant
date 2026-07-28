@@ -1963,6 +1963,7 @@ async function fetchSpotPriceUsd(env, symbol, options = {}) {
     'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
     'DXY': 'DX-Y.NYB', 'SPX': '^GSPC', 'NASDAQ': '^IXIC', 'DJI': '^DJI',
     'VIX': '^VIX', 'US10Y': '^TNX', 'CL1': 'CL=F', 'NG1': 'NG=F',
+    'GER40': '^GDAXI', 'JP225': '^N225',
     'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
     'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
     'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
@@ -4252,13 +4253,15 @@ const FOREX_PAIRS = [
   // Metals / Commodities
   { symbol: 'XAUUSD', name: 'Gold', tvSymbol: 'OANDA:XAUUSD', category: 'metal' },
   { symbol: 'XAGUSD', name: 'Silver', tvSymbol: 'OANDA:XAGUSD', category: 'metal' },
-  // Indices (no live price from frankfurter — price=0, chart via TradingView)
+  // Indices
   { symbol: 'DXY',    name: 'US Dollar Index',  tvSymbol: 'TVC:DXY',        category: 'index' },
   { symbol: 'SPX',    name: 'S&P 500',         tvSymbol: 'SP:SPX',        category: 'index' },
   { symbol: 'NASDAQ',  name: 'NASDAQ Composite', tvSymbol: 'NASDAQ:NDX',    category: 'index' },
   { symbol: 'DJI',    name: 'Dow Jones 30',     tvSymbol: 'DJ:DJI',        category: 'index' },
   { symbol: 'VIX',    name: 'VIX Fear Index',   tvSymbol: 'TVC:VIX',       category: 'index' },
   { symbol: 'US10Y',  name: 'US 10Y Bond Yield', tvSymbol: 'TVC:US10Y',    category: 'index' },
+  { symbol: 'GER40',  name: 'DAX 40 (Germany)', tvSymbol: 'XETR:DAX',      category: 'index' },
+  { symbol: 'JP225',  name: 'Nikkei 225 (Japan)', tvSymbol: 'TVC:NI225',   category: 'index' },
   // Commodities
   { symbol: 'CL1',    name: 'Crude Oil WTI',   tvSymbol: 'NYMEX:CL1!',   category: 'commodity' },
   { symbol: 'NG1',    name: 'Natural Gas',      tvSymbol: 'NYMEX:NG1!',   category: 'commodity' },
@@ -4348,6 +4351,8 @@ async function handleForexData(env) {
       'DJI': '^DJI',
       'VIX': '^VIX',
       'US10Y': '^TNX',
+      'GER40': '^GDAXI',
+      'JP225': '^N225',
       'CL1': 'CL=F',
       'NG1': 'NG=F',
     };
