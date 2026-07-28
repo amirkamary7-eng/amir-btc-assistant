@@ -59,6 +59,7 @@ export function createRewardCenterRepository(deps) {
       );
 
       -- Mission rewards — maps mission IDs to rewards
+      -- metadata JSONB stores: { trigger, target_count, description, icon }
       CREATE TABLE IF NOT EXISTS mission_rewards (
         id SERIAL PRIMARY KEY,
         mission_id VARCHAR(64) NOT NULL UNIQUE,
@@ -73,6 +74,22 @@ export function createRewardCenterRepository(deps) {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      -- Mission progress — tracks per-user per-day progress for multi-step missions
+      CREATE TABLE IF NOT EXISTS mission_progress (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        mission_id VARCHAR(64) NOT NULL,
+        progress_count INTEGER NOT NULL DEFAULT 0,
+        target_count INTEGER NOT NULL DEFAULT 1,
+        completed BOOLEAN NOT NULL DEFAULT FALSE,
+        rewarded BOOLEAN NOT NULL DEFAULT FALSE,
+        daily_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(user_id, mission_id, daily_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mission_progress_user ON mission_progress (user_id, daily_date);
 
       -- Campaigns — time-bounded reward events
       CREATE TABLE IF NOT EXISTS campaigns (
@@ -597,12 +614,71 @@ export function createRewardCenterRepository(deps) {
 
   async function getMissionReward(env, missionId) {
     await ensureSchema(env);
-    if (!isDatabaseConfigured(env)) return { token_amount: 0, bonus_spins: 0 };
+    if (!isDatabaseConfigured(env)) return { token_amount: 0, bonus_spins: 0, mission_name: '' };
     try {
-      const result = await queryDb(env, `SELECT token_amount, bonus_spins FROM mission_rewards WHERE mission_id = $1 AND is_enabled = TRUE LIMIT 1`, [String(missionId)]);
-      if (result.rows[0]) return { token_amount: Number(result.rows[0].token_amount), bonus_spins: Number(result.rows[0].bonus_spins) };
-      return { token_amount: 0, bonus_spins: 0 };
-    } catch { return { token_amount: 0, bonus_spins: 0 }; }
+      const result = await queryDb(env, `SELECT token_amount, bonus_spins, mission_name FROM mission_rewards WHERE mission_id = $1 AND is_enabled = TRUE LIMIT 1`, [String(missionId)]);
+      if (result.rows[0]) return { token_amount: Number(result.rows[0].token_amount), bonus_spins: Number(result.rows[0].bonus_spins), mission_name: result.rows[0].mission_name };
+      return { token_amount: 0, bonus_spins: 0, mission_name: '' };
+    } catch { return { token_amount: 0, bonus_spins: 0, mission_name: '' }; }
+  }
+
+  async function getActiveMissionRewards(env) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return [];
+    try {
+      const result = await queryDb(env, `SELECT mission_id, mission_name, token_amount, bonus_spins, sort_order, metadata FROM mission_rewards WHERE is_enabled = TRUE ORDER BY sort_order ASC`);
+      return result.rows.map(r => {
+        const meta = r.metadata || {};
+        return {
+          mission_id: r.mission_id, mission_name: r.mission_name,
+          token_amount: Number(r.token_amount), bonus_spins: Number(r.bonus_spins),
+          sort_order: Number(r.sort_order),
+          trigger: meta.trigger || r.mission_id,
+          target_count: Number(meta.target_count) || 1,
+          description: meta.description || '',
+          icon: meta.icon || '🎯',
+        };
+      });
+    } catch { return []; }
+  }
+
+  async function incrementMissionProgress(env, userId, missionId, targetCount = 1) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return null;
+    try {
+      const result = await queryDb(env,
+        `INSERT INTO mission_progress (user_id, mission_id, progress_count, target_count, completed, rewarded, daily_date)
+         VALUES ($1, $2, 1, $3, ($3 <= 1), FALSE, CURRENT_DATE)
+         ON CONFLICT (user_id, mission_id, daily_date)
+         DO UPDATE SET progress_count = mission_progress.progress_count + 1,
+           completed = (mission_progress.progress_count + 1 >= mission_progress.target_count),
+           updated_at = NOW()
+         RETURNING *`,
+        [String(userId), String(missionId), Number(targetCount)]);
+      return result.rows[0] ? {
+        progress_count: Number(result.rows[0].progress_count),
+        target_count: Number(result.rows[0].target_count),
+        completed: result.rows[0].completed, rewarded: result.rows[0].rewarded,
+      } : null;
+    } catch (e) { console.warn('incrementMissionProgress:', e.message); return null; }
+  }
+
+  async function getTodayMissionProgress(env, userId) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return [];
+    try {
+      const result = await queryDb(env, `SELECT mission_id, progress_count, target_count, completed, rewarded FROM mission_progress WHERE user_id = $1 AND daily_date = CURRENT_DATE`, [String(userId)]);
+      return result.rows.map(r => ({ mission_id: r.mission_id, progress_count: Number(r.progress_count), target_count: Number(r.target_count), completed: r.completed, rewarded: r.rewarded }));
+    } catch { return []; }
+  }
+
+  async function markMissionRewarded(env, userId, missionId) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return false;
+    try {
+      const result = await queryDb(env, `UPDATE mission_progress SET rewarded = TRUE, updated_at = NOW() WHERE user_id = $1 AND mission_id = $2 AND daily_date = CURRENT_DATE AND rewarded = FALSE RETURNING id`, [String(userId), String(missionId)]);
+      return result.rows.length > 0;
+    } catch { return false; }
   }
 
   function _mapMissionReward(r) {
@@ -763,6 +839,10 @@ export function createRewardCenterRepository(deps) {
     updateMissionReward,
     deleteMissionReward,
     getMissionReward,
+    getActiveMissionRewards,
+    incrementMissionProgress,
+    getTodayMissionProgress,
+    markMissionRewarded,
     listCampaigns,
     getCampaign,
     createCampaign,

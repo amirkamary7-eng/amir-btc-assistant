@@ -1991,6 +1991,9 @@ async function openAnalysisDetailPage(id) {
         window.scrollTo(0, 0);
     }
 
+    // Fire mission event: analysis_open
+    if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.ANALYSIS_OPEN);
+
     // Fetch fresh detail from server in background (for full content + increment view)
     // Includes retry: if first attempt fails, waits 1.5s and retries once
     let detailFetched = false;
@@ -4818,9 +4821,151 @@ function showMiniToast(msg) {
  */
 function showToast(msg) {
     showMiniToast(msg);
-    // Also trigger haptic feedback if available
     try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch {}
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// DAILY MISSIONS SYSTEM — CENTRAL EVENT BUS (fully generic, DB-driven)
+// ════════════════════════════════════════════════════════════════════════
+const _completedMissionsToday = new Set();
+let _missionsLoaded = false;
+let _missionStatusList = [];
+
+const TAB_EVENT_MAP = {
+    'dashboard-page': 'dashboard_open',
+    'market-page': 'market_open',
+    'analysis-page': 'analysis_open',
+    'news-page': 'news_open',
+    'profile-page': 'profile_open',
+};
+
+const MissionBus = {
+    fire(eventType) {
+        if (!eventType || !API_BASE) return;
+        const matching = _missionStatusList.filter(m =>
+            m.trigger === eventType && !m.completed && !_completedMissionsToday.has(m.mission_id)
+        );
+        for (const mission of matching) completeMission(mission.mission_id);
+    },
+    _tabHooked: false,
+    autoInstrumentTabs() {
+        if (this._tabHooked) return;
+        this._tabHooked = true;
+        const origSwitchTab = window.switchTab;
+        if (typeof origSwitchTab !== 'function') return;
+        window.switchTab = function(pageId, btn) {
+            origSwitchTab.call(this, pageId, btn);
+            const ev = TAB_EVENT_MAP[pageId];
+            if (ev) MissionBus.fire(ev);
+        };
+    },
+};
+
+async function loadMissionStatus() {
+    if (_missionsLoaded || !API_BASE || !canRunSessionRequests()) return;
+    try {
+        const data = await apiFetch('/api/wallet/missions');
+        if (data?.status === 'success' && Array.isArray(data.missions)) {
+            _missionStatusList = data.missions;
+            for (const m of data.missions) if (m.completed) _completedMissionsToday.add(m.mission_id);
+            updateMissionCards();
+        }
+        _missionsLoaded = true;
+        MissionBus.autoInstrumentTabs();
+    } catch (_) {}
+}
+
+async function completeMission(missionId) {
+    if (_completedMissionsToday.has(missionId)) return;
+    if (!API_BASE || !canRunSessionRequests()) return;
+    try {
+        const data = await apiFetch('/api/wallet/mission/complete', {
+            method: 'POST', body: JSON.stringify({ mission_id: missionId }),
+        });
+        if (data?.status === 'success') {
+            const idx = _missionStatusList.findIndex(m => m.mission_id === missionId);
+            if (idx >= 0) {
+                _missionStatusList[idx].progress_count = data.progress_count;
+                _missionStatusList[idx].target_count = data.target_count;
+                _missionStatusList[idx].completed = data.completed;
+            }
+            if (data.completed) _completedMissionsToday.add(missionId);
+            if (data.is_new_completion) {
+                showMissionRewardPopup(data.reward_label, data.reward_amount);
+                refreshWalletAfterMission(data.new_balance);
+            }
+            updateMissionCards();
+        }
+    } catch (_) {}
+}
+
+function refreshWalletAfterMission(newBalance) {
+    if (window.WalletApp?._invalidateCache) window.WalletApp._invalidateCache();
+    const balEl = document.querySelector('.wallet-hero-balance-value, .hero-balance');
+    if (balEl && newBalance != null) {
+        const cur = parseFloat(balEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
+        animateBalanceChange(balEl, cur, newBalance);
+    }
+    if (window.WalletApp?.loadProfileCard) setTimeout(() => window.WalletApp.loadProfileCard(), 300);
+    const wp = document.getElementById('wallet-full-page');
+    if (wp?.classList.contains('open') && window.WalletApp?._refreshWalletData) {
+        setTimeout(() => window.WalletApp._refreshWalletData(), 500);
+    }
+}
+
+function animateBalanceChange(el, from, to) {
+    const dur = 600, start = performance.now(), diff = to - from;
+    function upd(now) {
+        const p = Math.min(1, (now - start) / dur);
+        const e = 1 - Math.pow(1 - p, 3);
+        el.textContent = Math.round(from + diff * e).toLocaleString('en-US');
+        if (p < 1) requestAnimationFrame(upd);
+        else el.textContent = to.toLocaleString('en-US');
+    }
+    requestAnimationFrame(upd);
+}
+
+function updateMissionCards() {
+    const grid = document.querySelector('.wallet-earn-grid');
+    if (!grid || _missionStatusList.length === 0) return;
+    const dailyCard = grid.querySelector('#daily-checkin-card');
+    const inviteCard = grid.querySelector('#mission-invite-friend');
+    let html = '';
+    if (dailyCard) html += dailyCard.outerHTML;
+    for (const m of _missionStatusList) {
+        const done = m.completed || _completedMissionsToday.has(m.mission_id);
+        const pt = m.target_count > 1 ? `${m.progress_count||0}/${m.target_count}` : '';
+        const dc = done ? 'mission-completed' : '';
+        const cm = done ? '<div class="mission-checkmark"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>' : '';
+        const ph = pt && !done ? `<div class="mission-progress-text">${pt}</div>` : '';
+        html += `<div class="wallet-earn-card ${dc}" id="mission-${m.mission_id.replace(/_/g,'-')}"><div class="earn-reward">+${m.reward_amount} AB</div><div class="earn-title">${escapeHtml(m.mission_name||m.mission_id)}</div>${m.description?`<div class="earn-desc">${escapeHtml(m.description)}</div>`:''}${ph}${cm}</div>`;
+    }
+    if (inviteCard) html += inviteCard.outerHTML;
+    grid.innerHTML = html;
+}
+
+function showMissionRewardPopup(label, amount) {
+    const ex = document.getElementById('mission-reward-popup');
+    if (ex) ex.remove();
+    const p = document.createElement('div');
+    p.id = 'mission-reward-popup';
+    p.innerHTML = `<div class="mrp-coin-burst"><span class="mrp-coin">🪙</span><span class="mrp-coin">✨</span><span class="mrp-coin">🪙</span><span class="mrp-coin">✨</span><span class="mrp-coin">🪙</span></div><div class="mrp-icon">🎉</div><div class="mrp-content"><div class="mrp-title">ماموریت کامل شد!</div><div class="mrp-desc">${escapeHtml(label)}</div><div class="mrp-reward">+${amount} AB</div></div>`;
+    document.body.appendChild(p);
+    requestAnimationFrame(() => p.classList.add('mrp-show'));
+    setTimeout(() => { p.querySelectorAll('.mrp-coin').forEach((c,i) => { c.style.animationDelay=(i*0.06)+'s'; c.classList.add('mrp-coin-fly'); }); }, 100);
+    setTimeout(() => { p.classList.remove('mrp-show'); setTimeout(()=>p.remove(),300); }, 2500);
+    try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch {}
+}
+
+const MISSION_EVENTS = { NEWS_OPEN:'news_open', ANALYSIS_OPEN:'analysis_open', CALENDAR_OPEN:'calendar_open', DAILY_OPEN:'daily_open', PROFILE_OPEN:'profile_open', MARKET_OPEN:'market_open', DASHBOARD_OPEN:'dashboard_open' };
+function fireMissionEvent(ev) { MissionBus.fire(ev); }
+
+window.MissionBus = MissionBus;
+window.completeMission = completeMission;
+window.loadMissionStatus = loadMissionStatus;
+window.updateMissionCards = updateMissionCards;
+window.fireMissionEvent = fireMissionEvent;
+window.MISSION_EVENTS = MISSION_EVENTS;
 /**
  * واچ‌لیست را در رابط کاربری رندر می‌کند.
  * ورودی: بدون ورودی.
@@ -6393,6 +6538,11 @@ function switchNewsTab(category, btn) {
 
     // BUG #2 FIX: Restore scroll position for the new tab
     _niRestoreScrollPosition(category);
+
+    // Fire mission event: calendar_open
+    if (category === 'calendar' && typeof fireMissionEvent === 'function') {
+        fireMissionEvent(MISSION_EVENTS.CALENDAR_OPEN);
+    }
 }
 
 function switchCalendarTab(tab, btn) {
@@ -8963,6 +9113,9 @@ function openNewsModalWith(n) {
         if (spanEl) spanEl.innerText = t('view_source');
     }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
+
+    // Fire mission event: news_open
+    if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.NEWS_OPEN);
 }
 
 // ============================================================================
@@ -10124,10 +10277,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Data loading is triggered here after bootstrap resolves + member confirmed.
     bootstrapUser().then(() => {
         loadUser();
-        // If bootstrap confirmed membership (setJoinLockState('joined') was called
-        // inside bootstrapUser, which sets _joinLockShown = false), start data loading.
         if (!_joinLockShown && !_maintenanceBlocked) {
             _startDataLoading();
+            // Load mission status + fire daily_open mission
+            if (typeof loadMissionStatus === 'function') {
+                loadMissionStatus().then(() => {
+                    if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.DAILY_OPEN);
+                });
+            }
         }
     }).catch(e => {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);

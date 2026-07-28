@@ -3278,6 +3278,8 @@ const walletHandlers = createWalletHandlers({
   isDatabaseConfigured,
   walletRepo,
   notificationPlatformRepo,
+  economyService,
+  rewardCenterRepo,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({
@@ -6522,6 +6524,14 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/referral-stats') {
         return await walletHandlers.handleReferralStats(request, env);
+      }
+
+      // ── Daily Missions API Routes ──
+      if (request.method === 'POST' && url.pathname === '/api/wallet/mission/complete') {
+        return await walletHandlers.handleMissionComplete(request, env);
+      }
+      if (request.method === 'GET' && url.pathname === '/api/wallet/missions') {
+        return await walletHandlers.handleGetMissions(request, env);
       }
 
       // ── Lucky Wheel API Routes ──
