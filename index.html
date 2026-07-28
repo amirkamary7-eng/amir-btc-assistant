@@ -623,22 +623,28 @@
     <!-- #region NewsPage -->
     <!-- این بخش دسته‌بندی خبرها و خروجی تقویم اقتصادی را نمایش می‌دهد. -->
     <section id="news-page" class="page">
-        <!-- Premium Top Bar: Tabs + Filter + Search -->
+        <!-- Premium Top Bar — REDESIGNED: tabs and tools on separate rows.
+             Row 1: category tabs only (equal width, full coverage, no scroll).
+             Row 2: search + filter tools (larger touch targets, with labels). -->
         <div class="ni-topbar">
-            <div class="ni-tabs-row">
-                <div class="ni-tabs" id="news-tabs">
-                    <button class="ni-tab active" data-news="all" onclick="switchNewsTab('all', this)">همه</button>
-                    <button class="ni-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)">کریپتو</button>
-                    <button class="ni-tab" data-news="forex" onclick="switchNewsTab('forex', this)">فارکس</button>
-                    <button class="ni-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)">تقویم</button>
-                    <button class="ni-tab" data-news="saved" onclick="switchNewsTab('saved', this)">ذخیره شده</button>
-                </div>
-                <button class="ni-icon-btn" onclick="openNewsFilterSheet()" aria-label="فیلتر">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-                    <span class="ni-filter-dot" id="ni-filter-dot" style="display:none;"></span>
+            <!-- Row 1: Category tabs -->
+            <div class="ni-tabs" id="news-tabs">
+                <button class="ni-tab active" data-news="all" onclick="switchNewsTab('all', this)">همه</button>
+                <button class="ni-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)">کریپتو</button>
+                <button class="ni-tab" data-news="forex" onclick="switchNewsTab('forex', this)">فارکس</button>
+                <button class="ni-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)">تقویم</button>
+                <button class="ni-tab" data-news="saved" onclick="switchNewsTab('saved', this)">ذخیره شده</button>
+            </div>
+            <!-- Row 2: Tools (search + filter) — separated from tabs -->
+            <div class="ni-tools-row">
+                <button class="ni-tool-btn" onclick="openNewsSearch()" aria-label="جستجو">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <span>جستجو</span>
                 </button>
-                <button class="ni-icon-btn" onclick="openNewsSearch()" aria-label="جستجو">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <button class="ni-tool-btn" onclick="openNewsFilterSheet()" aria-label="فیلتر">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                    <span>فیلتر</span>
+                    <span class="ni-filter-dot" id="ni-filter-dot" style="display:none;"></span>
                 </button>
             </div>
         </div>

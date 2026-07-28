@@ -973,7 +973,7 @@ strong.down { color: var(--red); }
    All new classes use .ni- prefix (News Intelligence)
    ════════════════════════════════════════════════════════════════════ */
 
-/* ── Premium Top Bar ── */
+/* ── Premium Top Bar — REDESIGNED (two rows: tabs / tools) ── */
 .ni-topbar {
     position: sticky; top: 56px; z-index: 15;
     background: rgba(2, 6, 17, 0.85);
@@ -982,23 +982,31 @@ strong.down { color: var(--red); }
     border-bottom: 1px solid rgba(245, 166, 35, 0.08);
     padding: 10px 16px 8px;
 }
+/* Legacy row container — kept for backward compat (used elsewhere). */
 .ni-tabs-row {
     display: flex; align-items: center; gap: 8px;
 }
+/* Row 1: category tabs — equal width, full coverage, NO horizontal scroll.
+   Each .ni-tab gets flex:1 1 0 so the 5 tabs share the row evenly. */
 .ni-tabs {
-    display: flex; gap: 6px; flex: 1;
-    overflow-x: auto; scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+    display: flex; gap: 6px;
+    width: 100%;
 }
 .ni-tabs::-webkit-scrollbar { display: none; }
 .ni-tab {
-    flex-shrink: 0; height: 44px;
-    padding: 0 18px; border-radius: 16px;
+    flex: 1 1 0;          /* equal-width distribution across the row */
+    min-width: 0;          /* allow shrinking below content width if needed */
+    height: 44px;
+    padding: 0 6px;        /* compact horizontal padding so all 5 fit */
+    border-radius: 14px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     background: rgba(11, 18, 32, 0.6);
-    color: #A5B4C7; font-size: 14px; font-weight: 600;
+    color: #A5B4C7; font-size: 13px; font-weight: 600;
     cursor: pointer; transition: all 0.2s ease;
-    white-space: nowrap; font-family: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: inherit;
     display: flex; align-items: center; justify-content: center;
 }
 .ni-tab:active { transform: scale(0.96); }
@@ -1008,6 +1016,31 @@ strong.down { color: var(--red); }
     color: #F5A623;
     box-shadow: 0 0 20px rgba(245, 166, 35, 0.15), inset 0 1px 0 rgba(245, 166, 35, 0.1);
 }
+/* Row 2: tools (search + filter) — separated from tabs, 50/50 split, larger
+   touch targets with icon + Persian label for clarity. */
+.ni-tools-row {
+    display: flex; gap: 8px;
+    margin-top: 8px;
+    width: 100%;
+}
+.ni-tool-btn {
+    flex: 1 1 0;            /* equal-width: 50/50 split between search & filter */
+    min-width: 0;
+    height: 44px;           /* same height as the tabs above for visual rhythm */
+    padding: 0 12px;
+    border-radius: 14px;
+    background: rgba(11, 18, 32, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #A5B4C7; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    transition: all 0.2s ease;
+    position: relative;
+}
+.ni-tool-btn:active { transform: scale(0.96); }
+.ni-tool-btn:hover { background: rgba(245, 166, 35, 0.1); color: #F5A623; border-color: rgba(245, 166, 35, 0.2); }
+.ni-tool-btn svg { flex-shrink: 0; }
+/* Legacy icon button — kept for the news-search close button (line ~716). */
 .ni-icon-btn {
     width: 44px; height: 44px; border-radius: 14px;
     background: rgba(11, 18, 32, 0.6);
