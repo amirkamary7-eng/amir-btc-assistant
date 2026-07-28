@@ -27,6 +27,18 @@ export function createWalletRepository(deps) {
       CREATE INDEX IF NOT EXISTS idx_token_tx_user_created ON token_transactions (user_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_token_tx_type ON token_transactions (user_id, tx_type);
       CREATE INDEX IF NOT EXISTS idx_token_tx_status ON token_transactions (user_id, status);
+      -- ROOT CAUSE FIX (R-3.1): UNIQUE constraint on (user_id, tx_type, ref_id) for
+      -- completed transactions. This makes the idempotency check in creditTokens
+      -- atomic at the DB level — the second INSERT fails with a unique violation
+      -- instead of silently creating a duplicate credit. Fixes:
+      --   - Referral double-credit (R-2.1)
+      --   - Daily reward double-claim (R-2.3, R-2.10)
+      --   - Wheel double-reward (F-3)
+      -- Partial index: only applies when ref_id IS NOT NULL and status='completed'
+      -- (pending/reversed transactions are excluded).
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_token_tx_user_type_ref
+        ON token_transactions (user_id, tx_type, ref_id)
+        WHERE ref_id IS NOT NULL AND status = 'completed';
     `;
     try {
       await queryDb(env, batchSql);
@@ -330,6 +342,14 @@ export function createWalletRepository(deps) {
     // (user_id, tx_type, ref_id) already exists. If so, return it without
     // crediting again. This prevents double-credit from concurrent requests
     // (e.g. two simultaneous referral reward calls, or double-clicking claim).
+    //
+    // ROOT CAUSE FIX (R-2.1): The old code did a SELECT then INSERT — a
+    // TOCTOU race allowed two concurrent calls to both pass the SELECT and
+    // both INSERT. Now we use INSERT ... ON CONFLICT DO NOTHING which is
+    // atomic at the DB level (protected by the UNIQUE index added in
+    // ensureSchema). If the INSERT returns 0 rows (conflict), we know a
+    // concurrent caller already credited — we read the existing row and
+    // return idempotent success.
     if (refId) {
       const existing = await queryDb(
         env,
@@ -354,8 +374,15 @@ export function createWalletRepository(deps) {
         params: [uid, amt],
       },
       {
+        // ROOT CAUSE FIX (R-2.1): ON CONFLICT DO NOTHING — if a concurrent
+        // caller already inserted a transaction with the same (user_id,
+        // tx_type, ref_id), this INSERT returns 0 rows. We detect this and
+        // return idempotent success instead of creating a duplicate credit.
+        // The UNIQUE index idx_token_tx_user_type_ref (added in ensureSchema)
+        // enforces this at the DB level.
         sql: `INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at)
               VALUES ($1, $2, $3, $4, 'completed', $5, $6, $7, NOW(), NOW())
+              ON CONFLICT DO NOTHING
               RETURNING id`,
         params: [uid, amt, txType, source, description || txType, refId || null, metadataJson],
       },
@@ -363,6 +390,34 @@ export function createWalletRepository(deps) {
 
     const newBalance = Number(results[0].rows[0]?.balance || 0);
     const txId = results[1].rows[0]?.id;
+
+    // ROOT CAUSE FIX (R-2.1): If the INSERT returned no rows, a concurrent
+    // caller already credited this transaction. The balance was already
+    // incremented by the other caller's INSERT INTO token_balances (our
+    // INSERT above added it again — but ON CONFLICT DO UPDATE means our
+    // balance increment was applied on top of the other caller's). We need
+    // to UNDO our balance increment to avoid double-credit.
+    // However, since both callers are in a transaction and the UNIQUE
+    // constraint prevents the second INSERT, the transaction will ROLLBACK
+    // the balance increment if the INSERT fails. Wait — queryDbTransaction
+    // runs both queries in one transaction, so if the INSERT fails (ON
+    // CONFLICT DO NOTHING returns 0 rows, but the query itself "succeeds"),
+    // the balance increment is NOT rolled back. We need to handle this.
+    if (!txId && refId) {
+      // Our transaction INSERT was a no-op (conflict). But our balance
+      // INSERT succeeded (added `amt` to the balance). We need to undo it.
+      await queryDb(env,
+        `UPDATE token_balances SET balance = balance - $2, updated_at = NOW() WHERE user_id = $1`,
+        [uid, amt],
+      );
+      // Read the existing transaction for the return value
+      const existing = await queryDb(env,
+        `SELECT id, amount FROM token_transactions WHERE user_id = $1 AND tx_type = $2 AND ref_id = $3 AND status = 'completed' LIMIT 1`,
+        [uid, txType, refId],
+      );
+      return { success: true, newBalance: null, txId: existing.rows[0]?.id, idempotent: true };
+    }
+
     if (!txId) throw new Error('Failed to record transaction');
 
     // AUDIT LOG

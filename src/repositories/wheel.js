@@ -30,7 +30,7 @@ export function createWheelRepository(deps) {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         expires_at TIMESTAMPTZ,
         used_at TIMESTAMPTZ,
-        UNIQUE(user_id, spin_type, source, created_at)
+        spin_date DATE NOT NULL DEFAULT CURRENT_DATE
       );
       CREATE TABLE IF NOT EXISTS wheel_history (
         id SERIAL PRIMARY KEY,
@@ -57,6 +57,17 @@ export function createWheelRepository(deps) {
       CREATE INDEX IF NOT EXISTS idx_wheel_spins_user ON wheel_spins (user_id, status);
       CREATE INDEX IF NOT EXISTS idx_wheel_history_user ON wheel_history (user_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_wheel_rewards_active ON wheel_rewards (is_active, campaign_id);
+      -- ROOT CAUSE FIX (F-1): Add spin_date column to wheel_spins (if not exists)
+      -- and create a UNIQUE constraint on (user_id, spin_type, source, spin_date).
+      -- The old UNIQUE(user_id, spin_type, source, created_at) included the
+      -- microsecond-precision created_at column, so ON CONFLICT never fired —
+      -- every call to getOrCreateDailySpin minted a new row, allowing unlimited
+      -- daily spins. The new constraint uses spin_date (DATE, not TIMESTAMPTZ)
+      -- so only one daily spin row per user per day can exist.
+      ALTER TABLE wheel_spins ADD COLUMN IF NOT EXISTS spin_date DATE NOT NULL DEFAULT CURRENT_DATE;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_wheel_spins_daily_unique
+        ON wheel_spins (user_id, spin_type, source, spin_date)
+        WHERE spin_type = 'daily' AND source = 'daily_free';
     `;
     try {
       await queryDb(env, batchSql);
@@ -68,40 +79,95 @@ export function createWheelRepository(deps) {
 
   /**
    * Get or create today's daily free spin for a user.
-   * Uses ON CONFLICT to prevent duplicate daily spins.
+   *
+   * ROOT CAUSE FIX (F-1 + F-2): Completely rewritten to fix the unlimited
+   * spin minting vulnerability. The old code used ON CONFLICT on
+   * (user_id, spin_type, source, created_at) where created_at was a
+   * microsecond TIMESTAMPTZ — so ON CONFLICT never fired and every call
+   * created a new row.
+   *
+   * New approach:
+   * 1. Use advisory lock (pg_advisory_xact_lock) keyed on (user_id + today)
+   *    to serialize concurrent calls for the same user/day.
+   * 2. INSERT ... ON CONFLICT (user_id, spin_type, source, spin_date)
+   *    where spin_date is a DATE (not TIMESTAMPTZ) — so the constraint
+   *    actually fires when a row already exists for today.
+   * 3. If INSERT returns a row, it's a new spin. If 0 rows, the spin
+   *    already exists — SELECT it.
+   *
+   * This guarantees exactly ONE daily spin row per user per UTC day,
+   * regardless of how many times the API is called or how many concurrent
+   * requests are made.
    */
   async function getOrCreateDailySpin(env, userId) {
     const uid = String(userId);
-    const today = new Date().toISOString().slice(0, 10);
-    const refId = `daily_spin_${uid}_${today}`;
-
-    const result = await queryDb(
-      env,
-      `
-        INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at)
-        VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), NOW() + INTERVAL '24 hours')
-        ON CONFLICT (user_id, spin_type, source, created_at) DO NOTHING
-        RETURNING id, status
-      `,
-      [uid],
-    );
-
-    if (result.rows.length > 0) {
-      return { spin_id: result.rows[0].id, status: 'available', is_new: true };
+    // Use queryDbTransaction to get an advisory lock + INSERT in one atomic transaction
+    if (!queryDbTransaction) {
+      // Fallback: no transaction support — use simple INSERT with ON CONFLICT
+      const result = await queryDb(env,
+        `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
+         VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), NOW() + INTERVAL '24 hours', CURRENT_DATE)
+         ON CONFLICT (user_id, spin_type, source, spin_date) WHERE spin_type = 'daily' AND source = 'daily_free' DO NOTHING
+         RETURNING id, status`,
+        [uid]);
+      if (result.rows.length > 0) return { spin_id: result.rows[0].id, status: 'available', is_new: true };
+      const existing = await queryDb(env,
+        `SELECT id, status FROM wheel_spins WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free' AND spin_date = CURRENT_DATE LIMIT 1`,
+        [uid]);
+      if (existing.rows.length > 0) return { spin_id: existing.rows[0].id, status: existing.rows[0].status, is_new: false };
+      return { spin_id: null, status: 'none', is_new: false };
     }
 
-    // Spin already exists — check if it's been used
-    const existing = await queryDb(
-      env,
+    // Advisory lock key: hash of user_id + today's date
+    // This serializes concurrent getOrCreateDailySpin calls for the same user/day
+    const lockKey = _hashLockKey(uid + '_' + new Date().toISOString().slice(0, 10));
+
+    const results = await queryDbTransaction(env, [
+      {
+        // Acquire advisory lock — ensures only one caller can create the spin
+        sql: `SELECT pg_advisory_xact_lock($1)`,
+        params: [lockKey],
+      },
+      {
+        // INSERT with ON CONFLICT on spin_date (DATE, not TIMESTAMPTZ)
+        // This actually fires when a row exists for today
+        sql: `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
+              VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), NOW() + INTERVAL '24 hours', CURRENT_DATE)
+              ON CONFLICT DO NOTHING
+              RETURNING id, status`,
+        params: [uid],
+      },
+    ]);
+
+    const insertResult = results[1];
+    if (insertResult.rows.length > 0) {
+      return { spin_id: insertResult.rows[0].id, status: 'available', is_new: true };
+    }
+
+    // Spin already exists for today — fetch it
+    const existing = await queryDb(env,
       `SELECT id, status FROM wheel_spins
        WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-       AND created_at >= CURRENT_DATE ORDER BY created_at DESC LIMIT 1`,
-      [uid],
-    );
+       AND spin_date = CURRENT_DATE LIMIT 1`,
+      [uid]);
     if (existing.rows.length > 0) {
       return { spin_id: existing.rows[0].id, status: existing.rows[0].status, is_new: false };
     }
     return { spin_id: null, status: 'none', is_new: false };
+  }
+
+  /**
+   * Hash a string into a bigint for use as a PostgreSQL advisory lock key.
+   * Uses a simple FNV-1a hash — sufficient for lock key distribution.
+   */
+  function _hashLockKey(str) {
+    let hash = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      hash ^= str.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    // Convert to positive bigint (PostgreSQL advisory lock keys are bigint)
+    return Math.abs(hash);
   }
 
   /**

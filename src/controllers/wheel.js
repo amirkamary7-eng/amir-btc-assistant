@@ -111,8 +111,17 @@ export function createWheelHandlers(deps) {
       // Consume the spin (atomic: available → used)
       const spinResult = await wheelRepo.consumeSpin(env, authState.user.id, spinId);
 
-      // Skip reward grant if amount is 0 (no_reward type — admin disabled all rewards)
-      const rewardRefId = `wheel_${spinResult.spin_id}_${authState.user.id}`;
+      // ROOT CAUSE FIX (F-3): refId is now per-(user, day) instead of per-spin.
+      // The old refId `wheel_${spin_id}_${user_id}` was unique per minted spin
+      // row — so the idempotency check in creditTokens never triggered, and
+      // every spin (even if the user already spun today) granted tokens.
+      // The new refId `wheel_${user_id}_${today}` ensures that even if a
+      // concurrent request or a bug mints multiple spin_id's for the same
+      // user/day, only ONE reward is credited — the second INSERT into
+      // token_transactions fails the UNIQUE constraint and is treated as
+      // idempotent.
+      const today = new Date().toISOString().slice(0, 10);
+      const rewardRefId = `wheel_${authState.user.id}_${today}`;
       let rewardResult = { success: false, newBalance: null, txId: null };
       if (spinResult.reward.amount > 0) {
         try {

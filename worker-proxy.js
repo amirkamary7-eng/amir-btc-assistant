@@ -1383,10 +1383,16 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
     await diagLog(env, { scope: 'diag-creditReferralWithReward-SUCCESS', newBalance: result.newBalance, txId: result.txId });
 
     // Mark referral as rewarded
+    // ROOT CAUSE FIX (R-2.4): Added `AND rewarded = FALSE` condition.
+    // Previously the UPDATE always succeeded even if rewarded was already
+    // TRUE, providing no additional race protection. Now the UPDATE is
+    // conditional — if a concurrent caller already set rewarded=TRUE, this
+    // UPDATE affects 0 rows (which we ignore — the idempotency is handled
+    // by creditTokens' UNIQUE constraint on ref_id).
     await queryDb(env,
       alsoVerifyChannel
-        ? 'UPDATE referrals SET channel_verified = TRUE, rewarded = TRUE WHERE id = $1'
-        : 'UPDATE referrals SET rewarded = TRUE WHERE id = $1',
+        ? 'UPDATE referrals SET channel_verified = TRUE, rewarded = TRUE WHERE id = $1 AND rewarded = FALSE'
+        : 'UPDATE referrals SET rewarded = TRUE WHERE id = $1 AND rewarded = FALSE',
       [Number(referralId)],
     );
 
