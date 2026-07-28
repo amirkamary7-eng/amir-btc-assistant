@@ -5054,14 +5054,29 @@ async function completeMission(missionId) {
         });
 
         if (data?.status === 'success') {
-            _completedMissionsToday.add(missionId);
-
-            // Update local mission status list
+            // Update local mission status list with new progress
             const idx = _missionStatusList.findIndex(m => m.mission_id === missionId);
-            if (idx >= 0) _missionStatusList[idx].completed = true;
-            else _missionStatusList.push({ mission_id: missionId, completed: true, reward_amount: data.reward_amount, reward_label: data.reward_label });
+            if (idx >= 0) {
+                _missionStatusList[idx].progress_count = data.progress_count;
+                _missionStatusList[idx].target_count = data.target_count;
+                _missionStatusList[idx].completed = data.completed;
+            } else {
+                _missionStatusList.push({
+                    mission_id: missionId,
+                    completed: data.completed,
+                    progress_count: data.progress_count,
+                    target_count: data.target_count,
+                    reward_amount: data.reward_amount,
+                    reward_label: data.reward_label,
+                });
+            }
 
-            // Only show popup + refresh wallet on FIRST completion (not idempotent)
+            // If fully completed, add to completed set
+            if (data.completed) {
+                _completedMissionsToday.add(missionId);
+            }
+
+            // Show popup + refresh wallet only on FIRST completion (reward granted)
             if (data.is_new_completion) {
                 showMissionRewardPopup(data.reward_label, data.reward_amount);
                 refreshWalletAfterMission(data.new_balance);
@@ -5132,34 +5147,74 @@ function animateBalanceChange(el, from, to) {
 }
 
 /**
- * Update mission cards in the wallet to show completed/in-progress status.
+ * Update mission cards in the wallet to show completed/in-progress status with progress.
  * GENERIC: Reads mission status from _missionStatusList (populated from backend).
- * Matches missions to wallet cards by ID prefix 'mission-'.
- * Called after mission status loads or after a mission is completed.
+ * Renders cards dynamically from backend data — no hardcoded card IDs.
  */
 function updateMissionCards() {
-    // Find all mission cards in the wallet (any element with id starting with 'mission-')
-    const missionCards = document.querySelectorAll('[id^="mission-"]');
-    for (const card of missionCards) {
-        // Extract mission_id from card id: 'mission-news-view' → 'news_view'
-        const cardId = card.id;
-        const missionId = cardId.replace(/^mission-/, '').replace(/-/g, '_');
+    const earnGrid = document.querySelector('.wallet-earn-grid');
+    if (!earnGrid) return;
 
-        const status = _missionStatusList.find(m => m.mission_id === missionId);
-        const isCompleted = _completedMissionsToday.has(missionId) || status?.completed;
+    // If we have backend mission data, rebuild the grid dynamically
+    if (_missionStatusList.length > 0) {
+        // Build mission cards from backend data (keep daily-checkin and invite-friend separate)
+        const dailyCheckinCard = earnGrid.querySelector('#daily-checkin-card');
+        const inviteCard = earnGrid.querySelector('#mission-invite-friend');
 
-        if (isCompleted) {
-            card.classList.add('mission-completed');
-            if (!card.querySelector('.mission-checkmark')) {
-                const checkmark = document.createElement('div');
-                checkmark.className = 'mission-checkmark';
-                checkmark.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
-                card.appendChild(checkmark);
+        let html = '';
+        // Keep daily check-in first
+        if (dailyCheckinCard) html += dailyCheckinCard.outerHTML;
+
+        // Render each mission from backend
+        for (const m of _missionStatusList) {
+            const isCompleted = m.completed || _completedMissionsToday.has(m.mission_id);
+            const progressText = m.target_count > 1
+                ? `${m.progress_count}/${m.target_count}`
+                : '';
+            const completedClass = isCompleted ? 'mission-completed' : '';
+            const checkmarkHtml = isCompleted
+                ? '<div class="mission-checkmark"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>'
+                : '';
+            const progressHtml = progressText && !isCompleted
+                ? `<div class="mission-progress-text">${progressText}</div>`
+                : '';
+
+            html += `
+            <div class="wallet-earn-card ${completedClass}" id="mission-${m.mission_id.replace(/_/g, '-')}">
+                <div class="earn-reward">+${m.reward_amount} AB</div>
+                <div class="earn-title">${escapeHtml(m.mission_name || m.mission_id)}</div>
+                ${m.description ? `<div class="earn-desc">${escapeHtml(m.description)}</div>` : ''}
+                ${progressHtml}
+                ${checkmarkHtml}
+            </div>`;
+        }
+
+        // Keep invite friend last
+        if (inviteCard) html += inviteCard.outerHTML;
+
+        earnGrid.innerHTML = html;
+    } else {
+        // Fallback: just update existing cards by ID
+        const missionCards = document.querySelectorAll('[id^="mission-"]');
+        for (const card of missionCards) {
+            const cardId = card.id;
+            const missionId = cardId.replace(/^mission-/, '').replace(/-/g, '_');
+            const status = _missionStatusList.find(m => m.mission_id === missionId);
+            const isCompleted = _completedMissionsToday.has(missionId) || status?.completed;
+
+            if (isCompleted) {
+                card.classList.add('mission-completed');
+                if (!card.querySelector('.mission-checkmark')) {
+                    const checkmark = document.createElement('div');
+                    checkmark.className = 'mission-checkmark';
+                    checkmark.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+                    card.appendChild(checkmark);
+                }
+            } else {
+                card.classList.remove('mission-completed');
+                const checkmark = card.querySelector('.mission-checkmark');
+                if (checkmark) checkmark.remove();
             }
-        } else {
-            card.classList.remove('mission-completed');
-            const checkmark = card.querySelector('.mission-checkmark');
-            if (checkmark) checkmark.remove();
         }
     }
 }

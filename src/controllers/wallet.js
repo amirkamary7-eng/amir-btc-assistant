@@ -197,16 +197,20 @@ export function createWalletHandlers(deps) {
   }
 
   /**
-   * POST /api/wallet/mission/complete — Complete a daily mission and grant reward.
+   * POST /api/wallet/mission/complete — Increment progress and grant reward when complete.
    *
    * Body: { mission_id: string }
    *
-   * GENERIC: Mission definitions are read from the `mission_rewards` DB table.
-   * Adding a new mission requires only a DB insert (via admin panel) — no code change.
+   * GENERIC: Mission definitions (including target_count for multi-step) are read
+   * from the `mission_rewards` DB table via metadata.target_count.
    *
-   * Idempotent: refId = `mission_${userId}_${missionId}_${utcDate}` — the UNIQUE
-   * index on token_transactions(user_id, tx_type, ref_id) prevents double-reward.
-   * Daily reset: implicit — the refId changes at UTC midnight.
+   * Flow:
+   * 1. Read mission config from DB (amount, name, target_count)
+   * 2. Atomically increment progress in mission_progress table
+   * 3. If progress >= target AND not yet rewarded → grant reward
+   * 4. Return updated progress + reward status
+   *
+   * Idempotent: UNIQUE(user_id, mission_id, daily_date) + rewarded flag + creditTokens UNIQUE
    */
   async function handleMissionComplete(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
@@ -226,7 +230,9 @@ export function createWalletHandlers(deps) {
     }
 
     try {
-      // GENERIC: Read mission config from DB (mission_rewards table)
+      const userId = String(authState.user.id);
+
+      // 1. Read mission config from DB
       const missionConfig = rewardCenterRepo
         ? await rewardCenterRepo.getMissionReward(env, missionId)
         : { token_amount: 0, mission_name: missionId };
@@ -238,35 +244,64 @@ export function createWalletHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'Mission has no reward configured or is disabled', code: 'NO_REWARD' }, { status: 422 }, env);
       }
 
-      const userId = String(authState.user.id);
-      const today = new Date().toISOString().slice(0, 10);
-      const refId = `mission_${userId}_${missionId}_${today}`;
+      // 2. Get target_count from mission metadata
+      const activeMissions = rewardCenterRepo
+        ? await rewardCenterRepo.getActiveMissionRewards(env)
+        : [];
+      const missionMeta = activeMissions.find(m => m.mission_id === missionId);
+      const targetCount = missionMeta?.target_count || 1;
 
-      // grantReward → creditTokens → INSERT with ON CONFLICT DO NOTHING
-      const result = await economyService.grantReward({
-        userId,
-        amount,
-        rewardType: 'mission_reward',
-        description: `ماموریت: ${label}`,
-        refId,
-        metadata: { mission_id: missionId, mission_label: label, daily_date: today },
-        auditInfo: { actor: 'system', ip: request.headers.get('cf-connecting-ip') || null },
-        env,
-      });
+      // 3. Atomically increment progress
+      const progress = rewardCenterRepo
+        ? await rewardCenterRepo.incrementMissionProgress(env, userId, missionId, targetCount)
+        : { progress_count: 1, target_count: 1, completed: true, rewarded: false };
 
-      const isNew = result.success && !result.idempotent;
+      if (!progress) {
+        return jsonResponse({ status: 'error', message: 'Failed to update progress' }, { status: 500 }, env);
+      }
 
-      // Dispatch notification only on first completion
-      if (isNew && notificationPlatformRepo) {
-        notificationPlatformRepo.dispatch(env, {
-          userId,
-          category: 'wallet',
-          priority: 'low',
-          channel: 'mini_app',
-          title: '🎉 ماموریت کامل شد',
-          message: `${label} — ${amount} AB دریافت کردید`,
-          metadata: { mission_id: missionId, amount },
-        }).catch(() => {});
+      // 4. If completed and not yet rewarded → grant reward
+      let rewardGranted = false;
+      let newBalance = null;
+
+      if (progress.completed && !progress.rewarded) {
+        // Mark as rewarded FIRST (atomic CAS — prevents double-reward)
+        const claimed = rewardCenterRepo
+          ? await rewardCenterRepo.markMissionRewarded(env, userId, missionId)
+          : true;
+
+        if (claimed) {
+          // Now grant the reward via economyService
+          const today = new Date().toISOString().slice(0, 10);
+          const refId = `mission_${userId}_${missionId}_${today}`;
+
+          const result = await economyService.grantReward({
+            userId,
+            amount,
+            rewardType: 'mission_reward',
+            description: `ماموریت: ${label}`,
+            refId,
+            metadata: { mission_id: missionId, mission_label: label, daily_date: today, progress: `${progress.progress_count}/${targetCount}` },
+            auditInfo: { actor: 'system', ip: request.headers.get('cf-connecting-ip') || null },
+            env,
+          });
+
+          rewardGranted = result.success && !result.idempotent;
+          newBalance = result.newBalance;
+
+          // Dispatch notification
+          if (rewardGranted && notificationPlatformRepo) {
+            notificationPlatformRepo.dispatch(env, {
+              userId,
+              category: 'wallet',
+              priority: 'low',
+              channel: 'mini_app',
+              title: '🎉 ماموریت کامل شد',
+              message: `${label} — ${amount} AB دریافت کردید`,
+              metadata: { mission_id: missionId, amount },
+            }).catch(() => {});
+          }
+        }
       }
 
       return jsonResponse({
@@ -274,8 +309,11 @@ export function createWalletHandlers(deps) {
         mission_id: missionId,
         reward_amount: amount,
         reward_label: label,
-        is_new_completion: isNew,
-        new_balance: result.newBalance,
+        progress_count: progress.progress_count,
+        target_count: progress.target_count,
+        completed: progress.completed,
+        is_new_completion: rewardGranted,
+        new_balance: newBalance,
       }, {}, env);
     } catch (error) {
       console.warn(safeError('wallet-mission-complete', error));
@@ -284,11 +322,10 @@ export function createWalletHandlers(deps) {
   }
 
   /**
-   * GET /api/wallet/missions — Get today's mission status for the user.
+   * GET /api/wallet/missions — Get today's mission status with progress.
    *
-   * GENERIC: Reads ALL active missions from the `mission_rewards` DB table,
-   * then cross-references with `token_transactions` to determine completion status.
-   * Adding a new mission in the DB automatically makes it appear here — no code change.
+   * GENERIC: Reads ALL active missions from DB + cross-references with
+   * mission_progress for real progress data.
    */
   async function handleGetMissions(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
@@ -301,34 +338,38 @@ export function createWalletHandlers(deps) {
       const userId = String(authState.user.id);
       const today = new Date().toISOString().slice(0, 10);
 
-      // GENERIC: Get all active mission definitions from DB
+      // Get all active mission definitions from DB
       const activeMissions = rewardCenterRepo
         ? await rewardCenterRepo.getActiveMissionRewards(env)
         : [];
 
-      // Check which missions have been completed today
-      const result = await walletRepo.queryDb(env,
-        `SELECT ref_id FROM token_transactions
-         WHERE user_id = $1 AND tx_type = 'mission_reward'
-         AND ref_id LIKE $2 AND status = 'completed'`,
-        [userId, `mission_${userId}_%_${today}`],
-      );
+      // Get today's progress for this user
+      const progressList = rewardCenterRepo
+        ? await rewardCenterRepo.getTodayMissionProgress(env, userId)
+        : [];
 
-      const completedSet = new Set();
-      for (const row of result.rows) {
-        const parts = row.ref_id.split('_');
-        if (parts.length >= 4) {
-          completedSet.add(parts[2]);
-        }
+      const progressMap = {};
+      for (const p of progressList) {
+        progressMap[p.mission_id] = p;
       }
 
-      const missions = activeMissions.map(m => ({
-        mission_id: m.mission_id,
-        reward_amount: m.token_amount,
-        reward_label: m.mission_name,
-        completed: completedSet.has(m.mission_id),
-        sort_order: m.sort_order,
-      }));
+      const missions = activeMissions.map(m => {
+        const progress = progressMap[m.mission_id];
+        return {
+          mission_id: m.mission_id,
+          mission_name: m.mission_name,
+          reward_amount: m.token_amount,
+          reward_label: m.mission_name,
+          trigger: m.trigger,
+          target_count: m.target_count,
+          description: m.description,
+          icon: m.icon,
+          sort_order: m.sort_order,
+          progress_count: progress?.progress_count || 0,
+          completed: progress?.completed || false,
+          rewarded: progress?.rewarded || false,
+        };
+      });
 
       return jsonResponse({ status: 'success', missions, date: today }, {}, env);
     } catch (error) {

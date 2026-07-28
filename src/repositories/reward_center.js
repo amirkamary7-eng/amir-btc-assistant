@@ -59,6 +59,11 @@ export function createRewardCenterRepository(deps) {
       );
 
       -- Mission rewards — maps mission IDs to rewards
+      -- GENERIC: Admin adds missions here. metadata JSONB stores:
+      --   { trigger: 'news_view'|'analysis_read'|'calendar_view'|'daily_open'|'custom',
+      --     target_count: 1 (default, single-step) or N (multi-step, e.g. 3 for "read 3 news"),
+      --     description: 'optional description text',
+      --     icon: 'optional emoji or icon name' }
       CREATE TABLE IF NOT EXISTS mission_rewards (
         id SERIAL PRIMARY KEY,
         mission_id VARCHAR(64) NOT NULL UNIQUE,
@@ -73,6 +78,25 @@ export function createRewardCenterRepository(deps) {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      -- Mission progress — tracks per-user per-day progress for multi-step missions
+      -- For single-step missions (target_count=1), a row is created on completion
+      -- For multi-step missions (target_count=N), progress increments until target reached
+      CREATE TABLE IF NOT EXISTS mission_progress (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        mission_id VARCHAR(64) NOT NULL,
+        progress_count INTEGER NOT NULL DEFAULT 0,
+        target_count INTEGER NOT NULL DEFAULT 1,
+        completed BOOLEAN NOT NULL DEFAULT FALSE,
+        rewarded BOOLEAN NOT NULL DEFAULT FALSE,
+        daily_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(user_id, mission_id, daily_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mission_progress_user ON mission_progress (user_id, daily_date);
+      CREATE INDEX IF NOT EXISTS idx_mission_progress_completed ON mission_progress (user_id, completed, daily_date);
 
       -- Campaigns — time-bounded reward events
       CREATE TABLE IF NOT EXISTS campaigns (
@@ -609,21 +633,104 @@ export function createRewardCenterRepository(deps) {
    * Get ALL active (enabled) mission reward configurations.
    * Used by GET /api/wallet/missions to dynamically list all missions
    * without hardcoding them in the frontend.
+   * Returns metadata including trigger, target_count, description, icon.
    */
   async function getActiveMissionRewards(env) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return [];
     try {
       const result = await queryDb(env, `SELECT mission_id, mission_name, token_amount, bonus_spins, sort_order, metadata FROM mission_rewards WHERE is_enabled = TRUE ORDER BY sort_order ASC`);
+      return result.rows.map(r => {
+        const meta = r.metadata || {};
+        return {
+          mission_id: r.mission_id,
+          mission_name: r.mission_name,
+          token_amount: Number(r.token_amount),
+          bonus_spins: Number(r.bonus_spins),
+          sort_order: Number(r.sort_order),
+          trigger: meta.trigger || r.mission_id,
+          target_count: Number(meta.target_count) || 1,
+          description: meta.description || '',
+          icon: meta.icon || '🎯',
+        };
+      });
+    } catch { return []; }
+  }
+
+  /**
+   * Increment mission progress for a user.
+   * Creates or updates a row in mission_progress.
+   * Uses atomic UPSERT with progress increment.
+   * Returns the updated progress record.
+   */
+  async function incrementMissionProgress(env, userId, missionId, targetCount = 1) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return null;
+    try {
+      // Atomic UPSERT: increment progress_count, set completed if target reached
+      const result = await queryDb(env,
+        `INSERT INTO mission_progress (user_id, mission_id, progress_count, target_count, completed, rewarded, daily_date)
+         VALUES ($1, $2, 1, $3, ($3 <= 1), FALSE, CURRENT_DATE)
+         ON CONFLICT (user_id, mission_id, daily_date)
+         DO UPDATE SET
+           progress_count = mission_progress.progress_count + 1,
+           completed = (mission_progress.progress_count + 1 >= mission_progress.target_count),
+           updated_at = NOW()
+         RETURNING *`,
+        [String(userId), String(missionId), Number(targetCount)],
+      );
+      return result.rows[0] ? {
+        id: Number(result.rows[0].id),
+        progress_count: Number(result.rows[0].progress_count),
+        target_count: Number(result.rows[0].target_count),
+        completed: result.rows[0].completed,
+        rewarded: result.rows[0].rewarded,
+      } : null;
+    } catch (e) {
+      console.warn('incrementMissionProgress error:', e.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get today's mission progress for a user (all missions).
+   */
+  async function getTodayMissionProgress(env, userId) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return [];
+    try {
+      const result = await queryDb(env,
+        `SELECT mission_id, progress_count, target_count, completed, rewarded
+         FROM mission_progress
+         WHERE user_id = $1 AND daily_date = CURRENT_DATE`,
+        [String(userId)],
+      );
       return result.rows.map(r => ({
         mission_id: r.mission_id,
-        mission_name: r.mission_name,
-        token_amount: Number(r.token_amount),
-        bonus_spins: Number(r.bonus_spins),
-        sort_order: Number(r.sort_order),
-        metadata: r.metadata || {},
+        progress_count: Number(r.progress_count),
+        target_count: Number(r.target_count),
+        completed: r.completed,
+        rewarded: r.rewarded,
       }));
     } catch { return []; }
+  }
+
+  /**
+   * Mark a mission as rewarded (prevents double-reward at the progress level).
+   */
+  async function markMissionRewarded(env, userId, missionId) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return false;
+    try {
+      const result = await queryDb(env,
+        `UPDATE mission_progress
+         SET rewarded = TRUE, updated_at = NOW()
+         WHERE user_id = $1 AND mission_id = $2 AND daily_date = CURRENT_DATE AND rewarded = FALSE
+         RETURNING id`,
+        [String(userId), String(missionId)],
+      );
+      return result.rows.length > 0;
+    } catch { return false; }
   }
 
   function _mapMissionReward(r) {
@@ -785,6 +892,9 @@ export function createRewardCenterRepository(deps) {
     deleteMissionReward,
     getMissionReward,
     getActiveMissionRewards,
+    incrementMissionProgress,
+    getTodayMissionProgress,
+    markMissionRewarded,
     listCampaigns,
     getCampaign,
     createCampaign,
