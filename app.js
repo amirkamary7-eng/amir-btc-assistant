@@ -7117,13 +7117,11 @@ function closeCoinDetail() {
 /**
  * Open forex pair detail modal with TradingView chart.
  */
-function openForexDetail(symbol) {
+async function openForexDetail(symbol) {
     const pair = allForexPairs.find(f => f.symbol === symbol);
     if (!pair) return;
 
     // BUG 1 FIX: fully clear previous asset state BEFORE populating forex data.
-    // This destroys any crypto chart, resets the logo/icon, stats grid, alert
-    // card, watchlist button, etc. so no previous crypto data bleeds in.
     resetDetailState();
 
     const modal = document.getElementById('coin-detail-modal');
@@ -7135,6 +7133,26 @@ function openForexDetail(symbol) {
         modal.classList.remove('slide-up');
         modal.removeEventListener('animationend', handler);
     });
+
+    // ── Lazy-load TradingView script (same pattern as openCoinDetail) ──
+    // ROOT CAUSE FIX: openForexDetail was synchronous and never loaded tv.js.
+    // openCoinDetail had the lazy-load logic, but openForexDetail was missing it.
+    // If the user opened a forex pair FIRST (before any crypto), TradingView
+    // was undefined → createTradingViewWidget fell through to showChartUnavailable.
+    if (!window.TradingView) {
+        const s = document.createElement('script');
+        s.src = 'https://s3.tradingview.com/tv.js';
+        document.head.appendChild(s);
+        try {
+            await new Promise((resolve, reject) => {
+                s.onload = resolve;
+                s.onerror = reject;
+                setTimeout(() => reject(new Error('tv.js load timeout')), 5000);
+            });
+        } catch (e) {
+            console.warn('TradingView script failed to load for forex:', e?.message || e);
+        }
+    }
 
     // ── Top bar: set a category icon for forex/metals (crypto logo is N/A) ──
     // resetDetailState hid the icon; for forex we show a category badge instead
