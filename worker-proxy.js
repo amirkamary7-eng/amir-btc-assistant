@@ -188,15 +188,34 @@ async function readAppCache(env, key) {
   }
 }
 
+// In-memory cache of last-written values — prevents redundant KV writes.
+// Key: KV key, Value: string that was last written.
+// Survives for the lifetime of the Worker isolate.
+const _kvWriteCache = new Map();
+const _KV_WRITE_CACHE_MAX = 200;
+
 async function writeAppCache(env, key, value, expirationTtl) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.put !== 'function') {
     return;
   }
 
+  // SKIP-WRITTEN: If the value hasn't changed since last write, skip the KV put.
+  // This is the #1 KV write optimization — prevents redundant writes when
+  // cron re-processes the same data every minute.
+  const cachedValue = _kvWriteCache.get(key);
+  if (cachedValue === value) {
+    return; // Value unchanged — skip write
+  }
+
   try {
     await env.APP_CACHE.put(key, value, { expirationTtl });
+    // Track what we wrote so we can skip next time
+    if (_kvWriteCache.size >= _KV_WRITE_CACHE_MAX) {
+      const firstKey = _kvWriteCache.keys().next().value;
+      _kvWriteCache.delete(firstKey);
+    }
+    _kvWriteCache.set(key, value);
   } catch (e) {
-    // KV write limit exceeded or transient error — degrade gracefully
     console.warn('writeAppCache failed:', e.message || e);
   }
 }
@@ -6571,13 +6590,14 @@ export default {
         new Promise((resolve) => setTimeout(() => { console.warn('Scheduled task timeout after', ms, 'ms'); resolve(); }, ms)),
       ]);
 
-    // PRIMARY: Price alert checker — runs every 5 minutes.
-    // Direct Telegram send is built-in (no longer relies on queue processing).
+    const cronExpr = controller.cron || '* * * * *';
+    const isEveryMinute = cronExpr === '* * * * *';
+    const isEvery15Min = cronExpr === '*/15 * * * *';
+
+    // PRIMARY: Price alert checker — runs on every tick.
     ctx.waitUntil(withTimeout(runScheduledAlertsBaseline(controller, env)));
 
-    // Process notification queue on EVERY cron tick (both */5 and */15).
-    // Previously only ran on */15, causing queue items to stay 'pending' for
-    // up to 15 minutes. Now runs every 5 minutes for faster delivery.
+    // Process notification queue on every tick.
     if (notificationPlatformRepo?.processQueue) {
       ctx.waitUntil(withTimeout(
         notificationPlatformRepo.processQueue(env, sendTelegramMessage).catch((e) => {
@@ -6586,25 +6606,23 @@ export default {
       ));
     }
 
-    // Refresh CMC Market Overview every 15 minutes
-    if (env.CMC_API_KEY) {
+    // Refresh CMC Market Overview — ONLY on 15-minute ticks (was running every minute!)
+    if (isEvery15Min && env.CMC_API_KEY) {
       ctx.waitUntil(withTimeout(marketOverviewSvc.refreshOverview(env)));
     }
-    // Phase 3 — Check for upcoming high-impact calendar events
+
+    // Check for upcoming high-impact calendar events — every tick
     ctx.waitUntil(withTimeout(runCalendarAlertsCheck(env)));
 
-    // ── AI NEWS: Background processing of news articles ──
-    // Runs on EVERY cron tick (every 1 minute). Fetches latest news from RSS,
-    // then processes AI summaries for any articles that don't have one yet.
-    // Uses ctx.waitUntil (real) — Worker stays alive until processing completes.
-    // This ensures AI summaries are ready BEFORE any user opens the article.
-    ctx.waitUntil(withTimeout(processNewsAIBatch(env), 25000));
+    // ── AI NEWS: Background processing — ONLY on every-minute ticks ──
+    // Runs every 1 minute. Fetches RSS, caches articles, processes AI summaries.
+    // Skip-if-unchanged in writeAppCache prevents redundant KV writes
+    // when articles haven't changed since last cycle.
+    if (isEveryMinute) {
+      ctx.waitUntil(withTimeout(processNewsAIBatch(env), 25000));
+    }
 
-    // ── TELEGRAM PUBLISHER: process queue + auto-publish new content ──
-    // Runs on EVERY cron tick (every 1 minute).
-    // 1. Process pending queue items (rate-limited sends to channel)
-    // 2. Auto-publish hook: when auto-publish is enabled, new news/calendar/
-    //    analysis items are detected and enqueued for publishing.
+    // ── TELEGRAM PUBLISHER: process queue — every tick ──
     if (publisherHandlers?.processPublisherQueue) {
       ctx.waitUntil(withTimeout(
         publisherHandlers.processPublisherQueue(env, { maxItems: 8 }).catch((e) => {
