@@ -4627,9 +4627,8 @@ function renderForexGroupedList() {
             major:     { color: '#22C55E' },
             cross:     { color: '#F5A623' },
             metal:     { color: '#FFD700' },
-            index:     { color: '#60A5FA' },
-            commodity: { color: '#F97316' },
-        }[cat];
+            stock:     { color: '#60A5FA' },
+        }[cat] || { color: '#94a3b8' };
 
         html += `
             <div class="mkt-forex-group">
