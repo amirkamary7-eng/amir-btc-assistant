@@ -100,11 +100,24 @@ export function createAnalysisRepository(deps) {
 
   /**
    * Get featured analyses (up to 5).
+   *
+   * ROOT-CAUSE FIX: Previously used `LEFT(text, 250) AS text` to truncate the
+   * analysis body to 250 chars. This caused TWO problems on the VIP analysis
+   * detail page:
+   *   1. `openAnalysisDetailPage()` rendered the cached (truncated) text
+   *      immediately, then re-rendered with the full text once
+   *      `/api/analyses/:id` resolved → visible Layout Shift.
+   *   2. If the detail fetch failed (network/401), the user was stuck with
+   *      the 250-char excerpt → incomplete analysis text.
+   * Returning the full `text` column eliminates both issues: the cached
+   * featured record is identical to the detail record, so the re-render is
+   * a no-op (no shift) and the full text is available even offline.
+   * Payload impact is negligible (max 5 rows × typical 1-2KB text).
    */
   async function getFeatured(env) {
     const result = await queryDb(
       env,
-      `SELECT id, coin, timeframe, image, LEFT(text, 250) AS text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
+      `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
        FROM analyses WHERE featured = TRUE ORDER BY created_at DESC LIMIT 5`,
     );
     return result.rows.length ? result.rows.map(serializeAnalysisRow) : [];

@@ -1979,20 +1979,30 @@ async function openAnalysisDetailPage(id) {
     currentAnalysisDetail = null;
     const cachedAnalysis = analyses.find(x => x.id === id) || analysisFeatured.find(a => a.id === id) || null;
 
-    // Render detail page IMMEDIATELY from cached data for instant UX
+    // Render detail page IMMEDIATELY from cached data for instant UX.
+    // After the backend root-cause fix (getFeatured returns full text), the
+    // cached record — whether from `analyses` (regular) or `analysisFeatured`
+    // (VIP) — already contains the COMPLETE analysis body. So this first paint
+    // is final as far as the text is concerned; the background detail fetch
+    // only updates the view counter and is rendered idempotently (see
+    // renderAnalysisDetailPage → dataset.renderedText guard) so it cannot
+    // cause any Layout Shift.
+    let pageActivated = false;
     if (cachedAnalysis) {
         currentAnalysisDetail = cachedAnalysis;
         renderAnalysisDetailPage();
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         const page = $('analysis-detail-page');
         if (page) page.classList.add('active');
+        pageActivated = true;
         const nav = document.querySelector('.bottom-nav');
         if (nav) nav.style.display = 'none';
         window.scrollTo(0, 0);
     }
 
-    // Fetch fresh detail from server in background (for full content + increment view)
-    // Includes retry: if first attempt fails, waits 1.5s and retries once
+    // Fetch fresh detail from server in background (for view-count increment
+    // and to pick up any edits made after the list was cached). Includes
+    // retry: if first attempt fails, waits 1.5s and retries once.
     let detailFetched = false;
     for (let attempt = 0; attempt < 2 && !detailFetched; attempt++) {
         try {
@@ -2013,7 +2023,21 @@ async function openAnalysisDetailPage(id) {
                 if (fIdx >= 0 && detailRes.analysis.views_count !== undefined) {
                     analysisFeatured[fIdx].views_count = detailRes.analysis.views_count;
                 }
-                renderAnalysisDetailPage();
+                // Deep-link path: no cached analysis was available, so the page
+                // has not been activated yet. Activate it now alongside the
+                // first real render so the user never stares at a blank screen.
+                if (!pageActivated) {
+                    renderAnalysisDetailPage();
+                    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                    const page = $('analysis-detail-page');
+                    if (page) page.classList.add('active');
+                    pageActivated = true;
+                    const nav = document.querySelector('.bottom-nav');
+                    if (nav) nav.style.display = 'none';
+                    window.scrollTo(0, 0);
+                } else {
+                    renderAnalysisDetailPage();
+                }
             }
         } catch (fetchErr) {
             console.warn('[ANALYSIS-DETAIL] fetch attempt', attempt + 1, 'failed:', fetchErr);
@@ -2027,7 +2051,10 @@ async function openAnalysisDetailPage(id) {
             updateTelegramBackButton();
         }
     } else if (!detailFetched && cachedAnalysis) {
-        showToast('متن کامل تحلیل بارگذاری نشد. نسخه خلاصه نمایش داده می‌شود.');
+        // Cached record already carries the full text (post backend fix), so
+        // there is nothing "summary" about what's on screen — only the view
+        // counter couldn't be refreshed. Reflect that accurately.
+        showToast('شماره بازدید به‌روزرسانی نشد. متن تحلیل کامل است.');
     }
 }
 
@@ -2055,6 +2082,37 @@ function animateViewCount(el, target, readTime) {
         }
     }
     requestAnimationFrame(update);
+}
+
+/**
+ * Render analysis body text into XSS-safe semantic HTML.
+ *
+ * Splitting strategy (Persian/RTL friendly):
+ *   - 2+ consecutive newlines → paragraph break (each chunk becomes a <p>)
+ *   - single newline inside a paragraph → <br> soft wrap
+ *   - leading/trailing whitespace per paragraph is trimmed
+ *
+ * Empty paragraphs are dropped so the reading card never shows blank gaps.
+ * All text is passed through escapeHtml() first, so the structure built
+ * afterwards (<p>/<br>) is the only HTML that ends up in the DOM — user
+ * content can never inject markup.
+ */
+function renderAnalysisContentHTML(text) {
+    const raw = String(text || '');
+    if (!raw.trim()) {
+        return '<p class="adp-content-p adp-content-empty">—</p>';
+    }
+    const escaped = escapeHtml(raw);
+    const paragraphs = escaped.split(/\n{2,}/);
+    const html = paragraphs
+        .map(p => {
+            const trimmed = p.replace(/^\s+|\s+$/g, '');
+            if (!trimmed) return '';
+            return `<p class="adp-content-p">${trimmed.replace(/\n/g, '<br>')}</p>`;
+        })
+        .filter(Boolean)
+        .join('');
+    return html || `<p class="adp-content-p">${escaped.replace(/\n/g, '<br>')}</p>`;
 }
 
 function renderAnalysisDetailPage() {
@@ -2095,11 +2153,24 @@ function renderAnalysisDetailPage() {
         titleEl.innerHTML = `${escapeHtml(a.title || `${a.coin} — ${a.timeframe || '1D'}`)} ${sentimentHtml}`;
     }
 
-    // Content (escaped for XSS safety) — shown right after title
+    // Content (escaped for XSS safety) — wrapped in a reading card.
+    // ROOT-CAUSE FIX for Layout Shift + incomplete text:
+    //   - The content is rendered as semantic <p> paragraphs (split on blank
+    //     lines) so long-form Persian text is comfortable to read.
+    //   - Re-render is idempotent: if the text hasn't changed since the last
+    //     render (e.g. the background detail fetch returns the same body that
+    //     was already rendered from cache), we skip the innerHTML replacement
+    //     entirely. This guarantees zero Layout Shift when the detail fetch
+    //     resolves with identical content.
     const contentEl = $('adp-content');
     if (contentEl) {
         const text = a.content || a.text || '';
-        contentEl.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+        if (contentEl.dataset.renderedText === text) {
+            // Identical content already rendered — skip to avoid any flicker/shift.
+        } else {
+            contentEl.dataset.renderedText = text;
+            contentEl.innerHTML = renderAnalysisContentHTML(text);
+        }
     }
 
     // Price levels — smaller, shown BELOW content
