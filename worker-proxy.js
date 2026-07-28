@@ -1961,9 +1961,9 @@ async function fetchSpotPriceUsd(env, symbol, options = {}) {
   // ${symbol}USDT pairs — forex symbols like EURUSD would fail silently.
   const FOREX_YAHOO_MAP = {
     'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
-    'DXY': 'DX-Y.NYB', 'SPX': '^GSPC', 'NASDAQ': '^IXIC', 'DJI': '^DJI',
-    'VIX': '^VIX', 'US10Y': '^TNX', 'CL1': 'CL=F', 'NG1': 'NG=F',
-    'GER40': '^GDAXI', 'JP225': '^N225',
+    'AAPL': 'AAPL', 'MSFT': 'MSFT', 'NVDA': 'NVDA', 'AMZN': 'AMZN',
+    'GOOGL': 'GOOGL', 'META': 'META', 'TSLA': 'TSLA', 'NFLX': 'NFLX',
+    'AMD': 'AMD', 'INTC': 'INTC', 'COIN': 'COIN', 'MSTR': 'MSTR',
     'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
     'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
     'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
@@ -4250,22 +4250,22 @@ const FOREX_PAIRS = [
   { symbol: 'GBPCAD', name: 'GBP/CAD', tvSymbol: 'FX:GBPCAD', category: 'cross' },
   { symbol: 'AUDNZD', name: 'AUD/NZD', tvSymbol: 'FX:AUDNZD', category: 'cross' },
   { symbol: 'EURCAD', name: 'EUR/CAD', tvSymbol: 'FX:EURCAD', category: 'cross' },
-  // Metals / Commodities
+  // Metals
   { symbol: 'XAUUSD', name: 'Gold', tvSymbol: 'OANDA:XAUUSD', category: 'metal' },
   { symbol: 'XAGUSD', name: 'Silver', tvSymbol: 'OANDA:XAGUSD', category: 'metal' },
-  // Indices
-  { symbol: 'DXY',    name: 'US Dollar Index',  tvSymbol: 'TVC:DXY',        category: 'index' },
-  { symbol: 'SPX',    name: 'S&P 500',         tvSymbol: 'SP:SPX',        category: 'index' },
-  { symbol: 'NASDAQ',  name: 'NASDAQ Composite', tvSymbol: 'NASDAQ:NDX',    category: 'index' },
-  { symbol: 'DJI',    name: 'Dow Jones 30',     tvSymbol: 'DJ:DJI',        category: 'index' },
-  { symbol: 'VIX',    name: 'VIX Fear Index',   tvSymbol: 'TVC:VIX',       category: 'index' },
-  { symbol: 'US10Y',  name: 'US 10Y Bond Yield', tvSymbol: 'TVC:US10Y',    category: 'index' },
-  { symbol: 'GER40',  name: 'DAX 40 (Germany)', tvSymbol: 'XETR:DAX',      category: 'index' },
-  { symbol: 'JP225',  name: 'Nikkei 225 (Japan)', tvSymbol: 'TVC:NI225',   category: 'index' },
-  // Commodities
-  { symbol: 'CL1',    name: 'Crude Oil WTI',   tvSymbol: 'NYMEX:CL1!',   category: 'commodity' },
-  { symbol: 'NG1',    name: 'Natural Gas',      tvSymbol: 'NYMEX:NG1!',   category: 'commodity' },
-  { symbol: 'BCOM',   name: 'Bloomberg Commodity', tvSymbol: 'TVC:BCOM',  category: 'commodity' },
+  // Global Stocks — TradingView embed verified working in Mini App
+  { symbol: 'AAPL',  name: 'Apple',        tvSymbol: 'NASDAQ:AAPL',  category: 'stock' },
+  { symbol: 'MSFT',  name: 'Microsoft',    tvSymbol: 'NASDAQ:MSFT',  category: 'stock' },
+  { symbol: 'NVDA',  name: 'Nvidia',       tvSymbol: 'NASDAQ:NVDA',  category: 'stock' },
+  { symbol: 'AMZN',  name: 'Amazon',       tvSymbol: 'NASDAQ:AMZN',  category: 'stock' },
+  { symbol: 'GOOGL', name: 'Alphabet',     tvSymbol: 'NASDAQ:GOOGL', category: 'stock' },
+  { symbol: 'META',  name: 'Meta',         tvSymbol: 'NASDAQ:META',  category: 'stock' },
+  { symbol: 'TSLA',  name: 'Tesla',        tvSymbol: 'NASDAQ:TSLA',  category: 'stock' },
+  { symbol: 'NFLX',  name: 'Netflix',      tvSymbol: 'NASDAQ:NFLX',  category: 'stock' },
+  { symbol: 'AMD',   name: 'AMD',          tvSymbol: 'NASDAQ:AMD',   category: 'stock' },
+  { symbol: 'INTC',  name: 'Intel',        tvSymbol: 'NASDAQ:INTC',  category: 'stock' },
+  { symbol: 'COIN',  name: 'Coinbase',     tvSymbol: 'NASDAQ:COIN',  category: 'stock' },
+  { symbol: 'MSTR',  name: 'MicroStrategy', tvSymbol: 'NASDAQ:MSTR', category: 'stock' },
 ];
 
 const FOREX_CACHE_TTL = 120; // 2 minutes
@@ -4319,49 +4319,27 @@ async function handleForexData(env, options = {}) {
         return { price, prev };
       } catch { return null; }
     };
-    // Fetch metals + indices + commodities from Yahoo Finance in parallel
-    // Yahoo symbols: GC=F (gold), SI=F (silver), DX-Y.NYB (DXY), ^GSPC (S&P500),
-    // ^IXIC (NASDAQ), ^DJI (Dow), ^VIX (VIX), ^TNX (US 10Y yield),
-    // CL=F (crude oil), NG=F (natural gas)
-    const yahooMetals = Promise.all([yahooQuote('GC=F'), yahooQuote('SI=F')])
-      .then(async ([g, s]) => {
-        // Fallback to goldprice.org if Yahoo failed for either metal
-        if (!g || !s) {
-          const fb = await fetchJson('https://data-asg.goldprice.org/dbXRates/USD')
-            .then(r => r.ok ? r.body?.items?.[0] : null)
-            .catch(() => null);
-          if (fb) {
-            g = g || { price: Number(fb.xauPrice) || 0, prev: Number(fb.xauClose ?? fb.xauOpen) || 0 };
-            s = s || { price: Number(fb.xagPrice) || 0, prev: Number(fb.xagClose ?? fb.xagOpen) || 0 };
-          }
-        }
-        return {
-          xau: g?.price || 0,
-          xag: s?.price || 0,
-          xauPrev: g?.prev || 0,
-          xagPrev: s?.prev || 0,
-          xauChgPct: null,
-          xagChgPct: null,
-        };
-      })
-      .catch(() => null);
 
-    // Fetch indices + commodities from Yahoo Finance (parallel with metals)
-    // Mapping: FOREX_PAIRS symbol → Yahoo Finance ticker
-    const yahooIndexMap = {
-      'DXY': 'DX-Y.NYB',
-      'SPX': '^GSPC',
-      'NASDAQ': '^IXIC',
-      'DJI': '^DJI',
-      'VIX': '^VIX',
-      'US10Y': '^TNX',
-      'GER40': '^GDAXI',
-      'JP225': '^N225',
-      'CL1': 'CL=F',
-      'NG1': 'NG=F',
+    // Fetch metals + stocks from Yahoo Finance (parallel with forex rates)
+    // Yahoo symbols: GC=F (gold), SI=F (silver), AAPL, MSFT, NVDA, etc.
+    const yahooExtraMap = {
+      'XAUUSD': 'GC=F',
+      'XAGUSD': 'SI=F',
+      'AAPL': 'AAPL',
+      'MSFT': 'MSFT',
+      'NVDA': 'NVDA',
+      'AMZN': 'AMZN',
+      'GOOGL': 'GOOGL',
+      'META': 'META',
+      'TSLA': 'TSLA',
+      'NFLX': 'NFLX',
+      'AMD': 'AMD',
+      'INTC': 'INTC',
+      'COIN': 'COIN',
+      'MSTR': 'MSTR',
     };
-    const yahooIndices = Promise.all(
-      Object.entries(yahooIndexMap).map(async ([sym, yahooSym]) => {
+    const yahooExtra = Promise.all(
+      Object.entries(yahooExtraMap).map(async ([sym, yahooSym]) => {
         const q = await yahooQuote(yahooSym);
         return { sym, price: q?.price || 0, prev: q?.prev || 0 };
       })
@@ -4423,11 +4401,10 @@ async function handleForexData(env, options = {}) {
 
     if (frankfurterOk && frankfurterRates) {
       const rates = frankfurterRates;
-      const metals = await yahooMetals;
       const prevRates = await histPromise;
+      const extraData = await yahooExtra; // metals + stocks from Yahoo
 
       // Helper: compute a fiat pair price from a frankfurter rates object
-      // (frankfurter quotes 1 USD = N units of XXX)
       const priceFromRates = (r, pair) => {
         const base = pair.symbol.slice(0, 3);
         const quote = pair.symbol.slice(3, 6);
@@ -4437,15 +4414,13 @@ async function handleForexData(env, options = {}) {
         return (b && q) ? q / b : 0;
       };
 
-      const indexData = await yahooIndices;
-
       data = FOREX_PAIRS.map(pair => {
         let price = 0;
         let change = 0;
 
-        // Indices & commodities: fetch from Yahoo Finance
-        if (pair.category === 'index' || pair.category === 'commodity') {
-          const yd = indexData[pair.symbol];
+        // Metals & Stocks: fetch from Yahoo Finance
+        if (pair.category === 'metal' || pair.category === 'stock') {
+          const yd = extraData[pair.symbol];
           if (yd && yd.price > 0) {
             price = yd.price;
             if (yd.prev > 0) change = ((price - yd.prev) / yd.prev) * 100;
@@ -4453,20 +4428,11 @@ async function handleForexData(env, options = {}) {
           return { symbol: pair.symbol, name: pair.name, tvSymbol: pair.tvSymbol, category: pair.category, price, change: Math.round(change * 100) / 100, isForex: true };
         }
 
-        if (pair.symbol === 'XAUUSD') {
-          price = metals?.xau || 0;
-          if (typeof metals?.xauChgPct === 'number') change = metals.xauChgPct;
-          else if (metals?.xauPrev > 0 && price > 0) change = ((price - metals.xauPrev) / metals.xauPrev) * 100;
-        } else if (pair.symbol === 'XAGUSD') {
-          price = metals?.xag || 0;
-          if (typeof metals?.xagChgPct === 'number') change = metals.xagChgPct;
-          else if (metals?.xagPrev > 0 && price > 0) change = ((price - metals.xagPrev) / metals.xagPrev) * 100;
-        } else {
-          price = priceFromRates(rates, pair);
-          const prevRatesObj = prevRates?.prev;
-          const prevPrice = prevRatesObj ? priceFromRates(prevRatesObj, pair) : 0;
-          if (prevPrice > 0 && price > 0) change = ((price - prevPrice) / prevPrice) * 100;
-        }
+        // Fiat pairs: compute from frankfurter rates
+        price = priceFromRates(rates, pair);
+        const prevRatesObj = prevRates?.prev;
+        const prevPrice = prevRatesObj ? priceFromRates(prevRatesObj, pair) : 0;
+        if (prevPrice > 0 && price > 0) change = ((price - prevPrice) / prevPrice) * 100;
 
         // Round change to 2 decimals to keep the payload tidy
         change = Math.round(change * 100) / 100;

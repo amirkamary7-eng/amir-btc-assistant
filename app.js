@@ -4504,8 +4504,7 @@ function renderForexItem(f) {
         major:     { color: '#22C55E', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>', label: 'Major',     labelFa: 'جفت اصلی',   decimals: 4 },
         cross:     { color: '#F5A623', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', label: 'Cross',     labelFa: 'کراس',       decimals: 4 },
         metal:     { color: '#FFD700', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14h8M8 10h8M12 6v12"/></svg>', label: 'Metal',     labelFa: 'فلز گران‌بها', decimals: 2 },
-        index:     { color: '#60A5FA', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>', label: 'Index',     labelFa: 'شاخص',       decimals: 0 },
-        commodity: { color: '#F97316', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18M5 22V8l5-4 5 4v14M9 22v-6h4v6M14 22V10l3-2 3 2v12"/></svg>', label: 'Commodity', labelFa: 'کالا',       decimals: 0 },
+        stock:     { color: '#60A5FA', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 6-6"/></svg>', label: 'Stock',     labelFa: 'سهم',       decimals: 2 },
         // Per-symbol icons (override category default)
         // These are checked first in renderForexItem
     };
@@ -4516,17 +4515,18 @@ function renderForexItem(f) {
     const symbolIcons = {
         'XAUUSD': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14h8M8 10h8M12 6v12"/></svg>',
         'XAGUSD': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M8 10h8M8 14h8"/></svg>',
-        'CL1':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18M5 22V8l5-4 5 4v14M9 22v-6h4v6"/></svg>',
-        'NG1':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v8M8 10h8M6 14h12M4 18h16M3 22h18"/></svg>',
-        'DXY':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M8 9h4a2 2 0 0 1 0 4H8M8 13h4a2 2 0 0 1 0 4H8"/></svg>',
-        'SPX':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 6-6"/></svg>',
-        'NASDAQ': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 10 4 4 4-4 6 6"/></svg>',
-        'DJI':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 12 4 4 4-4 6-6"/></svg>',
-        'VIX':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>',
-        'US10Y':  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 3v6M11 3v10M15 3v4M19 3v14"/></svg>',
-        'GER40':  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 6-6"/></svg>',
-        'JP225':  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12"/></svg>',
-        'BCOM':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/></svg>',
+        'AAPL':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></svg>',
+        'MSFT':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>',
+        'NVDA':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 4-4"/></svg>',
+        'AMZN':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 17c3-3 8-3 10 0"/></svg>',
+        'GOOGL':  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>',
+        'META':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12c0-5 4-9 9-9s9 4 9 9-4 9-9 9"/><path d="M12 12c0-5 3-9 6-9"/></svg>',
+        'TSLA':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 10l5 5 5-5"/></svg>',
+        'NFLX':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 17V7l6 10V7"/></svg>',
+        'AMD':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12h8M12 8v8"/></svg>',
+        'INTC':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="14" x2="21" y2="14"/></svg>',
+        'COIN':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="5"/></svg>',
+        'MSTR':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 16V8M7 8l5 5 5-5"/></svg>',
     };
     const iconSvg = symbolIcons[f.symbol] || cfg.svg;
 
@@ -4604,11 +4604,10 @@ function renderForexGroupedList() {
 
     // Group by category
     const groups = {
-        major:     { label: 'Major Pairs',     labelFa: 'جفت‌های اصلی',     items: [] },
-        cross:     { label: 'Cross Pairs',     labelFa: 'کراس‌ها',          items: [] },
-        metal:     { label: 'Metals',          labelFa: 'فلزات گران‌بها',    items: [] },
-        index:     { label: 'Indices',         labelFa: 'شاخص‌ها',          items: [] },
-        commodity: { label: 'Commodities',     labelFa: 'کالاها',           items: [] },
+        metal:     { label: 'Precious Metals',  labelFa: 'فلزات گران‌بها',    items: [] },
+        major:     { label: 'Major Pairs',      labelFa: 'جفت‌های اصلی',     items: [] },
+        cross:     { label: 'Cross Pairs',      labelFa: 'کراس‌ها',          items: [] },
+        stock:     { label: 'Global Stocks',    labelFa: 'سهام جهانی',       items: [] },
     };
 
     for (const f of allForexPairs) {
@@ -4617,7 +4616,7 @@ function renderForexGroupedList() {
     }
 
     // Render each non-empty group
-    const groupOrder = ['metal', 'major', 'cross', 'index', 'commodity'];
+    const groupOrder = ['metal', 'major', 'cross', 'stock'];
     let html = '';
     for (const cat of groupOrder) {
         const g = groups[cat];
@@ -7160,7 +7159,7 @@ async function openForexDetail(symbol) {
     const iconEl = document.getElementById('detail-coin-icon');
     if (iconEl) {
         const cat = pair.category || 'major';
-        const catColors = { major: '#22C55E', cross: '#F5A623', metal: '#FFD700', index: '#60A5FA', commodity: '#F97316' };
+        const catColors = { major: '#22C55E', cross: '#F5A623', metal: '#FFD700', stock: '#60A5FA' };
         const catSvgPaths = {
             major: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
             cross: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>',
@@ -7236,12 +7235,12 @@ async function openForexDetail(symbol) {
 
     // Extra info
     const cat = pair.category || 'major';
-    const catLabels = { major: 'Major', cross: 'Cross', metal: 'Metal', index: 'Index', commodity: 'Commodity' };
-    const catLabelFa = { major: 'جفت اصلی', cross: 'کراس', metal: 'فلز گران‌بها', index: 'شاخص', commodity: 'کامودیتی' };
+    const catLabels = { major: 'Major', cross: 'Cross', metal: 'Metal', stock: 'Stock' };
+    const catLabelFa = { major: 'جفت اصلی', cross: 'کراس', metal: 'فلز گران‌بها', stock: 'سهم' };
     const catLabel = currentLang === 'fa' ? (catLabelFa[cat] || cat) : (catLabels[cat] || cat);
     const typeLabel = currentLang === 'fa'
-        ? ({ major: 'فارکس', cross: 'فارکس', metal: 'فلز', index: 'شاخص', commodity: 'کامودیتی' }[cat] || 'بازار')
-        : ({ major: 'Forex', cross: 'Forex', metal: 'Commodity', index: 'Index', commodity: 'Commodity' }[cat] || 'Market');
+        ? ({ major: 'فارکس', cross: 'فارکس', metal: 'فلز', stock: 'سهم' }[cat] || 'بازار')
+        : ({ major: 'Forex', cross: 'Forex', metal: 'Metal', stock: 'Stock' }[cat] || 'Market');
 
     // ── Premium stats grid for forex/metals ──
     // Previously this rendered bare .info-item spans (whose CSS is scoped under
