@@ -23,6 +23,8 @@ import { createNotificationHandlers } from './src/controllers/notifications.js';
 import { createAssistantHandlers } from './src/controllers/assistant.js';
 import { createAnalysisRepository } from './src/repositories/analyses.js';
 import { createAnalysisHandlers } from './src/controllers/analyses.js';
+import { createCalendarReminderRepository } from './src/repositories/calendar_reminders.js';
+import { createCalendarReminderHandlers } from './src/controllers/calendar_reminders.js';
 import { createAdminRepository } from './src/repositories/admin.js';
 import { createAdminHandlers } from './src/controllers/admin.js';
 import { createRewardCenterRepository } from './src/repositories/reward_center.js';
@@ -2957,8 +2959,44 @@ function parseCalendarTimeParts(timeString) {
   return { hour, minute };
 }
 
+/**
+ * ROOT CAUSE FIX (RC-7): ForexFactory (nfs.faireconomy.media) publishes
+ * event times in US Eastern Time (EST = UTC-5, EDT = UTC-4). The old code
+ * used Date.UTC(...) which treated these times as UTC — making every event
+ * appear 4-5 hours EARLIER than its real time. This caused the smart-alert
+ * cron to fire notifications 4-5 hours before the actual event.
+ *
+ * This helper returns the current UTC offset (in milliseconds) for US
+ * Eastern Time, accounting for DST (second Sunday of March → first Sunday
+ * of November, 2:00 AM local). DST → -4h, standard → -5h.
+ */
+function getEasternTimeOffsetMs(date) {
+  // Determine if `date` falls in DST (EDT, UTC-4) or standard (EST, UTC-5).
+  // US DST: starts 2nd Sunday of March, ends 1st Sunday of November.
+  const year = date.getUTCFullYear();
+  // Find 2nd Sunday of March
+  let marchFirst = new Date(Date.UTC(year, 2, 1));
+  let marchDow = marchFirst.getUTCDay(); // 0=Sun
+  let secondSundayMarch = 2 + ((7 - marchDow) % 7) + 7; // day-of-month
+  if (marchDow === 0) secondSundayMarch = 8; // March 1 is Sunday → 2nd Sunday is 8th
+  const dstStart = new Date(Date.UTC(year, 2, secondSundayMarch, 7, 0, 0)); // 2:00 AM EST = 7:00 UTC
+
+  // Find 1st Sunday of November
+  let novFirst = new Date(Date.UTC(year, 10, 1));
+  let novDow = novFirst.getUTCDay();
+  let firstSundayNov = 1 + ((7 - novDow) % 7);
+  if (novDow === 0) firstSundayNov = 1; // Nov 1 is Sunday → 1st Sunday is 1st
+  const dstEnd = new Date(Date.UTC(year, 10, firstSundayNov, 6, 0, 0)); // 2:00 AM EDT = 6:00 UTC
+
+  if (date >= dstStart && date < dstEnd) {
+    return -4 * 60 * 60 * 1000; // EDT = UTC-4
+  }
+  return -5 * 60 * 60 * 1000; // EST = UTC-5
+}
+
 function parseEventTime(dateString, timeString) {
   // ── ISO 8601 support (e.g. "2026-07-05T21:00:00-04:00") ─────────
+  // These already include the UTC offset, so no ET correction needed.
   if (dateString && /^\d{4}-\d{2}-\d{2}T/.test(dateString)) {
     const d = new Date(dateString);
     if (!Number.isNaN(d.getTime())) return d;
@@ -2974,13 +3012,18 @@ function parseEventTime(dateString, timeString) {
     if (year && month && day) {
       const parsedTime = parseCalendarTimeParts(timeString);
       if (parsedTime) {
-        return new Date(Date.UTC(year, month - 1, day, parsedTime.hour, parsedTime.minute, 0));
+        // ROOT CAUSE FIX (RC-7): ForexFactory publishes times in US Eastern
+        // Time. Parse as UTC then apply the ET offset (DST-aware).
+        const utcDate = new Date(Date.UTC(year, month - 1, day, parsedTime.hour, parsedTime.minute, 0));
+        const offsetMs = getEasternTimeOffsetMs(utcDate);
+        return new Date(utcDate.getTime() - offsetMs);
       }
       return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
     }
   }
 
-  // ── Legacy MM-DD-YYYY + HH:MMam/pm format ───────────────────────
+  // ── Legacy MM-DD-YYYY + HH:MMam/pm format (ForexFactory) ─────────
+  // Times are in US Eastern Time — apply DST-aware offset (RC-7 fix).
   const parsedDate = parseCalendarDate(dateString);
   if (!parsedDate) {
     return null;
@@ -2992,16 +3035,18 @@ function parseEventTime(dateString, timeString) {
 
   const parsedTime = parseCalendarTimeParts(timeString);
   if (parsedTime) {
-    return new Date(
-      Date.UTC(
-        parsedDate.year,
-        parsedDate.month - 1,
-        parsedDate.day,
-        parsedTime.hour,
-        parsedTime.minute,
-        0,
-      ),
-    );
+    const utcDate = new Date(Date.UTC(
+      parsedDate.year,
+      parsedDate.month - 1,
+      parsedDate.day,
+      parsedTime.hour,
+      parsedTime.minute,
+      0,
+    ));
+    // ROOT CAUSE FIX (RC-7): apply ET offset so the timestamp reflects the
+    // real event time, not 4-5 hours early.
+    const offsetMs = getEasternTimeOffsetMs(utcDate);
+    return new Date(utcDate.getTime() - offsetMs);
   }
 
   return new Date(Date.UTC(parsedDate.year, parsedDate.month - 1, parsedDate.day, 12, 0, 0));
@@ -3094,79 +3139,101 @@ async function fetchCalendarFeed() {
   return [];
 }
 
+// ROOT CAUSE FIX (RC-1): In-memory isolate cache for calendar events.
+// Survives KV TTL expiry — as long as the Worker isolate is alive, the
+// last successfully fetched events are available even if the upstream
+// goes down for an extended period. Cloudflare Workers isolates can
+// live for hours under steady traffic, so this provides a strong safety
+// net beyond the 10-minute KV TTL.
+// `_calendarIsolateCache` is set ONLY on successful fetch (events.length > 0)
+// and is returned when both KV cache and upstream fail.
+let _calendarIsolateCache = null;
+let _calendarIsolateCacheAt = 0; // timestamp of last successful fetch
+
 async function fetchCalendarEvents(env) {
-  // ROOT CAUSE FIX for "calendar data disappears intermittently":
-  // Previously, when the upstream feed (nfs.faireconomy.media) was slow,
-  // unreachable, or returned an empty array, fetchCalendarFeed() returned []
-  // and this function returned [] to the frontend — wiping the calendar even
-  // though we had valid (but expired) cached data in KV. The user had to
-  // refresh repeatedly to get data back.
-  //
-  // NEW behaviour: if the fresh fetch yields no events BUT we have a cache
-  // entry (even expired), serve the stale cache rather than empty. This
-  // matches the user's expectation that calendar data is always visible.
-  //
-  // readAppCache() returns null for expired entries (KV TTL), so a non-null
-  // result here means the cache is FRESH → return immediately for low latency.
-  const cachedEvents = await readAppCache(env, CALENDAR_CACHE_KEY);
-  if (cachedEvents) {
-    try {
-      const parsed = JSON.parse(cachedEvents);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      // cache corrupt — fall through to live fetch
-    }
-  }
+  // ROOT CAUSE FIX (RC-1): the previous "stale cache fallback" used
+  // `env.APP_CACHE.get(key, { cacheTtl: 60 })` claiming KV resurrects
+  // expired keys. This is factually wrong — KV deletes keys after
+  // expirationTtl. The real safety net is the in-memory isolate cache
+  // (_calendarIsolateCache) which survives as long as the Worker isolate
+  // is alive. We also use single-flight (RC-10) to prevent cache stampede.
 
-  // Cache miss or corrupt — fetch fresh from upstream.
-  const now = new Date();
-  const cutoffPast = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
-  const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const rawEvents = await fetchCalendarFeed();
-
-  const events = rawEvents
-    .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
-    .filter((item) => item !== null)
-    .sort((left, right) => {
-      // Null timestamps (unparseable) go to end
-      if (!left.timestamp && !right.timestamp) return 0;
-      if (!left.timestamp) return 1;
-      if (!right.timestamp) return -1;
-      return left.timestamp.localeCompare(right.timestamp);
-    });
-
-  if (events.length > 0) {
-    // Fresh fetch succeeded — write to cache (TTL from env, default 600s).
-    await writeAppCache(
-      env,
-      CALENDAR_CACHE_KEY,
-      JSON.stringify(events),
-      getNumericEnv(env, 'CALENDAR_CACHE_TTL', 600),
-    );
-    return events;
-  }
-
-  // Fresh fetch yielded nothing (upstream slow/down/empty). ROOT CAUSE FIX:
-  // try to read the cache WITHOUT TTL (raw KV get bypassing expiry) so we can
-  // serve stale data instead of showing an empty calendar. Cloudflare KV
-  // keeps the value for up to its metadata TTL even after expirationTtl
-  // expires, so a direct get with { cacheTtl: 0 } can still return it.
-  // We try readAppCache first (fresh), then fall back to raw read here.
-  // Since readAppCache already returned null above, we do a best-effort raw
-  // read — if KV still has the value (just expired), we serve it.
-  try {
-    const rawCached = await env.APP_CACHE?.get?.(CALENDAR_CACHE_KEY, { cacheTtl: 60 });
-    if (rawCached) {
-      const stale = JSON.parse(rawCached);
-      if (Array.isArray(stale) && stale.length > 0) {
-        return stale;
+  // ROOT CAUSE FIX (RC-10): single-flight prevents concurrent requests
+  // from all hitting the upstream when the KV cache expires. Only ONE
+  // upstream fetch runs at a time; all concurrent callers share its result.
+  return singleFlight('calendar:events:fetch', async () => {
+    // 1. Try fresh KV cache (TTL-enforced by KV itself)
+    const cachedEvents = await readAppCache(env, CALENDAR_CACHE_KEY);
+    if (cachedEvents) {
+      try {
+        const parsed = JSON.parse(cachedEvents);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Update isolate cache so it stays fresh
+          _calendarIsolateCache = parsed;
+          _calendarIsolateCacheAt = Date.now();
+          return parsed;
+        }
+      } catch {
+        // cache corrupt — fall through to live fetch
       }
     }
-  } catch {
-    // KV read failed — nothing more we can do
-  }
 
-  return [];
+    // 2. KV miss or empty — fetch fresh from upstream
+    const now = new Date();
+    const cutoffPast = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+    const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const rawEvents = await fetchCalendarFeed();
+
+    const events = rawEvents
+      .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
+      .filter((item) => item !== null)
+      .sort((left, right) => {
+        if (!left.timestamp && !right.timestamp) return 0;
+        if (!left.timestamp) return 1;
+        if (!right.timestamp) return -1;
+        return left.timestamp.localeCompare(right.timestamp);
+      });
+
+    if (events.length > 0) {
+      // Fresh fetch succeeded — write to KV cache + isolate cache
+      await writeAppCache(
+        env,
+        CALENDAR_CACHE_KEY,
+        JSON.stringify(events),
+        getNumericEnv(env, 'CALENDAR_CACHE_TTL', 600),
+      );
+      _calendarIsolateCache = events;
+      _calendarIsolateCacheAt = Date.now();
+      return events;
+    }
+
+    // 3. Upstream returned empty. ROOT CAUSE FIX (RC-1): serve the
+    // in-memory isolate cache rather than returning []. This survives
+    // upstream outages that exceed the KV TTL (10 min). The isolate cache
+    // is at most a few hours old (isolate lifetime).
+    if (_calendarIsolateCache && _calendarIsolateCache.length > 0) {
+      console.log('[calendar] upstream empty — serving isolate cache ' +
+        `(${Math.round((Date.now() - _calendarIsolateCacheAt) / 1000)}s old)`);
+      return _calendarIsolateCache;
+    }
+
+    // 4. No isolate cache either (cold start) — last resort: try a raw KV
+    // read with a long cacheTtl (edge cache might still have it even if
+    // origin expired). Best-effort, no guarantee.
+    try {
+      const rawCached = await env.APP_CACHE?.get?.(CALENDAR_CACHE_KEY, { cacheTtl: 86400 });
+      if (rawCached) {
+        const stale = JSON.parse(rawCached);
+        if (Array.isArray(stale) && stale.length > 0) {
+          return stale;
+        }
+      }
+    } catch {
+      // KV read failed — nothing more we can do
+    }
+
+    return [];
+  });
 }
 
 // Chart resolution timeout — shorter than price fetch timeout.
@@ -3537,6 +3604,17 @@ const analysisHandlers = createAnalysisHandlers({
   resolveWebAppUrl,
   queryDb,
 });
+// Calendar Reminders — per-user reminders for economic calendar events.
+// Stored in PostgreSQL so they survive across devices and actually fire.
+const calendarReminderRepo = createCalendarReminderRepository({ queryDb });
+const calendarReminderHandlers = createCalendarReminderHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  safeError,
+  buildBodyFieldValidationError,
+  isDatabaseConfigured,
+  calendarReminderRepo,
+});
 const adminRepo = createAdminRepository({ queryDb, normalizeOptionalString });
 const adminHandlers = createAdminHandlers({
   jsonResponse,
@@ -3602,6 +3680,7 @@ const alertEconomyHandlers = createAlertEconomyHandlers({
   alertEconomyRepo,
   economyService,
 });
+
 //#endregion
 
 // ── Telegram Publisher (admin) — channel publishing with queue + preview ──
@@ -4745,13 +4824,18 @@ const CALENDAR_ALERT_SENT_PREFIX = 'cal_alert:';
 
 async function runCalendarAlertsCheck(env) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
-  if (!notificationRepo) return;
+  if (!notificationPlatformRepo) return;
 
   try {
     const events = await fetchCalendarEvents(env);
     const now = Date.now();
-    const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
-    const alertedCount = { sent: 0, skipped: 0 };
+    // ROOT CAUSE FIX (RC-3): user requirement is "exactly 1 hour before".
+    // Was 10 minutes — notifications arrived too late. Now 60 minutes.
+    const WINDOW_MS = 60 * 60 * 1000; // 1 hour
+    // Minimum lead time — avoid firing for events that are already past or
+    // starting within the next 30 seconds (race window).
+    const MIN_LEAD_MS = 30 * 1000;
+    const alertedCount = { sent: 0, skipped: 0, failed: 0 };
 
     for (const event of events) {
       // Only high-impact events
@@ -4761,10 +4845,10 @@ async function runCalendarAlertsCheck(env) {
       if (!eventTs) continue;
 
       const timeUntil = eventTs - now;
-      // Only alert if event is within the next 10 minutes and hasn't passed
-      if (timeUntil < 0 || timeUntil > WINDOW_MS) continue;
+      // Only alert if event is within the next 1 hour and hasn't just passed
+      if (timeUntil < -MIN_LEAD_MS || timeUntil > WINDOW_MS) continue;
 
-      // Dedup key: title + date + country
+      // Dedup key: title + date + country (event-level, not per-user)
       const eventKey = `${String(event.title || '').slice(0, 60)}|${String(event.date || '')}|${String(event.country || '')}`;
       const dedupKey = `${CALENDAR_ALERT_SENT_PREFIX}${eventKey}`;
 
@@ -4775,8 +4859,16 @@ async function runCalendarAlertsCheck(env) {
         continue;
       }
 
-      // Mark as sent (TTL: 2 hours covers the full event window)
-      await writeAppCache(env, dedupKey, '1', 7200);
+      // ROOT CAUSE FIX (RC-5): mark dedup BEFORE dispatch to prevent the
+      // every-minute + every-15-minute cron overlap from double-firing.
+      // The previous "write before dispatch" approach lost notifications
+      // on transient dispatch failure — now we use a longer TTL (4h) so
+      // even if dispatch fails, the event won't be retried within the
+      // 1-hour window. This is the correct trade-off: a missed event is
+      // better than duplicate notifications (which spam users).
+      // ROOT CAUSE FIX (RC-3): TTL bumped from 2h to 4h to cover the
+      // 1-hour window plus event duration plus cron propagation delay.
+      await writeAppCache(env, dedupKey, '1', 4 * 3600);
 
       // Fetch joined users
       const usersResult = await queryDb(
@@ -4786,28 +4878,122 @@ async function runCalendarAlertsCheck(env) {
       const allUserIds = usersResult.rows.map((r) => String(r.telegram_id));
       if (allUserIds.length === 0) continue;
 
-      // CRITICAL FIX: Filter users who have calendar notifications enabled
-      const userIds = await notificationRepo.filterUsersByPreference(env, allUserIds, 'calendar');
-      if (userIds.length === 0) continue;
-
       const title = `🔔 رویداد مهم تقویم: ${event.title}`;
       const message = `${event.country} ${event.flag} — ${event.time || ''}`;
 
-      // Send via Notification Platform (single entry point — handles settings, templates, queue)
-      for (const uid of userIds) {
-        await notificationPlatformRepo.dispatch(env, {
-          userId: uid,
-          title, message,
-          category: 'calendar',
-          priority: 'medium',
-          channel: 'both',
-          metadata: { event_title: event.title, event_date: event.date, event_time: event.time, event_country: event.country },
-        }).catch(() => {});
+      // ROOT CAUSE FIX (RC-4): the old code called
+      // `notificationRepo.filterUsersByPreference(env, allUserIds, 'calendar')`
+      // which reads the LEGACY boolean `calendar` column (default FALSE).
+      // Most users never visit settings → no row → defaults to FALSE →
+      // zero users receive calendar alerts. This was already fixed for
+      // price alerts (using notificationPlatformRepo.getUserChannelPreference
+      // which reads the NEW ch_calendar column defaulting to 'both').
+      // Now we apply the same fail-open pattern: iterate all joined users
+      // and call getUserChannelPreference per-user inside the dispatch loop.
+      // notificationPlatformRepo.dispatch already calls getUserChannelPreference
+      // internally (src/repositories/notification_platform.js:239), so we
+      // can pass all joined users directly — users with ch_calendar='none'
+      // will be filtered out inside dispatch.
+
+      let sentForThisEvent = 0;
+      for (const uid of allUserIds) {
+        try {
+          const dispatchResult = await notificationPlatformRepo.dispatch(env, {
+            userId: uid,
+            title, message,
+            category: 'calendar',
+            priority: 'medium',
+            channel: 'both',
+            metadata: { event_title: event.title, event_date: event.date, event_time: event.time, event_country: event.country },
+          });
+          // dispatch returns {status: 'filtered'} if user opted out
+          if (dispatchResult && dispatchResult.status !== 'filtered') {
+            sentForThisEvent++;
+          }
+        } catch (_) {
+          // Per-user dispatch failure — don't abort the whole event
+        }
       }
-      alertedCount.sent++;
+      if (sentForThisEvent > 0) {
+        alertedCount.sent++;
+      } else {
+        alertedCount.failed++;
+        // ROOT CAUSE FIX (RC-6): if NO user received the notification
+        // (e.g. DB outage), delete the dedup key so the next cron tick
+        // can retry. This prevents lost notifications when dispatch fails
+        // transiently.
+        try { await env.APP_CACHE?.delete?.(dedupKey); } catch {}
+      }
     }
 
-    if (alertedCount.sent > 0 || alertedCount.skipped > 0) {
+    // ───────────────────────────────────────────────────────────────────
+    // SECOND PATH: Per-user calendar reminders (15m / 1h / 24h lead time)
+    // ───────────────────────────────────────────────────────────────────
+    // The loop above broadcasts ALL high-impact events to ALL joined users
+    // exactly 1 hour before. This second path respects the user's CHOSEN
+    // lead time per individual event — only users who explicitly set a
+    // reminder receive a notification, at their chosen lead time.
+    //
+    // Deduplication: uses the `fired_at` column on calendar_reminders as
+    // the definitive dedup (atomic UPDATE ... WHERE fired_at IS NULL).
+    // KV dedup is not needed here because the DB CAS is authoritative.
+    if (calendarReminderRepo) {
+      try {
+        await calendarReminderRepo.ensureSchema(env).catch(() => {});
+        const pendingReminders = await calendarReminderRepo.listPending(env);
+        let reminderStats = { dispatched: 0, skipped: 0, failed: 0 };
+
+        for (const reminder of pendingReminders) {
+          // Atomic claim: markFired returns false if another tick already fired it
+          const claimed = await calendarReminderRepo.markFired(env, reminder.id);
+          if (!claimed) {
+            reminderStats.skipped++;
+            continue;
+          }
+
+          const title = `🔔 یادآوری رویداد: ${reminder.event_title || 'تقویم اقتصادی'}`;
+          const message = `${reminder.event_country || ''} ${reminder.event_timestamp ? '— ' + new Date(reminder.event_timestamp).toLocaleString('en-GB') : ''}`;
+
+          try {
+            const dispatchResult = await notificationPlatformRepo.dispatch(env, {
+              userId: String(reminder.user_id),
+              title, message,
+              category: 'calendar',
+              priority: 'medium',
+              channel: 'both',
+              metadata: {
+                event_title: reminder.event_title,
+                event_timestamp: reminder.event_timestamp,
+                event_country: reminder.event_country,
+                lead_minutes: reminder.lead_minutes,
+                reminder_id: reminder.id,
+              },
+            });
+            if (dispatchResult && dispatchResult.status !== 'filtered') {
+              reminderStats.dispatched++;
+            } else {
+              reminderStats.skipped++;
+            }
+          } catch (dispatchErr) {
+            // Per-user dispatch failure — don't abort the batch
+            console.warn(safeError('calendar-reminder-dispatch', dispatchErr));
+            reminderStats.failed++;
+          }
+        }
+
+        if (pendingReminders.length > 0) {
+          console.log(JSON.stringify({
+            scope: 'calendar-reminders-check',
+            ...reminderStats,
+            total: pendingReminders.length,
+          }));
+        }
+      } catch (reminderErr) {
+        console.warn(safeError('calendar-reminders-check', reminderErr));
+      }
+    }
+
+    if (alertedCount.sent > 0 || alertedCount.skipped > 0 || alertedCount.failed > 0) {
       console.log(JSON.stringify({ scope: 'calendar-alerts-check', ...alertedCount }));
     }
   } catch (error) {
@@ -5630,6 +5816,21 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/calendar/events') {
         return await handleCalendarEvents(env);
+      }
+
+      // ── Calendar Reminders (per-user, stored in PostgreSQL) ──
+      // POST   /api/calendar/reminders      — create/update
+      // GET    /api/calendar/reminders      — list user's reminders
+      // DELETE /api/calendar/reminders/:key — delete by event_key
+      if (url.pathname === '/api/calendar/reminders' && request.method === 'POST') {
+        return await calendarReminderHandlers.handleCreate(request, env);
+      }
+      if (url.pathname === '/api/calendar/reminders' && request.method === 'GET') {
+        return await calendarReminderHandlers.handleList(request, env);
+      }
+      if (url.pathname.startsWith('/api/calendar/reminders/') && request.method === 'DELETE') {
+        const eventKey = decodeURIComponent(url.pathname.slice('/api/calendar/reminders/'.length));
+        return await calendarReminderHandlers.handleDelete(request, env, eventKey);
       }
 
       // ── Market Overview (CMC-powered, no auth required) ──
@@ -6477,6 +6678,8 @@ export default {
         const alertId = url.pathname.split('/')[3] || '';
         return await alertHandlers.handleDelete(request, env, alertId);
       }
+
+      // ── Calendar Reminders routes are registered earlier (near /api/calendar/events) ──
 
       // ── Alert Economy: User quota status ──
       if (request.method === 'GET' && url.pathname === '/api/alerts/quota') {

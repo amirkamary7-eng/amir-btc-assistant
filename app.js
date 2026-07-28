@@ -1014,6 +1014,12 @@ async function bootstrapUser() {
         if (adminActions && $('analysis-detail-page')?.classList.contains('active')) {
             adminActions.style.display = isCurrentUserAdmin ? '' : 'none';
         }
+
+        // Sync calendar reminders from backend so they're available across
+        // devices. Non-blocking — runs in background after bootstrap.
+        if (typeof syncRemindersFromBackend === 'function') {
+            syncRemindersFromBackend().catch(() => {});
+        }
     } catch (e) {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);
         // PERFORMANCE + UX FIX: Don't show error card on bootstrap failure.
@@ -6448,7 +6454,7 @@ function renderCalendarV2() {
                         <div class="ni-cal-stat"><div class="ni-cal-stat-label">تأثیر</div><div class="ni-cal-stat-value">${impactLabels[impact] || impactLabels.medium}</div></div>
                     </div>
                     <div class="ni-cal-event-footer">
-                        <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}')">
+                        <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}', '${escapeHtml(e.timestamp || '')}')"">
                             ${hasReminder ? NI_ICONS.bell : NI_ICONS.bellOff}
                             <span>${hasReminder ? 'یادآور فعال' : 'یادآوری'}</span>
                         </button>
@@ -6466,8 +6472,8 @@ function renderCalendarV2() {
 // Event Reminder System
 // ============================================================================
 
-function openReminderSheet(eventKey, title, country, time) {
-    _niCurrentReminderEvent = { key: eventKey, title, country, time };
+function openReminderSheet(eventKey, title, country, time, eventTimestamp) {
+    _niCurrentReminderEvent = { key: eventKey, title, country, time, timestamp: eventTimestamp };
     const sheet = document.getElementById('ni-reminder-sheet');
     if (!sheet) return;
     // Fill event info
@@ -6491,20 +6497,89 @@ function closeReminderSheet() {
     _niCurrentReminderEvent = null;
 }
 
+/**
+ * Map Persian reminder label to lead_minutes for the backend.
+ * Backend accepts: 15, 60, or 1440.
+ */
+function _niReminderWhenToMinutes(when) {
+    if (when === '۱۵ دقیقه قبل' || when === '15m' || when === 15) return 15;
+    if (when === '۱ ساعت قبل' || when === '1h' || when === 60) return 60;
+    if (when === '۲۴ ساعت قبل' || when === '24h' || when === 1440) return 1440;
+    return 60; // default
+}
+
 function setEventReminder(when) {
     if (!_niCurrentReminderEvent) return;
-    _niCalendarReminders[_niCurrentReminderEvent.key] = when;
+    const ev = _niCurrentReminderEvent;
+    // 1. Update local cache immediately (instant UI feedback)
+    _niCalendarReminders[ev.key] = when;
     localStorage.setItem('ni_cal_reminders', JSON.stringify(_niCalendarReminders));
     closeReminderSheet();
     renderCalendarV2();
+
+    // 2. Sync to backend (POST /api/calendar/reminders) — persists across
+    //    devices and enables the cron job to actually fire the notification.
+    //    Fail silently if offline or not in Telegram — the localStorage copy
+    //    still works as a local fallback.
+    if (!API_BASE || !isInTelegram()) return;
+    const leadMinutes = _niReminderWhenToMinutes(when);
+    apiFetch('/api/calendar/reminders', {
+        method: 'POST',
+        body: JSON.stringify({
+            event_key: ev.key,
+            event_title: ev.title || '',
+            event_country: ev.country || '',
+            event_timestamp: ev.timestamp || '',
+            lead_minutes: leadMinutes,
+        }),
+    }).catch(err => {
+        console.warn('[calendar-reminder] sync failed:', err);
+    });
 }
 
 function removeEventReminder() {
     if (!_niCurrentReminderEvent) return;
-    delete _niCalendarReminders[_niCurrentReminderEvent.key];
+    const ev = _niCurrentReminderEvent;
+    // 1. Remove from local cache
+    delete _niCalendarReminders[ev.key];
     localStorage.setItem('ni_cal_reminders', JSON.stringify(_niCalendarReminders));
     closeReminderSheet();
     renderCalendarV2();
+
+    // 2. Delete from backend
+    if (!API_BASE || !isInTelegram()) return;
+    apiFetch('/api/calendar/reminders/' + encodeURIComponent(ev.key), {
+        method: 'DELETE',
+    }).catch(err => {
+        console.warn('[calendar-reminder] delete sync failed:', err);
+    });
+}
+
+/**
+ * Sync reminders from backend → localStorage.
+ * Called on bootstrap to merge server-side reminders with local cache.
+ * Merges (server takes precedence on conflict) so users see their reminders
+ * across devices.
+ */
+async function syncRemindersFromBackend() {
+    if (!API_BASE || !isInTelegram()) return;
+    try {
+        const data = await apiFetch('/api/calendar/reminders');
+        if (data && data.status === 'success' && Array.isArray(data.reminders)) {
+            for (const r of data.reminders) {
+                // Convert lead_minutes back to Persian label for UI
+                let when;
+                if (r.lead_minutes === 15) when = '۱۵ دقیقه قبل';
+                else if (r.lead_minutes === 1440) when = '۲۴ ساعت قبل';
+                else when = '۱ ساعت قبل';
+                _niCalendarReminders[r.event_key] = when;
+            }
+            localStorage.setItem('ni_cal_reminders', JSON.stringify(_niCalendarReminders));
+        }
+    } catch (err) {
+        // Non-fatal — localStorage cache still works
+        console.warn('[calendar-reminder] sync from backend failed:', err);
+    }
 }
 
 function toggleCalReminder(btn) {
