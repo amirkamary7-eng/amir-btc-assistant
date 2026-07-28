@@ -4490,13 +4490,13 @@ function renderForexItem(f) {
     const safeName = escapeHtml(f.name);
     const cat = f.category || 'major';
 
-    // Category config: colors, icons, labels, precision
+    // Category config: colors, SVG icons, labels, precision
     const catConfig = {
-        major:     { color: '#22C55E', icon: 'M',  label: 'Major',     labelFa: 'جفت اصلی',   decimals: 4 },
-        cross:     { color: '#F5A623', icon: 'X',  label: 'Cross',     labelFa: 'کراس',       decimals: 4 },
-        metal:     { color: '#FFD700', icon: 'Au', label: 'Metal',     labelFa: 'فلز گران‌بها', decimals: 2 },
-        index:     { color: '#60A5FA', icon: 'ID', label: 'Index',     labelFa: 'شاخص',       decimals: 0 },
-        commodity: { color: '#F97316', icon: 'Cm', label: 'Commodity', labelFa: 'کالا',       decimals: 0 },
+        major:     { color: '#22C55E', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>', label: 'Major',     labelFa: 'جفت اصلی',   decimals: 4 },
+        cross:     { color: '#F5A623', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', label: 'Cross',     labelFa: 'کراس',       decimals: 4 },
+        metal:     { color: '#FFD700', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14h8M8 10h8M12 6v12"/></svg>', label: 'Metal',     labelFa: 'فلز گران‌بها', decimals: 2 },
+        index:     { color: '#60A5FA', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>', label: 'Index',     labelFa: 'شاخص',       decimals: 0 },
+        commodity: { color: '#F97316', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18M5 22V8l5-4 5 4v14M9 22v-6h4v6M14 22V10l3-2 3 2v12"/></svg>', label: 'Commodity', labelFa: 'کالا',       decimals: 0 },
     };
     const cfg = catConfig[cat] || catConfig.major;
     const decimals = cfg.decimals;
@@ -4523,6 +4523,12 @@ function renderForexItem(f) {
     const changeStr = hasChange ? (change >= 0 ? '+' : '') + change.toFixed(2) + '%' : '—';
     const changeCls = hasChange ? (change >= 0 ? 'up' : 'down') : '';
 
+    // Watchlist state
+    const inWatch = watchlist.includes(f.symbol);
+    const starSvg = inWatch
+        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
+        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+
     // Category icon with premium styling
     const iconBg = `background:${cfg.color}15; color:${cfg.color}; border:1px solid ${cfg.color}30;`;
 
@@ -4530,15 +4536,15 @@ function renderForexItem(f) {
         <div class="mkt-coin-row mkt-forex-row" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" data-action="open-forex" role="listitem">
             <span class="mkt-coin-rank">—</span>
             <div class="mkt-forex-icon" style="${iconBg}">
-                <span>${cfg.icon}</span>
+                ${cfg.svg}
             </div>
             <div class="mkt-coin-info">
                 <span class="mkt-coin-symbol">${safeName}</span>
             </div>
             <span class="mkt-coin-price">${priceStr}</span>
             <span class="mkt-coin-change ${changeCls}">${changeStr}</span>
-            <span class="mkt-coin-star" data-symbol="${safeSymbol}" onclick="event.stopPropagation();" role="button" aria-label="Forex">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.4"><circle cx="12" cy="12" r="10"/></svg>
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? 'حذف از واچ‌لیست' : 'افزودن به واچ‌لیست'}">
+                ${starSvg}
             </span>
         </div>
     `;
@@ -7107,15 +7113,20 @@ function openForexDetail(symbol) {
     const iconEl = document.getElementById('detail-coin-icon');
     if (iconEl) {
         const cat = pair.category || 'major';
-        const catIcons = {
-            major: '💱', cross: '💱', metal: '🥇', index: '📊', commodity: '🛢️',
+        const catColors = { major: '#22C55E', cross: '#F5A623', metal: '#FFD700', index: '#60A5FA', commodity: '#F97316' };
+        const catSvgPaths = {
+            major: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
+            cross: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>',
+            metal: '<circle cx="12" cy="12" r="10"/><path d="M8 14h8M8 10h8M12 6v12"/>',
+            index: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/>',
+            commodity: '<path d="M3 22h18M5 22V8l5-4 5 4v14M9 22v-6h4v6"/>',
         };
+        const color = catColors[cat] || '#F5A623';
+        const path = catSvgPaths[cat] || catSvgPaths.major;
         iconEl.removeAttribute('src');
         iconEl.removeAttribute('data-symbol');
         iconEl.onerror = null;
-        // Use a data-URI SVG with the emoji so the img element shows something clean
-        const emoji = catIcons[cat] || '💱';
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#0B1220" stroke="rgba(245,166,35,0.2)" stroke-width="1"/><text x="40" y="52" font-size="36" text-anchor="middle">${emoji}</text></svg>`;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="${color}15" stroke="${color}30" stroke-width="1"/><g transform="translate(16 16) scale(2)" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</g></svg>`;
         iconEl.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
         iconEl.style.visibility = 'visible';
     }

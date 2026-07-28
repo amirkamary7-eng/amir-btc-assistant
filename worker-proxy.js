@@ -4273,7 +4273,11 @@ async function handleForexData(env) {
         return { price, prev };
       } catch { return null; }
     };
-    const metalsPromise = Promise.all([yahooQuote('GC=F'), yahooQuote('SI=F')])
+    // Fetch metals + indices + commodities from Yahoo Finance in parallel
+    // Yahoo symbols: GC=F (gold), SI=F (silver), DX-Y.NYB (DXY), ^GSPC (S&P500),
+    // ^IXIC (NASDAQ), ^DJI (Dow), ^VIX (VIX), ^TNX (US 10Y yield),
+    // CL=F (crude oil), NG=F (natural gas)
+    const yahooMetals = Promise.all([yahooQuote('GC=F'), yahooQuote('SI=F')])
       .then(async ([g, s]) => {
         // Fallback to goldprice.org if Yahoo failed for either metal
         if (!g || !s) {
@@ -4295,6 +4299,29 @@ async function handleForexData(env) {
         };
       })
       .catch(() => null);
+
+    // Fetch indices + commodities from Yahoo Finance (parallel with metals)
+    // Mapping: FOREX_PAIRS symbol → Yahoo Finance ticker
+    const yahooIndexMap = {
+      'DXY': 'DX-Y.NYB',
+      'SPX': '^GSPC',
+      'NASDAQ': '^IXIC',
+      'DJI': '^DJI',
+      'VIX': '^VIX',
+      'US10Y': '^TNX',
+      'CL1': 'CL=F',
+      'NG1': 'NG=F',
+    };
+    const yahooIndices = Promise.all(
+      Object.entries(yahooIndexMap).map(async ([sym, yahooSym]) => {
+        const q = await yahooQuote(yahooSym);
+        return { sym, price: q?.price || 0, prev: q?.prev || 0 };
+      })
+    ).then(results => {
+      const map = {};
+      results.forEach(r => { if (r.price > 0) map[r.sym] = r; });
+      return map;
+    }).catch(() => ({}));
 
     // BUG 3 fix: fetch a 7-day frankfurter TIME SERIES (in parallel) and compare
     // the two most recent business days. Using "yesterday" alone failed because
@@ -4333,13 +4360,20 @@ async function handleForexData(env) {
         return (b && q) ? q / b : 0;
       };
 
+      const indexData = await yahooIndices;
+
       data = FOREX_PAIRS.map(pair => {
         let price = 0;
         let change = 0;
 
-        // Indices & commodities have no API price — chart-only via TradingView
+        // Indices & commodities: fetch from Yahoo Finance
         if (pair.category === 'index' || pair.category === 'commodity') {
-          return { symbol: pair.symbol, name: pair.name, tvSymbol: pair.tvSymbol, category: pair.category, price: 0, change: 0, isForex: true };
+          const yd = indexData[pair.symbol];
+          if (yd && yd.price > 0) {
+            price = yd.price;
+            if (yd.prev > 0) change = ((price - yd.prev) / yd.prev) * 100;
+          }
+          return { symbol: pair.symbol, name: pair.name, tvSymbol: pair.tvSymbol, category: pair.category, price, change: Math.round(change * 100) / 100, isForex: true };
         }
 
         if (pair.symbol === 'XAUUSD') {
