@@ -6115,14 +6115,15 @@ strong.down { color: var(--red); }
     overflow-x: hidden;
 }
 #dashboard-page .section-header {
-    padding: 24px 0 12px;
+    padding: 20px 0 14px; /* 14px gap from header to cards below */
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
 }
-#dashboard-page .section-header:first-of-type {
-    padding-top: 12px;
+/* First section-header after ticker: tighter top padding for balanced rhythm */
+#dashboard-page .market-ticker + .section-header {
+    padding-top: 14px; /* 14px gap from ticker to section title (overrides 20px) */
 }
 #dashboard-page .section-title {
     font-size: 16px;
@@ -6218,17 +6219,17 @@ strong.down { color: var(--red); }
     border: none;
     color: #020611;
     font-weight: 700;
-    padding: 0 10px; /* reduced horizontal padding (14px → 10px) */
-    height: 36px; /* reduced from 40px */
-    width: auto; /* auto width to fit content */
-    min-width: 110px;
-    border-radius: 10px; /* reduced from 14px */
+    padding: 0 8px; /* tighter horizontal padding */
+    height: 34px; /* refined: 36px → 34px */
+    width: auto;
+    min-width: 105px;
+    border-radius: 9px; /* refined: 10px → 9px */
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px; /* refined: 12px → 11px */
     line-height: 1;
     pointer-events: auto;
     transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
-    box-shadow: 0 4px 14px rgba(245, 166, 35, 0.3);
+    box-shadow: 0 4px 12px rgba(245, 166, 35, 0.28);
     white-space: nowrap;
     display: inline-flex; align-items: center; justify-content: center;
     flex-shrink: 0;
@@ -6243,10 +6244,12 @@ strong.down { color: var(--red); }
 .hero-cta--channel {
     margin-right: auto;
     margin-left: 4%;
+    margin-bottom: 3px; /* move 3px higher than bitunix */
 }
 .hero-cta--bitunix {
     margin-left: auto;
     margin-right: -10px;
+    margin-top: 3px; /* move 3px lower than channel */
 }
 .hero-slider-dots {
     position: absolute;
@@ -6281,7 +6284,7 @@ strong.down { color: var(--red); }
    ========================================================================== */
 .market-ticker {
     overflow: hidden;
-    margin: 0 0 22px; /* 22px gap to market status cards below (was 8px) */
+    margin: 0 0 0; /* gap handled by section-header padding-top */
     border-radius: 14px;
     background: linear-gradient(180deg, rgba(13, 20, 35, 0.85), rgba(9, 14, 26, 0.78));
     backdrop-filter: blur(12px) saturate(160%);
