@@ -411,6 +411,7 @@ const i18n = {
         trend_slightly_bullish: 'صعودی ضعیف', trend_slightly_bearish: 'نزولی ضعیف',
         trend_bearish: 'نزولی', trend_strong_bearish: 'نزولی قوی',
         tab_crypto: 'کریپتو', tab_top_market: 'برترین‌ها', tab_forex: 'فارکس', tab_gainers: 'رشد', tab_losers: 'ریزش',
+        subtab_all: 'همه', subtab_popular: 'محبوب', subtab_btc_pairs: 'جفت BTC',
         analysis_title: 'تحلیل‌های بازار', new_analysis: 'تحلیل جدید',
         news_all: 'همه', news_crypto: 'کریپتو', news_economy: 'اقتصادی', news_forex: 'فارکس', news_calendar: 'تقویم',
         hero_badge: 'کانال تحلیلی', hero_desc: 'سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار', hero_cta: 'عضویت رایگان',
@@ -524,6 +525,7 @@ const i18n = {
         trend_slightly_bullish: 'Slightly Bullish', trend_slightly_bearish: 'Slightly Bearish',
         trend_bearish: 'Bearish', trend_strong_bearish: 'Strong Bearish',
         tab_crypto: 'Crypto', tab_top_market: 'Top Market', tab_forex: 'Forex', tab_gainers: 'Gainers', tab_losers: 'Losers',
+        subtab_all: 'All', subtab_popular: 'Popular', subtab_btc_pairs: 'Pair BTC',
         analysis_title: 'Market Analysis', new_analysis: 'New Analysis',
         news_all: 'All', news_crypto: 'Crypto', news_economy: 'Economy', news_forex: 'Forex', news_calendar: 'Calendar',
         hero_badge: 'Analysis Channel', hero_desc: 'Daily signals, analysis & market education', hero_cta: 'Join Free',
@@ -8240,6 +8242,11 @@ async function loadAlertsFromServer() {
             createdAt: a.created_at
         }));
         localStorage.setItem('price_alerts', JSON.stringify(alerts));
+        // If the coin detail view is open, re-render active alerts so triggered
+        // alerts (now removed from backend's active list) disappear from the UI.
+        if (_currentDetailSymbol && typeof renderActiveAlerts === 'function') {
+            try { renderActiveAlerts(_currentDetailSymbol); } catch (_) {}
+        }
     } catch (e) { console.warn('loadAlertsFromServer:', e); }
 }
 
@@ -8383,6 +8390,11 @@ async function triggerAlert(alert, currentPrice) {
     // the detail view) and shows an immediate in-app toast/popup.
     alerts = alerts.filter(a => a.id !== alert.id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
+    // Reset the sync timer so the next periodic sync waits 2 minutes before
+    // re-fetching from backend. This gives the backend cron time to mark the
+    // alert as 'triggered' — otherwise loadAlertsFromServer would re-add the
+    // alert to local state (it's still 'active' in backend until cron runs).
+    _lastAlertSyncTs = Date.now();
     // Clean, short notification — same format as backend.
     const priceStr = currentPrice >= 1
         ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -8407,13 +8419,20 @@ async function triggerAlert(alert, currentPrice) {
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
 let _alertsLoaded = false;
+let _lastAlertSyncTs = 0;
+const ALERT_SYNC_INTERVAL = 120000; // 2 minutes — sync from backend to remove triggered alerts
+
 async function checkAlerts() {
     const userId = getUserId();
 
-    // Only load alerts from server ONCE — not every 30s
-    if (!_alertsLoaded && alerts.length === 0 && !isGuestUserId(userId) && !isPendingTelegramUserId(userId) && getTelegramUser()?.id) {
+    // Load alerts from server ONCE on first run, then periodically sync (every 2 min)
+    // to remove alerts that were triggered by the backend cron. Without this periodic
+    // sync, triggered alerts remain in the local state and UI indefinitely.
+    const shouldSync = !_alertsLoaded || (Date.now() - _lastAlertSyncTs > ALERT_SYNC_INTERVAL);
+    if (shouldSync && !isGuestUserId(userId) && !isPendingTelegramUserId(userId) && getTelegramUser()?.id) {
         _alertsLoaded = true;
-        await loadAlertsFromServer().catch(() => { _alertsLoaded = false; });
+        _lastAlertSyncTs = Date.now();
+        await loadAlertsFromServer().catch(() => { _alertsLoaded = false; _lastAlertSyncTs = 0; });
     }
 
     const userAlerts = alerts.filter(a => a.userId === userId);
