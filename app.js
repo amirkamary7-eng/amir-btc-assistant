@@ -4270,12 +4270,16 @@ async function loadForexData() {
         if (cached?.length) {
             allForexPairs = cached;
             renderMarket();
+            // Also persist to localStorage for instant cold-open hydration
+            try { localStorage.setItem('forex_data_cache', JSON.stringify({ data: allForexPairs, ts: Date.now() })); } catch {}
             return;
         }
         const res = await apiFetch('/api/forex');
         if (res.status === 'success' && Array.isArray(res.data)) {
             allForexPairs = res.data;
             Cache.set('forex', allForexPairs, 120);
+            // Persist to localStorage for instant cold-open hydration
+            try { localStorage.setItem('forex_data_cache', JSON.stringify({ data: allForexPairs, ts: Date.now() })); } catch {}
             renderMarket();
         }
     } catch (e) {
@@ -11389,6 +11393,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderWatchlist();
     }
 
+    // PERF FIX: Hydrate forex pairs from localStorage for instant watchlist render.
+    // Previously forex was only loaded from API (loadForexData), adding delay.
+    try {
+        const forexCacheStr = localStorage.getItem('forex_data_cache');
+        if (forexCacheStr) {
+            const parsed = JSON.parse(forexCacheStr);
+            if (parsed && parsed.ts && (Date.now() - parsed.ts < 5 * 60 * 1000) && Array.isArray(parsed.data)) {
+                allForexPairs = parsed.data;
+            }
+        }
+    } catch (_) { /* bad cache — ignore */ }
+
     // ROOT-CAUSE FIX (Task 38): Kick off a market data fetch IMMEDIATELY —
     // independently of bootstrapUser(). Previously loadMarketData(true) was
     // only called inside _startDataLoading(), which only runs after
@@ -11412,16 +11428,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     //   - renderDashboardMarketStatus() also no-ops gracefully when called
     //     before globalMarketData is loaded.
     if (API_BASE) {
-        console.log('[TICKER] Independent market fetch fired (parallel to bootstrap)');
-        loadMarketData(true).then(() => {
-            console.log('[TICKER] Independent market fetch completed — allCoins length:', allCoins.length);
+        // PERF FIX: Use force=false (cache-first) for initial load. If cached
+        // data exists in memory Cache, it renders instantly. Then a background
+        // refresh (force=true) fires 2s later to get fresh prices.
+        // Previously force=true ALWAYS hit the API, adding 200-500ms even when
+        // fresh cached data was available from a recent session.
+        loadMarketData(false).then(() => {
             renderMarketTicker();
             renderDashboardMarketStatus();
+            renderWatchlist(); // Re-render watchlist now that allCoins is populated
+            // Background refresh — get truly fresh prices after initial paint
+            setTimeout(() => loadMarketData(true).then(() => {
+                renderMarketTicker();
+                renderDashboardMarketStatus();
+                renderWatchlist();
+            }).catch(() => {}), 2000);
         }).catch(e => {
-            console.warn('[TICKER] Independent market fetch failed:', e?.message || e);
-            // Ticker will keep showing skeleton (or stale cache if it hydrated)
-            // — no need to throw, the polling mechanism will retry in 180s.
+            console.warn('[TICKER] Market fetch failed:', e?.message || e);
         });
+
+        // PERF FIX: Fire forex data load in parallel with market data.
+        // Previously forex was only loaded when user visited the Market tab.
+        // Now it loads on startup so the watchlist (which may contain forex
+        // pairs) renders instantly.
+        if (!allForexPairs.length) {
+            loadForexData().then(() => {
+                renderWatchlist(); // Re-render watchlist with forex data
+            }).catch(() => {});
+        }
     }
 
     // Skeletons for watchlist and news
