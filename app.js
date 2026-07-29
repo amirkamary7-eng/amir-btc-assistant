@@ -5942,8 +5942,16 @@ async function loadNews(force = false, append = false) {
         }
         const container = document.getElementById('news-list');
         if (!container) return;
+
+        // ITEM 2 FIX: Capture the active tab at fetch START. But when force=true
+        // (background refresh from cache-hit path), do NOT show skeleton — the
+        // cached data is already rendered. Showing skeleton overwrites the
+        // visible content causing a "blank then reappear" flash (Item 1 bug).
         const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
-        if (!append && activeTab !== 'calendar' && activeTab !== 'saved') {
+        // Only show skeleton on the FIRST load (no cached data). Background
+        // refreshes (force=true) skip the skeleton to avoid content flashing.
+        const isFirstLoad = !force && !append && !newsCache.length;
+        if (isFirstLoad && activeTab !== 'calendar' && activeTab !== 'saved') {
             container.innerHTML = `
                 <div class="skeleton-hero"></div>
                 ${Array(4).fill(`
@@ -5963,6 +5971,7 @@ async function loadNews(force = false, append = false) {
         let articles = [];
         let hasMore = false;
         let total = 0;
+        let fetchSucceeded = false;
 
         try {
             const json = await apiFetch(`/api/farsi-news?page=${page}&limit=20`);
@@ -5978,6 +5987,7 @@ async function loadNews(force = false, append = false) {
                     ai_status: a.ai_status || 'pending',
                     source_name: a.source_name || a.source || '',
                 }));
+                fetchSucceeded = true;
             }
             hasMore = json.pagination?.hasMore || false;
             total = json.pagination?.total || 0;
@@ -5993,13 +6003,24 @@ async function loadNews(force = false, append = false) {
         } catch (e) {
             console.warn('Farsi news API error:', e);
             // M1 FIX: Distinguish auth failure (401) from genuine "no news".
-            // Previously a 401 (outside Telegram) silently left articles=[] →
-            // renderNews showed "خبری یافت نشد" (no news found) which is
-            // misleading. Now we track the auth failure and renderNews shows
-            // a clear "Open in Telegram to see news" message instead.
             if (e?.status === 401) {
                 _newsAuthFailed = true;
             }
+        }
+
+        // ITEM 1 FIX: If the fetch failed or returned empty, do NOT overwrite
+        // the existing newsCache with an empty array. This was the root cause
+        // of news "disappearing" — a transient API failure would wipe all
+        // cached data. Now we preserve the existing cache and only update
+        // when we have valid new data.
+        if (!fetchSucceeded || articles.length === 0) {
+            // If we have cached data, keep it and just re-render (no blank)
+            if (newsCache.length > 0 && !append) {
+                // Re-render existing cache — don't overwrite with empty
+                const currentTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
+                renderNews(currentTab);
+            }
+            return;
         }
 
         if (append) {
@@ -6020,20 +6041,28 @@ async function loadNews(force = false, append = false) {
         }
 
         Cache.set('news', newsCache, 300);
-        // BUG #2 FIX: Preserve scroll position when re-rendering (not append)
+
+        // ITEM 2 FIX: Re-read the CURRENTLY active tab at render time, not
+        // the tab that was active when the fetch started. If the user switched
+        // tabs during the fetch, we must render the tab they're NOW looking at,
+        // not the stale one. This prevents wrong-content-after-tab-switch bug.
+        const currentTabAtRender = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
         if (!append) {
             const savedScroll = window.scrollY;
-            renderNews(activeTab);
+            renderNews(currentTabAtRender);
             // Restore scroll after re-render
             requestAnimationFrame(() => window.scrollTo(0, savedScroll));
         } else {
             // Append: just re-render, scroll stays naturally
-            renderNews(activeTab);
+            renderNews(currentTabAtRender);
         }
     } catch (e) {
         console.error('News error:', e);
-        const container = document.getElementById('news-list');
-        if (container) container.innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
+        // ITEM 1 FIX: Don't overwrite with error state if we still have data
+        if (!newsCache.length) {
+            const container = document.getElementById('news-list');
+            if (container) container.innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
+        }
     }
 }
 
@@ -6780,8 +6809,21 @@ function renderCalendar() {
             return;
         }
 
-        // Sort by time
-        filteredEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        // ITEM 3 FIX: Sort events by status first (upcoming → live → past),
+        // then by time within each status group. This ensures past events
+        // always appear at the bottom of the list, never at the top.
+        const statusOrder = { upcoming: 0, live: 1, past: 2 };
+        filteredEvents.sort((a, b) => {
+            const sa = statusOrder[a.status] ?? 1;
+            const sb = statusOrder[b.status] ?? 1;
+            if (sa !== sb) return sa - sb;
+            // Within same status: upcoming ascending (soonest first),
+            // past descending (most recent first)
+            if (a.status === 'past') {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            }
+            return new Date(a.timestamp) - new Date(b.timestamp);
+        });
 
         // Group by time period
         const groups = {};
@@ -7021,8 +7063,21 @@ function renderCalendarV2() {
             return;
         }
 
-        // Sort by time
-        filteredEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        // ITEM 3 FIX: Sort events by status first (upcoming → live → past),
+        // then by time within each status group. This ensures past events
+        // always appear at the bottom of the list, never at the top.
+        const statusOrder = { upcoming: 0, live: 1, past: 2 };
+        filteredEvents.sort((a, b) => {
+            const sa = statusOrder[a.status] ?? 1;
+            const sb = statusOrder[b.status] ?? 1;
+            if (sa !== sb) return sa - sb;
+            // Within same status: upcoming ascending (soonest first),
+            // past descending (most recent first)
+            if (a.status === 'past') {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            }
+            return new Date(a.timestamp) - new Date(b.timestamp);
+        });
 
         // ── SIGNATURE GUARD ──
         // Build a compact signature of everything that affects the rendered HTML.
