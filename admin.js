@@ -3578,6 +3578,12 @@ async function loadPublisherSettings() {
         const s = data.settings;
         const el = (id) => document.getElementById(id);
         if (el('tgpub-channel-id')) el('tgpub-channel-id').value = s.channel_id || '';
+        if (el('tgpub-channel-username')) el('tgpub-channel-username').value = s.channel_username || '';
+        // Bot token: show placeholder if set, don't expose the actual token
+        if (el('tgpub-bot-token')) {
+            el('tgpub-bot-token').value = '';
+            el('tgpub-bot-token').placeholder = s.bot_token_set ? '••••••••' + s.bot_token.slice(-4) + ' (تنظیم شده — برای تغییر وارد کنید)' : '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11';
+        }
         if (el('tgpub-rate-limit')) el('tgpub-rate-limit').value = s.rate_limit_ms || 3000;
         if (el('tgpub-enabled')) el('tgpub-enabled').checked = !!s.enabled;
         if (el('tgpub-auto-news')) el('tgpub-auto-news').checked = !!s.auto_publish_news;
@@ -3606,6 +3612,8 @@ async function savePublisherSettings() {
     const payload = {
         enabled: !!(el('tgpub-enabled') && el('tgpub-enabled').checked),
         channel_id: (el('tgpub-channel-id') && el('tgpub-channel-id').value || '').trim(),
+        channel_username: (el('tgpub-channel-username') && el('tgpub-channel-username').value || '').trim(),
+        bot_token: (el('tgpub-bot-token') && el('tgpub-bot-token').value || '').trim(),
         rate_limit_ms: Number(el('tgpub-rate-limit') && el('tgpub-rate-limit').value) || 3000,
         auto_publish_news: !!(el('tgpub-auto-news') && el('tgpub-auto-news').checked),
         auto_publish_calendar: !!(el('tgpub-auto-calendar') && el('tgpub-auto-calendar').checked),

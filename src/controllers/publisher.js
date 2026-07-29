@@ -49,6 +49,8 @@ export function createPublisherHandlers(deps) {
   const DEFAULT_SETTINGS = {
     enabled: false,
     channel_id: '',
+    channel_username: '',
+    bot_token: '', // Custom bot token (overrides env.TELEGRAM_BOT_TOKEN if set)
     rate_limit_ms: 3000,
     auto_publish_news: false,
     news_filters: {
@@ -85,11 +87,37 @@ export function createPublisherHandlers(deps) {
     return settings;
   }
 
+  /**
+   * Create a modified env with the custom bot token from publisher settings.
+   * If settings.bot_token is set, it overrides env.TELEGRAM_BOT_TOKEN.
+   * This allows the admin to change the bot without touching env vars.
+   */
+  function withPublisherBotToken(env, settings) {
+    if (settings && settings.bot_token) {
+      return { ...env, TELEGRAM_BOT_TOKEN: settings.bot_token };
+    }
+    return env;
+  }
+
   async function handleGetSettings(request, env) {
     const { error } = await requireAdmin(request, env);
     if (error) return error;
     const settings = await readSettings(env);
-    return jsonResponse({ status: 'success', settings }, {}, env);
+    // Mask bot_token for security — show only last 4 chars
+    const maskedSettings = { ...settings };
+    if (maskedSettings.bot_token && !maskedSettings.bot_token.includes('•')) {
+      const token = maskedSettings.bot_token;
+      maskedSettings.bot_token = token.length > 8
+        ? '••••••••' + token.slice(-4)
+        : '••••';
+      maskedSettings.bot_token_set = true;
+    } else if (maskedSettings.bot_token) {
+      // Already masked (shouldn't happen, but safety)
+      maskedSettings.bot_token_set = true;
+    } else {
+      maskedSettings.bot_token_set = false;
+    }
+    return jsonResponse({ status: 'success', settings: maskedSettings }, {}, env);
   }
 
   async function handleUpdateSettings(request, env) {
@@ -103,6 +131,15 @@ export function createPublisherHandlers(deps) {
     const next = { ...current };
     if (typeof payload.enabled === 'boolean') next.enabled = payload.enabled;
     if (typeof payload.channel_id === 'string') next.channel_id = String(payload.channel_id).trim().slice(0, 64);
+    if (typeof payload.channel_username === 'string') next.channel_username = String(payload.channel_username).trim().slice(0, 64);
+    // Only update bot_token if a new non-empty, non-masked value is provided
+    if (typeof payload.bot_token === 'string') {
+      const tokenVal = String(payload.bot_token).trim();
+      if (tokenVal && !tokenVal.includes('•')) {
+        next.bot_token = tokenVal.slice(0, 256);
+      }
+      // If empty or masked (••••), keep the existing bot_token
+    }
     if (payload.rate_limit_ms != null) {
       const v = Number(payload.rate_limit_ms);
       if (!Number.isFinite(v)) return buildBodyFieldValidationError(env, 'rate_limit_ms', 'must be a number');
@@ -160,45 +197,39 @@ export function createPublisherHandlers(deps) {
 
   // ── Message Templates ───────────────────────────────────────────────────
   // Returns: { text, imageUrl, buttons: [{text, url}], parseMode: 'HTML' }
+  //
+  // DESIGN PRINCIPLES (items 2-5):
+  // - NO prefix labels like "خبر", "تحلیل", "News", "Analysis" at the top
+  // - Start directly with the TITLE (bold)
+  // - Short, smart summary (3-5 lines max, ~500 chars) to create curiosity
+  // - Image sent via sendPhoto when available (title + summary in caption)
+  // - Single button at the bottom to open Mini App
+  // - Messages are SHORT and PROFESSIONAL — user should want to open the app
 
   function buildNewsMessage(env, article, overrides = {}) {
-    const settings = null; // fetched by caller; not needed here
     const title = (overrides.title != null ? overrides.title : article.title) || '';
-    const summaryRaw = (overrides.summary != null ? overrides.summary : (article.ai_summary || article.body || ''));
+    const summaryRaw = (overrides.summary != null ? overrides.summary : (article.ai_summary || article.summary || article.body || ''));
     const summary = summaryRaw || '';
-    const source = (overrides.source != null ? overrides.source : (article.source_name || article.source || ''));
-    const showSource = overrides.show_source !== false;
-    const isBreaking = overrides.is_breaking != null ? overrides.is_breaking : (article.is_breaking || article.priority === 'breaking');
-    const headerEmoji = isBreaking ? '🚨' : '📰';
-    const headerLabel = isBreaking ? 'خبر فوری' : 'خبر';
+    const imageUrl = (overrides.image_url != null ? overrides.image_url : (article.image || '')) || '';
 
     const refId = article.url_hash || hashUrl(article.url);
     const deepLink = buildDeepLink(env, 'news', refId);
-    const customNote = overrides.custom_note ? `\n\n⚠️ ${escapeHtml(overrides.custom_note)}\n` : '';
+    const customNote = overrides.custom_note ? `\n\n⚠️ ${escapeHtml(overrides.custom_note)}` : '';
 
+    // Template: Title (bold) → short summary (3-5 lines) → button
     const lines = [];
-    lines.push(`<b>${headerEmoji} ${escapeHtml(headerLabel)}</b>`);
-    lines.push('');
-    lines.push(`<b>${escapeHtml(title)}</b>`);
-    if (summary) lines.push(`\n${escapeHtml(truncate(summary, 1500))}`);
-    if (showSource && source) {
-      lines.push('');
-      lines.push('──────────────');
-      lines.push(`📰 <b>منبع:</b> ${escapeHtml(truncate(source, 80))}`);
-      lines.push('──────────────');
-    }
-    lines.push('');
-    lines.push('👇 مطالعه متن کامل در Mini App');
+    if (title) lines.push(`<b>${escapeHtml(title)}</b>`);
+    if (summary) lines.push(`\n${escapeHtml(truncate(summary, 500))}`);
     if (customNote) lines.push(customNote);
 
     const text = lines.join('\n');
     const buttons = deepLink
-      ? [[{ text: '📲 مشاهده خبر در Mini App', url: deepLink }]]
+      ? [[{ text: '📱 مشاهده کامل در ربات', url: deepLink }]]
       : [];
 
     return {
       text,
-      imageUrl: null,
+      imageUrl: imageUrl || null,
       buttons,
       parseMode: 'HTML',
       deepLink,
@@ -213,32 +244,39 @@ export function createPublisherHandlers(deps) {
     const impact = (overrides.impact != null ? overrides.impact : (event.impact || ''));
     const impactLower = String(impact).toLowerCase();
     const impactEmoji = impactLower === 'high' ? '🔴' : impactLower === 'medium' ? '🟡' : '🟢';
-    const impactLabel = impactLower === 'high' ? 'High' : impactLower === 'medium' ? 'Medium' : 'Low';
+    const impactLabel = impactLower === 'high' ? 'تأثیر بالا' : impactLower === 'medium' ? 'تأثیر متوسط' : 'تأثیر کم';
     const time = (overrides.time != null ? overrides.time : (event.time || ''));
     const forecast = (overrides.forecast != null ? overrides.forecast : (event.forecast || ''));
     const previous = (overrides.previous != null ? overrides.previous : (event.previous || ''));
     const actual = (overrides.actual != null ? overrides.actual : (event.actual || ''));
+    const customNote = overrides.custom_note ? `\n\n⚠️ ${escapeHtml(overrides.custom_note)}` : '';
 
     const refId = String(event.id || event.event_id || '').slice(0, 64) || String(eventName).slice(0, 64);
     const deepLink = buildDeepLink(env, 'calendar', refId);
-    const customNote = overrides.custom_note ? `\n⚠️ ${escapeHtml(overrides.custom_note)}\n` : '';
 
+    // Template: Event name (bold) → impact + time + data → button
     const lines = [];
-    lines.push('<b>📅 رویداد اقتصادی</b>');
+    if (eventName) lines.push(`<b>${escapeHtml(eventName)}</b>`);
     lines.push('');
-    if (country) lines.push(`${escapeHtml(country)}`);
-    if (eventName) lines.push(`\n<b>${escapeHtml(eventName)}</b>`);
-    if (impact) lines.push(`\nImpact: ${impactEmoji} <b>${escapeHtml(impactLabel)}</b>`);
-    if (time) lines.push(`\nزمان: <b>${escapeHtml(time)}</b>`);
-    if (forecast) lines.push(`Forecast: <code>${escapeHtml(forecast)}</code>`);
-    if (previous) lines.push(`Previous: <code>${escapeHtml(previous)}</code>`);
-    if (actual) lines.push(`Actual: <code>${escapeHtml(actual)}</code>`);
-    lines.push('');
-    lines.push('👇 مشاهده در Mini App');
+
+    // Data row: country + impact badge
+    const dataParts = [];
+    if (country) dataParts.push(escapeHtml(country));
+    if (impact) dataParts.push(`${impactEmoji} ${escapeHtml(impactLabel)}`);
+    if (time) dataParts.push(`🕐 ${escapeHtml(time)}`);
+    if (dataParts.length) lines.push(dataParts.join(' · '));
+
+    // Forecast/Previous/Actual
+    const valueParts = [];
+    if (previous) valueParts.push(`قبلی: <code>${escapeHtml(previous)}</code>`);
+    if (forecast) valueParts.push(`پیش‌بینی: <code>${escapeHtml(forecast)}</code>`);
+    if (actual) valueParts.push(`واقعی: <code>${escapeHtml(actual)}</code>`);
+    if (valueParts.length) lines.push(valueParts.join(' · '));
+
     if (customNote) lines.push(customNote);
 
     const text = lines.join('\n');
-    const buttons = deepLink ? [[{ text: '📊 مشاهده در Mini App', url: deepLink }]] : [];
+    const buttons = deepLink ? [[{ text: '📅 مشاهده کامل در ربات', url: deepLink }]] : [];
 
     return { text, imageUrl: null, buttons, parseMode: 'HTML', deepLink, refId, type: 'calendar' };
   }
@@ -247,30 +285,25 @@ export function createPublisherHandlers(deps) {
     const coin = (overrides.coin != null ? overrides.coin : (analysis.coin || '')).toUpperCase();
     const title = (overrides.title != null ? overrides.title : (analysis.title || ''));
     const summary = (overrides.summary != null ? overrides.summary : (analysis.summary || analysis.content || ''));
-    const marketState = (overrides.market_state != null ? overrides.market_state : (analysis.market_state || analysis.trend || ''));
-    const symbol = (overrides.symbol != null ? overrides.symbol : coin);
     const imageUrl = (overrides.image_url != null ? overrides.image_url : (analysis.image || '')) || '';
+    const customNote = overrides.custom_note ? `\n\n⚠️ ${escapeHtml(overrides.custom_note)}` : '';
 
     const refId = String(analysis.id || '').slice(0, 64);
     const deepLink = buildDeepLink(env, 'analysis', refId);
-    const customNote = overrides.custom_note ? `\n\n⚠️ ${escapeHtml(overrides.custom_note)}\n` : '';
 
+    // Template: Title (bold) → short summary (3-5 lines) → button
+    // NO prefix like "📈 تحلیل BTC" — just the title directly
     const lines = [];
-    lines.push(`<b>📈 تحلیل ${escapeHtml(coin || 'بازار')}</b>`);
-    lines.push('');
-    if (title) lines.push(`<b>${escapeHtml(title)}</b>`);
-    if (summary) lines.push(`\n${escapeHtml(truncate(summary, 1200))}`);
-    if (marketState) {
-      lines.push('');
-      lines.push(`📊 وضعیت بازار: <b>${escapeHtml(marketState)}</b>`);
+    if (title) {
+      lines.push(`<b>${escapeHtml(title)}</b>`);
+    } else if (coin) {
+      lines.push(`<b>${escapeHtml(coin)}</b>`);
     }
-    if (symbol) lines.push(`🏷 نماد: <code>${escapeHtml(symbol)}</code>`);
-    lines.push('');
-    lines.push('👇 مطالعه تحلیل کامل در Mini App');
+    if (summary) lines.push(`\n${escapeHtml(truncate(summary, 500))}`);
     if (customNote) lines.push(customNote);
 
     const text = lines.join('\n');
-    const buttons = deepLink ? [[{ text: '📖 مطالعه تحلیل کامل', url: deepLink }]] : [];
+    const buttons = deepLink ? [[{ text: '📱 مشاهده کامل در ربات', url: deepLink }]] : [];
 
     return { text, imageUrl, buttons, parseMode: 'HTML', deepLink, refId, type: 'analysis' };
   }
@@ -281,19 +314,15 @@ export function createPublisherHandlers(deps) {
     const imageUrl = (overrides.image_url != null ? overrides.image_url : (ann.image || '')) || '';
     const refId = String(ann.id || 'a').slice(0, 64);
     const deepLink = buildDeepLink(env, 'announcement', refId);
-    const customNote = overrides.custom_note ? `\n\n⚠️ ${escapeHtml(overrides.custom_note)}\n` : '';
+    const customNote = overrides.custom_note ? `\n\n⚠️ ${escapeHtml(overrides.custom_note)}` : '';
 
     const lines = [];
-    lines.push('<b>📢 اطلاعیه</b>');
-    lines.push('');
     if (title) lines.push(`<b>${escapeHtml(title)}</b>`);
-    if (body) lines.push(`\n${escapeHtml(truncate(body, 2000))}`);
-    lines.push('');
-    lines.push('👇 مشاهده در Mini App');
+    if (body) lines.push(`\n${escapeHtml(truncate(body, 1000))}`);
     if (customNote) lines.push(customNote);
 
     const text = lines.join('\n');
-    const buttons = deepLink ? [[{ text: '📲 مشاهده در Mini App', url: deepLink }]] : [];
+    const buttons = deepLink ? [[{ text: '📱 مشاهده در ربات', url: deepLink }]] : [];
     return { text, imageUrl, buttons, parseMode: 'HTML', deepLink, refId, type: 'announcement' };
   }
 
@@ -525,9 +554,10 @@ export function createPublisherHandlers(deps) {
     if (!settings.channel_id) {
       return jsonResponse({ status: 'error', message: 'شناسه کانال تنظیم نشده' }, { status: 400 }, env);
     }
-    const botToken = String(env.TELEGRAM_BOT_TOKEN || '');
+    // Use custom bot token from settings if available, otherwise env var
+    const botToken = String(settings.bot_token || env.TELEGRAM_BOT_TOKEN || '');
     if (!botToken || botToken === 'REPLACE_WITH_TOKEN') {
-      return jsonResponse({ status: 'error', message: 'TELEGRAM_BOT_TOKEN تنظیم نشده' }, { status: 400 }, env);
+      return jsonResponse({ status: 'error', message: 'Bot Token تنظیم نشده — در تنظیمات انتشار وارد کنید' }, { status: 400 }, env);
     }
     try {
       const apiUrl = `https://api.telegram.org/bot${botToken}/getChat`;
@@ -641,10 +671,11 @@ export function createPublisherHandlers(deps) {
     if (!settings.channel_id) return jsonResponse({ status: 'error', message: 'شناسه کانال تنظیم نشده' }, { status: 400 }, env);
 
     const tgPayload = buildTelegramPayload(settings.channel_id, built);
+    const sendEnv = withPublisherBotToken(env, settings);
     const t0 = Date.now();
     let result, sendError;
     try {
-      result = await sendTelegramMessage(env, tgPayload, { retries: 1, timeoutMs: 12000 });
+      result = await sendTelegramMessage(sendEnv, tgPayload, { retries: 1, timeoutMs: 12000 });
     } catch (e) {
       sendError = e;
     }
@@ -761,9 +792,10 @@ export function createPublisherHandlers(deps) {
         }
 
         const tgPayload = buildTelegramPayload(settings.channel_id, built);
+        const sendEnv = withPublisherBotToken(env, settings);
         let result, sendError;
         try {
-          result = await sendTelegramMessage(env, tgPayload, { retries: 1, timeoutMs: 12000 });
+          result = await sendTelegramMessage(sendEnv, tgPayload, { retries: 1, timeoutMs: 12000 });
         } catch (e) { sendError = e; }
         const durationMs = Date.now() - t0;
 

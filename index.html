@@ -2428,11 +2428,20 @@
                     <div class="tgpub-panel" id="tgpub-panel-settings">
                         <div class="pub-settings-grid">
                             <div class="pub-settings-card">
-                                <div class="pub-card-section-title">تنظیمات کلی</div>
+                                <div class="pub-card-section-title">تنظیمات کانال تلگرام</div>
                                 <div class="pub-form">
                                     <div class="pub-form-field">
-                                        <label>شناسه کانال</label>
+                                        <label>Bot Token</label>
+                                        <input type="text" id="tgpub-bot-token" class="pub-input" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" style="direction:ltr;text-align:right;" autocomplete="off">
+                                        <small style="color:var(--text-sub);font-size:11px;margin-top:4px;display:block;">توکن بات را اینجا وارد کنید — نیازی به تغییر Environment نیست</small>
+                                    </div>
+                                    <div class="pub-form-field">
+                                        <label>شناسه کانال (Chat ID)</label>
                                         <input type="text" id="tgpub-channel-id" class="pub-input" placeholder="@username یا -100123456" style="direction:ltr;text-align:right;">
+                                    </div>
+                                    <div class="pub-form-field">
+                                        <label>یوزرنیم کانال (اختیاری)</label>
+                                        <input type="text" id="tgpub-channel-username" class="pub-input" placeholder="@my_channel" style="direction:ltr;text-align:right;">
                                     </div>
                                     <div class="pub-form-field">
                                         <label>فاصله بین ارسال‌ها (میلی‌ثانیه) — ۱۰۰۰ تا ۱۰۰۰۰</label>
