@@ -274,7 +274,17 @@
         <div class="mkt-header">
             <div class="mkt-header-left">
                 <div class="mkt-header-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="5" y1="3" x2="5" y2="21"/><rect x="3.5" y="7" width="3" height="7" rx="0.8" fill="#22C55E" fill-opacity="0.85" stroke="none"/><line x1="12" y1="2" x2="12" y2="22"/><rect x="10.5" y="9" width="3" height="5" rx="0.8" fill="#EF4444" fill-opacity="0.85" stroke="none"/><line x1="19" y1="5" x2="19" y2="19"/><rect x="17.5" y="8" width="3" height="8" rx="0.8" fill="#22C55E" fill-opacity="0.85" stroke="none"/></svg>
+                    <svg width="26" height="26" viewBox="0 0 28 28" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <!-- Candlestick 1 (green/bullish) -->
+                        <line x1="6" y1="4" x2="6" y2="24" stroke="#22C55E" stroke-width="1.2" opacity="0.5"/>
+                        <rect x="4" y="8" width="4" height="10" rx="1" fill="#22C55E" fill-opacity="0.9" stroke="#22C55E" stroke-width="0.5" stroke-opacity="0.6"/>
+                        <!-- Candlestick 2 (red/bearish) -->
+                        <line x1="14" y1="3" x2="14" y2="25" stroke="#EF4444" stroke-width="1.2" opacity="0.5"/>
+                        <rect x="12" y="10" width="4" height="7" rx="1" fill="#EF4444" fill-opacity="0.9" stroke="#EF4444" stroke-width="0.5" stroke-opacity="0.6"/>
+                        <!-- Candlestick 3 (green/bullish, taller — showing growth) -->
+                        <line x1="22" y1="5" x2="22" y2="23" stroke="#22C55E" stroke-width="1.2" opacity="0.5"/>
+                        <rect x="20" y="7" width="4" height="12" rx="1" fill="#22C55E" fill-opacity="0.9" stroke="#22C55E" stroke-width="0.5" stroke-opacity="0.6"/>
+                    </svg>
                 </div>
                 <div class="mkt-header-text">
                     <h2 class="mkt-title" data-i18n="market">بازار</h2>
@@ -893,7 +903,7 @@
             <span data-i18n="dashboard">داشبورد</span>
         </button>
         <button class="nav-item" data-page="market-page" onclick="switchTab('market-page', this)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="5" y1="3" x2="5" y2="21"/><rect x="3.5" y="7" width="3" height="7" rx="0.8" fill="#22C55E" fill-opacity="0.85" stroke="none"/><line x1="12" y1="2" x2="12" y2="22"/><rect x="10.5" y="9" width="3" height="5" rx="0.8" fill="#EF4444" fill-opacity="0.85" stroke="none"/><line x1="19" y1="5" x2="19" y2="19"/><rect x="17.5" y="8" width="3" height="8" rx="0.8" fill="#22C55E" fill-opacity="0.85" stroke="none"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
             <span data-i18n="market">بازار</span>
         </button>
         <button class="nav-item" data-page="analysis-page" onclick="switchTab('analysis-page', this)">
