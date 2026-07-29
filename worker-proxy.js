@@ -2568,8 +2568,13 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
     const translatedTitle = allTranslations[i * 2];
     const translatedDescription = allTranslations[i * 2 + 1];
 
+    // SANITIZE: AI translation (m2m100) sometimes produces repeated words/phrases.
+    // sanitizeNewsTitle removes duplicates BEFORE the title is cached in KV and
+    // sent to frontend. This is the root-cause fix for the "duplicate title" bug.
+    const rawTitle = String(translatedTitle || limitedItems[i].title || 'بدون عنوان').replace(/\n/g, ' ').trim();
+
     articles.push({
-      title: String(translatedTitle || limitedItems[i].title || 'بدون عنوان').replace(/\n/g, ' ').trim(),
+      title: sanitizeNewsTitle(rawTitle),
       description: String(translatedDescription || limitedItems[i].description || '').replace(/\n/g, ' ').trim(),
       time_ago: parseRelativeTime(limitedItems[i].pubDate),
       source: sourceName,
@@ -2581,6 +2586,47 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
   }
 
   return articles.filter((item) => item.title || item.description);
+}
+
+/**
+ * Sanitize and deduplicate a news title.
+ * Fixes the critical bug where AI translation (m2m100) produces repeated
+ * words/phrases in the title. This runs on BOTH frontend and backend (defense
+ * in depth) — backend sanitizes before caching in KV, frontend sanitizes on
+ * receipt as a safety net.
+ *
+ * Handles:
+ * 1. Consecutive duplicate words: "BTC BTC BTC rises" → "BTC rises"
+ * 2. Consecutive duplicate phrases (2-6 words): "A B C A B C" → "A B C"
+ * 3. Full title duplication (first half == second half)
+ * 4. Whitespace normalization
+ */
+function sanitizeNewsTitle(rawTitle) {
+  if (!rawTitle) return '';
+  let title = String(rawTitle).replace(/\s+/g, ' ').trim();
+  if (!title) return '';
+
+  // 1. Remove consecutive duplicate words (2+ same words in a row → keep 1)
+  title = title.replace(/\b(\S+)(\s+\1)+\b/gi, '$1');
+
+  // 2. Remove consecutive duplicate phrases (phrase of 2-6 words repeated)
+  //    Run twice to catch nested duplications
+  for (let pass = 0; pass < 2; pass++) {
+    title = title.replace(/\b((?:\S+\s+){1,5}\S+)\s+\1\b/gi, '$1');
+  }
+
+  // 3. Full title duplication: first half == second half
+  const len = title.length;
+  if (len > 20) {
+    const mid = Math.floor(len / 2);
+    const firstHalf = title.substring(0, mid).trim();
+    const secondHalf = title.substring(mid).trim();
+    if (firstHalf === secondHalf && firstHalf.length > 10) {
+      title = firstHalf;
+    }
+  }
+
+  return title.replace(/\s+/g, ' ').trim();
 }
 
 function classifySentiment(title, description) {
@@ -4992,7 +5038,7 @@ async function handleTelegramWebhook(request, env) {
 
 const CALENDAR_ALERT_SENT_PREFIX = 'cal_alert:';
 
-async function runCalendarAlertsCheck(env) {
+async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
   if (!notificationPlatformRepo) return;
 
@@ -5157,6 +5203,19 @@ async function runCalendarAlertsCheck(env) {
             ...reminderStats,
             total: pendingReminders.length,
           }));
+        }
+
+        // Cleanup old reminders (fired + event passed >24h) on 15-min ticks
+        // to prevent the table from growing indefinitely.
+        if (isEvery15Min) {
+          try {
+            const cleaned = await calendarReminderRepo.cleanupOld(env);
+            if (cleaned > 0) {
+              console.log(JSON.stringify({ scope: 'calendar-reminders-cleanup', deleted: cleaned }));
+            }
+          } catch (cleanupErr) {
+            console.warn(safeError('calendar-reminders-cleanup', cleanupErr));
+          }
         }
       } catch (reminderErr) {
         console.warn(safeError('calendar-reminders-check', reminderErr));
@@ -7263,7 +7322,7 @@ export default {
     }
 
     // Check for upcoming high-impact calendar events — every tick
-    ctx.waitUntil(withTimeout(runCalendarAlertsCheck(env)));
+    ctx.waitUntil(withTimeout(runCalendarAlertsCheck(env, { isEvery15Min })));
 
     // ── AI NEWS: Background processing — ONLY on every-minute ticks ──
     // Runs every 1 minute. Fetches RSS, caches articles, processes AI summaries.

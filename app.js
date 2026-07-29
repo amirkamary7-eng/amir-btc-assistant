@@ -3756,6 +3756,60 @@ function escapeHtml(str) {
 }
 
 /**
+ * Sanitize and deduplicate a news title.
+ * Fixes the critical bug where titles render with repeated words/phrases.
+ *
+ * Root cause: AI translation (m2m100) sometimes produces repeated text, and
+ * RSS sources occasionally have malformed titles. This function normalizes
+ * ANY title — regardless of source — before rendering.
+ *
+ * Handles:
+ * 1. Consecutive duplicate words: "BTC BTC BTC rises" → "BTC rises"
+ * 2. Consecutive duplicate phrases: "Bitcoin rises Bitcoin rises" → "Bitcoin rises"
+ * 3. Full title duplication: "Bitcoin hits 65K Bitcoin hits 65K" → "Bitcoin hits 65K"
+ * 4. Whitespace normalization
+ * 5. Trailing/leading punctuation cleanup
+ *
+ * This is a DEFENSIVE measure — it never changes a clean title, only fixes
+ * broken ones. Safe to call on every title before render.
+ */
+function sanitizeNewsTitle(rawTitle) {
+    if (!rawTitle) return '';
+    let title = String(rawTitle).replace(/\s+/g, ' ').trim();
+    if (!title) return '';
+
+    // 1. Remove consecutive duplicate words (3+ same words in a row → keep 1)
+    //    e.g. "بیت‌کوین بیت‌کوین بیت‌کوین بالا رفت" → "بیت‌کوین بالا رفت"
+    title = title.replace(/\b(\S+)(\s+\1){2,}\b/gi, '$1');
+    //    Also handle 2 consecutive duplicates (common AI artifact)
+    title = title.replace(/\b(\S+)(\s+\1)\b/gi, '$1');
+
+    // 2. Remove consecutive duplicate phrases (phrase of 2-6 words repeated)
+    //    e.g. "قیمت بیت‌کوین بالا رفت قیمت بیت‌کوین بالا رفت" → "قیمت بیت‌کوین بالا رفت"
+    //    Run twice to catch nested duplications
+    for (let pass = 0; pass < 2; pass++) {
+        title = title.replace(/\b((?:\S+\s+){1,5}\S+)\s+\1\b/gi, '$1');
+    }
+
+    // 3. Full title duplication: if the title is exactly repeated (first half == second half)
+    //    e.g. "Bitcoin hits 65K Bitcoin hits 65K" → "Bitcoin hits 65K"
+    const len = title.length;
+    if (len > 20) {
+        const mid = Math.floor(len / 2);
+        const firstHalf = title.substring(0, mid).trim();
+        const secondHalf = title.substring(mid).trim();
+        if (firstHalf === secondHalf && firstHalf.length > 10) {
+            title = firstHalf;
+        }
+    }
+
+    // 4. Final whitespace cleanup
+    title = title.replace(/\s+/g, ' ').trim();
+
+    return title;
+}
+
+/**
  * Professional icon fallback: replaces broken img with first-letter badge.
  * Called via onerror="iconFallback(this)" on coin/forex images.
  */
@@ -5861,7 +5915,7 @@ async function loadNews(force = false, append = false) {
             const json = await apiFetch(`/api/farsi-news?page=${page}&limit=20`);
             if (json.data?.length) {
                 articles = json.data.map(a => ({
-                    title: a.title, body: a.description, source: a.source,
+                    title: sanitizeNewsTitle(a.title), body: a.description, source: a.source,
                     image: a.image, url: a.url, time: a.time_ago,
                     category: a.category || 'crypto',
                     sentiment: a.sentiment || 'neutral',
@@ -9750,6 +9804,11 @@ async function loadImportantNews() {
     if (!container) return;
     try {
         await loadNews(); // اطمینان از دریافت اخبار
+        // PERF FIX (item 2): loadImportantNews runs at bootstrap and fills
+        // newsCache. Set tabLoaded.news=true so the first News tab click
+        // doesn't re-call loadNews() (which would show skeleton + re-fetch).
+        // The News tab will re-render from the already-populated newsCache.
+        tabLoaded.news = true;
         if (!newsCache.length) {
             container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
             return;

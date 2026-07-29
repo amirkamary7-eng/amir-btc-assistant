@@ -109,8 +109,18 @@ export function createCalendarReminderRepository(deps) {
 
   /**
    * List reminders that should fire now (for the cron job).
-   * A reminder fires when: now >= event_timestamp - lead_minutes AND
-   * event_timestamp > now (event hasn't passed yet) AND fired_at IS NULL.
+   *
+   * A reminder fires when:
+   *   1. fired_at IS NULL (not yet fired)
+   *   2. event_timestamp IS NOT NULL
+   *   3. now >= event_timestamp - lead_minutes (the lead time has arrived)
+   *   4. now <= event_timestamp + 1 hour (grace period — event just started/passed)
+   *
+   * ROOT CAUSE FIX (item 3): Previously condition 4 was `event_timestamp > NOW()`
+   * which meant if the cron missed the exact trigger window (e.g. cron delay, or
+   * the reminder was set with a lead time that already passed), the reminder
+   * would NEVER fire. Now we allow firing up to 1 hour AFTER the event time so
+   * users still get notified even if the cron was slightly late.
    *
    * Returns rows with user_id for per-user dispatch.
    */
@@ -122,11 +132,40 @@ export function createCalendarReminderRepository(deps) {
        WHERE fired_at IS NULL
          AND event_timestamp IS NOT NULL
          AND event_timestamp <= NOW() + (lead_minutes || ' minutes')::interval
-         AND event_timestamp > NOW()
+         AND event_timestamp >= NOW() - INTERVAL '1 hour'
        ORDER BY event_timestamp ASC
        LIMIT 200`,
     );
     return result.rows.map(serializeRow);
+  }
+
+  /**
+   * Delete old reminders that have fired AND whose event has passed by more
+   * than 24 hours. This prevents the table from growing indefinitely.
+   * Called by the cron on 15-minute ticks.
+   */
+  async function cleanupOld(env) {
+    if (!isDatabaseConfigured(env)) return 0;
+    try {
+      const result = await queryDb(
+        env,
+        `DELETE FROM calendar_reminders
+         WHERE fired_at IS NOT NULL
+           AND event_timestamp < NOW() - INTERVAL '24 hours'
+         RETURNING id`,
+      );
+      return result.rows.length;
+    } catch (e) {
+      console.warn('Calendar reminder cleanup error:', e.message);
+      return 0;
+    }
+  }
+
+  /**
+   * Check if database is configured (for cleanup guard).
+   */
+  function isDatabaseConfigured(env) {
+    return env?.DATABASE_URL || env?.HYPERDRIVE_CONNECTION_STRING || env?.DB;
   }
 
   /**
@@ -162,6 +201,7 @@ export function createCalendarReminderRepository(deps) {
     listByUser,
     listPending,
     markFired,
+    cleanupOld,
     serializeRow,
   });
 }
