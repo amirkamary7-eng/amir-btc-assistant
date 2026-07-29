@@ -4728,22 +4728,30 @@ function renderMarket() {
     // Tab-based rendering (no search)
     if (currentMarketTab === 'forex') {
         if (!allForexPairs.length) {
-            // Show skeleton or loading for forex
-            list.innerHTML = Array(5).fill(`
-                <div class="market-skeleton">
-                    <div class="market-skeleton-left">
-                        <div class="market-skeleton-icon"></div>
-                        <div class="market-skeleton-text">
-                            <div class="market-skeleton-line"></div>
-                            <div class="market-skeleton-line"></div>
-                        </div>
+            // ROOT CAUSE FIX: Show a proper error state instead of infinite skeleton.
+            // Previously, if forex data failed to load (auth required, network error),
+            // the skeleton showed FOREVER with no feedback to the user.
+            // Now we show a clear message with a retry button.
+            const isGuest = (typeof isGuestUserId === 'function' ? isGuestUserId(getUserId()) : String(getUserId()).startsWith('guest_'));
+            list.innerHTML = isGuest
+                ? `<div class="market-error-state">
+                    <div class="market-error-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     </div>
-                    <div class="market-skeleton-right">
-                        <div class="market-skeleton-block"></div>
-                        <div class="market-skeleton-block"></div>
+                    <div class="market-error-title">داده فارکس نیاز به ورود از تلگرام دارد</div>
+                    <div class="market-error-desc">برای مشاهده نرخ فارکس و طلا، اپ را داخل تلگرام باز کنید</div>
+                </div>`
+                : `<div class="market-error-state">
+                    <div class="market-error-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
                     </div>
-                </div>
-            `).join('');
+                    <div class="market-error-title">بارگذاری مجدد</div>
+                    <div class="market-error-desc">دریافت داده فارکس ناموفق بود</div>
+                    <button class="market-error-retry" onclick="loadForexData().then(()=>renderMarket()).catch(()=>{})">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
+                        تلاش مجدد
+                    </button>
+                </div>`;
             return;
         }
         // Use premium grouped forex list (Major / Cross / Metals / Indices / Commodities)
