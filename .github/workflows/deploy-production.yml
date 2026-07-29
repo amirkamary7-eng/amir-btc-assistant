@@ -82,7 +82,10 @@ jobs:
       - name: Build Pages dist
         run: node scripts/prepare-pages.mjs
       - name: Deploy Pages to Production
-        run: npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages
+        # --branch=main deploys to the PRODUCTION domain (amir-btc-assistant.pages.dev),
+        # not a preview deployment URL. Without this flag, wrangler deploys to a
+        # random preview subdomain which doesn't update the main production URL.
+        run: npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --branch=main
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -105,15 +108,18 @@ jobs:
             exit 1
           fi
           echo "✅ Worker has calendar_reminders route"
-      - name: Verify Worker (farsi-news must be public)
+      - name: Verify Worker (farsi-news route exists — returns 401 in production, not 404)
         run: |
+          # farsi-news is intentionally auth-gated in production (requires Telegram
+          # initData + channel join). The correct post-deploy state is 401 (route
+          # exists, auth required) — NOT 404 (route missing = old version).
           CODE=$(curl -s -o /dev/null -w "%{http_code}" https://amir-btc-assistant-api-production.amirkamari9939.workers.dev/api/farsi-news)
           echo "farsi-news → HTTP $CODE"
-          if [ "$CODE" = "401" ]; then
-            echo "❌ FAIL: farsi-news still auth-gated — production Worker NOT updated"
+          if [ "$CODE" = "404" ]; then
+            echo "❌ FAIL: farsi-news route missing (404) — production Worker NOT updated"
             exit 1
           fi
-          echo "✅ farsi-news is public"
+          echo "✅ farsi-news route exists (401 = auth required, correct in production)"
       - name: Verify Pages (version.json buildId)
         run: |
           BUILD_ID=$(curl -s https://amir-btc-assistant.pages.dev/version.json | python3 -c "import sys,json; print(json.load(sys.stdin)['buildId'])")
