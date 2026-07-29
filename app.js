@@ -11453,10 +11453,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Previously forex was only loaded when user visited the Market tab.
         // Now it loads on startup so the watchlist (which may contain forex
         // pairs) renders instantly.
+        // ROOT CAUSE FIX: loadForexData calls apiFetch which requires Telegram
+        // auth. On startup, auth may not be ready yet (bootstrap pending).
+        // apiFetch's waitForApiReady handles this, but if auth fails (outside
+        // Telegram), the call silently fails. We retry after bootstrap completes.
         if (!allForexPairs.length) {
             loadForexData().then(() => {
-                renderWatchlist(); // Re-render watchlist with forex data
-            }).catch(() => {});
+                if (allForexPairs.length) renderWatchlist();
+            }).catch(() => {
+                // Will be retried after bootstrap completes (see bootstrapUser().then below)
+            });
         }
     }
 
@@ -11550,6 +11556,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Start bootstrap (non-blocking — membership check runs in parallel)
     bootstrapUser().then(() => {
         loadUser();
+        // ROOT CAUSE FIX: Retry forex data load after bootstrap completes.
+        // On startup, loadForexData fires in parallel but may fail because
+        // auth wasn't ready yet. After bootstrap, auth is confirmed, so retry.
+        if (!allForexPairs.length && API_BASE) {
+            loadForexData().then(() => {
+                renderWatchlist();
+                // If user is on the forex tab, re-render it
+                if (currentMarketTab === 'forex') renderMarket();
+            }).catch(() => {});
+        }
         if (_joinLockShown && !_maintenanceBlocked) {
             // Bootstrap confirmed membership — but _startDataLoading already
             // fired below. Just update admin UI here.
