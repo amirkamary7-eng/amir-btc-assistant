@@ -1,0 +1,126 @@
+# Production deploy workflow — manually triggered (workflow_dispatch)
+# Deploys BOTH the Cloudflare Worker (production env) and Cloudflare Pages.
+#
+# The CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets are already
+# configured in GitHub (verified working via the staging deploy workflow).
+#
+# Usage:
+#   - Via GitHub UI: Actions tab → "Deploy Production" → Run workflow
+#   - Via API: POST /repos/{owner}/{repo}/actions/workflows/deploy-production.yml/dispatches
+
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (faster, use only if tests already passed)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Run Worker Tests
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm ci
+      - name: Run worker tests
+        run: npm test
+
+  deploy-worker:
+    name: Deploy Worker (Production)
+    needs: test
+    if: ${{ always() && (github.event.inputs.skip_tests == 'true' || needs.test.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm ci
+      - name: Deploy Worker to Production
+        run: npx wrangler deploy --env production
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+  deploy-pages:
+    name: Deploy Pages (Production)
+    needs: test
+    if: ${{ always() && (github.event.inputs.skip_tests == 'true' || needs.test.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm ci
+      - name: Build Pages dist
+        run: node scripts/prepare-pages.mjs
+      - name: Deploy Pages to Production
+        run: npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+  verify:
+    name: Verify Production Deployment
+    needs: [deploy-worker, deploy-pages]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for propagation
+        run: sleep 15
+      - name: Verify Worker (calendar_reminders route must exist)
+        run: |
+          set -e
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" https://amir-btc-assistant-api-production.amirkamari9939.workers.dev/api/calendar/reminders)
+          echo "calendar/reminders → HTTP $CODE"
+          if [ "$CODE" = "404" ]; then
+            echo "❌ FAIL: calendar_reminders route still missing — production Worker NOT updated"
+            exit 1
+          fi
+          echo "✅ Worker has calendar_reminders route"
+      - name: Verify Worker (farsi-news must be public)
+        run: |
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" https://amir-btc-assistant-api-production.amirkamari9939.workers.dev/api/farsi-news)
+          echo "farsi-news → HTTP $CODE"
+          if [ "$CODE" = "401" ]; then
+            echo "❌ FAIL: farsi-news still auth-gated — production Worker NOT updated"
+            exit 1
+          fi
+          echo "✅ farsi-news is public"
+      - name: Verify Pages (version.json buildId must contain ca7a643)
+        run: |
+          BUILD_ID=$(curl -s https://amir-btc-assistant.pages.dev/version.json | python3 -c "import sys,json; print(json.load(sys.stdin)['buildId'])")
+          echo "Pages buildId: $BUILD_ID"
+          if echo "$BUILD_ID" | grep -q "ca7a643"; then
+            echo "✅ Pages buildId contains ca7a643"
+          else
+            echo "❌ FAIL: Pages buildId does not contain ca7a643 — Pages NOT updated"
+            exit 1
+          fi
+      - name: Verify Pages (defer warm-start attrs)
+        run: |
+          DEFER_COUNT=$(curl -s https://amir-btc-assistant.pages.dev/ | grep -c 'defer')
+          echo "defer attribute count: $DEFER_COUNT"
+          if [ "$DEFER_COUNT" -lt 5 ]; then
+            echo "❌ FAIL: defer attributes missing — warm-start fix NOT deployed"
+            exit 1
+          fi
+          echo "✅ Pages has defer warm-start attributes"
