@@ -7711,6 +7711,7 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 }
 .mkt-status-premium-header {
     display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 6px;
 }
 .mkt-status-premium-title-row {
     display: flex; align-items: center; gap: 7px;
@@ -7728,6 +7729,23 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px;
     border: 1px solid; transition: all 0.3s ease;
 }
+
+/* Market Trend (صعودی/نزولی/خنثی) — shown next to the F&G badge */
+.mkt-status-premium-trend {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 10px; font-weight: 600;
+}
+.mkt-trend-label {
+    color: #6B7A8D; text-transform: uppercase; letter-spacing: 0.3px;
+}
+.mkt-trend-value {
+    font-weight: 700; padding: 2px 7px; border-radius: 5px;
+    border: 1px solid; transition: all 0.3s ease;
+}
+.mkt-trend-value.trend-up { color: #22C55E; background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.25); }
+.mkt-trend-value.trend-down { color: #EF4444; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25); }
+.mkt-trend-value.trend-neutral { color: #F5A623; background: rgba(245,166,35,0.1); border-color: rgba(245,166,35,0.25); }
+
 .mkt-status-premium-total {
     font-size: 10px; font-weight: 600; color: #6B7A8D;
 }
@@ -7750,6 +7768,10 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 }
 .mkt-fg-gradient-bar-wrap {
     flex: 1; display: flex; flex-direction: column; gap: 4px;
+    /* Force LTR so FEAR is always on the left, GREED always on the right,
+       regardless of the page's RTL direction. Without this, RTL flips the
+       labels and gradient, making Fear appear on the right (bug). */
+    direction: ltr;
 }
 .mkt-fg-gradient-bar {
     position: relative; height: 10px; border-radius: 5px;

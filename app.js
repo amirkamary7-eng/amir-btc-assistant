@@ -4265,6 +4265,17 @@ function renderMarketInsights() {
         sentimentValueEl.className = 'mkt-status-sentiment-value ' + senClass;
     }
 
+    // Market Trend display (روند بازار: صعودی/نزولی/خنثی) — based on gainers/losers ratio
+    var trendValueEl = document.getElementById('mkt-trend-value');
+    if (trendValueEl) {
+        var trendLabel, trendClass;
+        if (ratio > 0.6) { trendLabel = currentLang === 'fa' ? 'صعودی' : 'Bullish'; trendClass = 'trend-up'; }
+        else if (ratio >= 0.4) { trendLabel = currentLang === 'fa' ? 'خنثی' : 'Neutral'; trendClass = 'trend-neutral'; }
+        else { trendLabel = currentLang === 'fa' ? 'نزولی' : 'Bearish'; trendClass = 'trend-down'; }
+        trendValueEl.textContent = trendLabel;
+        trendValueEl.className = 'mkt-trend-value ' + trendClass;
+    }
+
     // --- Fear & Greed ---
     // FIX 4: Only show real data from CoinMarketCap. Hide the entire section if unavailable.
     if (globalMarketData && globalMarketData.fearGreedValue > 0) {

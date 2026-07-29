@@ -274,7 +274,7 @@
         <div class="mkt-header">
             <div class="mkt-header-left">
                 <div class="mkt-header-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="3" x2="6" y2="21"/><rect x="4" y="6" width="4" height="9" rx="1" fill="currentColor" fill-opacity="0.25"/><line x1="12" y1="2" x2="12" y2="22"/><rect x="10" y="4" width="4" height="11" rx="1" fill="currentColor" fill-opacity="0.25"/><line x1="18" y1="5" x2="18" y2="19"/><rect x="16" y="8" width="4" height="7" rx="1" fill="currentColor" fill-opacity="0.25"/></svg>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="5" y1="3" x2="5" y2="21"/><rect x="3.5" y="7" width="3" height="7" rx="0.8" fill="#22C55E" fill-opacity="0.85" stroke="none"/><line x1="12" y1="2" x2="12" y2="22"/><rect x="10.5" y="9" width="3" height="5" rx="0.8" fill="#EF4444" fill-opacity="0.85" stroke="none"/><line x1="19" y1="5" x2="19" y2="19"/><rect x="17.5" y="8" width="3" height="8" rx="0.8" fill="#22C55E" fill-opacity="0.85" stroke="none"/></svg>
                 </div>
                 <div class="mkt-header-text">
                     <h2 class="mkt-title" data-i18n="market">بازار</h2>
@@ -337,7 +337,10 @@
                         <span class="mkt-status-premium-title">وضعیت بازار</span>
                         <span class="mkt-status-premium-badge" id="mkt-fg-badge">--</span>
                     </div>
-                    <span class="mkt-status-premium-total" id="mkt-status-total">0 ارز</span>
+                    <div class="mkt-status-premium-trend">
+                        <span class="mkt-trend-label">روند بازار</span>
+                        <span class="mkt-trend-value" id="mkt-trend-value">--</span>
+                    </div>
                 </div>
                 <div class="mkt-status-premium-fg">
                     <div class="mkt-fg-score-display">
@@ -350,9 +353,9 @@
                             <div class="mkt-fg-indicator" id="mkt-fg-indicator" style="left: 0%"></div>
                         </div>
                         <div class="mkt-fg-gradient-labels">
-                            <span>Fear</span>
-                            <span>Neutral</span>
-                            <span>Greed</span>
+                            <span>FEAR</span>
+                            <span>NEUTRAL</span>
+                            <span>GREED</span>
                         </div>
                     </div>
                 </div>
@@ -409,10 +412,10 @@
         <!-- ═══ MKT: Filter Chips (EXPANDED — All/Gainers/Losers/Popular/BTC Pairs) ═══ -->
         <div class="mkt-filters" id="market-sub-tabs" role="tablist">
             <button type="button" class="mkt-filter-chip active" data-sub-tab="top" onclick="switchSubTab('top', this)" role="tab">همه</button>
-            <button type="button" class="mkt-filter-chip" data-sub-tab="gainers" onclick="switchSubTab('gainers', this)" role="tab">بیشترین رشد</button>
-            <button type="button" class="mkt-filter-chip" data-sub-tab="losers" onclick="switchSubTab('losers', this)" role="tab">بیشترین ریزش</button>
-            <button type="button" class="mkt-filter-chip" data-sub-tab="popular" onclick="switchSubTab('popular', this)" role="tab">محبوب‌ها</button>
-            <button type="button" class="mkt-filter-chip" data-sub-tab="btcpairs" onclick="switchSubTab('btcpairs', this)" role="tab">جفت‌های BTC</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="gainers" onclick="switchSubTab('gainers', this)" role="tab">رشد</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="losers" onclick="switchSubTab('losers', this)" role="tab">ریزش</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="popular" onclick="switchSubTab('popular', this)" role="tab">محبوب</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="btcpairs" onclick="switchSubTab('btcpairs', this)" role="tab">BTC</button>
         </div>
 
         <!-- ═══ MKT: BTC Pairs Sub-Groups — REMOVED (BTC tab now renders flat BTC pair list) ═══ -->
@@ -890,7 +893,7 @@
             <span data-i18n="dashboard">داشبورد</span>
         </button>
         <button class="nav-item" data-page="market-page" onclick="switchTab('market-page', this)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="6" y1="4" x2="6" y2="20"/><rect x="4.5" y="7" width="3" height="8" rx="0.5" fill="currentColor" fill-opacity="0.3"/><line x1="12" y1="2" x2="12" y2="22"/><rect x="10.5" y="5" width="3" height="10" rx="0.5" fill="currentColor" fill-opacity="0.3"/><line x1="18" y1="6" x2="18" y2="18"/><rect x="16.5" y="9" width="3" height="6" rx="0.5" fill="currentColor" fill-opacity="0.3"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="5" y1="3" x2="5" y2="21"/><rect x="3.5" y="7" width="3" height="7" rx="0.8" fill="#22C55E" fill-opacity="0.85" stroke="none"/><line x1="12" y1="2" x2="12" y2="22"/><rect x="10.5" y="9" width="3" height="5" rx="0.8" fill="#EF4444" fill-opacity="0.85" stroke="none"/><line x1="19" y1="5" x2="19" y2="19"/><rect x="17.5" y="8" width="3" height="8" rx="0.8" fill="#22C55E" fill-opacity="0.85" stroke="none"/></svg>
             <span data-i18n="market">بازار</span>
         </button>
         <button class="nav-item" data-page="analysis-page" onclick="switchTab('analysis-page', this)">
