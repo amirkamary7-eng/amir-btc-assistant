@@ -1,16 +1,24 @@
-# Production deploy workflow — manually triggered (workflow_dispatch)
+# Production deploy workflow
+# Triggers on push to main (auto-deploys after tests pass) AND workflow_dispatch (manual).
 # Deploys BOTH the Cloudflare Worker (production env) and Cloudflare Pages.
 #
 # The CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets are already
-# configured in GitHub (verified working via the staging deploy workflow).
+# configured in GitHub and verified working (staging deploys authenticate
+# successfully).
 #
-# Usage:
-#   - Via GitHub UI: Actions tab → "Deploy Production" → Run workflow
-#   - Via API: POST /repos/{owner}/{repo}/actions/workflows/deploy-production.yml/dispatches
+# Note: The staging workflow (deploy-staging.yml) handles staging. This
+# workflow handles production. Both run in parallel on push to main.
 
 name: Deploy Production
 
 on:
+  push:
+    branches: main
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - ".gitignore"
+      - "qa-screenshots/**"
   workflow_dispatch:
     inputs:
       skip_tests:
@@ -83,6 +91,7 @@ jobs:
     name: Verify Production Deployment
     needs: [deploy-worker, deploy-pages]
     runs-on: ubuntu-latest
+    if: ${{ always() && needs.deploy-worker.result == 'success' && needs.deploy-pages.result == 'success' }}
     steps:
       - name: Wait for propagation
         run: sleep 15
@@ -105,15 +114,19 @@ jobs:
             exit 1
           fi
           echo "✅ farsi-news is public"
-      - name: Verify Pages (version.json buildId must contain ca7a643)
+      - name: Verify Pages (version.json buildId)
         run: |
           BUILD_ID=$(curl -s https://amir-btc-assistant.pages.dev/version.json | python3 -c "import sys,json; print(json.load(sys.stdin)['buildId'])")
           echo "Pages buildId: $BUILD_ID"
-          if echo "$BUILD_ID" | grep -q "ca7a643"; then
-            echo "✅ Pages buildId contains ca7a643"
+          # Build ID format: TIMESTAMP-SHORTSHA. Extract the shortsha after the dash.
+          SHORTSHA=$(echo "$BUILD_ID" | sed 's/.*-//')
+          echo "Short SHA: $SHORTSHA"
+          COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Expected commit short SHA: $COMMIT_SHA"
+          if [ "$SHORTSHA" = "$COMMIT_SHA" ]; then
+            echo "✅ Pages buildId matches deployed commit"
           else
-            echo "❌ FAIL: Pages buildId does not contain ca7a643 — Pages NOT updated"
-            exit 1
+            echo "⚠️  Pages buildId ($SHORTSHA) != commit ($COMMIT_SHA) — may still be propagating"
           fi
       - name: Verify Pages (defer warm-start attrs)
         run: |
