@@ -3257,6 +3257,47 @@ async function loadCalendarEvents(force = false) {
  * رویداد تقویم را به بخش‌های امروز/فردا/پس‌فردا/گذشته گروه‌بندی و مرتب می‌کند.
  * زمان‌ها به منطقه زمانی کاربر تبدیل می‌شوند.
  */
+
+/**
+ * Recompute event status based on CURRENT time.
+ *
+ * ROOT CAUSE FIX (calendar items 1-3): The backend computes event.status at
+ * API-call time. But the frontend caches events in localStorage for fast
+ * cold-open. When cached events are loaded (potentially hours later), the
+ * stored status is STALE — an event that was 'upcoming' when cached may now
+ * be 'past', but the cached status still says 'upcoming' (or vice versa).
+ *
+ * This function recomputes the status using the CURRENT browser time,
+ * ensuring the status is always accurate regardless of cache age.
+ *
+ * Status logic (matches backend getEventStatus):
+ *   - live: within ±30 min window of event time
+ *   - past: event time < now
+ *   - upcoming: event time > now
+ *
+ * @param {Array} events - calendar events with .timestamp (ISO UTC string)
+ * @returns {Array} events with updated .status
+ */
+function recomputeEventStatuses(events) {
+    if (!events || !events.length) return events;
+    const now = Date.now();
+    const LIVE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+    return events.map(e => {
+        if (!e.timestamp) return { ...e, status: 'upcoming' };
+        const eventTime = new Date(e.timestamp).getTime();
+        if (isNaN(eventTime)) return { ...e, status: 'upcoming' };
+        let status;
+        if (eventTime <= now + LIVE_WINDOW_MS && eventTime >= now - LIVE_WINDOW_MS) {
+            status = 'live';
+        } else if (eventTime < now) {
+            status = 'past';
+        } else {
+            status = 'upcoming';
+        }
+        return { ...e, status };
+    });
+}
+
 function groupCalendarEvents(events) {
     const tz = 'Asia/Tehran';
     const now = new Date();
@@ -6747,6 +6788,9 @@ function renderCalendar() {
             return;
         }
 
+        // ROOT CAUSE FIX: Recompute statuses from current time (stale cache fix)
+        events = recomputeEventStatuses(events);
+
         // Filter by tab
         const now = new Date();
         const tz = 'Asia/Tehran';
@@ -7007,6 +7051,13 @@ function renderCalendarV2() {
             container.innerHTML = segmentsHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویداد اقتصادی یافت نشد</div></div>`;
             return;
         }
+
+        // ROOT CAUSE FIX (calendar items 1-3): Recompute event statuses based
+        // on CURRENT time. Events may come from localStorage cache (hours old)
+        // with stale status values. Without this, upcoming events could show
+        // as 'past' (or vice versa) because the cached status was computed at
+        // API-call time, not at render time.
+        events = recomputeEventStatuses(events);
 
         // Filter by tab
         const now = new Date();
@@ -10455,9 +10506,12 @@ function renderDashboardCalendar() {
         return;
     }
 
+    // ROOT CAUSE FIX: Recompute statuses from current time (stale cache fix)
+    const freshEvents = recomputeEventStatuses(calendarEvents);
+
     const now = Date.now();
     // Filter upcoming events only, sort ascending by time, take next 3
-    const upcoming = calendarEvents
+    const upcoming = freshEvents
         .filter(e => {
             if (!e || !e.timestamp) return false;
             const d = new Date(e.timestamp);
