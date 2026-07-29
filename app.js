@@ -368,6 +368,7 @@ let analysisStats = null;
 let analysisPagination = null;
 let analysisListPage = 1;
 let analysisListLoading = false;
+let _analysisVisibleCount = 5; // ITEM 1: Lazy loading — initial visible count
 let currentAnalysisDetail = null;
 let deletingAnalysisId = null;
 const ANALYSIS_PAGE_SIZE = 20;
@@ -1768,7 +1769,15 @@ function renderAnalysisList() {
     }
 
     const isAdminUser = isAdmin();
-    container.innerHTML = filtered.map((a, i) => {
+
+    // ITEM 1 FIX: Lazy loading — only render first 5 analyses, show "Load More" button.
+    // Previously ALL filtered analyses were rendered at once, causing long pages.
+    const ANALYSIS_PAGE_SIZE = 5;
+    const visibleCount = Math.min(filtered.length, _analysisVisibleCount);
+    const visibleAnalyses = filtered.slice(0, visibleCount);
+    const hasMore = filtered.length > visibleCount;
+
+    container.innerHTML = visibleAnalyses.map((a, i) => {
         const sentiment = getSentiment(a);
         const readTime = estimateReadTime(a.content || a.text);
         const bookmarked = isAnalysisBookmarked(a.id);
@@ -1796,12 +1805,17 @@ function renderAnalysisList() {
                     </div>
                </div>`;
 
+        // ITEM 3: Market type badge — crypto vs forex
+        const isForexAnalysis = a.category === 'forex' || (a.coin && /USD|EUR|GBP|JPY|AUD|CAD|CHF|NZD|XAU|XAG/.test(a.coin));
+        const marketBadge = `<span class="acv-market-badge ${isForexAnalysis ? 'forex' : 'crypto'}">${isForexAnalysis ? 'Forex' : 'Crypto'}</span>`;
+
         return `
         <div class="analysis-card-v2 ${bookmarked ? 'acv-bookmarked' : ''}" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')" style="animation-delay:${Math.min(i, 8) * 0.04}s">
             ${imageSection}
             <div class="acv-content-section">
                 <div class="acv-title-row">
                     <span class="acv-coin-name">${escapeHtml(a.coin)}</span>
+                    ${marketBadge}
                     <span class="acv-timeframe">${escapeHtml(a.timeframe || '1D')}</span>
                     ${sentimentBadge}
                 </div>
@@ -1830,8 +1844,28 @@ function renderAnalysisList() {
         `;
     }).join('');
 
+    // ITEM 1: Add "Load More" button if there are more analyses to show
+    if (hasMore) {
+        container.innerHTML += `
+            <div class="analysis-load-more" id="analysis-load-more">
+                <button class="alm-btn" onclick="loadMoreAnalyses()">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
+                    <span>${t('load_more') || 'مشاهده بیشتر'}</span>
+                </button>
+            </div>`;
+    }
+
     // Setup infinite scroll
     setupAnalysisInfiniteScroll();
+}
+
+/**
+ * ITEM 1: Load more analyses — increments visible count and re-renders.
+ * Called when user clicks "مشاهده بیشتر" button.
+ */
+function loadMoreAnalyses() {
+    _analysisVisibleCount += 5;
+    renderAnalysisList();
 }
 
 /**
@@ -1842,6 +1876,7 @@ function resetAnalysisFilters() {
     analysisTimeframeFilter = 'all';
     analysisCategoryFilter = 'all';
     analysisShowSavedOnly = false;
+    _analysisVisibleCount = 5; // Reset lazy loading count
     const searchInput = $('analysis-search-input');
     if (searchInput) searchInput.value = '';
     const clearBtn = $('analysis-search-clear');
@@ -5666,9 +5701,22 @@ function buildWatchTrendSVG(changePercent, symbol) {
 function renderWatchlist() {
     const grid = $('watchlist-grid');
     if (!grid) return;
-    const watchCoins = allCoins.filter(c => watchlist.includes(c.symbol)).slice(0, DASHBOARD_WATCHLIST_MAX);
 
-    if (!allCoins.length) {
+    // ROOT CAUSE FIX (item 2): Previously only allCoins (crypto) was filtered.
+    // Forex pairs are in allForexPairs, not allCoins. Now we merge both sources.
+    const cryptoWatch = allCoins.filter(c => watchlist.includes(c.symbol));
+    const forexWatch = allForexPairs.filter(f => watchlist.includes(f.symbol)).map(f => ({
+        ...f,
+        priceUsd: f.price,
+        changePercent24Hr: f.change,
+        name: f.name || f.symbol,
+        image: null, // Forex uses letter-based icon fallback
+        _isForex: true,
+    }));
+    // Merge: crypto first, then forex, no limit (horizontal scroll handles overflow)
+    const watchCoins = [...cryptoWatch, ...forexWatch];
+
+    if (!allCoins.length && !allForexPairs.length) {
         // Market data not loaded yet — show skeleton (preserve CLS)
         if (!grid.querySelector('.watchlist-skeleton')) {
             grid.innerHTML = '<div class="watchlist-skeleton">' + Array(4).fill('<div class="watchlist-skeleton-item"><div class="watchlist-skeleton-icon"></div><div class="watchlist-skeleton-lines"><div class="watchlist-skeleton-line"></div><div class="watchlist-skeleton-line"></div></div></div>').join('') + '</div>';
@@ -5735,17 +5783,21 @@ function renderWatchlist() {
     let html = watchCoins.map(c => {
         const safeSymbol = escapeHtml(c.symbol);
         const safeName = escapeHtml(c.name || '');
-        const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
+        const isForex = !!c._isForex;
+        const icon = c.image || (isForex ? null : `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`);
         const pct = (typeof c.changePercent24Hr === 'number' && !isNaN(c.changePercent24Hr)) ? c.changePercent24Hr : 0;
         const isPos = pct >= 0;
         const changeStr = (isPos ? '+' : '') + pct.toFixed(2) + '%';
         const arrowSvg = isPos
             ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>'
             : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+        const iconHtml = icon
+            ? `<img loading="lazy" src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-card-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">`
+            : `<div class="watch-card-icon forex-icon-fallback" data-symbol="${safeSymbol}">${safeSymbol.slice(0,3)}</div>`;
         return `
-        <div class="watch-card" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
+        <div class="watch-card${isForex ? ' watch-card-forex' : ''}" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
             <div class="watch-card-header">
-                <img loading="lazy" src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-card-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">
+                ${iconHtml}
                 <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" aria-label="Remove">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </span>
@@ -11687,6 +11739,7 @@ window.openAnalysisDetailPage = openAnalysisDetailPage;
 window.closeAnalysisDetailPage = closeAnalysisDetailPage;
 window.startDeleteAnalysis = startDeleteAnalysis;
 window.resetAnalysisFilters = resetAnalysisFilters;
+window.loadMoreAnalyses = loadMoreAnalyses;
 window.initAnalysisToolbar = initAnalysisToolbar;
 window.toggleAnalysisBookmark = toggleAnalysisBookmark;
 window.copyAnalysisContent = copyAnalysisContent;
