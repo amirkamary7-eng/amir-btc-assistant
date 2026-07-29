@@ -3869,105 +3869,221 @@ strong.down { color: var(--red); }
    MAINTENANCE MODE — Premium Dark+Gold FinTech redesign
    Professional duotone gear+wrench icon, balanced layout, subtle animations.
    ============================================================================ */
+/* ════════════════════════════════════════════════════════════════════ */
+/* MAINTENANCE OVERLAY — Premium Multi-Gear System                       */
+/* ════════════════════════════════════════════════════════════════════ */
+
 .maint-overlay {
     position: fixed; inset: 0; z-index: 999999;
-    background: radial-gradient(ellipse at center, #0d1326 0%, #050810 70%, #02050b 100%);
+    background: radial-gradient(ellipse at 50% 40%, #0d1828 0%, #080f1a 50%, #03060d 100%);
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     padding: 24px; text-align: center;
-    animation: maintFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: maintFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
     overflow: hidden;
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
 @keyframes maintFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* Floating particles background */
+/* ── Floating particles ── */
 .maint-particles {
-    position: absolute; inset: 0; pointer-events: none;
-    overflow: hidden;
+    position: absolute; inset: 0; pointer-events: none; overflow: hidden;
 }
 .maint-particle {
     position: absolute; border-radius: 50%;
-    background: rgba(245, 166, 35, 0.35);
-    box-shadow: 0 0 8px rgba(245, 166, 35, 0.5);
+    background: rgba(245, 166, 35, 0.4);
+    box-shadow: 0 0 6px rgba(245, 166, 35, 0.6);
     animation: maintFloatUp linear infinite;
+    will-change: transform, opacity;
 }
 @keyframes maintFloatUp {
     0% { transform: translateY(110vh) translateX(0) scale(0); opacity: 0; }
-    10% { opacity: 1; transform: translateY(100vh) translateX(0) scale(1); }
-    90% { opacity: 1; }
-    100% { transform: translateY(-10vh) translateX(20px) scale(0.5); opacity: 0; }
+    10% { opacity: 0.8; transform: translateY(100vh) translateX(0) scale(1); }
+    90% { opacity: 0.8; }
+    100% { transform: translateY(-10vh) translateX(15px) scale(0.3); opacity: 0; }
 }
 
+/* ── Data stream lines (ambient) ── */
+.maint-data-streams {
+    position: absolute; inset: 0; pointer-events: none; overflow: hidden;
+}
+.maint-stream-line {
+    position: absolute; width: 1px; height: 100%;
+    background: linear-gradient(180deg, transparent 0%, rgba(245,166,35,0.06) 30%, rgba(245,166,35,0.06) 70%, transparent 100%);
+    animation: maintStreamPulse 4s ease-in-out infinite;
+    will-change: opacity;
+}
+.maint-stream-1 { left: 20%; animation-delay: 0s; }
+.maint-stream-2 { left: 50%; animation-delay: 1.5s; }
+.maint-stream-3 { left: 80%; animation-delay: 3s; }
+@keyframes maintStreamPulse {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 1; }
+}
+
+/* ── Content card ── */
 .maint-content {
     position: relative; z-index: 2;
-    max-width: 380px; width: 100%;
+    max-width: 400px; width: 100%;
     display: flex; flex-direction: column; align-items: center;
-    background: linear-gradient(180deg, rgba(14, 22, 35, 0.85) 0%, rgba(11, 18, 32, 0.9) 100%);
-    border: 1px solid rgba(245, 166, 35, 0.15);
-    border-radius: 24px;
-    padding: 40px 28px 32px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(245, 166, 35, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    animation: maintCardIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+    background: linear-gradient(180deg, rgba(14, 24, 40, 0.92) 0%, rgba(10, 16, 28, 0.95) 100%);
+    border: 1px solid rgba(245, 166, 35, 0.12);
+    border-radius: 28px;
+    padding: 44px 32px 36px;
+    box-shadow:
+        0 24px 80px rgba(0, 0, 0, 0.6),
+        0 0 60px rgba(245, 166, 35, 0.04),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    animation: maintCardIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
 }
 @keyframes maintCardIn {
-    from { opacity: 0; transform: translateY(24px) scale(0.96); }
+    from { opacity: 0; transform: translateY(28px) scale(0.95); }
     to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* ── Premium duotone gear + wrench icon ── */
-.maint-icon-scene {
+/* ── Multi-Gear Engine Scene ── */
+.maint-engine-scene {
     position: relative;
-    width: 110px; height: 110px;
-    margin-bottom: 20px;
+    width: 160px; height: 160px;
+    margin-bottom: 24px;
     display: flex; align-items: center; justify-content: center;
 }
-.maint-icon-glow {
+
+/* Ambient glow behind gears */
+.maint-engine-glow {
     position: absolute; top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 140px; height: 140px;
-    background: radial-gradient(circle, rgba(245, 166, 35, 0.22) 0%, transparent 65%);
+    width: 180px; height: 180px;
+    background: radial-gradient(circle, rgba(245, 166, 35, 0.18) 0%, rgba(245, 166, 35, 0.04) 40%, transparent 70%);
     border-radius: 50%;
-    animation: maintGlowPulse 3.5s ease-in-out infinite;
-    z-index: 0;
-}
-.maint-icon-ring {
-    position: absolute; top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 96px; height: 96px;
-    border: 1.5px solid rgba(245, 166, 35, 0.2);
-    border-radius: 50%;
-    animation: maintRingPulse 3s ease-in-out infinite;
-}
-@keyframes maintRingPulse {
-    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
-    50% { transform: translate(-50%, -50%) scale(1.08); opacity: 0.2; }
+    animation: maintGlowPulse 4s ease-in-out infinite;
+    will-change: opacity, transform;
 }
 @keyframes maintGlowPulse {
-    0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(1); }
-    50% { opacity: 0.85; transform: translate(-50%, -50%) scale(1.12); }
+    0%, 100% { opacity: 0.4; transform: translate(-50%, -50%) scale(1); }
+    50% { opacity: 0.8; transform: translate(-50%, -50%) scale(1.15); }
 }
-.maint-icon-gear {
-    position: relative; z-index: 2;
-    width: 72px; height: 72px;
-    animation: maintGearSpin 8s linear infinite;
-    filter: drop-shadow(0 0 12px rgba(245, 166, 35, 0.35));
-}
-@keyframes maintGearSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 
-/* ── Premium badge ── */
+/* Pulsing rings */
+.maint-ring {
+    position: absolute; top: 50%; left: 50%;
+    border-radius: 50%;
+    border: 1px solid rgba(245, 166, 35, 0.15);
+    transform: translate(-50%, -50%);
+    will-change: transform, opacity;
+}
+.maint-ring-1 {
+    width: 120px; height: 120px;
+    animation: maintRingExpand 3s ease-out infinite;
+}
+.maint-ring-2 {
+    width: 120px; height: 120px;
+    animation: maintRingExpand 3s ease-out infinite 1s;
+}
+.maint-ring-3 {
+    width: 120px; height: 120px;
+    animation: maintRingExpand 3s ease-out infinite 2s;
+}
+@keyframes maintRingExpand {
+    0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.6; }
+    100% { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
+}
+
+/* Gear SVG */
+.maint-gear-system {
+    position: relative; z-index: 2;
+    width: 140px; height: 140px;
+    filter: drop-shadow(0 4px 20px rgba(245, 166, 35, 0.15));
+}
+
+/* Individual gear animations — GPU accelerated, varying speeds + directions */
+.maint-gear-large {
+    transform-origin: 100px 70px;
+    animation: maintGearCW 12s linear infinite;
+    will-change: transform;
+}
+.maint-gear-small {
+    transform-origin: 0 0;
+    animation: maintGearCCW 7s linear infinite;
+    will-change: transform;
+}
+.maint-gear-medium {
+    transform-origin: 0 0;
+    animation: maintGearCW 9s linear infinite;
+    will-change: transform;
+}
+@keyframes maintGearCW {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+@keyframes maintGearCCW {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(-360deg); }
+}
+
+/* Data flow particles */
+.maint-flow-particle {
+    position: absolute;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: #FFD96B;
+    box-shadow: 0 0 8px rgba(255, 217, 107, 0.8);
+    z-index: 3;
+    will-change: transform, opacity;
+}
+.maint-flow-1 {
+    top: 20%; left: 50%;
+    animation: maintFlowOrbit 6s linear infinite;
+}
+.maint-flow-2 {
+    top: 50%; left: 80%;
+    animation: maintFlowOrbit 5s linear infinite 1.5s;
+}
+.maint-flow-3 {
+    top: 70%; left: 30%;
+    animation: maintFlowOrbit 7s linear infinite 3s;
+}
+@keyframes maintFlowOrbit {
+    0% { transform: translate(0, 0) scale(1); opacity: 0; }
+    20% { opacity: 1; }
+    80% { opacity: 1; }
+    100% { transform: translate(40px, -60px) scale(0.3); opacity: 0; }
+}
+
+/* ── Badge ── */
 .maint-badge {
     font-size: 10px; font-weight: 800; color: #F5A623;
-    letter-spacing: 2.5px; text-transform: uppercase;
+    letter-spacing: 3px; text-transform: uppercase;
     background: rgba(245, 166, 35, 0.08);
     border: 1px solid rgba(245, 166, 35, 0.2);
-    padding: 4px 14px; border-radius: 20px;
-    margin-bottom: 16px;
+    padding: 5px 16px; border-radius: 20px;
+    margin-bottom: 18px;
+    box-shadow: 0 0 12px rgba(245, 166, 35, 0.08);
+}
+
+/* ── Dynamic status text rotator ── */
+.maint-status-rotator {
+    height: 20px; overflow: hidden;
+    margin-bottom: 14px;
+    position: relative;
+}
+.maint-status-text {
+    display: block;
+    font-size: 12px; font-weight: 600;
+    color: #F5A623;
+    letter-spacing: 0.3px;
+    animation: maintStatusFade 3s ease-in-out infinite;
+    will-change: opacity, transform;
+}
+@keyframes maintStatusFade {
+    0%, 100% { opacity: 1; transform: translateY(0); }
+    50% { opacity: 0.4; transform: translateY(-2px); }
 }
 
 /* ── Text Content ── */
 .maint-title {
-    font-size: 21px; font-weight: 800; color: #FFFFFF;
+    font-size: 22px; font-weight: 800; color: #FFFFFF;
     margin: 0 0 12px;
     line-height: 1.35;
     letter-spacing: -0.3px;
@@ -3975,19 +4091,19 @@ strong.down { color: var(--red); }
 .maint-desc {
     font-size: 13.5px; color: #8B96A8; line-height: 1.65;
     margin: 0 0 28px;
-    max-width: 300px;
+    max-width: 310px;
 }
 
 /* ── Progress Bar ── */
 .maint-progress-wrap {
-    width: 100%; max-width: 300px; margin-bottom: 24px;
+    width: 100%; max-width: 320px; margin-bottom: 24px;
 }
 .maint-progress-label {
     display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 10px;
 }
 .maint-progress-text { font-size: 11px; color: #6B7A8D; font-weight: 600; letter-spacing: 0.3px; }
-.maint-progress-percent { font-size: 17px; font-weight: 800; color: #F5A623; font-variant-numeric: tabular-nums; }
+.maint-progress-percent { font-size: 18px; font-weight: 800; color: #F5A623; font-variant-numeric: tabular-nums; }
 .maint-progress-track {
     width: 100%; height: 8px;
     background: rgba(255,255,255,0.05);
@@ -3997,15 +4113,15 @@ strong.down { color: var(--red); }
 }
 .maint-progress-fill {
     height: 100%; border-radius: 10px;
-    background: linear-gradient(90deg, #F5A623, #FFCC4D);
-    box-shadow: 0 0 14px rgba(245, 166, 35, 0.5);
+    background: linear-gradient(90deg, #D4881A, #F5A623, #FFD96B);
+    box-shadow: 0 0 16px rgba(245, 166, 35, 0.5);
     transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
     position: relative;
     overflow: hidden;
 }
 .maint-progress-fill::after {
     content: ''; position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
     animation: maintProgressShine 2.5s linear infinite;
 }
 @keyframes maintProgressShine {
@@ -4016,28 +4132,29 @@ strong.down { color: var(--red); }
 /* ── Admin bypass button ── */
 .maint-admin-bypass {
     display: none;
-    align-items: center; justify-content: center; gap: 8px;
-    margin-top: 4px;
-    padding: 12px 24px;
-    height: 44px;
-    background: linear-gradient(135deg, #F5A623, #FFCC4D);
-    border: none;
-    border-radius: 12px;
-    color: #020611;
-    font-size: 13px; font-weight: 700;
-    cursor: pointer;
-    transition: transform 0.18s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    align-items: center; gap: 6px;
+    padding: 8px 18px;
+    border-radius: 10px;
+    font-size: 12px; font-weight: 600; color: #6B7A8D;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    cursor: pointer; transition: all 0.2s ease;
     font-family: inherit;
-    box-shadow: 0 4px 16px rgba(245, 166, 35, 0.3);
 }
 .maint-admin-bypass:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(245, 166, 35, 0.45);
-    filter: brightness(1.05);
+    background: rgba(245,166,35,0.08);
+    border-color: rgba(245,166,35,0.2);
+    color: #F5A623;
 }
-.maint-admin-bypass:active {
-    transform: scale(0.97);
-    box-shadow: 0 2px 8px rgba(245, 166, 35, 0.3);
+.maint-admin-bypass:active { transform: scale(0.97); }
+
+/* ── Mobile responsive ── */
+@media (max-width: 380px) {
+    .maint-content { padding: 36px 24px 28px; border-radius: 22px; }
+    .maint-engine-scene { width: 130px; height: 130px; margin-bottom: 18px; }
+    .maint-gear-system { width: 120px; height: 120px; }
+    .maint-title { font-size: 19px; }
+    .maint-desc { font-size: 12.5px; }
 }
 
 /* #endregion Maintenance Mode */

@@ -2511,44 +2511,98 @@
          Admins see a bypass button; regular users cannot close or bypass it.
          ════════════════════════════════════════════════════════════════ -->
     <div id="maintenance-overlay" class="maint-overlay" style="display:none;">
-        <!-- Floating particles background -->
+        <!-- Ambient particle background -->
         <div class="maint-particles" id="maint-particles"></div>
 
+        <!-- Data stream lines -->
+        <div class="maint-data-streams">
+            <div class="maint-stream-line maint-stream-1"></div>
+            <div class="maint-stream-line maint-stream-2"></div>
+            <div class="maint-stream-line maint-stream-3"></div>
+        </div>
+
         <div class="maint-content">
-            <!-- Premium animated icon: duotone gear + wrench with glow -->
-            <div class="maint-icon-scene">
-                <div class="maint-icon-glow"></div>
-                <div class="maint-icon-ring"></div>
-                <svg class="maint-icon-gear" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <!-- Premium multi-gear system -->
+            <div class="maint-engine-scene">
+                <!-- Outer ambient glow -->
+                <div class="maint-engine-glow"></div>
+                <!-- Pulsing rings -->
+                <div class="maint-ring maint-ring-1"></div>
+                <div class="maint-ring maint-ring-2"></div>
+                <div class="maint-ring maint-ring-3"></div>
+
+                <!-- Gear system SVG -->
+                <svg class="maint-gear-system" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <defs>
-                        <linearGradient id="maint-gear-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#FFCC4D"/>
+                        <linearGradient id="maint-grad-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#FFD96B"/>
+                            <stop offset="50%" stop-color="#F5A623"/>
+                            <stop offset="100%" stop-color="#D4881A"/>
+                        </linearGradient>
+                        <linearGradient id="maint-grad-gold-light" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#FFE9A0"/>
                             <stop offset="100%" stop-color="#F5A623"/>
                         </linearGradient>
-                        <linearGradient id="maint-wrench-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" stop-color="#FFD96B"/>
-                            <stop offset="100%" stop-color="#E8941A"/>
+                        <linearGradient id="maint-grad-dark" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#1a2a40"/>
+                            <stop offset="100%" stop-color="#0d1828"/>
                         </linearGradient>
+                        <filter id="maint-gear-shadow" x="-50%" y="-50%" width="200%" height="200%">
+                            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#F5A623" flood-opacity="0.3"/>
+                        </filter>
                     </defs>
-                    <!-- Outer gear (duotone: filled dark + gold teeth) -->
-                    <path d="M60 8 L67 22 L82 18 L84 34 L99 38 L94 53 L107 62 L94 71 L99 86 L84 90 L82 106 L67 102 L60 116 L53 102 L38 106 L36 90 L21 86 L26 71 L13 62 L26 53 L21 38 L36 34 L38 18 L53 22 Z"
-                          fill="url(#maint-gear-grad)" opacity="0.15"/>
-                    <path d="M60 8 L67 22 L82 18 L84 34 L99 38 L94 53 L107 62 L94 71 L99 86 L84 90 L82 106 L67 102 L60 116 L53 102 L38 106 L36 90 L21 86 L26 71 L13 62 L26 53 L21 38 L36 34 L38 18 L53 22 Z"
-                          stroke="url(#maint-gear-grad)" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
-                    <circle cx="60" cy="62" r="22" stroke="url(#maint-gear-grad)" stroke-width="2.5" fill="rgba(245,166,35,0.06)"/>
-                    <circle cx="60" cy="62" r="10" fill="url(#maint-gear-grad)" opacity="0.3"/>
-                    <!-- Wrench overlay (crossed through center) -->
-                    <g transform="translate(60 62) rotate(45)">
-                        <rect x="-3" y="-26" width="6" height="40" rx="3" fill="url(#maint-wrench-grad)"/>
-                        <path d="M-8 -26 Q-8 -34 0 -34 Q8 -34 8 -26 L8 -20 L4 -20 L4 -24 Q4 -28 0 -28 Q-4 -28 -4 -24 L-4 -20 L-8 -20 Z" fill="url(#maint-wrench-grad)"/>
-                        <circle cx="0" cy="14" r="5" fill="url(#maint-wrench-grad)"/>
-                        <circle cx="0" cy="14" r="2.5" fill="#0B1220"/>
+
+                    <!-- Large gear (clockwise, slow) -->
+                    <g class="maint-gear maint-gear-large" filter="url(#maint-gear-shadow)">
+                        <!-- 12 teeth gear -->
+                        <path d="M100 20 L108 28 L120 24 L124 36 L136 38 L134 50 L146 56 L140 68 L148 78 L138 84 L140 98 L128 98 L126 112 L114 108 L106 118 L96 108 L84 112 L82 98 L70 98 L72 84 L62 78 L70 68 L64 56 L76 50 L74 38 L86 36 L90 24 L102 28 Z"
+                              fill="url(#maint-grad-dark)" stroke="url(#maint-grad-gold)" stroke-width="1.5" stroke-linejoin="round"/>
+                        <circle cx="100" cy="70" r="28" fill="none" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.6"/>
+                        <circle cx="100" cy="70" r="18" fill="url(#maint-grad-dark)" stroke="url(#maint-grad-gold-light)" stroke-width="1" opacity="0.4"/>
+                        <circle cx="100" cy="70" r="6" fill="url(#maint-grad-gold)" opacity="0.8"/>
+                        <!-- Spokes -->
+                        <line x1="100" y1="42" x2="100" y2="52" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.5"/>
+                        <line x1="100" y1="88" x2="100" y2="98" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.5"/>
+                        <line x1="72" y1="70" x2="82" y2="70" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.5"/>
+                        <line x1="118" y1="70" x2="128" y2="70" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.5"/>
                     </g>
+
+                    <!-- Small gear (counter-clockwise, fast) -->
+                    <g class="maint-gear maint-gear-small" transform="translate(155 135)" filter="url(#maint-gear-shadow)">
+                        <path d="M0 -28 L5 -22 L13 -23 L14 -15 L21 -12 L18 -5 L22 2 L16 6 L17 14 L9 14 L6 21 L-1 18 L-8 21 L-11 14 L-19 14 L-18 6 L-24 2 L-20 -5 L-23 -12 L-16 -15 L-15 -23 L-7 -22 Z"
+                              fill="url(#maint-grad-dark)" stroke="url(#maint-grad-gold-light)" stroke-width="1.2" stroke-linejoin="round"/>
+                        <circle cx="0" cy="0" r="12" fill="none" stroke="url(#maint-grad-gold-light)" stroke-width="1" opacity="0.5"/>
+                        <circle cx="0" cy="0" r="4" fill="url(#maint-grad-gold-light)" opacity="0.7"/>
+                    </g>
+
+                    <!-- Medium gear (clockwise, medium) — bottom left -->
+                    <g class="maint-gear maint-gear-medium" transform="translate(45 140)" filter="url(#maint-gear-shadow)">
+                        <path d="M0 -20 L4 -16 L10 -17 L11 -11 L16 -9 L14 -3 L17 2 L13 5 L14 11 L8 11 L5 16 L0 13 L-5 16 L-8 11 L-14 11 L-13 5 L-17 2 L-14 -3 L-16 -9 L-11 -11 L-10 -17 L-4 -16 Z"
+                              fill="url(#maint-grad-dark)" stroke="url(#maint-grad-gold)" stroke-width="1" stroke-linejoin="round"/>
+                        <circle cx="0" cy="0" r="8" fill="none" stroke="url(#maint-grad-gold)" stroke-width="0.8" opacity="0.4"/>
+                        <circle cx="0" cy="0" r="3" fill="url(#maint-grad-gold)" opacity="0.6"/>
+                    </g>
+
+                    <!-- Central core -->
+                    <circle cx="100" cy="70" r="3" fill="#FFD96B" opacity="0.9">
+                        <animate attributeName="r" values="2;4;2" dur="2s" repeatCount="indefinite"/>
+                        <animate attributeName="opacity" values="0.9;0.4;0.9" dur="2s" repeatCount="indefinite"/>
+                    </circle>
                 </svg>
+
+                <!-- Data flow particles -->
+                <div class="maint-flow-particle maint-flow-1"></div>
+                <div class="maint-flow-particle maint-flow-2"></div>
+                <div class="maint-flow-particle maint-flow-3"></div>
             </div>
 
             <!-- Premium badge -->
             <div class="maint-badge">AMIRBTC</div>
+
+            <!-- Dynamic status text (rotates) -->
+            <div class="maint-status-rotator" id="maint-status-rotator">
+                <span class="maint-status-text maint-status-active">در حال بهینه‌سازی سیستم...</span>
+            </div>
 
             <!-- Text content -->
             <h2 class="maint-title" id="maint-title">در حال ساخت آینده‌ای بهتر!</h2>

@@ -10982,6 +10982,9 @@ function showMaintenancePopup(maint) {
     // Generate floating particles
     _generateMaintenanceParticles();
 
+    // Start dynamic status text rotation
+    _startMaintenanceStatusRotation();
+
     // Show overlay
     overlay.style.display = 'flex';
     document.body.style.overflow = 'hidden';
@@ -11014,6 +11017,38 @@ function _generateMaintenanceParticles() {
         p.style.animationDelay = (Math.random() * 10) + 's';
         container.appendChild(p);
     }
+}
+
+/**
+ * Dynamic status text rotation — cycles through system status messages
+ * with a fade animation to convey "system is actively working".
+ */
+let _maintStatusInterval = null;
+function _startMaintenanceStatusRotation() {
+    if (_maintStatusInterval) return; // Already running
+    const messages = [
+        'در حال بهینه‌سازی سیستم...',
+        'در حال بروزرسانی سرویس‌ها...',
+        'در حال همگام‌سازی داده‌ها...',
+        'در حال بررسی امنیت...',
+        'آماده‌سازی نسخه جدید...',
+    ];
+    let idx = 0;
+    const el = document.getElementById('maint-status-rotator');
+    if (!el) return;
+    const span = el.querySelector('.maint-status-text');
+    if (!span) return;
+
+    _maintStatusInterval = setInterval(() => {
+        idx = (idx + 1) % messages.length;
+        span.style.opacity = '0';
+        span.style.transform = 'translateY(-8px)';
+        setTimeout(() => {
+            span.textContent = messages[idx];
+            span.style.opacity = '1';
+            span.style.transform = 'translateY(0)';
+        }, 300);
+    }, 3500);
 }
 
 /**
