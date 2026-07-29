@@ -2522,78 +2522,181 @@
         </div>
 
         <div class="maint-content">
-            <!-- Premium multi-gear system -->
-            <div class="maint-engine-scene">
-                <!-- Outer ambient glow -->
-                <div class="maint-engine-glow"></div>
-                <!-- Pulsing rings -->
-                <div class="maint-ring maint-ring-1"></div>
-                <div class="maint-ring maint-ring-2"></div>
-                <div class="maint-ring maint-ring-3"></div>
+            <!-- ═══ Premium Mechanical Core — Reactor Engine ═══ -->
+            <div class="maint-core-scene">
+                <!-- Layer 0: Deep ambient glow -->
+                <div class="maint-core-deepglow"></div>
+                <!-- Layer 1: Outer aurora glow -->
+                <div class="maint-core-aurora"></div>
+                <!-- Layer 2: Bottom reflection -->
+                <div class="maint-core-reflection"></div>
 
-                <!-- Gear system SVG -->
-                <svg class="maint-gear-system" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <!-- Layer 3: SVG Ring System -->
+                <svg class="maint-core-svg" viewBox="0 0 240 240" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <defs>
-                        <linearGradient id="maint-grad-gold" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#FFD96B"/>
-                            <stop offset="50%" stop-color="#F5A623"/>
-                            <stop offset="100%" stop-color="#D4881A"/>
-                        </linearGradient>
-                        <linearGradient id="maint-grad-gold-light" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <!-- Metallic gold gradient -->
+                        <linearGradient id="mc-gold" x1="0%" y1="0%" x2="100%" y2="100%">
                             <stop offset="0%" stop-color="#FFE9A0"/>
+                            <stop offset="30%" stop-color="#F5A623"/>
+                            <stop offset="70%" stop-color="#D4881A"/>
+                            <stop offset="100%" stop-color="#A66A10"/>
+                        </linearGradient>
+                        <!-- Light gold for inner elements -->
+                        <linearGradient id="mc-gold-bright" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#FFF3D0"/>
+                            <stop offset="50%" stop-color="#FFD96B"/>
                             <stop offset="100%" stop-color="#F5A623"/>
                         </linearGradient>
-                        <linearGradient id="maint-grad-dark" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#1a2a40"/>
-                            <stop offset="100%" stop-color="#0d1828"/>
+                        <!-- Steel/dark gradient for depth -->
+                        <linearGradient id="mc-steel" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#1e2d42"/>
+                            <stop offset="50%" stop-color="#141e2e"/>
+                            <stop offset="100%" stop-color="#0a1220"/>
                         </linearGradient>
-                        <filter id="maint-gear-shadow" x="-50%" y="-50%" width="200%" height="200%">
-                            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#F5A623" flood-opacity="0.3"/>
+                        <!-- Core hexagon gradient -->
+                        <radialGradient id="mc-core-grad" cx="50%" cy="40%" r="60%">
+                            <stop offset="0%" stop-color="#FFF8E0"/>
+                            <stop offset="30%" stop-color="#FFD96B"/>
+                            <stop offset="70%" stop-color="#F5A623"/>
+                            <stop offset="100%" stop-color="#B8740F"/>
+                        </radialGradient>
+                        <!-- Glow filter -->
+                        <filter id="mc-glow" x="-100%" y="-100%" width="300%" height="300%">
+                            <feGaussianBlur stdDeviation="2" result="blur"/>
+                            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                        </filter>
+                        <filter id="mc-glow-strong" x="-100%" y="-100%" width="300%" height="300%">
+                            <feGaussianBlur stdDeviation="4" result="blur"/>
+                            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
                         </filter>
                     </defs>
 
-                    <!-- Large gear (clockwise, slow) -->
-                    <g class="maint-gear maint-gear-large" filter="url(#maint-gear-shadow)">
-                        <!-- 12 teeth gear -->
-                        <path d="M100 20 L108 28 L120 24 L124 36 L136 38 L134 50 L146 56 L140 68 L148 78 L138 84 L140 98 L128 98 L126 112 L114 108 L106 118 L96 108 L84 112 L82 98 L70 98 L72 84 L62 78 L70 68 L64 56 L76 50 L74 38 L86 36 L90 24 L102 28 Z"
-                              fill="url(#maint-grad-dark)" stroke="url(#maint-grad-gold)" stroke-width="1.5" stroke-linejoin="round"/>
-                        <circle cx="100" cy="70" r="28" fill="none" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.6"/>
-                        <circle cx="100" cy="70" r="18" fill="url(#maint-grad-dark)" stroke="url(#maint-grad-gold-light)" stroke-width="1" opacity="0.4"/>
-                        <circle cx="100" cy="70" r="6" fill="url(#maint-grad-gold)" opacity="0.8"/>
-                        <!-- Spokes -->
-                        <line x1="100" y1="42" x2="100" y2="52" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.5"/>
-                        <line x1="100" y1="88" x2="100" y2="98" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.5"/>
-                        <line x1="72" y1="70" x2="82" y2="70" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.5"/>
-                        <line x1="118" y1="70" x2="128" y2="70" stroke="url(#maint-grad-gold)" stroke-width="1.5" opacity="0.5"/>
+                    <!-- ═══ Ring 1: Outermost HUD compass (slow CW, 20s) ═══ -->
+                    <g class="mc-ring-outer" filter="url(#mc-glow)">
+                        <!-- Main circle -->
+                        <circle cx="120" cy="120" r="110" fill="none" stroke="url(#mc-gold)" stroke-width="0.5" opacity="0.3"/>
+                        <!-- Tick marks every 15° -->
+                        <g stroke="url(#mc-gold)" stroke-width="1" opacity="0.4">
+                            <line x1="120" y1="10" x2="120" y2="18"/>
+                            <line x1="120" y1="222" x2="120" y2="230"/>
+                            <line x1="10" y1="120" x2="18" y2="120"/>
+                            <line x1="222" y1="120" x2="230" y2="120"/>
+                        </g>
+                        <g stroke="url(#mc-gold)" stroke-width="0.6" opacity="0.25">
+                            <line x1="172" y1="22" x2="168" y2="29" transform="rotate(0 120 120)"/>
+                            <line x1="218" y1="68" x2="211" y2="72"/>
+                            <line x1="218" y1="172" x2="211" y2="168"/>
+                            <line x1="172" y1="218" x2="168" y2="211"/>
+                            <line x1="68" y1="218" x2="72" y2="211"/>
+                            <line x1="22" y1="172" x2="29" y2="168"/>
+                            <line x1="22" y1="68" x2="29" y2="72"/>
+                            <line x1="68" y1="22" x2="72" y2="29"/>
+                        </g>
+                        <!-- Arc segments (4 gaps) -->
+                        <path d="M 120 16 A 104 104 0 0 1 224 120" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+                        <path d="M 224 120 A 104 104 0 0 1 120 224" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+                        <path d="M 120 224 A 104 104 0 0 1 16 120" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+                        <path d="M 16 120 A 104 104 0 0 1 120 16" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+                        <!-- Corner accents (diamond markers at cardinal points) -->
+                        <rect x="117" y="6" width="6" height="6" rx="1" fill="url(#mc-gold-bright)" opacity="0.6" transform="rotate(45 120 9)"/>
+                        <rect x="117" y="228" width="6" height="6" rx="1" fill="url(#mc-gold-bright)" opacity="0.6" transform="rotate(45 120 231)"/>
+                        <rect x="6" y="117" width="6" height="6" rx="1" fill="url(#mc-gold-bright)" opacity="0.6" transform="rotate(45 9 120)"/>
+                        <rect x="228" y="117" width="6" height="6" rx="1" fill="url(#mc-gold-bright)" opacity="0.6" transform="rotate(45 231 120)"/>
                     </g>
 
-                    <!-- Small gear (counter-clockwise, fast) -->
-                    <g class="maint-gear maint-gear-small" transform="translate(155 135)" filter="url(#maint-gear-shadow)">
-                        <path d="M0 -28 L5 -22 L13 -23 L14 -15 L21 -12 L18 -5 L22 2 L16 6 L17 14 L9 14 L6 21 L-1 18 L-8 21 L-11 14 L-19 14 L-18 6 L-24 2 L-20 -5 L-23 -12 L-16 -15 L-15 -23 L-7 -22 Z"
-                              fill="url(#maint-grad-dark)" stroke="url(#maint-grad-gold-light)" stroke-width="1.2" stroke-linejoin="round"/>
-                        <circle cx="0" cy="0" r="12" fill="none" stroke="url(#maint-grad-gold-light)" stroke-width="1" opacity="0.5"/>
-                        <circle cx="0" cy="0" r="4" fill="url(#maint-grad-gold-light)" opacity="0.7"/>
+                    <!-- ═══ Ring 2: Middle mechanical ring (CCW, 14s) ═══ -->
+                    <g class="mc-ring-mid" filter="url(#mc-glow)">
+                        <!-- Dashed circle -->
+                        <circle cx="120" cy="120" r="88" fill="none" stroke="url(#mc-gold)" stroke-width="1" stroke-dasharray="6 4" opacity="0.4"/>
+                        <!-- Inner solid ring -->
+                        <circle cx="120" cy="120" r="82" fill="none" stroke="url(#mc-gold)" stroke-width="0.5" opacity="0.2"/>
+                        <!-- 8 segment arcs with gaps -->
+                        <g stroke="url(#mc-gold-bright)" stroke-width="2" opacity="0.5" stroke-linecap="round" fill="none">
+                            <path d="M 120 42 A 78 78 0 0 1 175 65"/>
+                            <path d="M 198 120 A 78 78 0 0 1 175 175"/>
+                            <path d="M 120 198 A 78 78 0 0 1 65 175"/>
+                            <path d="M 42 120 A 78 78 0 0 1 65 65"/>
+                        </g>
+                        <!-- Notch markers (small rectangles) -->
+                        <g fill="url(#mc-gold)" opacity="0.5">
+                            <rect x="118" y="38" width="4" height="8" rx="1"/>
+                            <rect x="118" y="194" width="4" height="8" rx="1"/>
+                            <rect x="38" y="118" width="8" height="4" rx="1"/>
+                            <rect x="194" y="118" width="8" height="4" rx="1"/>
+                        </g>
                     </g>
 
-                    <!-- Medium gear (clockwise, medium) — bottom left -->
-                    <g class="maint-gear maint-gear-medium" transform="translate(45 140)" filter="url(#maint-gear-shadow)">
-                        <path d="M0 -20 L4 -16 L10 -17 L11 -11 L16 -9 L14 -3 L17 2 L13 5 L14 11 L8 11 L5 16 L0 13 L-5 16 L-8 11 L-14 11 L-13 5 L-17 2 L-14 -3 L-16 -9 L-11 -11 L-10 -17 L-4 -16 Z"
-                              fill="url(#maint-grad-dark)" stroke="url(#maint-grad-gold)" stroke-width="1" stroke-linejoin="round"/>
-                        <circle cx="0" cy="0" r="8" fill="none" stroke="url(#maint-grad-gold)" stroke-width="0.8" opacity="0.4"/>
-                        <circle cx="0" cy="0" r="3" fill="url(#maint-grad-gold)" opacity="0.6"/>
+                    <!-- ═══ Ring 3: Inner gear ring (CW, 9s) ═══ -->
+                    <g class="mc-ring-inner" filter="url(#mc-glow)">
+                        <!-- 16-tooth gear ring -->
+                        <circle cx="120" cy="120" r="62" fill="none" stroke="url(#mc-gold)" stroke-width="0.5" opacity="0.2"/>
+                        <circle cx="120" cy="120" r="56" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.4" stroke-dasharray="3 1.5"/>
+                        <!-- Inner solid -->
+                        <circle cx="120" cy="120" r="50" fill="url(#mc-steel)" opacity="0.6"/>
+                        <circle cx="120" cy="120" r="50" fill="none" stroke="url(#mc-gold)" stroke-width="1" opacity="0.5"/>
+                        <!-- 8 spokes -->
+                        <g stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.3" stroke-linecap="round">
+                            <line x1="120" y1="72" x2="120" y2="88"/>
+                            <line x1="120" y1="152" x2="120" y2="168"/>
+                            <line x1="72" y1="120" x2="88" y2="120"/>
+                            <line x1="152" y1="120" x2="168" y2="120"/>
+                            <line x1="86" y1="86" x2="97" y2="97" opacity="0.5"/>
+                            <line x1="143" y1="143" x2="154" y2="154" opacity="0.5"/>
+                            <line x1="154" y1="86" x2="143" y2="97" opacity="0.5"/>
+                            <line x1="86" y1="154" x2="97" y2="143" opacity="0.5"/>
+                        </g>
                     </g>
 
-                    <!-- Central core -->
-                    <circle cx="100" cy="70" r="3" fill="#FFD96B" opacity="0.9">
-                        <animate attributeName="r" values="2;4;2" dur="2s" repeatCount="indefinite"/>
-                        <animate attributeName="opacity" values="0.9;0.4;0.9" dur="2s" repeatCount="indefinite"/>
-                    </circle>
+                    <!-- ═══ Central Hexagonal Core ═══ -->
+                    <g class="mc-core-hex" filter="url(#mc-glow-strong)">
+                        <!-- Outer hexagon -->
+                        <polygon points="120,88 148,104 148,136 120,152 92,136 92,104"
+                                 fill="url(#mc-core-grad)" opacity="0.9" stroke="url(#mc-gold-bright)" stroke-width="1.5" stroke-linejoin="round"/>
+                        <!-- Inner hexagon (darker) -->
+                        <polygon points="120,96 140,108 140,132 120,144 100,132 100,108"
+                                 fill="url(#mc-steel)" opacity="0.7" stroke="url(#mc-gold)" stroke-width="0.8" stroke-linejoin="round"/>
+                        <!-- Center dot (pulsing energy) -->
+                        <circle cx="120" cy="120" r="8" fill="url(#mc-core-grad)" opacity="0.8">
+                            <animate attributeName="r" values="6;10;6" dur="2.5s" repeatCount="indefinite"/>
+                            <animate attributeName="opacity" values="0.8;1;0.8" dur="2.5s" repeatCount="indefinite"/>
+                        </circle>
+                        <!-- Inner glow dot -->
+                        <circle cx="120" cy="120" r="3" fill="#FFF8E0" opacity="0.9">
+                            <animate attributeName="r" values="2;4;2" dur="2.5s" repeatCount="indefinite"/>
+                        </circle>
+                    </g>
+
+                    <!-- ═══ Energy beams (6 radial lines, pulsing) ═══ -->
+                    <g class="mc-beams" opacity="0.6">
+                        <line x1="120" y1="120" x2="120" y2="58" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.4" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.5;0.1" dur="3s" repeatCount="indefinite"/>
+                        </line>
+                        <line x1="120" y1="120" x2="174" y2="89" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.3" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.4;0.1" dur="3s" repeatCount="indefinite" begin="0.5s"/>
+                        </line>
+                        <line x1="120" y1="120" x2="174" y2="151" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.3" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.4;0.1" dur="3s" repeatCount="indefinite" begin="1s"/>
+                        </line>
+                        <line x1="120" y1="120" x2="120" y2="182" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.4" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.5;0.1" dur="3s" repeatCount="indefinite" begin="1.5s"/>
+                        </line>
+                        <line x1="120" y1="120" x2="66" y2="151" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.3" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.4;0.1" dur="3s" repeatCount="indefinite" begin="2s"/>
+                        </line>
+                        <line x1="120" y1="120" x2="66" y2="89" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.3" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.4;0.1" dur="3s" repeatCount="indefinite" begin="2.5s"/>
+                        </line>
+                    </g>
                 </svg>
 
-                <!-- Data flow particles -->
-                <div class="maint-flow-particle maint-flow-1"></div>
-                <div class="maint-flow-particle maint-flow-2"></div>
-                <div class="maint-flow-particle maint-flow-3"></div>
+                <!-- Orbiting particles (CSS-animated, GPU-accelerated) -->
+                <div class="mc-orbit mc-orbit-1"><div class="mc-orbit-dot"></div></div>
+                <div class="mc-orbit mc-orbit-2"><div class="mc-orbit-dot"></div></div>
+                <div class="mc-orbit mc-orbit-3"><div class="mc-orbit-dot"></div></div>
+                <div class="mc-orbit mc-orbit-4"><div class="mc-orbit-dot"></div></div>
+
+                <!-- Top light source (subtle highlight from above) -->
+                <div class="maint-core-toplight"></div>
             </div>
 
             <!-- Premium badge -->

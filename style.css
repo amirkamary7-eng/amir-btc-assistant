@@ -3942,113 +3942,187 @@ strong.down { color: var(--red); }
     to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* ── Multi-Gear Engine Scene ── */
-.maint-engine-scene {
+/* ════════════════════════════════════════════════════════════════════ */
+/* PREMIUM MECHANICAL CORE — Reactor Engine                              */
+/* Multi-layer depth system: glow + HUD rings + hexagonal core + orbits  */
+/* ════════════════════════════════════════════════════════════════════ */
+
+.maint-core-scene {
     position: relative;
-    width: 160px; height: 160px;
+    width: 180px; height: 180px;
     margin-bottom: 24px;
     display: flex; align-items: center; justify-content: center;
+    animation: mcFloat 6s ease-in-out infinite;
+    will-change: transform;
 }
 
-/* Ambient glow behind gears */
-.maint-engine-glow {
+/* Gentle floating of the entire scene */
+@keyframes mcFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+}
+
+/* Layer 0: Deep ambient glow (behind everything) */
+.maint-core-deepglow {
     position: absolute; top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 180px; height: 180px;
-    background: radial-gradient(circle, rgba(245, 166, 35, 0.18) 0%, rgba(245, 166, 35, 0.04) 40%, transparent 70%);
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(245,166,35,0.12) 0%, rgba(245,166,35,0.03) 40%, transparent 70%);
     border-radius: 50%;
-    animation: maintGlowPulse 4s ease-in-out infinite;
+    animation: mcDeepPulse 5s ease-in-out infinite;
     will-change: opacity, transform;
 }
-@keyframes maintGlowPulse {
-    0%, 100% { opacity: 0.4; transform: translate(-50%, -50%) scale(1); }
-    50% { opacity: 0.8; transform: translate(-50%, -50%) scale(1.15); }
+@keyframes mcDeepPulse {
+    0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(1); }
+    50% { opacity: 0.9; transform: translate(-50%, -50%) scale(1.2); }
 }
 
-/* Pulsing rings */
-.maint-ring {
+/* Layer 1: Aurora glow (medium, colored) */
+.maint-core-aurora {
     position: absolute; top: 50%; left: 50%;
-    border-radius: 50%;
-    border: 1px solid rgba(245, 166, 35, 0.15);
     transform: translate(-50%, -50%);
+    width: 160px; height: 160px;
+    background: radial-gradient(circle, rgba(255,217,107,0.15) 0%, rgba(245,166,35,0.05) 50%, transparent 80%);
+    border-radius: 50%;
+    animation: mcAuroraPulse 4s ease-in-out infinite 0.5s;
+    will-change: opacity, transform;
+}
+@keyframes mcAuroraPulse {
+    0%, 100% { opacity: 0.4; transform: translate(-50%, -50%) scale(0.95); }
+    50% { opacity: 0.8; transform: translate(-50%, -50%) scale(1.1); }
+}
+
+/* Layer 2: Bottom reflection (mirror glow) */
+.maint-core-reflection {
+    position: absolute; bottom: 5%; left: 50%;
+    transform: translateX(-50%);
+    width: 120px; height: 20px;
+    background: radial-gradient(ellipse, rgba(245,166,35,0.15) 0%, transparent 70%);
+    border-radius: 50%;
+    animation: mcReflectPulse 4s ease-in-out infinite;
+    will-change: opacity;
+}
+@keyframes mcReflectPulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.6; }
+}
+
+/* Layer 3: SVG Ring System */
+.maint-core-svg {
+    position: relative; z-index: 2;
+    width: 180px; height: 180px;
+    filter: drop-shadow(0 4px 24px rgba(245, 166, 35, 0.12));
+}
+
+/* ═══ Ring Animations — GPU-accelerated, varying speeds/directions ═══ */
+
+/* Outer ring: slow CW, 20s (compass-like) */
+.mc-ring-outer {
+    transform-origin: 120px 120px;
+    animation: mcRotateCW 20s linear infinite;
+    will-change: transform;
+}
+
+/* Middle ring: CCW, 14s (mechanical counter-rotation) */
+.mc-ring-mid {
+    transform-origin: 120px 120px;
+    animation: mcRotateCCW 14s linear infinite;
+    will-change: transform;
+}
+
+/* Inner ring: CW, 9s (faster, gear-like) */
+.mc-ring-inner {
+    transform-origin: 120px 120px;
+    animation: mcRotateCW 9s linear infinite;
+    will-change: transform;
+}
+
+/* Central hexagonal core: gentle oscillation */
+.mc-core-hex {
+    transform-origin: 120px 120px;
+    animation: mcCorePulse 3s ease-in-out infinite;
     will-change: transform, opacity;
 }
-.maint-ring-1 {
-    width: 120px; height: 120px;
-    animation: maintRingExpand 3s ease-out infinite;
-}
-.maint-ring-2 {
-    width: 120px; height: 120px;
-    animation: maintRingExpand 3s ease-out infinite 1s;
-}
-.maint-ring-3 {
-    width: 120px; height: 120px;
-    animation: maintRingExpand 3s ease-out infinite 2s;
-}
-@keyframes maintRingExpand {
-    0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.6; }
-    100% { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
+@keyframes mcCorePulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.05); opacity: 0.9; }
 }
 
-/* Gear SVG */
-.maint-gear-system {
-    position: relative; z-index: 2;
-    width: 140px; height: 140px;
-    filter: drop-shadow(0 4px 20px rgba(245, 166, 35, 0.15));
+/* Energy beams: pulse (SVG animate handles this) */
+.mc-beams {
+    transform-origin: 120px 120px;
+    animation: mcRotateCW 30s linear infinite;
+    will-change: transform;
 }
 
-/* Individual gear animations — GPU accelerated, varying speeds + directions */
-.maint-gear-large {
-    transform-origin: 100px 70px;
-    animation: maintGearCW 12s linear infinite;
-    will-change: transform;
-}
-.maint-gear-small {
-    transform-origin: 0 0;
-    animation: maintGearCCW 7s linear infinite;
-    will-change: transform;
-}
-.maint-gear-medium {
-    transform-origin: 0 0;
-    animation: maintGearCW 9s linear infinite;
-    will-change: transform;
-}
-@keyframes maintGearCW {
+@keyframes mcRotateCW {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
-@keyframes maintGearCCW {
+@keyframes mcRotateCCW {
     from { transform: rotate(0deg); }
     to { transform: rotate(-360deg); }
 }
 
-/* Data flow particles */
-.maint-flow-particle {
+/* ═══ Orbiting Particles — CSS-animated, GPU-accelerated ═══ */
+.mc-orbit {
+    position: absolute; top: 50%; left: 50%;
+    width: 0; height: 0;
+    will-change: transform;
+}
+.mc-orbit-dot {
     position: absolute;
     width: 4px; height: 4px;
     border-radius: 50%;
     background: #FFD96B;
-    box-shadow: 0 0 8px rgba(255, 217, 107, 0.8);
-    z-index: 3;
+    box-shadow: 0 0 8px rgba(255, 217, 107, 0.9), 0 0 4px rgba(245, 166, 35, 0.6);
     will-change: transform, opacity;
 }
-.maint-flow-1 {
-    top: 20%; left: 50%;
-    animation: maintFlowOrbit 6s linear infinite;
+.mc-orbit-1 {
+    animation: mcOrbit1 8s linear infinite;
 }
-.maint-flow-2 {
-    top: 50%; left: 80%;
-    animation: maintFlowOrbit 5s linear infinite 1.5s;
+.mc-orbit-1 .mc-orbit-dot { top: -80px; left: -2px; }
+@keyframes mcOrbit1 {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
-.maint-flow-3 {
-    top: 70%; left: 30%;
-    animation: maintFlowOrbit 7s linear infinite 3s;
+
+.mc-orbit-2 {
+    animation: mcOrbit2 6s linear infinite reverse;
 }
-@keyframes maintFlowOrbit {
-    0% { transform: translate(0, 0) scale(1); opacity: 0; }
-    20% { opacity: 1; }
-    80% { opacity: 1; }
-    100% { transform: translate(40px, -60px) scale(0.3); opacity: 0; }
+.mc-orbit-2 .mc-orbit-dot { top: -68px; left: -2px; width: 3px; height: 3px; }
+@keyframes mcOrbit2 {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.mc-orbit-3 {
+    animation: mcOrbit3 10s linear infinite;
+}
+.mc-orbit-3 .mc-orbit-dot { top: -55px; left: -2px; width: 3px; height: 3px; background: #F5A623; }
+@keyframes mcOrbit3 {
+    from { transform: rotate(120deg); }
+    to { transform: rotate(480deg); }
+}
+
+.mc-orbit-4 {
+    animation: mcOrbit4 7s linear infinite reverse;
+}
+.mc-orbit-4 .mc-orbit-dot { top: -90px; left: -2px; width: 2px; height: 2px; opacity: 0.6; }
+@keyframes mcOrbit4 {
+    from { transform: rotate(240deg); }
+    to { transform: rotate(600deg); }
+}
+
+/* Layer 8: Top light source (highlight from above) */
+.maint-core-toplight {
+    position: absolute; top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 60px; height: 30px;
+    background: radial-gradient(ellipse at top, rgba(255,248,224,0.1) 0%, transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 3;
 }
 
 /* ── Badge ── */
@@ -4151,8 +4225,8 @@ strong.down { color: var(--red); }
 /* ── Mobile responsive ── */
 @media (max-width: 380px) {
     .maint-content { padding: 36px 24px 28px; border-radius: 22px; }
-    .maint-engine-scene { width: 130px; height: 130px; margin-bottom: 18px; }
-    .maint-gear-system { width: 120px; height: 120px; }
+    .maint-core-scene { width: 150px; height: 150px; margin-bottom: 18px; }
+    .maint-core-svg { width: 150px; height: 150px; }
     .maint-title { font-size: 19px; }
     .maint-desc { font-size: 12.5px; }
 }
