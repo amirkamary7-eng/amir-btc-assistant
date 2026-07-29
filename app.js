@@ -7161,18 +7161,13 @@ function renderCalendarV2() {
         // Clear countdown before full re-render (will restart after innerHTML)
         if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
 
-        // Group by time period
-        const groups = {};
-        filteredEvents.forEach(e => {
-            const d = new Date(e.timestamp);
-            const hour = Number(d.toLocaleString('en-GB', { timeZone: tz, hour: 'numeric', hour12: false }));
-            const group = getTimeGroup(hour);
-            if (!groups[group]) groups[group] = [];
-            groups[group].push(e);
-        });
-
+        // ITEM 2 FIX: Render events in the sorted order directly — NO grouping
+        // by time period. Previously, events were grouped into morning/afternoon/
+        // evening which OVERRID the status-based sort. Past events in morning
+        // groups appeared before upcoming events in evening groups, even though
+        // the sort correctly put upcoming first. Now we render the flat sorted
+        // list so the status order (upcoming → live → past) is always respected.
         const lang = currentLang || 'fa';
-        const labels = timeGroupLabels[lang] || timeGroupLabels.fa;
         const impactLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
         const statusLabel = { past: 'گذشته', live: 'در حال اجرا', upcoming: 'در انتظار' };
 
@@ -7194,64 +7189,59 @@ function renderCalendarV2() {
         </div>`;
 
         let eventsHtml = '';
-        const groupOrder = ['morning', 'afternoon', 'evening'];
-        groupOrder.forEach(g => {
-            if (!groups[g]) return;
-            eventsHtml += `<div class="ni-cal-time-group">${labels[g]}</div>`;
-            groups[g].forEach(e => {
-                const ft = formatCalendarTime(e.timestamp);
-                const timeText = ft.time || '';
-                const isPast = e.status === 'past';
-                const isLive = e.status === 'live';
-                const impact = e.impact || 'medium';
-                const eventKey = e.title + '|' + e.timestamp;
-                const hasReminder = _niCalendarReminders[eventKey];
+        filteredEvents.forEach(e => {
+            const ft = formatCalendarTime(e.timestamp);
+            const timeText = ft.time || '';
+            const isPast = e.status === 'past';
+            const isLive = e.status === 'live';
+            const impact = e.impact || 'medium';
+            const eventKey = e.title + '|' + e.timestamp;
+            const hasReminder = _niCalendarReminders[eventKey];
 
-                // Surprise indicator
-                let surpriseHtml = '';
-                if (e.actual && e.forecast) {
-                    const actualVal = parseFloat(e.actual);
-                    const forecastVal = parseFloat(e.forecast);
-                    if (!isNaN(actualVal) && !isNaN(forecastVal)) {
-                        const diff = actualVal - forecastVal;
-                        const isPositiveGood = !e.title?.toUpperCase().includes('UNEMPLOYMENT');
-                        const isBetter = isPositiveGood ? diff > 0 : diff < 0;
-                        const cls = Math.abs(diff) < 0.01 ? 'surprise-expected' : (isBetter ? 'surprise-better' : 'surprise-worse');
-                        const icon = Math.abs(diff) < 0.01 ? NI_ICONS.clock : (isBetter ? NI_ICONS.arrowUp : NI_ICONS.arrowDown);
-                        surpriseHtml = ` <span class="cal-event-surprise ${cls}" style="display:inline-flex;align-items:center;gap:2px;">${icon}</span>`;
-                    }
+            // Surprise indicator
+            let surpriseHtml = '';
+            if (e.actual && e.forecast) {
+                const actualVal = parseFloat(e.actual);
+                const forecastVal = parseFloat(e.forecast);
+                if (!isNaN(actualVal) && !isNaN(forecastVal)) {
+                    const diff = actualVal - forecastVal;
+                    const isPositiveGood = !e.title?.toUpperCase().includes('UNEMPLOYMENT');
+                    const isBetter = isPositiveGood ? diff > 0 : diff < 0;
+                    const cls = Math.abs(diff) < 0.01 ? 'surprise-expected' : (isBetter ? 'surprise-better' : 'surprise-worse');
+                    const icon = Math.abs(diff) < 0.01 ? NI_ICONS.clock : (isBetter ? NI_ICONS.arrowUp : NI_ICONS.arrowDown);
+                    surpriseHtml = ` <span class="cal-event-surprise ${cls}" style="display:inline-flex;align-items:center;gap:2px;">${icon}</span>`;
                 }
+            }
 
-                eventsHtml += `
-                <div class="ni-cal-event impact-${impact}${isPast ? ' past' : ''}${isLive ? ' live' : ''}">
-                    <div class="ni-cal-event-top">
-                        <div class="ni-cal-event-left">
-                            <div class="ni-cal-event-flag">${e.flag || ''}</div>
-                            <div>
-                                <div class="ni-cal-event-currency">${escapeHtml(e.country || '')}</div>
-                                ${e.status ? `<span class="ni-cal-status ni-cal-status-${e.status}">${statusLabel[e.status] || e.status}</span>` : ''}
-                            </div>
-                        </div>
-                        <div style="text-align:left;">
-                            <div class="ni-cal-event-time">${timeText}</div>
-                            ${!isPast && !isLive ? `<div class="ni-cal-countdown" data-ts="${e.timestamp}">--</div>` : ''}
+            eventsHtml += `
+            <div class="ni-cal-event impact-${impact}${isPast ? ' past' : ''}${isLive ? ' live' : ''}">
+                <div class="ni-cal-event-top">
+                    <div class="ni-cal-event-left">
+                        <div class="ni-cal-event-flag">${e.flag || ''}</div>
+                        <div>
+                            <div class="ni-cal-event-currency">${escapeHtml(e.country || '')}</div>
+                            ${e.status ? `<span class="ni-cal-status ni-cal-status-${e.status}">${statusLabel[e.status] || e.status}</span>` : ''}
                         </div>
                     </div>
-                    <div class="ni-cal-event-title">${escapeHtml(e.title)}</div>
-                    <div class="ni-cal-event-stats">
-                        ${e.forecast ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">پیش‌بینی</div><div class="ni-cal-stat-value">${escapeHtml(e.forecast)}</div></div>` : ''}
-                        ${e.previous ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">قبلی</div><div class="ni-cal-stat-value">${escapeHtml(e.previous)}</div></div>` : ''}
-                        ${e.actual ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">واقعی</div><div class="ni-cal-stat-value actual">${escapeHtml(e.actual)}${surpriseHtml}</div></div>` : ''}
-                        <div class="ni-cal-stat"><div class="ni-cal-stat-label">تأثیر</div><div class="ni-cal-stat-value">${impactLabels[impact] || impactLabels.medium}</div></div>
+                    <div style="text-align:left;">
+                        <div class="ni-cal-event-time">${timeText}</div>
+                        ${!isPast && !isLive ? `<div class="ni-cal-countdown" data-ts="${e.timestamp}">--</div>` : ''}
                     </div>
-                    <div class="ni-cal-event-footer">
-                        <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}', '${escapeHtml(e.timestamp || '')}')"">
-                            ${hasReminder ? NI_ICONS.bell : NI_ICONS.bellOff}
-                            <span>${hasReminder ? 'یادآور فعال' : 'یادآوری'}</span>
-                        </button>
-                    </div>
-                </div>`;
-            });
+                </div>
+                <div class="ni-cal-event-title">${escapeHtml(e.title)}</div>
+                <div class="ni-cal-event-stats">
+                    ${e.forecast ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">پیش‌بینی</div><div class="ni-cal-stat-value">${escapeHtml(e.forecast)}</div></div>` : ''}
+                    ${e.previous ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">قبلی</div><div class="ni-cal-stat-value">${escapeHtml(e.previous)}</div></div>` : ''}
+                    ${e.actual ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">واقعی</div><div class="ni-cal-stat-value actual">${escapeHtml(e.actual)}${surpriseHtml}</div></div>` : ''}
+                    <div class="ni-cal-stat"><div class="ni-cal-stat-label">تأثیر</div><div class="ni-cal-stat-value">${impactLabels[impact] || impactLabels.medium}</div></div>
+                </div>
+                <div class="ni-cal-event-footer">
+                    <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}', '${escapeHtml(e.timestamp || '')}')"">
+                        ${hasReminder ? NI_ICONS.bell : NI_ICONS.bellOff}
+                        <span>${hasReminder ? 'یادآور فعال' : 'یادآوری'}</span>
+                    </button>
+                </div>
+            </div>`;
         });
 
         container.innerHTML = segmentsHtml + countriesHtml + eventsHtml;
