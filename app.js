@@ -3838,20 +3838,20 @@ function sanitizeNewsTitle(rawTitle) {
  * Item 2: News time displayed in Tehran timezone, not UTC.
  */
 function formatNewsTimeTehran(pubDate, relativeTime) {
-    // If we have a valid pubDate, format as Tehran time
+    // If we have a valid pubDate, format as Tehran time (HH:MM only, no label)
     if (pubDate) {
         try {
             const date = new Date(pubDate);
             if (!isNaN(date.getTime())) {
                 // Format in Asia/Tehran timezone (UTC+3:30, no DST)
-                // Intl.DateTimeFormat handles timezone conversion correctly
-                const tehranTime = new Intl.DateTimeFormat('fa-IR', {
+                // Show ONLY the time (e.g. "۱۴:۳۵") — no "به وقت تهران" label
+                // to keep the UI clean and uncluttered.
+                return new Intl.DateTimeFormat('fa-IR', {
                     timeZone: 'Asia/Tehran',
                     hour: '2-digit',
                     minute: '2-digit',
                     hour12: false,
                 }).format(date);
-                return tehranTime + ' | به وقت تهران';
             }
         } catch (_) { /* fall through to relative time */ }
     }
@@ -6861,6 +6861,12 @@ function startCalCountdown() {
     if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
     const updateCountdowns = () => {
         const now = Date.now();
+        // ROOT CAUSE FIX (item 2): When countdown reaches 0, the event is
+        // LIVE (starting now), NOT past. "زمان گذشته" was incorrectly shown
+        // the moment the event started. Now shows "در حال اجرا" (live) for
+        // 30 minutes after the event start time, then stops updating (the
+        // backend's getEventStatus will mark it 'past' on next data refresh).
+        const LIVE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
         document.querySelectorAll('.cal-event-countdown[data-ts]').forEach(el => {
             const ts = parseInt(el.dataset.ts);
             const diff = new Date(ts).getTime() - now;
@@ -6876,7 +6882,13 @@ function startCalCountdown() {
             const ts = parseInt(el.dataset.ts);
             const diff = new Date(ts).getTime() - now;
             if (diff <= 0) {
-                el.textContent = 'زمان گذشته';
+                // Event has started — show "در حال اجرا" (live), NOT "زمان گذشته"
+                // Only show "پایان" after the 30-min live window passes
+                if (Math.abs(diff) > LIVE_WINDOW_MS) {
+                    el.textContent = 'پایان یافت';
+                } else {
+                    el.textContent = 'در حال اجرا';
+                }
                 el.removeAttribute('data-ts');
             } else {
                 el.textContent = formatCountdown(diff);

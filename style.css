@@ -10471,3 +10471,188 @@ body.jl-locked .cd-fullscreen {
     margin-top: 4px;
     font-variant-numeric: tabular-nums;
 }
+
+/* ============================================================================ */
+/* Support Tickets — Professional Admin Panel Design                            */
+/* ============================================================================ */
+
+/* ── Ticket Card ── */
+.tk-card {
+    background: linear-gradient(180deg, #0E1623 0%, #0B1220 100%);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    overflow: hidden;
+}
+.tk-card:hover {
+    border-color: rgba(255,255,255,0.1);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+}
+.tk-card.tk-expanded {
+    border-color: rgba(245,166,35,0.2);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+}
+
+/* ── Ticket Card Header ── */
+.tk-card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; gap: 10px;
+}
+.tk-card-header-left {
+    display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+}
+.tk-card-icon {
+    width: 32px; height: 32px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+}
+.tk-card-icon.tk-status-open { background: rgba(59,130,246,0.12); }
+.tk-card-icon.tk-status-answered { background: rgba(245,166,35,0.12); }
+.tk-card-icon.tk-status-closed { background: rgba(107,122,141,0.12); }
+.tk-card-header-text {
+    display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;
+}
+.tk-card-subject {
+    font-size: 14px; font-weight: 700; color: #FFFFFF;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tk-card-user {
+    font-size: 11px; color: #6B7A8D; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tk-card-header-right {
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+
+/* ── Status Badges ── */
+.tk-badge {
+    font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 6px;
+    text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap;
+    border: 1px solid;
+}
+.tk-badge.tk-status-open {
+    color: #3B82F6; background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.25);
+}
+.tk-badge.tk-status-answered {
+    color: #F5A623; background: rgba(245,166,35,0.1); border-color: rgba(245,166,35,0.25);
+}
+.tk-badge.tk-status-closed {
+    color: #6B7A8D; background: rgba(107,122,141,0.1); border-color: rgba(107,122,141,0.25);
+}
+
+/* ── Card Arrow (expand/collapse indicator) ── */
+.tk-card-arrow {
+    color: #6B7A8D; transition: transform 0.2s ease;
+    display: flex; align-items: center;
+}
+.tk-card-arrow.tk-arrow-open { transform: rotate(180deg); }
+
+/* ── Card Preview Text ── */
+.tk-card-preview {
+    font-size: 12px; color: #8896A8; line-height: 1.5;
+    margin-top: 8px; padding-left: 42px;
+    white-space: pre-wrap; overflow: hidden; max-height: 40px;
+    text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+
+/* ── Card Footer ── */
+.tk-card-footer {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 8px; padding-left: 42px;
+    font-size: 10px; color: #4A5668; font-weight: 500;
+}
+.tk-card-updated { color: #4A5668; }
+.tk-card-replies { color: #F5A623; margin-left: auto; }
+
+/* ── Ticket Detail (expanded) ── */
+.tk-detail {
+    margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Conversation Thread ── */
+.tk-thread {
+    display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;
+    max-height: 300px; overflow-y: auto; padding-right: 4px;
+}
+.tk-thread::-webkit-scrollbar { width: 4px; }
+.tk-thread::-webkit-scrollbar-track { background: transparent; }
+.tk-thread::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* ── Individual Message ── */
+.tk-msg {
+    border-radius: 12px; padding: 10px 14px;
+    max-width: 85%;
+}
+.tk-msg-user {
+    background: rgba(255,255,255,0.04);
+    align-self: flex-start;
+}
+.tk-msg-admin {
+    background: rgba(245,166,35,0.08);
+    border: 1px solid rgba(245,166,35,0.15);
+    align-self: flex-end;
+}
+.tk-msg-header {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 4px;
+}
+.tk-msg-author {
+    font-size: 11px; font-weight: 700;
+}
+.tk-msg-user .tk-msg-author { color: #6B7A8D; }
+.tk-msg-admin .tk-msg-author { color: #F5A623; }
+.tk-msg-time {
+    font-size: 10px; color: #4A5668; font-weight: 500;
+}
+.tk-msg-body {
+    font-size: 13px; color: #C5D0E0; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word;
+}
+
+/* ── Reply Form ── */
+.tk-reply-form {
+    margin-bottom: 12px;
+}
+.tk-reply-input {
+    width: 100%; min-height: 72px;
+    font-size: 13px; padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: #FFFFFF; font-family: inherit;
+    resize: vertical; box-sizing: border-box;
+    transition: border-color 0.2s ease;
+}
+.tk-reply-input:focus {
+    outline: none; border-color: rgba(245,166,35,0.3);
+}
+.tk-reply-input::placeholder { color: #4A5668; }
+
+/* ── Action Buttons ── */
+.tk-actions {
+    display: flex; flex-wrap: wrap; gap: 6px;
+}
+.tk-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 7px 14px; border-radius: 8px;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.04); color: #A5B4C7;
+    transition: all 0.15s ease; font-family: inherit;
+}
+.tk-btn:hover { background: rgba(255,255,255,0.08); color: #FFFFFF; }
+.tk-btn:active { transform: scale(0.97); }
+.tk-btn-primary {
+    background: linear-gradient(135deg, #F5A623, #D97706);
+    border: none; color: #0B0F14; font-weight: 700;
+    padding: 8px 18px; font-size: 12px;
+    margin-top: 6px;
+}
+.tk-btn-primary:hover { background: linear-gradient(135deg, #FFB840, #E89006); color: #0B0F14; }
+.tk-btn-ghost { background: transparent; border-color: rgba(255,255,255,0.1); }
+.tk-btn-danger { color: #EF4444; border-color: rgba(239,68,68,0.15); background: rgba(239,68,68,0.05); }
+.tk-btn-danger:hover { background: rgba(239,68,68,0.12); color: #EF4444; }

@@ -37,7 +37,12 @@ export function createAdminHandlers(deps) {
     const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return { error: authState.error, admin: null };
 
-    // 2. Check admin status in DATABASE (admins table)
+    // 2. Ensure admins table exists before querying it
+    if (isDatabaseConfigured(env)) {
+      await adminRepo.ensureSchema(env).catch(() => {});
+    }
+
+    // 3. Check admin status in DATABASE (admins table)
     const admin = await adminRepo.getAdminByTelegramId(env, String(authState.user.id));
     if (!admin || !admin.active) {
       return { error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env), admin: null };
@@ -194,6 +199,7 @@ export function createAdminHandlers(deps) {
     }
 
     try {
+      await adminRepo.ensureSchema(env);
       const admins = await adminRepo.listAdmins(env);
       return jsonResponse({ status: 'success', admins }, {}, env);
     } catch (error) {
@@ -235,6 +241,7 @@ export function createAdminHandlers(deps) {
     const permissions = Array.isArray(payload.permissions) ? payload.permissions : [];
 
     try {
+      await adminRepo.ensureSchema(env);
       const newAdmin = await adminRepo.addAdmin(env, {
         telegram_id,
         role,

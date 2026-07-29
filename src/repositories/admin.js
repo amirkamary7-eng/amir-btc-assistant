@@ -9,6 +9,46 @@
 export function createAdminRepository(deps) {
   const { queryDb, normalizeOptionalString } = deps;
 
+  let _schemaVerified = false;
+
+  // ---------------------------------------------------------------------------
+  // Schema — ensure the admins table exists with all required columns
+  // ROOT CAUSE FIX (item 3): The admins table was never created in code.
+  // It was only created manually in production. When addAdmin() ran an
+  // INSERT on a non-existent table, the error was silently caught by the
+  // try/catch in the controller — making it appear as if the admin was
+  // added but nothing was actually saved. Now we ensure the table exists
+  // before any admin operation.
+  // ---------------------------------------------------------------------------
+
+  async function ensureSchema(env) {
+    if (_schemaVerified) return;
+    try {
+      await queryDb(env, `
+        CREATE TABLE IF NOT EXISTS admins (
+          id SERIAL PRIMARY KEY,
+          telegram_id VARCHAR(64) NOT NULL UNIQUE,
+          role VARCHAR(32) NOT NULL DEFAULT 'admin',
+          permissions JSONB NOT NULL DEFAULT '[]',
+          active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_by VARCHAR(64),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_admins_telegram_id ON admins (telegram_id);
+        CREATE INDEX IF NOT EXISTS idx_admins_active ON admins (active);
+      `);
+      // Ensure columns exist (for tables created before this fix)
+      await queryDb(env, `ALTER TABLE admins ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '[]'`).catch(() => {});
+      await queryDb(env, `ALTER TABLE admins ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE`).catch(() => {});
+      await queryDb(env, `ALTER TABLE admins ADD COLUMN IF NOT EXISTS created_by VARCHAR(64)`).catch(() => {});
+      await queryDb(env, `ALTER TABLE admins ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`).catch(() => {});
+    } catch (e) {
+      console.warn('Admin schema migration warning:', e.message);
+    }
+    _schemaVerified = true;
+  }
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -1260,6 +1300,7 @@ export function createAdminRepository(deps) {
   }
 
   return Object.freeze({
+    ensureSchema,
     getAdminByTelegramId,
     listAdmins,
     addAdmin,

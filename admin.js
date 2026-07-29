@@ -1072,70 +1072,76 @@ async function loadAdminTickets(page) {
 
         let html = '';
         tickets.forEach(function (t) {
-            const statusBadge = t.status === 'open' ? adminBadge('Open', 'red') :
-                t.status === 'answered' ? adminBadge('Answered', 'orange') :
-                    t.status === 'closed' ? adminBadge('Closed', 'gray') :
-                        adminBadge(String(t.status || ''), 'gray');
+            const statusInfo = {
+                open: { label: 'باز', cls: 'tk-status-open', icon: '🔵' },
+                answered: { label: 'پاسخ داده شده', cls: 'tk-status-answered', icon: '🟡' },
+                closed: { label: 'بسته شده', cls: 'tk-status-closed', icon: '⚫' },
+            };
+            const si = statusInfo[t.status] || { label: String(t.status || ''), cls: 'tk-status-closed', icon: '⚪' };
             const isExpanded = !!_adminTicketsExpanded[t.id];
             const replies = (t.replies && t.replies.length) ? t.replies : [];
+            const priorityCls = t.priority === 'high' ? 'tk-priority-high' : (t.priority === 'medium' ? 'tk-priority-medium' : 'tk-priority-low');
 
-            html += '<div class="admin-list-item admin-ticket-item" id="adm-ticket-' + t.id + '">' +
-                '<div class="admin-list-item-header" style="cursor:pointer" onclick="toggleAdminTicketDetail(\'' + t.id + '\')">' +
-                '<span class="admin-list-item-title">' + adminEscapeHtml(t.subject || t.title || 'Ticket #' + (t.id || '')) + '</span>' +
-                statusBadge +
-                '<span class="admin-list-item-arrow" style="margin-left:auto;color:#6B7A8D">›</span>' +
+            html += '<div class="tk-card ' + (isExpanded ? 'tk-expanded' : '') + '" id="adm-ticket-' + t.id + '">' +
+                '<div class="tk-card-header" onclick="toggleAdminTicketDetail(\'' + t.id + '\')">' +
+                    '<div class="tk-card-header-left">' +
+                        '<span class="tk-card-icon ' + si.cls + '">' + si.icon + '</span>' +
+                        '<div class="tk-card-header-text">' +
+                            '<span class="tk-card-subject">' + adminEscapeHtml(t.subject || t.title || 'تیکت #' + (t.id || '')) + '</span>' +
+                            '<span class="tk-card-user">' + adminEscapeHtml(t.user_name || t.username || 'کاربر') + ' · ID: ' + adminEscapeHtml(String(t.telegram_id || t.user_id || '')) + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="tk-card-header-right">' +
+                        '<span class="tk-badge ' + si.cls + '">' + si.label + '</span>' +
+                        '<span class="tk-card-arrow ' + (isExpanded ? 'tk-arrow-open' : '') + '"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></span>' +
+                    '</div>' +
                 '</div>' +
-                '<div class="admin-list-item-meta">From: ' + adminEscapeHtml(t.user_name || t.username || 'User') +
-                ' (ID: ' + adminEscapeHtml(String(t.telegram_id || t.user_id || '')) + ')</div>' +
-                '<div class="admin-list-item-meta" style="margin-top:4px;white-space:pre-wrap;overflow:hidden;max-height:60px;">' +
-                adminEscapeHtml(t.message || t.last_message || '') +
-                '</div>' +
-                '<div class="admin-list-item-meta" style="margin-top:4px;">' +
-                adminFormatDate(t.created_at || t.date) +
-                (t.updated_at ? ' &bull; Updated: ' + adminFormatDate(t.updated_at) : '') +
+                '<div class="tk-card-preview">' + adminEscapeHtml((t.message || t.last_message || '').substring(0, 120)) + (t.message && t.message.length > 120 ? '…' : '') + '</div>' +
+                '<div class="tk-card-footer">' +
+                    '<span class="tk-card-date">' + adminFormatDate(t.created_at || t.date) + '</span>' +
+                    (t.updated_at ? '<span class="tk-card-updated">· به‌روزرسانی: ' + adminFormatDate(t.updated_at) + '</span>' : '') +
+                    (replies.length ? '<span class="tk-card-replies">💬 ' + replies.length + ' پاسخ</span>' : '') +
                 '</div>';
 
             // Expanded detail: conversation history + reply form + status controls
             if (isExpanded) {
-                html += '<div class="adm-ticket-detail" style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);">';
+                html += '<div class="tk-detail">';
 
                 // Conversation thread
-                if (replies.length) {
-                    html += '<div class="adm-ticket-thread" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">';
-                    // Original message
-                    html += '<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:10px 12px;">' +
-                        '<div style="font-size:11px;color:#6B7A8D;margin-bottom:4px;">' + adminEscapeHtml(t.user_name || 'User') + ' • ' + adminFormatDate(t.created_at) + '</div>' +
-                        '<div style="white-space:pre-wrap;font-size:13px;color:#A5B4C7;">' + adminEscapeHtml(t.message || t.body || '') + '</div>' +
+                html += '<div class="tk-thread adm-ticket-thread">';
+                // Original message
+                html += '<div class="tk-msg tk-msg-user">' +
+                    '<div class="tk-msg-header"><span class="tk-msg-author">' + adminEscapeHtml(t.user_name || 'کاربر') + '</span><span class="tk-msg-time">' + adminFormatDate(t.created_at) + '</span></div>' +
+                    '<div class="tk-msg-body">' + adminEscapeHtml(t.message || t.body || '') + '</div>' +
+                    '</div>';
+                // Replies
+                replies.forEach(function (r) {
+                    var isAdmin = r.from === 'admin' || r.is_admin;
+                    html += '<div class="tk-msg ' + (isAdmin ? 'tk-msg-admin' : 'tk-msg-user') + '">' +
+                        '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? 'مدیر' : adminEscapeHtml(t.user_name || 'کاربر')) + '</span><span class="tk-msg-time">' + adminFormatDate(r.at || r.created_at) + '</span></div>' +
+                        '<div class="tk-msg-body">' + adminEscapeHtml(r.message || r.text || '') + '</div>' +
                         '</div>';
-                    // Replies
-                    replies.forEach(function (r) {
-                        var isAdmin = r.from === 'admin' || r.is_admin;
-                        html += '<div style="background:' + (isAdmin ? 'rgba(245,166,35,0.08)' : 'rgba(255,255,255,0.03)') + ';border-radius:10px;padding:10px 12px;' + (isAdmin ? 'border:1px solid rgba(245,166,35,0.15);' : '') + '">' +
-                            '<div style="font-size:11px;color:' + (isAdmin ? '#F5A623' : '#6B7A8D') + ';margin-bottom:4px;">' + (isAdmin ? 'Admin' : adminEscapeHtml(t.user_name || 'User')) + ' • ' + adminFormatDate(r.at || r.created_at) + '</div>' +
-                            '<div style="white-space:pre-wrap;font-size:13px;color:#A5B4C7;">' + adminEscapeHtml(r.message || r.text || '') + '</div>' +
-                            '</div>';
-                    });
-                    html += '</div>';
-                }
+                });
+                html += '</div>';
 
                 // Reply form
-                html += '<div style="margin-bottom:10px;">' +
-                    '<textarea id="adm-reply-' + t.id + '" class="adm-input" placeholder="Type a reply..." style="width:100%;min-height:70px;font-size:13px;padding:10px 12px;border-radius:10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#fff;font-family:inherit;resize:vertical;box-sizing:border-area;"></textarea>' +
-                    '<button class="admin-btn admin-btn-gold" style="margin-top:6px;padding:8px 18px;font-size:12px;" onclick="adminReplyTicket(\'' + t.id + '\')">Send Reply</button>' +
+                html += '<div class="tk-reply-form">' +
+                    '<textarea id="adm-reply-' + t.id + '" class="tk-reply-input" placeholder="پاسخ خود را بنویسید..." rows="3"></textarea>' +
+                    '<button class="tk-btn tk-btn-primary" onclick="adminReplyTicket(\'' + t.id + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال پاسخ</button>' +
                     '</div>';
 
                 // Status controls
-                html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
+                html += '<div class="tk-actions">';
                 if (t.status !== 'closed') {
-                    html += '<button class="admin-btn" style="padding:6px 14px;font-size:11px;" onclick="adminSetTicketStatus(\'' + t.id + '\',\'closed\')">Close</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + t.id + '\',\'closed\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg> بستن</button>';
                 }
                 if (t.status !== 'open') {
-                    html += '<button class="admin-btn" style="padding:6px 14px;font-size:11px;" onclick="adminSetTicketStatus(\'' + t.id + '\',\'open\')">Reopen</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + t.id + '\',\'open\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> باز کردن</button>';
                 }
                 if (t.status !== 'answered') {
-                    html += '<button class="admin-btn" style="padding:6px 14px;font-size:11px;" onclick="adminSetTicketStatus(\'' + t.id + '\',\'answered\')">Mark Answered</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + t.id + '\',\'answered\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> پاسخ داده شده</button>';
                 }
-                html += '<button class="admin-btn admin-btn-danger" style="padding:6px 14px;font-size:11px;" onclick="adminDeleteTicket(\'' + t.id + '\')">Delete</button>';
+                html += '<button class="tk-btn tk-btn-danger" onclick="adminDeleteTicket(\'' + t.id + '\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> حذف</button>';
                 html += '</div>';
 
                 html += '</div>';
@@ -1175,9 +1181,9 @@ async function fetchTicketReplies(ticketId) {
         let html = '';
         data.replies.forEach(function (r) {
             const isAdmin = r.is_admin_reply;
-            html += '<div style="background:' + (isAdmin ? 'rgba(245,166,35,0.08)' : 'rgba(255,255,255,0.03)') + ';border-radius:10px;padding:10px 12px;' + (isAdmin ? 'border:1px solid rgba(245,166,35,0.15);' : '') + '">' +
-                '<div style="font-size:11px;color:' + (isAdmin ? '#F5A623' : '#6B7A8D') + ';margin-bottom:4px;">' + (isAdmin ? 'Admin' : 'User') + ' • ' + adminFormatDate(r.created_at) + '</div>' +
-                '<div style="white-space:pre-wrap;font-size:13px;color:#A5B4C7;">' + adminEscapeHtml(r.body || '') + '</div>' +
+            html += '<div class="tk-msg ' + (isAdmin ? 'tk-msg-admin' : 'tk-msg-user') + '">' +
+                '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? 'مدیر' : 'کاربر') + '</span><span class="tk-msg-time">' + adminFormatDate(r.created_at) + '</span></div>' +
+                '<div class="tk-msg-body">' + adminEscapeHtml(r.body || '') + '</div>' +
                 '</div>';
         });
         threadEl.innerHTML = html;
