@@ -203,6 +203,28 @@ export function createRewardCenterRepository(deps) {
           ON CONFLICT DO NOTHING
         `);
       }
+      // Seed default daily missions if table is empty.
+      // ROOT CAUSE FIX (item 4): mission_rewards was created but never seeded,
+      // so getActiveMissionRewards() returned [] and MissionBus.fire() never
+      // matched any mission — no rewards were paid, no popup showed.
+      // These triggers match the frontend MISSION_EVENTS / TAB_EVENT_MAP:
+      //   daily_open    → fired at bootstrap (loadMissionStatus.then)
+      //   news_open     → fired at openNewsModalWith + switchTab('news-page')
+      //   analysis_open → fired at openAnalysisDetailPage + switchTab('analysis-page')
+      //   calendar_open → fired at switchNewsTab('calendar')
+      //   market_open   → fired at switchTab('market-page')
+      const missionCount = await queryDb(env, 'SELECT COUNT(*)::int AS cnt FROM mission_rewards');
+      if (Number(missionCount.rows[0]?.cnt || 0) === 0) {
+        await queryDb(env, `
+          INSERT INTO mission_rewards (mission_id, mission_name, token_amount, is_enabled, sort_order, metadata) VALUES
+            ('daily_login', 'ورود روزانه', 5, TRUE, 1, '{"trigger":"daily_open","target_count":1,"description":"هر روز وارد اپ شو","icon":"日出"}'),
+            ('read_news', 'دنبال کردن اخبار', 5, TRUE, 2, '{"trigger":"news_open","target_count":1,"description":"اخبار روزانه را باز کن","icon":"📰"}'),
+            ('read_analysis', 'مطالعه تحلیل بازار', 10, TRUE, 3, '{"trigger":"analysis_open","target_count":1,"description":"یک تحلیل بازار را بخوان","icon":"📊"}'),
+            ('check_calendar', 'تقویم اقتصادی', 5, TRUE, 4, '{"trigger":"calendar_open","target_count":1,"description":"تقویم اقتصادی را بررسی کن","icon":"📅"}'),
+            ('visit_market', 'بررسی بازار', 5, TRUE, 5, '{"trigger":"market_open","target_count":1,"description":"صفحه بازار را باز کن","icon":"📈"}')
+          ON CONFLICT (mission_id) DO NOTHING
+        `);
+      }
       _schemaVerified = true;
     } catch (e) {
       console.warn('Reward Center schema migration warning:', e.message);

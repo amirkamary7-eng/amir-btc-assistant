@@ -1805,3 +1805,148 @@
 }
 
 /* #endregion */
+
+/* ============================================================================ */
+/* Token Info Button + Popup (item 3: AB token explanation)                    */
+/* ============================================================================ */
+.wallet-info-btn {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 3;
+  transition: all 0.2s ease;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.wallet-info-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.wallet-info-btn:active {
+  transform: scale(0.9);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* In RTL mode, the info button stays in the visual top-left (which is the
+   inline-end in RTL). We use `left` explicitly so it doesn't flip. */
+[dir="rtl"] .wallet-info-btn {
+  left: 14px;
+  right: auto;
+}
+
+/* ── Token Info Popup ── */
+.token-info-popup {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.token-info-popup.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.token-info-popup-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.token-info-popup-card {
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  border-radius: 20px;
+  padding: 24px;
+  background: linear-gradient(160deg, #121826 0%, #0F1521 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  transform: scale(0.92) translateY(20px);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.token-info-popup.visible .token-info-popup-card {
+  transform: scale(1) translateY(0);
+}
+
+.token-info-popup-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.token-info-popup-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--w-tier-rgb, 212, 160, 76), 0.15);
+  color: rgb(var(--w-tier-rgb, 212, 160, 76));
+  flex-shrink: 0;
+}
+
+.token-info-popup-header h3 {
+  flex: 1;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+}
+
+.token-info-popup-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.token-info-popup-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.token-info-popup-body {
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.1px;
+}
+
+[dir="rtl"] .token-info-popup-body {
+  text-align: right;
+}
+

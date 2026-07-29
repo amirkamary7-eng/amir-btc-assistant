@@ -71,6 +71,28 @@ export function createWheelRepository(deps) {
     `;
     try {
       await queryDb(env, batchSql);
+      // ROOT CAUSE FIX (item 6): Seed default wheel rewards if table is empty.
+      // Without seeding, selectReward() returns { amount: 0, type: 'no_reward' }
+      // and the user always gets nothing — "wheel doesn't work".
+      // These 8 rewards match the default segment_count=8 in wheel_config.
+      // Weighted for a balanced experience: small rewards common, big rare.
+      try {
+        const poolCount = await queryDb(env, 'SELECT COUNT(*)::int AS cnt FROM wheel_rewards');
+        if (Number(poolCount.rows[0]?.cnt || 0) === 0) {
+          await queryDb(env, `
+            INSERT INTO wheel_rewards (reward_type, reward_amount, reward_label, weight, is_active, metadata) VALUES
+              ('token', 1,  '۱ AB',     30, TRUE, '{}'),
+              ('token', 2,  '۲ AB',     25, TRUE, '{}'),
+              ('token', 3,  '۳ AB',     20, TRUE, '{}'),
+              ('token', 5,  '۵ AB',     12, TRUE, '{}'),
+              ('token', 10, '۱۰ AB',     6, TRUE, '{}'),
+              ('token', 20, '۲۰ AB',     3, TRUE, '{}'),
+              ('token', 50, '۵۰ AB',     2, TRUE, '{}'),
+              ('spin',  1,  'اسپین اضافی', 2, TRUE, '{}')
+            ON CONFLICT DO NOTHING
+          `);
+        }
+      } catch (_) { /* seeding is best-effort — don't block startup */ }
     } catch (e) {
       console.warn('Wheel schema migration warning:', e.message);
     }

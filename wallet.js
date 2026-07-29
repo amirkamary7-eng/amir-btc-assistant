@@ -11,7 +11,7 @@ const WalletApp = (() => {
   // =============================================
   const WT_FA = {
     wallet_title: 'کیف پول توکن AB',
-    wallet_subtitle: 'دستیار امیر بیت‌کوین',
+    wallet_subtitle: 'مرکز مدیریت دارایی‌های شما',
     ab_token_wallet: 'کیف پول توکن AB',
     current_balance: 'موجودی فعلی',
     available_balance: 'موجودی قابل استفاده',
@@ -51,7 +51,7 @@ const WalletApp = (() => {
     coming_soon: 'به‌زودی',
     copied: 'کپی شد',
     ref_copied: 'لینک دعوت کپی شد!',
-    join_amir: 'به دستیار امیر بیت‌کوین بپیوندید و توکن AB کسب کنید!',
+    join_amir: 'به AmirBTC بپیوندید و توکن AB کسب کنید!',
     open_wallet: 'باز کردن کیف پول',
     login_to_view: 'برای مشاهده کیف پول وارد شوید',
     build_future: 'آینده را بسازید',
@@ -77,8 +77,10 @@ const WalletApp = (() => {
     referral: 'دعوت',
     rewards: 'جایزه‌ها',
     history: 'تاریخچه',
-    brand_quote: 'AMIRBTC — جایی که هر توکن ارزش دارد',
-    token_slogan: 'توکن AB — ارزشی بی‌نهایت، رشدی بی‌پایان.',
+    brand_quote: 'امیر بیت‌کوین — دستیار حرفه‌ای بازار',
+    token_slogan: 'توکن AB، واحد پاداش داخلی اپ — برای دسترسی به خدمات ویژه، جوایز و امکانات اختصاصی.',
+    token_info_title: 'توکن AB چیست؟',
+    token_info_body: 'توکن AB یک دارایی دیجیتال داخلی مینی‌اپ است که جایزه فعالیت‌های شماست. این توکن فقط در محیط اپ کاربرد دارد و قابلیت برداشت یا انتقال به کیف پول خارجی را ندارد. از توکن AB برای استفاده از خدمات ویژه، دریافت جوایز و دسترسی به امکانات اختصاصی مینی‌اپ استفاده کنید.',
     tier_bronze: 'برنز',
     tier_silver: 'نقره',
     tier_gold: 'طلایی',
@@ -167,8 +169,10 @@ const WalletApp = (() => {
     referral: 'Referral',
     rewards: 'Rewards',
     history: 'History',
-    brand_quote: 'AMIRBTC — Where Every Token Has Value',
-    token_slogan: 'AB Token — Infinite Value, Endless Growth.',
+    brand_quote: 'AmirBTC — Your Professional Market Assistant',
+    token_slogan: 'AB Token is the in-app reward unit — for premium features, rewards, and exclusive access.',
+    token_info_title: 'What is AB Token?',
+    token_info_body: 'AB Token is an internal mini-app digital asset that rewards your activity. It can only be used within the app and cannot be withdrawn or transferred to external wallets. Use AB Token to access premium features, claim rewards, and unlock exclusive in-app capabilities.',
     tier_bronze: 'Bronze',
     tier_silver: 'Silver',
     tier_gold: 'Gold',
@@ -419,6 +423,9 @@ const WalletApp = (() => {
     card.classList.remove('skeleton-loading');
     card.innerHTML = `
       <div class="wallet-watermark"><img src="${getTokenLogo()}" alt=""></div>
+      <button class="wallet-info-btn" onclick="event.stopPropagation(); WalletApp.showTokenInfo()" aria-label="AB Token info">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      </button>
       <div class="wallet-preview-top">
         <div class="wallet-preview-logo"><img src="${getTokenLogo()}" alt="AB Token"></div>
         <div class="wallet-preview-info">
@@ -1217,6 +1224,47 @@ const WalletApp = (() => {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  /**
+   * Show a popup explaining what AB Token is.
+   * Called when the user taps the info icon on the wallet card.
+   */
+  function showTokenInfo() {
+    // Remove any existing popup
+    const existing = document.getElementById('token-info-popup');
+    if (existing) { existing.remove(); return; }
+
+    const popup = document.createElement('div');
+    popup.id = 'token-info-popup';
+    popup.className = 'token-info-popup';
+    popup.setAttribute('dir', detectLang() === 'fa' ? 'rtl' : 'ltr');
+    popup.innerHTML = `
+      <div class="token-info-popup-overlay" onclick="WalletApp.closeTokenInfo()"></div>
+      <div class="token-info-popup-card">
+        <div class="token-info-popup-header">
+          <div class="token-info-popup-icon">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          </div>
+          <h3>${esc(WT('token_info_title'))}</h3>
+          <button class="token-info-popup-close" onclick="WalletApp.closeTokenInfo()" aria-label="Close">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="token-info-popup-body">${esc(WT('token_info_body'))}</div>
+      </div>
+    `;
+    document.body.appendChild(popup);
+    requestAnimationFrame(() => popup.classList.add('visible'));
+    // Haptic feedback
+    try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light'); } catch (_) {}
+  }
+
+  function closeTokenInfo() {
+    const popup = document.getElementById('token-info-popup');
+    if (!popup) return;
+    popup.classList.remove('visible');
+    setTimeout(() => popup.remove(), 250);
+  }
+
   return {
     loadProfileCard,
     openWallet,
@@ -1225,6 +1273,8 @@ const WalletApp = (() => {
     loadMoreHistory,
     scrollToSection,
     getTokenLogo,
+    showTokenInfo,
+    closeTokenInfo,
     _invalidateCache: invalidateWalletCache,
     _refreshWalletData: loadWalletData,
   };

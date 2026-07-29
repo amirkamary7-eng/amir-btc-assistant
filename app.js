@@ -1999,13 +1999,65 @@ async function loadMoreAnalyses() {
     if (changed) renderAnalysisList();
 }
 
+// ── Telegram BackButton Navigation Stack ──
+// Implements a proper history stack so the Telegram Back button navigates
+// step-by-step (Dashboard → Analysis → Detail → Back → Analysis list →
+// Back → Dashboard) instead of getting stuck.
+//
+// Usage:
+//   tgBackPush(closeFn)  — call when entering a sub-view (pushes onto stack)
+//   tgBackPop()          — call when the Back button is pressed (pops + runs closeFn)
+//   tgBackReset()        — call when switching main tabs (clears stack, hides button)
+let _tgBackStack = [];
+let _tgBackHandlerInstalled = false;
+
+function tgBackPush(closeFn) {
+    const tg = getTg();
+    if (!tg?.BackButton) return;
+    _tgBackStack.push({ closeFn });
+    // Install the handler once (idempotent — Telegram accumulates onClick listeners)
+    if (!_tgBackHandlerInstalled) {
+        _tgBackHandlerInstalled = true;
+        tg.BackButton.onClick(tgBackPop);
+    }
+    tg.BackButton.show();
+}
+
+function tgBackPop() {
+    const tg = getTg();
+    if (!tg?.BackButton) return;
+    const entry = _tgBackStack.pop();
+    if (entry && typeof entry.closeFn === 'function') {
+        try { entry.closeFn(); } catch (_) {}
+    }
+    if (_tgBackStack.length === 0) {
+        tg.BackButton.hide();
+        tg.BackButton.offClick(tgBackPop);
+        _tgBackHandlerInstalled = false;
+    }
+}
+
+function tgBackReset() {
+    const tg = getTg();
+    if (!tg?.BackButton) return;
+    _tgBackStack = [];
+    if (_tgBackHandlerInstalled) {
+        tg.BackButton.offClick(tgBackPop);
+        _tgBackHandlerInstalled = false;
+    }
+    tg.BackButton.hide();
+}
+
+// Expose for console debugging
+window.tgBackPush = tgBackPush;
+window.tgBackPop = tgBackPop;
+window.tgBackReset = tgBackReset;
+
 // ── Analysis Detail Page ──
 async function openAnalysisDetailPage(id) {
-    const tg = getTg();
-    if (tg?.BackButton) {
-        tg.BackButton.show();
-        tg.BackButton.onClick(closeAnalysisDetailPage);
-    }
+    // Push onto the BackButton navigation stack so pressing Back returns to
+    // the analysis list (not stuck on the detail page).
+    tgBackPush(closeAnalysisDetailPage);
 
     currentAnalysisDetail = null;
     const cachedAnalysis = analyses.find(x => x.id === id) || analysisFeatured.find(a => a.id === id) || null;
@@ -2079,11 +2131,9 @@ async function openAnalysisDetailPage(id) {
     }
     if (!detailFetched && !cachedAnalysis) {
         showToast('خطا در بارگذاری تحلیل. لطفاً دوباره تلاش کنید.');
-        if (tg?.BackButton) {
-            tg.BackButton.offClick(closeAnalysisDetailPage);
-            tg.BackButton.onClick(handleTelegramBack);
-            updateTelegramBackButton();
-        }
+        // Navigation stack: pop back to the analysis list since there's
+        // nothing to show on the detail page.
+        tgBackPop();
     } else if (!detailFetched && cachedAnalysis) {
         // Cached record already carries the full text (post backend fix), so
         // there is nothing "summary" about what's on screen — only the view
@@ -9497,14 +9547,9 @@ function closeAllOverlays() {
         }
     }
 
-    // 3) Restore Telegram BackButton if it was armed by an overlay.
-    try {
-        const tg = window.Telegram?.WebApp;
-        if (tg?.BackButton && typeof tg.BackButton.hide === 'function') {
-            tg.BackButton.hide();
-            tg.BackButton.offClick();
-        }
-    } catch (_) {}
+    // 3) Clear the Telegram BackButton navigation stack — switching main tabs
+    //    resets the history so the Back button is hidden on top-level pages.
+    try { tgBackReset(); } catch (_) {}
 }
 
 function switchTab(pageId, btn) {
