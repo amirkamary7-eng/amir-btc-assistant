@@ -6947,17 +6947,24 @@ function startCalCountdown() {
     if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
     const updateCountdowns = () => {
         const now = Date.now();
-        // ROOT CAUSE FIX (item 2): When countdown reaches 0, the event is
-        // LIVE (starting now), NOT past. "زمان گذشته" was incorrectly shown
-        // the moment the event started. Now shows "در حال اجرا" (live) for
-        // 30 minutes after the event start time, then stops updating (the
-        // backend's getEventStatus will mark it 'past' on next data refresh).
+        // ROOT CAUSE FIX: data-ts contains an ISO timestamp string (e.g.
+        // "2026-07-29T14:30:00.000Z"), NOT a numeric epoch. Previously
+        // parseInt("2026-07-29T14:30:00.000Z") returned 2026 (just the year!),
+        // which when passed to new Date(2026) gave a 1970 date — always in the
+        // past. This caused EVERY countdown to show "پایان یافت" regardless of
+        // the actual event time. Now we use new Date(el.dataset.ts).getTime()
+        // to correctly parse the ISO string.
         const LIVE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
         document.querySelectorAll('.cal-event-countdown[data-ts]').forEach(el => {
-            const ts = parseInt(el.dataset.ts);
-            const diff = new Date(ts).getTime() - now;
+            const eventTime = new Date(el.dataset.ts).getTime();
+            if (isNaN(eventTime)) return;
+            const diff = eventTime - now;
             if (diff <= 0) {
-                el.textContent = '• Live';
+                if (Math.abs(diff) > LIVE_WINDOW_MS) {
+                    el.textContent = '• Past';
+                } else {
+                    el.textContent = '• Live';
+                }
                 el.removeAttribute('data-ts');
             } else {
                 el.textContent = formatCountdown(diff);
@@ -6965,11 +6972,12 @@ function startCalCountdown() {
         });
         // Also update new V2 countdowns
         document.querySelectorAll('.ni-cal-countdown[data-ts]').forEach(el => {
-            const ts = parseInt(el.dataset.ts);
-            const diff = new Date(ts).getTime() - now;
+            const eventTime = new Date(el.dataset.ts).getTime();
+            if (isNaN(eventTime)) return;
+            const diff = eventTime - now;
             if (diff <= 0) {
-                // Event has started — show "در حال اجرا" (live), NOT "زمان گذشته"
-                // Only show "پایان" after the 30-min live window passes
+                // Event has started — show "در حال اجرا" (live) for 30 min,
+                // then "پایان یافت" after the live window passes.
                 if (Math.abs(diff) > LIVE_WINDOW_MS) {
                     el.textContent = 'پایان یافت';
                 } else {
