@@ -7669,41 +7669,118 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     line-height: 1.1;
 }
 
-/* ── Dashboard Row: F&G + Market Status ── */
-.mkt-dashboard-row {
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: 8px; padding: 0 16px 10px;
+/* ── Overview Meta (source indicator + last update) ── */
+.mkt-overview-meta {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 16px 8px; font-size: 10px; color: #6B7A8D;
 }
-.mkt-fg-card {
-    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px; padding: 10px 12px;
-    display: flex; flex-direction: column; align-items: center; gap: 4px;
+.mkt-overview-source {
+    display: flex; align-items: center; gap: 5px; font-weight: 600;
 }
-.mkt-fg-header { width: 100%; text-align: center; }
-.mkt-fg-title { font-size: 10px; font-weight: 700; color: #A5B4C7; text-transform: uppercase; letter-spacing: 0.5px; }
-.mkt-fg-gauge-wrap { width: 100%; max-width: 110px; }
-.mkt-fg-gauge { width: 100%; height: auto; }
-.mkt-fg-meta {
-    display: flex; justify-content: space-between; width: 100%;
-    font-size: 9px; color: #6B7A8D;
+.mkt-live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #22C55E; box-shadow: 0 0 6px #22C55E;
+    animation: livePulse 2s ease-in-out infinite;
 }
-.mkt-fg-meta b { color: #A5B4C7; font-weight: 700; }
+@keyframes livePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+}
+.mkt-overview-meta.error .mkt-live-dot {
+    background: #EF4444; box-shadow: 0 0 6px #EF4444;
+}
+.mkt-overview-updated { font-weight: 500; }
 
-.mkt-status-card {
-    background: linear-gradient(180deg, #0E1623 0%, #0B1220 100%);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px; padding: 10px 12px;
-    display: flex; flex-direction: column; gap: 8px;
+/* ── Premium Market Status Card (Glassmorphism) ── */
+.mkt-status-premium {
+    position: relative; margin: 0 16px 10px; border-radius: 16px;
+    overflow: hidden; border: 1px solid rgba(255,255,255,0.08);
+    background: linear-gradient(145deg, rgba(14,22,35,0.8) 0%, rgba(11,18,32,0.9) 100%);
+    backdrop-filter: blur(20px) saturate(1.5);
+    -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
 }
-.mkt-status-header {
+.mkt-status-premium-bg {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 80% at 100% 0%, rgba(245,166,35,0.08), transparent 50%),
+                radial-gradient(100% 60% at 0% 100%, rgba(34,197,94,0.06), transparent 50%);
+}
+.mkt-status-premium-content {
+    position: relative; padding: 14px 14px 12px; z-index: 1;
+    display: flex; flex-direction: column; gap: 10px;
+}
+.mkt-status-premium-header {
     display: flex; align-items: center; justify-content: space-between;
 }
-.mkt-status-title { font-size: 10px; font-weight: 700; color: #A5B4C7; text-transform: uppercase; letter-spacing: 0.5px; }
-.mkt-status-total { font-size: 9px; font-weight: 600; color: #6B7A8D; }
-.mkt-status-body { display: flex; flex-direction: column; gap: 6px; }
-.mkt-status-bar-wrap { }
+.mkt-status-premium-title-row {
+    display: flex; align-items: center; gap: 7px;
+}
+.mkt-status-premium-icon {
+    width: 24px; height: 24px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(245,166,35,0.12); color: #F5A623;
+    border: 1px solid rgba(245,166,35,0.2);
+}
+.mkt-status-premium-title {
+    font-size: 13px; font-weight: 700; color: #FFFFFF;
+}
+.mkt-status-premium-badge {
+    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px;
+    border: 1px solid; transition: all 0.3s ease;
+}
+.mkt-status-premium-total {
+    font-size: 10px; font-weight: 600; color: #6B7A8D;
+}
+
+/* F&G score display + gradient bar */
+.mkt-status-premium-fg {
+    display: flex; align-items: center; gap: 14px;
+}
+.mkt-fg-score-display {
+    display: flex; flex-direction: column; align-items: center;
+    flex-shrink: 0; min-width: 60px;
+}
+.mkt-fg-score-num {
+    font-size: 28px; font-weight: 800; color: #FFFFFF;
+    line-height: 1; font-variant-numeric: tabular-nums;
+}
+.mkt-fg-score-label {
+    font-size: 10px; font-weight: 600; color: #A5B4C7;
+    margin-top: 2px; white-space: nowrap;
+}
+.mkt-fg-gradient-bar-wrap {
+    flex: 1; display: flex; flex-direction: column; gap: 4px;
+}
+.mkt-fg-gradient-bar {
+    position: relative; height: 10px; border-radius: 5px;
+    overflow: visible;
+}
+.mkt-fg-gradient-fill {
+    position: absolute; inset: 0; border-radius: 5px;
+    background: linear-gradient(90deg,
+        #EF4444 0%, #F97316 25%, #F5A623 50%, #84CC16 75%, #22C55E 100%);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
+}
+.mkt-fg-indicator {
+    position: absolute; top: 50%; transform: translate(-50%, -50%);
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #FFFFFF; border: 3px solid #0B1220;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    transition: left 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 2;
+}
+.mkt-fg-gradient-labels {
+    display: flex; justify-content: space-between;
+    font-size: 8px; font-weight: 600; color: #6B7A8D;
+    text-transform: uppercase; letter-spacing: 0.3px;
+}
+
+/* Sentiment bar (gainers/neutral/losers) */
+.mkt-status-premium-bar {
+    display: flex; flex-direction: column; gap: 5px;
+}
 .mkt-status-bar {
-    display: flex; height: 8px; border-radius: 4px; overflow: hidden;
+    display: flex; height: 7px; border-radius: 4px; overflow: hidden;
     background: rgba(255,255,255,0.04);
     box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
 }
@@ -7715,7 +7792,16 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     font-size: 10px; font-weight: 600;
 }
 .mkt-status-up { display: flex; align-items: center; gap: 3px; color: #22C55E; }
+.mkt-status-neutral-label { display: flex; align-items: center; gap: 3px; color: #6B7A8D; }
 .mkt-status-down { display: flex; align-items: center; gap: 3px; color: #EF4444; }
+
+/* Analytical insight text */
+.mkt-status-premium-insight {
+    font-size: 11px; font-weight: 500; color: #A5B4C7;
+    line-height: 1.5; padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+[dir="rtl"] .mkt-status-premium-insight { text-align: right; }
 .mkt-status-neutral { display: flex; align-items: center; gap: 3px; color: #6B7A8D; }
 .mkt-status-labels b { font-size: 12px; font-weight: 800; }
 .mkt-status-labels small { font-size: 9px; font-weight: 500; opacity: 0.85; }
@@ -7844,17 +7930,17 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 
 /* ── Filter Chips ── */
 .mkt-filters {
-    display: flex; gap: 6px; padding: 0 16px 8px;
-    overflow-x: auto; scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px;
+    padding: 0 16px 8px;
 }
-.mkt-filters::-webkit-scrollbar { display: none; }
 .mkt-filter-chip {
-    flex-shrink: 0; padding: 6px 12px; border-radius: 8px;
+    padding: 7px 4px; border-radius: 8px;
     border: 1px solid rgba(255,255,255,0.06);
     background: rgba(255,255,255,0.03); color: #6B7A8D;
-    font-size: 12px; font-weight: 600; cursor: pointer;
-    transition: all 0.2s ease; font-family: inherit; white-space: nowrap;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: all 0.2s ease; font-family: inherit;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-align: center; min-width: 0;
 }
 .mkt-filter-chip:active { transform: scale(0.96); }
 .mkt-filter-chip.active {
@@ -7919,8 +8005,8 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 .mkt-lh-rank { text-align: center; }
 .mkt-lh-logo { } /* empty cell — aligns with the logo column */
 .mkt-lh-coin { padding-right: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mkt-lh-price { text-align: right; }
-.mkt-lh-change { text-align: right; }
+.mkt-lh-price { text-align: right; padding-right: 2px; }
+.mkt-lh-change { text-align: right; padding-right: 2px; }
 .mkt-lh-star { text-align: center; }
 
 /* ── Coin List (virtualized via content-visibility: auto) ──

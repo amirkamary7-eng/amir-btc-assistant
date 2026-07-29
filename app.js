@@ -4121,6 +4121,10 @@ function renderSummary() {
     volEl?.classList.remove('loading');
     domEl?.classList.remove('loading');
 
+    const sourceTextEl = document.getElementById('mkt-source-text');
+    const updatedEl = document.getElementById('mkt-overview-updated');
+    const metaEl = document.getElementById('mkt-overview-meta');
+
     if (globalMarketData) {
         const mcapVal = globalMarketData.totalMarketCap;
         const volVal = globalMarketData.totalVolume;
@@ -4128,6 +4132,22 @@ function renderSummary() {
         mcapEl.textContent = (mcapVal > 0) ? '$' + formatLargeNumber(mcapVal) : '--';
         volEl.textContent = (volVal > 0) ? '$' + formatLargeNumber(volVal) : '--';
         domEl.textContent = (domVal > 0) ? domVal.toFixed(1) + '%' : '--';
+
+        // Show data source + last update timestamp
+        if (sourceTextEl) {
+            const src = globalMarketData.source || 'unknown';
+            sourceTextEl.textContent = src === 'coinmarketcap' ? 'CoinMarketCap' :
+                                       src === 'coingecko' ? 'CoinGecko' :
+                                       src === 'coinpaprika' ? 'CoinPaprika' : src;
+        }
+        if (updatedEl && globalMarketData.timestamp) {
+            try {
+                const ts = new Date(globalMarketData.timestamp);
+                const timeStr = ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                updatedEl.textContent = '· ' + timeStr;
+            } catch (_) { updatedEl.textContent = ''; }
+        }
+        if (metaEl) metaEl.classList.remove('error');
     } else {
         // Fallback: compute from allCoins
         let totalMcap = 0;
@@ -4143,6 +4163,13 @@ function renderSummary() {
         mcapEl.textContent = totalMcap > 0 ? '$' + formatLargeNumber(totalMcap) : '--';
         volEl.textContent = totalVol > 0 ? '$' + formatLargeNumber(totalVol) : '--';
         domEl.textContent = totalMcap > 0 ? ((btcMcap / totalMcap) * 100).toFixed(1) + '%' : '--';
+
+        // Show error state if no data at all
+        if (totalMcap === 0 && metaEl) {
+            metaEl.classList.add('error');
+            if (sourceTextEl) sourceTextEl.textContent = 'Waiting for data...';
+            if (updatedEl) updatedEl.textContent = '';
+        }
     }
 }
 
@@ -4239,43 +4266,69 @@ function renderMarketInsights() {
     }
 
     // --- Fear & Greed ---
-    // FIX 4: Only show real data from Alternative.me. Hide the entire section if unavailable.
+    // FIX 4: Only show real data from CoinMarketCap. Hide the entire section if unavailable.
     if (globalMarketData && globalMarketData.fearGreedValue > 0) {
         var fgIndex = globalMarketData.fearGreedValue;
         var fgSource = globalMarketData.fearGreedSource || 'real';
         var fgClass = (globalMarketData.fearGreedClassification || '').toLowerCase();
         var fgLabel;
-        if (fgClass === 'extreme greed' || fgClass === 'extreme_greed') fgLabel = t('fg_extreme_greed');
-        else if (fgClass === 'greed') fgLabel = t('fg_greed');
-        else if (fgClass === 'neutral') fgLabel = t('fg_neutral');
-        else if (fgClass === 'fear') fgLabel = t('fg_fear');
-        else if (fgClass === 'extreme fear' || fgClass === 'extreme_fear') fgLabel = t('fg_extreme_fear');
+        var fgBadgeColor = '#6B7A8D';
+        if (fgClass === 'extreme greed' || fgClass === 'extreme_greed') { fgLabel = t('fg_extreme_greed'); fgBadgeColor = '#22C55E'; }
+        else if (fgClass === 'greed') { fgLabel = t('fg_greed'); fgBadgeColor = '#84CC16'; }
+        else if (fgClass === 'neutral') { fgLabel = t('fg_neutral'); fgBadgeColor = '#F5A623'; }
+        else if (fgClass === 'fear') { fgLabel = t('fg_fear'); fgBadgeColor = '#F97316'; }
+        else if (fgClass === 'extreme fear' || fgClass === 'extreme_fear') { fgLabel = t('fg_extreme_fear'); fgBadgeColor = '#EF4444'; }
         else fgLabel = globalMarketData.fearGreedClassification || '--';
         console.log('[FG] Real data from', fgSource, ':', fgIndex, fgLabel);
 
-        // Show FG section (it may have been hidden on a previous load)
-        var fgCard = document.querySelector('.fear-greed-card');
-        if (fgCard) fgCard.style.display = '';
+        // Update the score display (number + label)
+        var fgTextEl = document.getElementById('fg-gauge-text');
+        if (fgTextEl) fgTextEl.textContent = fgIndex;
+        var fgLabelEl = document.getElementById('fg-gauge-label');
+        if (fgLabelEl) fgLabelEl.textContent = fgLabel;
 
-        var fgValueEl = document.getElementById('fg-index-value');
-        if (fgValueEl) fgValueEl.textContent = fgIndex;
+        // Move the gradient bar indicator to the F&G value position
+        var fgIndicator = document.getElementById('mkt-fg-indicator');
+        if (fgIndicator) {
+            fgIndicator.style.left = fgIndex + '%';
+        }
 
+        // Update the F&G badge
+        var fgBadgeEl = document.getElementById('mkt-fg-badge');
+        if (fgBadgeEl) {
+            fgBadgeEl.textContent = fgLabel;
+            fgBadgeEl.style.background = fgBadgeColor + '22';
+            fgBadgeEl.style.color = fgBadgeColor;
+            fgBadgeEl.style.borderColor = fgBadgeColor + '44';
+        }
+
+        // Analytical insight text based on F&G value + sentiment
+        var insightEl = document.getElementById('mkt-status-insight');
+        if (insightEl) {
+            var insight = '';
+            if (currentLang === 'fa') {
+                if (fgIndex <= 25) insight = 'ترس شدید در بازار — فرصت خرید احتمالی برای سرمایه‌گذاران شجاع';
+                else if (fgIndex <= 45) insight = 'ترس در بازار غالب است — احتیاط کنید اما فرصت‌ها را بررسی کنید';
+                else if (fgIndex <= 55) insight = 'بازار در حالت خنثی — منتظر جهت‌گیری مشخص باشید';
+                else if (fgIndex <= 75) insight = 'حریصیت در بازار — زمان مناسب برای سودگیری و مدیریت ریسک';
+                else insight = 'حریصیت شدید — احتیاط کنید، اصلاح بازار محتمل است';
+            } else {
+                if (fgIndex <= 25) insight = 'Extreme fear — potential buying opportunity for bold investors';
+                else if (fgIndex <= 45) insight = 'Fear dominates — be cautious but watch for opportunities';
+                else if (fgIndex <= 55) insight = 'Market is neutral — wait for a clear direction';
+                else if (fgIndex <= 75) insight = 'Greed in the market — good time to take profits and manage risk';
+                else insight = 'Extreme greed — be cautious, market correction is likely';
+            }
+            insightEl.textContent = insight;
+        }
+
+        // Legacy: keep fg-arc updated for any remaining references
         var fgArcEl = document.getElementById('fg-arc');
         if (fgArcEl) {
             var totalLen = 150.8;
             var offset = totalLen - (totalLen * fgIndex / 100);
             fgArcEl.setAttribute('stroke-dashoffset', offset.toFixed(1));
         }
-
-        var fgTextEl = document.getElementById('fg-gauge-text');
-        if (fgTextEl) fgTextEl.textContent = fgIndex;
-        var fgLabelEl = document.getElementById('fg-gauge-label');
-        if (fgLabelEl) fgLabelEl.textContent = fgLabel;
-    } else {
-        // No real F&G data available — hide the entire section
-        console.log('[FG] No real data available, hiding section');
-        var fgCardHide = document.querySelector('.fear-greed-card');
-        if (fgCardHide) fgCardHide.style.display = 'none';
     }
 }
 

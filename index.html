@@ -274,10 +274,7 @@
         <div class="mkt-header">
             <div class="mkt-header-left">
                 <div class="mkt-header-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-                        <polyline points="17 6 23 6 23 12"/>
-                    </svg>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="3" x2="6" y2="21"/><rect x="4" y="6" width="4" height="9" rx="1" fill="currentColor" fill-opacity="0.25"/><line x1="12" y1="2" x2="12" y2="22"/><rect x="10" y="4" width="4" height="11" rx="1" fill="currentColor" fill-opacity="0.25"/><line x1="18" y1="5" x2="18" y2="19"/><rect x="16" y="8" width="4" height="7" rx="1" fill="currentColor" fill-opacity="0.25"/></svg>
                 </div>
                 <div class="mkt-header-text">
                     <h2 class="mkt-title" data-i18n="market">بازار</h2>
@@ -290,7 +287,7 @@
         </div>
 
         <!-- ═══ MKT: Compact Overview Cards (3 equal stat cards — exchange-style) ═══ -->
-        <div class="mkt-overview-grid">
+        <div class="mkt-overview-grid" id="mkt-overview-grid">
             <div class="mkt-stat-card" id="mkt-card-mcap">
                 <div class="mkt-stat-icon-wrap mkt-stat-icon-green">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
@@ -319,47 +316,51 @@
                 </div>
             </div>
         </div>
+        <!-- Live data source indicator + last update timestamp -->
+        <div class="mkt-overview-meta" id="mkt-overview-meta">
+            <span class="mkt-overview-source">
+                <span class="mkt-live-dot"></span>
+                <span id="mkt-source-text">CoinMarketCap</span>
+            </span>
+            <span class="mkt-overview-updated" id="mkt-overview-updated">--</span>
+        </div>
 
-        <!-- ═══ MKT: Fear & Greed + Market Status (REDESIGNED) ═══ -->
-        <div class="mkt-dashboard-row">
-            <div class="mkt-fg-card">
-                <div class="mkt-fg-header">
-                    <span class="mkt-fg-title">Fear &amp; Greed</span>
-                </div>
-                <div class="mkt-fg-gauge-wrap">
-                    <svg class="mkt-fg-gauge" viewBox="0 0 120 70" fill="none">
-                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="rgba(255,255,255,0.06)" stroke-width="7" stroke-linecap="round" fill="none"/>
-                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="url(#mkt-fg-gradient)" stroke-width="7" stroke-linecap="round" fill="none" stroke-dasharray="150.8" stroke-dashoffset="150.8" id="fg-arc"/>
-                        <text x="60" y="48" text-anchor="middle" fill="#FFFFFF" font-size="22" font-weight="800" id="fg-gauge-text">--</text>
-                        <text x="60" y="62" text-anchor="middle" fill="#A5B4C7" font-size="8" font-weight="500" id="fg-gauge-label">--</text>
-                        <defs>
-                            <linearGradient id="mkt-fg-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" stop-color="#EF4444"/>
-                                <stop offset="35%" stop-color="#F5A623"/>
-                                <stop offset="65%" stop-color="#F5A623"/>
-                                <stop offset="100%" stop-color="#22C55E"/>
-                            </linearGradient>
-                        </defs>
-                    </svg>
-                </div>
-                <div class="mkt-fg-meta">
-                    <span>دیروز: <b id="mkt-fg-yesterday">--</b></span>
-                    <span>هفته قبل: <b id="mkt-fg-last-week">--</b></span>
-                </div>
-            </div>
-            <div class="mkt-status-card">
-                <div class="mkt-status-header">
-                    <span class="mkt-status-title">وضعیت بازار</span>
-                    <span class="mkt-status-total" id="mkt-status-total">0 ارز</span>
-                </div>
-                <div class="mkt-status-body">
-                    <!-- Triple-segment ratio bar: gainers | neutral | losers -->
-                    <div class="mkt-status-bar-wrap">
-                        <div class="mkt-status-bar" id="mkt-status-bar">
-                            <div class="mkt-status-fill-green" id="mkt-status-green" style="width:33%"></div>
-                            <div class="mkt-status-fill-neutral" id="mkt-status-neutral" style="width:34%"></div>
-                            <div class="mkt-status-fill-red" id="mkt-status-red" style="width:33%"></div>
+        <!-- ═══ MKT: Market Status Card (REDESIGNED — Premium Glassmorphism) ═══ -->
+        <div class="mkt-status-premium" id="mkt-status-premium">
+            <div class="mkt-status-premium-bg"></div>
+            <div class="mkt-status-premium-content">
+                <div class="mkt-status-premium-header">
+                    <div class="mkt-status-premium-title-row">
+                        <div class="mkt-status-premium-icon">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 14l4-8 4 5 5-9"/></svg>
                         </div>
+                        <span class="mkt-status-premium-title">وضعیت بازار</span>
+                        <span class="mkt-status-premium-badge" id="mkt-fg-badge">--</span>
+                    </div>
+                    <span class="mkt-status-premium-total" id="mkt-status-total">0 ارز</span>
+                </div>
+                <div class="mkt-status-premium-fg">
+                    <div class="mkt-fg-score-display">
+                        <span class="mkt-fg-score-num" id="fg-gauge-text">--</span>
+                        <span class="mkt-fg-score-label" id="fg-gauge-label">--</span>
+                    </div>
+                    <div class="mkt-fg-gradient-bar-wrap">
+                        <div class="mkt-fg-gradient-bar">
+                            <div class="mkt-fg-gradient-fill"></div>
+                            <div class="mkt-fg-indicator" id="mkt-fg-indicator" style="left: 0%"></div>
+                        </div>
+                        <div class="mkt-fg-gradient-labels">
+                            <span>Fear</span>
+                            <span>Neutral</span>
+                            <span>Greed</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="mkt-status-premium-bar">
+                    <div class="mkt-status-bar" id="mkt-status-bar">
+                        <div class="mkt-status-fill-green" id="mkt-status-green" style="width:33%"></div>
+                        <div class="mkt-status-fill-neutral" id="mkt-status-neutral" style="width:34%"></div>
+                        <div class="mkt-status-fill-red" id="mkt-status-red" style="width:33%"></div>
                     </div>
                     <div class="mkt-status-labels">
                         <span class="mkt-status-up">
@@ -367,7 +368,7 @@
                             <b id="sentiment-gainers">0</b>
                             <small>صعودی</small>
                         </span>
-                        <span class="mkt-status-neutral">
+                        <span class="mkt-status-neutral-label">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#6B7A8D" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             <b id="sentiment-neutral">0</b>
                             <small>خنثی</small>
@@ -378,11 +379,8 @@
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
                         </span>
                     </div>
-                    <div class="mkt-status-sentiment">
-                        <span class="mkt-status-sentiment-label">احساس بازار:</span>
-                        <span class="mkt-status-sentiment-value" id="mkt-sentiment-value">--</span>
-                    </div>
                 </div>
+                <div class="mkt-status-premium-insight" id="mkt-status-insight">--</div>
             </div>
         </div>
 
@@ -892,7 +890,7 @@
             <span data-i18n="dashboard">داشبورد</span>
         </button>
         <button class="nav-item" data-page="market-page" onclick="switchTab('market-page', this)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="6" y1="4" x2="6" y2="20"/><rect x="4.5" y="7" width="3" height="8" rx="0.5" fill="currentColor" fill-opacity="0.3"/><line x1="12" y1="2" x2="12" y2="22"/><rect x="10.5" y="5" width="3" height="10" rx="0.5" fill="currentColor" fill-opacity="0.3"/><line x1="18" y1="6" x2="18" y2="18"/><rect x="16.5" y="9" width="3" height="6" rx="0.5" fill="currentColor" fill-opacity="0.3"/></svg>
             <span data-i18n="market">بازار</span>
         </button>
         <button class="nav-item" data-page="analysis-page" onclick="switchTab('analysis-page', this)">
