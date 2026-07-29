@@ -148,7 +148,36 @@ export function createAssistantHandlers(deps) {
     return parts.join('\n');
   }
 
-  // ── AI Providers (external) ────────────────────────────────────────────────
+  // ── AI Providers ───────────────────────────────────────────────────────────
+  // Cloudflare Workers AI is the PRIMARY provider (free, no API key needed,
+  // already bound via wrangler.jsonc env.AI). External providers are fallback.
+
+  async function callCloudflareAI(env, prompt) {
+    if (!env.AI) {
+      throw new Error('Cloudflare Workers AI binding not configured');
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+      response = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+        messages: [
+          { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: 1024,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const reply = response?.response;
+    if (typeof reply !== 'string' || !reply.trim()) {
+      throw new Error('Empty Cloudflare AI response');
+    }
+    return reply;
+  }
+
+  // ── External AI Providers (fallback) ───────────────────────────────────────
 
   async function callGemini(env, prompt, imageBase64) {
     const apiKey = normalizeOptionalString(env.GEMINI_API_KEY);
@@ -292,7 +321,12 @@ export function createAssistantHandlers(deps) {
   }
 
   async function generateAssistantReply(env, prompt, imageBase64) {
+    // ROOT CAUSE FIX: Cloudflare Workers AI is now the PRIMARY provider.
+    // Previously, only external providers (Gemini, OpenRouter, DeepSeek)
+    // were tried — all require API keys that may not be configured.
+    // Cloudflare AI is free, already bound via env.AI, and needs no key.
     const providers = [
+      ['cloudflare', () => callCloudflareAI(env, prompt)],
       ['gemini', () => callGemini(env, prompt, imageBase64)],
       ['openrouter', () => callOpenRouter(env, prompt)],
       ['deepseek', () => callDeepSeek(env, prompt)],

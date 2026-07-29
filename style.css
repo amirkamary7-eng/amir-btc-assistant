@@ -2858,64 +2858,84 @@ strong.down { color: var(--red); }
     -webkit-backdrop-filter: blur(20px);
 }
 
+/* ═══ AI Floating Icon — Premium Gold Theme ═══ */
 .ai-fab {
     position: relative;
-    width: 48px;
-    height: 48px;
+    width: 52px;
+    height: 52px;
     border-radius: 50%;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.85), rgba(139, 92, 246, 0.85));
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: #fff;
+    background: linear-gradient(135deg, #1a2a40 0%, #0d1828 100%);
+    border: 1.5px solid rgba(245, 166, 35, 0.3);
+    color: #F5A623;
     display: flex;
     align-items: center;
     justify-content: center;
     box-shadow:
-        0 4px 16px rgba(99, 102, 241, 0.35),
-        0 1px 4px rgba(0, 0, 0, 0.2);
+        0 4px 20px rgba(245, 166, 35, 0.15),
+        0 1px 6px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
     cursor: grab;
-    transition: box-shadow 0.25s ease, opacity 0.3s ease;
+    transition: box-shadow 0.3s ease, border-color 0.3s ease, transform 0.2s ease;
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
+    animation: ai-fab-float 4s ease-in-out infinite;
+    will-change: transform;
 }
 
 .ai-fab:active {
     cursor: grabbing;
+    transform: scale(0.92);
 }
 
 .ai-fab-glow {
     position: absolute;
-    inset: -3px;
+    inset: -4px;
     border-radius: 50%;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(236, 72, 153, 0.15));
-    filter: blur(6px);
-    opacity: 0.5;
+    background: radial-gradient(circle, rgba(245, 166, 35, 0.2) 0%, transparent 70%);
+    filter: blur(8px);
+    opacity: 0.6;
     z-index: -1;
     animation: ai-glow-pulse 3s ease-in-out infinite;
+    will-change: opacity, transform;
 }
 
 .ai-fab-icon {
     position: relative;
     z-index: 1;
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.15));
-    width: 24px;
-    height: 24px;
+    filter: drop-shadow(0 0 6px rgba(245, 166, 35, 0.4));
+    width: 26px;
+    height: 26px;
+    transition: filter 0.3s ease;
 }
 
 .ai-fab:hover {
+    border-color: rgba(245, 166, 35, 0.5);
     box-shadow:
-        0 6px 24px rgba(99, 102, 241, 0.45),
-        0 2px 8px rgba(0, 0, 0, 0.25);
+        0 6px 28px rgba(245, 166, 35, 0.25),
+        0 2px 10px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.ai-fab:hover .ai-fab-icon {
+    filter: drop-shadow(0 0 10px rgba(245, 166, 35, 0.6));
+}
+
+.ai-fab:hover .ai-fab-glow {
+    opacity: 0.9;
+    transform: scale(1.15);
 }
 
 .ai-fab-hidden {
     opacity: 0;
     pointer-events: none;
+    transform: scale(0.5);
+    transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 @keyframes ai-fab-float {
     0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-4px); }
+    50% { transform: translateY(-5px); }
 }
 
 @keyframes ai-glow-pulse {
@@ -5315,6 +5335,11 @@ strong.down { color: var(--red); }
     height: 100%;
     object-fit: cover;
     display: block;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+.acv-hero-image[src]:not([src=""]) {
+    /* Image has a source — will fade in on load via onload handler */
 }
 
 .acv-image-overlay {

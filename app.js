@@ -1786,10 +1786,12 @@ function renderAnalysisList() {
         // Price boxes — REMOVED from cards (available in detail page + hero slider)
         let priceBoxes = '';
 
-        // Image section
+        // Image section — FIXED: use eager loading (not lazy) for visible cards,
+        // and a proper placeholder background that shows while loading.
         const imageSection = a.image
             ? `<div class="acv-image-section">
-                    <img src="${escapeHtml(a.image)}" class="acv-hero-image" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="this.outerHTML='<div class=\'acv-no-image-placeholder\'>${escapeHtml(a.coin)}</div>'">
+                    <img src="${escapeHtml(a.image)}" class="acv-hero-image" alt="${escapeHtml(a.coin)}" decoding="async" onload="this.style.opacity=1" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                    <div class="acv-no-image-placeholder" style="display:none;position:absolute;inset:0;">${escapeHtml(a.coin)}</div>
                     <div class="acv-image-overlay">
                         <div class="acv-coin-badge">${escapeHtml(a.coin)}</div>
                         <div class="acv-tf-badge">${escapeHtml(a.timeframe || '1D')}</div>

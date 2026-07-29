@@ -37,14 +37,15 @@ const AssistantUI = {
                 <svg class="ai-fab-icon" width="28" height="28" viewBox="0 0 24 24" fill="none">
                     <defs>
                         <linearGradient id="aiFabGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
-                            <stop offset="100%" stop-color="#e0e7ff" stop-opacity="0.9"/>
+                            <stop offset="0%" stop-color="#FFE9A0"/>
+                            <stop offset="50%" stop-color="#F5A623"/>
+                            <stop offset="100%" stop-color="#D4881A"/>
                         </linearGradient>
                     </defs>
                     <path d="M12 2.5c.9 0 1.6.7 1.6 1.6 0 .6-.3 1.1-.8 1.4v1.1h.9c3.5 0 6.3 2.8 6.3 6.3v.5c.6 0 1 .4 1 1v1.5c0 .6-.4 1-1 1h-.5c-.8 2.2-2.8 3.8-5.2 3.8H8.5c-2.4 0-4.4-1.6-5.2-3.8H3c-.6 0-1-.4-1-1V14c0-.6.4-1 1-1v-.5c0-3.5 2.8-6.3 6.3-6.3h.9V5.5c-.5-.3-.8-.8-.8-1.4 0-.9.7-1.6 1.6-1.6z" fill="url(#aiFabGrad)"/>
-                    <circle cx="9" cy="13.5" r="1.1" fill="#6366f1"/>
-                    <circle cx="15" cy="13.5" r="1.1" fill="#a855f7"/>
-                    <path d="M9.5 16.5c.8.6 1.7.9 2.5.9s1.7-.3 2.5-.9" stroke="#c084fc" stroke-width="1.2" stroke-linecap="round"/>
+                    <circle cx="9" cy="13.5" r="1.1" fill="#0d1828"/>
+                    <circle cx="15" cy="13.5" r="1.1" fill="#0d1828"/>
+                    <path d="M9.5 16.5c.8.6 1.7.9 2.5.9s1.7-.3 2.5-.9" stroke="#0d1828" stroke-width="1.2" stroke-linecap="round"/>
                 </svg>
             </button>
             <div id="ai-panel" class="ai-panel" style="display:none;">
