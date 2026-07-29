@@ -555,16 +555,34 @@ export function createPublisherHandlers(deps) {
       let botStatus = null;
       if (isChannel) {
         try {
-          const memberRes = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: settings.channel_id, user_id: env.BOT_USER_ID || 0 }),
-            signal: AbortSignal.timeout(8000),
-          }).catch(() => null);
-          if (memberRes && memberRes.ok) {
-            const memberData = await memberRes.json();
-            botStatus = memberData.result?.status || 'unknown';
-            canPost = ['administrator', 'creator'].includes(botStatus);
+          // ROOT CAUSE FIX: env.BOT_USER_ID may not be set. Get the bot's
+          // user ID dynamically via getMe API instead of relying on env var.
+          let botUserId = env.BOT_USER_ID;
+          if (!botUserId) {
+            const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, {
+              signal: AbortSignal.timeout(5000),
+            }).catch(() => null);
+            if (meRes && meRes.ok) {
+              const meData = await meRes.json();
+              botUserId = meData.result?.id;
+            }
+          }
+          if (!botUserId) {
+            // Can't determine bot's user ID — assume can post (getChat succeeded)
+            canPost = true;
+            botStatus = 'unknown';
+          } else {
+            const memberRes = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: settings.channel_id, user_id: botUserId }),
+              signal: AbortSignal.timeout(8000),
+            }).catch(() => null);
+            if (memberRes && memberRes.ok) {
+              const memberData = await memberRes.json();
+              botStatus = memberData.result?.status || 'unknown';
+              canPost = ['administrator', 'creator'].includes(botStatus);
+            }
           }
         } catch {}
       }

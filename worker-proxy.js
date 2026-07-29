@@ -977,9 +977,14 @@ async function sendTelegramMessage(env, payload, { retries = 1, timeoutMs = 8000
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  // ROOT CAUSE FIX: When payload has a 'photo' field, use sendPhoto API
+  // instead of sendMessage. Previously, ALL messages used sendMessage which
+  // silently ignored the photo field — image messages were sent as text-only.
+  const apiMethod = payload.photo ? 'sendPhoto' : 'sendMessage';
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(buildTelegramApiUrl(env, 'sendMessage'), {
+      const response = await fetch(buildTelegramApiUrl(env, apiMethod), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
