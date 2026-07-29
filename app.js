@@ -4695,36 +4695,37 @@ function renderForexItem(f) {
     const safeName = escapeHtml(f.name);
     const cat = f.category || 'major';
 
-    // Category config: colors, SVG icons, labels, precision
+    // Category config: colors, labels, precision
     const catConfig = {
-        major:     { color: '#22C55E', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>', label: 'Major',     labelFa: 'جفت اصلی',   decimals: 4 },
-        cross:     { color: '#F5A623', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', label: 'Cross',     labelFa: 'کراس',       decimals: 4 },
-        metal:     { color: '#FFD700', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14h8M8 10h8M12 6v12"/></svg>', label: 'Metal',     labelFa: 'فلز گران‌بها', decimals: 2 },
-        stock:     { color: '#60A5FA', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 6-6"/></svg>', label: 'Stock',     labelFa: 'سهم',       decimals: 2 },
-        // Per-symbol icons (override category default)
-        // These are checked first in renderForexItem
+        major:     { color: '#22C55E', gradColor: '#16A34A', label: 'Major',     labelFa: 'جفت اصلی',       decimals: 4 },
+        cross:     { color: '#F5A623', gradColor: '#D97706', label: 'Cross',     labelFa: 'کراس',           decimals: 4 },
+        metal:     { color: '#FFD700', gradColor: '#B8860B', label: 'Metal',     labelFa: 'فلز گران‌بها',   decimals: 2 },
+        stock:     { color: '#60A5FA', gradColor: '#2563EB', label: 'Stock',     labelFa: 'سهم',            decimals: 2 },
     };
     const cfg = catConfig[cat] || catConfig.major;
     const decimals = cfg.decimals;
 
-    // Per-symbol custom icons for well-known assets
-    const symbolIcons = {
-        'XAUUSD': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14h8M8 10h8M12 6v12"/></svg>',
-        'XAGUSD': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M8 10h8M8 14h8"/></svg>',
-        'AAPL':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></svg>',
-        'MSFT':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>',
-        'NVDA':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 4-4"/></svg>',
-        'AMZN':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 17c3-3 8-3 10 0"/></svg>',
-        'GOOGL':  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>',
-        'META':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12c0-5 4-9 9-9s9 4 9 9-4 9-9 9"/><path d="M12 12c0-5 3-9 6-9"/></svg>',
-        'TSLA':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 10l5 5 5-5"/></svg>',
-        'NFLX':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 17V7l6 10V7"/></svg>',
-        'AMD':    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12h8M12 8v8"/></svg>',
-        'INTC':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="14" x2="21" y2="14"/></svg>',
-        'COIN':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="5"/></svg>',
-        'MSTR':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 16V8M7 8l5 5 5-5"/></svg>',
-    };
-    const iconSvg = symbolIcons[f.symbol] || cfg.svg;
+    // ── Professional letter-based icon ──
+    // Extract a 2-3 character abbreviation from the symbol for a clean,
+    // uniform, professional look. No more generic SVG line charts.
+    // For forex pairs (EURUSD, GBPUSD): show base currency symbol or 2-letter code
+    // For metals (XAUUSD): show chemical symbol (Au, Ag)
+    // For stocks (AAPL): show first 3-4 letters of ticker
+    const currencySymbols = { 'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'AUD': 'A$', 'CAD': 'C$', 'CHF': '₣', 'NZD': 'N$', 'CNY': '¥', 'XAU': 'Au', 'XAG': 'Ag' };
+
+    let iconText = '';
+    const sym = f.symbol.toUpperCase();
+    if (cat === 'metal') {
+        // XAUUSD → Au, XAGUSD → Ag
+        iconText = sym.startsWith('XAU') ? 'Au' : sym.startsWith('XAG') ? 'Ag' : sym.slice(0, 2);
+    } else if (cat === 'stock') {
+        // AAPL → AAPL (first 4 chars), but display only 3-4 to fit
+        iconText = sym.slice(0, 4);
+    } else {
+        // Forex: EURUSD → €, GBPUSD → £, or extract base currency
+        const baseCurr = sym.slice(0, 3);
+        iconText = currencySymbols[baseCurr] || baseCurr;
+    }
 
     // Format price with appropriate precision
     let priceStr;
@@ -4739,7 +4740,7 @@ function renderForexItem(f) {
             priceStr = f.price.toFixed(decimals);
         }
     } else {
-        priceStr = 'Unknown';
+        priceStr = '—';
     }
 
     // Change display
@@ -4754,17 +4755,24 @@ function renderForexItem(f) {
         ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
         : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
 
-    // Category icon with premium styling
-    const iconBg = `background:${cfg.color}15; color:${cfg.color}; border:1px solid ${cfg.color}30;`;
+    // Professional gradient icon background
+    const iconStyle = `background: linear-gradient(135deg, ${cfg.color}22, ${cfg.gradColor}33); color: ${cfg.color}; border: 1px solid ${cfg.color}40;`;
+
+    // Display: symbol as primary (always short), name as subtitle (small, dimmed)
+    // This prevents truncation — symbol codes like "EUR/USD" are always short.
+    // For stocks, symbol IS the name (AAPL), so show it as primary.
+    const displaySymbol = cat === 'stock' ? safeSymbol : (safeName.length > 8 ? safeSymbol : safeName);
+    const displayName = cat === 'stock' ? '' : (safeName.length > 8 ? safeName : '');
 
     return `
         <div class="mkt-coin-row mkt-forex-row" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" data-action="open-forex" role="listitem">
             <span class="mkt-coin-rank">—</span>
-            <div class="mkt-forex-icon" style="${iconBg}">
-                ${iconSvg}
+            <div class="mkt-forex-icon" style="${iconStyle}">
+                <span class="mkt-forex-icon-text">${escapeHtml(iconText)}</span>
             </div>
             <div class="mkt-coin-info">
-                <span class="mkt-coin-symbol">${safeName}</span>
+                <span class="mkt-coin-symbol">${displaySymbol}</span>
+                ${displayName ? `<span class="mkt-coin-pair-caption">${displayName}</span>` : ''}
             </div>
             <span class="mkt-coin-price">${priceStr}</span>
             <span class="mkt-coin-change ${changeCls}">${changeStr}</span>
