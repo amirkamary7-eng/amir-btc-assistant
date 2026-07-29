@@ -3778,28 +3778,49 @@ function sanitizeNewsTitle(rawTitle) {
     let title = String(rawTitle).replace(/\s+/g, ' ').trim();
     if (!title) return '';
 
-    // 1. Remove consecutive duplicate words (3+ same words in a row → keep 1)
+    // 1. Remove consecutive duplicate words (2+ same words in a row → keep 1)
+    //    Unicode-safe: doesn't rely on \b which fails for Persian/RTL text.
     //    e.g. "بیت‌کوین بیت‌کوین بیت‌کوین بالا رفت" → "بیت‌کوین بالا رفت"
-    title = title.replace(/\b(\S+)(\s+\1){2,}\b/gi, '$1');
-    //    Also handle 2 consecutive duplicates (common AI artifact)
-    title = title.replace(/\b(\S+)(\s+\1)\b/gi, '$1');
+    //    Run in a loop to handle 3+, 4+, etc. consecutive duplicates
+    let prev;
+    do {
+        prev = title;
+        title = title.replace(/(\S+)(\s+\1)(?=\s|$)/gi, '$1');
+    } while (title !== prev);
 
-    // 2. Remove consecutive duplicate phrases (phrase of 2-6 words repeated)
+    // 2. Remove consecutive duplicate phrases (phrase of 2-8 words repeated)
     //    e.g. "قیمت بیت‌کوین بالا رفت قیمت بیت‌کوین بالا رفت" → "قیمت بیت‌کوین بالا رفت"
-    //    Run twice to catch nested duplications
-    for (let pass = 0; pass < 2; pass++) {
-        title = title.replace(/\b((?:\S+\s+){1,5}\S+)\s+\1\b/gi, '$1');
-    }
+    //    Run in a loop to catch nested duplications
+    do {
+        prev = title;
+        title = title.replace(/((?:\S+\s+){1,8}\S+)\s+\1/gi, '$1');
+    } while (title !== prev);
 
     // 3. Full title duplication: if the title is exactly repeated (first half == second half)
     //    e.g. "Bitcoin hits 65K Bitcoin hits 65K" → "Bitcoin hits 65K"
+    //    Also handle slight asymmetry (off by 1-2 chars)
     const len = title.length;
     if (len > 20) {
         const mid = Math.floor(len / 2);
+        // Try exact midpoint split
         const firstHalf = title.substring(0, mid).trim();
         const secondHalf = title.substring(mid).trim();
-        if (firstHalf === secondHalf && firstHalf.length > 10) {
+        if (firstHalf === secondHalf && firstHalf.length > 8) {
             title = firstHalf;
+        } else {
+            // Try finding the second occurrence of the first 10 chars
+            const prefix = title.substring(0, 10);
+            if (prefix.length === 10) {
+                const secondOccurrence = title.indexOf(prefix, 5);
+                if (secondOccurrence > 10 && secondOccurrence < len - 10) {
+                    // Check if the text before the second occurrence matches the text after
+                    const candidate = title.substring(0, secondOccurrence).trim();
+                    const remainder = title.substring(secondOccurrence).trim();
+                    if (candidate === remainder && candidate.length > 8) {
+                        title = candidate;
+                    }
+                }
+            }
         }
     }
 
@@ -3807,6 +3828,35 @@ function sanitizeNewsTitle(rawTitle) {
     title = title.replace(/\s+/g, ' ').trim();
 
     return title;
+}
+
+/**
+ * Format a news publication date as Tehran time.
+ * Converts UTC ISO timestamp to Asia/Tehran timezone (UTC+3:30).
+ * Returns: "HH:MM | به وقت تهران" or relative time if no date available.
+ *
+ * Item 2: News time displayed in Tehran timezone, not UTC.
+ */
+function formatNewsTimeTehran(pubDate, relativeTime) {
+    // If we have a valid pubDate, format as Tehran time
+    if (pubDate) {
+        try {
+            const date = new Date(pubDate);
+            if (!isNaN(date.getTime())) {
+                // Format in Asia/Tehran timezone (UTC+3:30, no DST)
+                // Intl.DateTimeFormat handles timezone conversion correctly
+                const tehranTime = new Intl.DateTimeFormat('fa-IR', {
+                    timeZone: 'Asia/Tehran',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false,
+                }).format(date);
+                return tehranTime + ' | به وقت تهران';
+            }
+        } catch (_) { /* fall through to relative time */ }
+    }
+    // Fallback to relative time if no pubDate or formatting fails
+    return relativeTime || '';
 }
 
 /**
@@ -5881,7 +5931,10 @@ async function loadNews(force = false, append = false) {
         if (!force && !append) {
             const cached = Cache.get('news');
             if (cached) {
-                newsCache = cached;
+                // ROOT CAUSE FIX (item 1 permanent): Sanitize titles from
+                // in-memory cache too. Old cached titles may have AI-translation
+                // duplication artifacts that were stored before the fix.
+                newsCache = cached.map(n => ({ ...n, title: sanitizeNewsTitle(n.title) }));
                 renderNews(document.querySelector('.ni-tab.active')?.dataset?.news || 'all');
                 loadNews(true);
                 return;
@@ -5917,6 +5970,7 @@ async function loadNews(force = false, append = false) {
                 articles = json.data.map(a => ({
                     title: sanitizeNewsTitle(a.title), body: a.description, source: a.source,
                     image: a.image, url: a.url, time: a.time_ago,
+                    pub_date: a.pub_date || null, // ISO timestamp for Tehran time conversion
                     category: a.category || 'crypto',
                     sentiment: a.sentiment || 'neutral',
                     summary: a.summary || '',
@@ -6102,7 +6156,7 @@ function renderNews(category) {
             <div class="ni-card-footer">
                 <div class="ni-card-source">
                     ${NI_ICONS.clock}
-                    <span>${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</span>
+                    <span>${escapeHtml(n.source)} • ${escapeHtml(formatNewsTimeTehran(n.pub_date, n.time))}</span>
                 </div>
                 <div class="ni-card-actions">
                     <button class="ni-card-action ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="ذخیره">
@@ -6163,7 +6217,7 @@ function niRenderHeroSlider(items) {
                 <div class="ni-hero-headline">${escapeHtml(n.title)}</div>
                 ${n.summary ? `<div class="ni-hero-summary">${escapeHtml(n.summary)}</div>` : ''}
                 <div class="ni-hero-meta">
-                    <div class="ni-hero-source">${NI_ICONS.clock}<span>${escapeHtml(n.source || '')} • ${escapeHtml(n.time || '')}</span></div>
+                    <div class="ni-hero-source">${NI_ICONS.clock}<span>${escapeHtml(n.source || '')} • ${escapeHtml(formatNewsTimeTehran(n.pub_date, n.time))}</span></div>
                     <div class="ni-hero-actions">
                         <button class="ni-hero-action-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="ذخیره">
                             ${isSaved ? NI_ICONS.bookmarkFilled : NI_ICONS.bookmark}
@@ -6388,7 +6442,7 @@ function toggleSaveNews(idx) {
     if (savedIdx >= 0) {
         _niSavedNews.splice(savedIdx, 1);
     } else {
-        _niSavedNews.unshift({ url: n.url, title: n.title, image: n.image, source: n.source, time: n.time, sentiment: n.sentiment, summary: n.summary, body: n.body, category: n.category, savedAt: Date.now() });
+        _niSavedNews.unshift({ url: n.url, title: n.title, image: n.image, source: n.source, time: n.time, pub_date: n.pub_date, sentiment: n.sentiment, summary: n.summary, body: n.body, category: n.category, savedAt: Date.now() });
     }
     localStorage.setItem('ni_saved_news', JSON.stringify(_niSavedNews));
     // Re-render to update button state
@@ -6430,7 +6484,7 @@ function renderSavedNews() {
             <div class="ni-card-footer">
                 <div class="ni-card-source">
                     ${NI_ICONS.clock}
-                    <span>${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</span>
+                    <span>${escapeHtml(n.source)} • ${escapeHtml(formatNewsTimeTehran(n.pub_date, n.time))}</span>
                 </div>
                 <div class="ni-card-actions">
                     <button class="ni-card-action saved" onclick="event.stopPropagation(); toggleSaveNews(${i})" aria-label="حذف ذخیره">
@@ -7296,7 +7350,7 @@ function openNewsModal(idx) {
 
     // Meta: time, source, category
     const timeEl = el('news-modal-time');
-    if (timeEl) timeEl.innerText = n.time || n.time_ago || '—';
+    if (timeEl) timeEl.innerText = formatNewsTimeTehran(n.pub_date, n.time || n.time_ago) || '—';
     const sourceEl = el('news-modal-source');
     if (sourceEl) sourceEl.innerText = n.source || n.source_name || '—';
     const categoryEl = el('news-modal-category');
@@ -9918,7 +9972,7 @@ function openNewsModalWith(n) {
 
     // Meta: time, source, category
     const timeEl = el('news-modal-time');
-    if (timeEl) timeEl.innerText = n.time || n.time_ago || '—';
+    if (timeEl) timeEl.innerText = formatNewsTimeTehran(n.pub_date, n.time || n.time_ago) || '—';
     const sourceEl = el('news-modal-source');
     if (sourceEl) sourceEl.innerText = n.source || n.source_name || '—';
     const categoryEl = el('news-modal-category');

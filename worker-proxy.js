@@ -2577,6 +2577,9 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
       title: sanitizeNewsTitle(rawTitle),
       description: String(translatedDescription || limitedItems[i].description || '').replace(/\n/g, ' ').trim(),
       time_ago: parseRelativeTime(limitedItems[i].pubDate),
+      // Raw publication date in ISO format (UTC) — frontend converts to
+      // Asia/Tehran for display. Item 2: news time in Tehran timezone.
+      pub_date: limitedItems[i].pubDate ? new Date(limitedItems[i].pubDate).toISOString() : null,
       source: sourceName,
       category: category || 'crypto',
       image: limitedItems[i].image,
@@ -2607,13 +2610,18 @@ function sanitizeNewsTitle(rawTitle) {
   if (!title) return '';
 
   // 1. Remove consecutive duplicate words (2+ same words in a row → keep 1)
-  title = title.replace(/\b(\S+)(\s+\1)+\b/gi, '$1');
+  //    Unicode-safe: doesn't rely on \b which fails for Persian/RTL text.
+  let prev;
+  do {
+    prev = title;
+    title = title.replace(/(\S+)(\s+\1)(?=\s|$)/gi, '$1');
+  } while (title !== prev);
 
-  // 2. Remove consecutive duplicate phrases (phrase of 2-6 words repeated)
-  //    Run twice to catch nested duplications
-  for (let pass = 0; pass < 2; pass++) {
-    title = title.replace(/\b((?:\S+\s+){1,5}\S+)\s+\1\b/gi, '$1');
-  }
+  // 2. Remove consecutive duplicate phrases (phrase of 2-8 words repeated)
+  do {
+    prev = title;
+    title = title.replace(/((?:\S+\s+){1,8}\S+)\s+\1/gi, '$1');
+  } while (title !== prev);
 
   // 3. Full title duplication: first half == second half
   const len = title.length;
@@ -2621,8 +2629,21 @@ function sanitizeNewsTitle(rawTitle) {
     const mid = Math.floor(len / 2);
     const firstHalf = title.substring(0, mid).trim();
     const secondHalf = title.substring(mid).trim();
-    if (firstHalf === secondHalf && firstHalf.length > 10) {
+    if (firstHalf === secondHalf && firstHalf.length > 8) {
       title = firstHalf;
+    } else {
+      // Try finding the second occurrence of the first 10 chars
+      const prefix = title.substring(0, 10);
+      if (prefix.length === 10) {
+        const secondOccurrence = title.indexOf(prefix, 5);
+        if (secondOccurrence > 10 && secondOccurrence < len - 10) {
+          const candidate = title.substring(0, secondOccurrence).trim();
+          const remainder = title.substring(secondOccurrence).trim();
+          if (candidate === remainder && candidate.length > 8) {
+            title = candidate;
+          }
+        }
+      }
     }
   }
 
@@ -2658,8 +2679,19 @@ async function fetchFarsiNews(env, categoryFilter) {
   if (cachedNews) {
     try {
       const parsed = JSON.parse(cachedNews);
+      // ROOT CAUSE FIX (item 1 permanent): Apply sanitizeNewsTitle on the
+      // CACHE-HIT path too. Previously sanitization only ran in
+      // buildFarsiNewsArticles (live-fetch path). If the KV cache contained
+      // old titles with AI-translation duplication artifacts (from before
+      // the fix was deployed), they were served as-is — causing the bug to
+      // persist in production even after the fix. Now every title is
+      // sanitized regardless of whether it came from cache or live fetch.
+      const sanitized = parsed.map(a => ({
+        ...a,
+        title: sanitizeNewsTitle(a.title),
+      }));
       // Enrich with AI summaries from KV (if available)
-      const enriched = await enrichNewsWithAISummaries(env, parsed);
+      const enriched = await enrichNewsWithAISummaries(env, sanitized);
       const data = categoryFilter
         ? enriched.filter((a) => a.category === categoryFilter)
         : enriched;
