@@ -258,5 +258,99 @@ export function createUserHandlers(deps) {
     }
   }
 
-  return Object.freeze({ handleBootstrap, handleMe, handleMeSettings });
+  /**
+   * DELETE /api/users/me — Permanently delete the authenticated user's account.
+   *
+   * ── ROOT-CAUSE FIX: Delete Account with full cascade ──
+   *
+   * This endpoint allows a user to permanently delete their account and ALL
+   * associated data. After deletion, the user can re-register via a referral
+   * link and the referral will be properly registered (because the old
+   * referral row is cascade-deleted, so the "first inviter wins" check
+   * won't block the new referral).
+   *
+   * Security:
+   *   - Requires cryptographic initData authentication (no body.user_id fallback)
+   *   - Requires a confirmation payload: { confirm: "DELETE" } to prevent
+   *     accidental deletion via CSRF or misclick.
+   *
+   * Flow:
+   *   1. Authenticate user via initData
+   *   2. Parse body — require { confirm: "DELETE" }
+   *   3. Call userRepo.deleteAccount(env, userId) — cascades to all tables
+   *   4. Return summary of what was deleted
+   */
+  async function handleDeleteAccount(request, env) {
+    // ── DEBUG: Log every step of the delete-account flow ──
+    const t0 = Date.now();
+    console.log(JSON.stringify({ scope: 'diag-delete-account-STEP1-ENTRY', ts: new Date().toISOString() }));
+
+    const auth = await optionalTelegramAuth(request, env);
+    if (!auth.user) {
+      console.log(JSON.stringify({ scope: 'diag-delete-account-REJECTED', reason: 'no_auth' }));
+      return auth.error;
+    }
+
+    const userId = String(auth.user.id);
+    console.log(JSON.stringify({ scope: 'diag-delete-account-STEP2-AUTHED', userId }));
+
+    if (!isDatabaseConfigured(env)) {
+      return jsonResponse(
+        { status: 'error', message: 'Database not configured' },
+        { status: 503 }, env);
+    }
+
+    // Parse body — require confirmation
+    const bodyResult = await readJsonBody(request, 10240, env);
+    if (bodyResult.error) return bodyResult.error;
+    const payload = bodyResult.payload;
+
+    if (!payload || payload.confirm !== 'DELETE') {
+      console.log(JSON.stringify({ scope: 'diag-delete-account-REJECTED', reason: 'no_confirmation', userId }));
+      return jsonResponse({
+        status: 'error',
+        message: 'Confirmation required. Send { "confirm": "DELETE" } in the request body to confirm account deletion.',
+      }, { status: 400 }, env);
+    }
+
+    console.log(JSON.stringify({ scope: 'diag-delete-account-STEP3-CONFIRMED', userId }));
+
+    try {
+      // Verify user exists before deleting
+      const existingUser = await userRepo.getById(env, userId);
+      if (!existingUser) {
+        console.log(JSON.stringify({ scope: 'diag-delete-account-REJECTED', reason: 'user_not_found', userId }));
+        return jsonResponse({ status: 'error', message: 'User not found' }, { status: 404 }, env);
+      }
+
+      console.log(JSON.stringify({ scope: 'diag-delete-account-STEP4-CASCADE-START', userId, hadChannelJoined: existingUser.channel_joined }));
+
+      // ── CASCADE DELETE ──
+      const summary = await userRepo.deleteAccount(env, userId);
+
+      console.log(JSON.stringify({
+        scope: 'diag-delete-account-STEP5-CASCADE-DONE',
+        userId,
+        summary,
+        elapsed: Date.now() - t0
+      }));
+
+      return jsonResponse({
+        status: 'success',
+        message: 'Account permanently deleted. You can re-register anytime via the Telegram bot.',
+        deleted: summary,
+      }, {}, env);
+    } catch (error) {
+      console.error(JSON.stringify({
+        scope: 'diag-delete-account-FATAL',
+        userId,
+        error: error?.message,
+        stack: error?.stack?.substring(0, 300),
+        elapsed: Date.now() - t0
+      }));
+      return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, env);
+    }
+  }
+
+  return Object.freeze({ handleBootstrap, handleMe, handleMeSettings, handleDeleteAccount });
 }

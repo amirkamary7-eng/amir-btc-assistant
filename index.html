@@ -89,7 +89,14 @@
 
     <link rel="stylesheet" href="style.css">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- PERFORMANCE: TradingView tv.js lazy-loaded in openCoinDetail() — saves ~200KB on initial page load -->
+    <!-- ── PERFORMANCE: Preload TradingView tv.js with high priority ── -->
+    <!-- Preload hint tells the browser to start fetching tv.js immediately,
+         without executing it. The actual <script> is injected by app.js
+         (preloadTradingViewScript) which then executes it. This cuts ~1-2s
+         off the first chart open. -->
+    <link rel="preload" href="https://s3.tradingview.com/tv.js" as="script">
+    <link rel="preconnect" href="https://s3.tradingview.com">
+    <link rel="preconnect" href="https://scanner.tradingview.com">
     <link rel="stylesheet" href="wallet.css">
     <link rel="stylesheet" href="referral.css">
     <!-- WARM-START: Preconnect to Worker API for faster first API call -->
@@ -888,6 +895,23 @@
             <button class="rec-cta" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                 <span data-i18n="open_referral_center">باز کردن مرکز دعوت</span>
+            </button>
+        </div>
+
+        <!-- ── DANGER ZONE: Delete Account (root-cause fix for referral re-registration) ── -->
+        <div class="danger-zone-card" id="danger-zone-card">
+            <div class="danger-zone-header">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span data-i18n="danger_zone">منطقه خطر</span>
+            </div>
+            <p class="danger-zone-desc" data-i18n="delete_account_desc">حذف حساب کاربری به‌صورت دائمی تمام داده‌های شما (پاداش‌ها، دعوت‌ها، کیف پول، هشدارها) را پاک می‌کند. این عملیات قابل بازگشت نیست.</p>
+            <button class="danger-zone-btn" type="button" onclick="requestDeleteAccount()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span data-i18n="delete_account">حذف حساب کاربری</span>
             </button>
         </div>
     </section>

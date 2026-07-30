@@ -36,6 +36,34 @@ export function createReferralRepository(deps) {
     } catch (e) {
       console.warn('Referral schema migration warning:', e.message);
     }
+
+    // ── ROOT-CAUSE FIX: Ensure UNIQUE constraint on invitee_id exists ──
+    // The INSERT in processReferralOnBootstrap uses ON CONFLICT (invitee_id) DO NOTHING.
+    // This REQUIRES a UNIQUE constraint on invitee_id. If it doesn't exist, the
+    // INSERT will throw "there is no unique or exclusion constraint matching the ON CONFLICT"
+    // instead of doing nothing on duplicate — causing a 500 error.
+    // ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS is NOT supported in Postgres,
+    // so we use a DO block that checks pg_constraint first.
+    try {
+      await queryDb(env, `
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'uq_referral_invitee'
+              AND conrelid = 'referrals'::regclass
+          ) THEN
+            ALTER TABLE referrals ADD CONSTRAINT uq_referral_invitee UNIQUE (invitee_id);
+          END IF;
+        END $$;
+      `);
+      console.log('[REFERRAL] UNIQUE constraint uq_referral_invitee verified');
+    } catch (e) {
+      // Non-fatal — the constraint might already exist under a different name,
+      // or the table might have a primary key on a different column.
+      console.warn('[REFERRAL] Could not add uq_referral_invitee constraint (may already exist):', e?.message);
+    }
+
     _schemaVerified = true;
   }
 

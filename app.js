@@ -3404,6 +3404,15 @@ async function resolveChartSymbol(symbol) {
     const cached = Cache.get(cacheKey);
     if (cached) return cached;
 
+    // ── PERFORMANCE: Check localStorage cache (6h TTL) for instant repeat lookup ──
+    // This avoids a network round-trip entirely for coins the user has opened before.
+    const lsCached = getLsChartSymbol(symbol);
+    if (lsCached) {
+        // Also set in in-memory cache for subsequent calls in the same session
+        Cache.set(cacheKey, lsCached, 3600);
+        return lsCached;
+    }
+
     const symUpper = String(symbol || '').toUpperCase().trim();
     if (!symUpper) {
         return { found: false, symbol: symbol, exchange: null, tv_symbol: null };
@@ -3426,6 +3435,7 @@ async function resolveChartSymbol(symbol) {
                 is_btc_pair: true,
             };
             Cache.set(cacheKey, result, 3600);
+            setLsChartSymbol(symbol, result);
             return result;
         }
     }
@@ -3436,6 +3446,7 @@ async function resolveChartSymbol(symbol) {
     if (skipSymbols.includes(symUpper)) {
         const notFound = { found: false, symbol: symUpper, exchange: null, tv_symbol: null };
         Cache.set(cacheKey, notFound, 300);
+        setLsChartSymbol(symbol, notFound);
         return notFound;
     }
 
@@ -3449,15 +3460,18 @@ async function resolveChartSymbol(symbol) {
             const data = await apiFetch(`/api/charts/resolve?symbol=${encodeURIComponent(symbol)}`);
             if (data && data.found && data.tv_symbol) {
                 Cache.set(cacheKey, data, 3600);
+                setLsChartSymbol(symbol, data);
                 return data;
             }
             // Backend said genuinely not found → trust it (short cache, retry later)
             if (data && data.found === false) {
                 Cache.set(cacheKey, data, 300);
+                setLsChartSymbol(symbol, data);
                 return data;
             }
         } catch (e) { console.warn('resolveChartSymbol backend failed, trying client-side scanner:', e); }
     }
+
 
     // ── LAST-RESORT FALLBACK: client-side TradingView scanner ──
     // Used only if the backend is completely unreachable. Queries TradingView's
@@ -3497,6 +3511,7 @@ async function resolveChartSymbol(symbol) {
                         is_fallback: true,
                     };
                     Cache.set(cacheKey, result, 3600);
+                    setLsChartSymbol(symbol, result);
                     return result;
                 }
             }
@@ -3506,8 +3521,30 @@ async function resolveChartSymbol(symbol) {
     // No chart available for this symbol on ANY exchange TradingView tracks
     const notFound = { found: false, symbol: symUpper, exchange: null, tv_symbol: null };
     Cache.set(cacheKey, notFound, 300); // Short cache — retry sooner if listed later
+    setLsChartSymbol(symbol, notFound);
     return notFound;
 }
+
+// ============================================================================
+// ── PERFORMANCE: Prefetch chart symbols for top coins ──
+// ============================================================================
+// After market data loads, silently prefetch the chart symbol resolution for
+// the top 10 coins (BTC, ETH, SOL, etc.) so that when the user taps one,
+// the result is already in the in-memory + localStorage cache → instant chart.
+// This runs in the background and never blocks the UI.
+function prefetchTopChartSymbols() {
+    if (!allCoins || allCoins.length === 0) return;
+    const topCoins = allCoins.slice(0, 10).map(c => c.symbol).filter(Boolean);
+    console.log('[CHART-PERF] Prefetching chart symbols for top', topCoins.length, 'coins');
+    // Stagger the prefetches to avoid overwhelming the backend
+    topCoins.forEach((sym, i) => {
+        setTimeout(() => {
+            // resolveChartSymbol checks cache first — only fetches if not cached
+            resolveChartSymbol(sym).catch(() => {});
+        }, i * 200); // 200ms between each = 2s total for 10 coins
+    });
+}
+
 
 /**
  * PERFORMANCE: Two-layer request optimizer.
@@ -4237,6 +4274,12 @@ async function loadMarketData(force = false) {
         renderMarket();
         renderWatchlist();
         renderSummary();
+
+        // ── PERFORMANCE: Prefetch chart symbols for top 10 coins ──
+        // Runs in background — never blocks the UI. By the time the user taps
+        // a top coin (BTC, ETH, SOL...), its chart symbol is already cached
+        // → chart opens instantly.
+        try { prefetchTopChartSymbols(); } catch (e) { console.warn('chart prefetch failed:', e?.message); }
         renderMarketInsights();
         // ALWAYS re-render ticker after a successful market load — this is the
         // primary path that hydrates the ticker from cold-open (skeleton → real).
@@ -7615,6 +7658,103 @@ function closeNewsModal() {
 // Each call increments this token; if a newer call starts, older calls abort silently.
 let _detailLoadToken = 0;
 
+// ============================================================================
+// ── PERFORMANCE: TradingView script preloader ──
+// ============================================================================
+// Instead of lazy-loading tv.js on the FIRST openCoinDetail call (which blocks
+// the chart for up to 5s), we preload it on app start. By the time the user
+// taps a coin, tv.js is already loaded → chart renders instantly.
+//
+// The preloader is fire-and-forget: it starts loading immediately but never
+// blocks the main thread. If it fails, openCoinDetail will retry.
+let _tvJsLoadPromise = null;
+
+/**
+ * Preload the TradingView tv.js script on app start.
+ * Called once during initialization — safe to call multiple times.
+ * The script loads in the background; when a user first opens a coin detail,
+ * the script is already cached.
+ */
+function preloadTradingViewScript() {
+    if (window.TradingView || _tvJsLoadPromise) return;
+    _tvJsLoadPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://s3.tradingview.com/tv.js';
+        s.async = true;
+        s.onload = () => {
+            console.log('[CHART-PERF] tv.js preloaded successfully');
+            resolve();
+        };
+        s.onerror = (e) => {
+            console.warn('[CHART-PERF] tv.js preload failed (will retry on first openCoinDetail):', e);
+            _tvJsLoadPromise = null; // Reset so openCoinDetail can retry
+            reject(e);
+        };
+        document.head.appendChild(s);
+    });
+}
+
+/**
+ * Ensure TradingView is loaded. Returns a promise that resolves immediately
+ * if already loaded, or waits for the preload to finish.
+ * If preload hasn't started yet (edge case), starts it now.
+ */
+function ensureTradingViewLoaded() {
+    if (window.TradingView) return Promise.resolve();
+    if (_tvJsLoadPromise) return _tvJsLoadPromise;
+    // Preload wasn't started — start it now (first openCoinDetail before init)
+    preloadTradingViewScript();
+    return _tvJsLoadPromise || Promise.resolve();
+}
+
+// Start preloading as soon as this script parses (non-blocking)
+// The script tag is async, so it won't block page render.
+if (typeof window !== 'undefined') {
+    // Defer to next tick to avoid blocking initial render
+    setTimeout(preloadTradingViewScript, 100);
+}
+
+// ============================================================================
+// ── PERFORMANCE: localStorage cache for resolved chart symbols ──
+// ============================================================================
+// resolveChartSymbol hits the backend /api/charts/resolve which has a 1h KV cache.
+// But even a KV cache hit is ~50-100ms latency. For REPEAT visits (same coin
+// opened again), we cache the result in localStorage for instant lookup.
+// TTL: 6 hours (matches the backend's 1h KV cache × a few refreshes).
+const CHART_SYMBOL_LS_KEY = 'tv_symbol_cache_v1';
+const CHART_SYMBOL_LS_TTL = 6 * 60 * 60 * 1000; // 6 hours
+
+function getLsChartSymbol(symbol) {
+    try {
+        const raw = localStorage.getItem(CHART_SYMBOL_LS_KEY);
+        if (!raw) return null;
+        const cache = JSON.parse(raw);
+        const entry = cache[symbol];
+        if (!entry) return null;
+        if (Date.now() - entry.ts > CHART_SYMBOL_LS_TTL) {
+            delete cache[symbol];
+            localStorage.setItem(CHART_SYMBOL_LS_KEY, JSON.stringify(cache));
+            return null;
+        }
+        return entry.data;
+    } catch { return null; }
+}
+
+function setLsChartSymbol(symbol, data) {
+    try {
+        const raw = localStorage.getItem(CHART_SYMBOL_LS_KEY);
+        const cache = raw ? JSON.parse(raw) : {};
+        cache[symbol] = { data, ts: Date.now() };
+        // Evict oldest entries if cache grows too large (max 100 symbols)
+        const keys = Object.keys(cache);
+        if (keys.length > 100) {
+            keys.sort((a, b) => cache[a].ts - cache[b].ts);
+            for (let i = 0; i < keys.length - 80; i++) delete cache[keys[i]];
+        }
+        localStorage.setItem(CHART_SYMBOL_LS_KEY, JSON.stringify(cache));
+    } catch { /* localStorage full or disabled — non-fatal */ }
+}
+
 /**
  * BUG 1 FIX — Fully clear ALL previous-asset state before opening a new one.
  * Called at the START of both openCoinDetail and openForexDetail so no
@@ -7732,81 +7872,57 @@ async function openCoinDetail(symbol) {
     // load the new one.
     resetDetailState();
 
-    // Lazy-load TradingView widget on first use.
-    // CRITICAL FIX: if tv.js fails to load (network blocked, offline, etc.),
-    // we MUST NOT abort the entire openCoinDetail — the user still needs to
-    // see the coin's price, stats, and alert UI. We catch the load error and
-    // continue with a flag indicating the chart is unavailable.
+    // ── PERFORMANCE FIX: Parallelize tv.js load + chart symbol resolution ──
+    // Previously these were SERIAL: load tv.js (up to 5s) → THEN resolve symbol (500ms).
+    // Now they run concurrently via Promise.all, cutting the waterfall from 5.5s to max(5s, 500ms).
+    // If tv.js was preloaded (preloadTradingViewScript), it's already cached → instant.
     let chartAvailable = true;
-    if (!window.TradingView) {
-        const s = document.createElement('script');
-        s.src = 'https://s3.tradingview.com/tv.js';
-        document.head.appendChild(s);
-        try {
-            await new Promise((resolve, reject) => {
-                s.onload = resolve;
-                s.onerror = reject;
-                // Timeout after 5s — don't block the UI forever
-                setTimeout(() => reject(new Error('tv.js load timeout')), 5000);
-            });
-        } catch (e) {
-            console.warn('TradingView script failed to load — chart will be hidden, but coin detail will still show price/stats:', e?.message || e);
-            chartAvailable = false;
-        }
-    }
+    const tvJsPromise = ensureTradingViewLoaded(); // Returns immediately if already loaded
 
-    // RACE GUARD: if a newer openCoinDetail call started while we were loading tv.js, abort.
-    if (token !== _detailLoadToken) return;
-
-    // ── BTC PAIR DETECTION ──
-    // If symbol is "ETHBTC", we render the ETH/BTC pair chart (not ETH/USDT).
-    // The coin data (price, change, market cap) still comes from the base coin (ETH).
+    // Start symbol resolution IN PARALLEL with tv.js load
+    // (resolveChartSymbol hits backend /api/charts/resolve which has 1h KV cache)
     const btcPairBase = parseBtcPairSymbol(symbol);
     const isBtcPair = btcPairBase !== null;
     const baseSymbol = isBtcPair ? btcPairBase : symbol;
 
-    // Look up coin data. First check allCoins (200 loaded coins).
-    // If not found (e.g. coin from search outside top 200), check if the
-    // search results have this coin stored in a temporary cache.
+    // ── Look up coin data while tv.js + symbol resolve in parallel ──
     let coin = allCoins.find(c => c.symbol === baseSymbol);
     let coinPriceUnknown = false;
     if (!coin) {
-        // Coin not in the 200-coin market list. Check search cache.
-        // The search results store rich data (price, change, volume) from MEXC.
         const searchCacheKey = `search_coin_${baseSymbol}`;
         const cachedSearchCoin = Cache.get(searchCacheKey);
         if (cachedSearchCoin) {
             coin = cachedSearchCoin;
-        } else {
-            // Last resort: fetch real-time price from /api/market/price
-            // This gives us at least the current price for the coin detail.
-            try {
-                const priceData = await fetch(`${API_BASE}/api/market/price?symbol=${encodeURIComponent(baseSymbol)}`, {
-                    headers: { 'X-Telegram-Init-Data': getTelegramInitData() || '' }
-                }).then(r => r.ok ? r.json() : null);
-                if (priceData && priceData.price) {
-                    coin = {
-                        symbol: baseSymbol,
-                        name: baseSymbol,
-                        priceUsd: priceData.price,
-                        changePercent24Hr: 0,
-                        volumeUsd24Hr: 0,
-                        marketCapUsd: 0,
-                        rank: 0,
-                        image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(baseSymbol).toLowerCase()}@2x.png`,
-                    };
-                }
-            } catch (e) {
-                console.warn('openCoinDetail: failed to fetch price for', baseSymbol, e?.message);
-            }
         }
+        // NOTE: /api/market/price fallback deferred — don't block the chart on it.
+        // The chart renders from TradingView data, not our price API.
     }
+
+    // ── Wait for BOTH tv.js AND chart symbol resolution (in parallel) ──
+    let chartInfo = null;
+    try {
+        const [, resolvedChart] = await Promise.all([
+            tvJsPromise.catch(e => {
+                console.warn('TradingView script failed to load — chart will be hidden, but coin detail will still show price/stats:', e?.message || e);
+                chartAvailable = false;
+            }),
+            resolveChartSymbol(symbol).then(info => { chartInfo = info; }),
+        ]);
+    } catch (e) {
+        console.warn('openCoinDetail parallel load error:', e?.message);
+    }
+
+    // RACE GUARD: if a newer openCoinDetail call started while we were loading, abort.
+    if (token !== _detailLoadToken) return;
+
+
+    // ── BTC PAIR DETECTION (variables already declared above for parallel use) ──
+    // btcPairBase, isBtcPair, baseSymbol, coin, coinPriceUnknown are all set above.
+
     // H1 FIX: If we still don't have coin data (e.g. coin outside top-200 AND
-    // /api/market/price returned 401 because not opened in Telegram), DON'T
-    // silently abort. Build a minimal placeholder coin so the detail modal
-    // still opens and the TradingView chart can render. The chart fetches its
-    // own data from TradingView's servers — it does NOT depend on our price API.
-    // Previously this returned silently → user tapped a coin and nothing happened.
+    // no search cache), build a minimal placeholder so the modal opens and the
+    // chart renders. The chart fetches its own data from TradingView — it does
+    // NOT depend on our price API.
     if (!coin) {
         coin = {
             symbol: baseSymbol,
@@ -7819,10 +7935,26 @@ async function openCoinDetail(symbol) {
             image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(baseSymbol).toLowerCase()}@2x.png`,
         };
         coinPriceUnknown = true;
-        // Inform the user that price data is unavailable but the chart will still load.
-        showMiniToast(currentLang === 'fa'
-            ? 'اطلاعات قیمت در دسترس نیست — نمودار بارگذاری می‌شود'
-            : 'Price data unavailable — chart will still load');
+
+        // ── PERFORMANCE FIX: Fetch price in the BACKGROUND (non-blocking) ──
+        // Previously this was an AWAIT, blocking the chart by 200-500ms.
+        // Now we fire-and-forget: if the price arrives, we update the UI; if not,
+        // the chart still renders immediately.
+        fetch(`${API_BASE}/api/market/price?symbol=${encodeURIComponent(baseSymbol)}`, {
+            headers: { 'X-Telegram-Init-Data': getTelegramInitData() || '' }
+        }).then(r => r.ok ? r.json() : null).then(priceData => {
+            if (priceData && priceData.price && token === _detailLoadToken && _currentDetailSymbol === symbol) {
+                coin.priceUsd = priceData.price;
+                coinPriceUnknown = false;
+                const priceEl = document.getElementById('detail-coin-price');
+                if (priceEl) priceEl.textContent = '$' + (priceData.price > 1 ? priceData.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : priceData.price.toFixed(6));
+                const alertPriceVal = document.getElementById('alert-current-price-value');
+                if (alertPriceVal) alertPriceVal.textContent = '$' + priceData.price;
+            }
+        }).catch(e => console.warn('background price fetch failed:', e?.message));
+
+        // Don't show the "price unavailable" toast anymore — the background fetch
+        // will fill it in silently if it succeeds.
     }
 
     // ── Top Bar: Icon, Title, Rank, Price, Change ──
@@ -7923,8 +8055,9 @@ async function openCoinDetail(symbol) {
     if (!modal) return;
     modal.style.display = 'flex';
 
-    // ── Chart: skeleton already shown by resetDetailState; now resolve symbol ──
-    const chartInfo = await resolveChartSymbol(symbol);
+    // ── PERFORMANCE FIX: chartInfo was already resolved in PARALLEL with tv.js above ──
+    // No need to call resolveChartSymbol again — it's cached in the `chartInfo` variable.
+    // This eliminates a second serial network round-trip (~500ms saved).
 
     // RACE GUARD: if a newer openCoinDetail call started while we were resolving the chart, abort.
     // This prevents stale chart/alert data from overwriting the newer coin's state.
@@ -9193,6 +9326,148 @@ function openSettingsModal() {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function closeSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
+
+// ============================================================================
+// ── ROOT-CAUSE FIX: Delete Account (cascade delete + referral re-registration) ──
+// ============================================================================
+/**
+ * Opens the Delete Account confirmation dialog.
+ * Two-step confirmation to prevent accidental deletion.
+ */
+function requestDeleteAccount() {
+    // Step 1: Show confirmation dialog
+    const fa = currentLang === 'fa';
+    const message = fa
+        ? '⚠️ هشدار جدی\n\nآیا واقعاً می‌خواهید حساب خود را حذف کنید؟\n\n• تمام پاداش‌ها و توکن‌های شما پاک می‌شود\n• تاریخچه دعوت‌ها حذف می‌شود\n• کیف پول، هشدارها و واچ‌لیست پاک می‌شود\n• این عملیات قابل بازگشت نیست\n\nپس از حذف، می‌توانید دوباره با لینک دعوت ثبت‌نام کنید.'
+        : '⚠️ SERIOUS WARNING\n\nDo you really want to delete your account?\n\n• All rewards and tokens will be erased\n• Referral history will be deleted\n• Wallet, alerts, and watchlist will be cleared\n• This action is IRREVERSIBLE\n\nAfter deletion, you can re-register with a referral link.';
+
+    // Use a custom modal for better UX than the native confirm()
+    showDeleteAccountModal(message, fa);
+}
+
+function showDeleteAccountModal(message, fa) {
+    // Remove any existing delete modal
+    const existing = document.getElementById('delete-account-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'delete-account-modal';
+    modal.className = 'delete-account-modal-overlay';
+    modal.innerHTML = `
+        <div class="delete-account-modal-content">
+            <div class="delete-account-modal-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </div>
+            <h3 class="delete-account-modal-title">${fa ? 'حذف حساب کاربری' : 'Delete Account'}</h3>
+            <p class="delete-account-modal-message">${message.replace(/\n/g, '<br>')}</p>
+            <div class="delete-account-modal-input-wrap">
+                <label class="delete-account-modal-label">${fa ? 'برای تأیید، تایپ کنید:' : 'Type to confirm:'}</label>
+                <input type="text" id="delete-account-confirm-input" class="delete-account-modal-input" placeholder="DELETE" autocomplete="off">
+            </div>
+            <div class="delete-account-modal-actions">
+                <button class="delete-account-modal-cancel" onclick="closeDeleteAccountModal()">${fa ? 'انصراف' : 'Cancel'}</button>
+                <button class="delete-account-modal-confirm" id="delete-account-confirm-btn" onclick="executeDeleteAccount()" disabled>
+                    <span class="da-spinner" style="display:none;"></span>
+                    <span class="da-btn-text">${fa ? 'حذف دائمی' : 'Permanently Delete'}</span>
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.style.display = 'flex';
+
+    // Enable confirm button only when user types "DELETE"
+    const input = document.getElementById('delete-account-confirm-input');
+    const confirmBtn = document.getElementById('delete-account-confirm-btn');
+    input.addEventListener('input', () => {
+        confirmBtn.disabled = input.value.trim().toUpperCase() !== 'DELETE';
+    });
+    // Focus the input for quick confirmation
+    setTimeout(() => input.focus(), 100);
+}
+
+function closeDeleteAccountModal() {
+    const modal = document.getElementById('delete-account-modal');
+    if (modal) modal.remove();
+}
+
+async function executeDeleteAccount() {
+    const confirmBtn = document.getElementById('delete-account-confirm-btn');
+    const spinner = confirmBtn?.querySelector('.da-spinner');
+    const btnText = confirmBtn?.querySelector('.da-btn-text');
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+    const fa = currentLang === 'fa';
+    if (btnText) btnText.textContent = fa ? 'در حال حذف...' : 'Deleting...';
+
+    try {
+        const initData = getTelegramInitData();
+        if (!initData) {
+            showMiniToast(fa ? 'خطا: ابتدا از طریق تلگرام وارد شوید' : 'Error: Sign in via Telegram first');
+            if (confirmBtn) confirmBtn.disabled = false;
+            if (spinner) spinner.style.display = 'none';
+            if (btnText) btnText.textContent = fa ? 'حذف دائمی' : 'Permanently Delete';
+            return;
+        }
+
+        console.log('[DELETE-ACCOUNT] Sending DELETE /api/users/me');
+        const response = await fetch(`${API_BASE}/api/users/me`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Telegram-Init-Data': initData,
+            },
+            body: JSON.stringify({ confirm: 'DELETE' }),
+        });
+
+        const data = await response.json();
+        console.log('[DELETE-ACCOUNT] Response:', response.status, data);
+
+        if (response.ok && data.status === 'success') {
+            closeDeleteAccountModal();
+            showMiniToast(fa ? '✅ حساب حذف شد. می‌توانید دوباره ثبت‌نام کنید.' : '✅ Account deleted. You can re-register.');
+
+            // Clear local state
+            try {
+                localStorage.clear();
+                sessionStorage.clear();
+            } catch {}
+
+            // Show a farewell screen, then prompt to restart via Telegram
+            setTimeout(() => {
+                const fa2 = currentLang === 'fa';
+                document.body.innerHTML = `
+                    <div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0b1220;color:#fff;font-family:inherit;padding:24px;text-align:center;">
+                        <div style="font-size:48px;margin-bottom:16px;">👋</div>
+                        <h2 style="font-size:22px;margin-bottom:12px;">${fa2 ? 'حساب شما حذف شد' : 'Account Deleted'}</h2>
+                        <p style="color:rgba(255,255,255,0.6);max-width:320px;line-height:1.6;margin-bottom:24px;">${fa2 ? 'برای ثبت‌نام مجدد، ربات را در تلگرام استارت کنید. اگر با لینک دعوت وارد شوید، دعوت شما ثبت خواهد شد.' : 'To re-register, start the bot in Telegram. If you enter via a referral link, your referral will be registered.'}</p>
+                        <button onclick="location.reload()" style="padding:12px 32px;background:#f7931a;color:#fff;border:none;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;">${fa2 ? 'بارگذاری مجدد' : 'Reload'}</button>
+                    </div>
+                `;
+            }, 1500);
+        } else {
+            showMiniToast((fa ? 'خطا: ' : 'Error: ') + (data.message || data.error || 'Unknown'));
+            if (confirmBtn) confirmBtn.disabled = false;
+            if (spinner) spinner.style.display = 'none';
+            if (btnText) btnText.textContent = fa ? 'حذف دائمی' : 'Permanently Delete';
+        }
+    } catch (e) {
+        console.error('[DELETE-ACCOUNT] Network error:', e);
+        showMiniToast(fa ? 'خطای شبکه — دوباره تلاش کنید' : 'Network error — try again');
+        if (confirmBtn) confirmBtn.disabled = false;
+        if (spinner) spinner.style.display = 'none';
+        if (btnText) btnText.textContent = fa ? 'حذف دائمی' : 'Permanently Delete';
+    }
+}
+
+// Make functions globally accessible (called from inline onclick in index.html)
+window.requestDeleteAccount = requestDeleteAccount;
+window.closeDeleteAccountModal = closeDeleteAccountModal;
+window.executeDeleteAccount = executeDeleteAccount;
 /**
  * زبان مودال را باز می‌کند.
  * ورودی: بدون ورودی.

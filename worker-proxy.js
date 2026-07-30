@@ -1638,43 +1638,87 @@ async function retryFailedWheelRewards(env) {
 /**
  * Process referral on user bootstrap.
  *
- * Key design decisions:
- * - Only NEW users (first bootstrap) can generate a referral (Design).
- *   Existing users clicking a referral link are silently ignored.
- * - Self-referral is rejected.
- * - Non-numeric referrer_id is rejected (M-R4).
- * - INSERT uses ON CONFLICT DO NOTHING to avoid 503 on concurrent bootstraps (H-R3).
- * - Reward is delegated to processPendingReferralReward (called here and
- *   also after channel join verification).
+ * ── ROOT-CAUSE FIX (referral not registering for returning users) ──
+ * Previously this function had a `if (!isNewUser) return null` gate that
+ * blocked referrals for ANY user who already had a DB row — even if they
+ * had NO prior referral. This meant:
+ *   - A user who opened the app once (without a referral link) could NEVER
+ *     be referred later, even on their very first referral-link click.
+ *   - A user who deleted their account and re-registered would be blocked
+ *     if the user row was recreated before the referral was processed.
+ *
+ * FIX: The `isNewUser` gate is REMOVED. Referral attribution is now governed
+ * SOLELY by the "first inviter wins" rule:
+ *   1. If a referral row already exists for this invitee → keep the original
+ *      inviter (no re-attribution). Idempotent.
+ *   2. If NO referral row exists → create one (ON CONFLICT DO NOTHING for
+ *      race safety). This works for brand-new users AND for existing users
+ *      who never had a referral.
+ *
+ * This is safe because:
+ *   - Self-referral is still rejected (M-R4 check).
+ *   - Duplicate prevention is enforced by the referrals.invitee_id UNIQUE
+ *     constraint + the pre-check at step 2.
+ *   - Reward is still delegated to processPendingReferralReward (idempotent).
+ *
+ * Debug logging covers EVERY step so production issues can be traced:
+ *   Start Parameter → Referrer → Telegram ID → Bootstrap → isNewUser
+ *   → Insert → Reward → Final Result
  */
 async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined, isNewUser) {
-  await diagLog(env, { scope: 'diag-processReferralOnBootstrap', inviteeId, referrerId, channelJoined, isNewUser });
+  // ── DEBUG: Step 1 — Log entry point with all parameters ──
+  await diagLog(env, {
+    scope: 'diag-referral-STEP1-ENTRY',
+    inviteeId,
+    referrerId,
+    channelJoined,
+    isNewUser,
+    note: 'processReferralOnBootstrap called'
+  });
 
   const normalizedReferrerId = normalizeOptionalString(referrerId);
 
-  // M-R4: reject non-numeric referrer_id
+  // ── DEBUG: Step 2 — Validate referrer_id (M-R4: must be numeric, not self) ──
   if (!normalizedReferrerId || !/^\d{1,20}$/.test(normalizedReferrerId) || normalizedReferrerId === String(inviteeId)) {
-    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'M-R4-invalid-or-self', normalizedReferrerId, inviteeId });
+    await diagLog(env, {
+      scope: 'diag-referral-STEP2-REJECTED',
+      reason: 'M-R4-invalid-or-self',
+      normalizedReferrerId,
+      inviteeId,
+      referrerIdRaw: referrerId
+    });
     return null;
   }
+  await diagLog(env, { scope: 'diag-referral-STEP2-VALID', normalizedReferrerId, inviteeId });
 
-  // Design: only new users can be referred
-  if (!isNewUser) {
-    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'NOT-new-user' });
-    return null;
-  }
+  // ── ROOT-CAUSE FIX: `isNewUser` gate REMOVED ──
+  // The "first inviter wins" rule (existing referral check + ON CONFLICT)
+  // is sufficient to prevent abuse. See function docstring for full rationale.
+  // We still log isNewUser for debugging/observability.
+  await diagLog(env, {
+    scope: 'diag-referral-STEP3-NEWUSER-CHECK',
+    isNewUser,
+    note: isNewUser ? 'Brand new user — proceeding' : 'Existing user — proceeding (isNewUser gate removed, first-inviter-wins applies)'
+  });
 
+  // ── DEBUG: Step 4 — Verify inviter exists in users table ──
   const inviterResult = await queryDb(
     env,
     'SELECT telegram_id FROM users WHERE telegram_id = $1 LIMIT 1',
     [normalizedReferrerId],
   );
   if (!inviterResult.rows[0]) {
-    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-REJECTED', reason: 'inviter-not-found', normalizedReferrerId });
+    await diagLog(env, {
+      scope: 'diag-referral-STEP4-REJECTED',
+      reason: 'inviter-not-found',
+      normalizedReferrerId,
+      note: 'The referrer does not have a user row in the DB'
+    });
     return null;
   }
+  await diagLog(env, { scope: 'diag-referral-STEP4-INVITER-FOUND', inviterId: normalizedReferrerId });
 
-  // Check for existing referral (race condition between concurrent bootstraps)
+  // ── DEBUG: Step 5 — Check for existing referral (first inviter wins) ──
   const existingResult = await queryDb(
     env,
     `
@@ -1688,14 +1732,22 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   const existing = existingResult.rows[0] || null;
 
   if (existing) {
-    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-existing', referral_id: existing.id, rewarded: existing.rewarded });
+    await diagLog(env, {
+      scope: 'diag-referral-STEP5-EXISTING',
+      referral_id: existing.id,
+      existing_inviter: existing.inviter_id,
+      rewarded: existing.rewarded,
+      note: 'First inviter wins — keeping original attribution'
+    });
     // Race: another concurrent bootstrap already inserted the referral.
     // Delegate reward processing (idempotent — won't double-reward).
     await processPendingReferralReward(env, inviteeId, channelJoined);
+    await diagLog(env, { scope: 'diag-referral-FINAL', result: 'already_exists', referral_id: existing.id });
     return { referral_id: existing.id, already_exists: true };
   }
+  await diagLog(env, { scope: 'diag-referral-STEP5-NO-EXISTING', note: 'No prior referral — will insert' });
 
-  // H-R3: INSERT with ON CONFLICT DO NOTHING — race-safe.
+  // ── DEBUG: Step 6 — INSERT referral row (H-R3: ON CONFLICT DO NOTHING — race-safe) ──
   const insertResult = await queryDb(
     env,
     `
@@ -1707,19 +1759,28 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     [normalizedReferrerId, String(inviteeId)],
   );
   const createdReferral = insertResult.rows[0] || null;
-  await diagLog(env, { scope: 'diag-processReferralOnBootstrap-INSERT', createdReferral, rowCount: insertResult.rowCount });
+  await diagLog(env, {
+    scope: 'diag-referral-STEP6-INSERT',
+    createdReferral,
+    rowCount: insertResult.rowCount,
+    inviter: normalizedReferrerId,
+    invitee: inviteeId
+  });
   if (!createdReferral) {
     // Race lost — another request already inserted the referral.
-    await diagLog(env, { scope: 'diag-processReferralOnBootstrap-race-lost' });
+    await diagLog(env, { scope: 'diag-referral-STEP6-race-lost', note: 'Another concurrent request won the INSERT race' });
     return { referral_id: null, already_exists: true, race_won: false };
   }
 
-  // Delegate reward processing (idempotent — safe to call even if channel_joined=false)
-  await diagLog(env, { scope: 'diag-processReferralOnBootstrap-calling-reward', referral_id: createdReferral.id, channelJoined });
+  // ── DEBUG: Step 7 — Delegate reward processing (idempotent) ──
+  await diagLog(env, { scope: 'diag-referral-STEP7-REWARD-CALL', referral_id: createdReferral.id, channelJoined });
   const rewardResult = await processPendingReferralReward(env, inviteeId, channelJoined);
-  await diagLog(env, { scope: 'diag-processReferralOnBootstrap-reward-result', rewardResult });
+  await diagLog(env, { scope: 'diag-referral-STEP7-REWARD-RESULT', rewardResult });
 
-  return { referral_id: createdReferral.id, rewarded: Boolean(rewardResult?.rewarded) };
+  // ── DEBUG: Step 8 — Final result ──
+  const finalResult = { referral_id: createdReferral.id, rewarded: Boolean(rewardResult?.rewarded) };
+  await diagLog(env, { scope: 'diag-referral-STEP8-FINAL', result: finalResult, inviteeId, inviterId: normalizedReferrerId });
+  return finalResult;
 }
 
 async function getChatMemberDebugPayload(userId, env) {
@@ -2461,8 +2522,9 @@ async function translateToFarsi(text, env) {
       if (translated && typeof translated === 'string' && translated.trim()) {
         result = translated.trim();
       }
-    } catch {
+    } catch (e) {
       // AI unavailable or model error — fall through to Google Translate
+      console.warn('[TRANSLATE] m2m100 failed (non-fatal):', e?.message);
     }
   }
 
@@ -2487,8 +2549,9 @@ async function translateToFarsi(text, env) {
           if (translated) result = translated;
         }
       }
-    } catch {
+    } catch (e) {
       // Both AI and Google failed — return original text
+      console.warn('[TRANSLATE] Google fallback failed (non-fatal):', e?.message);
     }
   }
 
@@ -2526,8 +2589,9 @@ async function fetchAllNewsRss() {
         if (response.ok && rssText.includes('<item>')) {
           return { rssText, sourceName: source.name, category: source.category, skipTranslate: !!source.skipTranslate };
         }
-      } catch {
-        // Source failed — will be filtered out below
+      } catch (e) {
+        // Source failed — will be filtered out below. Log for observability.
+        console.warn(`[RSS] Source "${source.name}" failed:`, e?.message || e);
       } finally {
         clearTimeout(timeoutId);
       }
@@ -2819,7 +2883,7 @@ async function enrichNewsWithAISummaries(env, articles) {
       let aiSummary = null;
       try {
         aiSummary = await readAppCache(env, aiKey);
-      } catch {}
+      } catch (e) { console.warn('[NEWS-AI] enrichNews KV read error:', e?.message); }
       return {
         ...article,
         ai_summary: aiSummary || null,
@@ -2845,20 +2909,32 @@ async function processNewsAIJobs(env, articles) {
   let aiRequestsExecuted = 0;
   let alreadyCompleted = 0;
 
-  for (const article of articles.slice(0, 3)) { // Process max 3 per cycle (25s timeout)
+  // ── ROOT-CAUSE FIX: Increased from 3 → 5 articles per cycle ──
+  // With 25s timeout and ~3-5s per article (fetch + AI), 5 articles fit comfortably.
+  // This reduces the backlog: 30 articles × 3/cycle = 10 cycles (10 min) → 6 cycles (6 min).
+  for (const article of articles.slice(0, 5)) { // Process max 5 per cycle (25s timeout)
     if (!article.url) continue;
 
     const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
+    const articleStart = Date.now();
 
     // Check if summary already exists — SKIP ENTIRE PIPELINE if so
     // (no fetch, no extract, no AI call, no write)
     let existing = null;
     try {
       existing = await readAppCache(env, aiKey);
-    } catch {}
-    if (existing) { success++; alreadyCompleted++; continue; } // Already processed — skip ENTIRE pipeline
+    } catch (e) {
+      console.warn('[NEWS-AI-BG] KV read error (non-fatal):', e?.message);
+    }
+    if (existing) {
+      success++;
+      console.log(`[NEWS-AI-BG] SKIP (already cached): ${article.url.substring(0, 70)}`);
+      continue;
+    }
 
-    console.log('[NEWS-AI-BG] Processing:', article.url.substring(0, 80));
+    console.log(`[NEWS-AI-BG] === Processing article ===`);
+    console.log(`[NEWS-AI-BG] URL: ${article.url.substring(0, 100)}`);
+    console.log(`[NEWS-AI-BG] Title: ${(article.title || '').substring(0, 80)}`);
 
     try {
       // Step 1: Fetch full article
@@ -2875,13 +2951,14 @@ async function processNewsAIJobs(env, articles) {
       clearTimeout(fetchTimeout);
 
       if (!articleRes.ok) {
-        console.warn('[NEWS-AI-BG] Article fetch failed:', articleRes.status);
+        console.warn(`[NEWS-AI-BG] FETCH_FAILED: HTTP ${articleRes.status} for ${article.url.substring(0, 80)}`);
         failed++;
         errors.push({ url: article.url.substring(0, 60), error: 'fetch_' + articleRes.status });
         continue; // Skip — will retry next cycle
       }
 
       const html = await articleRes.text();
+      console.log(`[NEWS-AI-BG] FETCH_OK: ${html.length} bytes in ${Date.now() - articleStart}ms`);
 
       // Step 2: Extract article text
       let cleanedHtml = html
@@ -2923,8 +3000,13 @@ async function processNewsAIJobs(env, articles) {
       if (articleText.length < 100) {
         // Use RSS body as fallback for AI
         articleText = (article.title || '') + '\n\n' + (article.body || article.description || '');
-        if (articleText.length < 50) { failed++; continue; }
+        if (articleText.length < 50) {
+          console.warn(`[NEWS-AI-BG] TEXT_TOO_SHORT: only ${articleText.length} chars — skipping`);
+          failed++;
+          continue;
+        }
       }
+      console.log(`[NEWS-AI-BG] TEXT_EXTRACTED: ${articleText.length} chars`);
 
       // Step 3: Generate AI summary
       let summary = null;
@@ -2994,8 +3076,10 @@ ${articleText}`;
 
       // Method 2: Cloudflare Workers AI (free, always available)
       if (!summary && hasWorkersAI) {
+        const aiStart = Date.now();
         try {
           aiRequestsExecuted++;
+          console.log(`[NEWS-AI-BG] AI_CALL_start: llama-3.3-70b (input ${articleText.substring(0, 8000).length} chars)`);
           const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
             messages: [
               { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details, numbers, and names. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
@@ -3004,33 +3088,39 @@ ${articleText}`;
             max_tokens: 4096,
             temperature: 0.3,
           });
+          console.log(`[NEWS-AI-BG] AI_CALL_done in ${Date.now() - aiStart}ms, response keys: ${Object.keys(aiResponse || {}).join(',')}`);
 
           if (aiResponse && aiResponse.response && aiResponse.response.trim().length >= 50) {
             summary = aiResponse.response;
             aiSource = 'cloudflare-workers-ai';
+            console.log(`[NEWS-AI-BG] AI_SUCCESS: summary ${summary.length} chars from ${aiSource}`);
           } else {
+            console.warn(`[NEWS-AI-BG] AI_EMPTY_RESPONSE: ${JSON.stringify(aiResponse).substring(0, 200)}`);
             errors.push({ url: article.url.substring(0, 60), error: 'workers_ai_empty' });
           }
         } catch (e) {
-          console.warn('[NEWS-AI-BG] Workers AI failed:', e.message);
+          console.warn(`[NEWS-AI-BG] AI_FAILED in ${Date.now() - aiStart}ms: ${e.message}`);
+          console.warn(`[NEWS-AI-BG] AI Stack: ${e.stack?.substring(0, 300)}`);
           errors.push({ url: article.url.substring(0, 60), error: 'workers_ai_' + e.message.substring(0, 80) });
         }
+      } else if (!summary && !hasWorkersAI) {
+        console.warn('[NEWS-AI-BG] NO_AI_BINDING: env.AI not available — cannot generate summary');
       }
 
-      // Step 4: Cache the summary in KV (7 days)
+      // Step 4: SAVE — Cache the summary in KV (7 days)
       if (summary && summary.trim().length >= 50) {
         try {
           await writeAppCache(env, aiKey, summary, NEWS_AI_CACHE_TTL);
           success++;
-          console.log('[NEWS-AI-BG] SUCCESS:', article.url.substring(0, 60), 'source:', aiSource, 'length:', summary.length);
+          console.log(`[NEWS-AI-BG] SAVE_SUCCESS: ${article.url.substring(0, 60)} | source=${aiSource} | len=${summary.length} | total=${Date.now() - articleStart}ms`);
         } catch (e) {
           failed++;
-          console.warn('[NEWS-AI-BG] KV write failed:', e.message);
+          console.warn(`[NEWS-AI-BG] KV_WRITE_FAILED: ${e.message}`);
           errors.push({ url: article.url.substring(0, 60), error: 'kv_write_' + e.message.substring(0, 80) });
         }
       } else {
         failed++;
-        console.warn('[NEWS-AI-BG] All AI methods failed for:', article.url.substring(0, 60));
+        console.warn(`[NEWS-AI-BG] ALL_METHODS_FAILED for: ${article.url.substring(0, 60)}`);
       }
 
     } catch (e) {
@@ -3077,86 +3167,143 @@ function ctx_waitUntil_safe(env, promise) {
  * 3. User HTTP requests only read from KV — instant response, no AI calls
  */
 async function processNewsAIBatch(env) {
-  if (!env.APP_CACHE) return;
-
-  console.log('[NEWS-AI-CRON] Starting batch processing...');
-
-  // Step 1: Fetch latest news articles from RSS
-  const sources = await fetchAllNewsRss();
-  if (!sources || sources.length === 0) {
-    console.log('[NEWS-AI-CRON] No RSS sources available');
-    return;
-  }
-
-  // Build articles from all sources
-  const allArticles = (
-    await Promise.all(
-      sources.map((s) => buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env, s.skipTranslate))
-    )
-  ).flat();
-
-  // Deduplicate by URL
-  const seen = new Set();
-  const deduped = allArticles.filter((a) => {
-    if (!a.url || seen.has(a.url)) return false;
-    seen.add(a.url);
-    return true;
-  });
-
-  if (deduped.length === 0) {
-    console.log('[NEWS-AI-CRON] No articles to process');
-    return;
-  }
-
-  console.log('[NEWS-AI-CRON] Found', deduped.length, 'articles. Checking which need AI summaries...');
-
-  // Step 1.5: Cache the articles in KV so users get instant response
-  // (Previously articles were only cached when a user requested /api/farsi-news,
-  // meaning the first user after cache expiry had to wait for live RSS fetch.)
-  const MAX_NEWS_ARTICLES = 30;
-  const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
-  const newsJson = JSON.stringify(trimmed);
-  const newsWriteBefore = _kvWriteStats.totalWrites;
-  const newsSkippedBefore = _kvWriteStats.totalSkipped;
-  // Check if KV is available
-  const kvAvailable = !!(env.APP_CACHE && typeof env.APP_CACHE.put === 'function');
-  // Check if in-memory cache has this key
-  const inMemoryCached = _kvWriteCache.has(FARSI_NEWS_CACHE_KEY);
-  const inMemoryMatches = _kvWriteCache.get(FARSI_NEWS_CACHE_KEY) === newsJson;
-  try {
-    await writeAppCache(
-      env,
-      FARSI_NEWS_CACHE_KEY,
-      newsJson,
-      getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
-    );
-  } catch (e) {
-    console.warn('[NEWS-AI-CRON] Failed to cache articles:', e.message);
-  }
-  const newsWriteActuallyWritten = _kvWriteStats.totalWrites > newsWriteBefore;
-  const newsWriteWasSkipped = _kvWriteStats.totalSkipped > newsSkippedBefore;
-
-  // Step 2: Process AI summaries for articles that don't have one
-  const aiResult = await processNewsAIJobs(env, deduped);
-
-  console.log('[NEWS-AI-CRON] Batch processing complete.', aiResult);
-  return {
-    articlesPrepared: trimmed.length,
-    newsCacheWritten: newsWriteActuallyWritten,
-    newsCacheSkipped: !newsWriteActuallyWritten,
-    newsWriteWasSkipped: newsWriteWasSkipped,
-    kvAvailable: kvAvailable,
-    inMemoryCached: inMemoryCached,
-    inMemoryMatches: inMemoryMatches,
-    newsJsonLength: newsJson.length,
-    ai: aiResult,
-    kvWriteStats: {
-      totalWrites: _kvWriteStats.totalWrites,
-      totalSkipped: _kvWriteStats.totalSkipped,
-      byPrefix: Object.entries(_kvWriteStats.byPrefix).sort((a,b) => b[1]-a[1]).slice(0, 10).map(([k,v]) => ({key:k, writes:v})),
-      byKey: Object.entries(_kvWriteStats.byKey).sort((a,b) => b[1]-a[1]).slice(0, 15).map(([k,v]) => ({key:k, writes:v})),
-    },
+  // ── ROOT-CAUSE FIX: Full try/catch with step-by-step logging ──
+  // Previously this function had NO top-level try/catch, AND the caller at
+  // line 6611 had no .catch(), so any rejection became an unhandled promise
+  // rejection → Cloudflare logged a bare "error" with no stack/message.
+  // Now every step is logged and any exception is caught + surfaced.
+  const t0 = Date.now();
+  const stepLog = (step, extra) => {
+    const elapsed = Date.now() - t0;
+    console.log(`[NEWS-AI-CRON] ${step} (${elapsed}ms)${extra ? ' ' + JSON.stringify(extra) : ''}`);
   };
+
+  // ── MERGED: try/catch + step logging (root-cause fix) + KV write stats (from HEAD) ──
+  try {
+    if (!env.APP_CACHE) {
+      stepLog('ABORT', { reason: 'APP_CACHE_not_bound' });
+      return { ok: false, reason: 'APP_CACHE_not_bound' };
+    }
+
+    stepLog('START');
+
+    // ── STEP 1: RSS FETCH ──
+    stepLog('RSS_FETCH_start');
+    let sources;
+    try {
+      sources = await fetchAllNewsRss();
+    } catch (rssErr) {
+      stepLog('RSS_FETCH_FAILED', { error: rssErr?.message, stack: rssErr?.stack?.substring(0, 200) });
+      throw rssErr;
+    }
+    if (!sources || sources.length === 0) {
+      stepLog('RSS_FETCH_empty', { sourceCount: 0 });
+      return { ok: true, reason: 'no_rss_sources', elapsed: Date.now() - t0 };
+    }
+    stepLog('RSS_FETCH_done', { sourceCount: sources.length, names: sources.map(s => s.sourceName) });
+
+    // ── STEP 2: TRANSLATION (buildFarsiNewsArticles translates title+description) ──
+    stepLog('TRANSLATION_start', { sources: sources.length });
+    let allArticles;
+    try {
+      allArticles = (
+        await Promise.all(
+          sources.map(async (s) => {
+            try {
+              return await buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env, s.skipTranslate);
+            } catch (srcErr) {
+              // Per-source isolation — one bad feed must not kill the whole batch
+              console.warn(`[NEWS-AI-CRON] buildFarsiNewsArticles failed for "${s.sourceName}":`, srcErr?.message);
+              return [];
+            }
+          })
+        )
+      ).flat();
+    } catch (transErr) {
+      stepLog('TRANSLATION_FAILED', { error: transErr?.message, stack: transErr?.stack?.substring(0, 200) });
+      throw transErr;
+    }
+    stepLog('TRANSLATION_done', { totalArticles: allArticles.length });
+
+    // ── STEP 3: DEDUP / QUEUE ──
+    const seen = new Set();
+    const deduped = allArticles.filter((a) => {
+      if (!a.url || seen.has(a.url)) return false;
+      seen.add(a.url);
+      return true;
+    });
+    if (deduped.length === 0) {
+      stepLog('QUEUE_empty', { reason: 'no_articles_after_dedup' });
+      return { ok: true, reason: 'no_articles', elapsed: Date.now() - t0 };
+    }
+    stepLog('QUEUE_done', { deduped: deduped.length });
+
+    // ── STEP 4: CACHE ARTICLES in KV (so users get instant response) ──
+    const MAX_NEWS_ARTICLES = 30;
+    const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
+    const newsJson = JSON.stringify(trimmed);
+    const newsWriteBefore = _kvWriteStats.totalWrites;
+    const newsSkippedBefore = _kvWriteStats.totalSkipped;
+    const kvAvailable = !!(env.APP_CACHE && typeof env.APP_CACHE.put === 'function');
+    const inMemoryCached = _kvWriteCache.has(FARSI_NEWS_CACHE_KEY);
+    const inMemoryMatches = _kvWriteCache.get(FARSI_NEWS_CACHE_KEY) === newsJson;
+    try {
+      await writeAppCache(
+        env,
+        FARSI_NEWS_CACHE_KEY,
+        newsJson,
+        getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
+      );
+      stepLog('KV_ARTICLES_cached', { count: trimmed.length });
+    } catch (cacheErr) {
+      console.warn('[NEWS-AI-CRON] Failed to cache articles (non-fatal):', cacheErr?.message);
+      stepLog('KV_ARTICLES_cache_failed', { error: cacheErr?.message });
+    }
+    const newsWriteActuallyWritten = _kvWriteStats.totalWrites > newsWriteBefore;
+    const newsWriteWasSkipped = _kvWriteStats.totalSkipped > newsSkippedBefore;
+
+    // ── STEP 5: AI SUMMARY GENERATION ──
+    stepLog('AI_SUMMARY_start', { toProcess: Math.min(deduped.length, 5) });
+    let aiResult;
+    try {
+      aiResult = await processNewsAIJobs(env, deduped);
+    } catch (aiErr) {
+      stepLog('AI_SUMMARY_FAILED', { error: aiErr?.message, stack: aiErr?.stack?.substring(0, 200) });
+      throw aiErr;
+    }
+    stepLog('AI_SUMMARY_done', aiResult);
+
+    // ── STEP 6: FINISH ──
+    const result = {
+      ok: true,
+      articlesCached: trimmed.length,
+      newsCacheWritten: newsWriteActuallyWritten,
+      newsCacheSkipped: !newsWriteActuallyWritten,
+      newsWriteWasSkipped: newsWriteWasSkipped,
+      kvAvailable: kvAvailable,
+      inMemoryCached: inMemoryCached,
+      inMemoryMatches: inMemoryMatches,
+      newsJsonLength: newsJson.length,
+      ai: aiResult,
+      elapsed: Date.now() - t0,
+      kvWriteStats: {
+        totalWrites: _kvWriteStats.totalWrites,
+        totalSkipped: _kvWriteStats.totalSkipped,
+        byPrefix: Object.entries(_kvWriteStats.byPrefix).sort((a,b) => b[1]-a[1]).slice(0, 10).map(([k,v]) => ({key:k, writes:v})),
+        byKey: Object.entries(_kvWriteStats.byKey).sort((a,b) => b[1]-a[1]).slice(0, 15).map(([k,v]) => ({key:k, writes:v})),
+      },
+    };
+    stepLog('FINISH', { articlesCached: result.articlesCached, aiSuccess: aiResult?.success, aiFailed: aiResult?.failed });
+    return result;
+  } catch (fatalErr) {
+    // ── ROOT-CAUSE FIX: Surface the REAL error, not a bare "error" string ──
+    const errMsg = fatalErr?.message || String(fatalErr);
+    const errStack = fatalErr?.stack?.substring(0, 500);
+    console.error('[NEWS-AI-CRON] FATAL ERROR:', errMsg);
+    if (errStack) console.error('[NEWS-AI-CRON] Stack:', errStack);
+    stepLog('FATAL', { error: errMsg, stack: errStack });
+    return { ok: false, error: errMsg, elapsed: Date.now() - t0 };
+  }
 }
 
 function parseCalendarDate(dateString) {
@@ -7181,6 +7328,13 @@ export default {
         return await userHandlers.handleMeSettings(request, env);
       }
 
+      // ── ROOT-CAUSE FIX: Delete Account endpoint (cascade delete) ──
+      // Permanently deletes the user and ALL their data. After this, the user
+      // can re-register via a referral link and the referral will register.
+      if (request.method === 'DELETE' && url.pathname === '/api/users/me') {
+        return await userHandlers.handleDeleteAccount(request, env);
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
         return await userHandlers.handleBootstrap(request, env);
       }
@@ -7321,12 +7475,26 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // Wrap each task with a 25s timeout to prevent waitUntil cancellation
-    const withTimeout = (promise, ms = 25000) =>
-      Promise.race([
-        promise,
-        new Promise((resolve) => setTimeout(() => { console.warn('Scheduled task timeout after', ms, 'ms'); resolve(); }, ms)),
+    // ── ROOT-CAUSE FIX: withTimeout now catches BOTH timeout AND rejection ──
+    // Previously it used Promise.race which only catches timeout. If the inner
+    // promise REJECTED, the rejection propagated as an unhandled promise rejection
+    // → Cloudflare logged a bare "error" with no message/stack.
+    // Now we attach a .catch() so rejections are logged with full detail.
+    const withTimeout = (promise, ms = 25000) => {
+      const tagged = promise.catch((e) => {
+        // Log the REAL error — never swallow it silently
+        console.error('[CRON] Task failed:', e?.message || String(e));
+        if (e?.stack) console.error('[CRON] Stack:', e.stack.substring(0, 500));
+        return { __cronError: true, error: e?.message || String(e) };
+      });
+      return Promise.race([
+        tagged,
+        new Promise((resolve) => setTimeout(() => {
+          console.warn('[CRON] Scheduled task timeout after', ms, 'ms');
+          resolve({ __timeout: true, ms });
+        }, ms)),
       ]);
+    };
 
     const cronExpr = controller.cron || '* * * * *';
     const isEveryMinute = cronExpr === '* * * * *';

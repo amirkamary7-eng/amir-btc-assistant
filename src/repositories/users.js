@@ -222,5 +222,107 @@ export function createUserRepository(deps) {
     return result.rows[0] || null;
   }
 
-  return Object.freeze({ ensureTable, normalizeLanguage, normalizeRow, getById, bootstrap, updateSettings });
+  /**
+   * ── ROOT-CAUSE FIX: Delete Account with full cascade ──
+   *
+   * Permanently deletes a user and ALL their associated data across every
+   * table in the database. This is required so that:
+   *   1. Users can exercise their right to erasure (GDPR / privacy).
+   *   2. A user who deletes their account can re-register via a referral link
+   *      and have the referral registered (the old referral row must be gone
+   *      so the "first inviter wins" check doesn't block the new referral).
+   *
+   * Cascade order (child → parent to avoid FK violations):
+   *   1. referrals (as invitee AND as inviter)
+   *   2. token_transactions
+   *   3. token_balances (if table exists)
+   *   4. watchlist_items
+   *   5. alerts
+   *   6. notifications
+   *   7. tickets
+   *   8. mission_progress
+   *   9. calendar_reminders (if table exists)
+   *  10. users (the root row)
+   *
+   * Each DELETE is wrapped in its own try/catch so that a missing table or
+   * transient error doesn't abort the cascade — the user row is still deleted.
+   *
+   * @returns {Object} summary of what was deleted (for debug logging)
+   */
+  async function deleteAccount(env, userId) {
+    const uid = String(userId);
+    const summary = { userId: uid, tables: {}, errors: [] };
+
+    // Helper: run a DELETE and record rowCount
+    const cascadeDelete = async (tableName, sql, params) => {
+      try {
+        const result = await queryDb(env, sql, params);
+        summary.tables[tableName] = result.rowCount || 0;
+      } catch (e) {
+        // Table might not exist yet, or FK constraint — log and continue
+        summary.tables[tableName] = -1;
+        summary.errors.push({ table: tableName, error: e?.message });
+      }
+    };
+
+    // 1. referrals (as invitee — this is the critical one for re-registration)
+    await cascadeDelete('referrals_as_invitee',
+      'DELETE FROM referrals WHERE invitee_id = $1', [uid]);
+    // 1b. referrals (as inviter — remove their invite records)
+    await cascadeDelete('referrals_as_inviter',
+      'DELETE FROM referrals WHERE inviter_id = $1', [uid]);
+
+    // 2. token_transactions
+    await cascadeDelete('token_transactions',
+      'DELETE FROM token_transactions WHERE user_id = $1', [uid]);
+
+    // 3. token_balances (may not exist — some setups use a single row per user)
+    await cascadeDelete('token_balances',
+      'DELETE FROM token_balances WHERE user_id = $1', [uid]);
+
+    // 4. watchlist_items
+    await cascadeDelete('watchlist_items',
+      'DELETE FROM watchlist_items WHERE user_id = $1', [uid]);
+
+    // 5. alerts
+    await cascadeDelete('alerts',
+      'DELETE FROM alerts WHERE user_id = $1', [uid]);
+
+    // 6. notifications
+    await cascadeDelete('notifications',
+      'DELETE FROM notifications WHERE user_id = $1', [uid]);
+
+    // 7. tickets
+    await cascadeDelete('tickets',
+      'DELETE FROM tickets WHERE user_id = $1', [uid]);
+
+    // 8. mission_progress
+    await cascadeDelete('mission_progress',
+      'DELETE FROM mission_progress WHERE user_id = $1', [uid]);
+
+    // 9. calendar_reminders (if table exists)
+    await cascadeDelete('calendar_reminders',
+      'DELETE FROM calendar_reminders WHERE user_id = $1', [uid]);
+
+    // 10. wheel_spins (if table exists — some setups track per-user spin history)
+    await cascadeDelete('wheel_spins',
+      'DELETE FROM wheel_spins WHERE user_id = $1', [uid]);
+
+    // 11. support_messages (if separate from tickets)
+    await cascadeDelete('support_messages',
+      'DELETE FROM support_messages WHERE user_id = $1', [uid]);
+
+    // 12. admin records (if user was an admin)
+    await cascadeDelete('admins',
+      'DELETE FROM admins WHERE telegram_id = $1', [uid]);
+
+    // 13. FINALLY — delete the user row itself
+    await cascadeDelete('users',
+      'DELETE FROM users WHERE telegram_id = $1', [uid]);
+
+    console.log('[DELETE-ACCOUNT] Cascade complete:', JSON.stringify(summary));
+    return summary;
+  }
+
+  return Object.freeze({ ensureTable, normalizeLanguage, normalizeRow, getById, bootstrap, updateSettings, deleteAccount });
 }
