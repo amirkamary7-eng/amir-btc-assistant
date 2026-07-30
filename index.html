@@ -208,6 +208,27 @@
             </div>
         </div>
 
+        <!-- ── NEW: Market Heatmap — visual 24h changes ── -->
+        <div class="section-header">
+            <span class="section-title">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                <span data-i18n="heatmap_title">نقشه حرارتی بازار</span>
+            </span>
+            <span class="section-more" data-i18n="view_all" onclick="switchTab('market-page')">مشاهده همه</span>
+        </div>
+        <div class="heatmap-container" id="dashboard-heatmap">
+            <div class="heatmap-skeleton">
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+            </div>
+        </div>
+
         <!-- 3. Watchlist -->
         <div class="section-header">
             <span class="section-title">
@@ -1166,6 +1187,29 @@
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
                             <span>ثبت هشدار</span>
                         </button>
+                    </div>
+
+                    <!-- ── NEW: Quick Preset Buttons ── -->
+                    <div class="cd-alert-presets" id="cd-alert-presets">
+                        <span class="cd-alert-presets-label" data-i18n="alert_quick_presets">تنظیم سریع</span>
+                        <div class="cd-alert-presets-grid">
+                            <button type="button" class="cd-preset-btn cd-preset-up" data-preset="5up" onclick="applyAlertPreset('5up')">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 14 12 8 18 14"/></svg>
+                                <span data-i18n="alert_preset_5_up">۵٪ +</span>
+                            </button>
+                            <button type="button" class="cd-preset-btn cd-preset-up" data-preset="10up" onclick="applyAlertPreset('10up')">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 14 12 8 18 14"/></svg>
+                                <span data-i18n="alert_preset_10_up">۱۰٪ +</span>
+                            </button>
+                            <button type="button" class="cd-preset-btn cd-preset-down" data-preset="5down" onclick="applyAlertPreset('5down')">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 10 12 16 18 10"/></svg>
+                                <span data-i18n="alert_preset_5_down">۵٪ -</span>
+                            </button>
+                            <button type="button" class="cd-preset-btn cd-preset-down" data-preset="10down" onclick="applyAlertPreset('10down')">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 10 12 16 18 10"/></svg>
+                                <span data-i18n="alert_preset_10_down">۱۰٪ -</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Active alerts list -->

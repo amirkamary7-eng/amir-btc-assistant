@@ -9032,6 +9032,77 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 }
 .cd-alert-btn:active { transform: scale(0.97); }
 
+/* ── NEW: Quick Preset Buttons ── */
+.cd-alert-presets {
+    margin-top: 12px;
+    padding: 10px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 12px;
+}
+.cd-alert-presets-label {
+    display: block;
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+.cd-alert-presets-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+.cd-preset-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 8px 4px;
+    border-radius: 9px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+    color: rgba(255,255,255,0.7);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+.cd-preset-btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.15);
+}
+.cd-preset-btn:active { transform: scale(0.94); }
+.cd-preset-btn.cd-preset-up {
+    color: #22C55E;
+    border-color: rgba(34,197,94,0.2);
+    background: rgba(34,197,94,0.05);
+}
+.cd-preset-btn.cd-preset-up:hover {
+    background: rgba(34,197,94,0.12);
+    border-color: rgba(34,197,94,0.4);
+}
+.cd-preset-btn.cd-preset-down {
+    color: #EF4444;
+    border-color: rgba(239,68,68,0.2);
+    background: rgba(239,68,68,0.05);
+}
+.cd-preset-btn.cd-preset-down:hover {
+    background: rgba(239,68,68,0.12);
+    border-color: rgba(239,68,68,0.4);
+}
+.cd-preset-btn.flash {
+    animation: presetFlash 0.6s ease;
+}
+@keyframes presetFlash {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.15); filter: brightness(1.4); }
+    100% { transform: scale(1); }
+}
+.cd-preset-btn svg { flex-shrink: 0; }
+
 .cd-alert-list {
     display: flex; flex-direction: column; gap: 8px;
     margin-top: 4px;
@@ -11296,4 +11367,119 @@ body.jl-locked .cd-fullscreen {
 }
 @keyframes da-spin {
     to { transform: rotate(360deg); }
+}
+
+/* ============================================================================
+   ── NEW FEATURE: Market Heatmap ──
+   ============================================================================ */
+.heatmap-container {
+    margin: 0 20px 20px;
+    overflow: hidden;
+}
+.heatmap-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-auto-rows: 64px;
+    gap: 6px;
+    grid-auto-flow: dense;
+}
+.hm-cell {
+    border-radius: 12px;
+    border: 1px solid;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    overflow: hidden;
+    position: relative;
+}
+.hm-cell:hover {
+    transform: scale(1.04);
+    z-index: 2;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.hm-cell:active { transform: scale(0.96); }
+.hm-cell:focus-visible {
+    outline: 2px solid #F5A623;
+    outline-offset: 2px;
+}
+.hm-symbol {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    line-height: 1;
+}
+.hm-change {
+    font-size: 10.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    opacity: 0.9;
+}
+/* Size variants — larger cells for dominant coins */
+.hm-size-xl {
+    grid-column: span 2;
+    grid-row: span 2;
+}
+.hm-size-xl .hm-symbol { font-size: 20px; }
+.hm-size-xl .hm-change { font-size: 14px; }
+.hm-size-lg {
+    grid-column: span 2;
+    grid-row: span 1;
+}
+.hm-size-lg .hm-symbol { font-size: 16px; }
+.hm-size-lg .hm-change { font-size: 12px; }
+.hm-size-md {
+    grid-column: span 1;
+    grid-row: span 1;
+}
+.hm-size-sm {
+    grid-column: span 1;
+    grid-row: span 1;
+}
+
+/* Skeleton */
+.heatmap-skeleton {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-auto-rows: 64px;
+    gap: 6px;
+}
+.heatmap-skel-cell {
+    border-radius: 12px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    background-size: 200% 100%;
+    animation: heatmap-skel-shimmer 1.5s infinite;
+}
+@keyframes heatmap-skel-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+.heatmap-empty {
+    text-align: center;
+    color: rgba(255,255,255,0.3);
+    padding: 20px;
+    font-size: 14px;
+}
+
+/* ── Improve Dashboard cards with glassmorphism + premium feel ── */
+.dms-card {
+    position: relative;
+    overflow: hidden;
+}
+.dms-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(245,166,35,0.3), transparent);
+    pointer-events: none;
+}
+.dms-card:hover {
+    transform: translateY(-2px);
+    transition: transform 0.3s ease;
 }

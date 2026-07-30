@@ -507,7 +507,29 @@ const i18n = {
         dashboard_trend_bearish: 'نزولی',
         dashboard_trend_neutral: 'خنثی',
         hero_cta_trade: 'شروع معامله',
-        hero_cta_analysis: 'مشاهده تحلیل‌ها'
+        hero_cta_analysis: 'مشاهده تحلیل‌ها',
+        // ── Delete Account / Danger Zone i18n ──
+        danger_zone: 'منطقه خطر',
+        delete_account: 'حذف حساب کاربری',
+        delete_account_desc: 'حذف حساب کاربری به‌صورت دائمی تمام داده‌های شما (پاداش‌ها، دعوت‌ها، کیف پول، هشدارها) را پاک می‌کند. این عملیات قابل بازگشت نیست.',
+        delete_account_confirm: 'حذف دائمی',
+        delete_account_cancel: 'انصراف',
+        delete_account_typing: 'برای تأیید، تایپ کنید:',
+        delete_account_success: 'حساب حذف شد. می‌توانید دوباره ثبت‌نام کنید.',
+        delete_account_error: 'خطا در حذف حساب',
+        delete_account_progress: 'در حال حذف...',
+        // ── Price Alert Quick Presets ──
+        alert_quick_presets: 'تنظیم سریع',
+        alert_preset_5_up: '۵٪ +',
+        alert_preset_10_up: '۱۰٪ +',
+        alert_preset_5_down: '۵٪ -',
+        alert_preset_10_down: '۱۰٪ -',
+        alert_preset_ath: 'قله تاریخی',
+        // ── Market Heatmap ──
+        heatmap_title: 'نقشه حرارتی بازار',
+        heatmap_subtitle: 'نمایش بصری تغییرات ۲۴ ساعته',
+        heatmap_top: 'برترین بازار',
+        heatmap_show_more: 'نمایش بیشتر'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -618,7 +640,29 @@ const i18n = {
         dashboard_trend_bearish: 'Bearish',
         dashboard_trend_neutral: 'Neutral',
         hero_cta_trade: 'Start Trading',
-        hero_cta_analysis: 'View Analysis'
+        hero_cta_analysis: 'View Analysis',
+        // ── Delete Account / Danger Zone i18n ──
+        danger_zone: 'Danger Zone',
+        delete_account: 'Delete Account',
+        delete_account_desc: 'Permanently deleting your account will erase all your data (rewards, referrals, wallet, alerts). This action is irreversible.',
+        delete_account_confirm: 'Permanently Delete',
+        delete_account_cancel: 'Cancel',
+        delete_account_typing: 'Type to confirm:',
+        delete_account_success: 'Account deleted. You can re-register.',
+        delete_account_error: 'Error deleting account',
+        delete_account_progress: 'Deleting...',
+        // ── Price Alert Quick Presets ──
+        alert_quick_presets: 'Quick Set',
+        alert_preset_5_up: '+5%',
+        alert_preset_10_up: '+10%',
+        alert_preset_5_down: '-5%',
+        alert_preset_10_down: '-10%',
+        alert_preset_ath: 'All-Time High',
+        // ── Market Heatmap ──
+        heatmap_title: 'Market Heatmap',
+        heatmap_subtitle: 'Visual 24h changes',
+        heatmap_top: 'Top Market',
+        heatmap_show_more: 'Show More'
     }
 };
 /**
@@ -4274,6 +4318,8 @@ async function loadMarketData(force = false) {
         renderMarket();
         renderWatchlist();
         renderSummary();
+        // ── NEW: Update heatmap with fresh prices ──
+        renderDashboardHeatmap();
 
         // ── PERFORMANCE: Prefetch chart symbols for top 10 coins ──
         // Runs in background — never blocks the UI. By the time the user taps
@@ -8492,6 +8538,66 @@ function selectCdAlertDirection(dir, btn) {
     if (btn) btn.classList.add('active');
 }
 
+// ============================================================================
+// ── NEW FEATURE: Price Alert Quick Presets ──
+// ============================================================================
+// One-tap buttons that auto-calculate the target price based on the current
+// coin price and a percentage delta (+5%, +10%, -5%, -10%).
+// This eliminates manual price calculation for the most common alert scenarios.
+function applyAlertPreset(preset) {
+    if (!_currentDetailSymbol) {
+        showMiniToast(currentLang === 'fa' ? 'ابتدا یک ارز انتخاب کنید' : 'Select a coin first');
+        return;
+    }
+    // Find current coin price
+    const btcPairBase = parseBtcPairSymbol(_currentDetailSymbol);
+    const baseSymbol = btcPairBase || _currentDetailSymbol;
+    const coin = allCoins.find(c => c.symbol === baseSymbol);
+    if (!coin || !coin.priceUsd || coin.priceUsd <= 0) {
+        showMiniToast(currentLang === 'fa' ? 'قیمت در دسترس نیست' : 'Price unavailable');
+        return;
+    }
+    const currentPrice = coin.priceUsd;
+    let targetPrice, direction;
+    switch (preset) {
+        case '5up':   targetPrice = currentPrice * 1.05; direction = 'above'; break;
+        case '10up':  targetPrice = currentPrice * 1.10; direction = 'above'; break;
+        case '5down': targetPrice = currentPrice * 0.95; direction = 'below'; break;
+        case '10down':targetPrice = currentPrice * 0.90; direction = 'below'; break;
+        default: return;
+    }
+    // Fill the price input
+    const input = document.getElementById('alert-price');
+    if (input) {
+        // Format: 6 decimals for small prices, 2 for large
+        input.value = targetPrice > 1
+            ? targetPrice.toFixed(2)
+            : targetPrice.toFixed(6);
+    }
+    // Set the direction
+    const dirBtn = document.querySelector(`.cd-alert-dir-btn[data-direction="${direction}"]`);
+    if (dirBtn) selectCdAlertDirection(direction, dirBtn);
+    // Visual feedback — flash the preset button
+    const presetBtn = document.querySelector(`.cd-preset-btn[data-preset="${preset}"]`);
+    if (presetBtn) {
+        presetBtn.classList.add('flash');
+        setTimeout(() => presetBtn.classList.remove('flash'), 600);
+    }
+    // Haptic feedback
+    if (window.tg?.HapticFeedback) {
+        try { window.tg.HapticFeedback.impactOccurred('light'); } catch {}
+    }
+    // Show a mini toast confirming the preset
+    const pctLabel = preset.includes('5') ? '5%' : '10%';
+    const dirLabel = direction === 'above'
+        ? (currentLang === 'fa' ? 'بالا' : 'up')
+        : (currentLang === 'fa' ? 'پایین' : 'down');
+    showMiniToast(currentLang === 'fa'
+        ? `هدف: $${input?.value} (${pctLabel} ${dirLabel})`
+        : `Target: $${input?.value} (${pctLabel} ${dirLabel})`);
+}
+window.applyAlertPreset = applyAlertPreset;
+
 /**
  * Update the alert status badge (active count + status icon/text)
  * based on the current symbol's active alerts.
@@ -10749,6 +10855,86 @@ function renderMarketTicker() {
     _tickerSkeletonCleared = true;
 }
 
+// ============================================================================
+// ── NEW FEATURE: Market Heatmap ──
+// ============================================================================
+// Renders a visual grid of top coins where each cell's:
+//   - SIZE is proportional to market cap (bigger = more dominant)
+//   - COLOR is based on 24h change (green = up, red = down, intensity = magnitude)
+//   - Text shows symbol + percentage
+//
+// This gives users an instant visual overview of market sentiment without
+// having to scan a list. Tapping a cell opens the coin detail.
+function renderDashboardHeatmap() {
+    const container = $('dashboard-heatmap');
+    if (!container) return;
+
+    if (!allCoins || allCoins.length === 0) {
+        // Skeleton already in HTML — leave it
+        return;
+    }
+
+    // Take top 12 coins by market cap (skip stablecoins — they're always 0%)
+    const skipStable = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FDUSD', 'USDE', 'USDGO'];
+    const top = allCoins
+        .filter(c => c && c.symbol && !skipStable.includes(c.symbol.toUpperCase()))
+        .slice(0, 12);
+
+    if (top.length === 0) {
+        container.innerHTML = '<div class="heatmap-empty">—</div>';
+        return;
+    }
+
+    // Compute max market cap for size weighting
+    const maxMcap = Math.max(...top.map(c => c.marketCapUsd || 0), 1);
+
+    // Build heatmap cells
+    const cells = top.map(coin => {
+        const change = Number(coin.changePercent24Hr) || 0;
+        const mcap = coin.marketCapUsd || 0;
+        // Size class: based on market cap relative to max
+        const sizeRatio = mcap / maxMcap;
+        let sizeClass = 'hm-size-md';
+        if (sizeRatio > 0.6) sizeClass = 'hm-size-xl';
+        else if (sizeRatio > 0.3) sizeClass = 'hm-size-lg';
+        else if (sizeRatio > 0.1) sizeClass = 'hm-size-md';
+        else sizeClass = 'hm-size-sm';
+
+        // Color: based on change percentage
+        // Intensity: clamp to ±10% for color saturation
+        const intensity = Math.min(Math.abs(change) / 10, 1);
+        let bgColor, textColor, borderColor;
+        if (change > 0.5) {
+            // Green — brighter for bigger gains
+            const alpha = 0.15 + intensity * 0.35;
+            bgColor = `rgba(34, 197, 94, ${alpha})`;
+            textColor = '#86EFAC';
+            borderColor = `rgba(34, 197, 94, ${0.3 + intensity * 0.3})`;
+        } else if (change < -0.5) {
+            // Red — brighter for bigger drops
+            const alpha = 0.15 + intensity * 0.35;
+            bgColor = `rgba(239, 68, 68, ${alpha})`;
+            textColor = '#FCA5A5';
+            borderColor = `rgba(239, 68, 68, ${0.3 + intensity * 0.3})`;
+        } else {
+            // Neutral (between -0.5% and +0.5%)
+            bgColor = 'rgba(255, 255, 255, 0.04)';
+            textColor = 'rgba(255, 255, 255, 0.6)';
+            borderColor = 'rgba(255, 255, 255, 0.08)';
+        }
+
+        const changeStr = (change >= 0 ? '+' : '') + change.toFixed(2) + '%';
+        const safeSymbol = String(coin.symbol).replace(/</g, '&lt;').substring(0, 6);
+
+        return `<div class="hm-cell ${sizeClass}" style="background:${bgColor};border-color:${borderColor};color:${textColor};" onclick="openCoinDetail('${coin.symbol}')" role="button" tabindex="0">
+            <span class="hm-symbol">${safeSymbol}</span>
+            <span class="hm-change">${changeStr}</span>
+        </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="heatmap-grid">${cells}</div>`;
+}
+
 /**
  * Market Analysis section — combines VIP (analysisFeatured) + regular analyses,
  * renders up to 5 horizontal scrollable cards with cover image, gradient overlay,
@@ -11632,6 +11818,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // arrives from the API.
     renderMarketTicker();
     renderDashboardMarketStatus();
+    // ── NEW: Render market heatmap on dashboard ──
+    renderDashboardHeatmap();
 
     // ── DASHBOARD SPEED OPTIMIZATION ──
     // Hydrate analysis, news, and calendar from localStorage on cold open
