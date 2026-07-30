@@ -1187,31 +1187,53 @@ function isAdminTelegramId(env, userId) {
 function createPool(env) {
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) return null;
-  return new Pool({
+  // ── DIAG: log pool creation with config ──
+  const poolId = `pool_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const pool = new Pool({
     connectionString: databaseUrl,
     max: 1,
     idleTimeoutMillis: 0,
     connectionTimeoutMillis: 8000,
   });
+  console.log(JSON.stringify({
+    scope: 'diag-pool-created',
+    poolId,
+    config: { max: 1, idleTimeoutMillis: 0, connectionTimeoutMillis: 8000 },
+    note: 'Pool created with max=1 (only 1 concurrent query allowed)',
+  }));
+  // Store poolId on the pool for tracing
+  try { pool._diagPoolId = poolId; } catch {}
+  return pool;
 }
 
 // ── ROOT CAUSE FIX: Per-request Pool sharing ──
-// Previously, queryDb created a new Pool for EVERY query call. When dashboard
-// runs 17 parallel queries (Promise.allSettled), 17 WebSocket connections open
-// simultaneously to Neon DB → connection exhaustion → "All attempts to open a
-// WebSocket to connect to the database failed" errors.
-//
-// FIX: Pool is created ONCE per Worker fetch invocation and stored in a
-// WeakMap keyed by the env object. All queryDb calls within the same request
-// share the same Pool (reusing the WebSocket connection). Pool is closed
-// after the fetch handler completes (in the finally block).
 const _poolCache = new WeakMap();
+
+// ── DIAG: Track pool acquisition timing and concurrent query count ──
+const _poolStats = {
+  poolsCreated: 0,
+  poolsReused: 0,
+  queriesStarted: 0,
+  queriesCompleted: 0,
+  queriesFailed: 0,
+  queriesTimedOut: 0,
+  maxConcurrentQueries: 0,
+  currentConcurrentQueries: 0,
+  totalQueryWaitMs: 0,
+  totalQueryExecMs: 0,
+};
 
 function getSharedPool(env) {
   if (!env) return null;
-  if (_poolCache.has(env)) return _poolCache.get(env);
+  if (_poolCache.has(env)) {
+    _poolStats.poolsReused++;
+    return _poolCache.get(env);
+  }
   const pool = createPool(env);
-  if (pool) _poolCache.set(env, pool);
+  if (pool) {
+    _poolCache.set(env, pool);
+    _poolStats.poolsCreated++;
+  }
   return pool;
 }
 
@@ -1219,16 +1241,7 @@ function closeSharedPool(env) {
   if (!env) return;
   const pool = _poolCache.get(env);
   if (pool) {
-    // ROOT-CAUSE FIX: pool.end() returns a Promise. Previously this was
-    // fire-and-forget (.catch(() => {})), which meant the pool cleanup
-    // continued AFTER the fetch handler returned its Response — causing
-    // "A promise was resolved from a different request context" warnings.
-    // FIX: Just delete from cache; let the pool be GC'd. The Neon serverless
-    // pool doesn't hold persistent connections (it uses HTTP/WebSocket per
-    // query), so explicit .end() is not strictly necessary. Avoiding it
-    // eliminates the cross-context promise resolution.
     _poolCache.delete(env);
-    // Best-effort cleanup — non-blocking, errors ignored
     try { pool.end(); } catch {}
   }
 }
@@ -1328,33 +1341,100 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // ROOT CAUSE FIX: Use shared pool instead of creating a new Pool per call.
-  // This prevents WebSocket connection exhaustion when multiple queries run
-  // in parallel (e.g., dashboard's 17 parallel COUNT queries).
+  // ── DIAG: Connection-layer timing ──
+  const _diagT0 = Date.now();
+  const _diagQueryId = `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const _diagSqlPreview = String(sqlText || '').substring(0, 80).replace(/\s+/g, ' ').trim();
+
   const pool = getSharedPool(env);
   if (!pool) throw new Error('Database not configured');
+
+  // Track concurrent queries (to detect queue buildup from max=1)
+  _poolStats.queriesStarted++;
+  _poolStats.currentConcurrentQueries++;
+  if (_poolStats.currentConcurrentQueries > _poolStats.maxConcurrentQueries) {
+    _poolStats.maxConcurrentQueries = _poolStats.currentConcurrentQueries;
+  }
+
+  const _diagPoolAcquiredAt = Date.now();
+  const _diagPoolAcquireMs = _diagPoolAcquiredAt - _diagT0;
+
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const timeoutMs = 8000;
+        const _diagQueryStart = Date.now();
+
+        // The pool.query() call includes BOTH:
+        //   (a) waiting for a free connection slot (if max=1 and another query is running)
+        //   (b) the actual query execution over the WebSocket
+        // We can't separate these without pool.connect(), but we log the total.
         const result = await Promise.race([
           pool.query(sqlText, params),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Query timeout after ${timeoutMs}ms: ${sqlText.substring(0, 60)}`)), timeoutMs)
+            setTimeout(() => {
+              _poolStats.queriesTimedOut++;
+              console.warn(JSON.stringify({
+                scope: 'diag-query-timeout',
+                queryId: _diagQueryId,
+                sql: _diagSqlPreview,
+                timeoutMs,
+                poolAcquireMs: _diagPoolAcquireMs,
+                queryExecMs: Date.now() - _diagQueryStart,
+                concurrentQueries: _poolStats.currentConcurrentQueries,
+                maxConcurrent: _poolStats.maxConcurrentQueries,
+                poolId: pool._diagPoolId,
+                note: 'Query waited too long — likely queued behind other queries (max=1 pool)',
+              }));
+              reject(new Error(`Query timeout after ${timeoutMs}ms: ${sqlText.substring(0, 60)}`));
+            }, timeoutMs)
           ),
         ]);
+
+        const _diagQueryExecMs = Date.now() - _diagQueryStart;
+        _poolStats.queriesCompleted++;
+        _poolStats.totalQueryExecMs += _diagQueryExecMs;
+        _poolStats.totalQueryWaitMs += _diagPoolAcquireMs;
+
+        // Log slow queries (>500ms) — these are the ones eating the 25s budget
+        if (_diagQueryExecMs > 500) {
+          console.log(JSON.stringify({
+            scope: 'diag-slow-query',
+            queryId: _diagQueryId,
+            sql: _diagSqlPreview,
+            poolAcquireMs: _diagPoolAcquireMs,
+            queryExecMs: _diagQueryExecMs,
+            totalMs: Date.now() - _diagT0,
+            concurrentQueries: _poolStats.currentConcurrentQueries,
+            attempt,
+          }));
+        }
+
         return result;
       } catch (error) {
-        if (attempt === retries) throw error;
+        if (attempt === retries) {
+          _poolStats.queriesFailed++;
+          console.error(JSON.stringify({
+            scope: 'diag-query-failed',
+            queryId: _diagQueryId,
+            sql: _diagSqlPreview,
+            error: error?.message,
+            poolAcquireMs: _diagPoolAcquireMs,
+            totalMs: Date.now() - _diagT0,
+            attempts: attempt + 1,
+            concurrentQueries: _poolStats.currentConcurrentQueries,
+          }));
+          throw error;
+        }
         const ms = Math.min(200 * 2 ** attempt, 1000);
         await new Promise((r) => setTimeout(r, ms));
       }
     }
   } catch (error) {
-    // If the shared pool's connection is broken, invalidate it so the next
-    // queryDb call creates a fresh pool.
     closeSharedPool(env);
     throw error;
+  } finally {
+    _poolStats.currentConcurrentQueries--;
   }
 }
 
@@ -6972,6 +7052,35 @@ export default {
         }, {}, env);
       }
 
+      // ── DIAGNOSTIC: Pool Stats — view live connection pool statistics ──
+      if (request.method === 'GET' && url.pathname === '/api/_diag/pool-stats') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.DIAG_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+        return jsonResponse({
+          status: 'success',
+          poolStats: {
+            poolsCreated: _poolStats.poolsCreated,
+            poolsReused: _poolStats.poolsReused,
+            queriesStarted: _poolStats.queriesStarted,
+            queriesCompleted: _poolStats.queriesCompleted,
+            queriesFailed: _poolStats.queriesFailed,
+            queriesTimedOut: _poolStats.queriesTimedOut,
+            currentConcurrentQueries: _poolStats.currentConcurrentQueries,
+            maxConcurrentQueries: _poolStats.maxConcurrentQueries,
+            totalQueryExecMs: _poolStats.totalQueryExecMs,
+            totalQueryWaitMs: _poolStats.totalQueryWaitMs,
+            avgQueryExecMs: _poolStats.queriesCompleted > 0
+              ? Math.round(_poolStats.totalQueryExecMs / _poolStats.queriesCompleted)
+              : 0,
+          },
+          poolConfig: { max: 1, idleTimeoutMillis: 0, connectionTimeoutMillis: 8000 },
+          note: 'max=1 means only 1 concurrent query per pool. maxConcurrentQueries > 1 means queries were queued.',
+        }, {}, env);
+      }
+
       // ── DIAGNOSTIC: Referral Debug — inspect referral flow logs + DB state ──
       // Usage: GET /api/_diag/referral-debug?user_id=123456
       //        GET /api/_diag/referral-debug?inviter_id=123456
@@ -7799,7 +7908,48 @@ export default {
       cron_expr: cronExpr,
       dispatch_setup_ms: Date.now() - _diagCronStart,
       jobs_dispatched: Object.keys(_diagJobTimings).length,
+      poolStats_snapshot: {
+        poolsCreated: _poolStats.poolsCreated,
+        poolsReused: _poolStats.poolsReused,
+        queriesStarted: _poolStats.queriesStarted,
+        queriesCompleted: _poolStats.queriesCompleted,
+        queriesFailed: _poolStats.queriesFailed,
+        queriesTimedOut: _poolStats.queriesTimedOut,
+        currentConcurrentQueries: _poolStats.currentConcurrentQueries,
+        maxConcurrentQueries: _poolStats.maxConcurrentQueries,
+      },
       note: 'All jobs dispatched via ctx.waitUntil. Per-job timings will be logged as they complete.',
+    }));
+
+    // ── DIAG: Schedule a pool stats dump 30s later (after jobs should have finished) ──
+    // This captures the FINAL state of pool stats after all cron jobs complete.
+    // NOTE: This itself uses ctx.waitUntil, so the Worker stays alive to log this.
+    ctx.waitUntil(new Promise(resolve => {
+      setTimeout(() => {
+        console.log(JSON.stringify({
+          scope: 'diag-pool-stats-final',
+          cron_expr: cronExpr,
+          timestamp: new Date().toISOString(),
+          poolStats: {
+            poolsCreated: _poolStats.poolsCreated,
+            poolsReused: _poolStats.poolsReused,
+            queriesStarted: _poolStats.queriesStarted,
+            queriesCompleted: _poolStats.queriesCompleted,
+            queriesFailed: _poolStats.queriesFailed,
+            queriesTimedOut: _poolStats.queriesTimedOut,
+            currentConcurrentQueries: _poolStats.currentConcurrentQueries,
+            maxConcurrentQueries: _poolStats.maxConcurrentQueries,
+            totalQueryExecMs: _poolStats.totalQueryExecMs,
+            totalQueryWaitMs: _poolStats.totalQueryWaitMs,
+            avgQueryExecMs: _poolStats.queriesCompleted > 0
+              ? Math.round(_poolStats.totalQueryExecMs / _poolStats.queriesCompleted)
+              : 0,
+            jobTimings: _diagJobTimings,
+          },
+          note: 'maxConcurrentQueries > 1 means queries were QUEUED (max=1 pool bottleneck)',
+        }));
+        resolve();
+      }, 30000); // 30s — after the 25s withTimeout would have fired
     }));
   },
 };
