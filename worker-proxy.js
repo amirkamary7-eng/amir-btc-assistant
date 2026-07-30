@@ -6293,6 +6293,26 @@ export default {
         return handleHealth(env);
       }
 
+      // ── DIAG: Read last cron job reports from KV ──
+      if (request.method === 'GET' && url.pathname === '/api/_diag/last-cron') {
+        const jobNames = ['runScheduledAlertsBaseline', 'notificationQueue', 'marketOverviewRefresh',
+          'retryFailedReferralRewards', 'retryFailedWheelRewards', 'runCalendarAlertsCheck',
+          'processNewsAIBatch', 'processPublisherQueue'];
+        const jobs = {};
+        for (const name of jobNames) {
+          const raw = env.APP_CACHE ? await env.APP_CACHE.get('diag:job:' + name) : null;
+          if (raw) {
+            try { jobs[name] = JSON.parse(raw); } catch { jobs[name] = { raw: raw.substring(0, 100) }; }
+          }
+        }
+        const finalReport = env.APP_CACHE ? await env.APP_CACHE.get('diag:last_cron_report') : null;
+        const result = { status: 'success', jobs };
+        if (finalReport) {
+          try { result.finalReport = JSON.parse(finalReport); } catch {}
+        }
+        return jsonResponse(result, {}, env);
+      }
+
       // ── DIAGNOSTIC: Admin endpoint tester (temp, for root cause analysis) ──
       // Auth: X-Cron-Secret header must match ALERTS_CRON_SHARED_SECRET
       // Tests ALL admin endpoints internally and returns exact HTTP status + response body
@@ -7986,11 +8006,25 @@ export default {
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
-    // ── DIAG: wrap each job with timing ──
+    // ── DIAG: wrap each job with timing + store to KV immediately ──
     const diagWrap = (jobName, promise, ms) => {
       const start = Date.now();
       const wrapped = withTimeout(promise, ms);
-      wrapped.then(result => _diagLogJob(jobName, start, result)).catch(() => {});
+      wrapped.then(result => {
+        _diagLogJob(jobName, start, result);
+        // Store job result to KV immediately (don't wait for 30s timer)
+        if (env.APP_CACHE?.put) {
+          const jobReport = {
+            job: jobName,
+            elapsed_ms: Date.now() - start,
+            timed_out: result?.__timeout === true,
+            error: result?.__cronError ? result.error : null,
+            timestamp: new Date().toISOString(),
+            cron_expr: controller.cron,
+          };
+          env.APP_CACHE.put('diag:job:' + jobName, JSON.stringify(jobReport), { expirationTtl: 300 }).catch(() => {});
+        }
+      }).catch(() => {});
       return wrapped;
     };
 
@@ -8058,7 +8092,7 @@ export default {
     const _leakCheckTimes = [10000, 20000, 30000];
     for (const checkAt of _leakCheckTimes) {
       ctx.waitUntil(new Promise(resolve => {
-        setTimeout(() => {
+        setTimeout(async () => {
           // ── LEAK DETECTOR: Check for unreleased connections ──
           const leakedConnections = [];
           const heldConnections = [];
@@ -8109,9 +8143,9 @@ export default {
             }));
           }
 
-          // Final dump at 30s
+          // Final dump at 30s — also store in KV for HTTP retrieval
           if (checkAt === 30000) {
-            console.log(JSON.stringify({
+            const finalReport = {
               scope: 'diag-pool-stats-final',
               cron_expr: cronExpr,
               timestamp: new Date().toISOString(),
@@ -8141,9 +8175,16 @@ export default {
                 heldConnections: heldConnections.length,
                 details: [...leakedConnections, ...heldConnections],
               },
-              connectionHistory: _connectionHistory.slice(-50),
+              connectionHistory: _connectionHistory.slice(-100),
               jobTimings: _diagJobTimings,
-            }));
+            };
+            console.log(JSON.stringify(finalReport));
+            // Store in KV for HTTP retrieval (no need for wrangler tail)
+            if (env.APP_CACHE?.put) {
+              try {
+                await env.APP_CACHE.put('diag:last_cron_report', JSON.stringify(finalReport), { expirationTtl: 300 });
+              } catch {}
+            }
           }
           resolve();
         }, checkAt);
