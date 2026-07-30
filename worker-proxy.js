@@ -1210,6 +1210,11 @@ function createPool(env) {
 const _poolCache = new WeakMap();
 
 // ── DIAG: Track pool acquisition timing and concurrent query count ──
+// NOTE: currentConcurrentQueries / maxConcurrentQueries measure the number
+// of queryDb() CALLS that are in-flight (including those waiting for a
+// connection slot). This is DEMAND on the pool, not actual connections.
+// With pool max=1, if maxConcurrentQueries > 1, it means queries were
+// QUEUED — only 1 was actually executing, the rest were waiting.
 const _poolStats = {
   poolsCreated: 0,
   poolsReused: 0,
@@ -1217,10 +1222,12 @@ const _poolStats = {
   queriesCompleted: 0,
   queriesFailed: 0,
   queriesTimedOut: 0,
-  maxConcurrentQueries: 0,
-  currentConcurrentQueries: 0,
-  totalQueryWaitMs: 0,
-  totalQueryExecMs: 0,
+  maxConcurrentQueries: 0,        // max concurrent queryDb() calls (DEMAND)
+  currentConcurrentQueries: 0,    // current concurrent queryDb() calls (DEMAND)
+  maxConcurrentConnections: 0,    // max actual connections held (CAPACITY used)
+  currentConcurrentConnections: 0, // current actual connections held
+  totalQueryWaitMs: 0,            // total time waiting for connection slot
+  totalQueryExecMs: 0,            // total time executing SQL
 };
 
 function getSharedPool(env) {
@@ -1341,7 +1348,7 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // ── DIAG: Connection-layer timing ──
+  // ── DIAG: Connection-layer timing with SEPARATED wait vs exec ──
   const _diagT0 = Date.now();
   const _diagQueryId = `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const _diagSqlPreview = String(sqlText || '').substring(0, 80).replace(/\s+/g, ' ').trim();
@@ -1349,64 +1356,85 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   const pool = getSharedPool(env);
   if (!pool) throw new Error('Database not configured');
 
-  // Track concurrent queries (to detect queue buildup from max=1)
+  // Track concurrent queryDb CALLS (demand on the pool, not actual connections)
   _poolStats.queriesStarted++;
   _poolStats.currentConcurrentQueries++;
   if (_poolStats.currentConcurrentQueries > _poolStats.maxConcurrentQueries) {
     _poolStats.maxConcurrentQueries = _poolStats.currentConcurrentQueries;
   }
 
-  const _diagPoolAcquiredAt = Date.now();
-  const _diagPoolAcquireMs = _diagPoolAcquiredAt - _diagT0;
-
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const timeoutMs = 8000;
-        const _diagQueryStart = Date.now();
 
-        // The pool.query() call includes BOTH:
-        //   (a) waiting for a free connection slot (if max=1 and another query is running)
-        //   (b) the actual query execution over the WebSocket
-        // We can't separate these without pool.connect(), but we log the total.
-        const result = await Promise.race([
-          pool.query(sqlText, params),
+        // ── KEY DIAGNOSTIC: Use pool.connect() to SEPARATE connection wait from query exec ──
+        // pool.query() internally does: acquire connection → run query → release connection.
+        // We can't see how long the "acquire" step takes.
+        // pool.connect() explicitly gives us the connection, so we can time:
+        //   1. connectMs = time waiting for a free connection slot (the QUEUE wait)
+        //   2. execMs = time the actual SQL query takes on the connection
+        // This definitively answers: is the 8s timeout from QUEUEING or from SLOW QUERIES?
+        const _diagConnectStart = Date.now();
+        const client = await Promise.race([
+          pool.connect(),
           new Promise((_, reject) =>
             setTimeout(() => {
               _poolStats.queriesTimedOut++;
-              console.warn(JSON.stringify({
-                scope: 'diag-query-timeout',
+              console.error(JSON.stringify({
+                scope: 'diag-connect-timeout',
                 queryId: _diagQueryId,
                 sql: _diagSqlPreview,
-                timeoutMs,
-                poolAcquireMs: _diagPoolAcquireMs,
-                queryExecMs: Date.now() - _diagQueryStart,
-                concurrentQueries: _poolStats.currentConcurrentQueries,
-                maxConcurrent: _poolStats.maxConcurrentQueries,
+                connectWaitMs: Date.now() - _diagConnectStart,
+                concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
+                maxConcurrentQueryDbCalls: _poolStats.maxConcurrentQueries,
                 poolId: pool._diagPoolId,
-                note: 'Query waited too long — likely queued behind other queries (max=1 pool)',
+                note: 'Could not acquire connection in 8s. This means the pool is SATURATED — all connection slots are busy.',
               }));
-              reject(new Error(`Query timeout after ${timeoutMs}ms: ${sqlText.substring(0, 60)}`));
+              reject(new Error(`Connection timeout after ${timeoutMs}ms (pool saturated): ${sqlText.substring(0, 60)}`));
             }, timeoutMs)
           ),
         ]);
 
-        const _diagQueryExecMs = Date.now() - _diagQueryStart;
-        _poolStats.queriesCompleted++;
-        _poolStats.totalQueryExecMs += _diagQueryExecMs;
-        _poolStats.totalQueryWaitMs += _diagPoolAcquireMs;
+        const _diagConnectMs = Date.now() - _diagConnectStart;
+        const _diagQueryStart = Date.now();
 
-        // Log slow queries (>500ms) — these are the ones eating the 25s budget
-        if (_diagQueryExecMs > 500) {
+        // Track ACTUAL connections held (not just queryDb calls)
+        _poolStats.currentConcurrentConnections++;
+        if (_poolStats.currentConcurrentConnections > _poolStats.maxConcurrentConnections) {
+          _poolStats.maxConcurrentConnections = _poolStats.currentConcurrentConnections;
+        }
+
+        let result;
+        try {
+          result = await client.query(sqlText, params);
+        } finally {
+          client.release();
+          _poolStats.currentConcurrentConnections--;
+        }
+
+        const _diagExecMs = Date.now() - _diagQueryStart;
+        const _diagTotalMs = Date.now() - _diagT0;
+
+        _poolStats.queriesCompleted++;
+        _poolStats.totalQueryExecMs += _diagExecMs;
+        _poolStats.totalQueryWaitMs += _diagConnectMs;
+
+        // Log slow queries (>500ms total) with SEPARATED wait vs exec
+        if (_diagTotalMs > 500) {
           console.log(JSON.stringify({
             scope: 'diag-slow-query',
             queryId: _diagQueryId,
             sql: _diagSqlPreview,
-            poolAcquireMs: _diagPoolAcquireMs,
-            queryExecMs: _diagQueryExecMs,
-            totalMs: Date.now() - _diagT0,
-            concurrentQueries: _poolStats.currentConcurrentQueries,
+            connectWaitMs: _diagConnectMs,  // ← time waiting for connection slot
+            execMs: _diagExecMs,             // ← time the SQL actually took
+            totalMs: _diagTotalMs,
+            concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
             attempt,
+            poolId: pool._diagPoolId,
+            note: _diagConnectMs > 1000
+              ? 'SLOW CONNECT — query was QUEUED waiting for a free connection slot (pool bottleneck)'
+              : 'SLOW EXEC — the SQL query itself is slow (not a connection issue)',
           }));
         }
 
@@ -1419,10 +1447,9 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
             queryId: _diagQueryId,
             sql: _diagSqlPreview,
             error: error?.message,
-            poolAcquireMs: _diagPoolAcquireMs,
             totalMs: Date.now() - _diagT0,
             attempts: attempt + 1,
-            concurrentQueries: _poolStats.currentConcurrentQueries,
+            concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
           }));
           throw error;
         }
@@ -7070,14 +7097,24 @@ export default {
             queriesTimedOut: _poolStats.queriesTimedOut,
             currentConcurrentQueries: _poolStats.currentConcurrentQueries,
             maxConcurrentQueries: _poolStats.maxConcurrentQueries,
+            currentConcurrentConnections: _poolStats.currentConcurrentConnections,
+            maxConcurrentConnections: _poolStats.maxConcurrentConnections,
             totalQueryExecMs: _poolStats.totalQueryExecMs,
             totalQueryWaitMs: _poolStats.totalQueryWaitMs,
             avgQueryExecMs: _poolStats.queriesCompleted > 0
               ? Math.round(_poolStats.totalQueryExecMs / _poolStats.queriesCompleted)
               : 0,
+            avgConnectWaitMs: _poolStats.queriesCompleted > 0
+              ? Math.round(_poolStats.totalQueryWaitMs / _poolStats.queriesCompleted)
+              : 0,
           },
           poolConfig: { max: 1, idleTimeoutMillis: 0, connectionTimeoutMillis: 8000 },
-          note: 'max=1 means only 1 concurrent query per pool. maxConcurrentQueries > 1 means queries were queued.',
+          interpretation: {
+            maxConcurrentQueries: 'Number of queryDb() calls in-flight (DEMAND). >1 means queries were QUEUED.',
+            maxConcurrentConnections: 'Actual connections held simultaneously (CAPACITY). Should be <= max(=1).',
+            avgConnectWaitMs: 'Average time waiting for a connection slot. >1000ms indicates pool bottleneck.',
+            avgQueryExecMs: 'Average time the SQL itself took (excluding connection wait).',
+          },
         }, {}, env);
       }
 
@@ -7939,14 +7976,25 @@ export default {
             queriesTimedOut: _poolStats.queriesTimedOut,
             currentConcurrentQueries: _poolStats.currentConcurrentQueries,
             maxConcurrentQueries: _poolStats.maxConcurrentQueries,
+            currentConcurrentConnections: _poolStats.currentConcurrentConnections,
+            maxConcurrentConnections: _poolStats.maxConcurrentConnections,
             totalQueryExecMs: _poolStats.totalQueryExecMs,
             totalQueryWaitMs: _poolStats.totalQueryWaitMs,
             avgQueryExecMs: _poolStats.queriesCompleted > 0
               ? Math.round(_poolStats.totalQueryExecMs / _poolStats.queriesCompleted)
               : 0,
+            avgConnectWaitMs: _poolStats.queriesCompleted > 0
+              ? Math.round(_poolStats.totalQueryWaitMs / _poolStats.queriesCompleted)
+              : 0,
             jobTimings: _diagJobTimings,
           },
-          note: 'maxConcurrentQueries > 1 means queries were QUEUED (max=1 pool bottleneck)',
+          interpretation: {
+            maxConcurrentQueries: `${_poolStats.maxConcurrentQueries} queryDb() calls were in-flight simultaneously (DEMAND)`,
+            maxConcurrentConnections: `${_poolStats.maxConcurrentConnections} actual connections held simultaneously (should be <= pool max=1)`,
+            avgConnectWaitMs: _poolStats.queriesCompleted > 0
+              ? `${Math.round(_poolStats.totalQueryWaitMs / _poolStats.queriesCompleted)}ms average wait for connection slot`
+              : 'no data',
+          },
         }));
         resolve();
       }, 30000); // 30s — after the 25s withTimeout would have fired
