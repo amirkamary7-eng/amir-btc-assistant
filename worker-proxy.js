@@ -1405,12 +1405,36 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
           _poolStats.maxConcurrentConnections = _poolStats.currentConcurrentConnections;
         }
 
+        // ── KEY DIAG: Track how long the connection is HELD ──
+        // This is the time the connection is "busy" and other queries must wait.
+        // If holdTime > 1000ms, it means non-DB I/O is happening while holding
+        // the connection (e.g., awaiting a fetch between queries — but queryDb
+        // doesn't do that). More likely: the SQL itself is slow, OR Neon's
+        // WebSocket round-trip is slow.
+        const _diagHoldStart = Date.now();
+
         let result;
         try {
           result = await client.query(sqlText, params);
         } finally {
+          const _diagHoldMs = Date.now() - _diagHoldStart;
           client.release();
           _poolStats.currentConcurrentConnections--;
+
+          // Log any connection held > 500ms — these are the ones causing queue buildup
+          if (_diagHoldMs > 500) {
+            console.log(JSON.stringify({
+              scope: 'diag-connection-held-long',
+              queryId: _diagQueryId,
+              sql: _diagSqlPreview,
+              connectWaitMs: _diagConnectMs,
+              holdMs: _diagHoldMs,
+              execMs: Date.now() - _diagQueryStart,
+              concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
+              poolId: pool._diagPoolId,
+              note: 'Connection was held for >500ms — this blocks all other queued queries (max=1 pool)',
+            }));
+          }
         }
 
         const _diagExecMs = Date.now() - _diagQueryStart;
@@ -1471,23 +1495,59 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * Requires Neon serverless Pool with transaction_mode support.
  */
 async function queryDbTransaction(env, queries) {
+  // ── DIAG: This function creates its OWN pool (not shared) ──
+  // This means it does NOT compete with the shared pool's max=1 slot.
+  // But it DOES create a new WebSocket connection each time.
+  const _diagT0 = Date.now();
   const pool = createPool(env);
   if (!pool) throw new Error('Database not configured');
-  const client = await pool.connect();
+  const _diagPoolId = pool._diagPoolId || 'tx_unknown';
+
+  let client;
   try {
+    const _diagConnectStart = Date.now();
+    client = await pool.connect();
+    const _diagConnectMs = Date.now() - _diagConnectStart;
+
+    console.log(JSON.stringify({
+      scope: 'diag-transaction-connect',
+      poolId: _diagPoolId,
+      connectMs: _diagConnectMs,
+      queryCount: queries?.length || 0,
+      note: 'queryDbTransaction created a SEPARATE pool (not shared) — uses its own connection slot',
+    }));
+
     await client.query('BEGIN');
     const results = [];
     for (const { sql, params } of queries) {
       results.push(await client.query(sql, params));
     }
     await client.query('COMMIT');
+
+    console.log(JSON.stringify({
+      scope: 'diag-transaction-done',
+      poolId: _diagPoolId,
+      totalMs: Date.now() - _diagT0,
+      queryCount: queries?.length || 0,
+    }));
+
     return results;
   } catch (error) {
-    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    try { if (client) await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.error(JSON.stringify({
+      scope: 'diag-transaction-failed',
+      poolId: _diagPoolId,
+      error: error?.message,
+      totalMs: Date.now() - _diagT0,
+    }));
     throw error;
   } finally {
-    client.release();
-    pool.end().catch(() => {});
+    // ROOT-CAUSE FIX: ensure client.release() always runs
+    if (client) {
+      try { client.release(); } catch {}
+    }
+    // Close this private pool (it's not shared)
+    try { pool.end(); } catch {}
   }
 }
 
