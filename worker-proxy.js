@@ -1230,6 +1230,36 @@ const _poolStats = {
   totalQueryExecMs: 0,            // total time executing SQL
 };
 
+// ── LEAK DETECTOR: Track every connection by unique ID ──
+// Each pool.connect() that succeeds gets a connectionId.
+// On release, the entry is deleted. Any entry remaining after
+// the cron tick completes is a LEAK.
+let _connectionCounter = 0;
+const _activeConnections = new Map(); // connectionId → { acquiredAt, sql, queryId, caller }
+const _connectionHistory = []; // last 200 connection events for debugging
+
+function _logConnectionEvent(event) {
+  _connectionHistory.push({ ts: Date.now(), ...event });
+  if (_connectionHistory.length > 200) _connectionHistory.shift();
+}
+
+// Extract caller function name from stack trace
+function _getCallerFunction() {
+  const stack = new Error().stack || '';
+  const lines = stack.split('\n');
+  // Skip: Error, _getCallerFunction, queryDb, and find the actual caller
+  for (let i = 3; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line && !line.includes('queryDb') && !line.includes('_getCaller')) {
+      // Extract function name from: "at functionName (file:line:col)"
+      const match = line.match(/at\s+(\S+)\s+\(/);
+      if (match) return match[1];
+      return line.substring(0, 60);
+    }
+  }
+  return 'unknown';
+}
+
 function getSharedPool(env) {
   if (!env) return null;
   if (_poolCache.has(env)) {
@@ -1348,117 +1378,208 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // ── DIAG: Connection-layer timing with SEPARATED wait vs exec ──
+  // ── COMPLETE CONNECTION LIFECYCLE INSTRUMENTATION ──
+  // Tracks: acquire time, release time, hold duration, caller function,
+  // leak detection. Every connection gets a unique ID.
   const _diagT0 = Date.now();
   const _diagQueryId = `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const _diagSqlPreview = String(sqlText || '').substring(0, 80).replace(/\s+/g, ' ').trim();
+  const _diagCaller = _getCallerFunction();
 
   const pool = getSharedPool(env);
   if (!pool) throw new Error('Database not configured');
 
-  // Track concurrent queryDb CALLS (demand on the pool, not actual connections)
   _poolStats.queriesStarted++;
   _poolStats.currentConcurrentQueries++;
   if (_poolStats.currentConcurrentQueries > _poolStats.maxConcurrentQueries) {
     _poolStats.maxConcurrentQueries = _poolStats.currentConcurrentQueries;
   }
 
+  // Log the REQUEST to acquire a connection (before pool.connect)
+  _logConnectionEvent({
+    type: 'CONNECT_REQUEST',
+    queryId: _diagQueryId,
+    sql: _diagSqlPreview,
+    caller: _diagCaller,
+    poolId: pool._diagPoolId,
+    activeConnectionsBefore: _activeConnections.size,
+    concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
+  });
+
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const timeoutMs = 8000;
-
-        // ── KEY DIAGNOSTIC: Use pool.connect() to SEPARATE connection wait from query exec ──
-        // pool.query() internally does: acquire connection → run query → release connection.
-        // We can't see how long the "acquire" step takes.
-        // pool.connect() explicitly gives us the connection, so we can time:
-        //   1. connectMs = time waiting for a free connection slot (the QUEUE wait)
-        //   2. execMs = time the actual SQL query takes on the connection
-        // This definitively answers: is the 8s timeout from QUEUEING or from SLOW QUERIES?
         const _diagConnectStart = Date.now();
+
+        // ── FALLBACK: If pool.connect is not available (test mock), use pool.query ──
+        if (typeof pool.connect !== 'function') {
+          const result = await pool.query(sqlText, params);
+          _poolStats.queriesCompleted++;
+          return result;
+        }
+
+        // ── LEAK DETECTION: Track if pool.connect resolves AFTER timeout ──
+        let _timeoutFired = false;
+
+        const connectPromise = pool.connect().then(client => {
+          if (_timeoutFired) {
+            const connectionId = `conn_${++_connectionCounter}`;
+            console.error(JSON.stringify({
+              scope: 'diag-LEAK-DETECTED',
+              connectionId,
+              queryId: _diagQueryId,
+              sql: _diagSqlPreview,
+              caller: _diagCaller,
+              poolId: pool._diagPoolId,
+              connectWaitMs: Date.now() - _diagConnectStart,
+              note: 'pool.connect() resolved AFTER Promise.race timeout already fired. This client will NEVER be released → CONNECTION LEAK',
+              activeConnections: _activeConnections.size,
+            }));
+            _activeConnections.set(connectionId, {
+              acquiredAt: Date.now(),
+              sql: _diagSqlPreview,
+              queryId: _diagQueryId,
+              caller: _diagCaller,
+              leaked: true,
+              poolId: pool._diagPoolId,
+            });
+            try { client.release(); } catch {}
+            return null;
+          }
+          return client;
+        });
+
         const client = await Promise.race([
-          pool.connect(),
+          connectPromise,
           new Promise((_, reject) =>
             setTimeout(() => {
+              _timeoutFired = true;
               _poolStats.queriesTimedOut++;
+              const connectWaitMs = Date.now() - _diagConnectStart;
               console.error(JSON.stringify({
                 scope: 'diag-connect-timeout',
                 queryId: _diagQueryId,
                 sql: _diagSqlPreview,
-                connectWaitMs: Date.now() - _diagConnectStart,
+                caller: _diagCaller,
+                connectWaitMs,
+                timeoutMs,
+                activeConnections: _activeConnections.size,
+                activeConnectionDetails: Array.from(_activeConnections.entries()).map(([id, info]) => ({
+                  connectionId: id,
+                  heldForMs: Date.now() - info.acquiredAt,
+                  sql: info.sql?.substring(0, 40),
+                  caller: info.caller,
+                  leaked: info.leaked || false,
+                })),
                 concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
-                maxConcurrentQueryDbCalls: _poolStats.maxConcurrentQueries,
                 poolId: pool._diagPoolId,
-                note: 'Could not acquire connection in 8s. This means the pool is SATURATED — all connection slots are busy.',
+                note: 'Promise.race timeout fired. pool.connect() is still PENDING — if it resolves later, that connection will LEAK.',
               }));
-              reject(new Error(`Connection timeout after ${timeoutMs}ms (pool saturated): ${sqlText.substring(0, 60)}`));
+              reject(new Error(`Connection timeout after ${timeoutMs}ms: ${sqlText.substring(0, 60)}`));
             }, timeoutMs)
           ),
         ]);
 
-        const _diagConnectMs = Date.now() - _diagConnectStart;
-        const _diagQueryStart = Date.now();
+        if (!client) {
+          throw new Error('Connection acquired after timeout — leaked');
+        }
 
-        // Track ACTUAL connections held (not just queryDb calls)
+        const _diagConnectMs = Date.now() - _diagConnectStart;
+        const connectionId = `conn_${++_connectionCounter}`;
+
         _poolStats.currentConcurrentConnections++;
         if (_poolStats.currentConcurrentConnections > _poolStats.maxConcurrentConnections) {
           _poolStats.maxConcurrentConnections = _poolStats.currentConcurrentConnections;
         }
+        _activeConnections.set(connectionId, {
+          acquiredAt: Date.now(),
+          sql: _diagSqlPreview,
+          queryId: _diagQueryId,
+          caller: _diagCaller,
+          poolId: pool._diagPoolId,
+        });
 
-        // ── KEY DIAG: Track how long the connection is HELD ──
-        // This is the time the connection is "busy" and other queries must wait.
-        // If holdTime > 1000ms, it means non-DB I/O is happening while holding
-        // the connection (e.g., awaiting a fetch between queries — but queryDb
-        // doesn't do that). More likely: the SQL itself is slow, OR Neon's
-        // WebSocket round-trip is slow.
-        const _diagHoldStart = Date.now();
+        _logConnectionEvent({
+          type: 'ACQUIRE',
+          connectionId,
+          queryId: _diagQueryId,
+          sql: _diagSqlPreview,
+          caller: _diagCaller,
+          connectWaitMs: _diagConnectMs,
+          poolId: pool._diagPoolId,
+          activeConnections: _activeConnections.size,
+        });
+
+        if (_diagConnectMs > 100) {
+          console.log(JSON.stringify({
+            scope: 'diag-connect-acquire',
+            connectionId,
+            queryId: _diagQueryId,
+            sql: _diagSqlPreview,
+            caller: _diagCaller,
+            connectWaitMs: _diagConnectMs,
+            activeConnections: _activeConnections.size,
+            poolId: pool._diagPoolId,
+          }));
+        }
+
+        const _diagQueryStart = Date.now();
 
         let result;
+        let _diagExecMs = 0;
         try {
           result = await client.query(sqlText, params);
         } finally {
-          const _diagHoldMs = Date.now() - _diagHoldStart;
+          _diagExecMs = Date.now() - _diagQueryStart;
+          const _diagHoldMs = _diagExecMs;
+
           client.release();
           _poolStats.currentConcurrentConnections--;
+          _activeConnections.delete(connectionId);
 
-          // Log any connection held > 500ms — these are the ones causing queue buildup
-          if (_diagHoldMs > 500) {
+          _logConnectionEvent({
+            type: 'RELEASE',
+            connectionId,
+            queryId: _diagQueryId,
+            holdMs: _diagHoldMs,
+            execMs: _diagExecMs,
+            activeConnections: _activeConnections.size,
+          });
+
+          if (_diagHoldMs > 200) {
             console.log(JSON.stringify({
-              scope: 'diag-connection-held-long',
+              scope: 'diag-connection-held',
+              connectionId,
               queryId: _diagQueryId,
               sql: _diagSqlPreview,
+              caller: _diagCaller,
               connectWaitMs: _diagConnectMs,
               holdMs: _diagHoldMs,
-              execMs: Date.now() - _diagQueryStart,
-              concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
+              execMs: _diagExecMs,
+              activeConnectionsAfter: _activeConnections.size,
               poolId: pool._diagPoolId,
-              note: 'Connection was held for >500ms — this blocks all other queued queries (max=1 pool)',
             }));
           }
         }
 
-        const _diagExecMs = Date.now() - _diagQueryStart;
         const _diagTotalMs = Date.now() - _diagT0;
-
         _poolStats.queriesCompleted++;
         _poolStats.totalQueryExecMs += _diagExecMs;
         _poolStats.totalQueryWaitMs += _diagConnectMs;
 
-        // Log slow queries (>500ms total) with SEPARATED wait vs exec
-        if (_diagTotalMs > 500) {
+        if (_diagTotalMs > 300) {
           console.log(JSON.stringify({
             scope: 'diag-slow-query',
             queryId: _diagQueryId,
+            connectionId,
             sql: _diagSqlPreview,
-            connectWaitMs: _diagConnectMs,  // ← time waiting for connection slot
-            execMs: _diagExecMs,             // ← time the SQL actually took
+            caller: _diagCaller,
+            connectWaitMs: _diagConnectMs,
+            execMs: _diagExecMs,
             totalMs: _diagTotalMs,
-            concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
             attempt,
             poolId: pool._diagPoolId,
-            note: _diagConnectMs > 1000
-              ? 'SLOW CONNECT — query was QUEUED waiting for a free connection slot (pool bottleneck)'
-              : 'SLOW EXEC — the SQL query itself is slow (not a connection issue)',
           }));
         }
 
@@ -1470,10 +1591,11 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
             scope: 'diag-query-failed',
             queryId: _diagQueryId,
             sql: _diagSqlPreview,
+            caller: _diagCaller,
             error: error?.message,
             totalMs: Date.now() - _diagT0,
             attempts: attempt + 1,
-            concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
+            activeConnections: _activeConnections.size,
           }));
           throw error;
         }
@@ -7177,13 +7299,16 @@ export default {
               ? Math.round(_poolStats.totalQueryWaitMs / _poolStats.queriesCompleted)
               : 0,
           },
+          activeConnections: Array.from(_activeConnections.entries()).map(([id, info]) => ({
+            connectionId: id,
+            heldForMs: Date.now() - info.acquiredAt,
+            sql: info.sql,
+            caller: info.caller,
+            queryId: info.queryId,
+            leaked: info.leaked || false,
+          })),
+          connectionHistory: _connectionHistory.slice(-50),
           poolConfig: { max: 1, idleTimeoutMillis: 0, connectionTimeoutMillis: 8000 },
-          interpretation: {
-            maxConcurrentQueries: 'Number of queryDb() calls in-flight (DEMAND). >1 means queries were QUEUED.',
-            maxConcurrentConnections: 'Actual connections held simultaneously (CAPACITY). Should be <= max(=1).',
-            avgConnectWaitMs: 'Average time waiting for a connection slot. >1000ms indicates pool bottleneck.',
-            avgQueryExecMs: 'Average time the SQL itself took (excluding connection wait).',
-          },
         }, {}, env);
       }
 
@@ -8062,47 +8187,103 @@ export default {
       note: 'All jobs dispatched via ctx.waitUntil. Per-job timings will be logged as they complete.',
     }));
 
-    // ── DIAG: Schedule a pool stats dump 30s later (after jobs should have finished) ──
-    // This captures the FINAL state of pool stats after all cron jobs complete.
-    // NOTE: This itself uses ctx.waitUntil, so the Worker stays alive to log this.
-    ctx.waitUntil(new Promise(resolve => {
-      setTimeout(() => {
-        console.log(JSON.stringify({
-          scope: 'diag-pool-stats-final',
-          cron_expr: cronExpr,
-          timestamp: new Date().toISOString(),
-          poolStats: {
-            poolsCreated: _poolStats.poolsCreated,
-            poolsReused: _poolStats.poolsReused,
-            queriesStarted: _poolStats.queriesStarted,
-            queriesCompleted: _poolStats.queriesCompleted,
-            queriesFailed: _poolStats.queriesFailed,
-            queriesTimedOut: _poolStats.queriesTimedOut,
-            currentConcurrentQueries: _poolStats.currentConcurrentQueries,
-            maxConcurrentQueries: _poolStats.maxConcurrentQueries,
-            currentConcurrentConnections: _poolStats.currentConcurrentConnections,
-            maxConcurrentConnections: _poolStats.maxConcurrentConnections,
-            totalQueryExecMs: _poolStats.totalQueryExecMs,
-            totalQueryWaitMs: _poolStats.totalQueryWaitMs,
-            avgQueryExecMs: _poolStats.queriesCompleted > 0
-              ? Math.round(_poolStats.totalQueryExecMs / _poolStats.queriesCompleted)
-              : 0,
-            avgConnectWaitMs: _poolStats.queriesCompleted > 0
-              ? Math.round(_poolStats.totalQueryWaitMs / _poolStats.queriesCompleted)
-              : 0,
-            jobTimings: _diagJobTimings,
-          },
-          interpretation: {
-            maxConcurrentQueries: `${_poolStats.maxConcurrentQueries} queryDb() calls were in-flight simultaneously (DEMAND)`,
-            maxConcurrentConnections: `${_poolStats.maxConcurrentConnections} actual connections held simultaneously (should be <= pool max=1)`,
-            avgConnectWaitMs: _poolStats.queriesCompleted > 0
-              ? `${Math.round(_poolStats.totalQueryWaitMs / _poolStats.queriesCompleted)}ms average wait for connection slot`
-              : 'no data',
-          },
-        }));
-        resolve();
-      }, 30000); // 30s — after the 25s withTimeout would have fired
-    }));
+    // ── DIAG: Schedule leak check + pool stats dump at 10s, 20s, 30s ──
+    // Multiple checks so we can see if connections are being held across
+    // the entire cron tick lifetime.
+    const _leakCheckTimes = [10000, 20000, 30000];
+    for (const checkAt of _leakCheckTimes) {
+      ctx.waitUntil(new Promise(resolve => {
+        setTimeout(() => {
+          // ── LEAK DETECTOR: Check for unreleased connections ──
+          const leakedConnections = [];
+          const heldConnections = [];
+          for (const [connId, info] of _activeConnections.entries()) {
+            const heldMs = Date.now() - info.acquiredAt;
+            if (info.leaked) {
+              leakedConnections.push({
+                connectionId: connId,
+                heldMs,
+                sql: info.sql?.substring(0, 60),
+                caller: info.caller,
+                queryId: info.queryId,
+              });
+            } else {
+              heldConnections.push({
+                connectionId: connId,
+                heldMs,
+                sql: info.sql?.substring(0, 60),
+                caller: info.caller,
+                queryId: info.queryId,
+              });
+            }
+          }
+
+          if (leakedConnections.length > 0 || heldConnections.length > 0) {
+            console.log(JSON.stringify({
+              scope: 'diag-leak-check',
+              check_at_ms: checkAt,
+              cron_expr: cronExpr,
+              timestamp: new Date().toISOString(),
+              leakedConnections: leakedConnections.length,
+              heldConnections: heldConnections.length,
+              leakDetails: leakedConnections,
+              heldDetails: heldConnections,
+              poolStats: {
+                queriesStarted: _poolStats.queriesStarted,
+                queriesCompleted: _poolStats.queriesCompleted,
+                queriesTimedOut: _poolStats.queriesTimedOut,
+                currentConcurrentQueries: _poolStats.currentConcurrentQueries,
+                currentConcurrentConnections: _poolStats.currentConcurrentConnections,
+                maxConcurrentConnections: _poolStats.maxConcurrentConnections,
+              },
+              note: leakedConnections.length > 0
+                ? `LEAK DETECTED: ${leakedConnections.length} connections acquired but NEVER released`
+                : heldConnections.length > 0
+                  ? `${heldConnections.length} connections still held (may be in-progress queries)`
+                  : 'All connections properly released',
+            }));
+          }
+
+          // Final dump at 30s
+          if (checkAt === 30000) {
+            console.log(JSON.stringify({
+              scope: 'diag-pool-stats-final',
+              cron_expr: cronExpr,
+              timestamp: new Date().toISOString(),
+              poolStats: {
+                poolsCreated: _poolStats.poolsCreated,
+                poolsReused: _poolStats.poolsReused,
+                queriesStarted: _poolStats.queriesStarted,
+                queriesCompleted: _poolStats.queriesCompleted,
+                queriesFailed: _poolStats.queriesFailed,
+                queriesTimedOut: _poolStats.queriesTimedOut,
+                currentConcurrentQueries: _poolStats.currentConcurrentQueries,
+                maxConcurrentQueries: _poolStats.maxConcurrentQueries,
+                currentConcurrentConnections: _poolStats.currentConcurrentConnections,
+                maxConcurrentConnections: _poolStats.maxConcurrentConnections,
+                totalQueryExecMs: _poolStats.totalQueryExecMs,
+                totalQueryWaitMs: _poolStats.totalQueryWaitMs,
+                avgQueryExecMs: _poolStats.queriesCompleted > 0
+                  ? Math.round(_poolStats.totalQueryExecMs / _poolStats.queriesCompleted)
+                  : 0,
+                avgConnectWaitMs: _poolStats.queriesCompleted > 0
+                  ? Math.round(_poolStats.totalQueryWaitMs / _poolStats.queriesCompleted)
+                  : 0,
+              },
+              finalLeakCheck: {
+                activeConnectionsRemaining: _activeConnections.size,
+                leakedConnections: leakedConnections.length,
+                heldConnections: heldConnections.length,
+                details: [...leakedConnections, ...heldConnections],
+              },
+              connectionHistory: _connectionHistory.slice(-50),
+              jobTimings: _diagJobTimings,
+            }));
+          }
+          resolve();
+        }, checkAt);
+      }));
+    }
   },
 };
 //#endregion
