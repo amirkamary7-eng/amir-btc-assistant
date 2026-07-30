@@ -1187,21 +1187,25 @@ function isAdminTelegramId(env, userId) {
 function createPool(env) {
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) return null;
-  // ── DIAG: log pool creation with config ──
+  // ── ROOT-CAUSE FIX: Pool max increased from 1 to 5 ──
+  // With max=1, any stuck query (e.g., DDL with ACCESS EXCLUSIVE lock)
+  // blocks ALL other queries from the same pool. They queue and timeout
+  // at 8s, then the Promise.race leak permanently saturates the pool.
+  //
+  // With max=5, up to 5 queries can run concurrently. Even if one DDL
+  // query is stuck for 24s, 4 other queries can proceed. This eliminates
+  // the cascading timeout failure.
+  //
+  // Neon serverless supports many concurrent WebSocket connections.
+  // The previous max=1 was set to prevent "connection exhaustion" but
+  // it actually CAUSED exhaustion by leaking connections via Promise.race.
   const poolId = `pool_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   const pool = new Pool({
     connectionString: databaseUrl,
-    max: 1,
+    max: 5,
     idleTimeoutMillis: 0,
     connectionTimeoutMillis: 8000,
   });
-  console.log(JSON.stringify({
-    scope: 'diag-pool-created',
-    poolId,
-    config: { max: 1, idleTimeoutMillis: 0, connectionTimeoutMillis: 8000 },
-    note: 'Pool created with max=1 (only 1 concurrent query allowed)',
-  }));
-  // Store poolId on the pool for tracing
   try { pool._diagPoolId = poolId; } catch {}
   return pool;
 }
@@ -1409,9 +1413,6 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const timeoutMs = 8000;
-        const _diagConnectStart = Date.now();
-
         // ── FALLBACK: If pool.connect is not available (test mock), use pool.query ──
         if (typeof pool.connect !== 'function') {
           const result = await pool.query(sqlText, params);
@@ -1419,170 +1420,26 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
           return result;
         }
 
-        // ── LEAK DETECTION: Track if pool.connect resolves AFTER timeout ──
-        let _timeoutFired = false;
+        // ── ROOT-CAUSE FIX: Use pool.connect() directly WITHOUT Promise.race ──
+        // The pool already has connectionTimeoutMillis=8000 which handles queue
+        // timeout INTERNALLY. When the pool's timeout fires, it removes the
+        // request from _pendingQueue and rejects — NO LEAK.
+        //
+        // The previous Promise.race pattern caused a CONNECTION LEAK:
+        // When our 8s setTimeout won the race, pool.connect() was still pending
+        // in the pool's _pendingQueue. When a connection later became available,
+        // the pool gave it to our abandoned request — but nobody was awaiting it,
+        // so the client was NEVER released. This leaked connections, causing
+        // the pool's _clients to exceed max, permanently saturating the pool.
+        //
+        // FIX: Let the pool handle its own timeout. On rejection, the pool
+        // internally cleans up the _pendingQueue entry. No leak possible.
+        const client = await pool.connect();
 
-        const connectPromise = pool.connect().then(client => {
-          if (_timeoutFired) {
-            const connectionId = `conn_${++_connectionCounter}`;
-            console.error(JSON.stringify({
-              scope: 'diag-LEAK-DETECTED',
-              connectionId,
-              queryId: _diagQueryId,
-              sql: _diagSqlPreview,
-              caller: _diagCaller,
-              poolId: pool._diagPoolId,
-              connectWaitMs: Date.now() - _diagConnectStart,
-              note: 'pool.connect() resolved AFTER Promise.race timeout already fired. This client will NEVER be released → CONNECTION LEAK',
-              activeConnections: _activeConnections.size,
-            }));
-            _activeConnections.set(connectionId, {
-              acquiredAt: Date.now(),
-              sql: _diagSqlPreview,
-              queryId: _diagQueryId,
-              caller: _diagCaller,
-              leaked: true,
-              poolId: pool._diagPoolId,
-            });
-            try { client.release(); } catch {}
-            return null;
-          }
-          return client;
-        });
+        const result = await client.query(sqlText, params);
+        client.release();
 
-        const client = await Promise.race([
-          connectPromise,
-          new Promise((_, reject) =>
-            setTimeout(() => {
-              _timeoutFired = true;
-              _poolStats.queriesTimedOut++;
-              const connectWaitMs = Date.now() - _diagConnectStart;
-              console.error(JSON.stringify({
-                scope: 'diag-connect-timeout',
-                queryId: _diagQueryId,
-                sql: _diagSqlPreview,
-                caller: _diagCaller,
-                connectWaitMs,
-                timeoutMs,
-                activeConnections: _activeConnections.size,
-                activeConnectionDetails: Array.from(_activeConnections.entries()).map(([id, info]) => ({
-                  connectionId: id,
-                  heldForMs: Date.now() - info.acquiredAt,
-                  sql: info.sql?.substring(0, 40),
-                  caller: info.caller,
-                  leaked: info.leaked || false,
-                })),
-                concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
-                poolId: pool._diagPoolId,
-                note: 'Promise.race timeout fired. pool.connect() is still PENDING — if it resolves later, that connection will LEAK.',
-              }));
-              reject(new Error(`Connection timeout after ${timeoutMs}ms: ${sqlText.substring(0, 60)}`));
-            }, timeoutMs)
-          ),
-        ]);
-
-        if (!client) {
-          throw new Error('Connection acquired after timeout — leaked');
-        }
-
-        const _diagConnectMs = Date.now() - _diagConnectStart;
-        const connectionId = `conn_${++_connectionCounter}`;
-
-        _poolStats.currentConcurrentConnections++;
-        if (_poolStats.currentConcurrentConnections > _poolStats.maxConcurrentConnections) {
-          _poolStats.maxConcurrentConnections = _poolStats.currentConcurrentConnections;
-        }
-        _activeConnections.set(connectionId, {
-          acquiredAt: Date.now(),
-          sql: _diagSqlPreview,
-          queryId: _diagQueryId,
-          caller: _diagCaller,
-          poolId: pool._diagPoolId,
-        });
-
-        _logConnectionEvent({
-          type: 'ACQUIRE',
-          connectionId,
-          queryId: _diagQueryId,
-          sql: _diagSqlPreview,
-          caller: _diagCaller,
-          connectWaitMs: _diagConnectMs,
-          poolId: pool._diagPoolId,
-          activeConnections: _activeConnections.size,
-        });
-
-        if (_diagConnectMs > 100) {
-          console.log(JSON.stringify({
-            scope: 'diag-connect-acquire',
-            connectionId,
-            queryId: _diagQueryId,
-            sql: _diagSqlPreview,
-            caller: _diagCaller,
-            connectWaitMs: _diagConnectMs,
-            activeConnections: _activeConnections.size,
-            poolId: pool._diagPoolId,
-          }));
-        }
-
-        const _diagQueryStart = Date.now();
-
-        let result;
-        let _diagExecMs = 0;
-        try {
-          result = await client.query(sqlText, params);
-        } finally {
-          _diagExecMs = Date.now() - _diagQueryStart;
-          const _diagHoldMs = _diagExecMs;
-
-          client.release();
-          _poolStats.currentConcurrentConnections--;
-          _activeConnections.delete(connectionId);
-
-          _logConnectionEvent({
-            type: 'RELEASE',
-            connectionId,
-            queryId: _diagQueryId,
-            holdMs: _diagHoldMs,
-            execMs: _diagExecMs,
-            activeConnections: _activeConnections.size,
-          });
-
-          if (_diagHoldMs > 200) {
-            console.log(JSON.stringify({
-              scope: 'diag-connection-held',
-              connectionId,
-              queryId: _diagQueryId,
-              sql: _diagSqlPreview,
-              caller: _diagCaller,
-              connectWaitMs: _diagConnectMs,
-              holdMs: _diagHoldMs,
-              execMs: _diagExecMs,
-              activeConnectionsAfter: _activeConnections.size,
-              poolId: pool._diagPoolId,
-            }));
-          }
-        }
-
-        const _diagTotalMs = Date.now() - _diagT0;
         _poolStats.queriesCompleted++;
-        _poolStats.totalQueryExecMs += _diagExecMs;
-        _poolStats.totalQueryWaitMs += _diagConnectMs;
-
-        if (_diagTotalMs > 300) {
-          console.log(JSON.stringify({
-            scope: 'diag-slow-query',
-            queryId: _diagQueryId,
-            connectionId,
-            sql: _diagSqlPreview,
-            caller: _diagCaller,
-            connectWaitMs: _diagConnectMs,
-            execMs: _diagExecMs,
-            totalMs: _diagTotalMs,
-            attempt,
-            poolId: pool._diagPoolId,
-          }));
-        }
-
         return result;
       } catch (error) {
         if (attempt === retries) {
@@ -5733,7 +5590,15 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
     // KV dedup is not needed here because the DB CAS is authoritative.
     if (calendarReminderRepo) {
       try {
-        await calendarReminderRepo.ensureSchema(env).catch(() => {});
+        // ROOT-CAUSE FIX: Only run ensureSchema on 15-min cron (not every minute).
+        // DDL queries (CREATE TABLE, ALTER TABLE) hold ACCESS EXCLUSIVE locks
+        // and can block the pool connection for 10-24 seconds when multiple
+        // isolates run them concurrently. The _schemaVerified flag is per-isolate,
+        // so every new isolate re-runs ALL DDL — causing lock contention.
+        // Now: only run on 15-min cron, which is enough for schema changes.
+        if (isEvery15Min) {
+          await calendarReminderRepo.ensureSchema(env).catch(() => {});
+        }
         const pendingReminders = await calendarReminderRepo.listPending(env);
         let reminderStats = { dispatched: 0, skipped: 0, failed: 0 };
 
