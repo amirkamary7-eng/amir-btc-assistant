@@ -60,6 +60,9 @@ export function createWheelHandlers(deps) {
         },
       }, {}, env);
     } catch (error) {
+      // ROOT-CAUSE FIX: Log full stack trace for diagnosis
+      console.error('[WHEEL-STATUS] Error:', error?.message || String(error));
+      if (error?.stack) console.error('[WHEEL-STATUS] Stack:', error.stack);
       console.warn(safeError('wheel-status', error));
       return safeDbErrorResponse(error, {}, env);
     }

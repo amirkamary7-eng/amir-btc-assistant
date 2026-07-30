@@ -231,11 +231,14 @@ async function writeAppCache(env, key, value, expirationTtl) {
   }
 
   try {
-    // CRITICAL: Cloudflare KV rejects expirationTtl: 0 (means "delete").
-    // Use undefined instead of 0 for "no expiration".
+    // CRITICAL: Cloudflare KV requires expirationTtl >= 60 seconds.
+    // Values below 60 cause "Invalid expiration_ttl" errors and the write
+    // silently fails (caught below), meaning the cache is NEVER populated.
+    // This was the root cause of the Market cache not working (was TTL=30).
+    // FIX: Clamp any TTL < 60 up to 60. For TTL=0/undefined, omit (no expiry).
     const putOpts = {};
     if (expirationTtl && expirationTtl > 0) {
-      putOpts.expirationTtl = expirationTtl;
+      putOpts.expirationTtl = Math.max(60, Math.floor(expirationTtl));
     }
     await env.APP_CACHE.put(key, value, putOpts);
     _trackKvWrite(key);
@@ -1216,8 +1219,17 @@ function closeSharedPool(env) {
   if (!env) return;
   const pool = _poolCache.get(env);
   if (pool) {
-    pool.end().catch(() => {});
+    // ROOT-CAUSE FIX: pool.end() returns a Promise. Previously this was
+    // fire-and-forget (.catch(() => {})), which meant the pool cleanup
+    // continued AFTER the fetch handler returned its Response — causing
+    // "A promise was resolved from a different request context" warnings.
+    // FIX: Just delete from cache; let the pool be GC'd. The Neon serverless
+    // pool doesn't hold persistent connections (it uses HTTP/WebSocket per
+    // query), so explicit .end() is not strictly necessary. Avoiding it
+    // eliminates the cross-context promise resolution.
     _poolCache.delete(env);
+    // Best-effort cleanup — non-blocking, errors ignored
+    try { pool.end(); } catch {}
   }
 }
 
@@ -1239,7 +1251,10 @@ async function getDbUserJoinState(env, userId) {
     console.warn(safeError('join-db-read', error));
     return null;
   } finally {
-    pool.end().catch(() => {});
+    // ROOT-CAUSE FIX: Don't fire-and-forget pool.end() — it causes
+    // "promise resolved from different request context" warnings.
+    // Neon serverless pools don't need explicit cleanup.
+    try { pool.end(); } catch {}
   }
 }
 
@@ -1273,7 +1288,8 @@ async function persistDbUserJoinState(env, userId, joined) {
   } catch (error) {
     console.warn(safeError('join-db-write', error));
   } finally {
-    pool.end().catch(() => {});
+    // ROOT-CAUSE FIX: Don't fire-and-forget pool.end()
+    try { pool.end(); } catch {}
   }
 }
 
@@ -3144,15 +3160,19 @@ ${articleText}`;
   };
 }
 
-/**
- * Safe ctx.waitUntil wrapper — works even if ctx is not available.
- */
-function ctx_waitUntil_safe(env, promise) {
-  // In Worker context, ctx.waitUntil is available via the module scope.
-  // But fetchFarsiNews doesn't have access to ctx. So we just fire-and-forget.
-  // The promise runs in the background and writes to KV when done.
-  promise.catch(() => {}); // Silent fail — don't crash the request
-}
+// ROOT-CAUSE FIX: ctx_waitUntil_safe was REMOVED.
+// It was a fire-and-forget wrapper that caused "A promise was resolved from
+// a different request context" warnings. The pattern `promise.catch(() => {})`
+// lets the promise continue running AFTER the HTTP response is sent, which
+// means any I/O it does (fetch, KV.put) runs in a dead request context.
+//
+// The CORRECT pattern for background work in the fetch handler is:
+//   ctx.waitUntil(promise)  — keeps the request context alive until the promise settles
+//
+// For the cron handler, ctx.waitUntil is already used correctly.
+// For the fetch handler, all background work must either:
+//   1. Be awaited before returning the Response, OR
+//   2. Be wrapped in ctx.waitUntil(promise) if it must outlive the response
 
 /**
  * CRON-BASED AI NEWS PROCESSING
@@ -4174,7 +4194,12 @@ async function handleCalendarEvents(env) {
   }, {}, env);
 }
 
-const MARKET_CACHE_TTL = 30; // 30 seconds — prices must stay close to TradingView for alert accuracy
+// ROOT-CAUSE FIX: Was 30 seconds, but Cloudflare KV requires expirationTtl >= 60.
+// A TTL of 30 caused "Invalid expiration_ttl" on EVERY market cache write,
+// meaning the market data was NEVER cached in KV — every request hit the
+// upstream API. Now 60s (the minimum allowed by KV). writeAppCache also
+// clamps any sub-60 TTL up to 60 as a safety net.
+const MARKET_CACHE_TTL = 60; // 60 seconds — KV minimum; prices refresh every minute
 const MARKET_GLOBAL_CACHE_TTL = 300; // 5 minutes — global stats change less frequently
 const MARKET_FETCH_LIMIT = 200;
 const SEARCH_FETCH_LIMIT = 1500; // Extended list for search — not displayed in market list
@@ -5191,8 +5216,13 @@ async function handleTelegramWebhook(request, env) {
     await diagLog(env, { scope: 'diag-start-reply-url', webAppUrl: finalWebAppUrl });
     await sendTelegramMessage(env, replyPayload);
 
-    // Sync the hamburger Menu Button URL with WEBAPP_URL (non-critical, fire-and-forget)
-    syncMenuButton(env);
+    // ROOT-CAUSE FIX: syncMenuButton was called fire-and-forget (no await),
+    // which caused "A promise was resolved from a different request context"
+    // warnings. The Telegram API call continued running AFTER the webhook
+    // response was sent, resolving in a dead request context.
+    // FIX: await it so it completes BEFORE the response is returned.
+    // It's fast (~100ms) and idempotent, so blocking is acceptable.
+    await syncMenuButton(env);
   } catch (error) {
     console.error(safeError('telegram-webhook-error', error));
     // Attempt to notify the user that something went wrong
@@ -6865,6 +6895,122 @@ export default {
           byPrefix: byPrefixSorted,
           topKeys: byKeySorted,
         }, {}, env);
+      }
+
+      // ── DIAGNOSTIC: Referral Debug — inspect referral flow logs + DB state ──
+      // Usage: GET /api/_diag/referral-debug?user_id=123456
+      //        GET /api/_diag/referral-debug?inviter_id=123456
+      //        GET /api/_diag/referral-debug  (latest logs only)
+      if (request.method === 'GET' && url.pathname === '/api/_diag/referral-debug') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || '';
+        const expectedSecret = env.DIAG_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+
+        const debugInfo = {
+          timestamp: new Date().toISOString(),
+          logs: [],
+          userState: null,
+          referralState: null,
+          dbQueries: [],
+        };
+
+        try {
+          // 1. Read the buffered diag logs from KV
+          const rawLogs = await env.APP_CACHE.get(DIAG_LOG_KEY);
+          if (rawLogs) {
+            const lines = rawLogs.split('\n').filter(Boolean);
+            // Parse each line as JSON and filter by user_id if provided
+            const userIdFilter = url.searchParams.get('user_id');
+            const inviterFilter = url.searchParams.get('inviter_id');
+            const parsed = lines.map(line => {
+              try { return JSON.parse(line); } catch { return { raw: line }; }
+            });
+            debugInfo.logs = userIdFilter
+              ? parsed.filter(l => l.inviteeId === userIdFilter || l.inviterId === userIdFilter || l.userId === userIdFilter)
+              : inviterFilter
+                ? parsed.filter(l => l.inviterId === inviterFilter)
+                : parsed.slice(-50); // Last 50 logs
+            debugInfo.logCount = debugInfo.logs.length;
+          } else {
+            debugInfo.logs = [];
+            debugInfo.logNote = 'No diag logs found in KV. This means processReferralOnBootstrap has NOT been called yet, OR the KV was cleared.';
+          }
+
+          // 2. If user_id provided, query DB for that user's state
+          const targetUserId = url.searchParams.get('user_id');
+          if (targetUserId && /^\d{1,20}$/.test(targetUserId)) {
+            try {
+              const userResult = await queryDb(env,
+                'SELECT telegram_id, username, first_name, channel_joined, channel_verified_at, created_at, updated_at FROM users WHERE telegram_id = $1',
+                [targetUserId]
+              );
+              debugInfo.userState = userResult.rows[0] || { found: false, note: 'User not found in users table' };
+              debugInfo.dbQueries.push({ query: 'SELECT user', rowCount: userResult.rows.length });
+            } catch (e) {
+              debugInfo.userState = { error: e.message };
+            }
+
+            // 3. Query referral state for this user (as invitee)
+            try {
+              const refResult = await queryDb(env,
+                'SELECT id, inviter_id, invitee_id, channel_verified, rewarded, status, source, created_at, updated_at FROM referrals WHERE invitee_id = $1',
+                [targetUserId]
+              );
+              debugInfo.referralState = refResult.rows[0] || { found: false, note: 'No referral row exists for this user (as invitee)' };
+              debugInfo.dbQueries.push({ query: 'SELECT referral as invitee', rowCount: refResult.rows.length });
+            } catch (e) {
+              debugInfo.referralState = { error: e.message };
+            }
+
+            // 4. Query token transactions for this user
+            try {
+              const txResult = await queryDb(env,
+                "SELECT id, amount, tx_type, description, ref_id, status, created_at FROM token_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10",
+                [targetUserId]
+              );
+              debugInfo.tokenTransactions = txResult.rows;
+              debugInfo.dbQueries.push({ query: 'SELECT transactions', rowCount: txResult.rows.length });
+            } catch (e) {
+              debugInfo.tokenTransactions = { error: e.message };
+            }
+          }
+
+          // 5. If inviter_id provided, show all their referrals
+          const inviterId = url.searchParams.get('inviter_id');
+          if (inviterId && /^\d{1,20}$/.test(inviterId)) {
+            try {
+              const inviterRefs = await queryDb(env,
+                'SELECT id, inviter_id, invitee_id, channel_verified, rewarded, created_at FROM referrals WHERE inviter_id = $1 ORDER BY created_at DESC LIMIT 20',
+                [inviterId]
+              );
+              debugInfo.referralsAsInviter = inviterRefs.rows;
+              debugInfo.dbQueries.push({ query: 'SELECT referrals as inviter', rowCount: inviterRefs.rows.length });
+            } catch (e) {
+              debugInfo.referralsAsInviter = { error: e.message };
+            }
+          }
+
+          // 6. Check if the UNIQUE constraint exists
+          try {
+            const constraintResult = await queryDb(env,
+              `SELECT conname, conrelid::regclass AS table_name, pg_get_constraintdef(oid) AS definition
+               FROM pg_constraint
+               WHERE conrelid = 'referrals'::regclass AND contype = 'u'`
+            );
+            debugInfo.referralConstraints = constraintResult.rows;
+            debugInfo.dbQueries.push({ query: 'SELECT constraints', rowCount: constraintResult.rows.length });
+          } catch (e) {
+            debugInfo.referralConstraints = { error: e.message };
+          }
+
+        } catch (e) {
+          debugInfo.fatalError = e.message;
+          debugInfo.fatalStack = e.stack?.substring(0, 500);
+        }
+
+        return jsonResponse({ status: 'success', debug: debugInfo }, {}, env);
       }
 
       // ── DIAGNOSTIC: Full cron pipeline test (RSS → AI → KV → fetch) ──

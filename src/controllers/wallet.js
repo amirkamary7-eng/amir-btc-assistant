@@ -36,6 +36,9 @@ export function createWalletHandlers(deps) {
       const walletState = await walletRepo.getWalletState(env, authState.user.id);
       return jsonResponse({ status: 'success', ...walletState }, {}, env);
     } catch (error) {
+      // ROOT-CAUSE FIX: Log full stack trace for diagnosis
+      console.error('[WALLET] Error:', error?.message || String(error));
+      if (error?.stack) console.error('[WALLET] Stack:', error.stack);
       console.warn(safeError('get-wallet', error));
       return safeDbErrorResponse(error, {}, env);
     }
