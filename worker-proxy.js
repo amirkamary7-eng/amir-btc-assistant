@@ -7696,24 +7696,49 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
+    // ── TEMPORARY DIAGNOSTIC LOGGING (for root-cause investigation) ──
+    // Tracks per-job timing to identify which scheduled job exceeds 25s
+    // and which job triggers "Cannot perform I/O on behalf of a different request".
+    // REMOVE after root cause is confirmed.
+    const _diagCronStart = Date.now();
+    const _diagJobTimings = {};
+    const _diagLogJob = (jobName, startTime, result) => {
+      const elapsed = Date.now() - startTime;
+      _diagJobTimings[jobName] = {
+        elapsed_ms: elapsed,
+        timed_out: result?.__timeout === true,
+        error: result?.__cronError ? result.error : null,
+        finished_at: new Date().toISOString(),
+      };
+      console.log(JSON.stringify({
+        scope: 'diag-cron-job-timing',
+        job: jobName,
+        elapsed_ms: elapsed,
+        timed_out: result?.__timeout === true,
+        error: result?.__cronError ? result.error : null,
+        cron_expr: controller.cron,
+      }));
+    };
+
     // ── ROOT-CAUSE FIX: withTimeout now catches BOTH timeout AND rejection ──
-    // Previously it used Promise.race which only catches timeout. If the inner
-    // promise REJECTED, the rejection propagated as an unhandled promise rejection
-    // → Cloudflare logged a bare "error" with no message/stack.
-    // Now we attach a .catch() so rejections are logged with full detail.
     const withTimeout = (promise, ms = 25000) => {
       const tagged = promise.catch((e) => {
-        // Log the REAL error — never swallow it silently
         console.error('[CRON] Task failed:', e?.message || String(e));
         if (e?.stack) console.error('[CRON] Stack:', e.stack.substring(0, 500));
         return { __cronError: true, error: e?.message || String(e) };
       });
       return Promise.race([
         tagged,
-        new Promise((resolve) => setTimeout(() => {
-          console.warn('[CRON] Scheduled task timeout after', ms, 'ms');
-          resolve({ __timeout: true, ms });
-        }, ms)),
+        new Promise((resolve) => {
+          const timerId = setTimeout(() => {
+            console.warn('[CRON] Scheduled task timeout after', ms, 'ms');
+            resolve({ __timeout: true, ms });
+          }, ms);
+          // Allow the timer to be unref'd so it doesn't keep the process alive
+          if (typeof timerId === 'object' && timerId && typeof timerId.unref === 'function') {
+            timerId.unref();
+          }
+        }),
       ]);
     };
 
@@ -7721,51 +7746,61 @@ export default {
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
+    // ── DIAG: wrap each job with timing ──
+    const diagWrap = (jobName, promise, ms) => {
+      const start = Date.now();
+      const wrapped = withTimeout(promise, ms);
+      wrapped.then(result => _diagLogJob(jobName, start, result)).catch(() => {});
+      return wrapped;
+    };
+
     // PRIMARY: Price alert checker — runs on every tick.
-    ctx.waitUntil(withTimeout(runScheduledAlertsBaseline(controller, env)));
+    ctx.waitUntil(diagWrap('runScheduledAlertsBaseline', runScheduledAlertsBaseline(controller, env)));
 
     // Process notification queue on every tick.
     if (notificationPlatformRepo?.processQueue) {
-      ctx.waitUntil(withTimeout(
+      ctx.waitUntil(diagWrap('notificationQueue',
         notificationPlatformRepo.processQueue(env, sendTelegramMessage).catch((e) => {
           console.warn('Notification queue processing failed:', e?.message);
         })
       ));
     }
 
-    // Refresh CMC Market Overview — ONLY on 15-minute ticks (was running every minute!)
+    // Refresh CMC Market Overview — ONLY on 15-minute ticks
     if (isEvery15Min && env.CMC_API_KEY) {
-      ctx.waitUntil(withTimeout(marketOverviewSvc.refreshOverview(env)));
+      ctx.waitUntil(diagWrap('marketOverviewRefresh', marketOverviewSvc.refreshOverview(env)));
     }
 
-    // ROOT CAUSE FIX (R-2.6 + 3.5): Retry failed referral + wheel rewards
-    // every 15 minutes. Picks up rewards where processing failed (DB error,
-    // kill switch, etc.) and retries. Idempotent — UNIQUE constraint prevents
-    // double-credit even if this runs concurrently with a user request.
     if (isEvery15Min) {
-      ctx.waitUntil(withTimeout(retryFailedReferralRewards(env)));
-      ctx.waitUntil(withTimeout(retryFailedWheelRewards(env)));
+      ctx.waitUntil(diagWrap('retryFailedReferralRewards', retryFailedReferralRewards(env)));
+      ctx.waitUntil(diagWrap('retryFailedWheelRewards', retryFailedWheelRewards(env)));
     }
 
     // Check for upcoming high-impact calendar events — every tick
-    ctx.waitUntil(withTimeout(runCalendarAlertsCheck(env, { isEvery15Min })));
+    ctx.waitUntil(diagWrap('runCalendarAlertsCheck', runCalendarAlertsCheck(env, { isEvery15Min })));
 
     // ── AI NEWS: Background processing — ONLY on every-minute ticks ──
-    // Runs every 1 minute. Fetches RSS, caches articles, processes AI summaries.
-    // Skip-if-unchanged in writeAppCache prevents redundant KV writes
-    // when articles haven't changed since last cycle.
     if (isEveryMinute) {
-      ctx.waitUntil(withTimeout(processNewsAIBatch(env), 25000));
+      ctx.waitUntil(diagWrap('processNewsAIBatch', processNewsAIBatch(env), 25000));
     }
 
     // ── TELEGRAM PUBLISHER: process queue — every tick ──
     if (publisherHandlers?.processPublisherQueue) {
-      ctx.waitUntil(withTimeout(
+      ctx.waitUntil(diagWrap('processPublisherQueue',
         publisherHandlers.processPublisherQueue(env, { maxItems: 8 }).catch((e) => {
           console.warn('Publisher queue processing failed:', e?.message);
         })
       , 25000));
     }
+
+    // ── DIAG: Log total scheduled handler setup time (not execution time) ──
+    console.log(JSON.stringify({
+      scope: 'diag-cron-scheduled-handler-dispatched',
+      cron_expr: cronExpr,
+      dispatch_setup_ms: Date.now() - _diagCronStart,
+      jobs_dispatched: Object.keys(_diagJobTimings).length,
+      note: 'All jobs dispatched via ctx.waitUntil. Per-job timings will be logged as they complete.',
+    }));
   },
 };
 //#endregion
