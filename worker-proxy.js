@@ -6231,11 +6231,20 @@ async function runScheduledAlertsBaseline(controller, env) {
       ...resultPayload,
       finished: true,
       duration_ms: Date.now() - t0,
-      // STAGE-BY-STAGE LATENCY for performance monitoring:
-      //   db_query_ms: time to SELECT active alerts from PostgreSQL
-      //   price_fetch_total_ms: time to fetch prices for all unique symbols
-      //   evaluation_ms: time to evaluate all alerts + trigger notifications
-      //   total_ms: cron tick total (db + price_fetch + evaluation + delivery)
+      // ── DIAG: Query count breakdown ──
+      query_count_estimate: {
+        listActiveForCron: 1,  // initial SELECT
+        updateLastChecked_per_alert: 1,  // per alert (always)
+        markTriggered_per_triggered: resultPayload.triggered_count,  // per triggered alert
+        getUserChannelPreference_per_triggered: resultPayload.triggered_count,  // per triggered
+        insertNotification_per_triggered: resultPayload.triggered_count,  // per triggered (if mini_app)
+        insertQueue_per_failed_tg: resultPayload.delivery_failures,  // per failed TG
+        total_estimated: 1 + resultPayload.checked_count + (resultPayload.triggered_count * 3) + resultPayload.delivery_failures,
+      },
+      batch_opportunity: {
+        updateLastChecked: `${resultPayload.checked_count} individual UPDATEs → 1 bulk UPDATE with CASE WHEN`,
+        estimated_savings_ms: resultPayload.checked_count * 50,  // ~50ms per query saved
+      },
       phase_latency: {
         db_query_start: t0,
         db_query_end: _tDbEnd || null,
@@ -7903,11 +7912,46 @@ export default {
 
   async scheduled(controller, env, ctx) {
     // ── TEMPORARY DIAGNOSTIC LOGGING (for root-cause investigation) ──
-    // Tracks per-job timing to identify which scheduled job exceeds 25s
-    // and which job triggers "Cannot perform I/O on behalf of a different request".
-    // REMOVE after root cause is confirmed.
     const _diagCronStart = Date.now();
     const _diagJobTimings = {};
+
+    // ── KEY DIAG: Track env object identity to detect multiple pools ──
+    // If two scheduled() calls (from * * * * * and */15 * * * *) run
+    // concurrently on the same isolate with DIFFERENT env objects,
+    // getSharedPool creates TWO pools (each max=1), allowing 2 concurrent
+    // connections. This would explain maxConcurrentConnections=2.
+    if (!global._diagEnvRegistry) {
+      global._diagEnvRegistry = new WeakMap();
+    }
+    let envInfo = global._diagEnvRegistry.get(env);
+    if (!envInfo) {
+      envInfo = {
+        envId: `env_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        firstSeen: new Date().toISOString(),
+        scheduledCalls: 0,
+      };
+      global._diagEnvRegistry.set(env, envInfo);
+    }
+    envInfo.scheduledCalls++;
+    const pool = _poolCache.has(env) ? 'REUSED' : 'NEW';
+    console.log(JSON.stringify({
+      scope: 'diag-scheduled-env-identity',
+      cron_expr: controller.cron,
+      envId: envInfo.envId,
+      envScheduledCalls: envInfo.scheduledCalls,
+      poolStatus: pool,
+      currentPoolsInCache: _poolCache ? 'WeakMap (cannot count)' : 'none',
+      poolStats_snapshot: {
+        poolsCreated: _poolStats.poolsCreated,
+        poolsReused: _poolStats.poolsReused,
+        maxConcurrentConnections: _poolStats.maxConcurrentConnections,
+        maxConcurrentQueries: _poolStats.maxConcurrentQueries,
+      },
+      note: pool === 'NEW'
+        ? 'NEW pool will be created for this env — if another scheduled() runs concurrently with a DIFFERENT env, TWO pools exist'
+        : 'Pool already exists for this env — sharing with previous scheduled() call',
+    }));
+
     const _diagLogJob = (jobName, startTime, result) => {
       const elapsed = Date.now() - startTime;
       _diagJobTimings[jobName] = {
