@@ -1466,6 +1466,59 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       ]);
     } catch { /* notification failure should not break reward */ }
   }
+
+  // ── NEW: Direct Telegram message to inviter with reward details + buttons ──
+  // This is SEPARATE from the notification platform — it's a rich Telegram
+  // message with inline keyboard buttons, sent ONLY when the reward is
+  // actually credited (result.idempotent === false).
+  // The notification platform handles in-app + simple Telegram alerts;
+  // this message provides the premium UX the product requires:
+  //   🎉 تبریک! 👤 کاربر جدید... 🎁 +3 Token 💎 موجودی: XX
+  //   [👥 مشاهده رفرال‌ها] [🔗 لینک دعوت من]
+  if (result && !result.idempotent) {
+    try {
+      const newBalance = result.newBalance || 0;
+      const botUsername = String(env.BOT_USERNAME || '');
+      // Build the web_app URL for the referral center button
+      const webAppUrl = resolveWebAppUrl(env);
+      const referralCenterUrl = webAppUrl ? `${webAppUrl}?startapp=referral_center` : null;
+      const myReferralLink = botUsername ? `https://t.me/${botUsername}?start=ref_${inviterId}` : null;
+
+      const messageText =
+        `🎉 تبریک!\n\n` +
+        `👤 یک کاربر جدید با لینک دعوت شما وارد AMIRBTC Assistant شد.\n\n` +
+        `🎁 پاداش شما: +${amount} Token\n` +
+        `💎 موجودی جدید شما: ${newBalance} Token\n\n` +
+        `از دعوت دوستان خود، توکن بیشتری دریافت کنید.`;
+
+      // Build inline keyboard with two buttons
+      const inlineKeyboard = [];
+      if (referralCenterUrl) {
+        inlineKeyboard.push([{
+          text: '👥 مشاهده رفرال‌ها',
+          web_app: { url: referralCenterUrl },
+        }]);
+      }
+      if (myReferralLink) {
+        inlineKeyboard.push([{
+          text: '🔗 لینک دعوت من',
+          url: myReferralLink,
+        }]);
+      }
+
+      await sendTelegramMessage(env, {
+        chat_id: String(inviterId),
+        text: messageText,
+        parse_mode: 'HTML',
+        reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined,
+      });
+      await diagLog(env, { scope: 'diag-referral-reward-message-SENT', inviterId, inviteeId, amount, newBalance });
+    } catch (msgErr) {
+      // Non-fatal — the reward was credited, just the message failed
+      console.warn('[REFERRAL] Reward message send failed (non-fatal):', msgErr?.message);
+      await diagLog(env, { scope: 'diag-referral-reward-message-FAILED', error: msgErr?.message });
+    }
+  }
   } catch (err) {
     await diagLog(env, { scope: 'diag-creditReferralWithReward-ERROR', error: err?.message, stack: err?.stack });
     throw err;
@@ -1706,6 +1759,28 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     return null;
   }
   await diagLog(env, { scope: 'diag-referral-STEP2-VALID', normalizedReferrerId, inviteeId });
+
+  // ── ANTI-ABUSE: Check 15-day referral cooldown for deleted accounts ──
+  // If this user previously deleted their account, they are in a 15-day
+  // cooldown during which they CANNOT generate a new referral reward.
+  // They can still use the app — only the referral is blocked.
+  // This prevents abuse: delete → re-register with self-referral → farm rewards.
+  if (typeof userRepo?.checkReferralCooldown === 'function') {
+    const cooldown = await userRepo.checkReferralCooldown(env, inviteeId);
+    if (cooldown.inCooldown) {
+      await diagLog(env, {
+        scope: 'diag-referral-STEP2b-COOLDOWN-REJECTED',
+        inviteeId,
+        reason: cooldown.reason,
+        cooldownUntil: cooldown.cooldownUntil,
+        deletedAt: cooldown.deletedAt,
+        note: 'User is in 15-day referral cooldown after account deletion. Referral REJECTED. User can still use the app.'
+      });
+      console.log(`[REFERRAL] Rejected — ${inviteeId} in cooldown until ${cooldown.cooldownUntil}`);
+      return { referral_id: null, rejected: true, reason: cooldown.reason, cooldownUntil: cooldown.cooldownUntil };
+    }
+    await diagLog(env, { scope: 'diag-referral-STEP2b-COOLDOWN-PASS', inviteeId, note: 'Not in cooldown — proceeding' });
+  }
 
   // ── ROOT-CAUSE FIX: `isNewUser` gate REMOVED ──
   // The "first inviter wins" rule (existing referral check + ON CONFLICT)

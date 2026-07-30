@@ -232,6 +232,12 @@ export function createUserRepository(deps) {
    *      and have the referral registered (the old referral row must be gone
    *      so the "first inviter wins" check doesn't block the new referral).
    *
+   * ANTI-ABUSE: Before deleting, records the user in a `deleted_users`
+   * cooldown table with a 15-day cooldown. If the same Telegram ID re-registers
+   * within 15 days, they CAN use the app but CANNOT generate a new referral
+   * reward. This prevents abuse where a user deletes + re-registers repeatedly
+   * to farm referral rewards for themselves.
+   *
    * Cascade order (child → parent to avoid FK violations):
    *   1. referrals (as invitee AND as inviter)
    *   2. token_transactions
@@ -253,22 +259,56 @@ export function createUserRepository(deps) {
     const uid = String(userId);
     const summary = { userId: uid, tables: {}, errors: [] };
 
+    // ── ANTI-ABUSE: Record in deleted_users cooldown table BEFORE cascade ──
+    // This must happen BEFORE the user row is deleted, so we can look up
+    // their existing referral data (to store the referral_hash).
+    try {
+      // Get the user's existing referral (if any) to store the inviter
+      const existingRef = await queryDb(env,
+        'SELECT inviter_id FROM referrals WHERE invitee_id = $1 LIMIT 1',
+        [uid]);
+      const previousInviterId = existingRef.rows[0]?.inviter_id || null;
+
+      // Create the deleted_users table if it doesn't exist (idempotent)
+      await queryDb(env, `
+        CREATE TABLE IF NOT EXISTS deleted_users (
+          id SERIAL PRIMARY KEY,
+          telegram_id VARCHAR(64) NOT NULL,
+          previous_inviter_id VARCHAR(64),
+          deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
+        )
+      `);
+      // Insert the cooldown record (ON CONFLICT updates cooldown if already exists)
+      await queryDb(env, `
+        INSERT INTO deleted_users (telegram_id, previous_inviter_id, deleted_at, cooldown_until)
+        VALUES ($1, $2, NOW(), NOW() + INTERVAL '15 days')
+        ON CONFLICT (telegram_id) DO UPDATE
+        SET deleted_at = NOW(), cooldown_until = NOW() + INTERVAL '15 days'
+      `, [uid, previousInviterId]);
+      summary.cooldownRecorded = true;
+      console.log('[DELETE-ACCOUNT] Cooldown recorded for', uid, 'until', new Date(Date.now() + 15*24*60*60*1000).toISOString());
+    } catch (e) {
+      summary.cooldownRecorded = false;
+      summary.cooldownError = e?.message;
+      console.warn('[DELETE-ACCOUNT] Failed to record cooldown (non-fatal):', e?.message);
+    }
+
     // Helper: run a DELETE and record rowCount
     const cascadeDelete = async (tableName, sql, params) => {
       try {
         const result = await queryDb(env, sql, params);
         summary.tables[tableName] = result.rowCount || 0;
       } catch (e) {
-        // Table might not exist yet, or FK constraint — log and continue
         summary.tables[tableName] = -1;
         summary.errors.push({ table: tableName, error: e?.message });
       }
     };
 
-    // 1. referrals (as invitee — this is the critical one for re-registration)
+    // 1. referrals (as invitee)
     await cascadeDelete('referrals_as_invitee',
       'DELETE FROM referrals WHERE invitee_id = $1', [uid]);
-    // 1b. referrals (as inviter — remove their invite records)
+    // 1b. referrals (as inviter)
     await cascadeDelete('referrals_as_inviter',
       'DELETE FROM referrals WHERE inviter_id = $1', [uid]);
 
@@ -276,7 +316,7 @@ export function createUserRepository(deps) {
     await cascadeDelete('token_transactions',
       'DELETE FROM token_transactions WHERE user_id = $1', [uid]);
 
-    // 3. token_balances (may not exist — some setups use a single row per user)
+    // 3. token_balances
     await cascadeDelete('token_balances',
       'DELETE FROM token_balances WHERE user_id = $1', [uid]);
 
@@ -300,19 +340,19 @@ export function createUserRepository(deps) {
     await cascadeDelete('mission_progress',
       'DELETE FROM mission_progress WHERE user_id = $1', [uid]);
 
-    // 9. calendar_reminders (if table exists)
+    // 9. calendar_reminders
     await cascadeDelete('calendar_reminders',
       'DELETE FROM calendar_reminders WHERE user_id = $1', [uid]);
 
-    // 10. wheel_spins (if table exists — some setups track per-user spin history)
+    // 10. wheel_spins
     await cascadeDelete('wheel_spins',
       'DELETE FROM wheel_spins WHERE user_id = $1', [uid]);
 
-    // 11. support_messages (if separate from tickets)
+    // 11. support_messages
     await cascadeDelete('support_messages',
       'DELETE FROM support_messages WHERE user_id = $1', [uid]);
 
-    // 12. admin records (if user was an admin)
+    // 12. admin records
     await cascadeDelete('admins',
       'DELETE FROM admins WHERE telegram_id = $1', [uid]);
 
@@ -324,5 +364,47 @@ export function createUserRepository(deps) {
     return summary;
   }
 
-  return Object.freeze({ ensureTable, normalizeLanguage, normalizeRow, getById, bootstrap, updateSettings, deleteAccount });
+  /**
+   * Check if a Telegram ID is in the 15-day referral cooldown period.
+   * Returns { inCooldown: boolean, cooldownUntil: string|null, reason: string }
+   *
+   * Used by processReferralOnBootstrap to reject referrals from recently
+   * deleted accounts. The user CAN still use the app — they just can't
+   * generate a new referral reward for 15 days after deletion.
+   */
+  async function checkReferralCooldown(env, userId) {
+    const uid = String(userId);
+    try {
+      // Ensure table exists
+      await queryDb(env, `
+        CREATE TABLE IF NOT EXISTS deleted_users (
+          id SERIAL PRIMARY KEY,
+          telegram_id VARCHAR(64) NOT NULL UNIQUE,
+          previous_inviter_id VARCHAR(64),
+          deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
+        )
+      `);
+      const result = await queryDb(env,
+        `SELECT telegram_id, deleted_at, cooldown_until
+         FROM deleted_users
+         WHERE telegram_id = $1 AND cooldown_until > NOW()
+         LIMIT 1`,
+        [uid]);
+      if (result.rows[0]) {
+        return {
+          inCooldown: true,
+          cooldownUntil: result.rows[0].cooldown_until,
+          reason: 'Deleted account cooldown (15 days)',
+          deletedAt: result.rows[0].deleted_at,
+        };
+      }
+      return { inCooldown: false, reason: null };
+    } catch (e) {
+      console.warn('[COOLDOWN] Check failed (non-fatal, allowing referral):', e?.message);
+      return { inCooldown: false, reason: null, error: e?.message };
+    }
+  }
+
+  return Object.freeze({ ensureTable, normalizeLanguage, normalizeRow, getById, bootstrap, updateSettings, deleteAccount, checkReferralCooldown });
 }

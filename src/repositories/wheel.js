@@ -10,6 +10,51 @@ export function createWheelRepository(deps) {
 
   let _schemaVerified = false;
 
+  // ── ROOT-CAUSE FIX: Calendar daily reset at 00:00 Asia/Tehran ──
+  // Previously the wheel used UTC date (new Date().toISOString().slice(0,10)
+  // and SQL CURRENT_DATE). Iran is UTC+3:30, so the wheel reset at 03:30
+  // Tehran time instead of 00:00. Users who ran out of spins at 23:00 Tehran
+  // had to wait 4.5 hours for UTC date to roll over.
+  //
+  // FIX: Calculate "today" in Asia/Tehran timezone. All spin_date comparisons
+  // use this Tehran date string. This ensures ALL users get 3 fresh spins at
+  // exactly Tehran midnight, regardless of when they used their spins.
+  //
+  // We pass the Tehran date as a PARAMETER to SQL (not rely on CURRENT_DATE)
+  // because Neon's CURRENT_DATE uses the DB's timezone (UTC by default).
+  function getTehranDateString() {
+    // Intl.DateTimeFormat with timeZone gives us the correct date in Tehran
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tehran',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return fmt.format(new Date()); // e.g. "2026-07-30"
+  }
+
+  // Calculate the Tehran-midnight timestamp for expires_at
+  // Returns an ISO string for the NEXT 00:00 Asia/Tehran
+  function getNextTehranMidnightISO() {
+    const now = new Date();
+    // Get Tehran time components
+    const tehranParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Tehran',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    }).formatToParts(now);
+    const p = {};
+    for (const part of tehranParts) p[part.type] = part.value;
+    // Build a Date for "now" in Tehran, then add 1 day and set to 00:00
+    // Tehran is UTC+3:30, so 00:00 Tehran = previous day 20:30 UTC
+    const tehranNow = new Date(`${p.year}-${p.month}-${p.day}T${p.hour === '24' ? '00' : p.hour}:${p.minute}:${p.second}+03:30`);
+    const tomorrowMidnight = new Date(tehranNow);
+    tomorrowMidnight.setDate(tomorrowMidnight.getDate() + 1);
+    tomorrowMidnight.setHours(0, 0, 0, 0);
+    return tomorrowMidnight.toISOString();
+  }
+
   /**
    * Ensure wheel tables exist. Creates:
    * - wheel_spins: spin inventory (daily + premium)
@@ -123,30 +168,34 @@ export function createWheelRepository(deps) {
    */
   async function getOrCreateDailySpins(env, userId, maxSpins = 3) {
     const uid = String(userId);
-    const today = new Date().toISOString().slice(0, 10);
-    const lockKey = _hashLockKey(uid + '_' + today);
+    // ROOT-CAUSE FIX: Use Tehran date, NOT UTC date.
+    // This ensures spins reset at 00:00 Asia/Tehran (calendar reset),
+    // not at 00:00 UTC (which is 03:30 Tehran).
+    const tehranToday = getTehranDateString();
+    const lockKey = _hashLockKey(uid + '_' + tehranToday);
+    // expires_at = next Tehran midnight (so spins expire at 00:00 Tehran tomorrow)
+    const expiresAtISO = getNextTehranMidnightISO();
 
     if (!queryDbTransaction) {
       // Fallback: no transaction support — use simple queries
-      // Check how many available spins exist for today
       const availResult = await queryDb(env,
         `SELECT id, status FROM wheel_spins
          WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-         AND spin_date = CURRENT_DATE AND status = 'available'`,
-        [uid]);
+         AND spin_date = $2::date AND status = 'available'`,
+        [uid, tehranToday]);
       const availableCount = availResult.rows.length;
       const needed = Math.max(0, maxSpins - availableCount);
       for (let i = 0; i < needed; i++) {
         await queryDb(env,
           `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
-           VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), NOW() + INTERVAL '24 hours', CURRENT_DATE)`,
-          [uid]);
+           VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), $2, $3::date)`,
+          [uid, expiresAtISO, tehranToday]);
       }
       const finalResult = await queryDb(env,
         `SELECT id, status FROM wheel_spins
          WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-         AND spin_date = CURRENT_DATE AND status = 'available'`,
-        [uid]);
+         AND spin_date = $2::date AND status = 'available'`,
+        [uid, tehranToday]);
       return { spins: finalResult.rows, total_available: finalResult.rows.length, total_allowed: maxSpins };
     }
 
@@ -157,11 +206,11 @@ export function createWheelRepository(deps) {
         params: [lockKey],
       },
       {
-        // Count today's available spins
+        // Count today's available spins (Tehran date)
         sql: `SELECT COUNT(*)::int AS cnt FROM wheel_spins
               WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-              AND spin_date = CURRENT_DATE AND status = 'available'`,
-        params: [uid],
+              AND spin_date = $2::date AND status = 'available'`,
+        params: [uid, tehranToday],
       },
     ]);
 
@@ -173,16 +222,16 @@ export function createWheelRepository(deps) {
     for (let i = 0; i < needed; i++) {
       await queryDb(env,
         `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
-         VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), NOW() + INTERVAL '24 hours', CURRENT_DATE)`,
-        [uid]);
+         VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), $2, $3::date)`,
+        [uid, expiresAtISO, tehranToday]);
     }
 
-    // Return all available spins for today
+    // Return all available spins for today (Tehran date)
     const finalResult = await queryDb(env,
       `SELECT id, status FROM wheel_spins
        WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-       AND spin_date = CURRENT_DATE AND status = 'available'`,
-      [uid]);
+       AND spin_date = $2::date AND status = 'available'`,
+      [uid, tehranToday]);
 
     return { spins: finalResult.rows, total_available: finalResult.rows.length, total_allowed: maxSpins };
   }
