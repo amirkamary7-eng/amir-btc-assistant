@@ -142,7 +142,7 @@ export function createPublisherHandlers(deps) {
     }
     if (payload.rate_limit_ms != null) {
       const v = Number(payload.rate_limit_ms);
-      if (!Number.isFinite(v)) return buildBodyFieldValidationError(env, 'rate_limit_ms', 'must be a number');
+      if (!Number.isFinite(v)) return jsonResponse(buildBodyFieldValidationError('rate_limit_ms', 'type_error', 'must be a number', payload.rate_limit_ms), { status: 422 }, env);
       next.rate_limit_ms = Math.max(1000, Math.min(10000, Math.round(v)));
     }
     if (typeof payload.auto_publish_news === 'boolean') next.auto_publish_news = payload.auto_publish_news;
@@ -393,9 +393,9 @@ export function createPublisherHandlers(deps) {
     const overrides = payload.overrides || payload.payload || {};
 
     if (!['news', 'calendar', 'analysis', 'announcement'].includes(type)) {
-      return buildBodyFieldValidationError(env, 'type', 'must be news | calendar | analysis | announcement');
+      return jsonResponse(buildBodyFieldValidationError('type', 'value_error', 'must be news | calendar | analysis | announcement', payload.type), { status: 422 }, env);
     }
-    if (!refId) return buildBodyFieldValidationError(env, 'ref_id', 'is required');
+    if (!refId) return jsonResponse(buildBodyFieldValidationError('ref_id', 'missing', 'is required', null), { status: 422 }, env);
 
     const item = await resolveSourceItem(env, type, refId);
     if (!item) {
@@ -444,9 +444,9 @@ export function createPublisherHandlers(deps) {
     const scheduledAt = payload.scheduled_at || null;
 
     if (!['news', 'calendar', 'analysis', 'announcement'].includes(type)) {
-      return buildBodyFieldValidationError(env, 'type', 'must be news | calendar | analysis | announcement');
+      return jsonResponse(buildBodyFieldValidationError('type', 'value_error', 'must be news | calendar | analysis | announcement', payload.type), { status: 422 }, env);
     }
-    if (!refId) return buildBodyFieldValidationError(env, 'ref_id', 'is required');
+    if (!refId) return jsonResponse(buildBodyFieldValidationError('ref_id', 'missing', 'is required', null), { status: 422 }, env);
 
     const item = await resolveSourceItem(env, type, refId);
     if (!item) {
@@ -654,9 +654,9 @@ export function createPublisherHandlers(deps) {
     const overrides = payload.overrides || {};
 
     if (!['news', 'calendar', 'analysis', 'announcement'].includes(type)) {
-      return buildBodyFieldValidationError(env, 'type', 'must be news | calendar | analysis | announcement');
+      return jsonResponse(buildBodyFieldValidationError('type', 'value_error', 'must be news | calendar | analysis | announcement', payload.type), { status: 422 }, env);
     }
-    if (!refId) return buildBodyFieldValidationError(env, 'ref_id', 'is required');
+    if (!refId) return jsonResponse(buildBodyFieldValidationError('ref_id', 'missing', 'is required', null), { status: 422 }, env);
 
     const item = await resolveSourceItem(env, type, refId);
     if (!item) return jsonResponse({ status: 'error', message: 'مورد یافت نشد' }, { status: 404 }, env);
