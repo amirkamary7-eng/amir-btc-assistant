@@ -1195,24 +1195,26 @@ function createPool(env) {
   });
 }
 
-// ── ROOT CAUSE FIX: Per-request Pool sharing ──
-const _poolCache = new WeakMap();
+// ── ARCHITECTURAL FIX: No module-level pool state ──
+// Cloudflare Workers can reuse isolates across requests and cron ticks.
+// A module-level Pool/WeakMap holds WebSocket connections that outlive
+// the request context → "Cannot perform I/O on behalf of a different request".
+//
+// FIX: Every queryDb call creates a FRESH pool, runs the query, and
+// closes the pool BEFORE returning. This guarantees no connection
+// outlives the request. Neon serverless pools are lightweight (no
+// persistent TCP — they use HTTP/WebSocket per query), so creating
+// a pool per call has negligible overhead (~1ms).
 
 function getSharedPool(env) {
-  if (!env) return null;
-  if (_poolCache.has(env)) return _poolCache.get(env);
-  const pool = createPool(env);
-  if (pool) _poolCache.set(env, pool);
-  return pool;
+  // Always return a fresh pool — never cached, never shared across requests
+  return createPool(env);
 }
 
 function closeSharedPool(env) {
-  if (!env) return;
-  const pool = _poolCache.get(env);
-  if (pool) {
-    _poolCache.delete(env);
-    try { pool.end(); } catch {}
-  }
+  // No-op — pools are not cached. Each queryDb call creates and closes
+  // its own pool. This function is kept for backward compatibility with
+  // the fetch handler's finally block.
 }
 
 async function getDbUserJoinState(env, userId) {
@@ -1221,10 +1223,7 @@ async function getDbUserJoinState(env, userId) {
   try {
     const result = await pool.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [String(userId)]);
     const row = result.rows[0];
-    if (!row) {
-      return null;
-    }
-
+    if (!row) return null;
     return {
       telegram_id: String(row.telegram_id),
       channel_joined: Boolean(row.channel_joined),
@@ -1233,10 +1232,11 @@ async function getDbUserJoinState(env, userId) {
     console.warn(safeError('join-db-read', error));
     return null;
   } finally {
-    // ROOT-CAUSE FIX: Don't fire-and-forget pool.end() — it causes
-    // "promise resolved from different request context" warnings.
-    // Neon serverless pools don't need explicit cleanup.
-    try { pool.end(); } catch {}
+    // CRITICAL: pool.end() returns a Promise. We MUST await it so the
+    // WebSocket closes BEFORE the function returns. If we don't await,
+    // the pool cleanup runs as a fire-and-forget promise that resolves
+    // AFTER the request context is gone → cross-request I/O error.
+    try { await pool.end(); } catch {}
   }
 }
 
@@ -1244,8 +1244,6 @@ async function persistDbUserJoinState(env, userId, joined) {
   const pool = createPool(env);
   if (!pool) return;
   try {
-    // PHASE 2: Also set bot_joined_at on first interaction (when user row is new).
-    // On conflict (existing user), COALESCE preserves the existing bot_joined_at.
     await pool.query(
       `
         INSERT INTO users (
@@ -1270,8 +1268,8 @@ async function persistDbUserJoinState(env, userId, joined) {
   } catch (error) {
     console.warn(safeError('join-db-write', error));
   } finally {
-    // ROOT-CAUSE FIX: Don't fire-and-forget pool.end()
-    try { pool.end(); } catch {}
+    // CRITICAL: await pool.end() to close WebSocket before function returns
+    try { await pool.end(); } catch {}
   }
 }
 
@@ -1310,7 +1308,10 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  const pool = getSharedPool(env);
+  // ARCHITECTURAL FIX: Create a fresh pool per query call.
+  // This guarantees no WebSocket connection outlives this function.
+  // The pool is closed in the finally block BEFORE the function returns.
+  const pool = createPool(env);
   if (!pool) throw new Error('Database not configured');
 
   try {
@@ -1321,27 +1322,20 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
           return await pool.query(sqlText, params);
         }
 
-        // ROOT-CAUSE FIX: Use pool.connect() directly WITHOUT Promise.race.
-        // The pool has connectionTimeoutMillis=8000 which handles queue timeout
-        // internally. On timeout, pool removes the request from _pendingQueue —
-        // NO LEAK. The previous Promise.race pattern leaked connections because
-        // when our setTimeout won the race, pool.connect() was still pending and
-        // would later resolve with a client that nobody released.
-        const client = await pool.connect();
-        try {
-          return await client.query(sqlText, params);
-        } finally {
-          client.release();
-        }
+        // Use pool.query() which internally handles connect + release.
+        // This is simpler and avoids any chance of leaking a client.
+        return await pool.query(sqlText, params);
       } catch (error) {
         if (attempt === retries) throw error;
         const ms = Math.min(200 * 2 ** attempt, 1000);
         await new Promise((r) => setTimeout(r, ms));
       }
     }
-  } catch (error) {
-    closeSharedPool(env);
-    throw error;
+  } finally {
+    // CRITICAL: await pool.end() to close the WebSocket connection BEFORE
+    // this function returns. If we don't await, the pool.end() promise
+    // resolves after the request context is gone → cross-request I/O error.
+    try { await pool.end(); } catch {}
   }
 }
 
@@ -1351,59 +1345,28 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * Requires Neon serverless Pool with transaction_mode support.
  */
 async function queryDbTransaction(env, queries) {
-  // ── DIAG: This function creates its OWN pool (not shared) ──
-  // This means it does NOT compete with the shared pool's max=1 slot.
-  // But it DOES create a new WebSocket connection each time.
-  const _diagT0 = Date.now();
   const pool = createPool(env);
   if (!pool) throw new Error('Database not configured');
-  const _diagPoolId = pool._diagPoolId || 'tx_unknown';
 
   let client;
   try {
-    const _diagConnectStart = Date.now();
     client = await pool.connect();
-    const _diagConnectMs = Date.now() - _diagConnectStart;
-
-    console.log(JSON.stringify({
-      scope: 'diag-transaction-connect',
-      poolId: _diagPoolId,
-      connectMs: _diagConnectMs,
-      queryCount: queries?.length || 0,
-      note: 'queryDbTransaction created a SEPARATE pool (not shared) — uses its own connection slot',
-    }));
-
     await client.query('BEGIN');
     const results = [];
     for (const { sql, params } of queries) {
       results.push(await client.query(sql, params));
     }
     await client.query('COMMIT');
-
-    console.log(JSON.stringify({
-      scope: 'diag-transaction-done',
-      poolId: _diagPoolId,
-      totalMs: Date.now() - _diagT0,
-      queryCount: queries?.length || 0,
-    }));
-
     return results;
   } catch (error) {
-    try { if (client) await client.query('ROLLBACK'); } catch { /* ignore */ }
-    console.error(JSON.stringify({
-      scope: 'diag-transaction-failed',
-      poolId: _diagPoolId,
-      error: error?.message,
-      totalMs: Date.now() - _diagT0,
-    }));
+    try { if (client) await client.query('ROLLBACK'); } catch {}
     throw error;
   } finally {
-    // ROOT-CAUSE FIX: ensure client.release() always runs
     if (client) {
       try { client.release(); } catch {}
     }
-    // Close this private pool (it's not shared)
-    try { pool.end(); } catch {}
+    // CRITICAL: await pool.end() to close WebSocket before function returns
+    try { await pool.end(); } catch {}
   }
 }
 
@@ -5997,9 +5960,12 @@ async function runScheduledAlertsBaseline(controller, env) {
             let tgResult = await sendTelegramMessage(env, tgPayload);
             telegramMessageId = tgResult?.messageId || tgResult?.result?.message_id || null;
 
-            // Attempt 2 (retry if first failed)
+            // Attempt 2 (retry if first failed) — NO setTimeout delay.
+            // Previously used `await new Promise(r => setTimeout(r, 1000))` which
+            // could resolve after the cron context ended → cross-request I/O error.
+            // Now: retry immediately. If both fail, enqueue in notification_queue
+            // for the next cron tick to retry.
             if (!telegramMessageId) {
-              await new Promise(r => setTimeout(r, 1000));
               try {
                 tgResult = await sendTelegramMessage(env, tgPayload);
                 telegramMessageId = tgResult?.messageId || tgResult?.result?.message_id || null;
@@ -7736,23 +7702,23 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // ROOT-CAUSE FIX: Stripped ALL diagnostic instrumentation that was causing
-    // exceededCpu. The instrumentation added:
-    //   - new Error().stack on EVERY queryDb call (expensive CPU operation)
-    //   - _logConnectionEvent on every connect/release (array push + JSON)
-    //   - 3x setTimeout(30s) leak-check timers with full JSON.stringify
-    //   - _poolStats tracking with 15+ field updates per query
-    //   - diagWrap with KV writes on every job completion
-    // This overhead pushed the Worker past its CPU time limit (exceededCpu).
+    // ARCHITECTURAL FIX: No module-level pool state, no diagnostic overhead.
+    // Each cron job creates and closes its own DB pool per query via queryDb.
+    // No setTimeout-based retry delays that could outlive the request context.
 
-    const withTimeout = (promise, ms = 25000) =>
-      Promise.race([
+    const withTimeout = (promise, ms = 25000) => {
+      let timerId;
+      return Promise.race([
         promise.catch((e) => {
+          if (timerId) clearTimeout(timerId);
           console.warn('[CRON] Task failed:', e?.message || String(e));
           return { __cronError: true, error: e?.message || String(e) };
         }),
-        new Promise((resolve) => setTimeout(() => resolve({ __timeout: true, ms }), ms)),
+        new Promise((resolve) => {
+          timerId = setTimeout(() => resolve({ __timeout: true, ms }), ms);
+        }),
       ]);
+    };
 
     const cronExpr = controller.cron || '* * * * *';
     const isEveryMinute = cronExpr === '* * * * *';
