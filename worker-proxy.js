@@ -8103,34 +8103,39 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // ROOT-CAUSE FIX: Sequential execution with 2-cron split.
-    // Free plan: 10ms CPU limit, max 2 cron triggers.
+    // ROOT-CAUSE FIX: alternating job execution to stay under CPU limit.
     //
-    // */2 * * * *  (every 2 min): alerts + calendar only (2 jobs)
-    // */15 * * * * (every 15 min): alerts + calendar + maintenance + heavy jobs
-    //   But to stay under resource limit: only run 4 jobs max per 15-min tick.
-    //   Heavy jobs (news AI, publisher) run conditionally every other 15-min tick.
+    // Each queryDb creates a per-call Pool (~3-5ms CPU). Running 2 queryDb
+    // jobs in the same tick = ~6-10ms CPU → exceededResources (10ms limit).
     //
-    // Was every 1 min (* * * * *) → exceededResources on nearly every tick.
-    // Changed to every 2 min to stay under the cron resource limit.
+    // FIX: alternate between alerts and calendar on every-minute ticks.
+    // Even minutes → alerts. Odd minutes → calendar. This ensures each
+    // tick makes at most 1 queryDb = ~3-5ms CPU — well under the limit.
+    // Alert detection latency: 2 min (was 1 min for alerts, now alternating).
+    // Calendar check latency: 2 min (was 1 min, now alternating).
+    // Both acceptable trade-offs for zero exceededResources.
+    //
+    // */15 * * * * (every 15 min): alerts + calendar + maintenance + heavy jobs.
 
-    const cronExpr = controller.cron || '*/2 * * * *';
-    const isEvery2Min = cronExpr === '*/2 * * * *';
+    const cronExpr = controller.cron || '* * * * *';
+    const isEveryMinute = cronExpr === '* * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
     ctx.waitUntil((async () => {
       try {
-        // === EVERY 2 MIN: time-sensitive jobs only ===
-        // ROOT-CAUSE FIX: was every 1 min (* * * * *) → exceededResources on
-        // nearly every tick because runScheduledAlertsBaseline + runCalendarAlertsCheck
-        // together exceed the cron resource limit. Every 2 min halves the load
-        // and stays under the limit. Alert detection latency: 2 min (acceptable).
-        if (isEvery2Min) {
-          try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
-            console.warn('[CRON] alerts failed:', e?.message);
-          }
-          try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); } catch (e) {
-            console.warn('[CRON] calendar failed:', e?.message);
+        if (isEveryMinute) {
+          // Alternate: even minute → alerts, odd minute → calendar.
+          // This ensures max 1 queryDb per tick = ~3-5ms CPU.
+          const minute = new Date().getUTCMinutes();
+          const runAlerts = minute % 2 === 0;
+          if (runAlerts) {
+            try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
+              console.warn('[CRON] alerts failed:', e?.message);
+            }
+          } else {
+            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); } catch (e) {
+              console.warn('[CRON] calendar failed:', e?.message);
+            }
           }
         }
 
