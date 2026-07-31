@@ -208,6 +208,36 @@
             </div>
         </div>
 
+        <!-- 1d. Trending Movers — 3-column card showing Top Gainer / Top Loser / Most Active.
+             Computed from existing allCoins (no extra API call). Each cell is tappable → coin detail.
+             Collapses to skeleton rows until data arrives. -->
+        <div class="trending-movers" id="trending-movers" aria-label="Trending market movers">
+            <div class="tm-header">
+                <span class="tm-title">
+                    <svg class="tm-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    <span>تحرک‌های بازار</span>
+                </span>
+                <span class="tm-hint" data-i18n="view_all" onclick="switchTab('market-page')">مشاهده همه</span>
+            </div>
+            <div class="tm-grid">
+                <button class="tm-cell tm-cell--up" data-mover="gainer" type="button">
+                    <span class="tm-cell-label">صدر صعود</span>
+                    <span class="tm-cell-symbol" id="tm-gainer-sym">--</span>
+                    <span class="tm-cell-pct" id="tm-gainer-pct">--</span>
+                </button>
+                <button class="tm-cell tm-cell--down" data-mover="loser" type="button">
+                    <span class="tm-cell-label">صدر نزول</span>
+                    <span class="tm-cell-symbol" id="tm-loser-sym">--</span>
+                    <span class="tm-cell-pct" id="tm-loser-pct">--</span>
+                </button>
+                <button class="tm-cell tm-cell--active" data-mover="active" type="button">
+                    <span class="tm-cell-label">پرتحرک‌ترین</span>
+                    <span class="tm-cell-symbol" id="tm-active-sym">--</span>
+                    <span class="tm-cell-pct" id="tm-active-vol">--</span>
+                </button>
+            </div>
+        </div>
+
         <!-- 2. Market Status (Fear & Greed + Market Trend) -->
         <div class="section-header">
             <span class="section-title">

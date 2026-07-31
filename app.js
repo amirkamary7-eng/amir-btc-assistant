@@ -4222,6 +4222,8 @@ async function loadMarketOverview() {
             renderDashboardMarketStatus();
             // Refresh Market Pulse with newly arrived dominance/volume data
             try { renderMarketPulse(); } catch (e) { /* non-critical */ }
+            // Refresh Trending Movers with newly arrived volume data
+            try { renderTrendingMovers(); } catch (e) { /* non-critical */ }
         }
     } catch (e) {
         console.warn('[OVERVIEW] Failed to load overview:', e);
@@ -10858,6 +10860,8 @@ function renderMarketTicker() {
 
     // Refresh the Market Pulse strip alongside the ticker — same data source.
     try { renderMarketPulse(); } catch (e) { /* non-critical */ }
+    // Refresh the Trending Movers card alongside the ticker — same data source.
+    try { renderTrendingMovers(); } catch (e) { /* non-critical */ }
 }
 
 // ============================================================================
@@ -10949,6 +10953,92 @@ function renderMarketPulse() {
     }
 
     _pulseRendered = true;
+}
+
+// ============================================================================
+// ── NEW FEATURE: Trending Movers — 3-column card ──
+// ============================================================================
+// Shows Top Gainer / Top Loser / Most Active (by 24h volume) from allCoins.
+// Each cell is tappable → opens the coin detail view.
+// Uses existing allCoins data — NO extra API call.
+// Idempotent: safe to call multiple times.
+let _moversRendered = false;
+let _moversData = { gainer: null, loser: null, active: null };
+
+function renderTrendingMovers() {
+    const card = $('trending-movers');
+    if (!card) return; // element not in DOM
+
+    const gSym = $('tm-gainer-sym');
+    const gPct = $('tm-gainer-pct');
+    const lSym = $('tm-loser-sym');
+    const lPct = $('tm-loser-pct');
+    const aSym = $('tm-active-sym');
+    const aVol = $('tm-active-vol');
+    if (!gSym || !gPct || !lSym || !lPct || !aSym || !aVol) return;
+
+    if (!Array.isArray(allCoins) || !allCoins.length) {
+        return; // keep '--' placeholders
+    }
+
+    // Consider only the top 50 coins by rank for meaningful movers
+    // (avoids obscure micro-caps with extreme % swings dominating the card)
+    const pool = allCoins.slice(0, 50);
+    if (!pool.length) return;
+
+    let gainer = null, loser = null, active = null;
+    for (const c of pool) {
+        const pct = Number(c.changePercent24Hr) || 0;
+        const vol = Number(c.volumeUsd24Hr) || 0;
+        if (!gainer || pct > gainer._pct) { gainer = c; gainer._pct = pct; }
+        if (!loser || pct < loser._pct) { loser = c; loser._pct = pct; }
+        if (!active || vol > active._vol) { active = c; active._vol = vol; }
+    }
+
+    if (gainer) {
+        gSym.textContent = (gainer.symbol || '?').slice(0, 6);
+        gPct.textContent = (gainer._pct > 0 ? '+' : '') + gainer._pct.toFixed(2) + '%';
+    }
+    if (loser) {
+        lSym.textContent = (loser.symbol || '?').slice(0, 6);
+        lPct.textContent = (loser._pct > 0 ? '+' : '') + loser._pct.toFixed(2) + '%';
+    }
+    if (active) {
+        aSym.textContent = (active.symbol || '?').slice(0, 6);
+        aVol.textContent = '$' + formatLargeNumber(active._vol);
+    }
+
+    _moversData = { gainer, loser, active };
+    _moversRendered = true;
+}
+
+// Handle tap on a mover cell → open coin detail
+function _initTrendingMoversTap() {
+    const card = $('trending-movers');
+    if (!card || card._tapBound) return;
+    card._tapBound = true;
+    card.addEventListener('click', (e) => {
+        const cell = e.target.closest('.tm-cell');
+        if (!cell) return;
+        const mover = cell.dataset.mover;
+        const coin = _moversData[mover];
+        if (coin && coin.symbol) {
+            // Use the existing global openCoinDetail / openCoin function
+            if (typeof openCoinDetail === 'function') openCoinDetail(coin.symbol);
+            else if (typeof openCoin === 'function') openCoin(coin.symbol);
+            else if (typeof switchTab === 'function') switchTab('market-page');
+        } else {
+            // No data yet → take user to market page
+            if (typeof switchTab === 'function') switchTab('market-page');
+        }
+    });
+}
+
+// Auto-init on DOM ready (the card is always in the dashboard HTML)
+if (document.readyState !== 'loading') {
+    _initTrendingMoversTap();
+} else {
+    document.addEventListener('DOMContentLoaded', _initTrendingMoversTap);
 }
 
 // ============================================================================
