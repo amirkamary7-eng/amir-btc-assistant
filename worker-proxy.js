@@ -1218,12 +1218,11 @@ function closeSharedPool(env) {
 }
 
 async function getDbUserJoinState(env, userId) {
-  const databaseUrl = resolveDatabaseUrl(env);
-  if (!databaseUrl) return null;
+  const pool = createPool(env);
+  if (!pool) return null;
   try {
-    const sql = neon(databaseUrl);
-    const result = await sql.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [String(userId)]);
-    const row = result.rows?.[0];
+    const result = await pool.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [String(userId)]);
+    const row = result.rows[0];
     if (!row) return null;
     return {
       telegram_id: String(row.telegram_id),
@@ -1232,15 +1231,16 @@ async function getDbUserJoinState(env, userId) {
   } catch (error) {
     console.warn(safeError('join-db-read', error));
     return null;
+  } finally {
+    try { await pool.end(); } catch {}
   }
 }
 
 async function persistDbUserJoinState(env, userId, joined) {
-  const databaseUrl = resolveDatabaseUrl(env);
-  if (!databaseUrl) return;
+  const pool = createPool(env);
+  if (!pool) return;
   try {
-    const sql = neon(databaseUrl);
-    await sql.query(
+    await pool.query(
       `INSERT INTO users (telegram_id, lang, channel_joined, channel_verified_at, bot_joined_at, created_at, updated_at)
        VALUES ($1, 'fa', $2, $3, NOW(), NOW(), NOW())
        ON CONFLICT (telegram_id) DO UPDATE
@@ -1250,6 +1250,8 @@ async function persistDbUserJoinState(env, userId, joined) {
     );
   } catch (error) {
     console.warn(safeError('join-db-write', error));
+  } finally {
+    try { await pool.end(); } catch {}
   }
 }
 
@@ -1291,27 +1293,42 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) throw new Error('Database not configured');
 
-  // ROOT-CAUSE FIX: neon() returns a tagged-template function.
-  // To call it with (sql, params) we must use sql.query() not sql().
-  // See: https://neon.tech/docs/serverless/serverless-driver
-  const sql = neon(databaseUrl);
+  // ROOT-CAUSE FIX: Use Pool with WebSocket for reliability.
+  // The neon() HTTP client was failing with "HTTP 530 Error 1016" (DNS resolution
+  // failure) intermittently. This happens because neon() makes HTTP requests to
+  // Neon's SQL-over-HTTP endpoint, which can fail with DNS errors inside CF Workers.
+  //
+  // Pool uses WebSocket connections which are more reliable from CF Workers
+  // and don't have the DNS resolution issue.
+  // Each queryDb call creates a fresh Pool, runs the query, and closes it
+  // in the finally block — no cross-request state.
+  const pool = createPool(env);
+  if (!pool) throw new Error('Database not configured');
 
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        // Use sql.query() for conventional parameterized queries.
-        // sql() (tagged template) would also work but requires template syntax.
-        const result = await sql.query(sqlText, params);
-        // sql.query() returns { rows: [], rowCount: 0 } — same as Pool.query()
-        return result;
+        // FALLBACK: If pool.connect is not available (test mock), use pool.query
+        if (typeof pool.connect !== 'function') {
+          return await pool.query(sqlText, params);
+        }
+        // Use pool.query() which internally handles connect + release.
+        return await pool.query(sqlText, params);
       } catch (error) {
-        if (attempt === retries) throw error;
-        const ms = Math.min(200 * 2 ** attempt, 1000);
+        // Retry on transient errors (HTTP 530, DNS failures, connection resets)
+        const isTransient = error?.message?.includes('530') ||
+                            error?.message?.includes('1016') ||
+                            error?.message?.includes('ECONNRESET') ||
+                            error?.message?.includes('Connection terminated') ||
+                            error?.message?.includes('timeout');
+        if (attempt === retries || !isTransient) throw error;
+        const ms = Math.min(300 * 2 ** attempt, 2000);
         await new Promise((r) => setTimeout(r, ms));
       }
     }
-  } catch (error) {
-    throw error;
+  } finally {
+    // CRITICAL: await pool.end() to close WebSocket before function returns
+    try { await pool.end(); } catch {}
   }
 }
 
@@ -1321,25 +1338,27 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * Requires Neon serverless Pool with transaction_mode support.
  */
 async function queryDbTransaction(env, queries) {
-  const databaseUrl = resolveDatabaseUrl(env);
-  if (!databaseUrl) throw new Error('Database not configured');
+  const pool = createPool(env);
+  if (!pool) throw new Error('Database not configured');
 
-  const sql = neon(databaseUrl, { arrayMode: false, fullResults: true });
-
+  let client;
   try {
-    // Use sql.transaction() for atomic multi-query execution.
-    // Inside the callback, use tx.query() for parameterized queries.
-    const results = await sql.transaction(async (tx) => {
-      const txResults = [];
-      for (const { sql: q, params } of queries) {
-        const result = await tx.query(q, params);
-        txResults.push(result);
-      }
-      return txResults;
-    });
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const results = [];
+    for (const { sql, params } of queries) {
+      results.push(await client.query(sql, params));
+    }
+    await client.query('COMMIT');
     return results;
   } catch (error) {
+    try { if (client) await client.query('ROLLBACK'); } catch {}
     throw error;
+  } finally {
+    if (client) {
+      try { client.release(); } catch {}
+    }
+    try { await pool.end(); } catch {}
   }
 }
 
