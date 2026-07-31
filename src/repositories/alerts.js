@@ -9,6 +9,13 @@
 export function createAlertRepository(deps) {
   const { queryDb, ensureUserRow, normalizeOptionalString } = deps;
 
+  // ROOT-CAUSE FIX: _tableEnsured cache — same pattern as notifications.js and
+  // users.js. Without this, ensureTable ran 7 queryDb calls on EVERY alertRepo.list()
+  // and alertRepo.create() call. Since frontend polls /api/alerts every 15s,
+  // this was 7 × 3-5ms = 21-35ms CPU every 15s → exceededResources.
+  // With cache: 7 queryDb on first call (cold isolate), 0 on every subsequent call.
+  let _tableEnsured = false;
+
   /**
    * Serialize a raw DB row into the API response shape.
    */
@@ -45,6 +52,7 @@ export function createAlertRepository(deps) {
    * AUDIT-002 FIX: Added idx_price_alerts_status_created for cron query optimization.
    */
   async function ensureTable(env) {
+    if (_tableEnsured) return;
     await queryDb(env, `
       CREATE TABLE IF NOT EXISTS price_alerts (
         id VARCHAR(64) PRIMARY KEY,
@@ -72,6 +80,8 @@ export function createAlertRepository(deps) {
     await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_price_alerts_status_created ON price_alerts (status, created_at DESC)`, []);
     // Index for fast lookup by symbol (cron fetches prices per unique symbol)
     await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_price_alerts_status_symbol ON price_alerts (status, symbol)`, []);
+
+    _tableEnsured = true;
   }
 
   /**
