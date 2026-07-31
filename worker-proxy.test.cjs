@@ -119,6 +119,12 @@ function loadWorker(pgOverride) {
         }
         end() { return Promise.resolve(); }
       },
+      neon: function(connectionString) {
+        return async function(sqlText, params) {
+          // Mock neon() — returns array of rows (same as Pool.query().rows)
+          return [];
+        };
+      },
     },
   };
 
@@ -154,7 +160,7 @@ function loadWorker(pgOverride) {
       "import { createHmac, timingSafeEqual } from 'node:crypto';",
       "const { createHmac, timingSafeEqual } = require('node:crypto');",
     )
-    .replace("import { Pool } from '@neondatabase/serverless';", "const { Pool } = require('@neondatabase/serverless');")
+    .replace("import { Pool, neon } from '@neondatabase/serverless';", "const { Pool, neon } = require('@neondatabase/serverless');")
     .replace(
       /import\s+\{([^}]*)\}\s+from\s+['"](\.\/src\/[^'"]+)['"];?/g,
       (_, named, p) => `const { ${named} } = require('${p}');`,

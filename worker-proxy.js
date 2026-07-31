@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { Pool } from '@neondatabase/serverless';
+import { Pool, neon } from '@neondatabase/serverless';
 import { createAlertRepository } from './src/repositories/alerts.js';
 import { createAlertHandlers } from './src/controllers/alerts.js';
 import { createWatchlistRepository } from './src/repositories/watchlist.js';
@@ -1218,11 +1218,12 @@ function closeSharedPool(env) {
 }
 
 async function getDbUserJoinState(env, userId) {
-  const pool = createPool(env);
-  if (!pool) return null;
+  const databaseUrl = resolveDatabaseUrl(env);
+  if (!databaseUrl) return null;
   try {
-    const result = await pool.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [String(userId)]);
-    const row = result.rows[0];
+    const sql = neon(databaseUrl);
+    const rows = await sql('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [String(userId)]);
+    const row = Array.isArray(rows) ? rows[0] : null;
     if (!row) return null;
     return {
       telegram_id: String(row.telegram_id),
@@ -1231,45 +1232,24 @@ async function getDbUserJoinState(env, userId) {
   } catch (error) {
     console.warn(safeError('join-db-read', error));
     return null;
-  } finally {
-    // CRITICAL: pool.end() returns a Promise. We MUST await it so the
-    // WebSocket closes BEFORE the function returns. If we don't await,
-    // the pool cleanup runs as a fire-and-forget promise that resolves
-    // AFTER the request context is gone → cross-request I/O error.
-    try { await pool.end(); } catch {}
   }
 }
 
 async function persistDbUserJoinState(env, userId, joined) {
-  const pool = createPool(env);
-  if (!pool) return;
+  const databaseUrl = resolveDatabaseUrl(env);
+  if (!databaseUrl) return;
   try {
-    await pool.query(
-      `
-        INSERT INTO users (
-          telegram_id,
-          lang,
-          channel_joined,
-          channel_verified_at,
-          bot_joined_at,
-          created_at,
-          updated_at
-        )
-        VALUES ($1, 'fa', $2, $3, NOW(), NOW(), NOW())
-        ON CONFLICT (telegram_id) DO UPDATE
-        SET
-          channel_joined = EXCLUDED.channel_joined,
-          channel_verified_at = EXCLUDED.channel_verified_at,
-          bot_joined_at = COALESCE(users.bot_joined_at, NOW()),
-          updated_at = NOW()
-      `,
+    const sql = neon(databaseUrl);
+    await sql(
+      `INSERT INTO users (telegram_id, lang, channel_joined, channel_verified_at, bot_joined_at, created_at, updated_at)
+       VALUES ($1, 'fa', $2, $3, NOW(), NOW(), NOW())
+       ON CONFLICT (telegram_id) DO UPDATE
+       SET channel_joined = EXCLUDED.channel_joined, channel_verified_at = EXCLUDED.channel_verified_at,
+           bot_joined_at = COALESCE(users.bot_joined_at, NOW()), updated_at = NOW()`,
       [String(userId), Boolean(joined), joined ? new Date().toISOString() : null],
     );
   } catch (error) {
     console.warn(safeError('join-db-write', error));
-  } finally {
-    // CRITICAL: await pool.end() to close WebSocket before function returns
-    try { await pool.end(); } catch {}
   }
 }
 
@@ -1308,34 +1288,35 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // ARCHITECTURAL FIX: Create a fresh pool per query call.
-  // This guarantees no WebSocket connection outlives this function.
-  // The pool is closed in the finally block BEFORE the function returns.
-  const pool = createPool(env);
-  if (!pool) throw new Error('Database not configured');
+  // ARCHITECTURAL FIX: Use the Neon serverless `neon()` function instead of Pool.
+  // The `neon()` client is STATELESS — it makes a single HTTP request per query
+  // with NO WebSocket connection, NO pool, NO state to clean up.
+  // This eliminates:
+  //   - Pool creation overhead (was ~2ms CPU per createPool)
+  //   - pool.end() await (was ~1ms CPU per end)
+  //   - WebSocket connection lifecycle (was causing cross-request I/O)
+  //   - Connection leaks (impossible with stateless client)
+  //
+  // The neon() function is imported at the top of this file.
+  const databaseUrl = resolveDatabaseUrl(env);
+  if (!databaseUrl) throw new Error('Database not configured');
+
+  // Use the neon() SQL function (tagged template or function call)
+  const sql = neon(databaseUrl);
 
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        // FALLBACK: If pool.connect is not available (test mock), use pool.query
-        if (typeof pool.connect !== 'function') {
-          return await pool.query(sqlText, params);
-        }
-
-        // Use pool.query() which internally handles connect + release.
-        // This is simpler and avoids any chance of leaking a client.
-        return await pool.query(sqlText, params);
+        const result = await sql(sqlText, params);
+        return { rows: Array.isArray(result) ? result : (result?.rows || []), rowCount: Array.isArray(result) ? result.length : (result?.rowCount || 0) };
       } catch (error) {
         if (attempt === retries) throw error;
         const ms = Math.min(200 * 2 ** attempt, 1000);
         await new Promise((r) => setTimeout(r, ms));
       }
     }
-  } finally {
-    // CRITICAL: await pool.end() to close the WebSocket connection BEFORE
-    // this function returns. If we don't await, the pool.end() promise
-    // resolves after the request context is gone → cross-request I/O error.
-    try { await pool.end(); } catch {}
+  } catch (error) {
+    throw error;
   }
 }
 
@@ -1345,28 +1326,28 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * Requires Neon serverless Pool with transaction_mode support.
  */
 async function queryDbTransaction(env, queries) {
-  const pool = createPool(env);
-  if (!pool) throw new Error('Database not configured');
+  // ARCHITECTURAL FIX: Use neon() stateless client with transaction support.
+  // The neon() function supports transaction_mode via the options parameter.
+  // This avoids creating a Pool with WebSocket connections.
+  const databaseUrl = resolveDatabaseUrl(env);
+  if (!databaseUrl) throw new Error('Database not configured');
 
-  let client;
+  // neon() with { arrayMode: false, fullResults: true } returns { rows, rowCount }
+  const sql = neon(databaseUrl, { arrayMode: false, fullResults: true });
+
   try {
-    client = await pool.connect();
-    await client.query('BEGIN');
-    const results = [];
-    for (const { sql, params } of queries) {
-      results.push(await client.query(sql, params));
-    }
-    await client.query('COMMIT');
+    // Execute all queries in a single transaction using the `transaction` method
+    const results = await sql.transaction(async (tx) => {
+      const txResults = [];
+      for (const { sql: q, params } of queries) {
+        const result = await tx(q, params);
+        txResults.push(result);
+      }
+      return txResults;
+    });
     return results;
   } catch (error) {
-    try { if (client) await client.query('ROLLBACK'); } catch {}
     throw error;
-  } finally {
-    if (client) {
-      try { client.release(); } catch {}
-    }
-    // CRITICAL: await pool.end() to close WebSocket before function returns
-    try { await pool.end(); } catch {}
   }
 }
 
@@ -7750,8 +7731,15 @@ export default {
     // Check for upcoming high-impact calendar events — every tick
     ctx.waitUntil(withTimeout(runCalendarAlertsCheck(env, { isEvery15Min })));
 
-    // AI NEWS: Background processing — ONLY on every-minute ticks
-    if (isEveryMinute) {
+    // AI NEWS: Background processing — ONLY on 15-minute ticks (was every minute)
+    // Running every minute caused exceededCpu because processNewsAIBatch does:
+    //   - 8 RSS fetches (each with TLS handshake + response parsing)
+    //   - 70 AI translations (m2m100 model calls)
+    //   - 5 article HTML fetches + text extraction (regex-heavy CPU)
+    //   - 5 AI summary generations (llama-3.3-70b model calls)
+    // Total: ~88 network calls + heavy CPU for regex/AI → exceeded 10ms free-plan CPU limit
+    // Now: runs every 15 minutes — enough for news to stay fresh, well within CPU budget.
+    if (isEvery15Min) {
       ctx.waitUntil(withTimeout(processNewsAIBatch(env), 25000));
     }
 
