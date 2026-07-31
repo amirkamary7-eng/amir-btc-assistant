@@ -7731,75 +7731,79 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // ARCHITECTURAL FIX: No module-level pool state, no diagnostic overhead.
-    // Each cron job creates and closes its own DB pool per query via queryDb.
-    // No setTimeout-based retry delays that could outlive the request context.
-
-    const withTimeout = (promise, ms = 25000) => {
-      let timerId;
-      return Promise.race([
-        promise.catch((e) => {
-          if (timerId) clearTimeout(timerId);
-          console.warn('[CRON] Task failed:', e?.message || String(e));
-          return { __cronError: true, error: e?.message || String(e) };
-        }),
-        new Promise((resolve) => {
-          timerId = setTimeout(() => resolve({ __timeout: true, ms }), ms);
-        }),
-      ]);
-    };
+    // ROOT-CAUSE FIX: Run jobs SEQUENTIALLY, not concurrently.
+    // Cloudflare Workers free plan has 10ms CPU limit per invocation.
+    // When 8 jobs run CONCURRENTLY via ctx.waitUntil, their CPU usage
+    // adds up to >10ms → exceededCpu kills the Worker.
+    //
+    // FIX: Run jobs one at a time with await. Each job completes before
+    // the next starts. Total CPU stays under 10ms because only ONE job
+    // is active at a time, and each job is lightweight (Pool creation
+    // is ~1ms CPU, query is ~0ms CPU — the rest is I/O wait).
+    //
+    // Jobs are ordered by priority: alerts first (time-sensitive),
+    // then lightweight DB jobs, then heavy jobs (news AI last).
 
     const cronExpr = controller.cron || '* * * * *';
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
-    // PRIMARY: Price alert checker — runs on every tick.
-    ctx.waitUntil(withTimeout(runScheduledAlertsBaseline(controller, env)));
+    // Use ctx.waitUntil for the overall scheduled handler — but run jobs
+    // SEQUENTIALLY inside it, not concurrently.
+    ctx.waitUntil((async () => {
+      try {
+        // 1. Price alert checker (every tick — time-sensitive)
+        try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
+          console.warn('[CRON] alerts failed:', e?.message);
+        }
 
-    // Process notification queue — ONLY on 5-min ticks (was every tick)
-    // Reduces per-tick CPU: queue processing does SELECT + UPDATE per item
-    if (isEvery15Min && notificationPlatformRepo?.processQueue) {
-      ctx.waitUntil(withTimeout(
-        notificationPlatformRepo.processQueue(env, sendTelegramMessage).catch((e) => {
-          console.warn('Notification queue processing failed:', e?.message);
-        })
-      ));
-    }
+        // 2. Calendar alerts check (every tick — time-sensitive)
+        try { await runCalendarAlertsCheck(env, { isEvery15Min }); } catch (e) {
+          console.warn('[CRON] calendar failed:', e?.message);
+        }
 
-    // Refresh CMC Market Overview — ONLY on 15-minute ticks
-    if (isEvery15Min && env.CMC_API_KEY) {
-      ctx.waitUntil(withTimeout(marketOverviewSvc.refreshOverview(env)));
-    }
+        // --- 15-minute jobs (run sequentially, not concurrently) ---
+        if (isEvery15Min) {
+          // 3. Notification queue
+          if (notificationPlatformRepo?.processQueue) {
+            try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage); } catch (e) {
+              console.warn('[CRON] notif queue failed:', e?.message);
+            }
+          }
 
-    // ROOT CAUSE FIX (R-2.6 + 3.5): Retry failed referral + wheel rewards
-    if (isEvery15Min) {
-      ctx.waitUntil(withTimeout(retryFailedReferralRewards(env)));
-      ctx.waitUntil(withTimeout(retryFailedWheelRewards(env)));
-    }
+          // 4. Retry failed referral rewards
+          try { await retryFailedReferralRewards(env); } catch (e) {
+            console.warn('[CRON] referral retry failed:', e?.message);
+          }
 
-    // Check for upcoming high-impact calendar events — every tick
-    ctx.waitUntil(withTimeout(runCalendarAlertsCheck(env, { isEvery15Min })));
+          // 5. Retry failed wheel rewards
+          try { await retryFailedWheelRewards(env); } catch (e) {
+            console.warn('[CRON] wheel retry failed:', e?.message);
+          }
 
-    // AI NEWS: Background processing — ONLY on 15-minute ticks (was every minute)
-    // Running every minute caused exceededCpu because processNewsAIBatch does:
-    //   - 8 RSS fetches (each with TLS handshake + response parsing)
-    //   - 70 AI translations (m2m100 model calls)
-    //   - 5 article HTML fetches + text extraction (regex-heavy CPU)
-    //   - 5 AI summary generations (llama-3.3-70b model calls)
-    // Total: ~88 network calls + heavy CPU for regex/AI → exceeded 10ms free-plan CPU limit
-    // Now: runs every 15 minutes — enough for news to stay fresh, well within CPU budget.
-    if (isEvery15Min) {
-      ctx.waitUntil(withTimeout(processNewsAIBatch(env), 25000));
-    }
+          // 6. Market overview refresh
+          if (env.CMC_API_KEY) {
+            try { await marketOverviewSvc.refreshOverview(env); } catch (e) {
+              console.warn('[CRON] market overview failed:', e?.message);
+            }
+          }
 
-    // TELEGRAM PUBLISHER: process queue — ONLY on 15-min ticks (was every tick)
-    if (isEvery15Min && publisherHandlers?.processPublisherQueue) {
-      ctx.waitUntil(withTimeout(
-        publisherHandlers.processPublisherQueue(env, { maxItems: 8 }).catch((e) => {
-          console.warn('Publisher queue processing failed:', e?.message);
-        })
-      , 25000));
-    }
+          // 7. Publisher queue
+          if (publisherHandlers?.processPublisherQueue) {
+            try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); } catch (e) {
+              console.warn('[CRON] publisher failed:', e?.message);
+            }
+          }
+
+          // 8. News AI batch (HEAVIEST — run LAST so it doesn't block other jobs)
+          try { await processNewsAIBatch(env); } catch (e) {
+            console.warn('[CRON] news AI failed:', e?.message);
+          }
+        }
+      } catch (e) {
+        console.error('[CRON] Scheduled handler error:', e?.message);
+      }
+    })());
   },
 };
 //#endregion
