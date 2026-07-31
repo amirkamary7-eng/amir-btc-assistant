@@ -682,7 +682,12 @@ async function requireChannelJoin(user, env) {
     return null; // Admin always passes
   }
   try {
-    const membership = await resolveChannelMembership(env, String(user.id), { forceRefresh: false });
+    // ROOT-CAUSE FIX: skipRewardProcessing=true — this middleware runs on EVERY
+    // protected API request (/api/wallet, /api/referrals/stats, /api/sessions/online,
+    // etc.). Processing referral rewards here (6+ queryDb calls = 18-30ms CPU)
+    // caused exceededCpu on every endpoint. Reward processing now happens only
+    // in bootstrap (once per app open) and check-join (explicit user action).
+    const membership = await resolveChannelMembership(env, String(user.id), { forceRefresh: false, skipRewardProcessing: true });
     if (membership?.joined) {
       return null; // Member — allowed
     }
@@ -2056,11 +2061,11 @@ async function checkChannelMembership(userId, env) {
   return { joined: false, reason: 'api_error' };
 }
 
-async function resolveChannelMembership(env, userId, { forceRefresh = false } = {}) {
+async function resolveChannelMembership(env, userId, { forceRefresh = false, skipRewardProcessing = false } = {}) {
   const uid = String(userId);
 
   // DIAGNOSTIC LOG
-  console.log(JSON.stringify({ scope: 'diag-resolveMembership-start', user_id: uid, forceRefresh, is_guest: uid.startsWith('guest_'), is_admin: isAdminTelegramId(env, uid) }));
+  console.log(JSON.stringify({ scope: 'diag-resolveMembership-start', user_id: uid, forceRefresh, skipRewardProcessing, is_guest: uid.startsWith('guest_'), is_admin: isAdminTelegramId(env, uid) }));
 
   if (uid.startsWith('guest_')) {
     return { joined: false, reason: 'guest_user' };
@@ -2096,36 +2101,32 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
       await setCachedJoinStatus(env, uid, true);
       if (isDatabaseConfigured(env)) {
         await persistDbUserJoinState(env, uid, true);
-        // Process any pending referral reward — non-critical, don't let failure affect membership
-        try {
-          await processPendingReferralReward(env, uid, true);
-        } catch (refErr) {
-          console.warn(safeError('referral-reward-failed', refErr));
+        // ROOT-CAUSE FIX for CPU exhaustion:
+        //
+        // processPendingReferralReward is ONLY called when skipRewardProcessing
+        // is false. This flag is true for requireChannelJoin (the middleware that
+        // gates every protected API endpoint: /api/wallet, /api/referrals/stats,
+        // /api/sessions/online, etc.). Previously, EVERY protected endpoint
+        // triggered the full referral reward chain (up to 6 queryDb calls:
+        // isSubsystemDisabled + getReferralRewardPerInvite + SELECT referrals +
+        // validateRules + creditTokens(ensureSchema + SELECT + INSERT) +
+        // UPDATE referrals) = ~18-30ms CPU → exceededCpu.
+        //
+        // Reward processing belongs in bootstrap (once per app open) and
+        // check-join (user explicitly clicked "Verify"), NOT in every API call.
+        // The cron retryFailedReferralRewards() catches any missed rewards.
+        if (!skipRewardProcessing) {
+          try {
+            await processPendingReferralReward(env, uid, true);
+          } catch (refErr) {
+            console.warn(safeError('referral-reward-failed', refErr));
+          }
         }
       }
       return result;
     }
 
     if (result.reason === 'api_error') {
-      // ROOT-CAUSE FIX for membership instability:
-      //
-      // When the Telegram Bot API has a transient error (timeout, 5xx, network),
-      // we CANNOT know if the user is a member or not. Previously, forceRefresh=true
-      // (used by bootstrap) returned joined:false on ANY API error — even for
-      // verified members. This caused:
-      //   - "کاربر عضو کانال است ولی همچنان عضو تشخیص داده نمی‌شود"
-      //   - "گاهی بعد از چند بار رفرش درست می‌شود"
-      //
-      // FIX: On API error, fall back to the last known good state (DB → KV cache)
-      // for BOTH forceRefresh values. The security concern (user LEFT the channel
-      // but DB still says true) is mitigated by:
-      //   1. DB fallback only trusts channel_joined=TRUE (never false) on API error
-      //   2. When the Telegram API recovers, the next check updates the DB
-      //   3. KV cache for joined has a 5-min TTL — stale values expire naturally
-      //
-      // The ONLY case where we return joined:false is when Telegram EXPLICITLY
-      // says "not a member" (reason: 'not_member') — a definitive answer, not an
-      // API error.
       if (isDatabaseConfigured(env)) {
         const dbUser = await getDbUserJoinState(env, uid);
         if (dbUser?.channel_joined) {
@@ -2140,9 +2141,6 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
         return { joined: true, cached_fallback: true, reason: result.reason };
       }
 
-      // No good cached state — genuinely can't determine membership.
-      // Return false but do NOT cache the negative result (it's an API error,
-      // not a definitive "not a member").
       return { ...result, joined: false };
     }
 
