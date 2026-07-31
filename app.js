@@ -4220,6 +4220,8 @@ async function loadMarketOverview() {
             // the next poll (60s). Now we re-render immediately when data arrives.
             renderSummary();
             renderDashboardMarketStatus();
+            // Refresh Market Pulse with newly arrived dominance/volume data
+            try { renderMarketPulse(); } catch (e) { /* non-critical */ }
         }
     } catch (e) {
         console.warn('[OVERVIEW] Failed to load overview:', e);
@@ -10853,6 +10855,100 @@ function renderMarketTicker() {
 
     _tickerRendered = true;
     _tickerSkeletonCleared = true;
+
+    // Refresh the Market Pulse strip alongside the ticker — same data source.
+    try { renderMarketPulse(); } catch (e) { /* non-critical */ }
+}
+
+// ============================================================================
+// ── NEW FEATURE: Market Pulse — compact stats strip ──
+// ============================================================================
+// Renders 4 at-a-glance pills: BTC dominance, ETH dominance, 24h volume, and
+// the biggest 24h gainer among the top coins. Uses globalMarketData (from
+// /api/overview) + allCoins (from /api/market) — NO extra API call.
+//
+// Design goals:
+//   - Instant market overview without scrolling
+//   - Resilient: if overview data is missing, falls back to computing from
+//     allCoins; if allCoins is also empty, shows '--' gracefully
+//   - Idempotent: safe to call multiple times
+let _pulseRendered = false;
+function renderMarketPulse() {
+    const strip = $('market-pulse');
+    if (!strip) return; // element not in DOM (e.g. on Market page)
+
+    const btcdomEl = $('pulse-btcdom');
+    const ethdomEl = $('pulse-ethdom');
+    const volEl = $('pulse-vol');
+    const gainerEl = $('pulse-gainer');
+    if (!btcdomEl || !ethdomEl || !volEl || !gainerEl) return;
+
+    // ── Dominance + Volume from globalMarketData (preferred) ──
+    let btcDom = 0, ethDom = 0, vol = 0;
+    if (globalMarketData) {
+        btcDom = Number(globalMarketData.btcDominance) || 0;
+        ethDom = Number(globalMarketData.ethDominance) || 0;
+        vol = Number(globalMarketData.totalVolume) || 0;
+    }
+    // Fallback: compute dominance from allCoins if overview didn't provide it
+    if ((!btcDom || !ethDom) && Array.isArray(allCoins) && allCoins.length) {
+        let totalMcap = 0, btcMcap = 0, ethMcap = 0;
+        for (const c of allCoins) {
+            const mc = Number(c.marketCapUsd) || 0;
+            totalMcap += mc;
+            if (c.symbol === 'BTC') btcMcap = mc;
+            else if (c.symbol === 'ETH') ethMcap = mc;
+        }
+        if (totalMcap > 0) {
+            if (!btcDom) btcDom = (btcMcap / totalMcap) * 100;
+            if (!ethDom) ethDom = (ethMcap / totalMcap) * 100;
+        }
+        if (!vol) {
+            for (const c of allCoins) vol += (Number(c.volumeUsd24Hr) || 0);
+        }
+    }
+
+    btcdomEl.textContent = btcDom > 0 ? btcDom.toFixed(1) + '%' : '--';
+    ethdomEl.textContent = ethDom > 0 ? ethDom.toFixed(1) + '%' : '--';
+    volEl.textContent = vol > 0 ? '$' + formatLargeNumber(vol) : '--';
+
+    // ── Top gainer from allCoins (top 30 by rank) ──
+    let gainerSym = '--', gainerPct = 0, hasGainer = false;
+    if (Array.isArray(allCoins) && allCoins.length) {
+        const pool = allCoins.slice(0, 30);
+        let best = null;
+        for (const c of pool) {
+            const pct = Number(c.changePercent24Hr) || 0;
+            if (!best || pct > best._pct) {
+                best = c; best._pct = pct;
+            }
+        }
+        if (best && best._pct !== 0) {
+            gainerSym = (best.symbol || '?').slice(0, 5);
+            gainerPct = best._pct;
+            hasGainer = true;
+        }
+    }
+
+    const gainerPill = strip.querySelector('[data-pulse="gainer"]');
+    if (hasGainer) {
+        const sign = gainerPct > 0 ? '+' : '';
+        gainerEl.textContent = gainerSym + ' ' + sign + gainerPct.toFixed(1) + '%';
+        // Toggle accent vs down based on direction
+        gainerPill.classList.remove('pulse-pill--down');
+        if (gainerPct >= 0) {
+            gainerPill.classList.add('pulse-pill--accent');
+        } else {
+            gainerPill.classList.remove('pulse-pill--accent');
+            gainerPill.classList.add('pulse-pill--down');
+        }
+    } else {
+        gainerEl.textContent = '--';
+        gainerPill.classList.remove('pulse-pill--down', 'pulse-pill--accent');
+        gainerPill.classList.add('pulse-pill--accent'); // default tint
+    }
+
+    _pulseRendered = true;
 }
 
 // ============================================================================

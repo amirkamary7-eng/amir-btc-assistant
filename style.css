@@ -11483,3 +11483,184 @@ body.jl-locked .cd-fullscreen {
     transform: translateY(-2px);
     transition: transform 0.3s ease;
 }
+
+/* ============================================================================
+   #region Market Pulse — compact stats strip (dashboard)
+   A 4-pill horizontal strip showing BTC.D / ETH.D / 24h Vol / Top Gainer.
+   Renders from existing globalMarketData + allCoins — no extra API call.
+   ============================================================================ */
+.market-pulse {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    padding: 0 12px;
+    margin: 10px 0 14px;
+}
+.pulse-pill {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 10px 6px;
+    border-radius: 14px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%);
+    border: 1px solid rgba(255,255,255,0.06);
+    transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    min-height: 56px;
+}
+.pulse-pill:active { transform: scale(0.96); }
+.pulse-pill:hover { border-color: rgba(255,138,0,0.25); }
+.pulse-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+.pulse-value {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    text-align: center;
+    word-break: keep-all;
+}
+/* Accent pill (top gainer) — subtle green tint */
+.pulse-pill--accent {
+    background: linear-gradient(160deg, rgba(34,197,94,0.10) 0%, rgba(34,197,94,0.03) 100%);
+    border-color: rgba(34,197,94,0.20);
+}
+.pulse-pill--accent .pulse-value { color: #4ADE80; }
+.pulse-pill--accent .pulse-label { color: rgba(74,222,128,0.7); }
+/* Down variant (for when top "gainer" is actually a loser — rare but possible) */
+.pulse-pill--down {
+    background: linear-gradient(160deg, rgba(239,68,68,0.10) 0%, rgba(239,68,68,0.03) 100%);
+    border-color: rgba(239,68,68,0.20);
+}
+.pulse-pill--down .pulse-value { color: #F87171; }
+.pulse-pill--down .pulse-label { color: rgba(248,113,113,0.7); }
+
+/* Loading shimmer for pulse values */
+.pulse-value.is-loading {
+    color: transparent;
+    background: linear-gradient(90deg, rgba(255,255,255,0.06) 25%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.06) 75%);
+    background-size: 200% 100%;
+    animation: pulse-shimmer 1.4s ease-in-out infinite;
+    border-radius: 4px;
+    min-width: 32px;
+}
+@keyframes pulse-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+@media (max-width: 360px) {
+    .market-pulse { gap: 6px; }
+    .pulse-pill { padding: 8px 4px; min-height: 50px; }
+    .pulse-value { font-size: 12px; }
+    .pulse-label { font-size: 9px; }
+}
+/* #endregion */
+
+/* ============================================================================
+   #region Polish overrides — background, nav contrast, empty states, spacing
+   Appended at end so these win on equal specificity. Targeted, not global.
+   ============================================================================ */
+
+/* Richer ambient background — eliminates the "black void" feel when content
+   is short. Layered radial glows give depth without distracting. */
+body {
+    background-color: var(--bg-primary);
+    background-image:
+        radial-gradient(ellipse 70% 40% at 50% 0%, rgba(255,138,0,0.045) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 30% at 100% 8%, rgba(99,102,241,0.035) 0%, transparent 50%),
+        radial-gradient(ellipse 50% 30% at 0% 12%, rgba(244,114,182,0.025) 0%, transparent 50%),
+        radial-gradient(ellipse 90% 50% at 50% 100%, rgba(34,197,94,0.020) 0%, transparent 60%);
+    background-attachment: fixed;
+}
+
+/* Bottom nav: brighter active state with icon glow + fill tint.
+   Previous state was too low-contrast against the dark glass background. */
+.nav-item.active {
+    color: #FF9F1C;
+}
+.nav-item.active svg {
+    filter: drop-shadow(0 0 6px rgba(255,159,28,0.45));
+}
+.nav-item.active span {
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+.nav-item.active::before {
+    content: '';
+    position: absolute;
+    top: 4px; left: 18%; right: 18%;
+    height: 30px;
+    background: radial-gradient(ellipse 60% 100% at 50% 0%, rgba(255,159,28,0.18) 0%, transparent 70%);
+    border-radius: 12px;
+    pointer-events: none;
+    z-index: -1;
+}
+.nav-item.active::after {
+    height: 3px;
+    bottom: 2px;
+    box-shadow: 0 0 12px rgba(255,159,28,0.6), 0 0 4px rgba(255,159,28,0.8);
+}
+
+/* Tighter section-header rhythm — reduce the gap between header and content
+   that the VLM flagged as "too much margin-top". */
+.section-header {
+    padding: 4px 12px 6px;
+    margin-top: 6px;
+}
+.section-header + div {
+    margin-top: 0;
+}
+
+/* Empty-state polish — friendlier visual feedback with icon glow and a
+   subtle hint instead of bare text. */
+.empty-state {
+    padding: 36px 24px;
+    border-radius: 16px;
+    margin: 12px;
+    background: rgba(255,255,255,0.02);
+    border: 1px dashed rgba(255,255,255,0.08);
+}
+.empty-state svg {
+    opacity: 0.3;
+    filter: drop-shadow(0 0 8px rgba(255,138,0,0.15));
+}
+
+/* Card hover lift — subtle but adds tactile polish to tappable cards */
+.dms-card, .coin-card, .news-card {
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.dms-card:active, .coin-card:active {
+    transform: scale(0.985);
+}
+
+/* Scrollbar polish for inner scroll areas */
+.max-h-96, .modal-list, [class*="overflow-y-auto"] {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,138,0,0.3) transparent;
+}
+.max-h-96::-webkit-scrollbar, .modal-list::-webkit-scrollbar, [class*="overflow-y-auto"]::-webkit-scrollbar {
+    width: 5px;
+}
+.max-h-96::-webkit-scrollbar-thumb, .modal-list::-webkit-scrollbar-thumb, [class*="overflow-y-auto"]::-webkit-scrollbar-thumb {
+    background: rgba(255,138,0,0.25);
+    border-radius: 3px;
+}
+.max-h-96::-webkit-scrollbar-thumb:hover, .modal-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,138,0,0.45);
+}
+
+/* Focus-visible ring for keyboard accessibility on interactive elements */
+button:focus-visible, .nav-item:focus-visible, .coin-card:focus-visible,
+.hero-slide:focus-visible, .section-more:focus-visible {
+    outline: 2px solid rgba(255,159,28,0.6);
+    outline-offset: 2px;
+    border-radius: 8px;
+}
+/* #endregion */

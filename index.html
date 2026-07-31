@@ -185,6 +185,29 @@
             </div>
         </div>
 
+        <!-- 1c. Market Pulse — compact at-a-glance stats strip.
+             Shows BTC dominance, ETH dominance, 24h volume, and top gainer.
+             Renders from existing globalMarketData + allCoins (no extra API call).
+             Collapses to skeleton pills until data arrives. -->
+        <div class="market-pulse" id="market-pulse" aria-label="Market pulse summary">
+            <div class="pulse-pill" data-pulse="btcdom">
+                <span class="pulse-label">BTC.D</span>
+                <span class="pulse-value" id="pulse-btcdom">--</span>
+            </div>
+            <div class="pulse-pill" data-pulse="ethdom">
+                <span class="pulse-label">ETH.D</span>
+                <span class="pulse-value" id="pulse-ethdom">--</span>
+            </div>
+            <div class="pulse-pill" data-pulse="vol">
+                <span class="pulse-label">حجم ۲۴س</span>
+                <span class="pulse-value" id="pulse-vol">--</span>
+            </div>
+            <div class="pulse-pill pulse-pill--accent" data-pulse="gainer">
+                <span class="pulse-label">بزرگ‌ترین صعود</span>
+                <span class="pulse-value" id="pulse-gainer">--</span>
+            </div>
+        </div>
+
         <!-- 2. Market Status (Fear & Greed + Market Trend) -->
         <div class="section-header">
             <span class="section-title">
