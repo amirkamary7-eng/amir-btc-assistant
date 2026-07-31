@@ -120,10 +120,25 @@ function loadWorker(pgOverride) {
         end() { return Promise.resolve(); }
       },
       neon: function(connectionString) {
-        return async function(sqlText, params) {
-          // Mock neon() — returns array of rows (same as Pool.query().rows)
+        const mockFn = async function(sqlText, params) {
           return [];
         };
+        mockFn.query = async function(sqlText, params) {
+          // Mock — return same format as Pool.query()
+          const sqlLower = (sqlText || '').toLowerCase();
+          if (sqlLower.includes('insert into users') && sqlLower.includes('returning')) {
+            return { rows: [{ telegram_id: String(params?.[0] || '123456'), username: null, first_name: 'Test', last_name: null, lang: 'fa', channel_joined: false }] };
+          }
+          if (sqlLower.includes('select') && sqlLower.includes('from users') && sqlLower.includes('where telegram_id')) {
+            return { rows: [] };
+          }
+          return { rows: [] };
+        };
+        mockFn.transaction = async function(cb) {
+          const tx = { query: mockFn.query };
+          return await cb(tx);
+        };
+        return mockFn;
       },
     },
   };

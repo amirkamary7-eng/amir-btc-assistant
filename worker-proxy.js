@@ -1222,8 +1222,8 @@ async function getDbUserJoinState(env, userId) {
   if (!databaseUrl) return null;
   try {
     const sql = neon(databaseUrl);
-    const rows = await sql('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [String(userId)]);
-    const row = Array.isArray(rows) ? rows[0] : null;
+    const result = await sql.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [String(userId)]);
+    const row = result.rows?.[0];
     if (!row) return null;
     return {
       telegram_id: String(row.telegram_id),
@@ -1240,7 +1240,7 @@ async function persistDbUserJoinState(env, userId, joined) {
   if (!databaseUrl) return;
   try {
     const sql = neon(databaseUrl);
-    await sql(
+    await sql.query(
       `INSERT INTO users (telegram_id, lang, channel_joined, channel_verified_at, bot_joined_at, created_at, updated_at)
        VALUES ($1, 'fa', $2, $3, NOW(), NOW(), NOW())
        ON CONFLICT (telegram_id) DO UPDATE
@@ -1288,27 +1288,22 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // ARCHITECTURAL FIX: Use the Neon serverless `neon()` function instead of Pool.
-  // The `neon()` client is STATELESS — it makes a single HTTP request per query
-  // with NO WebSocket connection, NO pool, NO state to clean up.
-  // This eliminates:
-  //   - Pool creation overhead (was ~2ms CPU per createPool)
-  //   - pool.end() await (was ~1ms CPU per end)
-  //   - WebSocket connection lifecycle (was causing cross-request I/O)
-  //   - Connection leaks (impossible with stateless client)
-  //
-  // The neon() function is imported at the top of this file.
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) throw new Error('Database not configured');
 
-  // Use the neon() SQL function (tagged template or function call)
+  // ROOT-CAUSE FIX: neon() returns a tagged-template function.
+  // To call it with (sql, params) we must use sql.query() not sql().
+  // See: https://neon.tech/docs/serverless/serverless-driver
   const sql = neon(databaseUrl);
 
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const result = await sql(sqlText, params);
-        return { rows: Array.isArray(result) ? result : (result?.rows || []), rowCount: Array.isArray(result) ? result.length : (result?.rowCount || 0) };
+        // Use sql.query() for conventional parameterized queries.
+        // sql() (tagged template) would also work but requires template syntax.
+        const result = await sql.query(sqlText, params);
+        // sql.query() returns { rows: [], rowCount: 0 } — same as Pool.query()
+        return result;
       } catch (error) {
         if (attempt === retries) throw error;
         const ms = Math.min(200 * 2 ** attempt, 1000);
@@ -1326,21 +1321,18 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * Requires Neon serverless Pool with transaction_mode support.
  */
 async function queryDbTransaction(env, queries) {
-  // ARCHITECTURAL FIX: Use neon() stateless client with transaction support.
-  // The neon() function supports transaction_mode via the options parameter.
-  // This avoids creating a Pool with WebSocket connections.
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) throw new Error('Database not configured');
 
-  // neon() with { arrayMode: false, fullResults: true } returns { rows, rowCount }
   const sql = neon(databaseUrl, { arrayMode: false, fullResults: true });
 
   try {
-    // Execute all queries in a single transaction using the `transaction` method
+    // Use sql.transaction() for atomic multi-query execution.
+    // Inside the callback, use tx.query() for parameterized queries.
     const results = await sql.transaction(async (tx) => {
       const txResults = [];
       for (const { sql: q, params } of queries) {
-        const result = await tx(q, params);
+        const result = await tx.query(q, params);
         txResults.push(result);
       }
       return txResults;
@@ -3332,7 +3324,7 @@ async function processNewsAIBatch(env) {
     const newsWriteWasSkipped = _kvWriteStats.totalSkipped > newsSkippedBefore;
 
     // ── STEP 5: AI SUMMARY GENERATION ──
-    stepLog('AI_SUMMARY_start', { toProcess: Math.min(deduped.length, 5) });
+    stepLog('AI_SUMMARY_start', { toProcess: Math.min(deduped.length, 3) });
     let aiResult;
     try {
       aiResult = await processNewsAIJobs(env, deduped);
