@@ -24,6 +24,7 @@ export function createUserHandlers(deps) {
     resolveChannelMembership,
     userRepo,
     watchlistRepo,
+    adminRepo,
     diagLog,
   } = deps;
 
@@ -156,7 +157,32 @@ export function createUserHandlers(deps) {
         channelJoined = Boolean(freshUserRow?.channel_joined);
       }
 
-      console.log(JSON.stringify({ scope: 'diag-bootstrap-response', user_id: userId, channel_joined: channelJoined, is_admin: isAdminTelegramId(env, userId), db_had: Boolean(freshUserRow?.channel_joined) }));
+      // ROOT-CAUSE FIX for admin detection instability:
+      //
+      // Previously, bootstrap only checked isAdminTelegramId(env, userId) — which
+      // ONLY checks env vars (ADMIN_TELEGRAM_ID / ADMIN_TELEGRAM_IDS). DB admins
+      // (added via the admin panel) got is_admin=false from bootstrap → the admin
+      // entry button was never shown → they could NEVER open the admin panel.
+      //
+      // This caused: "بعضی وقت‌ها پنل مدیریت نمایش داده نمی‌شود" for DB admins.
+      //
+      // FIX: Check BOTH env super admin AND DB admins table. This matches the
+      // logic in handleIsAdmin() so bootstrap and is-admin agree.
+      let isUserAdmin = isAdminTelegramId(env, userId);
+      if (!isUserAdmin && isDatabaseConfigured(env) && adminRepo) {
+        try {
+          await adminRepo.ensureSchema(env).catch(() => {});
+          const dbAdmin = await adminRepo.getAdminByTelegramId(env, userId);
+          if (dbAdmin && dbAdmin.active) {
+            isUserAdmin = true;
+          }
+        } catch (e) {
+          // Non-fatal — don't let admin check failure break bootstrap
+          console.warn('[BOOTSTRAP] Admin DB check failed:', e?.message);
+        }
+      }
+
+      console.log(JSON.stringify({ scope: 'diag-bootstrap-response', user_id: userId, channel_joined: channelJoined, is_admin: isUserAdmin, is_env_admin: isAdminTelegramId(env, userId), db_had: Boolean(freshUserRow?.channel_joined) }));
 
       return jsonResponse({
         status: 'success',
@@ -164,7 +190,7 @@ export function createUserHandlers(deps) {
         watchlist,
         bot_username: String(env.BOT_USERNAME || ''),
         channel_joined: channelJoined,
-        is_admin: isAdminTelegramId(env, userId),
+        is_admin: isUserAdmin,
       }, {}, env);
     } catch (error) {
       console.warn(safeError('bootstrap-user', error));

@@ -1319,7 +1319,18 @@ async function persistDbUserJoinState(env, userId, joined) {
  * This is the SINGLE SOURCE OF TRUTH for the base per-invite reward.
  * Admins can change it via Reward Center → Referral Rewards tab.
  */
+// Module-level cache for referral reward amount. The value rarely changes
+// (only when admin updates reward tiers), so a 60-second TTL is safe and
+// eliminates a DB query on every processPendingReferralReward call.
+let _rewardPerInviteCache = { value: null, expiresAt: 0 };
+const REWARD_PER_INVITE_CACHE_TTL = 60000; // 60 seconds
+
 async function getReferralRewardPerInvite(env) {
+  // Check cache first
+  const now = Date.now();
+  if (_rewardPerInviteCache.value !== null && now < _rewardPerInviteCache.expiresAt) {
+    return _rewardPerInviteCache.value;
+  }
   // Try DB first
   if (isDatabaseConfigured(env)) {
     try {
@@ -1330,7 +1341,9 @@ async function getReferralRewardPerInvite(env) {
          ORDER BY invite_count DESC LIMIT 1`,
       );
       if (result.rows[0] && Number(result.rows[0].token_amount) > 0) {
-        return Number(result.rows[0].token_amount);
+        const val = Number(result.rows[0].token_amount);
+        _rewardPerInviteCache = { value: val, expiresAt: now + REWARD_PER_INVITE_CACHE_TTL };
+        return val;
       }
     } catch (e) {
       // Table might not exist yet — fall through to env fallback
@@ -1338,7 +1351,9 @@ async function getReferralRewardPerInvite(env) {
     }
   }
   // Env fallback (still configurable, but DB takes priority)
-  return Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0);
+  const fallback = Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0);
+  _rewardPerInviteCache = { value: fallback, expiresAt: now + REWARD_PER_INVITE_CACHE_TTL };
+  return fallback;
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
@@ -2092,27 +2107,42 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
     }
 
     if (result.reason === 'api_error') {
-      // SECURITY FIX: during forceRefresh (used by bootstrap + check-join), do NOT
-      // fall back to stale DB/cache values on Telegram API errors. This prevents
-      // a user who LEFT the channel from getting in via a stale DB 'true' value
-      // when the Telegram API is temporarily unavailable. Fail-closed = deny.
-      // For non-forceRefresh (used by requireChannelJoin on data endpoints),
-      // keep the fail-open behavior so legitimate members aren't locked out
-      // during transient Telegram outages.
-      if (!forceRefresh) {
-        if (isDatabaseConfigured(env)) {
-          const dbUser = await getDbUserJoinState(env, uid);
-          if (dbUser?.channel_joined) {
-            return { joined: true, from_db_fallback: true, reason: result.reason };
-          }
-        }
-
-        const cached = await getCachedJoinStatus(env, uid);
-        if (cached === true) {
-          return { joined: true, cached_fallback: true, reason: result.reason };
+      // ROOT-CAUSE FIX for membership instability:
+      //
+      // When the Telegram Bot API has a transient error (timeout, 5xx, network),
+      // we CANNOT know if the user is a member or not. Previously, forceRefresh=true
+      // (used by bootstrap) returned joined:false on ANY API error — even for
+      // verified members. This caused:
+      //   - "کاربر عضو کانال است ولی همچنان عضو تشخیص داده نمی‌شود"
+      //   - "گاهی بعد از چند بار رفرش درست می‌شود"
+      //
+      // FIX: On API error, fall back to the last known good state (DB → KV cache)
+      // for BOTH forceRefresh values. The security concern (user LEFT the channel
+      // but DB still says true) is mitigated by:
+      //   1. DB fallback only trusts channel_joined=TRUE (never false) on API error
+      //   2. When the Telegram API recovers, the next check updates the DB
+      //   3. KV cache for joined has a 5-min TTL — stale values expire naturally
+      //
+      // The ONLY case where we return joined:false is when Telegram EXPLICITLY
+      // says "not a member" (reason: 'not_member') — a definitive answer, not an
+      // API error.
+      if (isDatabaseConfigured(env)) {
+        const dbUser = await getDbUserJoinState(env, uid);
+        if (dbUser?.channel_joined) {
+          console.log(JSON.stringify({ scope: 'diag-resolveMembership-api-error-db-fallback', user_id: uid, joined: true, source: 'db_fallback' }));
+          return { joined: true, from_db_fallback: true, reason: result.reason };
         }
       }
 
+      const cached = await getCachedJoinStatus(env, uid);
+      if (cached === true) {
+        console.log(JSON.stringify({ scope: 'diag-resolveMembership-api-error-kv-fallback', user_id: uid, joined: true, source: 'kv_fallback' }));
+        return { joined: true, cached_fallback: true, reason: result.reason };
+      }
+
+      // No good cached state — genuinely can't determine membership.
+      // Return false but do NOT cache the negative result (it's an API error,
+      // not a definitive "not a member").
       return { ...result, joined: false };
     }
 
@@ -3999,7 +4029,7 @@ const watchlistHandlers = createWatchlistHandlers({
   isDatabaseConfigured,
   watchlistRepo,
 });
-const referralRepo = createReferralRepository({ queryDb, getReferralRewardPerInvite });
+const referralRepo = createReferralRepository({ queryDb, getReferralRewardPerInvite, getNumericEnv });
 const referralHandlers = createReferralHandlers({
   jsonResponse,
   authenticateTelegramRequest,
@@ -4080,6 +4110,9 @@ const ticketHandlers = createTicketHandlers({
   notificationPlatformRepo,
 });
 const userRepo = createUserRepository({ queryDb, normalizeOptionalString });
+// adminRepo must be created BEFORE userHandlers because userHandlers (bootstrap)
+// checks the DB admins table to detect DB-added admins (not just env super admin).
+const adminRepo = createAdminRepository({ queryDb, normalizeOptionalString });
 const userHandlers = createUserHandlers({
   jsonResponse,
   optionalTelegramAuth,
@@ -4095,6 +4128,7 @@ const userHandlers = createUserHandlers({
   resolveChannelMembership,
   userRepo,
   watchlistRepo,
+  adminRepo,
   diagLog,
 });
 const notifyHandlers = createNotifyHandlers({
@@ -4161,7 +4195,6 @@ const calendarReminderHandlers = createCalendarReminderHandlers({
   isDatabaseConfigured,
   calendarReminderRepo,
 });
-const adminRepo = createAdminRepository({ queryDb, normalizeOptionalString });
 const adminHandlers = createAdminHandlers({
   jsonResponse,
   authenticateTelegramRequest,

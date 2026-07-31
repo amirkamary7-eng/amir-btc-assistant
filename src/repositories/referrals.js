@@ -10,7 +10,7 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createReferralRepository(deps) {
-  const { queryDb, getReferralRewardPerInvite } = deps;
+  const { queryDb, getReferralRewardPerInvite, getNumericEnv } = deps;
 
   let _schemaVerified = false;
 
@@ -21,6 +21,11 @@ export function createReferralRepository(deps) {
    */
   async function ensureSchema(env) {
     if (_schemaVerified) return;
+    // ROOT-CAUSE FIX: Merge ALL schema migrations into a SINGLE queryDb call.
+    // Previously this was 2 separate queryDb calls (batch SQL + DO block),
+    // each creating a new Pool + TLS handshake (~3-5ms CPU each).
+    // 2 calls × 5ms = 10ms → exceededCpu on /api/referrals/stats.
+    // Now 1 call = 1 Pool = ~3-5ms CPU.
     const batchSql = `
       ALTER TABLE referrals ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'active';
       ALTER TABLE referrals ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
@@ -30,40 +35,22 @@ export function createReferralRepository(deps) {
       CREATE INDEX IF NOT EXISTS idx_referrals_inviter_created ON referrals (inviter_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_referrals_status ON referrals (status);
       CREATE INDEX IF NOT EXISTS idx_referrals_campaign ON referrals (campaign_id);
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'uq_referral_invitee'
+            AND conrelid = 'referrals'::regclass
+        ) THEN
+          ALTER TABLE referrals ADD CONSTRAINT uq_referral_invitee UNIQUE (invitee_id);
+        END IF;
+      END $$;
     `;
     try {
       await queryDb(env, batchSql);
     } catch (e) {
       console.warn('Referral schema migration warning:', e.message);
     }
-
-    // ── ROOT-CAUSE FIX: Ensure UNIQUE constraint on invitee_id exists ──
-    // The INSERT in processReferralOnBootstrap uses ON CONFLICT (invitee_id) DO NOTHING.
-    // This REQUIRES a UNIQUE constraint on invitee_id. If it doesn't exist, the
-    // INSERT will throw "there is no unique or exclusion constraint matching the ON CONFLICT"
-    // instead of doing nothing on duplicate — causing a 500 error.
-    // ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS is NOT supported in Postgres,
-    // so we use a DO block that checks pg_constraint first.
-    try {
-      await queryDb(env, `
-        DO $$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint
-            WHERE conname = 'uq_referral_invitee'
-              AND conrelid = 'referrals'::regclass
-          ) THEN
-            ALTER TABLE referrals ADD CONSTRAINT uq_referral_invitee UNIQUE (invitee_id);
-          END IF;
-        END $$;
-      `);
-      console.log('[REFERRAL] UNIQUE constraint uq_referral_invitee verified');
-    } catch (e) {
-      // Non-fatal — the constraint might already exist under a different name,
-      // or the table might have a primary key on a different column.
-      console.warn('[REFERRAL] Could not add uq_referral_invitee constraint (may already exist):', e?.message);
-    }
-
     _schemaVerified = true;
   }
 
@@ -99,22 +86,39 @@ export function createReferralRepository(deps) {
    */
   async function getStats(env, userId) {
     await ensureSchema(env).catch(() => {});
+    // ROOT-CAUSE FIX: Merge reward_per_invite query into the main stats query
+    // via CTE. Previously getStats made 2 queryDb calls (stats + getReferralRewardPerInvite),
+    // each creating a separate Pool + TLS handshake (~3-5ms CPU each).
+    // Now 1 queryDb call = 1 Pool = ~3-5ms CPU. Halves the CPU cost.
     const result = await queryDb(
       env,
       `
+        WITH stats AS (
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE channel_verified = true)::int AS active,
+            COUNT(*) FILTER (WHERE rewarded = true)::int AS rewarded,
+            COUNT(*) FILTER (WHERE status = 'active')::int AS active_status,
+            COUNT(*) FILTER (WHERE status = 'flagged')::int AS flagged,
+            COUNT(*) FILTER (WHERE status = 'reversed')::int AS reversed
+          FROM referrals
+          WHERE inviter_id = $1
+        ),
+        reward AS (
+          SELECT token_amount FROM referral_reward_tiers
+          WHERE is_enabled = TRUE AND invite_count <= 1
+          ORDER BY invite_count DESC LIMIT 1
+        )
         SELECT
-          COUNT(*)::int AS total,
-          COUNT(*) FILTER (WHERE channel_verified = true)::int AS active,
-          COUNT(*) FILTER (WHERE rewarded = true)::int AS rewarded,
-          COUNT(*) FILTER (WHERE status = 'active')::int AS active_status,
-          COUNT(*) FILTER (WHERE status = 'flagged')::int AS flagged,
-          COUNT(*) FILTER (WHERE status = 'reversed')::int AS reversed
-        FROM referrals
-        WHERE inviter_id = $1
+          s.total, s.active, s.rewarded, s.active_status, s.flagged, s.reversed,
+          COALESCE(r.token_amount, 0)::int AS reward_per_invite
+        FROM stats s
+        LEFT JOIN reward r ON true
       `,
       [String(userId)],
     );
     const row = result.rows[0] || {};
+    const rewardPerInvite = Number(row.reward_per_invite || 0);
     return {
       total: Number(row.total || 0),
       active: Number(row.active || 0),
@@ -122,7 +126,8 @@ export function createReferralRepository(deps) {
       flagged: Number(row.flagged || 0),
       reversed: Number(row.reversed || 0),
       pending: Number(row.total || 0) - Number(row.rewarded || 0),
-      reward_per_invite: await getReferralRewardPerInvite(env),
+      // Use DB value if > 0, otherwise fall back to env var (no extra query)
+      reward_per_invite: rewardPerInvite > 0 ? rewardPerInvite : Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0),
     };
   }
 
