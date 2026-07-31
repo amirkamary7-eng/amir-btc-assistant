@@ -10874,59 +10874,81 @@ function renderDashboardHeatmap() {
         return;
     }
 
-    // Take top 16 coins by market cap (skip stablecoins — they're always 0%)
-    // 16 fills a 4×4 grid perfectly with no empty spaces
-    const skipStable = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FDUSD', 'USDE', 'USDGO'];
-    const top = allCoins
-        .filter(c => c && c.symbol && !skipStable.includes(c.symbol.toUpperCase()))
-        .slice(0, 16);
+    // Priority list of important coins to display (ordered by market importance)
+    const PRIORITY_COINS = [
+        'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'DOGE', 'ADA', 'TRX',
+        'LINK', 'AVAX', 'TON', 'SUI', 'DOT', 'LTC', 'NEAR', 'APT'
+    ];
 
-    if (top.length === 0) {
+    const skipStable = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FDUSD', 'USDE', 'USDGO'];
+
+    // Build a map of available coins by symbol
+    const coinMap = {};
+    for (const c of allCoins) {
+        if (c && c.symbol && !skipStable.includes(c.symbol.toUpperCase())) {
+            coinMap[c.symbol.toUpperCase()] = c;
+        }
+    }
+
+    // Select coins: priority first, then fill from remaining top by market cap
+    const selected = [];
+    const used = new Set();
+    for (const sym of PRIORITY_COINS) {
+        if (coinMap[sym] && !used.has(sym)) {
+            selected.push(coinMap[sym]);
+            used.add(sym);
+        }
+    }
+    // Fill remaining slots from top by market cap
+    if (selected.length < 16) {
+        const remaining = allCoins
+            .filter(c => c && c.symbol && !skipStable.includes(c.symbol.toUpperCase()) && !used.has(c.symbol.toUpperCase()))
+            .sort((a, b) => (b.marketCapUsd || 0) - (a.marketCapUsd || 0));
+        for (const c of remaining) {
+            if (selected.length >= 16) break;
+            selected.push(c);
+            used.add(c.symbol.toUpperCase());
+        }
+    }
+
+    if (selected.length === 0) {
         container.innerHTML = '<div class="heatmap-empty">—</div>';
         return;
     }
 
-    // Compute max market cap for size weighting
-    const maxMcap = Math.max(...top.map(c => c.marketCapUsd || 0), 1);
+    // Size tiers: BTC gets xl, ETH gets lg, next 6 get md, rest get sm
+    // This creates a professional treemap-style heatmap where size = importance
+    const SIZE_MAP = {};
+    if (selected[0]) SIZE_MAP[selected[0].symbol.toUpperCase()] = 'hm-size-xl';
+    if (selected[1]) SIZE_MAP[selected[1].symbol.toUpperCase()] = 'hm-size-lg';
+    for (let i = 2; i < Math.min(8, selected.length); i++) {
+        SIZE_MAP[selected[i].symbol.toUpperCase()] = 'hm-size-md';
+    }
 
     // Build heatmap cells
-    const cells = top.map(coin => {
+    const cells = selected.map(coin => {
         const change = Number(coin.changePercent24Hr) || 0;
-        const mcap = coin.marketCapUsd || 0;
-        // Size class: based on market cap relative to max
-        const sizeRatio = mcap / maxMcap;
-        let sizeClass = 'hm-size-sm';
-        if (sizeRatio > 0.6) sizeClass = 'hm-size-xl';
-        else if (sizeRatio > 0.3) sizeClass = 'hm-size-lg';
-        else if (sizeRatio > 0.1) sizeClass = 'hm-size-md';
-        else sizeClass = 'hm-size-sm';
+        const sym = coin.symbol.toUpperCase();
+        const sizeClass = SIZE_MAP[sym] || 'hm-size-sm';
 
-        // Color: based on change percentage with PROPORTIONAL INTENSITY
-        // Only EXACTLY 0.0% is gray. Any non-zero change shows green/red
-        // with intensity proportional to the magnitude.
+        // Color: proportional intensity — only exactly 0.0% is gray
         let bgColor, textColor, borderColor;
         if (change === 0) {
-            // Only exactly 0% is gray
             bgColor = 'rgba(255, 255, 255, 0.04)';
             textColor = 'rgba(255, 255, 255, 0.6)';
             borderColor = 'rgba(255, 255, 255, 0.08)';
         } else if (change > 0) {
-            // Green — intensity proportional to change magnitude
-            // Even 0.01% shows a faint green; 10%+ is fully saturated
-            const intensity = Math.min(Math.abs(change) / 10, 1);
-            const minAlpha = 0.08; // Minimum visibility even for tiny changes
-            const alpha = minAlpha + intensity * 0.42;
+            const intensity = Math.min(Math.abs(change) / 8, 1);
+            const alpha = 0.08 + intensity * 0.45;
             bgColor = `rgba(34, 197, 94, ${alpha})`;
-            textColor = intensity > 0.3 ? '#86EFAC' : 'rgba(134, 239, 172, 0.8)';
-            borderColor = `rgba(34, 197, 94, ${0.15 + intensity * 0.35})`;
+            textColor = intensity > 0.3 ? '#86EFAC' : 'rgba(134, 239, 172, 0.85)';
+            borderColor = `rgba(34, 197, 94, ${0.15 + intensity * 0.4})`;
         } else {
-            // Red — intensity proportional to change magnitude
-            const intensity = Math.min(Math.abs(change) / 10, 1);
-            const minAlpha = 0.08;
-            const alpha = minAlpha + intensity * 0.42;
+            const intensity = Math.min(Math.abs(change) / 8, 1);
+            const alpha = 0.08 + intensity * 0.45;
             bgColor = `rgba(239, 68, 68, ${alpha})`;
-            textColor = intensity > 0.3 ? '#FCA5A5' : 'rgba(252, 165, 165, 0.8)';
-            borderColor = `rgba(239, 68, 68, ${0.15 + intensity * 0.35})`;
+            textColor = intensity > 0.3 ? '#FCA5A5' : 'rgba(252, 165, 165, 0.85)';
+            borderColor = `rgba(239, 68, 68, ${0.15 + intensity * 0.4})`;
         }
 
         const changeStr = (change >= 0 ? '+' : '') + change.toFixed(2) + '%';

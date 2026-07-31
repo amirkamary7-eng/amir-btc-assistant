@@ -7731,8 +7731,9 @@ export default {
     // PRIMARY: Price alert checker — runs on every tick.
     ctx.waitUntil(withTimeout(runScheduledAlertsBaseline(controller, env)));
 
-    // Process notification queue on every tick.
-    if (notificationPlatformRepo?.processQueue) {
+    // Process notification queue — ONLY on 5-min ticks (was every tick)
+    // Reduces per-tick CPU: queue processing does SELECT + UPDATE per item
+    if (isEvery15Min && notificationPlatformRepo?.processQueue) {
       ctx.waitUntil(withTimeout(
         notificationPlatformRepo.processQueue(env, sendTelegramMessage).catch((e) => {
           console.warn('Notification queue processing failed:', e?.message);
@@ -7766,8 +7767,8 @@ export default {
       ctx.waitUntil(withTimeout(processNewsAIBatch(env), 25000));
     }
 
-    // TELEGRAM PUBLISHER: process queue — every tick
-    if (publisherHandlers?.processPublisherQueue) {
+    // TELEGRAM PUBLISHER: process queue — ONLY on 15-min ticks (was every tick)
+    if (isEvery15Min && publisherHandlers?.processPublisherQueue) {
       ctx.waitUntil(withTimeout(
         publisherHandlers.processPublisherQueue(env, { maxItems: 8 }).catch((e) => {
           console.warn('Publisher queue processing failed:', e?.message);

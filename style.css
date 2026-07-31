@@ -11379,9 +11379,9 @@ body.jl-locked .cd-fullscreen {
 .heatmap-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    grid-auto-rows: 60px;
+    grid-auto-rows: 56px;
     gap: 5px;
-    /* No grid-auto-flow: dense — with 16 uniform cells, no gaps to fill */
+    grid-auto-flow: dense;
 }
 .hm-cell {
     border-radius: 10px;
@@ -11420,8 +11420,27 @@ body.jl-locked .cd-fullscreen {
     line-height: 1;
     opacity: 0.9;
 }
-/* All cells are uniform 1×1 — no size variants.
-   This ensures the 4×4 grid (16 coins) has no empty spaces. */
+/* Size variants — treemap style: BTC largest, ETH second, majors medium */
+.hm-size-xl {
+    grid-column: span 2;
+    grid-row: span 2;
+}
+.hm-size-xl .hm-symbol { font-size: 20px; }
+.hm-size-xl .hm-change { font-size: 14px; }
+.hm-size-lg {
+    grid-column: span 2;
+    grid-row: span 1;
+}
+.hm-size-lg .hm-symbol { font-size: 16px; }
+.hm-size-lg .hm-change { font-size: 12px; }
+.hm-size-md {
+    grid-column: span 1;
+    grid-row: span 1;
+}
+.hm-size-sm {
+    grid-column: span 1;
+    grid-row: span 1;
+}
 
 /* Skeleton */
 .heatmap-skeleton {
