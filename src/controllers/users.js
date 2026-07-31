@@ -148,9 +148,7 @@ export function createUserHandlers(deps) {
             membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: true });
             channelJoined = Boolean(membership?.joined);
           }
-          console.log(JSON.stringify({ scope: 'diag-bootstrap-membership-resolved', user_id: userId, tg_user_id: tgUser.id, membership_joined: membership?.joined, membership_reason: membership?.reason, final_channelJoined: channelJoined, db_had: Boolean(freshUserRow?.channel_joined) }));
         } catch (e) {
-          console.log(JSON.stringify({ scope: 'diag-bootstrap-membership-error', user_id: userId, error: e?.message }));
           channelJoined = Boolean(freshUserRow?.channel_joined);
         }
       } else {
@@ -182,7 +180,6 @@ export function createUserHandlers(deps) {
         }
       }
 
-      console.log(JSON.stringify({ scope: 'diag-bootstrap-response', user_id: userId, channel_joined: channelJoined, is_admin: isUserAdmin, is_env_admin: isAdminTelegramId(env, userId), db_had: Boolean(freshUserRow?.channel_joined) }));
 
       return jsonResponse({
         status: 'success',
@@ -309,16 +306,13 @@ export function createUserHandlers(deps) {
   async function handleDeleteAccount(request, env) {
     // ── DEBUG: Log every step of the delete-account flow ──
     const t0 = Date.now();
-    console.log(JSON.stringify({ scope: 'diag-delete-account-STEP1-ENTRY', ts: new Date().toISOString() }));
 
     const auth = await optionalTelegramAuth(request, env);
     if (!auth.user) {
-      console.log(JSON.stringify({ scope: 'diag-delete-account-REJECTED', reason: 'no_auth' }));
       return auth.error;
     }
 
     const userId = String(auth.user.id);
-    console.log(JSON.stringify({ scope: 'diag-delete-account-STEP2-AUTHED', userId }));
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -332,34 +326,24 @@ export function createUserHandlers(deps) {
     const payload = bodyResult.payload;
 
     if (!payload || payload.confirm !== 'DELETE') {
-      console.log(JSON.stringify({ scope: 'diag-delete-account-REJECTED', reason: 'no_confirmation', userId }));
       return jsonResponse({
         status: 'error',
         message: 'Confirmation required. Send { "confirm": "DELETE" } in the request body to confirm account deletion.',
       }, { status: 400 }, env);
     }
 
-    console.log(JSON.stringify({ scope: 'diag-delete-account-STEP3-CONFIRMED', userId }));
 
     try {
       // Verify user exists before deleting
       const existingUser = await userRepo.getById(env, userId);
       if (!existingUser) {
-        console.log(JSON.stringify({ scope: 'diag-delete-account-REJECTED', reason: 'user_not_found', userId }));
         return jsonResponse({ status: 'error', message: 'User not found' }, { status: 404 }, env);
       }
 
-      console.log(JSON.stringify({ scope: 'diag-delete-account-STEP4-CASCADE-START', userId, hadChannelJoined: existingUser.channel_joined }));
 
       // ── CASCADE DELETE ──
       const summary = await userRepo.deleteAccount(env, userId);
 
-      console.log(JSON.stringify({
-        scope: 'diag-delete-account-STEP5-CASCADE-DONE',
-        userId,
-        summary,
-        elapsed: Date.now() - t0
-      }));
 
       return jsonResponse({
         status: 'success',
@@ -367,13 +351,6 @@ export function createUserHandlers(deps) {
         deleted: summary,
       }, {}, env);
     } catch (error) {
-      console.error(JSON.stringify({
-        scope: 'diag-delete-account-FATAL',
-        userId,
-        error: error?.message,
-        stack: error?.stack?.substring(0, 300),
-        elapsed: Date.now() - t0
-      }));
       return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, env);
     }
   }

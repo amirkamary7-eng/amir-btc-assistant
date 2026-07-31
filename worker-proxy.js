@@ -196,26 +196,12 @@ async function readAppCache(env, key) {
 const _kvWriteCache = new Map();
 const _KV_WRITE_CACHE_MAX = 200;
 
-// ── REAL KV WRITE TRACKING ──
-// Counts actual KV.put calls per key prefix. Survives per isolate.
-// Reported via /api/_diag/kv-write-stats
-const _kvWriteStats = {
-  startedAt: null, // Set on first write (lazy init)
-  totalWrites: 0,
-  totalSkipped: 0,
-  byKey: {},       // exact key → count
-  byPrefix: {},    // prefix (first 2 segments) → count
-};
-function _trackKvWrite(key) {
-  if (!_kvWriteStats.startedAt) _kvWriteStats.startedAt = new Date().toISOString();
-  _kvWriteStats.totalWrites++;
-  const parts = String(key || '').split(':').slice(0, 2).join(':');
-  _kvWriteStats.byPrefix[parts] = (_kvWriteStats.byPrefix[parts] || 0) + 1;
-  _kvWriteStats.byKey[key] = (_kvWriteStats.byKey[key] || 0) + 1;
-}
-function _trackKvSkip() {
-  _kvWriteStats.totalSkipped++;
-}
+// ── KV write tracking (DISABLED — was diagnostic instrumentation) ──
+// ROOT-CAUSE FIX: _trackKvWrite and _trackKvSkip ran on EVERY writeAppCache
+// call, doing string splitting + object property updates. Now no-ops.
+const _kvWriteStats = { startedAt: null, totalWrites: 0, totalSkipped: 0, byKey: {}, byPrefix: {} };
+function _trackKvWrite(key) { /* no-op: diagnostic tracking removed */ }
+function _trackKvSkip() { /* no-op */ }
 
 async function writeAppCache(env, key, value, expirationTtl) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.put !== 'function') {
@@ -252,50 +238,14 @@ async function writeAppCache(env, key, value, expirationTtl) {
   }
 }
 
-// ============================================================================
-// OPTIMIZATION: Use in-memory buffer + batch writes to reduce KV writes.
-// Previously each diagLog call did 1 KV read + 1 KV write = 2 KV ops.
-// With 21 calls per referral flow, that's 42 KV ops just for logging.
-// Now: buffer in memory, flush once per request via waitUntil.
-// ============================================================================
-const DIAG_LOG_KEY = 'diag_referral_flow_log';
-const DIAG_LOG_MAX = 50;
-const _diagBuffer = [];
-
-async function diagLog(env, entry) {
-  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
-  console.log(line);
-  // Buffer in memory — will be flushed by flushDiagLog()
-  _diagBuffer.push(line);
-  if (_diagBuffer.length > DIAG_LOG_MAX) {
-    _diagBuffer.splice(0, _diagBuffer.length - DIAG_LOG_MAX);
-  }
-}
-
-/** Flush buffered diag logs to KV (call once at end of request via waitUntil) */
-async function flushDiagLog(env) {
-  if (_diagBuffer.length === 0) return;
-  if (!env?.APP_CACHE?.put) return;
-  try {
-    const existing = await env.APP_CACHE.get(DIAG_LOG_KEY);
-    let lines = existing ? existing.split('\n').filter(Boolean) : [];
-    lines = lines.concat(_diagBuffer);
-    if (lines.length > DIAG_LOG_MAX) lines = lines.slice(-DIAG_LOG_MAX);
-    await env.APP_CACHE.put(DIAG_LOG_KEY, lines.join('\n'), { expirationTtl: 600 });
-    _trackKvWrite(DIAG_LOG_KEY);
-    _diagBuffer.length = 0; // Clear buffer after successful flush
-  } catch { /* KV write failure should not break the flow */ }
-}
-
-/** Fire-and-forget version for sync contexts (buffers, does not block caller) */
-function diagLogSync(env, entry) {
-  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
-  console.log(line);
-  _diagBuffer.push(line);
-  if (_diagBuffer.length > DIAG_LOG_MAX) {
-    _diagBuffer.splice(0, _diagBuffer.length - DIAG_LOG_MAX);
-  }
-}
+// ROOT-CAUSE FIX: diagLog/flushDiagLog/diagLogSync were diagnostic logging
+// functions that ran JSON.stringify + console.log + KV write on EVERY referral
+// flow step (15+ calls per bootstrap). Each call costs ~0.5-1ms CPU.
+// 15 calls × 1ms = 15ms CPU → exceededResources.
+// These are now no-ops. All call sites remain for code structure but do nothing.
+async function diagLog(env, entry) { /* no-op: diagnostic logging removed */ }
+async function flushDiagLog(env) { /* no-op */ }
+function diagLogSync(env, entry) { /* no-op */ }
 
 // ============================================================================
 // MAINTENANCE MODE — System-wide maintenance state stored in APP_CACHE KV
@@ -722,10 +672,7 @@ async function optionalTelegramAuth(request, env) {
   const fallbackId = (url.searchParams.get('user_id') || '').trim();
 
   if (fallbackId && /^\d+$/.test(fallbackId)) {
-    console.log(
-      JSON.stringify({ scope: 'optional-auth-fallback', user_id: fallbackId }),
-    );
-    return { user: { id: fallbackId }, authMethod: 'fallback', error: null };
+        return { user: { id: fallbackId }, authMethod: 'fallback', error: null };
   }
 
   // No fallback available — preserve the original auth error for the caller
@@ -908,7 +855,6 @@ function extractStartParam(text) {
   const result = match ? match[1] : null;
   // Note: no env available here — logged at call site via diag-start-handler
   // console.log kept for wrangler-tail real-time viewing
-  console.log(JSON.stringify({ scope: 'diag-extractStartParam', raw_text: String(text || '').trim(), extracted: result }));
   return result;
 }
 
@@ -1091,8 +1037,7 @@ async function syncMenuButton(env) {
         },
       }),
     });
-    console.log(JSON.stringify({ scope: 'sync-menu-button', url: webAppUrl }));
-  } catch (error) {
+      } catch (error) {
     console.warn(safeError('sync-menu-button', error));
   }
 }
@@ -1617,8 +1562,7 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
 
   // Kill switch: if referral rewards are emergency-disabled, skip
   if (await rewardCenterRepo.isSubsystemDisabled(env, 'referral')) {
-    console.log('[REWARD] Referral rewards emergency-disabled — skipping');
-    return null;
+        return null;
   }
 
   // DB-driven reward amount (async — reads from referral_reward_tiers)
@@ -1695,13 +1639,7 @@ async function retryFailedReferralRewards(env) {
       }
     }
     if (retried > 0) {
-      console.log(JSON.stringify({
-        scope: 'referral-retry-cron',
-        checked: result.rows.length,
-        retried,
-        succeeded,
-      }));
-    }
+          }
   } catch (e) {
     console.warn(safeError('referral-retry-cron', e));
   }
@@ -1765,13 +1703,7 @@ async function retryFailedWheelRewards(env) {
       }
     }
     if (retried > 0) {
-      console.log(JSON.stringify({
-        scope: 'wheel-reward-retry-cron',
-        checked: result.rows.length,
-        retried,
-        succeeded,
-      }));
-    }
+          }
   } catch (e) {
     console.warn(safeError('wheel-reward-retry-cron', e));
   }
@@ -1849,8 +1781,7 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
         deletedAt: cooldown.deletedAt,
         note: 'User is in 15-day referral cooldown after account deletion. Referral REJECTED. User can still use the app.'
       });
-      console.log(`[REFERRAL] Rejected — ${inviteeId} in cooldown until ${cooldown.cooldownUntil}`);
-      return { referral_id: null, rejected: true, reason: cooldown.reason, cooldownUntil: cooldown.cooldownUntil };
+            return { referral_id: null, rejected: true, reason: cooldown.reason, cooldownUntil: cooldown.cooldownUntil };
     }
     await diagLog(env, { scope: 'diag-referral-STEP2b-COOLDOWN-PASS', inviteeId, note: 'Not in cooldown — proceeding' });
   }
@@ -1964,18 +1895,6 @@ async function getChatMemberDebugPayload(userId, env) {
     joined: false,
   };
 
-  // DIAGNOSTIC LOG: capture every detail for debugging membership issues
-  console.log(JSON.stringify({
-    scope: 'diag-getChatMember',
-    user_id: uid,
-    required_channel: requiredChannel,
-    chat_id_used: chatId,
-    bot_configured: botConfigured,
-    is_admin: isAdmin,
-    is_guest: uid.startsWith('guest_'),
-    is_numeric: /^\d+$/.test(uid),
-  }));
-
   if (uid.startsWith('guest_')) {
     payload.telegram_response = { reason: 'guest_user' };
     return payload;
@@ -1984,41 +1903,26 @@ async function getChatMemberDebugPayload(userId, env) {
   if (isAdmin) {
     payload.telegram_response = { admin: true, reason: 'admin_bypass' };
     payload.joined = true;
-    console.log(JSON.stringify({ scope: 'diag-getChatMember-result', user_id: uid, result: 'admin_bypass', joined: true }));
     return payload;
   }
 
   if (!botConfigured) {
     payload.telegram_response = { reason: 'bot_not_configured' };
-    console.log(JSON.stringify({ scope: 'diag-getChatMember-result', user_id: uid, result: 'bot_not_configured', joined: false }));
     return payload;
   }
 
   if (!/^\d+$/.test(uid)) {
     payload.telegram_response = { reason: 'invalid_user_id', value: uid };
-    console.log(JSON.stringify({ scope: 'diag-getChatMember-result', user_id: uid, result: 'invalid_user_id', joined: false }));
     return payload;
   }
 
   try {
     const telegramUrl = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${encodeURIComponent(uid)}`;
-    console.log(JSON.stringify({ scope: 'diag-getChatMember-fetch', user_id: uid, url: telegramUrl.replace(botToken, 'BOT_TOKEN') }));
     const telegramResponse = await fetch(telegramUrl);
     const data = await telegramResponse.json();
     payload.telegram_response = data;
     const status = data?.result?.status || '';
     payload.joined = Boolean(data?.ok && JOINED_STATUSES.has(status));
-
-    // DIAGNOSTIC LOG: the exact raw response from Telegram
-    console.log(JSON.stringify({
-      scope: 'diag-getChatMember-result',
-      user_id: uid,
-      telegram_ok: data?.ok,
-      telegram_status: status,
-      telegram_raw: JSON.stringify(data).slice(0, 500),
-      joined: payload.joined,
-      joined_statuses_list: [...JOINED_STATUSES],
-    }));
 
     return payload;
   } catch (error) {
@@ -2026,7 +1930,6 @@ async function getChatMemberDebugPayload(userId, env) {
       exception: error instanceof Error ? error.name : 'Error',
       message: error instanceof Error ? error.message : String(error),
     };
-    console.log(JSON.stringify({ scope: 'diag-getChatMember-error', user_id: uid, error: payload.telegram_response }));
     return payload;
   }
 }
@@ -2073,15 +1976,11 @@ async function checkChannelMembership(userId, env) {
 async function resolveChannelMembership(env, userId, { forceRefresh = false, skipRewardProcessing = false } = {}) {
   const uid = String(userId);
 
-  // DIAGNOSTIC LOG
-  console.log(JSON.stringify({ scope: 'diag-resolveMembership-start', user_id: uid, forceRefresh, skipRewardProcessing, is_guest: uid.startsWith('guest_'), is_admin: isAdminTelegramId(env, uid) }));
-
   if (uid.startsWith('guest_')) {
     return { joined: false, reason: 'guest_user' };
   }
 
   if (isAdminTelegramId(env, uid)) {
-    console.log(JSON.stringify({ scope: 'diag-resolveMembership-admin', user_id: uid, joined: true }));
     return { joined: true, admin: true };
   }
 
@@ -2089,23 +1988,19 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false, ski
     if (!forceRefresh) {
       const cached = await getCachedJoinStatus(env, uid);
       if (cached === true) {
-        console.log(JSON.stringify({ scope: 'diag-resolveMembership-cached', user_id: uid, joined: true, source: 'kv_cache' }));
         return { joined: true, cached: true };
       }
 
       if (isDatabaseConfigured(env)) {
         const dbUser = await getDbUserJoinState(env, uid);
-        console.log(JSON.stringify({ scope: 'diag-resolveMembership-db', user_id: uid, db_channel_joined: dbUser?.channel_joined }));
         if (dbUser?.channel_joined) {
           await setCachedJoinStatus(env, uid, true);
-          console.log(JSON.stringify({ scope: 'diag-resolveMembership-db-hit', user_id: uid, joined: true, source: 'db' }));
           return { joined: true, from_db: true };
         }
       }
     }
 
     const result = await checkChannelMembership(uid, env);
-    console.log(JSON.stringify({ scope: 'diag-resolveMembership-telegram-result', user_id: uid, joined: result.joined, reason: result.reason }));
     if (result.joined) {
       await setCachedJoinStatus(env, uid, true);
       if (isDatabaseConfigured(env)) {
@@ -2139,14 +2034,12 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false, ski
       if (isDatabaseConfigured(env)) {
         const dbUser = await getDbUserJoinState(env, uid);
         if (dbUser?.channel_joined) {
-          console.log(JSON.stringify({ scope: 'diag-resolveMembership-api-error-db-fallback', user_id: uid, joined: true, source: 'db_fallback' }));
           return { joined: true, from_db_fallback: true, reason: result.reason };
         }
       }
 
       const cached = await getCachedJoinStatus(env, uid);
       if (cached === true) {
-        console.log(JSON.stringify({ scope: 'diag-resolveMembership-api-error-kv-fallback', user_id: uid, joined: true, source: 'kv_fallback' }));
         return { joined: true, cached_fallback: true, reason: result.reason };
       }
 
@@ -3115,8 +3008,7 @@ async function processNewsAIJobs(env, articles) {
     }
     if (existing) {
       success++;
-      console.log(`[NEWS-AI-BG] SKIP (already cached): ${article.url.substring(0, 70)}`);
-      continue;
+            continue;
     }
 
 
@@ -3269,8 +3161,7 @@ ${articleText}`;
             max_tokens: 4096,
             temperature: 0.3,
           });
-          console.log(`[NEWS-AI-BG] AI_CALL_done in ${Date.now() - aiStart}ms, response keys: ${Object.keys(aiResponse || {}).join(',')}`);
-
+          
           if (aiResponse && aiResponse.response && aiResponse.response.trim().length >= 50) {
             summary = aiResponse.response;
             aiSource = 'cloudflare-workers-ai';
@@ -3358,8 +3249,7 @@ async function processNewsAIBatch(env) {
   const t0 = Date.now();
   const stepLog = (step, extra) => {
     const elapsed = Date.now() - t0;
-    console.log(`[NEWS-AI-CRON] ${step} (${elapsed}ms)${extra ? ' ' + JSON.stringify(extra) : ''}`);
-  };
+      };
 
   // ── MERGED: try/catch + step logging (root-cause fix) + KV write stats (from HEAD) ──
   try {
@@ -3782,8 +3672,6 @@ async function fetchCalendarEvents(env) {
     // upstream outages that exceed the KV TTL (10 min). The isolate cache
     // is at most a few hours old (isolate lifetime).
     if (_calendarIsolateCache && _calendarIsolateCache.length > 0) {
-      console.log('[calendar] upstream empty — serving isolate cache ' +
-        `(${Math.round((Date.now() - _calendarIsolateCacheAt) / 1000)}s old)`);
       // ROOT CAUSE FIX (RC-B): Write the isolate cache back to KV with a
       // ROOT CAUSE FIX (B-1): TTL bumped from 120s to 300s.
       // The old 120s TTL was shorter than the 180s frontend polling
@@ -3983,13 +3871,7 @@ function handleRoot(env) {
 
 function handleHealth(env) {
   const webAppUrl = resolveWebAppUrl(env);
-  console.log(JSON.stringify({
-    scope: 'health-check',
-    webapp_url_raw: String(env.WEBAPP_URL || '').trim(),
-    webapp_url_resolved: webAppUrl,
-    has_cache_bust: webAppUrl.includes('_v='),
-  }));
-  return jsonResponse({
+    return jsonResponse({
     status: 'ok',
     bot_configured: isBotConfigured(env),
     database_ready: isDatabaseConfigured(env),
@@ -4461,7 +4343,6 @@ async function fetchFearGreed() {
       const cached = await env_APP_CACHE.get(FG_CACHE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
-        console.log('F&G: using cached value (API failed):', parsed.value, parsed.classification);
         return parsed;
       }
     } catch {}
@@ -4553,7 +4434,6 @@ async function enrichMarketData(env, coins) {
             }
           }
         }
-        console.log('Market: enriched with CMC data, ' + coins.filter(c => c.marketCapUsd > 0).length + '/' + coins.length + ' coins have marketCap');
         return coins;
       }
     } catch (e) {
@@ -4620,7 +4500,6 @@ async function fetchGlobalStats(env) {
             btcDominance: d.market_cap_percentage?.btc || 0,
             source: 'coingecko',
           };
-          console.log('Global: CoinGecko success — mcap:', stats.totalMarketCap, 'vol:', stats.totalVolume, 'btcDom:', stats.btcDominance);
         }
       }
     } catch (e) {
@@ -4639,7 +4518,6 @@ async function fetchGlobalStats(env) {
           btcDominance: body.bitcoin_dominance_percentage || 0,
           source: 'coinpaprika',
         };
-        console.log('Global: CoinPaprika success — mcap:', stats.totalMarketCap, 'vol:', stats.totalVolume, 'btcDom:', stats.btcDominance);
       }
     } catch (e) {
       console.warn('Global: CoinPaprika failed', e.message || e);
@@ -4693,7 +4571,6 @@ async function fetchGlobalStats(env) {
             btcDominance: TYPICAL_BTC_DOMINANCE * 100,
             source: 'mexc-estimated',
           };
-          console.log('Global: MEXC fallback success — est. mcap:', stats.totalMarketCap, 'vol:', stats.totalVolume, 'btcDom (assumed):', stats.btcDominance);
         }
       }
     } catch (e) {
@@ -4710,7 +4587,6 @@ async function fetchGlobalStats(env) {
       stats.fearGreedClassification = fg.classification;
       stats.fearGreedSource = 'coinmarketcap';
       stats.fearGreedTimestamp = fg.timestamp;
-      console.log('Global: Fear & Greed =', fg.value, fg.classification, 'ts:', fg.timestamp);
     }
   } catch {}
 
@@ -5245,12 +5121,7 @@ async function handleTelegramWebhook(request, env) {
       const chatId = callbackQuery?.message?.chat?.id;
       const messageId = callbackQuery?.message?.message_id;
 
-      console.log(JSON.stringify({
-        scope: 'telegram-callback',
-        callback_data: callbackData,
-        user_id: userId,
-      }));
-
+      
       if (callbackData !== 'check_join' || !userId || !chatId || !messageId) {
         await answerTelegramCallbackQuery(env, callbackQuery.id);
         return new Response(null, { status: 200, headers: withCors({}, env) });
@@ -5265,12 +5136,7 @@ async function handleTelegramWebhook(request, env) {
 
       // Check channel membership
       const membership = await resolveChannelMembership(env, userId, { forceRefresh: true });
-      console.log(JSON.stringify({
-        scope: 'callback-join-verify',
-        user_id: userId,
-        result: membership,
-      }));
-
+      
       if (membership?.joined) {
         // User is a member → show WebApp button, answer callback with success
         let callbackWebAppUrl = resolveWebAppUrl(env);
@@ -5318,16 +5184,7 @@ async function handleTelegramWebhook(request, env) {
 
     // ── Handle /start command ───────────────────────────────────────────────
     const messageContext = extractTelegramMessageContext(updatePayload);
-    console.log(
-      JSON.stringify({
-        scope: 'telegram-webhook',
-        path: requestPath,
-        update_id: updatePayload?.update_id ?? null,
-        has_message: Boolean(updatePayload?.message),
-        is_start: Boolean(messageContext && isTelegramStartCommand(messageContext.text)),
-      }),
-    );
-    if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
+        if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
       return new Response(null, {
         status: 200,
         headers: withCors({}, env),
@@ -5347,14 +5204,7 @@ async function handleTelegramWebhook(request, env) {
     // still got the "member" response and the Mini App button.
     // Now forceRefresh:true forces a real Telegram API call every time.
     const membership = await resolveChannelMembership(env, messageContext.userId, { forceRefresh: true });
-    console.log(
-      JSON.stringify({
-        scope: 'telegram-start',
-        user_id: messageContext.userId,
-        result: membership,
-      }),
-    );
-    await diagLog(env, { scope: 'diag-start-handler', userId: messageContext.userId, startParam: messageContext.startParam, text: messageContext.text });
+        await diagLog(env, { scope: 'diag-start-handler', userId: messageContext.userId, startParam: messageContext.startParam, text: messageContext.text });
 
     // Store pending referral in KV so check_join callback can retrieve it later
     if (messageContext.startParam && env.JOIN_CACHE && typeof env.JOIN_CACHE.put === 'function') {
@@ -5586,12 +5436,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
         }
 
         if (pendingReminders.length > 0) {
-          console.log(JSON.stringify({
-            scope: 'calendar-reminders-check',
-            ...reminderStats,
-            total: pendingReminders.length,
-          }));
-        }
+                  }
 
         // Cleanup old reminders (fired + event passed >24h) on 15-min ticks
         // to prevent the table from growing indefinitely.
@@ -5599,8 +5444,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
           try {
             const cleaned = await calendarReminderRepo.cleanupOld(env);
             if (cleaned > 0) {
-              console.log(JSON.stringify({ scope: 'calendar-reminders-cleanup', deleted: cleaned }));
-            }
+                          }
           } catch (cleanupErr) {
             console.warn(safeError('calendar-reminders-cleanup', cleanupErr));
           }
@@ -5611,8 +5455,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
     }
 
     if (alertedCount.sent > 0 || alertedCount.skipped > 0 || alertedCount.failed > 0) {
-      console.log(JSON.stringify({ scope: 'calendar-alerts-check', ...alertedCount }));
-    }
+          }
   } catch (error) {
     console.warn(safeError('calendar-alerts-check', error));
   }
@@ -5667,16 +5510,13 @@ async function runScheduledAlertsBaseline(controller, env) {
   };
 
   if (!payload.alerts_cron_enabled) {
-    console.log(JSON.stringify({ ...payload, skipped: true, reason: 'ALERTS_CRON_ENABLED is false' }));
-    return;
+        return;
   }
   if (!isDatabaseConfigured(env)) {
-    console.log(JSON.stringify({ ...payload, skipped: true, reason: 'Database not configured' }));
-    return;
+        return;
   }
   if (!isBotConfigured(env)) {
-    console.log(JSON.stringify({ ...payload, skipped: true, reason: 'Telegram bot token not configured' }));
-    return;
+        return;
   }
 
   const maxAlerts = Math.max(getNumericEnv(env, 'ALERTS_CRON_MAX_ALERTS', 500), 0);
@@ -5705,8 +5545,7 @@ async function runScheduledAlertsBaseline(controller, env) {
     if (alertsExistCached === '0') {
       // No active alerts — skip the entire alerts baseline this tick.
       // Still run calendar check (separate, lightweight).
-      console.log(JSON.stringify({ ...resultPayload, skipped: true, reason: 'no_active_alerts_cached', duration_ms: Date.now() - t0 }));
-      return resultPayload;
+            return resultPayload;
     }
 
     // AUDIT-002 FIX: Ensure table + indexes exist before querying (idempotent).
@@ -5734,8 +5573,7 @@ async function runScheduledAlertsBaseline(controller, env) {
       // next cron tick can skip the DB query entirely (saves ~3-5ms CPU).
       // TTL 60s — if a user creates an alert, it takes at most 60s to detect.
       try { await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '0', 60); } catch {}
-      console.log(JSON.stringify({ ...resultPayload, finished: true, duration_ms: Date.now() - t0 }));
-      return resultPayload;
+            return resultPayload;
     }
     // Alerts exist — update cache so next tick knows to query.
     try { await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '1', 60); } catch {}
@@ -5887,19 +5725,7 @@ async function runScheduledAlertsBaseline(controller, env) {
 
       if (!shouldTrigger) {
         // Log the no-trigger decision for audit trail
-        console.log(JSON.stringify({
-          scope: 'alert-check',
-          alert_id: alertId,
-          user_id: userId,
-          symbol,
-          direction,
-          target_price: targetPrice,
-          prev_price: prevPrice,
-          current_price: currentPrice,
-          triggered: false,
-          reason: triggerReason,
-        }));
-        continue;
+                continue;
       }
 
       // Count trigger type for monitoring
@@ -5931,15 +5757,7 @@ async function runScheduledAlertsBaseline(controller, env) {
 
       if (!triggered) {
         resultPayload.duplicate_triggers_prevented += 1;
-        console.log(JSON.stringify({
-          scope: 'alert-check',
-          alert_id: alertId,
-          user_id: userId,
-          symbol,
-          triggered: false,
-          reason: 'duplicate_prevented',
-        }));
-        continue;
+                continue;
       }
 
       // ── SEND NOTIFICATIONS ──
@@ -5992,16 +5810,7 @@ async function runScheduledAlertsBaseline(controller, env) {
 
         if (!shouldDeliver) {
           resultPayload.skipped_pref_disabled += 1;
-          console.log(JSON.stringify({
-            scope: 'alert-check',
-            alert_id: alertId,
-            user_id: userId,
-            symbol,
-            triggered: true,
-            notif_skipped: 'pref_disabled',
-            user_channel: userChannel,
-          }));
-          resultPayload.triggered_count += 1;
+                    resultPayload.triggered_count += 1;
           continue;
         }
 
@@ -6148,29 +5957,7 @@ async function runScheduledAlertsBaseline(controller, env) {
         //   dispatch_ms: time to insert in-app notification into DB
         //   telegram_ms: time to send Telegram message (including retry)
         //   total_ms: time from cron start to delivery complete
-        console.log(JSON.stringify({
-          scope: 'alert-check',
-          alert_id: alertId,
-          user_id: userId,
-          symbol,
-          direction,
-          target_price: targetPrice,
-          prev_price: prevPrice,
-          current_price: currentPrice,
-          triggered: true,
-          reason: triggerReason,
-          user_channel: userChannel,
-          in_app_delivered: inAppDelivered,
-          telegram_delivered: telegramDelivered,
-          telegram_message_id: telegramMessageId,
-          telegram_error: telegramError,
-          price_source: symbolSourceMap.get(symbol),
-          timing: {
-            ...timing,
-            total_ms: Date.now() - t0,
-          },
-        }));
-      } catch (error) {
+              } catch (error) {
         resultPayload.delivery_failures += 1;
         console.warn('scheduled alert delivery failed:', {
           alert_id: alertId,
@@ -6201,37 +5988,7 @@ async function runScheduledAlertsBaseline(controller, env) {
       }
     }
 
-    console.log(JSON.stringify({
-      ...resultPayload,
-      finished: true,
-      duration_ms: Date.now() - t0,
-      // ── DIAG: Query count breakdown ──
-      query_count_estimate: {
-        listActiveForCron: 1,  // initial SELECT
-        updateLastChecked_per_alert: 1,  // per alert (always)
-        markTriggered_per_triggered: resultPayload.triggered_count,  // per triggered alert
-        getUserChannelPreference_per_triggered: resultPayload.triggered_count,  // per triggered
-        insertNotification_per_triggered: resultPayload.triggered_count,  // per triggered (if mini_app)
-        insertQueue_per_failed_tg: resultPayload.delivery_failures,  // per failed TG
-        total_estimated: 1 + resultPayload.checked_count + (resultPayload.triggered_count * 3) + resultPayload.delivery_failures,
-      },
-      batch_opportunity: {
-        updateLastChecked: `${resultPayload.checked_count} individual UPDATEs → 1 bulk UPDATE with CASE WHEN`,
-        estimated_savings_ms: resultPayload.checked_count * 50,  // ~50ms per query saved
-      },
-      phase_latency: {
-        db_query_start: t0,
-        db_query_end: _tDbEnd || null,
-        price_fetch_start: _tPriceStart || null,
-        price_fetch_end: _tPriceEnd || null,
-        evaluation_start: _tEvalStart || null,
-        evaluation_end: Date.now(),
-        db_query_ms: _tDbEnd ? (_tDbEnd - t0) : null,
-        price_fetch_ms: (_tPriceStart && _tPriceEnd) ? (_tPriceEnd - _tPriceStart) : null,
-        evaluation_ms: (_tEvalStart) ? (Date.now() - _tEvalStart) : null,
-      },
-    }));
-    return resultPayload;
+        return resultPayload;
   } catch (error) {
     // ROOT-CAUSE FIX: Log FULL error details — message, stack, and which phase failed
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -6290,391 +6047,16 @@ export default {
       // ── DIAGNOSTIC: CPU Profile for admin endpoints ──
       // Traces the FULL call graph with per-function CPU timing + query count.
       // Auth: X-Cron-Secret or ?secret= must match DIAG_SECRET.
-      // Usage: /api/_diag/cpu-profile?endpoint=dashboard
       //        endpoint = dashboard | users | admins | tickets | rewards
-      if (request.method === 'GET' && url.pathname === '/api/_diag/cpu-profile') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || url.searchParams.get('secret') || '';
-        const expectedSecret = env.DIAG_SECRET || env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        const endpoint = url.searchParams.get('endpoint') || 'dashboard';
-        const traceUserId = String(env.ADMIN_TELEGRAM_ID || '').trim();
-
-        const profile = {
-          endpoint,
-          traceUserId,
-          timestamp: new Date().toISOString(),
-          stages: [],
-          total_cpu_ms: 0,
-          total_queryDb_calls: 0,
-          total_pools_created: 0,
-        };
-
-        // Helper to time a stage
-        async function _timeStage(name, fn) {
-          const t0 = Date.now();
-          let result, error = null;
-          try { result = await fn(); }
-          catch (e) { error = e?.message || String(e); }
-          const cpuMs = Date.now() - t0;
-          profile.stages.push({ name, wall_ms: cpuMs, error });
-          profile.total_cpu_ms += cpuMs;
-          return result;
-        }
-
-        // Wrap queryDb to count calls
-        const _origQueryDb = queryDb;
-        let _queryDbCallCount = 0;
-        // Can't override the imported function, so we count via stages instead.
-
-        // Stage 1: authenticateTelegramRequest (simulated — we call it directly)
-        const _fakeRequest = new Request(`https://worker.dev/api/admin/${endpoint}`, {
-          method: 'GET',
-          headers: { 'X-Telegram-Init-Data': '' }, // empty → will fail auth, but we bypass
-        });
-
-        // Since we can't call authenticateTelegramRequest without real initData,
-        // we profile the REPO functions directly (which is where the real CPU cost is).
-
-        if (endpoint === 'dashboard') {
-          await _timeStage('getDashboardStats (1 queryDb)', () => adminRepo.getDashboardStats(env));
-          await _timeStage('getRecentActivity (1 queryDb)', () => adminRepo.getRecentActivity(env, 10));
-        } else if (endpoint === 'users') {
-          await _timeStage('searchUsers (2 queryDb: count + page)', () => adminRepo.searchUsers(env, { search: '', page: 1, limit: 20 }));
-        } else if (endpoint === 'admins') {
-          await _timeStage('ensureSchema (1 queryDb, cached)', () => adminRepo.ensureSchema(env));
-          await _timeStage('listAdmins (1 queryDb)', () => adminRepo.listAdmins(env));
-        } else if (endpoint === 'tickets') {
-          await _timeStage('listTicketsAdmin (2 queryDb: count + page)', () => adminRepo.listTicketsAdmin(env, { page: 1, limit: 20, status: '' }));
-        } else if (endpoint === 'rewards') {
-          await _timeStage('listRewards (1 queryDb)', () => adminRepo.listRewards(env, { status: '', page: 1, limit: 20 }));
-        } else if (endpoint === 'membership') {
-          // Profile the membership check itself (the middleware path)
-          await _timeStage('resolveChannelMembership (cache+DB+Telegram)', () => resolveChannelMembership(env, traceUserId, { forceRefresh: false, skipRewardProcessing: true }));
-        }
-
-        // Also profile requireAdmin's DB path (ensureSchema + getAdminByTelegramId)
-        await _timeStage('adminRepo.ensureSchema (requireAdmin path)', () => adminRepo.ensureSchema(env));
-        await _timeStage('adminRepo.getAdminByTelegramId (requireAdmin path)', () => adminRepo.getAdminByTelegramId(env, traceUserId));
-
-        profile.summary = {
-          total_stages: profile.stages.length,
-          total_wall_ms: profile.total_cpu_ms,
-          stages_breakdown: profile.stages.map(s => `${s.name}: ${s.wall_ms}ms${s.error ? ' ERROR:' + s.error.slice(0, 80) : ''}`),
-        };
-        return jsonResponse(profile, {}, env);
-      }
 
       // ── DIAGNOSTIC: Join Check + Admin Detection flow tracer ──
       // Auth: X-Cron-Secret must match ALERTS_CRON_SHARED_SECRET
       // Pass ?user_id=123456 to trace a specific user's join check + admin detection.
       // Returns the result of EVERY stage so we can pinpoint exactly where it fails.
-      if (request.method === 'GET' && url.pathname === '/api/_diag/join-flow') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || url.searchParams.get('secret') || '';
-        const expectedSecret = env.DIAG_SECRET || env.ALERTS_CRON_SHARED_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        const traceUserId = String(url.searchParams.get('user_id') || '').trim() || String(env.ADMIN_TELEGRAM_ID || '').trim();
-        if (!traceUserId || !/^\d+$/.test(traceUserId)) {
-          return jsonResponse({ status: 'error', message: 'Missing or invalid ?user_id= (numeric Telegram ID required)', admin_id_set: !!env.ADMIN_TELEGRAM_ID, admin_id_length: String(env.ADMIN_TELEGRAM_ID || '').length, admin_id_first_chars: String(env.ADMIN_TELEGRAM_ID || '').slice(0,3) }, { status: 400 }, env);
-        }
-
-        const trace = {
-          user_id: traceUserId,
-          timestamp: new Date().toISOString(),
-          stages: {},
-        };
-
-        // ── STAGE 1: Config checks ──
-        trace.stages.config = {
-          database_configured: isDatabaseConfigured(env),
-          bot_configured: isBotConfigured(env),
-          required_channel: resolveRequiredChannel(env),
-          chat_id: getTelegramChatId(env),
-          admin_telegram_id: normalizeOptionalString(env.ADMIN_TELEGRAM_ID) ? '(set)' : '(NOT SET)',
-          is_env_super_admin: isAdminTelegramId(env, traceUserId),
-          direct_url_set: !!env.DIRECT_URL,
-          database_url_set: !!env.DATABASE_URL,
-        };
-
-        // ── STAGE 2: Database connection (per-call Pool with Pg protocol) ──
-        try {
-          const sql = getSharedNeon(env);
-          trace.stages.neon_client = {
-            available: !!sql,
-            url_resolved: resolveNeonDatabaseUrl(env) ? '(set)' : '(empty)',
-            note: 'neon() HTTP is NOT used for queries (DB is Supabase). queryDb uses per-call Pool.',
-          };
-        } catch (e) {
-          trace.stages.neon_client = { available: false, error: e?.message };
-        }
-
-        // ── STAGE 3: queryDb — direct test ──
-        try {
-          const t0 = Date.now();
-          const result = await queryDb(env, 'SELECT 1 AS ok');
-          trace.stages.queryDb = {
-            ok: true,
-            rows: result.rows?.length,
-            first_row: result.rows?.[0],
-            duration_ms: Date.now() - t0,
-          };
-        } catch (e) {
-          trace.stages.queryDb = { ok: false, error: e?.message, stack: e?.stack?.split('\n').slice(0,3).join(' | ') };
-        }
-
-        // ── STAGE 4: getDbUserJoinState — read user's channel_joined from DB ──
-        try {
-          const t0 = Date.now();
-          const joinState = await getDbUserJoinState(env, traceUserId);
-          trace.stages.getDbUserJoinState = {
-            ok: true,
-            result: joinState,
-            duration_ms: Date.now() - t0,
-          };
-        } catch (e) {
-          trace.stages.getDbUserJoinState = { ok: false, error: e?.message };
-        }
-
-        // ── STAGE 5: KV join cache read ──
-        try {
-          const t0 = Date.now();
-          const cached = await getCachedJoinStatus(env, traceUserId);
-          trace.stages.kv_join_cache = {
-            ok: true,
-            cached_value: cached,
-            cache_key: getJoinCacheKey(traceUserId),
-            duration_ms: Date.now() - t0,
-          };
-        } catch (e) {
-          trace.stages.kv_join_cache = { ok: false, error: e?.message };
-        }
-
-        // ── STAGE 6: Telegram Bot API getChatMember (raw) ──
-        try {
-          const t0 = Date.now();
-          const botToken = String(env.TELEGRAM_BOT_TOKEN || '');
-          const chatId = getTelegramChatId(env);
-          const tgUrl = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${encodeURIComponent(traceUserId)}`;
-          const tgRes = await fetch(tgUrl);
-          const tgData = await tgRes.json();
-          trace.stages.telegram_getChatMember = {
-            ok: true,
-            http_status: tgRes.status,
-            telegram_ok: tgData?.ok,
-            status: tgData?.result?.status,
-            raw: JSON.stringify(tgData).slice(0, 400),
-            joined: tgData?.ok && JOINED_STATUSES.has(tgData?.result?.status || ''),
-            duration_ms: Date.now() - t0,
-          };
-        } catch (e) {
-          trace.stages.telegram_getChatMember = { ok: false, error: e?.message };
-        }
-
-        // ── STAGE 7: resolveChannelMembership (forceRefresh: false) ──
-        try {
-          const t0 = Date.now();
-          const m1 = await resolveChannelMembership(env, traceUserId, { forceRefresh: false });
-          trace.stages.resolveChannelMembership_cached = {
-            ok: true,
-            result: m1,
-            duration_ms: Date.now() - t0,
-          };
-        } catch (e) {
-          trace.stages.resolveChannelMembership_cached = { ok: false, error: e?.message };
-        }
-
-        // ── STAGE 8: resolveChannelMembership (forceRefresh: true) ──
-        try {
-          const t0 = Date.now();
-          const m2 = await resolveChannelMembership(env, traceUserId, { forceRefresh: true });
-          trace.stages.resolveChannelMembership_force = {
-            ok: true,
-            result: m2,
-            duration_ms: Date.now() - t0,
-          };
-        } catch (e) {
-          trace.stages.resolveChannelMembership_force = { ok: false, error: e?.message };
-        }
-
-        // ── STAGE 9: Admin detection ──
-        try {
-          const t0 = Date.now();
-          const isSuper = adminRepo ? adminRepo.isSuperAdmin(env, traceUserId) : null;
-          let dbAdmin = null;
-          if (adminRepo && isDatabaseConfigured(env)) {
-            try { await adminRepo.ensureSchema(env).catch(() => {}); } catch {}
-            dbAdmin = await adminRepo.getAdminByTelegramId(env, traceUserId);
-          }
-          trace.stages.admin_detection = {
-            ok: true,
-            is_super_env: isSuper,
-            db_admin: dbAdmin ? {
-              telegram_id: dbAdmin.telegram_id,
-              role: dbAdmin.role,
-              active: dbAdmin.active,
-              permissions: dbAdmin.permissions,
-            } : null,
-            is_admin: isSuper || (dbAdmin && dbAdmin.active),
-            duration_ms: Date.now() - t0,
-          };
-        } catch (e) {
-          trace.stages.admin_detection = { ok: false, error: e?.message };
-        }
-
-        // ── SUMMARY ──
-        trace.summary = {
-          join_check_works: trace.stages.resolveChannelMembership_force?.result?.joined === true ||
-                            trace.stages.resolveChannelMembership_cached?.result?.joined === true,
-          admin_detection_works: trace.stages.admin_detection?.is_admin === true,
-          db_query_works: trace.stages.queryDb?.ok === true,
-          telegram_api_works: trace.stages.telegram_getChatMember?.telegram_ok === true,
-          neon_client_works: trace.stages.neon_client?.available === true,
-        };
-
-        return jsonResponse(trace, {}, env);
-      }
 
       // ── DIAGNOSTIC: Admin endpoint tester (temp, for root cause analysis) ──
       // Auth: X-Cron-Secret header must match ALERTS_CRON_SHARED_SECRET
       // Tests ALL admin endpoints internally and returns exact HTTP status + response body
-      if (request.method === 'GET' && url.pathname === '/api/_diag/admin-test') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.DIAG_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-
-        const results = {};
-        const endpoints = [
-          { name: 'dashboard', path: '/api/admin/dashboard', method: 'GET' },
-          { name: 'users', path: '/api/admin/users?page=1', method: 'GET' },
-          { name: 'admins', path: '/api/admin/admins', method: 'GET' },
-          { name: 'tickets', path: '/api/admin/tickets?page=1', method: 'GET' },
-          { name: 'broadcasts', path: '/api/admin/broadcasts', method: 'GET' },
-          { name: 'rewards', path: '/api/admin/rewards', method: 'GET' },
-          { name: 'transactions', path: '/api/admin/transactions?page=1', method: 'GET' },
-          { name: 'referrals', path: '/api/admin/referrals?page=1', method: 'GET' },
-          { name: 'logs', path: '/api/admin/logs?page=1', method: 'GET' },
-          { name: 'system-health', path: '/api/admin/system-health', method: 'GET' },
-          { name: 'reward-center/overview', path: '/api/admin/reward-center/overview', method: 'GET' },
-          { name: 'reward-center/wheel/config', path: '/api/admin/reward-center/wheel/config', method: 'GET' },
-          { name: 'reward-center/wheel/rewards', path: '/api/admin/reward-center/wheel/rewards', method: 'GET' },
-          { name: 'reward-center/library', path: '/api/admin/reward-center/library', method: 'GET' },
-          { name: 'reward-center/referral-tiers', path: '/api/admin/reward-center/referral-tiers', method: 'GET' },
-          { name: 'reward-center/mission-rewards', path: '/api/admin/reward-center/mission-rewards', method: 'GET' },
-          { name: 'reward-center/campaigns', path: '/api/admin/reward-center/campaigns', method: 'GET' },
-          { name: 'reward-center/emergency', path: '/api/admin/reward-center/emergency', method: 'GET' },
-          { name: 'reward-center/analytics', path: '/api/admin/reward-center/analytics', method: 'GET' },
-          { name: 'notifications/analytics', path: '/api/admin/notifications/analytics', method: 'GET' },
-          { name: 'notifications/templates', path: '/api/admin/notifications/templates', method: 'GET' },
-          { name: 'notifications/broadcasts', path: '/api/admin/notifications/broadcasts', method: 'GET' },
-          { name: 'alert-economy/dashboard', path: '/api/admin/alert-economy/dashboard', method: 'GET' },
-          { name: 'alert-economy/configs', path: '/api/admin/alert-economy/configs', method: 'GET' },
-          { name: 'maintenance', path: '/api/admin/maintenance', method: 'GET' },
-        ];
-
-        for (const ep of endpoints) {
-          try {
-            // Build a fake admin request to test the endpoint internally
-            const testReq = new Request(`https://worker.dev${ep.path}`, { method: ep.method });
-            // Simulate super-admin by setting the env ADMIN_TELEGRAM_ID as the caller
-            const adminId = String(env.ADMIN_TELEGRAM_ID || '0');
-            // We need to bypass auth — call the handler directly with a mock auth
-            const mockAuthState = { error: null, user: { id: adminId } };
-
-            // For each endpoint, call the handler directly
-            let response;
-            const url = new URL(testReq.url);
-
-            if (ep.name === 'dashboard') {
-              const stats = await adminRepo.getDashboardStats(env).catch(e => ({ error: e.message }));
-              const activity = await adminRepo.getRecentActivity(env, 10).catch(e => ({ error: e.message }));
-              response = { status: 'success', stats, recent_activity: activity };
-            } else if (ep.name === 'users') {
-              response = await adminRepo.searchUsers(env, { search: '', page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
-            } else if (ep.name === 'admins') {
-              response = { admins: await adminRepo.listAdmins(env).catch(e => ({ error: e.message })) };
-            } else if (ep.name === 'tickets') {
-              response = await adminRepo.listTicketsAdmin(env, { page: 1, limit: 20, status: '' }).catch(e => ({ status: 'error', error: e.message }));
-            } else if (ep.name === 'broadcasts') {
-              response = await adminRepo.listBroadcasts(env, { page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
-            } else if (ep.name === 'rewards') {
-              response = await adminRepo.listRewards(env, { status: '', page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
-            } else if (ep.name === 'transactions') {
-              response = await adminRepo.listTransactions(env, { page: 1, limit: 20, user_id: '', tx_type: '' }).catch(e => ({ status: 'error', error: e.message }));
-            } else if (ep.name === 'referrals') {
-              response = await adminRepo.listReferrals(env, { search: '', page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
-            } else if (ep.name === 'logs') {
-              response = await adminRepo.getAdminLogs(env, { action: '', page: 1, limit: 20 }).catch(e => ({ status: 'error', error: e.message }));
-            } else if (ep.name === 'system-health') {
-              response = await adminRepo.getSystemHealth(env).catch(e => ({ status: 'error', error: e.message }));
-            } else if (ep.name === 'maintenance') {
-              response = await getMaintenanceState(env).catch(e => ({ status: 'error', error: e.message }));
-            } else if (ep.path.startsWith('/api/admin/reward-center/')) {
-              if (typeof rewardCenterRepo !== 'undefined') {
-                if (ep.name === 'reward-center/overview') {
-                  response = await rewardCenterRepo.getOverview(env).catch(e => ({ status: 'error', error: e.message }));
-                } else if (ep.name === 'reward-center/wheel/config') {
-                  response = await rewardCenterRepo.getWheelConfig(env).catch(e => ({ status: 'error', error: e.message }));
-                } else if (ep.name === 'reward-center/wheel/rewards') {
-                  response = { rewards: await rewardCenterRepo.listWheelRewards(env).catch(e => ({ error: e.message })) };
-                } else if (ep.name === 'reward-center/library') {
-                  response = { library: await rewardCenterRepo.listRewardLibrary(env).catch(e => ({ error: e.message })) };
-                } else if (ep.name === 'reward-center/referral-tiers') {
-                  response = { tiers: await rewardCenterRepo.listReferralTiers(env).catch(e => ({ error: e.message })) };
-                } else if (ep.name === 'reward-center/mission-rewards') {
-                  response = { missions: await rewardCenterRepo.listMissionRewards(env).catch(e => ({ error: e.message })) };
-                } else if (ep.name === 'reward-center/campaigns') {
-                  response = { campaigns: await rewardCenterRepo.listCampaigns(env).catch(e => ({ error: e.message })) };
-                } else if (ep.name === 'reward-center/emergency') {
-                  response = await rewardCenterRepo.getEmergencyControls(env).catch(e => ({ status: 'error', error: e.message }));
-                } else if (ep.name === 'reward-center/analytics') {
-                  response = await rewardCenterRepo.getAnalytics(env, { range: '7d' }).catch(e => ({ status: 'error', error: e.message }));
-                }
-              } else {
-                response = { error: 'rewardCenterRepo not defined' };
-              }
-            } else if (ep.path.startsWith('/api/admin/notifications/')) {
-              if (typeof notificationPlatformRepo !== 'undefined') {
-                if (ep.name === 'notifications/analytics') {
-                  response = await notificationPlatformRepo.getAnalytics(env, { range: '7d' }).catch(e => ({ status: 'error', error: e.message }));
-                } else if (ep.name === 'notifications/templates') {
-                  response = { templates: await notificationPlatformRepo.listTemplates(env).catch(e => ({ error: e.message })) };
-                } else if (ep.name === 'notifications/broadcasts') {
-                  response = await notificationPlatformRepo.listBroadcasts(env, { limit: 20, offset: 0 }).catch(e => ({ status: 'error', error: e.message }));
-                }
-              } else {
-                response = { error: 'notificationPlatformRepo not defined' };
-              }
-            } else if (ep.path.startsWith('/api/admin/alert-economy/')) {
-              if (typeof alertEconomyRepo !== 'undefined') {
-                if (ep.name === 'alert-economy/dashboard') {
-                  response = await alertEconomyRepo.getDashboard(env).catch(e => ({ status: 'error', error: e.message }));
-                } else if (ep.name === 'alert-economy/configs') {
-                  response = { configs: await alertEconomyRepo.getAllConfigs(env).catch(e => ({ error: e.message })) };
-                }
-              } else {
-                response = { error: 'alertEconomyRepo not defined' };
-              }
-            } else {
-              response = { error: 'not implemented in diag' };
-            }
-
-            const hasError = response && (response.error || response.status === 'error');
-            results[ep.name] = {
-              status: hasError ? 'ERROR' : 'OK',
-              response: typeof response === 'object' ? JSON.stringify(response).substring(0, 500) : String(response).substring(0, 500),
-            };
-          } catch (e) {
-            results[ep.name] = { status: 'EXCEPTION', error: e.message };
-          }
-        }
-
-        return jsonResponse({ status: 'success', results }, {}, env);
-      }
 
       // ── Manual Alert Trigger (admin-only, for testing) ──
       // Allows admins to force-run the alert cron without waiting 5 minutes.
@@ -7230,398 +6612,18 @@ export default {
 
 
       // ── DIAGNOSTIC: Find working Workers AI text generation model ──
-      if (request.method === 'GET' && url.pathname === '/api/_diag/ai-models') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.DIAG_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        if (!env.AI) {
-          return jsonResponse({ status: 'error', error: 'AI binding not configured' }, {}, env);
-        }
-        const modelsToTry = [
-          '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-          '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-          '@cf/meta/llama-3-8b-instruct',
-          '@cf/meta/llama-2-7b-chat-int8',
-          '@hf/thebloke/neural-chat-7b-v3-1-awq',
-          '@cf/meta/mistral-7b-instruct-v0.1',
-          '@cf/qwen/qwen1.5-14b-chat-awq',
-          '@cf/qwen/qwen1.5-7b-chat-awq',
-          '@cf/meta/llama-3.1-8b-instruct',
-          '@cf/deepseek-ai/deepseek-coder-6.7b-instruct-awq',
-        ];
-        const results = [];
-        for (const model of modelsToTry) {
-          try {
-            const response = await env.AI.run(model, {
-              messages: [
-                { role: 'user', content: 'Say "hello" in Persian (Farsi). Just one word.' },
-              ],
-              max_tokens: 20,
-            });
-            const text = response?.response || response?.generated_text || '';
-            results.push({ model, status: 'OK', responseLength: text.length, sample: text.substring(0, 50) });
-          } catch (e) {
-            results.push({ model, status: 'FAIL', error: e.message?.substring(0, 100) });
-          }
-        }
-        return jsonResponse({ status: 'success', results }, {}, env);
-      }
 
       // ── DIAGNOSTIC: Test news summarization end-to-end ──
-      if (request.method === 'GET' && url.pathname === '/api/_diag/news-ai-test') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.DIAG_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-
-        const testArticle = 'Bitcoin price surged 5% today, reaching $65,000. The rally was driven by institutional inflows into spot ETFs. BlackRock led with $218 million in daily inflows, followed by Fidelity with $89 million. Analysts at JPMorgan predict further upside if BTC breaks the $67,000 resistance level. The total crypto market cap now stands at $2.3 trillion. Ethereum also gained 3%, trading at $3,450. The Fear and Greed Index moved from 26 (Fear) to 34 (Fear), indicating improving sentiment.';
-
-        const log = [];
-        const t0 = Date.now();
-
-        try {
-          log.push({ step: 'AI_REQUEST', model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', articleLength: testArticle.length });
-
-          const t1 = Date.now();
-          const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-            messages: [
-              { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details, numbers, and names. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
-              { role: 'user', content: testArticle },
-            ],
-            max_tokens: 4096,
-            temperature: 0.3,
-          });
-          const aiMs = Date.now() - t1;
-
-          log.push({ step: 'AI_RESPONSE', timeMs: aiMs, hasResponse: !!aiResponse?.response });
-
-          if (aiResponse && aiResponse.response) {
-            log.push({ step: 'SUCCESS', summaryLength: aiResponse.response.length, first200: aiResponse.response.substring(0, 200) });
-            return jsonResponse({ status: 'success', log, summary: aiResponse.response, totalMs: Date.now() - t0 }, {}, env);
-          } else {
-            log.push({ step: 'EMPTY_RESPONSE', fullResponse: JSON.stringify(aiResponse).substring(0, 300) });
-            return jsonResponse({ status: 'error', log, error: 'Empty AI response', totalMs: Date.now() - t0 }, {}, env);
-          }
-        } catch (e) {
-          log.push({ step: 'EXCEPTION', error: e.message });
-          return jsonResponse({ status: 'error', log, error: e.message, totalMs: Date.now() - t0 }, {}, env);
-        }
-      }
 
       // ── DIAGNOSTIC: Forex data test (bypasses auth for debugging) ──
-      if (request.method === 'GET' && url.pathname === '/api/_diag/forex-data') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.DIAG_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        // Call handleForexData directly with skipCache=true to force fresh fetch
-        const result = await handleForexData(env, { skipCache: true });
-        const body = await result.json();
-        const data = body.data || [];
-        const report = data.map(item => ({
-          symbol: item.symbol,
-          category: item.category,
-          price: item.price,
-          change: item.change,
-          tvSymbol: item.tvSymbol,
-          hasPrice: item.price > 0,
-        }));
-        // Summary
-        const byCategory = {};
-        for (const item of data) {
-          const cat = item.category;
-          if (!byCategory[cat]) byCategory[cat] = { total: 0, withPrice: 0, withoutPrice: 0 };
-          byCategory[cat].total++;
-          if (item.price > 0) byCategory[cat].withPrice++;
-          else byCategory[cat].withoutPrice++;
-        }
-        return jsonResponse({
-          status: 'success',
-          cached: body.cached,
-          totalSymbols: data.length,
-          symbolsWithPrice: data.filter(d => d.price > 0).length,
-          symbolsWithoutPrice: data.filter(d => d.price === 0).length,
-          byCategory,
-          symbols: report,
-        }, {}, env);
-      }
 
       // ── DIAGNOSTIC: Real KV Write Stats ──
-      if (request.method === 'GET' && url.pathname === '/api/_diag/kv-write-stats') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.DIAG_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        // Sort by count descending
-        const byPrefixSorted = Object.entries(_kvWriteStats.byPrefix)
-          .sort((a, b) => b[1] - a[1])
-          .map(([key, count]) => ({ key, writes: count }));
-        const byKeySorted = Object.entries(_kvWriteStats.byKey)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 30)
-          .map(([key, count]) => ({ key, writes: count }));
-        const uptimeMs = _kvWriteStats.startedAt ? Date.now() - new Date(_kvWriteStats.startedAt).getTime() : 0;
-        const uptimeMin = Math.max(1, Math.round(uptimeMs / 60000));
-        return jsonResponse({
-          status: 'success',
-          isolateStartedAt: _kvWriteStats.startedAt || 'no writes yet',
-          uptimeMinutes: uptimeMin,
-          totalWrites: _kvWriteStats.totalWrites,
-          totalSkipped: _kvWriteStats.totalSkipped,
-          writesPerMinute: uptimeMin > 0 ? Math.round(_kvWriteStats.totalWrites / uptimeMin * 10) / 10 : 0,
-          byPrefix: byPrefixSorted,
-          topKeys: byKeySorted,
-        }, {}, env);
-      }
 
       // ── DIAGNOSTIC: Referral Debug — inspect referral flow logs + DB state ──
-      // Usage: GET /api/_diag/referral-debug?user_id=123456
-      //        GET /api/_diag/referral-debug?inviter_id=123456
-      //        GET /api/_diag/referral-debug  (latest logs only)
-      if (request.method === 'GET' && url.pathname === '/api/_diag/referral-debug') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.DIAG_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-
-        const debugInfo = {
-          timestamp: new Date().toISOString(),
-          logs: [],
-          userState: null,
-          referralState: null,
-          dbQueries: [],
-        };
-
-        try {
-          // 1. Read the buffered diag logs from KV
-          const rawLogs = await env.APP_CACHE.get(DIAG_LOG_KEY);
-          if (rawLogs) {
-            const lines = rawLogs.split('\n').filter(Boolean);
-            // Parse each line as JSON and filter by user_id if provided
-            const userIdFilter = url.searchParams.get('user_id');
-            const inviterFilter = url.searchParams.get('inviter_id');
-            const parsed = lines.map(line => {
-              try { return JSON.parse(line); } catch { return { raw: line }; }
-            });
-            debugInfo.logs = userIdFilter
-              ? parsed.filter(l => l.inviteeId === userIdFilter || l.inviterId === userIdFilter || l.userId === userIdFilter)
-              : inviterFilter
-                ? parsed.filter(l => l.inviterId === inviterFilter)
-                : parsed.slice(-50); // Last 50 logs
-            debugInfo.logCount = debugInfo.logs.length;
-          } else {
-            debugInfo.logs = [];
-            debugInfo.logNote = 'No diag logs found in KV. This means processReferralOnBootstrap has NOT been called yet, OR the KV was cleared.';
-          }
-
-          // 2. If user_id provided, query DB for that user's state
-          const targetUserId = url.searchParams.get('user_id');
-          if (targetUserId && /^\d{1,20}$/.test(targetUserId)) {
-            try {
-              const userResult = await queryDb(env,
-                'SELECT telegram_id, username, first_name, channel_joined, channel_verified_at, created_at, updated_at FROM users WHERE telegram_id = $1',
-                [targetUserId]
-              );
-              debugInfo.userState = userResult.rows[0] || { found: false, note: 'User not found in users table' };
-              debugInfo.dbQueries.push({ query: 'SELECT user', rowCount: userResult.rows.length });
-            } catch (e) {
-              debugInfo.userState = { error: e.message };
-            }
-
-            // 3. Query referral state for this user (as invitee)
-            try {
-              const refResult = await queryDb(env,
-                'SELECT id, inviter_id, invitee_id, channel_verified, rewarded, status, source, created_at, updated_at FROM referrals WHERE invitee_id = $1',
-                [targetUserId]
-              );
-              debugInfo.referralState = refResult.rows[0] || { found: false, note: 'No referral row exists for this user (as invitee)' };
-              debugInfo.dbQueries.push({ query: 'SELECT referral as invitee', rowCount: refResult.rows.length });
-            } catch (e) {
-              debugInfo.referralState = { error: e.message };
-            }
-
-            // 4. Query token transactions for this user
-            try {
-              const txResult = await queryDb(env,
-                "SELECT id, amount, tx_type, description, ref_id, status, created_at FROM token_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10",
-                [targetUserId]
-              );
-              debugInfo.tokenTransactions = txResult.rows;
-              debugInfo.dbQueries.push({ query: 'SELECT transactions', rowCount: txResult.rows.length });
-            } catch (e) {
-              debugInfo.tokenTransactions = { error: e.message };
-            }
-          }
-
-          // 5. If inviter_id provided, show all their referrals
-          const inviterId = url.searchParams.get('inviter_id');
-          if (inviterId && /^\d{1,20}$/.test(inviterId)) {
-            try {
-              const inviterRefs = await queryDb(env,
-                'SELECT id, inviter_id, invitee_id, channel_verified, rewarded, created_at FROM referrals WHERE inviter_id = $1 ORDER BY created_at DESC LIMIT 20',
-                [inviterId]
-              );
-              debugInfo.referralsAsInviter = inviterRefs.rows;
-              debugInfo.dbQueries.push({ query: 'SELECT referrals as inviter', rowCount: inviterRefs.rows.length });
-            } catch (e) {
-              debugInfo.referralsAsInviter = { error: e.message };
-            }
-          }
-
-          // 6. Check if the UNIQUE constraint exists
-          try {
-            const constraintResult = await queryDb(env,
-              `SELECT conname, conrelid::regclass AS table_name, pg_get_constraintdef(oid) AS definition
-               FROM pg_constraint
-               WHERE conrelid = 'referrals'::regclass AND contype = 'u'`
-            );
-            debugInfo.referralConstraints = constraintResult.rows;
-            debugInfo.dbQueries.push({ query: 'SELECT constraints', rowCount: constraintResult.rows.length });
-          } catch (e) {
-            debugInfo.referralConstraints = { error: e.message };
-          }
-
-        } catch (e) {
-          debugInfo.fatalError = e.message;
-          debugInfo.fatalStack = e.stack?.substring(0, 500);
-        }
-
-        return jsonResponse({ status: 'success', debug: debugInfo }, {}, env);
-      }
 
       // ── DIAGNOSTIC: Full cron pipeline test (RSS → AI → KV → fetch) ──
-      if (request.method === 'GET' && url.pathname === '/api/_diag/news-cron-pipeline') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.DIAG_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        const log = [];
-        const t0 = Date.now();
-        try {
-          // Step 1: Check if cron is configured
-          log.push({ step: 'CRON_CONFIG', crons: ['* * * * *', '*/15 * * * *'] });
-
-          // Step 1.5: Test RSS sources individually
-          log.push({ step: 'RSS_SOURCES_TEST', sourceCount: NEWS_RSS_SOURCES.length });
-          const sourceResults = await Promise.allSettled(
-            NEWS_RSS_SOURCES.map(async (source) => {
-              try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000);
-                const response = await fetch(source.url, {
-                  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)' },
-                  signal: controller.signal,
-                });
-                clearTimeout(timeoutId);
-                const text = await response.text();
-                return { name: source.name, url: source.url, status: response.status, hasItems: text.includes('<item>'), length: text.length };
-              } catch (e) {
-                return { name: source.name, url: source.url, error: e.message };
-              }
-            })
-          );
-          log.push({
-            step: 'RSS_RESULTS',
-            sources: sourceResults.map(r => r.status === 'fulfilled' ? r.value : { error: r.reason?.message }),
-          });
-
-          // Step 2: Run processNewsAIBatch (the actual cron function)
-          log.push({ step: 'BATCH_START' });
-          const batchResult = await processNewsAIBatch(env).catch(e => ({ error: e.message }));
-          log.push({ step: 'BATCH_DONE', result: batchResult });
-
-          // Step 3: Fetch news and check how many have AI summaries
-          const newsResult = await fetchFarsiNews(env, null);
-          const articles = newsResult.data || [];
-          const withAi = articles.filter(a => a.ai_summary && a.ai_summary.length > 50);
-          const withoutAi = articles.filter(a => !a.ai_summary || a.ai_summary.length <= 50);
-          log.push({
-            step: 'FETCH_NEWS',
-            source: newsResult.source,
-            totalArticles: articles.length,
-            withAiSummary: withAi.length,
-            withoutAiSummary: withoutAi.length,
-            sample: articles.slice(0, 3).map(a => ({
-              title: (a.title || '').substring(0, 60),
-              hasAi: !!(a.ai_summary && a.ai_summary.length > 50),
-              aiStatus: a.ai_status,
-            })),
-          });
-
-          log.push({ step: 'COMPLETE', totalMs: Date.now() - t0 });
-          return jsonResponse({ status: 'success', log, totalMs: Date.now() - t0 }, {}, env);
-        } catch (e) {
-          log.push({ step: 'EXCEPTION', error: e.message, stack: e.stack?.substring(0, 200) });
-          return jsonResponse({ status: 'error', log, error: e.message, totalMs: Date.now() - t0 }, {}, env);
-        }
-      }
 
       // ── DIAGNOSTIC: List available Gemini models ──
-      if (request.method === 'GET' && url.pathname === '/api/_diag/gemini-models') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.DIAG_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        const GEMINI_API_KEY = env.GEMINI_API_KEY;
-        if (!GEMINI_API_KEY) {
-          return jsonResponse({ status: 'error', error: 'no_api_key' }, {}, env);
-        }
-        try {
-          // Try multiple model names — Google keeps renaming/deprecating
-          const modelNames = [
-            'gemini-2.5-flash',
-            'gemini-2.0-flash',
-            'gemini-1.5-flash',
-            'gemini-1.5-flash-latest',
-            'gemini-flash-latest',
-          ];
-          let geminiRes = null;
-          let modelUsed = null;
-          const modelErrors = [];
-          for (const modelName of modelNames) {
-            try {
-              const testRes = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    contents: [{ parts: [{ text: 'Say hello' }] }],
-                    generationConfig: { temperature: 0, maxOutputTokens: 10 },
-                  }),
-                  signal: AbortSignal.timeout(10000),
-                }
-              );
-              if (testRes.ok) {
-                geminiRes = testRes;
-                modelUsed = modelName;
-                break;
-              } else {
-                const errBody = await testRes.text().catch(() => '');
-                modelErrors.push({ model: modelName, status: testRes.status, error: errBody.substring(0, 200) });
-              }
-            } catch (e) {
-              modelErrors.push({ model: modelName, error: e.message });
-            }
-          }
-
-          if (!geminiRes || !modelUsed) {
-            return jsonResponse({ status: 'error', error: 'No working Gemini model found', testedModels: modelNames, modelErrors: modelErrors, apiKeyPrefix: GEMINI_API_KEY.substring(0, 10) + '...' }, {}, env);
-          }
-
-          return jsonResponse({ status: 'success', workingModel: modelUsed, testedModels: modelNames }, {}, env);
-        } catch (e) {
-          return jsonResponse({ status: 'error', error: e.message }, {}, env);
-        }
-      }
 
       // Future: /api/news/stream SSE endpoint for breaking news push.
       // Requires Durable Object for true WebSocket, or simple SSE stream.
