@@ -40,19 +40,28 @@ export function createAdminHandlers(deps) {
     // 2. Ensure admins table exists before querying it
     if (isDatabaseConfigured(env)) {
       await adminRepo.ensureSchema(env).catch(() => {});
+      // ROOT-CAUSE FIX: Auto-create the env-configured super admin row.
+      // Without this, requireAdmin checks the DB admins table but the super admin
+      // row doesn't exist yet → returns 403 even for the env-configured super admin.
+      // ensureSuperAdminExists is idempotent — only inserts if not already present.
+      await ensureSuperAdminExists(env);
     }
 
-    // 3. Check admin status in DATABASE (admins table)
+    // 3. Check if user is env-configured super admin (fast path — no DB needed)
+    const isEnvSuperAdmin = adminRepo.isSuperAdmin(env, String(authState.user.id));
+    if (isEnvSuperAdmin) {
+      // Super admin from env var — allow access even if not in DB table
+      const admin = await adminRepo.getAdminByTelegramId(env, String(authState.user.id));
+      return { error: null, admin: { ...(admin || {}), telegram_id: String(authState.user.id), role: 'super_admin', permissions: ['*'], active: true, is_super: true } };
+    }
+
+    // 4. Not env super admin — check DB admins table
     const admin = await adminRepo.getAdminByTelegramId(env, String(authState.user.id));
     if (!admin || !admin.active) {
       return { error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env), admin: null };
     }
 
-    // 3. Determine super admin status: env var OR DB role
-    const isSuper = adminRepo.isSuperAdmin(env, String(authState.user.id)) || admin.role === 'super_admin';
-    if (isSuper) return { error: null, admin: { ...admin, is_super: true } };
-
-    // 4. Check permission if required
+    // 5. Check permission if required
     if (requiredPermission && admin.permissions && !admin.permissions.includes(requiredPermission) && !admin.permissions.includes('*')) {
       return { error: jsonResponse({ detail: 'Insufficient permissions' }, { status: 403 }, env), admin: null };
     }
