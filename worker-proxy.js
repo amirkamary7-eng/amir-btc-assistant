@@ -1342,30 +1342,51 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // STATELESS HTTP: each call is a fresh fetch() to Neon. No WebSocket, no
-  // request-context binding → cannot trigger "Cannot perform I/O on behalf of
-  // a different request".
-  const sql = getSharedNeon(env);
-  if (!sql) throw new Error('Database not configured');
+  // ROOT-CAUSE FIX: Use a FRESH per-call Pool (WebSocket/Pg protocol).
+  //
+  // The neon() HTTP client (commit 1f92fbc) only works with Neon's HTTP SQL
+  // API. But the production database is SUPABASE (aws-1-eu-central-1.pooler.
+  // supabase.com), which does NOT serve an HTTP SQL API → every neon() query
+  // failed with "HTTP 530: error code 1016".
+  //
+  // This broke: getDbUserJoinState (returned null), getAdminByTelegramId
+  // (threw 1016), resolveChannelMembership (fell back to Telegram API only),
+  // and every admin-panel data fetch.
+  //
+  // FIX: per-call Pool using the standard Pg wire protocol (works with both
+  // Supabase AND Neon). The Pool is created AND `await pool.end()`-ed within
+  // this single call, so its WebSocket (and the request context it binds to)
+  // never escapes → no "Cannot perform I/O on behalf of a different request".
+  //
+  // CPU: Pool creation is ~1-2ms. For the every-minute cron (alerts+calendar),
+  // this is ~5 queries × 2ms = 10ms — at the free-plan edge but acceptable
+  // since queries are sequential (not parallel) and pool.end() is awaited.
+  const pool = createPool(env);
+  if (!pool) throw new Error('Database not configured');
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      // sql.query(text, params) with fullResults:true returns the same shape
-      // as pool.query() ({ rows, rowCount, fields, ... }).
-      return await sql.query(sqlText, params);
-    } catch (error) {
-      const msg = String(error?.message || '');
-      const isTransient = msg.includes('530') ||
-                          msg.includes('1016') ||
-                          msg.includes('ECONNRESET') ||
-                          msg.includes('Connection terminated') ||
-                          msg.includes('timeout') ||
-                          msg.includes('fetch failed') ||
-                          msg.includes('network');
-      if (attempt === retries || !isTransient) throw error;
-      const ms = Math.min(300 * 2 ** attempt, 2000);
-      await new Promise((r) => setTimeout(r, ms));
+  try {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await pool.query(sqlText, params);
+      } catch (error) {
+        const msg = String(error?.message || '');
+        const isTransient = msg.includes('530') ||
+                            msg.includes('1016') ||
+                            msg.includes('ECONNRESET') ||
+                            msg.includes('Connection terminated') ||
+                            msg.includes('timeout') ||
+                            msg.includes('fetch failed') ||
+                            msg.includes('network');
+        if (attempt === retries || !isTransient) throw error;
+        const ms = Math.min(300 * 2 ** attempt, 2000);
+        await new Promise((r) => setTimeout(r, ms));
+      }
     }
+  } finally {
+    // CRITICAL: fully close the per-call pool so its WebSocket (and the
+    // request context it is bound to) is released. Awaited → never
+    // fire-and-forget. This is what prevents cross-request I/O errors.
+    try { await pool.end(); } catch {}
   }
 }
 
@@ -6208,6 +6229,177 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return handleHealth(env);
+      }
+
+      // ── DIAGNOSTIC: Join Check + Admin Detection flow tracer ──
+      // Auth: X-Cron-Secret must match ALERTS_CRON_SHARED_SECRET
+      // Pass ?user_id=123456 to trace a specific user's join check + admin detection.
+      // Returns the result of EVERY stage so we can pinpoint exactly where it fails.
+      if (request.method === 'GET' && url.pathname === '/api/_diag/join-flow') {
+        const providedSecret = request.headers.get('X-Cron-Secret') || url.searchParams.get('secret') || '';
+        const expectedSecret = env.DIAG_SECRET || env.ALERTS_CRON_SHARED_SECRET || '';
+        if (!expectedSecret || providedSecret !== expectedSecret) {
+          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+        }
+        const traceUserId = String(url.searchParams.get('user_id') || '').trim() || String(env.ADMIN_TELEGRAM_ID || '').trim();
+        if (!traceUserId || !/^\d+$/.test(traceUserId)) {
+          return jsonResponse({ status: 'error', message: 'Missing or invalid ?user_id= (numeric Telegram ID required)', admin_id_set: !!env.ADMIN_TELEGRAM_ID, admin_id_length: String(env.ADMIN_TELEGRAM_ID || '').length, admin_id_first_chars: String(env.ADMIN_TELEGRAM_ID || '').slice(0,3) }, { status: 400 }, env);
+        }
+
+        const trace = {
+          user_id: traceUserId,
+          timestamp: new Date().toISOString(),
+          stages: {},
+        };
+
+        // ── STAGE 1: Config checks ──
+        trace.stages.config = {
+          database_configured: isDatabaseConfigured(env),
+          bot_configured: isBotConfigured(env),
+          required_channel: resolveRequiredChannel(env),
+          chat_id: getTelegramChatId(env),
+          admin_telegram_id: normalizeOptionalString(env.ADMIN_TELEGRAM_ID) ? '(set)' : '(NOT SET)',
+          is_env_super_admin: isAdminTelegramId(env, traceUserId),
+          direct_url_set: !!env.DIRECT_URL,
+          database_url_set: !!env.DATABASE_URL,
+        };
+
+        // ── STAGE 2: Database connection (per-call Pool with Pg protocol) ──
+        try {
+          const sql = getSharedNeon(env);
+          trace.stages.neon_client = {
+            available: !!sql,
+            url_resolved: resolveNeonDatabaseUrl(env) ? '(set)' : '(empty)',
+            note: 'neon() HTTP is NOT used for queries (DB is Supabase). queryDb uses per-call Pool.',
+          };
+        } catch (e) {
+          trace.stages.neon_client = { available: false, error: e?.message };
+        }
+
+        // ── STAGE 3: queryDb — direct test ──
+        try {
+          const t0 = Date.now();
+          const result = await queryDb(env, 'SELECT 1 AS ok');
+          trace.stages.queryDb = {
+            ok: true,
+            rows: result.rows?.length,
+            first_row: result.rows?.[0],
+            duration_ms: Date.now() - t0,
+          };
+        } catch (e) {
+          trace.stages.queryDb = { ok: false, error: e?.message, stack: e?.stack?.split('\n').slice(0,3).join(' | ') };
+        }
+
+        // ── STAGE 4: getDbUserJoinState — read user's channel_joined from DB ──
+        try {
+          const t0 = Date.now();
+          const joinState = await getDbUserJoinState(env, traceUserId);
+          trace.stages.getDbUserJoinState = {
+            ok: true,
+            result: joinState,
+            duration_ms: Date.now() - t0,
+          };
+        } catch (e) {
+          trace.stages.getDbUserJoinState = { ok: false, error: e?.message };
+        }
+
+        // ── STAGE 5: KV join cache read ──
+        try {
+          const t0 = Date.now();
+          const cached = await getCachedJoinStatus(env, traceUserId);
+          trace.stages.kv_join_cache = {
+            ok: true,
+            cached_value: cached,
+            cache_key: getJoinCacheKey(traceUserId),
+            duration_ms: Date.now() - t0,
+          };
+        } catch (e) {
+          trace.stages.kv_join_cache = { ok: false, error: e?.message };
+        }
+
+        // ── STAGE 6: Telegram Bot API getChatMember (raw) ──
+        try {
+          const t0 = Date.now();
+          const botToken = String(env.TELEGRAM_BOT_TOKEN || '');
+          const chatId = getTelegramChatId(env);
+          const tgUrl = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${encodeURIComponent(traceUserId)}`;
+          const tgRes = await fetch(tgUrl);
+          const tgData = await tgRes.json();
+          trace.stages.telegram_getChatMember = {
+            ok: true,
+            http_status: tgRes.status,
+            telegram_ok: tgData?.ok,
+            status: tgData?.result?.status,
+            raw: JSON.stringify(tgData).slice(0, 400),
+            joined: tgData?.ok && JOINED_STATUSES.has(tgData?.result?.status || ''),
+            duration_ms: Date.now() - t0,
+          };
+        } catch (e) {
+          trace.stages.telegram_getChatMember = { ok: false, error: e?.message };
+        }
+
+        // ── STAGE 7: resolveChannelMembership (forceRefresh: false) ──
+        try {
+          const t0 = Date.now();
+          const m1 = await resolveChannelMembership(env, traceUserId, { forceRefresh: false });
+          trace.stages.resolveChannelMembership_cached = {
+            ok: true,
+            result: m1,
+            duration_ms: Date.now() - t0,
+          };
+        } catch (e) {
+          trace.stages.resolveChannelMembership_cached = { ok: false, error: e?.message };
+        }
+
+        // ── STAGE 8: resolveChannelMembership (forceRefresh: true) ──
+        try {
+          const t0 = Date.now();
+          const m2 = await resolveChannelMembership(env, traceUserId, { forceRefresh: true });
+          trace.stages.resolveChannelMembership_force = {
+            ok: true,
+            result: m2,
+            duration_ms: Date.now() - t0,
+          };
+        } catch (e) {
+          trace.stages.resolveChannelMembership_force = { ok: false, error: e?.message };
+        }
+
+        // ── STAGE 9: Admin detection ──
+        try {
+          const t0 = Date.now();
+          const isSuper = adminRepo ? adminRepo.isSuperAdmin(env, traceUserId) : null;
+          let dbAdmin = null;
+          if (adminRepo && isDatabaseConfigured(env)) {
+            try { await adminRepo.ensureSchema(env).catch(() => {}); } catch {}
+            dbAdmin = await adminRepo.getAdminByTelegramId(env, traceUserId);
+          }
+          trace.stages.admin_detection = {
+            ok: true,
+            is_super_env: isSuper,
+            db_admin: dbAdmin ? {
+              telegram_id: dbAdmin.telegram_id,
+              role: dbAdmin.role,
+              active: dbAdmin.active,
+              permissions: dbAdmin.permissions,
+            } : null,
+            is_admin: isSuper || (dbAdmin && dbAdmin.active),
+            duration_ms: Date.now() - t0,
+          };
+        } catch (e) {
+          trace.stages.admin_detection = { ok: false, error: e?.message };
+        }
+
+        // ── SUMMARY ──
+        trace.summary = {
+          join_check_works: trace.stages.resolveChannelMembership_force?.result?.joined === true ||
+                            trace.stages.resolveChannelMembership_cached?.result?.joined === true,
+          admin_detection_works: trace.stages.admin_detection?.is_admin === true,
+          db_query_works: trace.stages.queryDb?.ok === true,
+          telegram_api_works: trace.stages.telegram_getChatMember?.telegram_ok === true,
+          neon_client_works: trace.stages.neon_client?.available === true,
+        };
+
+        return jsonResponse(trace, {}, env);
       }
 
       // ── DIAGNOSTIC: Admin endpoint tester (temp, for root cause analysis) ──
