@@ -52,13 +52,55 @@ export function createAdminHandlers(deps) {
       if (!admin || !admin.active) {
         return { error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env), admin: null };
       }
-      if (requiredPermission && admin.permissions && !admin.permissions.includes(requiredPermission) && !admin.permissions.includes('*')) {
-        return { error: jsonResponse({ detail: 'Insufficient permissions' }, { status: 403 }, env), admin: null };
+      // Permission check — supports BOTH the new granular permission keys
+      // (e.g. 'admins.add', 'tickets.reply') AND legacy shorthand keys
+      // (e.g. 'manage_admins', 'view_users') via LEGACY_PERM_MAP.
+      if (requiredPermission && admin.permissions && !admin.permissions.includes('*')) {
+        const expanded = _expandPermission(requiredPermission, admin.permissions);
+        if (!expanded) {
+          return { error: jsonResponse({ detail: 'Insufficient permissions' }, { status: 403 }, env), admin: null };
+        }
       }
       return { error: null, admin };
     }
 
     return { error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env), admin: null };
+  }
+
+  // Map legacy shorthand permission keys → new granular keys.
+  // If requireAdmin is called with a legacy key, the admin passes if they have
+  // ANY of the mapped new keys. This allows gradual migration without breaking
+  // existing endpoint calls.
+  const LEGACY_PERM_MAP = {
+    'manage_admins':   ['admins.view','admins.add','admins.edit','admins.delete'],
+    'manage_tickets':  ['tickets.view','tickets.reply','tickets.close'],
+    'manage_rewards':  ['wallet.reward','referral.reward'],
+    'view_users':      ['users.view','users.manage','users.block'],
+    'view_tickets':    ['tickets.view'],
+    'view_transactions':['wallet.view','wallet.manage'],
+    'view_referrals':  ['referral.manage','referral.reward'],
+    'broadcast':       ['notifications.send','notifications.manage'],
+  };
+
+  // Check if the admin has the required permission (or any of its legacy equivalents).
+  function _expandPermission(required, adminPerms) {
+    if (!required) return true;
+    if (adminPerms.includes('*')) return true;
+    if (adminPerms.includes(required)) return true;
+    // Legacy mapping: if the required key is a legacy shorthand, accept any
+    // of its mapped new keys.
+    const mapped = LEGACY_PERM_MAP[required];
+    if (mapped) {
+      return mapped.some(p => adminPerms.includes(p));
+    }
+    // Reverse: if the required key is a new granular key, also accept legacy
+    // shorthands that map to it (so admins created before the migration still work).
+    for (const [legacyKey, newKeys] of Object.entries(LEGACY_PERM_MAP)) {
+      if (newKeys.includes(required) && adminPerms.includes(legacyKey)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

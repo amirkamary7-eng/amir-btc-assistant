@@ -1661,25 +1661,24 @@
                                 <input type="text" id="admin-new-telegram-id" placeholder="مثال: 123456789" class="adm-input">
                             </div>
                             <div class="adm-form-field">
-                                <label class="adm-form-label">نقش</label>
-                                <select id="admin-new-role" class="adm-input">
-                                    <option value="admin">مدیر</option>
-                                    <option value="moderator">ناظم</option>
-                                    <option value="viewer">بیننده</option>
+                                <label class="adm-form-label">نقش (Role)</label>
+                                <select id="admin-new-role" class="adm-input" onchange="_onAdminRoleChange()">
+                                    <option value="support_agent">Support Agent</option>
+                                    <option value="support_manager">Support Manager</option>
+                                    <option value="news_editor">News Editor</option>
+                                    <option value="content_manager">Content Manager</option>
+                                    <option value="market_analyst">Market Analyst</option>
+                                    <option value="wallet_manager">Wallet Manager</option>
+                                    <option value="marketing_manager">Marketing Manager</option>
+                                    <option value="moderator">Moderator</option>
+                                    <option value="administrator">Administrator</option>
                                 </select>
                             </div>
                         </div>
                         <div class="adm-form-field">
-                            <label class="adm-form-label">دسترسی‌ها</label>
+                            <label class="adm-form-label">دسترسی‌ها (Permissions) — بر اساس نقش پر می‌شود، قابل ویرایش</label>
                             <div class="adm-perm-checks" id="admin-new-permissions">
-                                <label class="adm-chip"><input type="checkbox" value="view_users"> کاربران</label>
-                                <label class="adm-chip"><input type="checkbox" value="manage_tickets"> تیکت‌ها</label>
-                                <label class="adm-chip"><input type="checkbox" value="view_tickets"> مشاهده تیکت</label>
-                                <label class="adm-chip"><input type="checkbox" value="broadcast"> پیام گروهی</label>
-                                <label class="adm-chip"><input type="checkbox" value="manage_rewards"> پاداش‌ها</label>
-                                <label class="adm-chip"><input type="checkbox" value="view_transactions"> تراکنش‌ها</label>
-                                <label class="adm-chip"><input type="checkbox" value="view_referrals"> رفرال‌ها</label>
-                                <label class="adm-chip"><input type="checkbox" value="manage_admins"> مدیریت مدیران</label>
+                                <!-- Filled dynamically by _renderAdminPermChecks() -->
                             </div>
                         </div>
                         <div class="adm-form-actions">

@@ -11483,3 +11483,208 @@ body.jl-locked .cd-fullscreen {
     transform: translateY(-2px);
     transition: transform 0.3s ease;
 }
+
+/* ============================================================================
+   #region Admin Panel — Redesigned User/Admin Cards + Permission Groups
+   ============================================================================ */
+
+/* ── Modern admin card (users + admins) ── */
+.adm-user-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: linear-gradient(165deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s, transform 0.15s;
+    min-height: 140px;
+}
+.adm-user-card:hover { border-color: rgba(255,138,0,0.25); }
+.adm-user-card:active { transform: scale(0.995); }
+
+/* Row 1: avatar + name/badges */
+.adm-card-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.adm-card-avatar {
+    flex-shrink: 0;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FF8A00 0%, #FFB347 100%);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 800;
+    box-shadow: 0 2px 8px rgba(255,138,0,0.3);
+}
+.adm-card-avatar--premium {
+    background: linear-gradient(135deg, #F59E0B 0%, #FCD34D 100%);
+    box-shadow: 0 2px 8px rgba(245,158,11,0.4);
+}
+.adm-card-id {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.adm-card-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.adm-card-sub {
+    font-size: 11.5px;
+    color: var(--text-sub);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.adm-card-tgid {
+    font-variant-numeric: tabular-nums;
+    color: rgba(255,255,255,0.7);
+}
+.adm-card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: flex-end;
+    flex-shrink: 0;
+    max-width: 45%;
+}
+
+/* Row 2: meta grid — uniform columns */
+.adm-card-meta {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.18);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.04);
+}
+.adm-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    align-items: center;
+    text-align: center;
+    min-width: 0;
+}
+.adm-meta-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+}
+.adm-meta-val {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+/* Row 3: permission badges */
+.adm-card-perms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-height: 22px;
+}
+
+/* Row 4: action buttons — fixed at bottom */
+.adm-card-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: auto;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+}
+.adm-card-protected {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-style: italic;
+    align-self: center;
+}
+
+/* ── Standardized badges (all same height/size) ── */
+.admin-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1;
+    border: 1px solid transparent;
+}
+.admin-badge-green  { background: rgba(34,197,94,0.15);  color: #4ADE80; border-color: rgba(34,197,94,0.3); }
+.admin-badge-red    { background: rgba(239,68,68,0.15);  color: #F87171; border-color: rgba(239,68,68,0.3); }
+.admin-badge-orange { background: rgba(255,138,0,0.15);  color: #FFA940; border-color: rgba(255,138,0,0.3); }
+.admin-badge-blue   { background: rgba(59,130,246,0.15); color: #60A5FA; border-color: rgba(59,130,246,0.3); }
+.admin-badge-gray   { background: rgba(255,255,255,0.06);color: rgba(255,255,255,0.5); border-color: rgba(255,255,255,0.1); }
+
+/* ── Permission group form (add-admin) ── */
+.adm-perm-group {
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.15);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.04);
+}
+.adm-perm-group-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 6px;
+}
+.adm-perm-group-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.adm-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    user-select: none;
+}
+.adm-chip:hover { background: rgba(255,138,0,0.08); border-color: rgba(255,138,0,0.25); }
+.adm-chip input[type="checkbox"] {
+    width: 14px; height: 14px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+/* Responsive: on very narrow screens, stack badges below name */
+@media (max-width: 380px) {
+    .adm-card-top { flex-wrap: wrap; }
+    .adm-card-badges { max-width: 100%; justify-content: flex-start; }
+    .adm-card-meta { grid-template-columns: 1fr 1fr; }
+    .adm-meta-item:last-child { grid-column: 1 / -1; }
+}
+/* #endregion */
