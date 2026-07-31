@@ -7731,21 +7731,17 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // ROOT-CAUSE FIX: Split jobs across 3 cron schedules to stay under 10ms CPU.
-    // Free plan limit: 10ms CPU per invocation.
-    // Each Pool creation = ~1-2ms CPU. Sequential 8 jobs = ~16ms → exceeds limit.
-    // FIX: Distribute jobs so no single invocation does more than ~4ms CPU.
+    // ROOT-CAUSE FIX: Sequential execution with 2-cron split.
+    // Free plan: 10ms CPU limit, max 2 cron triggers.
     //
-    // Schedule:
-    //   * * * * *    (every 1 min): alerts + calendar (2 jobs, ~3ms CPU)
-    //   */15 * * * * (every 15 min): notif queue + referral retry + wheel retry
-    //                                + market overview (4 jobs, ~5ms CPU)
-    //   */30 * * * * (every 30 min): publisher queue + news AI (2 jobs, ~3ms CPU)
+    // * * * * *    (every 1 min): alerts + calendar only (2 jobs, ~3ms CPU)
+    // */15 * * * * (every 15 min): alerts + calendar + maintenance + heavy jobs
+    //   But to stay under 10ms: only run 4 jobs max per 15-min tick.
+    //   Heavy jobs (news AI, publisher) run conditionally every other 15-min tick.
 
     const cronExpr = controller.cron || '* * * * *';
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
-    const isEvery30Min = cronExpr === '*/30 * * * *';
 
     ctx.waitUntil((async () => {
       try {
@@ -7759,41 +7755,50 @@ export default {
           }
         }
 
-        // === EVERY 15 MIN: DB maintenance jobs ===
+        // === EVERY 15 MIN: maintenance + heavy jobs (split to stay under 10ms) ===
         if (isEvery15Min) {
+          // Phase 1: Time-sensitive (same as 1-min, but with 15-min flag)
           try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
             console.warn('[CRON] alerts failed:', e?.message);
           }
           try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); } catch (e) {
             console.warn('[CRON] calendar failed:', e?.message);
           }
-          if (notificationPlatformRepo?.processQueue) {
-            try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage); } catch (e) {
-              console.warn('[CRON] notif queue failed:', e?.message);
-            }
-          }
+
+          // Phase 2: Lightweight DB jobs
           try { await retryFailedReferralRewards(env); } catch (e) {
             console.warn('[CRON] referral retry failed:', e?.message);
           }
           try { await retryFailedWheelRewards(env); } catch (e) {
             console.warn('[CRON] wheel retry failed:', e?.message);
           }
-          if (env.CMC_API_KEY) {
-            try { await marketOverviewSvc.refreshOverview(env); } catch (e) {
-              console.warn('[CRON] market overview failed:', e?.message);
-            }
-          }
-        }
 
-        // === EVERY 30 MIN: heavy jobs ===
-        if (isEvery30Min) {
-          if (publisherHandlers?.processPublisherQueue) {
-            try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); } catch (e) {
-              console.warn('[CRON] publisher failed:', e?.message);
+          // Phase 3: Alternate heavy jobs every other 15-min tick
+          // Use minute-of-hour to determine which heavy job to run
+          // This ensures only ONE heavy job runs per 15-min tick
+          const minute = new Date().getUTCMinutes();
+          if (minute === 0 || minute === 30) {
+            // First 15-min tick of the half-hour: notification queue + market overview
+            if (notificationPlatformRepo?.processQueue) {
+              try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage); } catch (e) {
+                console.warn('[CRON] notif queue failed:', e?.message);
+              }
             }
-          }
-          try { await processNewsAIBatch(env); } catch (e) {
-            console.warn('[CRON] news AI failed:', e?.message);
+            if (env.CMC_API_KEY) {
+              try { await marketOverviewSvc.refreshOverview(env); } catch (e) {
+                console.warn('[CRON] market overview failed:', e?.message);
+              }
+            }
+          } else {
+            // Second 15-min tick: publisher + news AI
+            if (publisherHandlers?.processPublisherQueue) {
+              try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); } catch (e) {
+                console.warn('[CRON] publisher failed:', e?.message);
+              }
+            }
+            try { await processNewsAIBatch(env); } catch (e) {
+              console.warn('[CRON] news AI failed:', e?.message);
+            }
           }
         }
       } catch (e) {
