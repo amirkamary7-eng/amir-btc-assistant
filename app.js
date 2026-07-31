@@ -10681,8 +10681,8 @@ function renderDashboardMarketStatus() {
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        // Neutral image (originally named bull.webp — it shows bull+bear equal)
-        trendGraphic = `<img src="assets/market/bull.webp" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
+        // New neutral market status image (optimized: 400×400 PNG, 56KB)
+        trendGraphic = `<img src="assets/market/neutral-new.png" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
@@ -10874,11 +10874,12 @@ function renderDashboardHeatmap() {
         return;
     }
 
-    // Take top 12 coins by market cap (skip stablecoins — they're always 0%)
+    // Take top 16 coins by market cap (skip stablecoins — they're always 0%)
+    // 16 fills a 4×4 grid perfectly with no empty spaces
     const skipStable = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FDUSD', 'USDE', 'USDGO'];
     const top = allCoins
         .filter(c => c && c.symbol && !skipStable.includes(c.symbol.toUpperCase()))
-        .slice(0, 12);
+        .slice(0, 16);
 
     if (top.length === 0) {
         container.innerHTML = '<div class="heatmap-empty">—</div>';
@@ -10894,33 +10895,38 @@ function renderDashboardHeatmap() {
         const mcap = coin.marketCapUsd || 0;
         // Size class: based on market cap relative to max
         const sizeRatio = mcap / maxMcap;
-        let sizeClass = 'hm-size-md';
+        let sizeClass = 'hm-size-sm';
         if (sizeRatio > 0.6) sizeClass = 'hm-size-xl';
         else if (sizeRatio > 0.3) sizeClass = 'hm-size-lg';
         else if (sizeRatio > 0.1) sizeClass = 'hm-size-md';
         else sizeClass = 'hm-size-sm';
 
-        // Color: based on change percentage
-        // Intensity: clamp to ±10% for color saturation
-        const intensity = Math.min(Math.abs(change) / 10, 1);
+        // Color: based on change percentage with PROPORTIONAL INTENSITY
+        // Only EXACTLY 0.0% is gray. Any non-zero change shows green/red
+        // with intensity proportional to the magnitude.
         let bgColor, textColor, borderColor;
-        if (change > 0.5) {
-            // Green — brighter for bigger gains
-            const alpha = 0.15 + intensity * 0.35;
-            bgColor = `rgba(34, 197, 94, ${alpha})`;
-            textColor = '#86EFAC';
-            borderColor = `rgba(34, 197, 94, ${0.3 + intensity * 0.3})`;
-        } else if (change < -0.5) {
-            // Red — brighter for bigger drops
-            const alpha = 0.15 + intensity * 0.35;
-            bgColor = `rgba(239, 68, 68, ${alpha})`;
-            textColor = '#FCA5A5';
-            borderColor = `rgba(239, 68, 68, ${0.3 + intensity * 0.3})`;
-        } else {
-            // Neutral (between -0.5% and +0.5%)
+        if (change === 0) {
+            // Only exactly 0% is gray
             bgColor = 'rgba(255, 255, 255, 0.04)';
             textColor = 'rgba(255, 255, 255, 0.6)';
             borderColor = 'rgba(255, 255, 255, 0.08)';
+        } else if (change > 0) {
+            // Green — intensity proportional to change magnitude
+            // Even 0.01% shows a faint green; 10%+ is fully saturated
+            const intensity = Math.min(Math.abs(change) / 10, 1);
+            const minAlpha = 0.08; // Minimum visibility even for tiny changes
+            const alpha = minAlpha + intensity * 0.42;
+            bgColor = `rgba(34, 197, 94, ${alpha})`;
+            textColor = intensity > 0.3 ? '#86EFAC' : 'rgba(134, 239, 172, 0.8)';
+            borderColor = `rgba(34, 197, 94, ${0.15 + intensity * 0.35})`;
+        } else {
+            // Red — intensity proportional to change magnitude
+            const intensity = Math.min(Math.abs(change) / 10, 1);
+            const minAlpha = 0.08;
+            const alpha = minAlpha + intensity * 0.42;
+            bgColor = `rgba(239, 68, 68, ${alpha})`;
+            textColor = intensity > 0.3 ? '#FCA5A5' : 'rgba(252, 165, 165, 0.8)';
+            borderColor = `rgba(239, 68, 68, ${0.15 + intensity * 0.35})`;
         }
 
         const changeStr = (change >= 0 ? '+' : '') + change.toFixed(2) + '%';

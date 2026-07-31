@@ -11379,12 +11379,12 @@ body.jl-locked .cd-fullscreen {
 .heatmap-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    grid-auto-rows: 64px;
-    gap: 6px;
-    grid-auto-flow: dense;
+    grid-auto-rows: 60px;
+    gap: 5px;
+    /* No grid-auto-flow: dense — with 16 uniform cells, no gaps to fill */
 }
 .hm-cell {
-    border-radius: 12px;
+    border-radius: 10px;
     border: 1px solid;
     display: flex;
     flex-direction: column;
@@ -11408,7 +11408,7 @@ body.jl-locked .cd-fullscreen {
     outline-offset: 2px;
 }
 .hm-symbol {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 800;
     letter-spacing: 0.3px;
     line-height: 1;
@@ -11420,27 +11420,8 @@ body.jl-locked .cd-fullscreen {
     line-height: 1;
     opacity: 0.9;
 }
-/* Size variants — larger cells for dominant coins */
-.hm-size-xl {
-    grid-column: span 2;
-    grid-row: span 2;
-}
-.hm-size-xl .hm-symbol { font-size: 20px; }
-.hm-size-xl .hm-change { font-size: 14px; }
-.hm-size-lg {
-    grid-column: span 2;
-    grid-row: span 1;
-}
-.hm-size-lg .hm-symbol { font-size: 16px; }
-.hm-size-lg .hm-change { font-size: 12px; }
-.hm-size-md {
-    grid-column: span 1;
-    grid-row: span 1;
-}
-.hm-size-sm {
-    grid-column: span 1;
-    grid-row: span 1;
-}
+/* All cells are uniform 1×1 — no size variants.
+   This ensures the 4×4 grid (16 coins) has no empty spaces. */
 
 /* Skeleton */
 .heatmap-skeleton {
