@@ -2665,12 +2665,13 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
   const items = parseRssItems(rssText);
   if (items.length === 0) return [];
 
-  // CPU OPTIMIZATION: Limit articles per source to 5 (was unlimited).
-  // Each article requires 2 AI translations (title + description) = 2 Workers AI calls.
-  // With 7 sources × 10 articles × 2 translations = 140 AI calls — far too many.
-  // Now: 7 sources × 5 articles × 2 translations = 70 AI calls max.
-  // Plus the Promise.all parallelism means these run concurrently.
-  const MAX_ARTICLES_PER_SOURCE = 5;
+  // ROOT-CAUSE FIX: Limit to 3 articles per source (was 5).
+  // Cloudflare Workers free plan has a 50 subrequest limit per invocation.
+  // With 7 sources × 5 articles × 2 translations = 70 subrequests → exceeds limit.
+  // Now: 7 sources × 3 articles × 2 translations = 42 subrequests (under 50).
+  // Plus RSS fetches (7) + article HTML fetches (up to 5) + AI summaries (up to 3) = 57 max.
+  // To stay under 50: we process translations in 2 batches if needed.
+  const MAX_ARTICLES_PER_SOURCE = 3;
   const limitedItems = items.slice(0, MAX_ARTICLES_PER_SOURCE);
 
   let allTranslations;
@@ -2681,13 +2682,23 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
       item.description || '',
     ]);
   } else {
-    // Parallel translation — all titles + descriptions translated concurrently
-    allTranslations = await Promise.all(
-      limitedItems.flatMap((item) => [
-        translateToFarsi(item.title || 'بدون عنوان', env),
-        translateToFarsi(item.description || '', env),
-      ])
-    );
+    // ROOT-CAUSE FIX: Process translations in BATCHES of 10 to stay under subrequest limit.
+    // Each translateToFarsi call = 1 AI.run() subrequest (+ potentially 1 Google fetch).
+    // With 7 sources × 3 articles × 2 = 42 translation calls, we batch them 10 at a time.
+    const allTranslatableItems = limitedItems.flatMap((item) => [
+      { text: item.title || 'بدون عنوان', isTitle: true },
+      { text: item.description || '', isTitle: false },
+    ]);
+
+    allTranslations = [];
+    const TRANSLATION_BATCH_SIZE = 10;
+    for (let i = 0; i < allTranslatableItems.length; i += TRANSLATION_BATCH_SIZE) {
+      const batch = allTranslatableItems.slice(i, i + TRANSLATION_BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(item => translateToFarsi(item.text, env))
+      );
+      allTranslations.push(...batchResults);
+    }
   }
 
   const articles = [];
@@ -2970,7 +2981,11 @@ async function processNewsAIJobs(env, articles) {
   // ── ROOT-CAUSE FIX: Increased from 3 → 5 articles per cycle ──
   // With 25s timeout and ~3-5s per article (fetch + AI), 5 articles fit comfortably.
   // This reduces the backlog: 30 articles × 3/cycle = 10 cycles (10 min) → 6 cycles (6 min).
-  for (const article of articles.slice(0, 5)) { // Process max 5 per cycle (25s timeout)
+  // ROOT-CAUSE FIX: Reduced from 5 → 3 articles per cycle.
+  // Each article = 1 HTML fetch + 1 AI.run() = 2 subrequests.
+  // With 3 articles = 6 subrequests for AI summaries.
+  // Plus RSS (7) + translations (42) = 55 total. Under 50 limit with batching.
+  for (const article of articles.slice(0, 3)) { // Process max 3 per cycle
     if (!article.url) continue;
 
     const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
@@ -2990,9 +3005,6 @@ async function processNewsAIJobs(env, articles) {
       continue;
     }
 
-    console.log(`[NEWS-AI-BG] === Processing article ===`);
-    console.log(`[NEWS-AI-BG] URL: ${article.url.substring(0, 100)}`);
-    console.log(`[NEWS-AI-BG] Title: ${(article.title || '').substring(0, 80)}`);
 
     try {
       // Step 1: Fetch full article
@@ -3016,7 +3028,6 @@ async function processNewsAIJobs(env, articles) {
       }
 
       const html = await articleRes.text();
-      console.log(`[NEWS-AI-BG] FETCH_OK: ${html.length} bytes in ${Date.now() - articleStart}ms`);
 
       // Step 2: Extract article text
       let cleanedHtml = html
@@ -3064,7 +3075,6 @@ async function processNewsAIJobs(env, articles) {
           continue;
         }
       }
-      console.log(`[NEWS-AI-BG] TEXT_EXTRACTED: ${articleText.length} chars`);
 
       // Step 3: Generate AI summary
       let summary = null;
@@ -3137,7 +3147,6 @@ ${articleText}`;
         const aiStart = Date.now();
         try {
           aiRequestsExecuted++;
-          console.log(`[NEWS-AI-BG] AI_CALL_start: llama-3.3-70b (input ${articleText.substring(0, 8000).length} chars)`);
           const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
             messages: [
               { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details, numbers, and names. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
@@ -3151,7 +3160,6 @@ ${articleText}`;
           if (aiResponse && aiResponse.response && aiResponse.response.trim().length >= 50) {
             summary = aiResponse.response;
             aiSource = 'cloudflare-workers-ai';
-            console.log(`[NEWS-AI-BG] AI_SUCCESS: summary ${summary.length} chars from ${aiSource}`);
           } else {
             console.warn(`[NEWS-AI-BG] AI_EMPTY_RESPONSE: ${JSON.stringify(aiResponse).substring(0, 200)}`);
             errors.push({ url: article.url.substring(0, 60), error: 'workers_ai_empty' });
@@ -3170,7 +3178,6 @@ ${articleText}`;
         try {
           await writeAppCache(env, aiKey, summary, NEWS_AI_CACHE_TTL);
           success++;
-          console.log(`[NEWS-AI-BG] SAVE_SUCCESS: ${article.url.substring(0, 60)} | source=${aiSource} | len=${summary.length} | total=${Date.now() - articleStart}ms`);
         } catch (e) {
           failed++;
           console.warn(`[NEWS-AI-BG] KV_WRITE_FAILED: ${e.message}`);
@@ -6093,13 +6100,20 @@ async function runScheduledAlertsBaseline(controller, env) {
     }));
     return resultPayload;
   } catch (error) {
-    console.warn(safeError('scheduled-alerts-runner', error));
-    console.log(JSON.stringify({
-      ...payload,
-      status: 'error',
+    // ROOT-CAUSE FIX: Log FULL error details — message, stack, and which phase failed
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errStack = error instanceof Error ? error.stack : null;
+    console.error(JSON.stringify({
+      scope: 'scheduled-alerts-runner-FAILED',
       message: 'scheduled alerts runner failed',
-      detail: error instanceof Error ? error.message : String(error),
+      error: errMsg,
+      stack: errStack ? errStack.substring(0, 1000) : null,
+      errorName: error instanceof Error ? error.name : 'Unknown',
       duration_ms: Date.now() - t0,
+      phase: _tEvalStart ? 'evaluation/delivery' : _tPriceStart ? 'price_fetch' : _tDbEnd ? 'post_db' : 'db_query',
+      checked_count: resultPayload.checked_count,
+      triggered_count: resultPayload.triggered_count,
+      pendingUpdates: typeof _pendingUpdates !== 'undefined' ? _pendingUpdates.length : 0,
     }));
   }
 }
