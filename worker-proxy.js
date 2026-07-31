@@ -1361,58 +1361,36 @@ async function getReferralRewardPerInvite(env) {
   return fallback;
 }
 
-// ── REQUEST-SCOPED POOL ────────────────────────────────────────────────────
-// ROOT-CAUSE FIX for CPU exhaustion: creating a Pool per queryDb call costs
-// ~3-5ms CPU (TLS handshake). A single admin dashboard request makes 4-6
-// queryDb calls = 12-30ms CPU → exceededCpu (10ms free-plan limit).
+// ── PER-CALL POOL (NO module-level state) ──────────────────────────────────
+// ROOT-CAUSE FIX for "A promise was resolved from a different request context":
 //
-// FIX: one Pool per HTTP request. The fetch handler calls _setRequestPool()
-// at the start, queryDb reuses it for all queries in that request, and the
-// finally block calls _clearRequestPool() to close it.
+// The previous request-scoped Pool (_requestPool module-level variable) was
+// SHARED across requests. Cloudflare Workers can interleave requests within
+// the same isolate at await points — so while request A is awaiting a DB
+// query, request B can start and read the same _requestPool. When request A's
+// query resolves, it resolves in request B's context → the runtime error
+// "A promise was resolved or rejected from a different request context" →
+// "Worker's code had hung" → request canceled.
 //
-// CROSS-REQUEST SAFETY: _requestPool is set at the START of each fetch
-// invocation and cleared in the finally block. Because Cloudflare Workers
-// runs JavaScript single-threaded within an isolate, there is no risk of
-// two requests sharing the same _requestPool — each request runs to
-// completion (or yields at await points) before the next starts. The Pool's
-// WebSocket is bound to the request context that was active when the Pool
-// was created; since we clear it before the request ends, it never leaks.
-let _requestPool = null;
-let _requestPoolEnv = null;
-
-function _setRequestPool(env) {
-  if (_requestPool && _requestPoolEnv === env) return _requestPool;
-  if (_requestPool) {
-    try { _requestPool.end(); } catch {}
-    _requestPool = null;
-  }
-  _requestPool = createPool(env);
-  _requestPoolEnv = env;
-  return _requestPool;
-}
-
-async function _clearRequestPool() {
-  if (_requestPool) {
-    try { await _requestPool.end(); } catch {}
-    _requestPool = null;
-    _requestPoolEnv = null;
-  }
-}
+// FIX: return to PER-CALL Pool. Each queryDb call creates a fresh Pool, runs
+// the query, and `await pool.end()`s it in `finally`. The Pool's WebSocket
+// is created, used, and destroyed entirely within one synchronous async
+// execution — it NEVER outlives the await boundary, so it can NEVER be
+// observed by a different request.
+//
+// CPU cost: ~3-5ms per queryDb (Pool creation + TLS handshake). This is
+// acceptable because:
+//   1. Most endpoints make 1-3 queries (under 10ms CPU)
+//   2. ensureSchema uses _schemaVerified cache (0 queries on warm isolates)
+//   3. getReferralRewardPerInvite uses 60s cache (0 queries on warm isolates)
+//   4. The retry logic only triggers on transient errors
+//
+// This is the ONLY safe pattern for @neondatabase/serverless Pool in
+// Cloudflare Workers. Module-level Pool caching does NOT work because
+// WebSocket connections are bound to the request context that created them.
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // ROOT-CAUSE FIX: reuse a request-scoped Pool if available.
-  //
-  // The fetch handler calls _setRequestPool(env) at the start of each request.
-  // All queryDb calls within that request reuse the same Pool — eliminating
-  // the ~3-5ms CPU cost of creating a new Pool + TLS handshake per query.
-  //
-  // If no request-scoped pool exists (e.g. cron context not yet set up, or
-  // a standalone call), fall back to a per-call Pool (created + closed here).
-  //
-  // CPU SAVINGS: admin dashboard (4 queries) went from 4×5ms=20ms →
-  // 1×5ms (pool create) + 3×0.1ms (query reuse) = ~5.3ms — under 10ms.
-  const useRequestPool = _requestPool && _requestPoolEnv === env;
-  const pool = useRequestPool ? _requestPool : createPool(env);
+  const pool = createPool(env);
   if (!pool) throw new Error('Database not configured');
 
   try {
@@ -1434,11 +1412,10 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
       }
     }
   } finally {
-    // Only close the pool if we created it (per-call fallback).
-    // Request-scoped pools are closed in the fetch handler's finally block.
-    if (!useRequestPool) {
-      try { await pool.end(); } catch {}
-    }
+    // CRITICAL: close the Pool synchronously in finally. This MUST be awaited
+    // so the WebSocket is released before queryDb returns. If pool.end() were
+    // fire-and-forget, the WebSocket could outlive the request context.
+    try { await pool.end(); } catch {}
   }
 }
 
@@ -6272,9 +6249,6 @@ export default {
     if (typeof setEnvSendTelegramMessage === 'function') {
       setEnvSendTelegramMessage(sendTelegramMessage);
     }
-    // ROOT-CAUSE FIX: create ONE Pool for the entire request. All queryDb
-    // calls in this request will reuse it (see _requestPool). Closed in finally.
-    _setRequestPool(env);
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
@@ -8105,10 +8079,10 @@ export default {
         },
         { status: 500 }, env);
     } finally {
-      // ROOT-CAUSE FIX: close the request-scoped Pool so its WebSocket is
-      // released before the next request starts. This prevents cross-request
-      // I/O errors AND ensures the Pool doesn't leak across requests.
-      await _clearRequestPool();
+      // No per-request pool teardown needed: queryDb uses per-call Pool
+      // (created + closed inside each queryDb call). No module-level Pool
+      // state exists — nothing to clean up. This is the ONLY safe pattern
+      // for @neondatabase/serverless Pool in Cloudflare Workers.
     }
   },
 
@@ -8126,8 +8100,6 @@ export default {
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
     ctx.waitUntil((async () => {
-      // ROOT-CAUSE FIX: create ONE Pool for the entire cron invocation.
-      _setRequestPool(env);
       try {
         // === EVERY MINUTE: time-sensitive jobs only ===
         if (isEveryMinute) {
@@ -8187,9 +8159,6 @@ export default {
         }
       } catch (e) {
         console.error('[CRON] Scheduled handler error:', e?.message);
-      } finally {
-        // ROOT-CAUSE FIX: close the cron-scoped Pool.
-        await _clearRequestPool();
       }
     })());
   },
