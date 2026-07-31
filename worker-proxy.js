@@ -1187,94 +1187,22 @@ function isAdminTelegramId(env, userId) {
 function createPool(env) {
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) return null;
-  // ── ROOT-CAUSE FIX: Pool max increased from 1 to 5 ──
-  // With max=1, any stuck query (e.g., DDL with ACCESS EXCLUSIVE lock)
-  // blocks ALL other queries from the same pool. They queue and timeout
-  // at 8s, then the Promise.race leak permanently saturates the pool.
-  //
-  // With max=5, up to 5 queries can run concurrently. Even if one DDL
-  // query is stuck for 24s, 4 other queries can proceed. This eliminates
-  // the cascading timeout failure.
-  //
-  // Neon serverless supports many concurrent WebSocket connections.
-  // The previous max=1 was set to prevent "connection exhaustion" but
-  // it actually CAUSED exhaustion by leaking connections via Promise.race.
-  const poolId = `pool_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-  const pool = new Pool({
+  return new Pool({
     connectionString: databaseUrl,
     max: 5,
     idleTimeoutMillis: 0,
     connectionTimeoutMillis: 8000,
   });
-  try { pool._diagPoolId = poolId; } catch {}
-  return pool;
 }
 
 // ── ROOT CAUSE FIX: Per-request Pool sharing ──
 const _poolCache = new WeakMap();
 
-// ── DIAG: Track pool acquisition timing and concurrent query count ──
-// NOTE: currentConcurrentQueries / maxConcurrentQueries measure the number
-// of queryDb() CALLS that are in-flight (including those waiting for a
-// connection slot). This is DEMAND on the pool, not actual connections.
-// With pool max=1, if maxConcurrentQueries > 1, it means queries were
-// QUEUED — only 1 was actually executing, the rest were waiting.
-const _poolStats = {
-  poolsCreated: 0,
-  poolsReused: 0,
-  queriesStarted: 0,
-  queriesCompleted: 0,
-  queriesFailed: 0,
-  queriesTimedOut: 0,
-  maxConcurrentQueries: 0,        // max concurrent queryDb() calls (DEMAND)
-  currentConcurrentQueries: 0,    // current concurrent queryDb() calls (DEMAND)
-  maxConcurrentConnections: 0,    // max actual connections held (CAPACITY used)
-  currentConcurrentConnections: 0, // current actual connections held
-  totalQueryWaitMs: 0,            // total time waiting for connection slot
-  totalQueryExecMs: 0,            // total time executing SQL
-};
-
-// ── LEAK DETECTOR: Track every connection by unique ID ──
-// Each pool.connect() that succeeds gets a connectionId.
-// On release, the entry is deleted. Any entry remaining after
-// the cron tick completes is a LEAK.
-let _connectionCounter = 0;
-const _activeConnections = new Map(); // connectionId → { acquiredAt, sql, queryId, caller }
-const _connectionHistory = []; // last 200 connection events for debugging
-
-function _logConnectionEvent(event) {
-  _connectionHistory.push({ ts: Date.now(), ...event });
-  if (_connectionHistory.length > 200) _connectionHistory.shift();
-}
-
-// Extract caller function name from stack trace
-function _getCallerFunction() {
-  const stack = new Error().stack || '';
-  const lines = stack.split('\n');
-  // Skip: Error, _getCallerFunction, queryDb, and find the actual caller
-  for (let i = 3; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line && !line.includes('queryDb') && !line.includes('_getCaller')) {
-      // Extract function name from: "at functionName (file:line:col)"
-      const match = line.match(/at\s+(\S+)\s+\(/);
-      if (match) return match[1];
-      return line.substring(0, 60);
-    }
-  }
-  return 'unknown';
-}
-
 function getSharedPool(env) {
   if (!env) return null;
-  if (_poolCache.has(env)) {
-    _poolStats.poolsReused++;
-    return _poolCache.get(env);
-  }
+  if (_poolCache.has(env)) return _poolCache.get(env);
   const pool = createPool(env);
-  if (pool) {
-    _poolCache.set(env, pool);
-    _poolStats.poolsCreated++;
-  }
+  if (pool) _poolCache.set(env, pool);
   return pool;
 }
 
@@ -1382,80 +1310,31 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // ── COMPLETE CONNECTION LIFECYCLE INSTRUMENTATION ──
-  // Tracks: acquire time, release time, hold duration, caller function,
-  // leak detection. Every connection gets a unique ID.
-  const _diagT0 = Date.now();
-  const _diagQueryId = `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  const _diagSqlPreview = String(sqlText || '').substring(0, 80).replace(/\s+/g, ' ').trim();
-  const _diagCaller = _getCallerFunction();
-
   const pool = getSharedPool(env);
   if (!pool) throw new Error('Database not configured');
-
-  _poolStats.queriesStarted++;
-  _poolStats.currentConcurrentQueries++;
-  if (_poolStats.currentConcurrentQueries > _poolStats.maxConcurrentQueries) {
-    _poolStats.maxConcurrentQueries = _poolStats.currentConcurrentQueries;
-  }
-
-  // Log the REQUEST to acquire a connection (before pool.connect)
-  _logConnectionEvent({
-    type: 'CONNECT_REQUEST',
-    queryId: _diagQueryId,
-    sql: _diagSqlPreview,
-    caller: _diagCaller,
-    poolId: pool._diagPoolId,
-    activeConnectionsBefore: _activeConnections.size,
-    concurrentQueryDbCalls: _poolStats.currentConcurrentQueries,
-  });
 
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        // ── FALLBACK: If pool.connect is not available (test mock), use pool.query ──
+        // FALLBACK: If pool.connect is not available (test mock), use pool.query
         if (typeof pool.connect !== 'function') {
-          const result = await pool.query(sqlText, params);
-          _poolStats.queriesCompleted++;
-          return result;
+          return await pool.query(sqlText, params);
         }
 
-        // ── ROOT-CAUSE FIX: Use pool.connect() directly WITHOUT Promise.race ──
-        // The pool already has connectionTimeoutMillis=8000 which handles queue
-        // timeout INTERNALLY. When the pool's timeout fires, it removes the
-        // request from _pendingQueue and rejects — NO LEAK.
-        //
-        // The previous Promise.race pattern caused a CONNECTION LEAK:
-        // When our 8s setTimeout won the race, pool.connect() was still pending
-        // in the pool's _pendingQueue. When a connection later became available,
-        // the pool gave it to our abandoned request — but nobody was awaiting it,
-        // so the client was NEVER released. This leaked connections, causing
-        // the pool's _clients to exceed max, permanently saturating the pool.
-        //
-        // FIX: Let the pool handle its own timeout. On rejection, the pool
-        // internally cleans up the _pendingQueue entry. No leak possible.
+        // ROOT-CAUSE FIX: Use pool.connect() directly WITHOUT Promise.race.
+        // The pool has connectionTimeoutMillis=8000 which handles queue timeout
+        // internally. On timeout, pool removes the request from _pendingQueue —
+        // NO LEAK. The previous Promise.race pattern leaked connections because
+        // when our setTimeout won the race, pool.connect() was still pending and
+        // would later resolve with a client that nobody released.
         const client = await pool.connect();
-
-        const result = await client.query(sqlText, params);
-        client.release();
-
-        _poolStats.queriesCompleted++;
-        return result;
-      } catch (error) {
-        if (attempt === retries) {
-          _poolStats.queriesFailed++;
-          console.error(JSON.stringify({
-            scope: 'diag-query-failed',
-            queryId: _diagQueryId,
-            sql: _diagSqlPreview,
-            caller: _diagCaller,
-            error: error?.message,
-            totalMs: Date.now() - _diagT0,
-            attempts: attempt + 1,
-            activeConnections: _activeConnections.size,
-          }));
-          throw error;
+        try {
+          return await client.query(sqlText, params);
+        } finally {
+          client.release();
         }
+      } catch (error) {
+        if (attempt === retries) throw error;
         const ms = Math.min(200 * 2 ** attempt, 1000);
         await new Promise((r) => setTimeout(r, ms));
       }
@@ -1463,8 +1342,6 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   } catch (error) {
     closeSharedPool(env);
     throw error;
-  } finally {
-    _poolStats.currentConcurrentQueries--;
   }
 }
 
@@ -6293,26 +6170,6 @@ export default {
         return handleHealth(env);
       }
 
-      // ── DIAG: Read last cron job reports from KV ──
-      if (request.method === 'GET' && url.pathname === '/api/_diag/last-cron') {
-        const jobNames = ['runScheduledAlertsBaseline', 'notificationQueue', 'marketOverviewRefresh',
-          'retryFailedReferralRewards', 'retryFailedWheelRewards', 'runCalendarAlertsCheck',
-          'processNewsAIBatch', 'processPublisherQueue'];
-        const jobs = {};
-        for (const name of jobNames) {
-          const raw = env.APP_CACHE ? await env.APP_CACHE.get('diag:job:' + name) : null;
-          if (raw) {
-            try { jobs[name] = JSON.parse(raw); } catch { jobs[name] = { raw: raw.substring(0, 100) }; }
-          }
-        }
-        const finalReport = env.APP_CACHE ? await env.APP_CACHE.get('diag:last_cron_report') : null;
-        const result = { status: 'success', jobs };
-        if (finalReport) {
-          try { result.finalReport = JSON.parse(finalReport); } catch {}
-        }
-        return jsonResponse(result, {}, env);
-      }
-
       // ── DIAGNOSTIC: Admin endpoint tester (temp, for root cause analysis) ──
       // Auth: X-Cron-Secret header must match ALERTS_CRON_SHARED_SECRET
       // Tests ALL admin endpoints internally and returns exact HTTP status + response body
@@ -7155,48 +7012,6 @@ export default {
         }, {}, env);
       }
 
-      // ── DIAGNOSTIC: Pool Stats — view live connection pool statistics ──
-      if (request.method === 'GET' && url.pathname === '/api/_diag/pool-stats') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.DIAG_SECRET || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        return jsonResponse({
-          status: 'success',
-          poolStats: {
-            poolsCreated: _poolStats.poolsCreated,
-            poolsReused: _poolStats.poolsReused,
-            queriesStarted: _poolStats.queriesStarted,
-            queriesCompleted: _poolStats.queriesCompleted,
-            queriesFailed: _poolStats.queriesFailed,
-            queriesTimedOut: _poolStats.queriesTimedOut,
-            currentConcurrentQueries: _poolStats.currentConcurrentQueries,
-            maxConcurrentQueries: _poolStats.maxConcurrentQueries,
-            currentConcurrentConnections: _poolStats.currentConcurrentConnections,
-            maxConcurrentConnections: _poolStats.maxConcurrentConnections,
-            totalQueryExecMs: _poolStats.totalQueryExecMs,
-            totalQueryWaitMs: _poolStats.totalQueryWaitMs,
-            avgQueryExecMs: _poolStats.queriesCompleted > 0
-              ? Math.round(_poolStats.totalQueryExecMs / _poolStats.queriesCompleted)
-              : 0,
-            avgConnectWaitMs: _poolStats.queriesCompleted > 0
-              ? Math.round(_poolStats.totalQueryWaitMs / _poolStats.queriesCompleted)
-              : 0,
-          },
-          activeConnections: Array.from(_activeConnections.entries()).map(([id, info]) => ({
-            connectionId: id,
-            heldForMs: Date.now() - info.acquiredAt,
-            sql: info.sql,
-            caller: info.caller,
-            queryId: info.queryId,
-            leaked: info.leaked || false,
-          })),
-          connectionHistory: _connectionHistory.slice(-50),
-          poolConfig: { max: 1, idleTimeoutMillis: 0, connectionTimeoutMillis: 8000 },
-        }, {}, env);
-      }
-
       // ── DIAGNOSTIC: Referral Debug — inspect referral flow logs + DB state ──
       // Usage: GET /api/_diag/referral-debug?user_id=123456
       //        GET /api/_diag/referral-debug?inviter_id=123456
@@ -7921,119 +7736,34 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // ── TEMPORARY DIAGNOSTIC LOGGING (for root-cause investigation) ──
-    const _diagCronStart = Date.now();
-    const _diagJobTimings = {};
+    // ROOT-CAUSE FIX: Stripped ALL diagnostic instrumentation that was causing
+    // exceededCpu. The instrumentation added:
+    //   - new Error().stack on EVERY queryDb call (expensive CPU operation)
+    //   - _logConnectionEvent on every connect/release (array push + JSON)
+    //   - 3x setTimeout(30s) leak-check timers with full JSON.stringify
+    //   - _poolStats tracking with 15+ field updates per query
+    //   - diagWrap with KV writes on every job completion
+    // This overhead pushed the Worker past its CPU time limit (exceededCpu).
 
-    // ── KEY DIAG: Track env object identity to detect multiple pools ──
-    // If two scheduled() calls (from * * * * * and */15 * * * *) run
-    // concurrently on the same isolate with DIFFERENT env objects,
-    // getSharedPool creates TWO pools (each max=1), allowing 2 concurrent
-    // connections. This would explain maxConcurrentConnections=2.
-    if (!global._diagEnvRegistry) {
-      global._diagEnvRegistry = new WeakMap();
-    }
-    let envInfo = global._diagEnvRegistry.get(env);
-    if (!envInfo) {
-      envInfo = {
-        envId: `env_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        firstSeen: new Date().toISOString(),
-        scheduledCalls: 0,
-      };
-      global._diagEnvRegistry.set(env, envInfo);
-    }
-    envInfo.scheduledCalls++;
-    const pool = _poolCache.has(env) ? 'REUSED' : 'NEW';
-    console.log(JSON.stringify({
-      scope: 'diag-scheduled-env-identity',
-      cron_expr: controller.cron,
-      envId: envInfo.envId,
-      envScheduledCalls: envInfo.scheduledCalls,
-      poolStatus: pool,
-      currentPoolsInCache: _poolCache ? 'WeakMap (cannot count)' : 'none',
-      poolStats_snapshot: {
-        poolsCreated: _poolStats.poolsCreated,
-        poolsReused: _poolStats.poolsReused,
-        maxConcurrentConnections: _poolStats.maxConcurrentConnections,
-        maxConcurrentQueries: _poolStats.maxConcurrentQueries,
-      },
-      note: pool === 'NEW'
-        ? 'NEW pool will be created for this env — if another scheduled() runs concurrently with a DIFFERENT env, TWO pools exist'
-        : 'Pool already exists for this env — sharing with previous scheduled() call',
-    }));
-
-    const _diagLogJob = (jobName, startTime, result) => {
-      const elapsed = Date.now() - startTime;
-      _diagJobTimings[jobName] = {
-        elapsed_ms: elapsed,
-        timed_out: result?.__timeout === true,
-        error: result?.__cronError ? result.error : null,
-        finished_at: new Date().toISOString(),
-      };
-      console.log(JSON.stringify({
-        scope: 'diag-cron-job-timing',
-        job: jobName,
-        elapsed_ms: elapsed,
-        timed_out: result?.__timeout === true,
-        error: result?.__cronError ? result.error : null,
-        cron_expr: controller.cron,
-      }));
-    };
-
-    // ── ROOT-CAUSE FIX: withTimeout now catches BOTH timeout AND rejection ──
-    const withTimeout = (promise, ms = 25000) => {
-      const tagged = promise.catch((e) => {
-        console.error('[CRON] Task failed:', e?.message || String(e));
-        if (e?.stack) console.error('[CRON] Stack:', e.stack.substring(0, 500));
-        return { __cronError: true, error: e?.message || String(e) };
-      });
-      return Promise.race([
-        tagged,
-        new Promise((resolve) => {
-          const timerId = setTimeout(() => {
-            console.warn('[CRON] Scheduled task timeout after', ms, 'ms');
-            resolve({ __timeout: true, ms });
-          }, ms);
-          // Allow the timer to be unref'd so it doesn't keep the process alive
-          if (typeof timerId === 'object' && timerId && typeof timerId.unref === 'function') {
-            timerId.unref();
-          }
+    const withTimeout = (promise, ms = 25000) =>
+      Promise.race([
+        promise.catch((e) => {
+          console.warn('[CRON] Task failed:', e?.message || String(e));
+          return { __cronError: true, error: e?.message || String(e) };
         }),
+        new Promise((resolve) => setTimeout(() => resolve({ __timeout: true, ms }), ms)),
       ]);
-    };
 
     const cronExpr = controller.cron || '* * * * *';
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
-    // ── DIAG: wrap each job with timing + store to KV immediately ──
-    const diagWrap = (jobName, promise, ms) => {
-      const start = Date.now();
-      const wrapped = withTimeout(promise, ms);
-      wrapped.then(result => {
-        _diagLogJob(jobName, start, result);
-        // Store job result to KV immediately (don't wait for 30s timer)
-        if (env.APP_CACHE?.put) {
-          const jobReport = {
-            job: jobName,
-            elapsed_ms: Date.now() - start,
-            timed_out: result?.__timeout === true,
-            error: result?.__cronError ? result.error : null,
-            timestamp: new Date().toISOString(),
-            cron_expr: controller.cron,
-          };
-          env.APP_CACHE.put('diag:job:' + jobName, JSON.stringify(jobReport), { expirationTtl: 300 }).catch(() => {});
-        }
-      }).catch(() => {});
-      return wrapped;
-    };
-
     // PRIMARY: Price alert checker — runs on every tick.
-    ctx.waitUntil(diagWrap('runScheduledAlertsBaseline', runScheduledAlertsBaseline(controller, env)));
+    ctx.waitUntil(withTimeout(runScheduledAlertsBaseline(controller, env)));
 
     // Process notification queue on every tick.
     if (notificationPlatformRepo?.processQueue) {
-      ctx.waitUntil(diagWrap('notificationQueue',
+      ctx.waitUntil(withTimeout(
         notificationPlatformRepo.processQueue(env, sendTelegramMessage).catch((e) => {
           console.warn('Notification queue processing failed:', e?.message);
         })
@@ -8042,153 +7772,30 @@ export default {
 
     // Refresh CMC Market Overview — ONLY on 15-minute ticks
     if (isEvery15Min && env.CMC_API_KEY) {
-      ctx.waitUntil(diagWrap('marketOverviewRefresh', marketOverviewSvc.refreshOverview(env)));
+      ctx.waitUntil(withTimeout(marketOverviewSvc.refreshOverview(env)));
     }
 
+    // ROOT CAUSE FIX (R-2.6 + 3.5): Retry failed referral + wheel rewards
     if (isEvery15Min) {
-      ctx.waitUntil(diagWrap('retryFailedReferralRewards', retryFailedReferralRewards(env)));
-      ctx.waitUntil(diagWrap('retryFailedWheelRewards', retryFailedWheelRewards(env)));
+      ctx.waitUntil(withTimeout(retryFailedReferralRewards(env)));
+      ctx.waitUntil(withTimeout(retryFailedWheelRewards(env)));
     }
 
     // Check for upcoming high-impact calendar events — every tick
-    ctx.waitUntil(diagWrap('runCalendarAlertsCheck', runCalendarAlertsCheck(env, { isEvery15Min })));
+    ctx.waitUntil(withTimeout(runCalendarAlertsCheck(env, { isEvery15Min })));
 
-    // ── AI NEWS: Background processing — ONLY on every-minute ticks ──
+    // AI NEWS: Background processing — ONLY on every-minute ticks
     if (isEveryMinute) {
-      ctx.waitUntil(diagWrap('processNewsAIBatch', processNewsAIBatch(env), 25000));
+      ctx.waitUntil(withTimeout(processNewsAIBatch(env), 25000));
     }
 
-    // ── TELEGRAM PUBLISHER: process queue — every tick ──
+    // TELEGRAM PUBLISHER: process queue — every tick
     if (publisherHandlers?.processPublisherQueue) {
-      ctx.waitUntil(diagWrap('processPublisherQueue',
+      ctx.waitUntil(withTimeout(
         publisherHandlers.processPublisherQueue(env, { maxItems: 8 }).catch((e) => {
           console.warn('Publisher queue processing failed:', e?.message);
         })
       , 25000));
-    }
-
-    // ── DIAG: Log total scheduled handler setup time (not execution time) ──
-    console.log(JSON.stringify({
-      scope: 'diag-cron-scheduled-handler-dispatched',
-      cron_expr: cronExpr,
-      dispatch_setup_ms: Date.now() - _diagCronStart,
-      jobs_dispatched: Object.keys(_diagJobTimings).length,
-      poolStats_snapshot: {
-        poolsCreated: _poolStats.poolsCreated,
-        poolsReused: _poolStats.poolsReused,
-        queriesStarted: _poolStats.queriesStarted,
-        queriesCompleted: _poolStats.queriesCompleted,
-        queriesFailed: _poolStats.queriesFailed,
-        queriesTimedOut: _poolStats.queriesTimedOut,
-        currentConcurrentQueries: _poolStats.currentConcurrentQueries,
-        maxConcurrentQueries: _poolStats.maxConcurrentQueries,
-      },
-      note: 'All jobs dispatched via ctx.waitUntil. Per-job timings will be logged as they complete.',
-    }));
-
-    // ── DIAG: Schedule leak check + pool stats dump at 10s, 20s, 30s ──
-    // Multiple checks so we can see if connections are being held across
-    // the entire cron tick lifetime.
-    const _leakCheckTimes = [10000, 20000, 30000];
-    for (const checkAt of _leakCheckTimes) {
-      ctx.waitUntil(new Promise(resolve => {
-        setTimeout(async () => {
-          // ── LEAK DETECTOR: Check for unreleased connections ──
-          const leakedConnections = [];
-          const heldConnections = [];
-          for (const [connId, info] of _activeConnections.entries()) {
-            const heldMs = Date.now() - info.acquiredAt;
-            if (info.leaked) {
-              leakedConnections.push({
-                connectionId: connId,
-                heldMs,
-                sql: info.sql?.substring(0, 60),
-                caller: info.caller,
-                queryId: info.queryId,
-              });
-            } else {
-              heldConnections.push({
-                connectionId: connId,
-                heldMs,
-                sql: info.sql?.substring(0, 60),
-                caller: info.caller,
-                queryId: info.queryId,
-              });
-            }
-          }
-
-          if (leakedConnections.length > 0 || heldConnections.length > 0) {
-            console.log(JSON.stringify({
-              scope: 'diag-leak-check',
-              check_at_ms: checkAt,
-              cron_expr: cronExpr,
-              timestamp: new Date().toISOString(),
-              leakedConnections: leakedConnections.length,
-              heldConnections: heldConnections.length,
-              leakDetails: leakedConnections,
-              heldDetails: heldConnections,
-              poolStats: {
-                queriesStarted: _poolStats.queriesStarted,
-                queriesCompleted: _poolStats.queriesCompleted,
-                queriesTimedOut: _poolStats.queriesTimedOut,
-                currentConcurrentQueries: _poolStats.currentConcurrentQueries,
-                currentConcurrentConnections: _poolStats.currentConcurrentConnections,
-                maxConcurrentConnections: _poolStats.maxConcurrentConnections,
-              },
-              note: leakedConnections.length > 0
-                ? `LEAK DETECTED: ${leakedConnections.length} connections acquired but NEVER released`
-                : heldConnections.length > 0
-                  ? `${heldConnections.length} connections still held (may be in-progress queries)`
-                  : 'All connections properly released',
-            }));
-          }
-
-          // Final dump at 30s — also store in KV for HTTP retrieval
-          if (checkAt === 30000) {
-            const finalReport = {
-              scope: 'diag-pool-stats-final',
-              cron_expr: cronExpr,
-              timestamp: new Date().toISOString(),
-              poolStats: {
-                poolsCreated: _poolStats.poolsCreated,
-                poolsReused: _poolStats.poolsReused,
-                queriesStarted: _poolStats.queriesStarted,
-                queriesCompleted: _poolStats.queriesCompleted,
-                queriesFailed: _poolStats.queriesFailed,
-                queriesTimedOut: _poolStats.queriesTimedOut,
-                currentConcurrentQueries: _poolStats.currentConcurrentQueries,
-                maxConcurrentQueries: _poolStats.maxConcurrentQueries,
-                currentConcurrentConnections: _poolStats.currentConcurrentConnections,
-                maxConcurrentConnections: _poolStats.maxConcurrentConnections,
-                totalQueryExecMs: _poolStats.totalQueryExecMs,
-                totalQueryWaitMs: _poolStats.totalQueryWaitMs,
-                avgQueryExecMs: _poolStats.queriesCompleted > 0
-                  ? Math.round(_poolStats.totalQueryExecMs / _poolStats.queriesCompleted)
-                  : 0,
-                avgConnectWaitMs: _poolStats.queriesCompleted > 0
-                  ? Math.round(_poolStats.totalQueryWaitMs / _poolStats.queriesCompleted)
-                  : 0,
-              },
-              finalLeakCheck: {
-                activeConnectionsRemaining: _activeConnections.size,
-                leakedConnections: leakedConnections.length,
-                heldConnections: heldConnections.length,
-                details: [...leakedConnections, ...heldConnections],
-              },
-              connectionHistory: _connectionHistory.slice(-100),
-              jobTimings: _diagJobTimings,
-            };
-            console.log(JSON.stringify(finalReport));
-            // Store in KV for HTTP retrieval (no need for wrangler tail)
-            if (env.APP_CACHE?.put) {
-              try {
-                await env.APP_CACHE.put('diag:last_cron_report', JSON.stringify(finalReport), { expirationTtl: 300 });
-              } catch {}
-            }
-          }
-          resolve();
-        }, checkAt);
-      }));
     }
   },
 };
