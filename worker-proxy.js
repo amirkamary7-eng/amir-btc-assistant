@@ -1187,9 +1187,15 @@ function isAdminTelegramId(env, userId) {
 function createPool(env) {
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) return null;
+  // ROOT-CAUSE FIX: max=1 — only ONE WebSocket connection per Pool.
+  // max=5 caused up to 5 concurrent WebSocket connections per request,
+  // each requiring a TLS handshake (~2ms CPU each = 10ms total → exceededCpu).
+  // With max=1, the Pool creates ONE WebSocket connection and reuses it
+  // for all queries. Queries queue internally if the connection is busy.
+  // This is safe because pool.query() is self-contained (acquire → query → release).
   return new Pool({
     connectionString: databaseUrl,
-    max: 5,
+    max: 1,
     idleTimeoutMillis: 0,
     connectionTimeoutMillis: 8000,
   });

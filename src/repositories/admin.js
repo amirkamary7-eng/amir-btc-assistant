@@ -251,76 +251,59 @@ export function createAdminRepository(deps) {
   // ---------------------------------------------------------------------------
 
   async function getDashboardStats(env) {
-    // ROOT CAUSE FIX: Previous version had MISLEADING field names + missing metrics.
-    //   - 'active_today' came from `channel_joined = TRUE` (WRONG: that's "joined
-    //     channel", not "active today"). No last_active tracking exists.
-    //   - No weekly/monthly stats.
-    //   - No join percentage.
-    //   - Frontend expected 'new_users_today' but backend returned 'users_today'.
-    //
-    // PHASE 2 FIX: Now uses real tracking columns (last_active_at, bot_joined_at,
-    // mini_app_opened_at, is_premium) added by users.ensureTable().
-    //
-    // All metrics are REAL SQL counts from the database:
-    //   - total_users: COUNT(*) FROM users
-    //   - new_today: WHERE created_at >= CURRENT_DATE
-    //   - new_this_week: WHERE created_at >= date_trunc('week', CURRENT_DATE)
-    //   - new_this_month: WHERE created_at >= date_trunc('month', CURRENT_DATE)
-    //   - joined_channel: WHERE channel_joined = TRUE
-    //   - join_percentage: joined_channel / total_users * 100
-    //   - joined_bot: WHERE bot_joined_at IS NOT NULL
-    //   - opened_mini_app: WHERE mini_app_opened_at IS NOT NULL
-    //   - active_today: WHERE last_active_at >= CURRENT_DATE
-    //   - active_this_week: WHERE last_active_at >= date_trunc('week', CURRENT_DATE)
-    //   - active_this_month: WHERE last_active_at >= date_trunc('month', CURRENT_DATE)
-    const results = await Promise.allSettled([
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users'),
-      queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE created_at >= CURRENT_DATE"),
-      queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE created_at >= date_trunc('week', CURRENT_DATE)"),
-      queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE created_at >= date_trunc('month', CURRENT_DATE)"),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM analyses'),
-      queryDb(env, "SELECT COUNT(*) AS cnt FROM tickets WHERE status = 'open'"),
-      queryDb(env, 'SELECT COALESCE(SUM(balance), 0) AS total FROM token_balances'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM token_transactions'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users WHERE channel_joined = TRUE'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM admins'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM price_alerts WHERE status = \'active\''),
-      queryDb(env, "SELECT COUNT(*) AS cnt FROM price_alerts WHERE status = 'triggered' AND triggered_at >= CURRENT_DATE"),
-      // Phase 2: real activity tracking
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users WHERE last_active_at >= CURRENT_DATE'),
-      queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE last_active_at >= date_trunc('week', CURRENT_DATE)"),
-      queryDb(env, "SELECT COUNT(*) AS cnt FROM users WHERE last_active_at >= date_trunc('month', CURRENT_DATE)"),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users WHERE bot_joined_at IS NOT NULL'),
-      queryDb(env, 'SELECT COUNT(*) AS cnt FROM users WHERE mini_app_opened_at IS NOT NULL'),
-    ]);
+    // ROOT-CAUSE FIX: Replaced 17 parallel queries with 1 single query.
+    // 17 queries × Pool I/O = massive CPU overhead → exceededCpu.
+    // Now: 1 query with subqueries + CTEs returns all stats at once.
+    try {
+      const result = await queryDb(env, `
+        SELECT
+          (SELECT COUNT(*) FROM users) AS total_users,
+          (SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_DATE) AS new_today,
+          (SELECT COUNT(*) FROM users WHERE created_at >= date_trunc('week', CURRENT_DATE)) AS new_this_week,
+          (SELECT COUNT(*) FROM users WHERE created_at >= date_trunc('month', CURRENT_DATE)) AS new_this_month,
+          (SELECT COUNT(*) FROM users WHERE channel_joined = TRUE) AS joined_channel,
+          (SELECT COUNT(*) FROM users WHERE bot_joined_at IS NOT NULL) AS joined_bot,
+          (SELECT COUNT(*) FROM users WHERE mini_app_opened_at IS NOT NULL) AS opened_mini_app,
+          (SELECT COUNT(*) FROM users WHERE last_active_at >= CURRENT_DATE) AS active_today,
+          (SELECT COUNT(*) FROM users WHERE last_active_at >= date_trunc('week', CURRENT_DATE)) AS active_this_week,
+          (SELECT COUNT(*) FROM users WHERE last_active_at >= date_trunc('month', CURRENT_DATE)) AS active_this_month,
+          (SELECT COUNT(*) FROM analyses) AS total_analyses,
+          (SELECT COUNT(*) FROM tickets WHERE status = 'open') AS open_tickets,
+          (SELECT COALESCE(SUM(balance), 0) FROM token_balances) AS total_token_balances,
+          (SELECT COUNT(*) FROM token_transactions) AS total_transactions,
+          (SELECT COUNT(*) FROM admins) AS admins_count,
+          (SELECT COUNT(*) FROM price_alerts WHERE status = 'active') AS active_alerts,
+          (SELECT COUNT(*) FROM price_alerts WHERE status = 'triggered' AND triggered_at >= CURRENT_DATE) AS triggered_today
+      `);
+      const row = result.rows[0] || {};
+      const totalUsers = Number(row.total_users || 0);
+      const joinedChannel = Number(row.joined_channel || 0);
+      const joinPercentage = totalUsers > 0 ? Math.round((joinedChannel / totalUsers) * 1000) / 10 : 0;
 
-    const val = (r, fallback = 0) => r.status === 'fulfilled' ? Number(r.value?.rows?.[0]?.cnt || r.value?.rows?.[0]?.total || fallback) : fallback;
-
-    const totalUsers = val(results[0]);
-    const joinedChannel = val(results[8]);
-    const joinPercentage = totalUsers > 0 ? Math.round((joinedChannel / totalUsers) * 1000) / 10 : 0;
-
-    return {
-      total_users: totalUsers,
-      new_today: val(results[1]),
-      new_this_week: val(results[2]),
-      new_this_month: val(results[3]),
-      joined_channel: joinedChannel,
-      join_percentage: joinPercentage,
-      // Phase 2: real activity tracking (was null before, now real)
-      joined_bot: val(results[15]),
-      opened_mini_app: val(results[16]),
-      active_today: val(results[12]),
-      active_this_week: val(results[13]),
-      active_this_month: val(results[14]),
-      total_analyses: val(results[4]),
-      open_tickets: val(results[5]),
-      total_token_balances: val(results[6]),
-      total_transactions: val(results[7]),
-      admins_count: val(results[9]),
-      active_alerts: val(results[10]),
-      triggered_today: val(results[11]),
-    };
+      return {
+        total_users: totalUsers,
+        new_today: Number(row.new_today || 0),
+        new_this_week: Number(row.new_this_week || 0),
+        new_this_month: Number(row.new_this_month || 0),
+        joined_channel: joinedChannel,
+        join_percentage: joinPercentage,
+        joined_bot: Number(row.joined_bot || 0),
+        opened_mini_app: Number(row.opened_mini_app || 0),
+        active_today: Number(row.active_today || 0),
+        active_this_week: Number(row.active_this_week || 0),
+        active_this_month: Number(row.active_this_month || 0),
+        total_analyses: Number(row.total_analyses || 0),
+        open_tickets: Number(row.open_tickets || 0),
+        total_token_balances: Number(row.total_token_balances || 0),
+        total_transactions: Number(row.total_transactions || 0),
+        admins_count: Number(row.admins_count || 0),
+        active_alerts: Number(row.active_alerts || 0),
+        triggered_today: Number(row.triggered_today || 0),
+      };
+    } catch (e) {
+      console.warn('getDashboardStats failed:', e?.message);
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------------

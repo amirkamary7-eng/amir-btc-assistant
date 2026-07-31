@@ -37,36 +37,28 @@ export function createAdminHandlers(deps) {
     const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return { error: authState.error, admin: null };
 
-    // 2. Ensure admins table exists before querying it
-    if (isDatabaseConfigured(env)) {
-      await adminRepo.ensureSchema(env).catch(() => {});
-      // ROOT-CAUSE FIX: Auto-create the env-configured super admin row.
-      // Without this, requireAdmin checks the DB admins table but the super admin
-      // row doesn't exist yet → returns 403 even for the env-configured super admin.
-      // ensureSuperAdminExists is idempotent — only inserts if not already present.
-      await ensureSuperAdminExists(env);
-    }
-
-    // 3. Check if user is env-configured super admin (fast path — no DB needed)
+    // 2. Check if user is env-configured super admin (FAST PATH — no DB query needed)
+    // This is the most common case and should be checked FIRST to avoid DB overhead.
     const isEnvSuperAdmin = adminRepo.isSuperAdmin(env, String(authState.user.id));
     if (isEnvSuperAdmin) {
-      // Super admin from env var — allow access even if not in DB table
+      return { error: null, admin: { telegram_id: String(authState.user.id), role: 'super_admin', permissions: ['*'], active: true, is_super: true } };
+    }
+
+    // 3. Not env super admin — check DB admins table
+    // Only do ensureSchema + DB lookup for non-env admins (rare path)
+    if (isDatabaseConfigured(env)) {
+      await adminRepo.ensureSchema(env).catch(() => {});
       const admin = await adminRepo.getAdminByTelegramId(env, String(authState.user.id));
-      return { error: null, admin: { ...(admin || {}), telegram_id: String(authState.user.id), role: 'super_admin', permissions: ['*'], active: true, is_super: true } };
+      if (!admin || !admin.active) {
+        return { error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env), admin: null };
+      }
+      if (requiredPermission && admin.permissions && !admin.permissions.includes(requiredPermission) && !admin.permissions.includes('*')) {
+        return { error: jsonResponse({ detail: 'Insufficient permissions' }, { status: 403 }, env), admin: null };
+      }
+      return { error: null, admin };
     }
 
-    // 4. Not env super admin — check DB admins table
-    const admin = await adminRepo.getAdminByTelegramId(env, String(authState.user.id));
-    if (!admin || !admin.active) {
-      return { error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env), admin: null };
-    }
-
-    // 5. Check permission if required
-    if (requiredPermission && admin.permissions && !admin.permissions.includes(requiredPermission) && !admin.permissions.includes('*')) {
-      return { error: jsonResponse({ detail: 'Insufficient permissions' }, { status: 403 }, env), admin: null };
-    }
-
-    return { error: null, admin };
+    return { error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env), admin: null };
   }
 
   /**
