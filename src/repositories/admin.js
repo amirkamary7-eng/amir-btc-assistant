@@ -23,6 +23,11 @@ export function createAdminRepository(deps) {
 
   async function ensureSchema(env) {
     if (_schemaVerified) return;
+    // ROOT-CAUSE FIX: Merge ALL schema migrations into a SINGLE queryDb call.
+    // Previously this was 5 separate queryDb calls (CREATE TABLE + 4 ALTER TABLE),
+    // each creating a new Pool + TLS handshake (~3-5ms CPU each).
+    // 5 calls × 5ms = 25ms CPU → exceededCpu on admin endpoints.
+    // Now 1 call = 1 Pool = ~3-5ms CPU.
     try {
       await queryDb(env, `
         CREATE TABLE IF NOT EXISTS admins (
@@ -37,12 +42,11 @@ export function createAdminRepository(deps) {
         );
         CREATE INDEX IF NOT EXISTS idx_admins_telegram_id ON admins (telegram_id);
         CREATE INDEX IF NOT EXISTS idx_admins_active ON admins (active);
+        ALTER TABLE admins ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '[]';
+        ALTER TABLE admins ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+        ALTER TABLE admins ADD COLUMN IF NOT EXISTS created_by VARCHAR(64);
+        ALTER TABLE admins ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
       `);
-      // Ensure columns exist (for tables created before this fix)
-      await queryDb(env, `ALTER TABLE admins ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '[]'`).catch(() => {});
-      await queryDb(env, `ALTER TABLE admins ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE`).catch(() => {});
-      await queryDb(env, `ALTER TABLE admins ADD COLUMN IF NOT EXISTS created_by VARCHAR(64)`).catch(() => {});
-      await queryDb(env, `ALTER TABLE admins ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`).catch(() => {});
     } catch (e) {
       console.warn('Admin schema migration warning:', e.message);
     }
