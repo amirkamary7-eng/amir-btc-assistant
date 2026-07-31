@@ -1180,19 +1180,88 @@ function isAdminTelegramId(env, userId) {
   return getAdminIds(env).has(String(userId));
 }
 
-// Create a NEW Pool per queryDb call to avoid module-level I/O sharing.
-// Pool is lightweight to create — it doesn't connect until query() is called.
-// This eliminates "Cannot perform I/O on behalf of a different request" errors
-// while keeping TCP connections (which work from Cloudflare Workers).
+// ────────────────────────────────────────────────────────────────────────────
+// CONNECTION LAYER — ROOT-CAUSE FIX for "Cannot perform I/O on behalf of a
+// different request"
+//
+// ARCHITECTURE
+//   • Regular queries → neon() HTTP client (STATELESS, cached at module level)
+//   • Transactions     → per-call Pool (WebSocket, created AND ended in one call)
+//
+// ROOT CAUSE OF THE OLD ERROR
+//   The previous design cached a WebSocket `Pool` at module level
+//   (`_modulePoolCache`). On Cloudflare Workers every request has its own I/O
+//   context. A WebSocket connection opened inside Request A's context is BOUND
+//   to that context. When Request B reuses the cached Pool, `pool.query()`
+//   tries to drive a WebSocket that belongs to A's (now-finished) request
+//   context → "Cannot perform I/O on behalf of a different request".
+//   This broke: cron (1-min) alerts, channel-membership checks, admin
+//   detection, and every admin-panel data fetch.
+//
+// WHY neon() HTTP IS SAFE TO CACHE
+//   The neon() HTTP client is STATELESS: each query is a fresh `fetch()` to
+//   Neon's HTTP SQL API. There is NO persistent socket, so there is NOTHING
+//   that can belong to a different request. The cached object holds only config
+//   (connection string + options) — no I/O state. Caching it at module level is
+//   100% safe across requests AND across cron/HTTP boundaries.
+//
+// WHY TRANSACTIONS USE A PER-CALL POOL
+//   Interactive transactions (BEGIN → dependent queries → COMMIT) need a
+//   persistent WebSocket. We create a brand-new Pool inside queryDbTransaction,
+//   use pool.connect() for the transaction, and `await pool.end()` in `finally`.
+//   Because the Pool is created AND destroyed within a single request's async
+//   execution, no I/O object ever crosses a request boundary.
+//
+// CPU PROFILE
+//   neon() HTTP uses `fetch()` (~0.1ms CPU/query, no TLS handshake) — far under
+//   the 10ms free-plan limit even for the every-minute cron (alerts+calendar).
+//   Per-call Pool for transactions pays one TLS handshake (~5ms) ONLY when a
+//   transaction actually runs (daily claim / wheel spin — a handful per minute).
+// ────────────────────────────────────────────────────────────────────────────
+
+// Resolve the connection string for the neon() HTTP client.
+// Prefers DIRECT_URL (non-pooler) because Neon's HTTP SQL API is served on the
+// DIRECT host — the pooler (-pooler) host speaks Postgres wire protocol only
+// and does NOT serve HTTP. Using the pooler host here was the cause of the old
+// "HTTP 530 / Error 1016" failures. We also strip `pgbouncer=true` (a
+// WebSocket-only hint that is meaningless for HTTP).
+function resolveNeonDatabaseUrl(env) {
+  let url = String(env.DIRECT_URL || env.DATABASE_URL || '').trim();
+  if (!url) return '';
+  url = url.replace(/([?&])pgbouncer=true(&?)/, (_m, lead, trail) =>
+    trail ? lead : (lead === '?' ? '' : ''),
+  );
+  return url;
+}
+
+// Module-level cache of neon() HTTP clients, keyed by connection string.
+// SAFE: the neon() client holds only config — no sockets, no request context.
+const _moduleNeonCache = new Map();
+
+function getSharedNeon(env) {
+  const url = resolveNeonDatabaseUrl(env);
+  if (!url) return null;
+  if (_moduleNeonCache.has(url)) return _moduleNeonCache.get(url);
+  let sql;
+  try {
+    // fullResults:true → returns { rows, rowCount, fields, ... } exactly like
+    // pool.query(), so all existing callers (result.rows[0], result.rowCount)
+    // keep working unchanged.
+    sql = neon(url, { fullResults: true });
+  } catch (e) {
+    console.warn('[DB] neon() client init failed:', e?.message);
+    return null;
+  }
+  _moduleNeonCache.set(url, sql);
+  return sql;
+}
+
+// Create a brand-new Pool for a SINGLE transaction. NOT cached — used and
+// `await pool.end()`-ed within queryDbTransaction so its WebSocket (and the
+// request context it binds to) never escapes that call.
 function createPool(env) {
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) return null;
-  // ROOT-CAUSE FIX: max=1 — only ONE WebSocket connection per Pool.
-  // max=5 caused up to 5 concurrent WebSocket connections per request,
-  // each requiring a TLS handshake (~2ms CPU each = 10ms total → exceededCpu).
-  // With max=1, the Pool creates ONE WebSocket connection and reuses it
-  // for all queries. Queries queue internally if the connection is busy.
-  // This is safe because pool.query() is self-contained (acquire → query → release).
   return new Pool({
     connectionString: databaseUrl,
     max: 1,
@@ -1201,51 +1270,14 @@ function createPool(env) {
   });
 }
 
-// ── ROOT-CAUSE FIX: Module-level Pool cache (per-isolate) ===
-// Creating a new Pool per queryDb call uses ~2-4ms CPU each (Pool constructor
-// parses connection string, initializes TLS config, sets up event handlers).
-// With 5+ queries per cron tick, Pool creation alone exceeds the 10ms
-// free-plan CPU limit.
-//
-// FIX: Cache ONE Pool per databaseUrl at module level. The Pool is created
-// once per Worker isolate and reused across queries. This eliminates the
-// ~2-4ms CPU overhead per query.
-//
-// Cross-request I/O safety: Pool.query() internally acquires a connection,
-// runs the query, and releases it back to the pool. The connection lifecycle
-// is fully managed inside pool.query() — no client is held across await
-// boundaries. The WebSocket connection persists in the pool between queries
-// (that's the point of pooling), but since pool.query() is fully self-contained,
-// there's no risk of cross-request I/O.
-//
-// The previous "Cannot perform I/O on behalf of a different request" errors
-// were caused by pool.end() being called as fire-and-forget (not awaited),
-// NOT by the pool itself being shared. Now pool.end() is never called during
-// normal operation — the pool lives for the isolate's lifetime.
-const _modulePoolCache = new Map();
-
-function getSharedPool(env) {
-  const databaseUrl = resolveDatabaseUrl(env);
-  if (!databaseUrl) return null;
-  if (_modulePoolCache.has(databaseUrl)) {
-    return _modulePoolCache.get(databaseUrl);
-  }
-  const pool = createPool(env);
-  if (pool) _modulePoolCache.set(databaseUrl, pool);
-  return pool;
-}
-
-function closeSharedPool(env) {
-  // No-op — pools are cached at module level for reuse across queries.
-  // Pool.end() is NOT called here because it would destroy the cached pool.
-  // The pool lives for the isolate's lifetime and is reused.
-}
-
 async function getDbUserJoinState(env, userId) {
-  const pool = getSharedPool(env);
-  if (!pool) return null;
+  // Routes through queryDb() → neon() HTTP (stateless). No shared Pool.
   try {
-    const result = await pool.query('SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1', [String(userId)]);
+    const result = await queryDb(
+      env,
+      'SELECT telegram_id, channel_joined FROM users WHERE telegram_id = $1 LIMIT 1',
+      [String(userId)],
+    );
     const row = result.rows[0];
     if (!row) return null;
     return {
@@ -1259,10 +1291,10 @@ async function getDbUserJoinState(env, userId) {
 }
 
 async function persistDbUserJoinState(env, userId, joined) {
-  const pool = getSharedPool(env);
-  if (!pool) return;
+  // Routes through queryDb() → neon() HTTP (stateless). No shared Pool.
   try {
-    await pool.query(
+    await queryDb(
+      env,
       `INSERT INTO users (telegram_id, lang, channel_joined, channel_verified_at, bot_joined_at, created_at, updated_at)
        VALUES ($1, 'fa', $2, $3, NOW(), NOW(), NOW())
        ON CONFLICT (telegram_id) DO UPDATE
@@ -1310,18 +1342,26 @@ async function getReferralRewardPerInvite(env) {
 }
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  const pool = getSharedPool(env);
-  if (!pool) throw new Error('Database not configured');
+  // STATELESS HTTP: each call is a fresh fetch() to Neon. No WebSocket, no
+  // request-context binding → cannot trigger "Cannot perform I/O on behalf of
+  // a different request".
+  const sql = getSharedNeon(env);
+  if (!sql) throw new Error('Database not configured');
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await pool.query(sqlText, params);
+      // sql.query(text, params) with fullResults:true returns the same shape
+      // as pool.query() ({ rows, rowCount, fields, ... }).
+      return await sql.query(sqlText, params);
     } catch (error) {
-      const isTransient = error?.message?.includes('530') ||
-                          error?.message?.includes('1016') ||
-                          error?.message?.includes('ECONNRESET') ||
-                          error?.message?.includes('Connection terminated') ||
-                          error?.message?.includes('timeout');
+      const msg = String(error?.message || '');
+      const isTransient = msg.includes('530') ||
+                          msg.includes('1016') ||
+                          msg.includes('ECONNRESET') ||
+                          msg.includes('Connection terminated') ||
+                          msg.includes('timeout') ||
+                          msg.includes('fetch failed') ||
+                          msg.includes('network');
       if (attempt === retries || !isTransient) throw error;
       const ms = Math.min(300 * 2 ** attempt, 2000);
       await new Promise((r) => setTimeout(r, ms));
@@ -1330,12 +1370,18 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
 }
 
 /**
- * Execute multiple SQL statements inside a single DB transaction.
- * Uses pool.connect() → BEGIN → queries → COMMIT (ROLLBACK on error).
- * Requires Neon serverless Pool with transaction_mode support.
+ * Execute multiple SQL statements inside a single interactive DB transaction.
+ *
+ * Uses a FRESH Pool (WebSocket) created per call — NEVER shared across requests.
+ * The Pool is fully closed (`await pool.end()`) in `finally` before returning,
+ * so its WebSocket — and the request context that WebSocket is bound to — is
+ * released synchronously with this call. No I/O object escapes, therefore no
+ * "Cannot perform I/O on behalf of a different request" is possible.
+ *
+ * This is the ONLY place a Pool is used; regular queries go through neon() HTTP.
  */
 async function queryDbTransaction(env, queries) {
-  const pool = getSharedPool(env);
+  const pool = createPool(env);
   if (!pool) throw new Error('Database not configured');
 
   let client;
@@ -1355,6 +1401,9 @@ async function queryDbTransaction(env, queries) {
     if (client) {
       try { client.release(); } catch {}
     }
+    // CRITICAL: fully close the per-call pool so its WebSocket (and the request
+    // context it is bound to) is released. Awaited → never fire-and-forget.
+    try { await pool.end(); } catch {}
   }
 }
 
@@ -7719,10 +7768,9 @@ export default {
         },
         { status: 500 }, env);
     } finally {
-      // ROOT CAUSE FIX: Close the shared DB pool after each request to
-      // prevent WebSocket connection leaks. The pool is recreated on the
-      // next request via getSharedPool().
-      closeSharedPool(env);
+      // No per-request pool teardown needed: regular queries use the stateless
+      // neon() HTTP client (no socket to close), and queryDbTransaction already
+      // `await pool.end()`s its own per-call pool. Nothing crosses requests.
     }
   },
 
