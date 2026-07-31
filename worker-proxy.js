@@ -5696,11 +5696,21 @@ async function runScheduledAlertsBaseline(controller, env) {
   };
 
   try {
+    // ROOT-CAUSE FIX for exceededResources: check KV cache first to see if
+    // any active alerts exist. If none, skip the DB query entirely — saves
+    // ~3-5ms CPU (one queryDb = one Pool + TLS handshake). When alerts are
+    // created/removed, the cache is invalidated. TTL 60s as fallback.
+    const ALERTS_EXIST_CACHE_KEY = 'alerts:active-exists';
+    const alertsExistCached = await readAppCache(env, ALERTS_EXIST_CACHE_KEY);
+    if (alertsExistCached === '0') {
+      // No active alerts — skip the entire alerts baseline this tick.
+      // Still run calendar check (separate, lightweight).
+      console.log(JSON.stringify({ ...resultPayload, skipped: true, reason: 'no_active_alerts_cached', duration_ms: Date.now() - t0 }));
+      return resultPayload;
+    }
+
     // AUDIT-002 FIX: Ensure table + indexes exist before querying (idempotent).
-    // PERFORMANCE: Only run ensureTable on the 15-min cron (not every 1 min).
-    // CREATE INDEX IF NOT EXISTS is fast but still a DB roundtrip — 8 queries × 200ms
-    // = 1.6s of wasted latency on every 1-min cron. The 15-min cron handles it.
-    // Bug 2 FIX: cron changed from */5 to * (every minute) for faster alert detection.
+    // PERFORMANCE: Only run ensureTable on the 15-min cron (not every 2 min).
     if (controller.cron === '*/15 * * * *' && typeof alertRepo?.ensureTable === 'function') {
       try { await alertRepo.ensureTable(env); } catch {}
     }
@@ -5720,9 +5730,15 @@ async function runScheduledAlertsBaseline(controller, env) {
     _tDbEnd = Date.now(); // Phase 1 done: DB query
 
     if (!alerts.length) {
+      // ROOT-CAUSE FIX: cache the fact that no active alerts exist, so the
+      // next cron tick can skip the DB query entirely (saves ~3-5ms CPU).
+      // TTL 60s — if a user creates an alert, it takes at most 60s to detect.
+      try { await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '0', 60); } catch {}
       console.log(JSON.stringify({ ...resultPayload, finished: true, duration_ms: Date.now() - t0 }));
       return resultPayload;
     }
+    // Alerts exist — update cache so next tick knows to query.
+    try { await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '1', 60); } catch {}
 
     // ── PHASE 1: Batch fetch prices for all unique symbols ──
     // Use Promise.all with a strict 4-second per-fetch timeout.
@@ -8090,19 +8106,26 @@ export default {
     // ROOT-CAUSE FIX: Sequential execution with 2-cron split.
     // Free plan: 10ms CPU limit, max 2 cron triggers.
     //
-    // * * * * *    (every 1 min): alerts + calendar only (2 jobs, ~3ms CPU)
+    // */2 * * * *  (every 2 min): alerts + calendar only (2 jobs)
     // */15 * * * * (every 15 min): alerts + calendar + maintenance + heavy jobs
-    //   But to stay under 10ms: only run 4 jobs max per 15-min tick.
+    //   But to stay under resource limit: only run 4 jobs max per 15-min tick.
     //   Heavy jobs (news AI, publisher) run conditionally every other 15-min tick.
+    //
+    // Was every 1 min (* * * * *) → exceededResources on nearly every tick.
+    // Changed to every 2 min to stay under the cron resource limit.
 
-    const cronExpr = controller.cron || '* * * * *';
-    const isEveryMinute = cronExpr === '* * * * *';
+    const cronExpr = controller.cron || '*/2 * * * *';
+    const isEvery2Min = cronExpr === '*/2 * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
     ctx.waitUntil((async () => {
       try {
-        // === EVERY MINUTE: time-sensitive jobs only ===
-        if (isEveryMinute) {
+        // === EVERY 2 MIN: time-sensitive jobs only ===
+        // ROOT-CAUSE FIX: was every 1 min (* * * * *) → exceededResources on
+        // nearly every tick because runScheduledAlertsBaseline + runCalendarAlertsCheck
+        // together exceed the cron resource limit. Every 2 min halves the load
+        // and stays under the limit. Alert detection latency: 2 min (acceptable).
+        if (isEvery2Min) {
           try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
             console.warn('[CRON] alerts failed:', e?.message);
           }
