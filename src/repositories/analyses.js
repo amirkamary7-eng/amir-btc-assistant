@@ -132,17 +132,79 @@ export function createAnalysisRepository(deps) {
    * non-featured (regular) count; the new `featured` field is the true featured count.
    */
   async function getStats(env) {
-    const [totalRes, featuredRes, activeRes, todayRes] = await Promise.all([
-      queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses`),
-      queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured = TRUE`),
-      queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured IS NOT TRUE OR featured = FALSE`),
-      queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE created_at >= CURRENT_DATE`),
-    ]);
-    const total = Number(totalRes.rows[0]?.cnt || 0);
-    const featured = Number(featuredRes.rows[0]?.cnt || 0);
-    const active = Number(activeRes.rows[0]?.cnt || 0);
-    const today = Number(todayRes.rows[0]?.cnt || 0);
-    return { total, featured, active, today };
+    // ROOT-CAUSE FIX: Merge 4 parallel queryDb calls into 1 single query.
+    // 4 × Pool creation = ~12-20ms CPU → exceededResources.
+    // Now 1 queryDb = ~3-5ms CPU.
+    const result = await queryDb(env, `
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE featured = TRUE)::int AS featured,
+        COUNT(*) FILTER (WHERE featured IS NOT TRUE OR featured = FALSE)::int AS active,
+        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)::int AS today
+      FROM analyses
+    `);
+    const row = result.rows[0] || {};
+    return {
+      total: Number(row.total || 0),
+      featured: Number(row.featured || 0),
+      active: Number(row.active || 0),
+      today: Number(row.today || 0),
+    };
+  }
+
+  /**
+   * Get stats + featured analyses in a SINGLE queryDb call.
+   * ROOT-CAUSE FIX: previously getStats + getFeatured were 2 separate queryDb
+   * calls (2 Pool creations = ~6-10ms CPU). Now 1 queryDb = ~3-5ms CPU.
+   * Used by handleDelete to halve CPU cost.
+   */
+  async function getStatsAndFeatured(env) {
+    const result = await queryDb(env, `
+      WITH stats AS (
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE featured = TRUE)::int AS featured,
+          COUNT(*) FILTER (WHERE featured IS NOT TRUE OR featured = FALSE)::int AS active,
+          COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)::int AS today
+        FROM analyses
+      )
+      SELECT
+        (SELECT total FROM stats) AS total,
+        (SELECT featured FROM stats) AS featured,
+        (SELECT active FROM stats) AS active,
+        (SELECT today FROM stats) AS today,
+        COALESCE(
+          (SELECT json_agg(json_build_object(
+            'id', f.id, 'coin', f.coin, 'timeframe', f.timeframe,
+            'image', f.image, 'text', f.text, 'title', f.title,
+            'support_level', f.support_level, 'current_price', f.current_price,
+            'resistance_level', f.resistance_level, 'views_count', f.views_count,
+            'featured', f.featured, 'category', f.category,
+            'author', f.author, 'author_id', f.author_id,
+            'created_at', f.created_at, 'updated_at', f.updated_at
+          )) FROM (
+            SELECT * FROM analyses WHERE featured = TRUE
+            ORDER BY created_at DESC LIMIT 5
+          ) f),
+          '[]'
+        ) AS featured_rows
+    `);
+    const row = result.rows[0] || {};
+    let featured = [];
+    try {
+      const raw = row.featured_rows;
+      featured = (typeof raw === 'string' ? JSON.parse(raw) : raw) || [];
+      featured = featured.map(serializeAnalysisRow);
+    } catch {}
+    return {
+      stats: {
+        total: Number(row.total || 0),
+        featured: Number(row.featured || 0),
+        active: Number(row.active || 0),
+        today: Number(row.today || 0),
+      },
+      featured,
+    };
   }
 
   /**
@@ -334,6 +396,7 @@ export function createAnalysisRepository(deps) {
     ensureSchema,
     getFeatured,
     getStats,
+    getStatsAndFeatured,
     list,
     listAll,
     getById,

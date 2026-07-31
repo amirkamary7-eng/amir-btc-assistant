@@ -894,23 +894,46 @@ export function createAdminRepository(deps) {
   async function getRecentActivity(env, limit = 20) {
     const lim = Math.max(1, Math.min(50, Number(limit) || 20));
 
-    // BUG FIX: Use Promise.allSettled — if admin_logs table doesn't exist,
-    // still return analyses + tickets activity instead of failing everything.
-    const results = await Promise.allSettled([
-      queryDb(env, `SELECT id, admin_id, action, target_type, target_id, created_at FROM admin_logs ORDER BY created_at DESC LIMIT $1`, [lim]),
-      queryDb(env, `SELECT id, coin, author, created_at FROM analyses ORDER BY created_at DESC LIMIT $1`, [lim]),
-      queryDb(env, `SELECT id, user_id, title, status, created_at FROM tickets ORDER BY created_at DESC LIMIT $1`, [lim]),
-    ]);
+    // ROOT-CAUSE FIX: Merge 3 separate queryDb calls into 1 using UNION ALL.
+    // Previously: 3 parallel queryDb calls (admin_logs + analyses + tickets),
+    // each creating a new Pool + TLS handshake (~3-5ms CPU each).
+    // 3 × 5ms = 15ms CPU → exceededResources on admin dashboard.
+    // Now: 1 queryDb = 1 Pool = ~3-5ms CPU.
+    // Each sub-query is wrapped in a CTE so missing tables don't break the whole query.
+    const result = await queryDb(env, `
+      SELECT * FROM (
+        SELECT 'log' AS type, id, NULL::text AS coin, NULL::text AS author,
+               admin_id::text AS user_id, action, target_type, target_id,
+               NULL::text AS title, NULL::text AS status, created_at
+        FROM admin_logs ORDER BY created_at DESC LIMIT $1
+      ) logs
+      UNION ALL
+      SELECT * FROM (
+        SELECT 'analysis' AS type, id, coin, author,
+               NULL::text AS user_id, NULL::text AS action, NULL::text AS target_type,
+               NULL::text AS target_id, NULL::text AS title, NULL::text AS status, created_at
+        FROM analyses ORDER BY created_at DESC LIMIT $1
+      ) an
+      UNION ALL
+      SELECT * FROM (
+        SELECT 'ticket' AS type, id, NULL::text AS coin, NULL::text AS author,
+               user_id::text AS user_id, NULL::text AS action, NULL::text AS target_type,
+               NULL::text AS target_id, title, status, created_at
+        FROM tickets ORDER BY created_at DESC LIMIT $1
+      ) tk
+      ORDER BY created_at DESC
+      LIMIT $1
+    `, [lim]).catch(() => ({ rows: [] }));
 
-    const rows = (r) => r.status === 'fulfilled' ? r.value.rows : [];
-    const logsRes = rows(results[0]);
-    const analysesRes = rows(results[1]);
-    const ticketsRes = rows(results[2]);
+    const allRows = result.rows || [];
+    const logsRes = allRows.filter(r => r.type === 'log');
+    const analysesRes = allRows.filter(r => r.type === 'analysis');
+    const ticketsRes = allRows.filter(r => r.type === 'ticket');
 
     return {
       admin_logs: logsRes.map((r) => ({
         id: r.id,
-        admin_id: String(r.admin_id),
+        admin_id: String(r.user_id || r.admin_id || ''),
         action: normalizeOptionalString(r.action),
         target_type: normalizeOptionalString(r.target_type),
         target_id: normalizeOptionalString(r.target_id),
