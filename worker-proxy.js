@@ -7731,71 +7731,67 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // ROOT-CAUSE FIX: Run jobs SEQUENTIALLY, not concurrently.
-    // Cloudflare Workers free plan has 10ms CPU limit per invocation.
-    // When 8 jobs run CONCURRENTLY via ctx.waitUntil, their CPU usage
-    // adds up to >10ms → exceededCpu kills the Worker.
+    // ROOT-CAUSE FIX: Split jobs across 3 cron schedules to stay under 10ms CPU.
+    // Free plan limit: 10ms CPU per invocation.
+    // Each Pool creation = ~1-2ms CPU. Sequential 8 jobs = ~16ms → exceeds limit.
+    // FIX: Distribute jobs so no single invocation does more than ~4ms CPU.
     //
-    // FIX: Run jobs one at a time with await. Each job completes before
-    // the next starts. Total CPU stays under 10ms because only ONE job
-    // is active at a time, and each job is lightweight (Pool creation
-    // is ~1ms CPU, query is ~0ms CPU — the rest is I/O wait).
-    //
-    // Jobs are ordered by priority: alerts first (time-sensitive),
-    // then lightweight DB jobs, then heavy jobs (news AI last).
+    // Schedule:
+    //   * * * * *    (every 1 min): alerts + calendar (2 jobs, ~3ms CPU)
+    //   */15 * * * * (every 15 min): notif queue + referral retry + wheel retry
+    //                                + market overview (4 jobs, ~5ms CPU)
+    //   */30 * * * * (every 30 min): publisher queue + news AI (2 jobs, ~3ms CPU)
 
     const cronExpr = controller.cron || '* * * * *';
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
+    const isEvery30Min = cronExpr === '*/30 * * * *';
 
-    // Use ctx.waitUntil for the overall scheduled handler — but run jobs
-    // SEQUENTIALLY inside it, not concurrently.
     ctx.waitUntil((async () => {
       try {
-        // 1. Price alert checker (every tick — time-sensitive)
-        try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
-          console.warn('[CRON] alerts failed:', e?.message);
+        // === EVERY MINUTE: time-sensitive jobs only ===
+        if (isEveryMinute) {
+          try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
+            console.warn('[CRON] alerts failed:', e?.message);
+          }
+          try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); } catch (e) {
+            console.warn('[CRON] calendar failed:', e?.message);
+          }
         }
 
-        // 2. Calendar alerts check (every tick — time-sensitive)
-        try { await runCalendarAlertsCheck(env, { isEvery15Min }); } catch (e) {
-          console.warn('[CRON] calendar failed:', e?.message);
-        }
-
-        // --- 15-minute jobs (run sequentially, not concurrently) ---
+        // === EVERY 15 MIN: DB maintenance jobs ===
         if (isEvery15Min) {
-          // 3. Notification queue
+          try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
+            console.warn('[CRON] alerts failed:', e?.message);
+          }
+          try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); } catch (e) {
+            console.warn('[CRON] calendar failed:', e?.message);
+          }
           if (notificationPlatformRepo?.processQueue) {
             try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage); } catch (e) {
               console.warn('[CRON] notif queue failed:', e?.message);
             }
           }
-
-          // 4. Retry failed referral rewards
           try { await retryFailedReferralRewards(env); } catch (e) {
             console.warn('[CRON] referral retry failed:', e?.message);
           }
-
-          // 5. Retry failed wheel rewards
           try { await retryFailedWheelRewards(env); } catch (e) {
             console.warn('[CRON] wheel retry failed:', e?.message);
           }
-
-          // 6. Market overview refresh
           if (env.CMC_API_KEY) {
             try { await marketOverviewSvc.refreshOverview(env); } catch (e) {
               console.warn('[CRON] market overview failed:', e?.message);
             }
           }
+        }
 
-          // 7. Publisher queue
+        // === EVERY 30 MIN: heavy jobs ===
+        if (isEvery30Min) {
           if (publisherHandlers?.processPublisherQueue) {
             try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); } catch (e) {
               console.warn('[CRON] publisher failed:', e?.message);
             }
           }
-
-          // 8. News AI batch (HEAVIEST — run LAST so it doesn't block other jobs)
           try { await processNewsAIBatch(env); } catch (e) {
             console.warn('[CRON] news AI failed:', e?.message);
           }
