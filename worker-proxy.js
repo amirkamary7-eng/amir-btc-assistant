@@ -1220,6 +1220,37 @@ function createPool(env) {
   });
 }
 
+/**
+ * Wrap a handler with a request-scoped shared Pool.
+ *
+ * Creates ONE Pool (ONE TLS handshake to Supabase) that is reused by ALL
+ * queryDb calls within the handler. Without this, each queryDb creates its
+ * own Pool + TLS handshake (~100ms CPU each), causing Error 1102 when a
+ * handler makes multiple queryDb calls.
+ *
+ * Usage:
+ *   return withSharedPool(env, () => handler.handleFoo(request, env, ctx));
+ *
+ * The Pool is closed in `finally` so its WebSocket is released before the
+ * response is returned. Safe for Cloudflare Workers — the Pool never
+ * outlives the request.
+ */
+async function withSharedPool(env, fn) {
+  if (!isDatabaseConfigured(env)) {
+    // No DB — just run the handler. createPool would return null anyway.
+    return fn();
+  }
+  env._reqPool = createPool(env);
+  try {
+    return await fn();
+  } finally {
+    if (env._reqPool) {
+      try { await env._reqPool.end(); } catch {}
+      env._reqPool = null;
+    }
+  }
+}
+
 async function getDbUserJoinState(env, userId) {
   // Routes through queryDb() → neon() HTTP (stateless). No shared Pool.
   try {
@@ -6073,52 +6104,54 @@ export default {
       // Auth method 1: ALERTS_CRON_SHARED_SECRET in X-Cron-Secret header
       // Auth method 2: Telegram admin auth (ADMIN_TELEGRAM_ID) via X-Telegram-Init-Data
       if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/trigger-alerts') {
-        const providedSecret = request.headers.get('X-Cron-Secret') || '';
-        const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
-        let authorized = false;
+        return withSharedPool(env, async () => {
+          const providedSecret = request.headers.get('X-Cron-Secret') || '';
+          const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
+          let authorized = false;
 
-        // Method 1: shared secret
-        if (expectedSecret && providedSecret === expectedSecret) {
-          authorized = true;
-        }
+          // Method 1: shared secret
+          if (expectedSecret && providedSecret === expectedSecret) {
+            authorized = true;
+          }
 
-        // Method 2: Telegram admin auth
-        if (!authorized) {
-          try {
-            const authState = await authenticateTelegramRequest(request, env);
-            if (!authState.error && authState.user) {
-              const adminIds = String(env.ADMIN_TELEGRAM_ID || env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim());
-              if (adminIds.includes(String(authState.user.id))) {
-                authorized = true;
+          // Method 2: Telegram admin auth
+          if (!authorized) {
+            try {
+              const authState = await authenticateTelegramRequest(request, env);
+              if (!authState.error && authState.user) {
+                const adminIds = String(env.ADMIN_TELEGRAM_ID || env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim());
+                if (adminIds.includes(String(authState.user.id))) {
+                  authorized = true;
+                }
               }
-            }
-          } catch {}
-        }
+            } catch {}
+          }
 
-        if (!authorized) {
-          return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
-        }
-        // Run the alert checker immediately
-        const result = await runScheduledAlertsBaseline({ cron: 'manual-trigger' }, env);
+          if (!authorized) {
+            return jsonResponse({ status: 'error', message: 'Unauthorized' }, { status: 401 }, env);
+          }
+          // Run the alert checker immediately
+          const result = await runScheduledAlertsBaseline({ cron: 'manual-trigger' }, env);
 
-        // Also return DB state for debugging
-        let dbState = {};
-        try {
-          const activeAlerts = await queryDb(env, `SELECT id, user_id, symbol, price, direction, status, created_at, triggered_at, last_price, last_checked_at FROM price_alerts WHERE status = 'active' ORDER BY created_at DESC LIMIT 20`);
-          const recentTriggered = await queryDb(env, `SELECT id, user_id, symbol, price, direction, status, triggered_at, last_trigger_price FROM price_alerts WHERE status = 'triggered' ORDER BY triggered_at DESC LIMIT 10`);
-          const recentNotifs = await queryDb(env, `SELECT id, title, message, category, priority, channel, created_at FROM notifications ORDER BY created_at DESC LIMIT 10`);
-          const recentQueue = await queryDb(env, `SELECT id, user_id, channel, status, created_at FROM notification_queue ORDER BY created_at DESC LIMIT 10`).catch(() => ({ rows: [] }));
-          dbState = {
-            active_alerts: activeAlerts.rows,
-            recent_triggered: recentTriggered.rows,
-            recent_notifications: recentNotifs.rows,
-            recent_queue: recentQueue.rows,
-          };
-        } catch (e) {
-          dbState = { error: e.message };
-        }
+          // Also return DB state for debugging
+          let dbState = {};
+          try {
+            const activeAlerts = await queryDb(env, `SELECT id, user_id, symbol, price, direction, status, created_at, triggered_at, last_price, last_checked_at FROM price_alerts WHERE status = 'active' ORDER BY created_at DESC LIMIT 20`);
+            const recentTriggered = await queryDb(env, `SELECT id, user_id, symbol, price, direction, status, triggered_at, last_trigger_price FROM price_alerts WHERE status = 'triggered' ORDER BY triggered_at DESC LIMIT 10`);
+            const recentNotifs = await queryDb(env, `SELECT id, title, message, category, priority, channel, created_at FROM notifications ORDER BY created_at DESC LIMIT 10`);
+            const recentQueue = await queryDb(env, `SELECT id, user_id, channel, status, created_at FROM notification_queue ORDER BY created_at DESC LIMIT 10`).catch(() => ({ rows: [] }));
+            dbState = {
+              active_alerts: activeAlerts.rows,
+              recent_triggered: recentTriggered.rows,
+              recent_notifications: recentNotifs.rows,
+              recent_queue: recentQueue.rows,
+            };
+          } catch (e) {
+            dbState = { error: e.message };
+          }
 
-        return jsonResponse({ status: 'success', message: 'Alert check triggered', result, dbState }, {}, env);
+          return jsonResponse({ status: 'success', message: 'Alert check triggered', result, dbState }, {}, env);
+        });
       }
 
 
@@ -6150,14 +6183,14 @@ export default {
       // GET    /api/calendar/reminders      — list user's reminders
       // DELETE /api/calendar/reminders/:key — delete by event_key
       if (url.pathname === '/api/calendar/reminders' && request.method === 'POST') {
-        return await calendarReminderHandlers.handleCreate(request, env);
+        return withSharedPool(env, () => calendarReminderHandlers.handleCreate(request, env));
       }
       if (url.pathname === '/api/calendar/reminders' && request.method === 'GET') {
-        return await calendarReminderHandlers.handleList(request, env);
+        return withSharedPool(env, () => calendarReminderHandlers.handleList(request, env));
       }
       if (url.pathname.startsWith('/api/calendar/reminders/') && request.method === 'DELETE') {
         const eventKey = decodeURIComponent(url.pathname.slice('/api/calendar/reminders/'.length));
-        return await calendarReminderHandlers.handleDelete(request, env, eventKey);
+        return withSharedPool(env, () => calendarReminderHandlers.handleDelete(request, env, eventKey));
       }
 
       // ── Market Overview (CMC-powered, no auth required) ──
@@ -6202,77 +6235,77 @@ export default {
 
       // ── Admin Panel API Routes (R4) ──
       if (url.pathname === '/api/admin/is-admin' && request.method === 'GET') {
-        return await adminHandlers.handleIsAdmin(request, env);
+        return withSharedPool(env, () => adminHandlers.handleIsAdmin(request, env));
       }
       if (url.pathname === '/api/admin/dashboard' && request.method === 'GET') {
-        return await adminHandlers.handleDashboard(request, env);
+        return withSharedPool(env, () => adminHandlers.handleDashboard(request, env));
       }
       if (url.pathname === '/api/admin/admins' && request.method === 'GET') {
-        return await adminHandlers.handleListAdmins(request, env);
+        return withSharedPool(env, () => adminHandlers.handleListAdmins(request, env));
       }
       if (url.pathname === '/api/admin/admins' && request.method === 'POST') {
-        return await adminHandlers.handleAddAdmin(request, env);
+        return withSharedPool(env, () => adminHandlers.handleAddAdmin(request, env));
       }
       if (/^\/api\/admin\/admins\/\d+$/.test(url.pathname) && request.method === 'PUT') {
         const adminId = url.pathname.split('/').pop();
-        return await adminHandlers.handleUpdateAdmin(request, env, adminId);
+        return withSharedPool(env, () => adminHandlers.handleUpdateAdmin(request, env, adminId));
       }
       if (/^\/api\/admin\/admins\/\d+$/.test(url.pathname) && request.method === 'DELETE') {
         const adminId = url.pathname.split('/').pop();
-        return await adminHandlers.handleDeleteAdmin(request, env, adminId);
+        return withSharedPool(env, () => adminHandlers.handleDeleteAdmin(request, env, adminId));
       }
       if (url.pathname === '/api/admin/users' && request.method === 'GET') {
-        return await adminHandlers.handleListUsers(request, env);
+        return withSharedPool(env, () => adminHandlers.handleListUsers(request, env));
       }
       if (/^\/api\/admin\/users\/[^/]+\/stats$/.test(url.pathname) && request.method === 'GET') {
         const userId = decodeURIComponent(url.pathname.split('/')[4]);
-        return await adminHandlers.handleUserDetail(request, env, userId);
+        return withSharedPool(env, () => adminHandlers.handleUserDetail(request, env, userId));
       }
       if (url.pathname === '/api/admin/tickets' && request.method === 'GET') {
-        return await adminHandlers.handleListTickets(request, env);
+        return withSharedPool(env, () => adminHandlers.handleListTickets(request, env));
       }
       if (/^\/api\/admin\/tickets\/[^/]+\/reply$/.test(url.pathname) && request.method === 'POST') {
         const ticketId = url.pathname.split('/')[4];
-        return await adminHandlers.handleReplyTicket(request, env, ticketId);
+        return withSharedPool(env, () => adminHandlers.handleReplyTicket(request, env, ticketId));
       }
       if (/^\/api\/admin\/tickets\/[^/]+\/status$/.test(url.pathname) && request.method === 'PUT') {
         const ticketId = url.pathname.split('/')[4];
-        return await adminHandlers.handleUpdateTicketStatus(request, env, ticketId);
+        return withSharedPool(env, () => adminHandlers.handleUpdateTicketStatus(request, env, ticketId));
       }
       // PHASE 3 FIX (Bug 5): Admin DELETE ticket — previously didn't exist
       if (/^\/api\/admin\/tickets\/[^/]+$/.test(url.pathname) && request.method === 'DELETE') {
         const ticketId = url.pathname.split('/')[4];
-        return await adminHandlers.handleDeleteTicket(request, env, ticketId);
+        return withSharedPool(env, () => adminHandlers.handleDeleteTicket(request, env, ticketId));
       }
       // PHASE 3 FIX (Bug 6): Admin GET ticket replies — for conversation thread
       if (/^\/api\/admin\/tickets\/[^/]+\/replies$/.test(url.pathname) && request.method === 'GET') {
         const ticketId = url.pathname.split('/')[4];
-        return await adminHandlers.handleListTicketReplies(request, env, ticketId);
+        return withSharedPool(env, () => adminHandlers.handleListTicketReplies(request, env, ticketId));
       }
       if (url.pathname === '/api/admin/broadcasts' && request.method === 'POST') {
-        return await adminHandlers.handleCreateBroadcast(request, env);
+        return withSharedPool(env, () => adminHandlers.handleCreateBroadcast(request, env));
       }
       if (url.pathname === '/api/admin/broadcasts' && request.method === 'GET') {
-        return await adminHandlers.handleListBroadcasts(request, env);
+        return withSharedPool(env, () => adminHandlers.handleListBroadcasts(request, env));
       }
       if (url.pathname === '/api/admin/rewards' && request.method === 'GET') {
-        return await adminHandlers.handleListRewards(request, env);
+        return withSharedPool(env, () => adminHandlers.handleListRewards(request, env));
       }
       if (/^\/api\/admin\/rewards\/\d+\/status$/.test(url.pathname) && request.method === 'PUT') {
         const rewardId = url.pathname.split('/')[4];
-        return await adminHandlers.handleUpdateReward(request, env, rewardId);
+        return withSharedPool(env, () => adminHandlers.handleUpdateReward(request, env, rewardId));
       }
       if (url.pathname === '/api/admin/transactions' && request.method === 'GET') {
-        return await adminHandlers.handleListTransactions(request, env);
+        return withSharedPool(env, () => adminHandlers.handleListTransactions(request, env));
       }
       if (url.pathname === '/api/admin/referrals' && request.method === 'GET') {
-        return await adminHandlers.handleListReferrals(request, env);
+        return withSharedPool(env, () => adminHandlers.handleListReferrals(request, env));
       }
       if (url.pathname === '/api/admin/system-health' && request.method === 'GET') {
-        return await adminHandlers.handleSystemHealth(request, env);
+        return withSharedPool(env, () => adminHandlers.handleSystemHealth(request, env));
       }
       if (url.pathname === '/api/admin/logs' && request.method === 'GET') {
-        return await adminHandlers.handleLogs(request, env);
+        return withSharedPool(env, () => adminHandlers.handleLogs(request, env));
       }
 
       // ─────────────────────────────────────────────────────────────
@@ -6281,91 +6314,91 @@ export default {
 
       // Overview & Analytics
       if (url.pathname === '/api/admin/reward-center/overview' && request.method === 'GET') {
-        return await rewardCenterHandlers.handleOverview(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleOverview(request, env));
       }
       if (url.pathname === '/api/admin/reward-center/analytics' && request.method === 'GET') {
-        return await rewardCenterHandlers.handleAnalytics(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleAnalytics(request, env));
       }
 
       // Wheel Config
       if (url.pathname === '/api/admin/reward-center/wheel/config' && request.method === 'GET') {
-        return await rewardCenterHandlers.handleGetWheelConfig(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleGetWheelConfig(request, env));
       }
       if (url.pathname === '/api/admin/reward-center/wheel/config' && (request.method === 'PUT' || request.method === 'POST')) {
-        return await rewardCenterHandlers.handleUpdateWheelConfig(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleUpdateWheelConfig(request, env));
       }
 
       // Wheel Rewards CRUD
       if (url.pathname === '/api/admin/reward-center/wheel/rewards' && request.method === 'GET') {
-        return await rewardCenterHandlers.handleListWheelRewards(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleListWheelRewards(request, env));
       }
       if (url.pathname === '/api/admin/reward-center/wheel/rewards' && request.method === 'POST') {
-        return await rewardCenterHandlers.handleCreateWheelReward(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleCreateWheelReward(request, env));
       }
       if (/^\/api\/admin\/reward-center\/wheel\/rewards\/\d+$/.test(url.pathname)) {
         const rewardId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateWheelReward(request, env, rewardId);
-        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteWheelReward(request, env, rewardId);
+        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateWheelReward(request, env, rewardId));
+        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteWheelReward(request, env, rewardId));
       }
 
       // Reward Library CRUD
       if (url.pathname === '/api/admin/reward-center/library' && request.method === 'GET') {
-        return await rewardCenterHandlers.handleListLibrary(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleListLibrary(request, env));
       }
       if (url.pathname === '/api/admin/reward-center/library' && request.method === 'POST') {
-        return await rewardCenterHandlers.handleCreateLibraryItem(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleCreateLibraryItem(request, env));
       }
       if (/^\/api\/admin\/reward-center\/library\/\d+$/.test(url.pathname)) {
         const itemId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateLibraryItem(request, env, itemId);
-        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteLibraryItem(request, env, itemId);
+        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateLibraryItem(request, env, itemId));
+        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteLibraryItem(request, env, itemId));
       }
 
       // Referral Reward Tiers CRUD
       if (url.pathname === '/api/admin/reward-center/referral-tiers' && request.method === 'GET') {
-        return await rewardCenterHandlers.handleListReferralTiers(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleListReferralTiers(request, env));
       }
       if (url.pathname === '/api/admin/reward-center/referral-tiers' && request.method === 'POST') {
-        return await rewardCenterHandlers.handleCreateReferralTier(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleCreateReferralTier(request, env));
       }
       if (/^\/api\/admin\/reward-center\/referral-tiers\/\d+$/.test(url.pathname)) {
         const tierId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateReferralTier(request, env, tierId);
-        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteReferralTier(request, env, tierId);
+        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateReferralTier(request, env, tierId));
+        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteReferralTier(request, env, tierId));
       }
 
       // Mission Rewards CRUD
       if (url.pathname === '/api/admin/reward-center/mission-rewards' && request.method === 'GET') {
-        return await rewardCenterHandlers.handleListMissionRewards(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleListMissionRewards(request, env));
       }
       if (url.pathname === '/api/admin/reward-center/mission-rewards' && request.method === 'POST') {
-        return await rewardCenterHandlers.handleCreateMissionReward(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleCreateMissionReward(request, env));
       }
       if (/^\/api\/admin\/reward-center\/mission-rewards\/\d+$/.test(url.pathname)) {
         const missionId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateMissionReward(request, env, missionId);
-        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteMissionReward(request, env, missionId);
+        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateMissionReward(request, env, missionId));
+        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteMissionReward(request, env, missionId));
       }
 
       // Campaigns CRUD
       if (url.pathname === '/api/admin/reward-center/campaigns' && request.method === 'GET') {
-        return await rewardCenterHandlers.handleListCampaigns(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleListCampaigns(request, env));
       }
       if (url.pathname === '/api/admin/reward-center/campaigns' && request.method === 'POST') {
-        return await rewardCenterHandlers.handleCreateCampaign(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleCreateCampaign(request, env));
       }
       if (/^\/api\/admin\/reward-center\/campaigns\/[^/]+$/.test(url.pathname)) {
         const campaignId = decodeURIComponent(url.pathname.split('/').pop());
-        if (request.method === 'PUT' || request.method === 'PATCH') return await rewardCenterHandlers.handleUpdateCampaign(request, env, campaignId);
-        if (request.method === 'DELETE') return await rewardCenterHandlers.handleDeleteCampaign(request, env, campaignId);
+        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateCampaign(request, env, campaignId));
+        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteCampaign(request, env, campaignId));
       }
 
       // Emergency Controls
       if (url.pathname === '/api/admin/reward-center/emergency' && request.method === 'GET') {
-        return await rewardCenterHandlers.handleGetEmergencyControls(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleGetEmergencyControls(request, env));
       }
       if (url.pathname === '/api/admin/reward-center/emergency' && (request.method === 'PUT' || request.method === 'POST')) {
-        return await rewardCenterHandlers.handleUpdateEmergencyControls(request, env);
+        return withSharedPool(env, () => rewardCenterHandlers.handleUpdateEmergencyControls(request, env));
       }
 
       // ── Maintenance Mode Controls (admin only) ──
@@ -6662,7 +6695,7 @@ export default {
 
       // ── Analyses: Public endpoints ──
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
-        return await analysisHandlers.handleList(request, env);
+        return withSharedPool(env, () => analysisHandlers.handleList(request, env));
       }
 
       // GET /api/analyses/:id (detail) — must be before PUT/DELETE pattern
@@ -6679,98 +6712,86 @@ export default {
 
       // ── Analyses: Admin endpoints (new paths) ──
       if (request.method === 'POST' && url.pathname === '/api/admin/analyses') {
-        // A/B TEST: Create request-scoped shared pool (1 TLS handshake for all queries)
-        env._reqPool = createPool(env);
-        try {
-          return await analysisHandlers.handleCreate(request, env, ctx);
-        } finally {
-          if (env._reqPool) { try { await env._reqPool.end(); } catch {} env._reqPool = null; }
-        }
+        return withSharedPool(env, () => analysisHandlers.handleCreate(request, env, ctx));
       }
 
       if (request.method === 'PUT' && /^\/api\/admin\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[4] || '';
-        return await analysisHandlers.handleUpdate(request, env, analysisId);
+        return withSharedPool(env, () => analysisHandlers.handleUpdate(request, env, analysisId));
       }
 
       if (request.method === 'DELETE' && /^\/api\/admin\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[4] || '';
-        // A/B TEST: Create request-scoped shared pool (1 TLS handshake for all queries)
-        env._reqPool = createPool(env);
-        try {
-          return await analysisHandlers.handleDelete(request, env, analysisId);
-        } finally {
-          if (env._reqPool) { try { await env._reqPool.end(); } catch {} env._reqPool = null; }
-        }
+        return withSharedPool(env, () => analysisHandlers.handleDelete(request, env, analysisId));
       }
 
       // ── Analyses: Legacy admin paths (backward compat) ──
       if (request.method === 'POST' && url.pathname === '/api/analyses') {
-        return await analysisHandlers.handleCreateLegacy(request, env, ctx);
+        return withSharedPool(env, () => analysisHandlers.handleCreateLegacy(request, env, ctx));
       }
 
       if (request.method === 'PUT' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
-        return await analysisHandlers.handleUpdateLegacy(request, env, analysisId);
+        return withSharedPool(env, () => analysisHandlers.handleUpdateLegacy(request, env, analysisId));
       }
 
       if (request.method === 'DELETE' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
-        return await analysisHandlers.handleDeleteLegacy(request, env, analysisId);
+        return withSharedPool(env, () => analysisHandlers.handleDeleteLegacy(request, env, analysisId));
       }
 
       if (request.method === 'POST' && url.pathname === '/api/tickets') {
-        return await ticketHandlers.handleCreate(request, env);
+        return withSharedPool(env, () => ticketHandlers.handleCreate(request, env));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/tickets') {
-        return await ticketHandlers.handleList(request, env);
+        return withSharedPool(env, () => ticketHandlers.handleList(request, env));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/tickets/all') {
-        return await ticketHandlers.handleListAll(request, env);
+        return withSharedPool(env, () => ticketHandlers.handleListAll(request, env));
       }
 
       if (request.method === 'POST' && /^\/api\/tickets\/[^/]+\/reply$/u.test(url.pathname)) {
         const ticketId = url.pathname.split('/')[3] || '';
-        return await ticketHandlers.handleReply(request, env, ticketId);
+        return withSharedPool(env, () => ticketHandlers.handleReply(request, env, ticketId));
       }
 
       if (request.method === 'DELETE' && /^\/api\/tickets\/[^/]+$/u.test(url.pathname) && url.pathname !== '/api/tickets/all') {
         const ticketId = url.pathname.split('/')[3] || '';
-        return await ticketHandlers.handleDelete(request, env, ticketId);
+        return withSharedPool(env, () => ticketHandlers.handleDelete(request, env, ticketId));
       }
 
       if (request.method === 'POST' && url.pathname === '/api/alerts') {
-        return await alertHandlers.handleCreate(request, env);
+        return withSharedPool(env, () => alertHandlers.handleCreate(request, env));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/alerts') {
-        return await alertHandlers.handleList(request, env);
+        return withSharedPool(env, () => alertHandlers.handleList(request, env));
       }
 
       if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
         const alertId = url.pathname.split('/')[3] || '';
-        return await alertHandlers.handleDelete(request, env, alertId);
+        return withSharedPool(env, () => alertHandlers.handleDelete(request, env, alertId));
       }
 
       // ── Calendar Reminders routes are registered earlier (near /api/calendar/events) ──
 
       // ── Alert Economy: User quota status ──
       if (request.method === 'GET' && url.pathname === '/api/alerts/quota') {
-        return await alertEconomyHandlers.handleQuotaStatus(request, env);
+        return withSharedPool(env, () => alertEconomyHandlers.handleQuotaStatus(request, env));
       }
 
       // ── Alert Economy: Admin config + dashboard ──
       if (request.method === 'GET' && url.pathname === '/api/admin/alert-economy/configs') {
-        return await alertEconomyHandlers.handleListConfigs(request, env);
+        return withSharedPool(env, () => alertEconomyHandlers.handleListConfigs(request, env));
       }
       if (request.method === 'PUT' && /^\/api\/admin\/alert-economy\/configs\/[^/]+$/.test(url.pathname)) {
         const alertType = decodeURIComponent(url.pathname.split('/').pop());
-        return await alertEconomyHandlers.handleUpdateConfig(request, env, alertType);
+        return withSharedPool(env, () => alertEconomyHandlers.handleUpdateConfig(request, env, alertType));
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/alert-economy/dashboard') {
-        return await alertEconomyHandlers.handleDashboard(request, env);
+        return withSharedPool(env, () => alertEconomyHandlers.handleDashboard(request, env));
       }
 
       // ─────────────────────────────────────────────────────────────
@@ -6781,56 +6802,56 @@ export default {
         return await publisherHandlers.handleUpdateSettings(request, env);
       }
       if (url.pathname === '/api/admin/publisher/preview' && request.method === 'POST') {
-        return await publisherHandlers.handlePreview(request, env);
+        return withSharedPool(env, () => publisherHandlers.handlePreview(request, env));
       }
       if (url.pathname === '/api/admin/publisher/queue' && request.method === 'POST') {
-        return await publisherHandlers.handleEnqueue(request, env);
+        return withSharedPool(env, () => publisherHandlers.handleEnqueue(request, env));
       }
       if (url.pathname === '/api/admin/publisher/send-now' && request.method === 'POST') {
-        return await publisherHandlers.handleSendNow(request, env);
+        return withSharedPool(env, () => publisherHandlers.handleSendNow(request, env));
       }
       if (url.pathname === '/api/admin/publisher/queue' && request.method === 'GET') {
-        return await publisherHandlers.handleListQueue(request, env, 'pending');
+        return withSharedPool(env, () => publisherHandlers.handleListQueue(request, env, 'pending'));
       }
       if (url.pathname === '/api/admin/publisher/sent' && request.method === 'GET') {
-        return await publisherHandlers.handleListQueue(request, env, 'sent');
+        return withSharedPool(env, () => publisherHandlers.handleListQueue(request, env, 'sent'));
       }
       if (url.pathname === '/api/admin/publisher/failed' && request.method === 'GET') {
-        return await publisherHandlers.handleListQueue(request, env, 'failed');
+        return withSharedPool(env, () => publisherHandlers.handleListQueue(request, env, 'failed'));
       }
       if (url.pathname === '/api/admin/publisher/logs' && request.method === 'GET') {
-        return await publisherHandlers.handleListLogs(request, env);
+        return withSharedPool(env, () => publisherHandlers.handleListLogs(request, env));
       }
       if (url.pathname === '/api/admin/publisher/stats' && request.method === 'GET') {
-        return await publisherHandlers.handleStats(request, env);
+        return withSharedPool(env, () => publisherHandlers.handleStats(request, env));
       }
       if (url.pathname === '/api/admin/publisher/process' && request.method === 'POST') {
-        return await publisherHandlers.handleProcessNow(request, env);
+        return withSharedPool(env, () => publisherHandlers.handleProcessNow(request, env));
       }
       if (url.pathname === '/api/admin/publisher/test-connection' && request.method === 'POST') {
         return await publisherHandlers.handleTestConnection(request, env);
       }
       if (/^\/api\/admin\/publisher\/retry\/\d+$/.test(url.pathname) && request.method === 'POST') {
         const id = url.pathname.split('/').pop();
-        return await publisherHandlers.handleRetry(request, env, id);
+        return withSharedPool(env, () => publisherHandlers.handleRetry(request, env, id));
       }
       if (/^\/api\/admin\/publisher\/cancel\/\d+$/.test(url.pathname) && request.method === 'POST') {
         const id = url.pathname.split('/').pop();
-        return await publisherHandlers.handleCancel(request, env, id);
+        return withSharedPool(env, () => publisherHandlers.handleCancel(request, env, id));
       }
       if (/^\/api\/admin\/publisher\/sent\/\d+$/.test(url.pathname) && request.method === 'DELETE') {
         const id = url.pathname.split('/').pop();
-        return await publisherHandlers.handleDeleteSent(request, env, id);
+        return withSharedPool(env, () => publisherHandlers.handleDeleteSent(request, env, id));
       }
       if (/^\/api\/admin\/publisher\/dedup\/[^/]+\/[^/]+$/.test(url.pathname) && request.method === 'GET') {
         const parts = url.pathname.split('/');
         const type = decodeURIComponent(parts[parts.length - 2]);
         const refId = decodeURIComponent(parts[parts.length - 1]);
-        return await publisherHandlers.handleCheckDedup(request, env, type, refId);
+        return withSharedPool(env, () => publisherHandlers.handleCheckDedup(request, env, type, refId));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/notifications') {
-        return await notificationHandlers.handleList(request, env);
+        return withSharedPool(env, () => notificationHandlers.handleList(request, env));
       }
 
       // ── Notification Settings API ──
@@ -6889,7 +6910,7 @@ export default {
 
       // User: list notifications (with filter/search/pagination)
       if (request.method === 'GET' && url.pathname === '/api/notifications/platform/list') {
-        return await notificationPlatformHandlers.handleList(request, env);
+        return withSharedPool(env, () => notificationPlatformHandlers.handleList(request, env));
       }
       // User: unread count
       if (request.method === 'GET' && url.pathname === '/api/notifications/platform/unread-count') {
@@ -6925,30 +6946,30 @@ export default {
 
       // Admin: notification analytics
       if (request.method === 'GET' && url.pathname === '/api/admin/notifications/analytics') {
-        return await notificationPlatformHandlers.handleAdminAnalytics(request, env);
+        return withSharedPool(env, () => notificationPlatformHandlers.handleAdminAnalytics(request, env));
       }
       // Admin: templates CRUD
       if (request.method === 'GET' && url.pathname === '/api/admin/notifications/templates') {
-        return await notificationPlatformHandlers.handleListTemplates(request, env);
+        return withSharedPool(env, () => notificationPlatformHandlers.handleListTemplates(request, env));
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/notifications/templates') {
-        return await notificationPlatformHandlers.handleCreateTemplate(request, env);
+        return withSharedPool(env, () => notificationPlatformHandlers.handleCreateTemplate(request, env));
       }
       if (/^\/api\/admin\/notifications\/templates\/\d+$/.test(url.pathname)) {
         const tplId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return await notificationPlatformHandlers.handleUpdateTemplate(request, env, tplId);
-        if (request.method === 'DELETE') return await notificationPlatformHandlers.handleDeleteTemplate(request, env, tplId);
+        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => notificationPlatformHandlers.handleUpdateTemplate(request, env, tplId));
+        if (request.method === 'DELETE') return withSharedPool(env, () => notificationPlatformHandlers.handleDeleteTemplate(request, env, tplId));
       }
       // Admin: broadcasts
       if (request.method === 'GET' && url.pathname === '/api/admin/notifications/broadcasts') {
-        return await notificationPlatformHandlers.handleListBroadcasts(request, env);
+        return withSharedPool(env, () => notificationPlatformHandlers.handleListBroadcasts(request, env));
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/notifications/broadcasts') {
-        return await notificationPlatformHandlers.handleCreateBroadcast(request, env);
+        return withSharedPool(env, () => notificationPlatformHandlers.handleCreateBroadcast(request, env));
       }
       if (request.method === 'POST' && /^\/api\/admin\/notifications\/broadcasts\/\d+\/send$/.test(url.pathname)) {
         const bId = url.pathname.split('/')[5];
-        return await notificationPlatformHandlers.handleProcessBroadcast(request, env, bId);
+        return withSharedPool(env, () => notificationPlatformHandlers.handleProcessBroadcast(request, env, bId));
       }
 
       if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
@@ -6972,7 +6993,7 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/users/me') {
-        return await userHandlers.handleMe(request, env);
+        return withSharedPool(env, () => userHandlers.handleMe(request, env));
       }
 
       if (request.method === 'PUT' && url.pathname === '/api/users/me/settings') {
@@ -6983,16 +7004,11 @@ export default {
       // Permanently deletes the user and ALL their data. After this, the user
       // can re-register via a referral link and the referral will register.
       if (request.method === 'DELETE' && url.pathname === '/api/users/me') {
-        return await userHandlers.handleDeleteAccount(request, env);
+        return withSharedPool(env, () => userHandlers.handleDeleteAccount(request, env));
       }
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
-        env._reqPool = createPool(env);
-        try {
-          return await userHandlers.handleBootstrap(request, env);
-        } finally {
-          if (env._reqPool) { try { await env._reqPool.end(); } catch {} env._reqPool = null; }
-        }
+        return withSharedPool(env, () => userHandlers.handleBootstrap(request, env));
       }
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
@@ -7024,7 +7040,7 @@ export default {
       }
 
       if (request.method === 'PUT' && url.pathname === '/api/watchlist') {
-        return await watchlistHandlers.handlePut(request, env);
+        return withSharedPool(env, () => watchlistHandlers.handlePut(request, env));
       }
 
       if (request.method === 'POST' && url.pathname === '/api/notify') {
@@ -7036,7 +7052,7 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/history') {
-        return await referralHandlers.handleHistory(request, env);
+        return withSharedPool(env, () => referralHandlers.handleHistory(request, env));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/leaderboard') {
@@ -7062,7 +7078,7 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/history') {
-        return await walletHandlers.handleGetHistory(request, env);
+        return withSharedPool(env, () => walletHandlers.handleGetHistory(request, env));
       }
 
       if (request.method === 'GET' && /^\/api\/wallet\/transaction\/[^/]+$/.test(url.pathname)) {
@@ -7075,7 +7091,7 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/wallet/claim') {
-        return await walletHandlers.handleClaimDaily(request, env);
+        return withSharedPool(env, () => walletHandlers.handleClaimDaily(request, env));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/referral-stats') {
@@ -7084,24 +7100,24 @@ export default {
 
       // ── Daily Missions API Routes ──
       if (request.method === 'POST' && url.pathname === '/api/wallet/mission/complete') {
-        return await walletHandlers.handleMissionComplete(request, env);
+        return withSharedPool(env, () => walletHandlers.handleMissionComplete(request, env));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/missions') {
-        return await walletHandlers.handleGetMissions(request, env);
+        return withSharedPool(env, () => walletHandlers.handleGetMissions(request, env));
       }
 
       // ── Lucky Wheel API Routes ──
       if (request.method === 'GET' && url.pathname === '/api/wheel/status') {
-        return await wheelHandlers.handleStatus(request, env);
+        return withSharedPool(env, () => wheelHandlers.handleStatus(request, env));
       }
 
       if (request.method === 'POST' && url.pathname === '/api/wheel/spin') {
-        return await wheelHandlers.handleSpin(request, env);
+        return withSharedPool(env, () => wheelHandlers.handleSpin(request, env));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wheel/history') {
-        return await wheelHandlers.handleHistory(request, env);
+        return withSharedPool(env, () => wheelHandlers.handleHistory(request, env));
       }
 
       if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {
