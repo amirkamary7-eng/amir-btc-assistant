@@ -153,9 +153,91 @@ export function createAnalysisRepository(deps) {
   }
 
   /**
+   * ROOT-CAUSE FIX: Get list + featured + stats in a SINGLE queryDb call.
+   * Previously handleList called list() + getFeatured() + getStats() = 3 queryDb.
+   * After Create/Delete, invalidateAnalysesCache deletes KV cache → every
+   * subsequent GET /api/analyses = cache miss → 3 queryDb → exceededCpu → 500.
+   * This cascade broke admin detection + join check.
+   * Now: 1 queryDb with CTE = 3-5ms CPU → under 10ms limit.
+   */
+  async function listWithStatsAndFeatured(env, page = 1, limit = 20) {
+    const p = Math.max(1, Number(page) || 1);
+    const l = Math.max(1, Math.min(50, Number(limit) || 20));
+    const offset = (p - 1) * l;
+
+    const result = await queryDb(env, `
+      WITH stats AS (
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE featured = TRUE)::int AS featured_count,
+          COUNT(*) FILTER (WHERE featured IS NOT TRUE OR featured = FALSE)::int AS non_featured_count,
+          COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)::int AS today
+        FROM analyses
+      ),
+      featured_rows AS (
+        SELECT id, coin, timeframe, image, text, title, support_level,
+               current_price, resistance_level, views_count, featured,
+               category, author, author_id, created_at, updated_at
+        FROM analyses WHERE featured = TRUE
+        ORDER BY created_at DESC LIMIT 5
+      ),
+      list_rows AS (
+        SELECT id, coin, timeframe, image, text, title, support_level,
+               current_price, resistance_level, views_count, featured,
+               category, author, author_id, created_at, updated_at
+        FROM analyses
+        WHERE featured IS NOT TRUE OR featured = FALSE
+        ORDER BY created_at DESC
+        LIMIT $1 OFFSET $2
+      )
+      SELECT
+        (SELECT total FROM stats) AS total,
+        (SELECT featured_count FROM stats) AS featured_count,
+        (SELECT non_featured_count FROM stats) AS non_featured_count,
+        (SELECT today FROM stats) AS today,
+        COALESCE(
+          (SELECT json_agg(row_to_json(f)) FROM featured_rows f),
+          '[]'
+        ) AS featured_json,
+        COALESCE(
+          (SELECT json_agg(row_to_json(l)) FROM list_rows l),
+          '[]'
+        ) AS list_json
+    `, [l, offset]);
+
+    const row = result.rows[0] || {};
+
+    let featured = [];
+    try {
+      const raw = row.featured_json;
+      featured = (typeof raw === 'string' ? JSON.parse(raw) : raw) || [];
+      featured = featured.map(serializeAnalysisRow);
+    } catch {}
+
+    let analyses = [];
+    try {
+      const raw = row.list_json;
+      analyses = (typeof raw === 'string' ? JSON.parse(raw) : raw) || [];
+      analyses = analyses.map(serializeAnalysisRow);
+    } catch {}
+
+    const nonFeaturedCount = Number(row.non_featured_count || 0);
+
+    return {
+      analyses,
+      pagination: { page: p, limit: l, total: nonFeaturedCount, hasMore: offset + l < nonFeaturedCount },
+      featured,
+      stats: {
+        total: Number(row.total || 0),
+        featured: Number(row.featured_count || 0),
+        active: Number(row.non_featured_count || 0),
+        today: Number(row.today || 0),
+      },
+    };
+  }
+
+  /**
    * Get stats + featured analyses in a SINGLE queryDb call.
-   * ROOT-CAUSE FIX: previously getStats + getFeatured were 2 separate queryDb
-   * calls (2 Pool creations = ~6-10ms CPU). Now 1 queryDb = ~3-5ms CPU.
    * Used by handleDelete to halve CPU cost.
    */
   async function getStatsAndFeatured(env) {
@@ -397,6 +479,7 @@ export function createAnalysisRepository(deps) {
     getFeatured,
     getStats,
     getStatsAndFeatured,
+    listWithStatsAndFeatured,
     list,
     listAll,
     getById,

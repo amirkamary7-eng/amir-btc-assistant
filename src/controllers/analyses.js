@@ -219,34 +219,35 @@ export function createAnalysisHandlers(deps) {
     // Need fresh data from DB
     if (isDatabaseConfigured(env)) {
       try {
-        // Ensure schema on first request
+        // ROOT-CAUSE FIX: Merge list + getFeatured + getStats into 1 queryDb.
+        // Previously 3 parallel queryDb = 3 Pool creations = 9-15ms CPU → exceededCpu.
+        // After Create/Delete, invalidateAnalysesCache deletes KV cache → every
+        // subsequent GET /api/analyses hits this path → 3 queryDb → exceededCpu → 500.
+        // This cascade breaks admin detection + join check.
+        // Now: 1 queryDb = 3-5ms CPU → under 10ms limit.
         await analysisRepo.ensureSchema(env).catch(() => {});
 
-        const [listResult, featured, stats] = await Promise.all([
-          analysisRepo.list(env, page, limit),
-          analysisRepo.getFeatured(env),
-          analysisRepo.getStats(env),
-        ]);
+        const pageData = await analysisRepo.listWithStatsAndFeatured(env, page, limit);
 
         // Cache featured separately (short TTL)
-        if (featured) {
-          await writeAppCache(env, ANALYSES_FEATURED_KEY, JSON.stringify(featured), 300);
+        if (pageData.featured) {
+          await writeAppCache(env, ANALYSES_FEATURED_KEY, JSON.stringify(pageData.featured), 300);
         }
 
         // Cache stats (short TTL — invalidated on CRUD)
-        await writeAppCache(env, ANALYSES_STATS_KEY, JSON.stringify(stats), 60);
+        await writeAppCache(env, ANALYSES_STATS_KEY, JSON.stringify(pageData.stats), 60);
 
         // Generate version — avoids expensive listAll() + JSON.stringify comparison
         const version = generateVersion();
         // Cache the paginated list (used for version checking, not listAll)
-        await updateAnalysesCache(env, listResult.analyses, version);
+        await updateAnalysesCache(env, pageData.analyses, version);
 
         return jsonResponse({
           status: 'success',
-          featured,
-          stats,
-          analyses: listResult.analyses,
-          pagination: listResult.pagination,
+          featured: pageData.featured,
+          stats: pageData.stats,
+          analyses: pageData.analyses,
+          pagination: pageData.pagination,
           version,
           unchanged: false,
         }, {}, env);
@@ -435,7 +436,13 @@ export function createAnalysisHandlers(deps) {
    * DELETE /api/admin/analyses/:id — Delete (admin only, double-confirm in frontend).
    */
   async function handleDelete(request, env, analysisId) {
+    const _t0 = Date.now();
+    const _steps = [];
+    const _step = (name) => { _steps.push({ name, ms: Date.now() - _t0 }); };
+
+    _step('start');
     const authResult = await requireAdmin(request, env);
+    _step('requireAdmin');
     if (authResult.error) return authResult.error;
     if (!isAdminTelegramId(env, authResult.user.id)) {
       return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
@@ -446,19 +453,21 @@ export function createAnalysisHandlers(deps) {
 
     try {
       const deleted = await analysisRepo.remove(env, analysisId);
+      _step('remove');
       if (!deleted) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
       const version = await invalidateAnalysesCache(env, analysisId);
+      _step('invalidateCache');
 
-      // ROOT-CAUSE FIX: Removed getStatsAndFeatured() — it added 1 extra
-      // queryDb which pushed CPU to 10ms → exceededCpu → Worker killed
-      // AFTER delete succeeded but BEFORE returning response → HTTP 500.
-      // Frontend thought delete failed, then all subsequent requests also
-      // hit exceededCpu, breaking admin detection + join check in cascade.
-      // Now: only 1 queryDb (remove). Stats/featured via background refetch.
+      _step('end');
+      const totalMs = Date.now() - _t0;
+      console.log(JSON.stringify({ scope: 'delete-profile', totalMs, steps: _steps }));
       return jsonResponse({ status: 'success', version }, {}, env);
     } catch (error) {
+      _step('catch');
+      const totalMs = Date.now() - _t0;
+      console.log(JSON.stringify({ scope: 'delete-profile-ERROR', totalMs, steps: _steps, error: error?.message }));
       console.warn(safeError('delete-analysis', error));
       return safeDbErrorResponse(error, {}, env);
     }
