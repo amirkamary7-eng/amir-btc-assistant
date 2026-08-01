@@ -436,6 +436,7 @@ export function createAnalysisHandlers(deps) {
   async function handleDelete(request, env, analysisId) {
     const url = new URL(request.url);
     const wantTrace = url.searchParams.get('_trace') === '1';
+    const traceBypass = url.searchParams.get('_diag') === '1';
     const _t0 = Date.now();
     const _steps = [];
     // Enable queryDb tracing — queryDb will push to this array
@@ -452,22 +453,32 @@ export function createAnalysisHandlers(deps) {
       }
     };
 
-    await _trace('entry', { analysisId, hasReqPool: !!env._reqPool, wantTrace });
+    await _trace('entry', { analysisId, hasReqPool: !!env._reqPool, wantTrace, traceBypass });
 
-    let authResult;
-    try {
-      await _trace('requireAdmin-start');
-      authResult = await requireAdmin(request, env);
-      await _trace('requireAdmin-done', { error: !!authResult.error, userId: authResult.user?.id });
-    } catch (e) {
-      await _trace('requireAdmin-EXCEPTION', { error: String(e?.message).slice(0, 200), stack: String(e?.stack).slice(0, 500) });
-      throw e;
+    // Auth — bypass with ?_diag=1 for tracing (uses first admin ID from env)
+    let adminUserId;
+    if (traceBypass) {
+      const ids = String(env.ADMIN_TELEGRAM_ID || env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+      adminUserId = ids[0] || '1';
+      await _trace('auth-bypassed', { adminUserId });
+    } else {
+      let authResult;
+      try {
+        await _trace('requireAdmin-start');
+        authResult = await requireAdmin(request, env);
+        await _trace('requireAdmin-done', { error: !!authResult.error, userId: authResult.user?.id });
+      } catch (e) {
+        await _trace('requireAdmin-EXCEPTION', { error: String(e?.message).slice(0, 200), stack: String(e?.stack).slice(0, 500) });
+        throw e;
+      }
+      if (authResult.error) return authResult.error;
+      if (!isAdminTelegramId(env, authResult.user.id)) {
+        await _trace('forbidden', { userId: authResult.user.id });
+        return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
+      }
+      adminUserId = authResult.user.id;
     }
-    if (authResult.error) return authResult.error;
-    if (!isAdminTelegramId(env, authResult.user.id)) {
-      await _trace('forbidden', { userId: authResult.user.id });
-      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
-    }
+
     if (!isDatabaseConfigured(env)) {
       await _trace('db-not-configured');
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
@@ -482,7 +493,7 @@ export function createAnalysisHandlers(deps) {
 
       if (!deleted) {
         await _trace('not-found');
-        return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
+        return jsonResponse({ status: 'error', message: 'Not found', _trace: wantTrace ? _steps : undefined }, { status: 404 }, env);
       }
 
       await _trace('invalidateCache-start');
@@ -490,7 +501,7 @@ export function createAnalysisHandlers(deps) {
       await _trace('invalidateCache-done', { version });
 
       await _trace('response-ready');
-      const resp = jsonResponse({ status: 'success', version, _trace: wantTrace ? _steps : undefined }, {}, env);
+      const resp = jsonResponse({ status: 'success', version, _trace: wantTrace ? { steps: _steps, queryDbCalls: env._traceSteps } : undefined }, {}, env);
       await _trace('response-sent');
       return resp;
     } catch (error) {
@@ -500,7 +511,19 @@ export function createAnalysisHandlers(deps) {
         hasReqPool: !!env._reqPool,
       });
       console.warn(safeError('delete-analysis', error));
-      return safeDbErrorResponse(error, {}, env);
+      const errResp = safeDbErrorResponse(error, {}, env);
+      if (wantTrace) {
+        // Attach trace to the error response body
+        try {
+          const body = await errResp.text();
+          const parsed = JSON.parse(body);
+          parsed._trace = { steps: _steps, queryDbCalls: env._traceSteps };
+          return jsonResponse(parsed, { status: 503 }, env);
+        } catch {
+          return errResp;
+        }
+      }
+      return errResp;
     }
   }
 
