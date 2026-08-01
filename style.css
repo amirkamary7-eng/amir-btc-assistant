@@ -6611,6 +6611,11 @@ strong.down { color: var(--red); }
     object-position: center;
     display: block;
 }
+/* New banners: cover to fill slider completely, no empty space */
+.hero-slide-img--cover {
+    object-fit: cover;
+    object-position: center;
+}
 .hero-slide-shade {
     position: absolute;
     inset: 0;
@@ -6667,38 +6672,79 @@ strong.down { color: var(--red); }
     margin-right: -10px;
     margin-top: 3px; /* move 3px lower than channel */
 }
-/* Premium CTA — transparent with gold border, centered at bottom.
-   The banner image has a designated empty space at bottom-center for this button. */
-.hero-cta--premium {
+
+/* ─── New banners: absolute-positioned CTAs matching design ───
+   Button coordinates verified via VLM image analysis:
+   - Channel banner: Left 16.5%, Top 80.2%, Right 42.4%, Bottom 87.8%
+   - Premium banner: Left 9.6%, Top 82.4%, Right 44.7%, Bottom 91.8%
+   Both buttons positioned absolutely to align EXACTLY with the designed placeholder rectangles. */
+.hero-cta--channel-v2 {
+    position: absolute;
+    left: 16.5%;
+    top: 80.2%;
+    width: calc(42.4% - 16.5%);
+    height: calc(87.8% - 80.2%);
+    margin: 0;
+    padding: 0;
     background: transparent;
-    border: 1.5px solid rgba(245, 158, 11, 0.45);
+    border: 1.5px solid rgba(245, 158, 11, 0.4);
+    border-radius: 8px;
     color: #FCD34D;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    height: 38px;
-    min-width: 130px;
-    border-radius: 10px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.3px;
-    box-shadow: 0 2px 12px rgba(245, 158, 11, 0.08);
-    margin: 0 auto;
-    margin-bottom: 6px;
-    position: relative;
-    overflow: hidden;
+    cursor: pointer;
+    z-index: 3;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
 }
-.hero-cta--premium:hover {
-    border-color: rgba(252, 211, 77, 0.7);
-    box-shadow: 0 4px 18px rgba(245, 158, 11, 0.2);
+.hero-cta--channel-v2:hover {
+    border-color: rgba(252, 211, 77, 0.65);
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.15);
     color: #FFCC4D;
 }
-.hero-cta--premium:active {
-    transform: scale(0.96);
-    border-color: rgba(252, 211, 77, 0.5);
+.hero-cta--channel-v2:active { transform: scale(0.96); }
+
+.hero-cta--premium-v2 {
+    position: absolute;
+    left: 9.6%;
+    top: 82.4%;
+    width: calc(44.7% - 9.6%);
+    height: calc(91.8% - 82.4%);
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: 1.5px solid rgba(245, 158, 11, 0.4);
+    border-radius: 8px;
+    color: #FCD34D;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    z-index: 3;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
 }
-/* Ripple animation */
-.hero-cta--premium .ripple {
+.hero-cta--premium-v2:hover {
+    border-color: rgba(252, 211, 77, 0.65);
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.15);
+    color: #FFCC4D;
+}
+.hero-cta--premium-v2:active { transform: scale(0.96); }
+
+/* Ripple animation for both new CTAs */
+.hero-cta--channel-v2 .ripple,
+.hero-cta--premium-v2 .ripple {
     position: absolute;
     border-radius: 50%;
     background: rgba(252, 211, 77, 0.25);
@@ -6709,6 +6755,7 @@ strong.down { color: var(--red); }
 @keyframes hero-ripple {
     to { transform: scale(2.5); opacity: 0; }
 }
+
 .hero-slider-dots {
     position: absolute;
     top: 12px;
