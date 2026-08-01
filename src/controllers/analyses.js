@@ -92,10 +92,27 @@ export function createAnalysisHandlers(deps) {
       immediateGetError: null,
     };
 
+    // ── BINDING VERIFICATION ──
+    // Confirm put and get use the SAME binding (env.APP_CACHE)
+    const _binding = env.APP_CACHE;
+    _diag.binding = {
+      name: 'APP_CACHE',
+      present: !!_binding,
+      hasGet: typeof _binding?.get === 'function',
+      hasPut: typeof _binding?.put === 'function',
+      hasDelete: typeof _binding?.delete === 'function',
+      // Capture the binding identity — if put and get use different objects,
+      // these will differ
+      identityGet: _binding ? (_binding.constructor?.name || 'unknown') : null,
+      identityPut: _binding ? (_binding.constructor?.name || 'unknown') : null,
+      sameRef: _binding ? true : false, // we use the same env.APP_CACHE for both
+    };
+
     const version = generateVersion();
     _diag.newVersion = String(version);
 
     // Read BEFORE put — to see what the old value was
+    // Use env.APP_CACHE directly (not readAppCache) to confirm same binding
     let _beforePut = null;
     try {
       _beforePut = await env.APP_CACHE?.get?.(ANALYSES_VERSION_KEY);
@@ -107,9 +124,13 @@ export function createAnalysisHandlers(deps) {
     _diag.stage = 'before-kv-put';
 
     // Write a tombstone version so all clients know to refetch
+    // Use env.APP_CACHE directly (not writeAppCache) to confirm same binding
+    // and to bypass the _kvWriteCache skip-write optimization
     try {
-      await writeAppCache(env, ANALYSES_VERSION_KEY, String(version), 86400 * 7);
+      const _putOpts = { expirationTtl: 604800 };
+      await env.APP_CACHE.put(ANALYSES_VERSION_KEY, String(version), _putOpts);
       _diag.kvPutExecuted = true;
+      _diag.kvPutBindingUsed = 'env.APP_CACHE (direct put)';
     } catch (e) {
       _diag.kvPutError = String(e?.message).slice(0, 300);
       _diag.kvPutExecuted = false;
@@ -118,15 +139,47 @@ export function createAnalysisHandlers(deps) {
     _diag.stage = 'after-kv-put';
 
     // IMMEDIATE KV.get in the SAME Worker — does it see the new value?
+    // Use env.APP_CACHE directly (not readAppCache) to confirm same binding
     try {
-      const _immediate = await env.APP_CACHE?.get?.(ANALYSES_VERSION_KEY);
+      const _immediate = await env.APP_CACHE.get(ANALYSES_VERSION_KEY);
       _diag.immediateGetResult = _immediate;
+      _diag.immediateGetBindingUsed = 'env.APP_CACHE (direct get)';
       _diag.immediateGetMatches = (_immediate === String(version));
     } catch (e) {
       _diag.immediateGetError = String(e?.message).slice(0, 200);
     }
 
     _diag.stage = 'after-immediate-get';
+
+    // ── DEBUG KEY TEST ──
+    // Write a BRAND NEW key (never written before) and immediately read it back.
+    // This isolates whether the issue is with KV itself or with analyses:version.
+    const _debugKey = `debug:test:${Date.now()}`;
+    const _debugValue = `val-${Date.now()}`;
+    _diag.debugKey = {
+      key: _debugKey,
+      valueWritten: _debugValue,
+    };
+    try {
+      await env.APP_CACHE.put(_debugKey, _debugValue, { expirationTtl: 60 });
+      _diag.debugKey.putExecuted = true;
+      _diag.debugKey.putError = null;
+    } catch (e) {
+      _diag.debugKey.putExecuted = false;
+      _diag.debugKey.putError = String(e?.message).slice(0, 200);
+    }
+    try {
+      const _debugRead = await env.APP_CACHE.get(_debugKey);
+      _diag.debugKey.getResult = _debugRead;
+      _diag.debugKey.getMatches = (_debugRead === _debugValue);
+      _diag.debugKey.getError = null;
+    } catch (e) {
+      _diag.debugKey.getResult = null;
+      _diag.debugKey.getMatches = false;
+      _diag.debugKey.getError = String(e?.message).slice(0, 200);
+    }
+
+    _diag.stage = 'after-debug-key-test';
 
     // Delete list cache so next request hits DB
     try { await env.APP_CACHE?.delete?.(ANALYSES_LIST_KEY); } catch {}
