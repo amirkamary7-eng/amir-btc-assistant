@@ -6574,11 +6574,11 @@ strong.down { color: var(--red); }
    1. HERO SLIDER — image-based banner slides, aspect-ratio for CLS=0
    ========================================================================== */
 .hero-banner-slider {
-    margin: 0 0 22px; /* 22px gap to ticker (was 8px → 14px → 22px) */
+    margin: 0 0 22px; /* 22px gap to ticker */
     border-radius: 24px;
     position: relative;
-    overflow: hidden;
-    aspect-ratio: 16 / 9;
+    overflow: hidden; /* CRITICAL: no overflow, no bleed */
+    aspect-ratio: 2 / 1; /* Match banner image aspect ratio (1200x590 ≈ 2:1) */
     width: 100%;
     border: 1px solid rgba(245, 166, 35, 0.12);
     background: #0B1220;
@@ -6590,11 +6590,7 @@ strong.down { color: var(--red); }
     opacity: 0;
     transition: opacity 0.4s ease;
     pointer-events: none;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    align-items: center;
-    padding: 0 16px 10px; /* moved CTA up: 6px → 10px from bottom */
+    overflow: hidden;
     box-sizing: border-box;
 }
 .hero-slide.active {
@@ -6611,9 +6607,9 @@ strong.down { color: var(--red); }
     object-position: center;
     display: block;
 }
-/* New banners: cover to fill slider completely, no empty space */
+/* New banners: fill container exactly (container aspect-ratio matches image) */
 .hero-slide-img--cover {
-    object-fit: cover;
+    object-fit: fill; /* container is 2:1, images are 2:1 → perfect fit, no crop */
     object-position: center;
 }
 .hero-slide-shade {
@@ -6673,58 +6669,31 @@ strong.down { color: var(--red); }
     margin-top: 3px; /* move 3px lower than channel */
 }
 
-/* ─── New banners: absolute-positioned CTAs matching design ───
-   Button coordinates verified via VLM image analysis:
-   - Channel banner: Left 16.5%, Top 80.2%, Right 42.4%, Bottom 87.8%
-   - Premium banner: Left 9.6%, Top 82.4%, Right 44.7%, Bottom 91.8%
-   Both buttons positioned absolutely to align EXACTLY with the designed placeholder rectangles. */
-.hero-cta--channel-v2 {
-    position: absolute;
-    left: 16.5%;
-    top: 80.2%;
-    width: calc(42.4% - 16.5%);
-    height: calc(87.8% - 80.2%);
-    margin: 0;
-    padding: 0;
-    background: transparent;
-    border: 1.5px solid rgba(245, 158, 11, 0.4);
-    border-radius: 8px;
-    color: #FCD34D;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    cursor: pointer;
-    z-index: 3;
-    backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-}
-.hero-cta--channel-v2:hover {
-    border-color: rgba(252, 211, 77, 0.65);
-    box-shadow: 0 0 16px rgba(245, 158, 11, 0.15);
-    color: #FFCC4D;
-}
-.hero-cta--channel-v2:active { transform: scale(0.96); }
+/* ─── Unified Banner CTA Component ──────────────────────────────────────────
+   Both buttons use the SAME base styles (same width/height/radius/padding/position).
+   Only the position (left/top/width/height) differs — matching the designed
+   placeholder rectangle in each banner image (VLM-verified exact coordinates).
 
+   Because the container aspect-ratio (2:1) matches the image aspect-ratio,
+   and object-fit: fill is used, percentage positions map EXACTLY to image pixels
+   at ALL screen sizes. Buttons stay perfectly aligned on any mobile/desktop.
+
+   Channel banner button: Left 16.5%, Top 80.3%, Right 42.4%, Bottom 88.0%
+   Premium banner button: Left 9.6%, Top 82.8%, Right 44.7%, Bottom 91.8%
+   ─────────────────────────────────────────────────────────────────────────── */
+.hero-cta--channel-v2,
 .hero-cta--premium-v2 {
     position: absolute;
-    left: 9.6%;
-    top: 82.4%;
-    width: calc(44.7% - 9.6%);
-    height: calc(91.8% - 82.4%);
     margin: 0;
     padding: 0;
     background: transparent;
     border: 1.5px solid rgba(245, 158, 11, 0.4);
-    border-radius: 8px;
+    border-radius: 6px;
     color: #FCD34D;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.3px;
+    line-height: 1;
     cursor: pointer;
     z-index: 3;
     backdrop-filter: blur(3px);
@@ -6734,15 +6703,44 @@ strong.down { color: var(--red); }
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    white-space: nowrap;
+    /* Override ALL base .hero-cta props that would break exact-fit positioning */
+    width: auto;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    box-shadow: none;
+    flex-shrink: 1;
+    pointer-events: auto;
 }
+.hero-cta--channel-v2:hover,
 .hero-cta--premium-v2:hover {
     border-color: rgba(252, 211, 77, 0.65);
     box-shadow: 0 0 16px rgba(245, 158, 11, 0.15);
     color: #FFCC4D;
 }
-.hero-cta--premium-v2:active { transform: scale(0.96); }
+.hero-cta--channel-v2:active,
+.hero-cta--premium-v2:active {
+    transform: scale(0.96);
+}
 
-/* Ripple animation for both new CTAs */
+/* Channel CTA — exact position matching designed placeholder */
+.hero-cta--channel-v2 {
+    left: 16.5%;
+    top: 80.3%;
+    width: calc(42.4% - 16.5%);   /* 25.9% */
+    height: calc(88.0% - 80.3%);  /* 7.7% */
+}
+
+/* Premium CTA — exact position matching designed placeholder */
+.hero-cta--premium-v2 {
+    left: 9.6%;
+    top: 82.8%;
+    width: calc(44.7% - 9.6%);    /* 35.1% */
+    height: calc(91.8% - 82.8%);  /* 9.0% */
+}
+
+/* Ripple animation for both CTAs */
 .hero-cta--channel-v2 .ripple,
 .hero-cta--premium-v2 .ripple {
     position: absolute;
@@ -7875,10 +7873,6 @@ html[dir="rtl"] .market-ticker-track {
 @media (max-width: 360px) {
     #dashboard-page { padding: 10px 12px 20px; }
     .hero-banner-slider { border-radius: 18px; }
-    .hero-cta { font-size: 11px; height: 36px; padding: 0 12px; width: 112px; }
-    .hero-cta--channel { margin-left: 4%; }
-    .hero-cta--bitunix { width: 122px; margin-right: -10px; }
-    .hero-cta--premium { min-width: 110px; height: 34px; font-size: 11px; margin-bottom: 4px; }
     .hero-slider-dots { top: 8px; right: 10px; }
     .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }
     .dms-fg-gauge { width: 64px; }
