@@ -154,10 +154,11 @@
                 <div class="hero-slide-shade"></div>
                 <button class="hero-cta hero-cta--channel" type="button" onclick="event.stopPropagation();window.open('https://t.me/amir_btc_2024','_blank')">عضویت در کانال</button>
             </div>
-            <div class="hero-slide" data-slide="1" onclick="window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">
-                <img src="assets/banner-bitunix.png" alt="Bitunix" class="hero-slide-img" loading="lazy" decoding="async" onerror="this.style.background='#0B1220'">
-                <div class="hero-slide-shade hero-slide-shade--right"></div>
-                <button class="hero-cta hero-cta--bitunix" type="button" onclick="event.stopPropagation();window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">ثبت‌نام و دریافت بونوس</button>
+            <div class="hero-slide" data-slide="1" onclick="if(window.MembershipApp)MembershipApp.open()">
+                <img src="assets/banner-premium.webp" alt="AMIRBTC Premium" class="hero-slide-img" loading="lazy" decoding="async" onerror="this.style.background='#0B1220'">
+                <button class="hero-cta hero-cta--premium" type="button" onclick="event.stopPropagation();if(window.MembershipApp)MembershipApp.open()">
+                    <span>فعال‌سازی Premium</span>
+                </button>
             </div>
             <div class="hero-slider-dots" id="hero-slider-dots">
                 <span class="hero-dot active" data-dot="0"></span>

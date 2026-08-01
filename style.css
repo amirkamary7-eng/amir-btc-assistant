@@ -6667,6 +6667,48 @@ strong.down { color: var(--red); }
     margin-right: -10px;
     margin-top: 3px; /* move 3px lower than channel */
 }
+/* Premium CTA — transparent with gold border, centered at bottom.
+   The banner image has a designated empty space at bottom-center for this button. */
+.hero-cta--premium {
+    background: transparent;
+    border: 1.5px solid rgba(245, 158, 11, 0.45);
+    color: #FCD34D;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    height: 38px;
+    min-width: 130px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    box-shadow: 0 2px 12px rgba(245, 158, 11, 0.08);
+    margin: 0 auto;
+    margin-bottom: 6px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.hero-cta--premium:hover {
+    border-color: rgba(252, 211, 77, 0.7);
+    box-shadow: 0 4px 18px rgba(245, 158, 11, 0.2);
+    color: #FFCC4D;
+}
+.hero-cta--premium:active {
+    transform: scale(0.96);
+    border-color: rgba(252, 211, 77, 0.5);
+}
+/* Ripple animation */
+.hero-cta--premium .ripple {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(252, 211, 77, 0.25);
+    transform: scale(0);
+    animation: hero-ripple 0.6s ease-out;
+    pointer-events: none;
+}
+@keyframes hero-ripple {
+    to { transform: scale(2.5); opacity: 0; }
+}
 .hero-slider-dots {
     position: absolute;
     top: 12px;
@@ -7789,6 +7831,7 @@ html[dir="rtl"] .market-ticker-track {
     .hero-cta { font-size: 11px; height: 36px; padding: 0 12px; width: 112px; }
     .hero-cta--channel { margin-left: 4%; }
     .hero-cta--bitunix { width: 122px; margin-right: -10px; }
+    .hero-cta--premium { min-width: 110px; height: 34px; font-size: 11px; margin-bottom: 4px; }
     .hero-slider-dots { top: 8px; right: 10px; }
     .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }
     .dms-fg-gauge { width: 64px; }

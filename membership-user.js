@@ -486,10 +486,31 @@
     refresh: function () { _cache = null; return loadCard(); },
   };
 
+  // ─── Ripple animation for Premium CTA button ────────────────────────────
+  function addRipple(e) {
+    var btn = e.currentTarget;
+    if (!btn || btn.classList.contains('hero-cta--premium') === false) return;
+    var rect = btn.getBoundingClientRect();
+    var ripple = document.createElement('span');
+    ripple.className = 'ripple';
+    var size = Math.max(rect.width, rect.height);
+    ripple.style.width = ripple.style.height = size + 'px';
+    ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+    ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+    btn.appendChild(ripple);
+    setTimeout(function () { ripple.remove(); }, 600);
+  }
+
+  function initRipple() {
+    var btn = document.querySelector('.hero-cta--premium');
+    if (btn) btn.addEventListener('click', addRipple);
+  }
+
   // Auto-load on DOMContentLoaded (also called from loadUser in app.js)
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', loadCard);
+    document.addEventListener('DOMContentLoaded', function () { loadCard(); initRipple(); });
   } else {
     loadCard();
+    initRipple();
   }
 })();
