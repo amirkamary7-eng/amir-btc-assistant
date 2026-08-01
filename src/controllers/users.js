@@ -36,6 +36,10 @@ export function createUserHandlers(deps) {
    * for development/testing outside Telegram Webview.
    */
   async function handleBootstrap(request, env) {
+    const _t0 = Date.now();
+    const _log = (name) => console.log(JSON.stringify({ scope: 'boot-trace', step: name, ms: Date.now() - _t0 }));
+
+    _log('entry');
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
         {
@@ -82,12 +86,13 @@ export function createUserHandlers(deps) {
 
     payload.user_id = userId;
     try {
-      // Phase 2: Ensure users table has new tracking columns
+      _log('auth-ok');
       if (typeof userRepo.ensureTable === 'function') {
         try { await userRepo.ensureTable(env); } catch {}
       }
-      // Check if user already exists — referral only allowed for new users (Design)
+      _log('ensureTable');
       const preExistingUser = await userRepo.getById(env, userId);
+      _log('getById-1');
       const isNewUser = !preExistingUser;
 
       const userRow = await userRepo.bootstrap(env, userId, {
@@ -95,57 +100,34 @@ export function createUserHandlers(deps) {
         first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(tgUser?.first_name),
         last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(tgUser?.last_name),
         lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
-        // Phase 2: Track Telegram premium status from initData
         is_premium: Boolean(tgUser?.is_premium),
       });
-      const referrerId = normalizeOptionalString(payload.referrer_id);
-      // ROOT CAUSE FIX (R-1.1): Use the SIGNED start_param from initData
-      // instead of the unsigned request body referrer_id. The start_param
-      // is covered by the HMAC hash — it cannot be tampered with.
-      // The frontend still sends referrer_id in the body for backward
-      // compatibility, but we OVERRIDE it with the signed startParam if
-      // available. This prevents referral fraud (user claiming a different
-      // referrer than the one in their Telegram invite link).
-      //
-      // start_param format: "ref_<telegram_id>" (set by the /start command
-      // when the user opens the bot via a referral link t.me/bot?start=ref_123)
-      let signedReferrerId = referrerId; // fallback to body value
+      _log('bootstrap-user');
+      let signedReferrerId = normalizeOptionalString(payload.referrer_id);
       if (auth.startParam && typeof auth.startParam === 'string') {
         const match = auth.startParam.match(/^ref_(\d+)$/);
-        if (match) {
-          signedReferrerId = match[1];
-        }
+        if (match) signedReferrerId = match[1];
       }
-      await diagLog(env, { scope: 'diag-handleBootstrap', userId, referrer_id: signedReferrerId, isNewUser, used_signed_referrer: signedReferrerId !== referrerId });
 
-      await processReferralOnBootstrap(
-        env,
-        userId,
-        signedReferrerId,
-        Boolean(userRow?.channel_joined),
-        isNewUser,
-      );
-      // Flush buffered diag logs to KV (1 write instead of 21+)
-      if (typeof flushDiagLog === 'function') {
-        try { await flushDiagLog(env); } catch {}
-      }
+      _log('before-referral');
+      await processReferralOnBootstrap(env, userId, signedReferrerId, Boolean(userRow?.channel_joined), isNewUser);
+      _log('after-referral');
+
       const freshUserRow = await userRepo.getById(env, userId);
+      _log('getById-2');
       const watchlist = await watchlistRepo.getSymbols(env, userId);
+      _log('watchlist');
 
-      // Membership check: use cache first (fast path for returning users),
-      // fall back to real Telegram check only if cache is empty/stale.
-      // This makes the check nearly instant for users who recently verified.
       let channelJoined = false;
       if (tgUser?.id) {
         try {
-          // Step 1: try cache (forceRefresh: false) — instant if user verified <5min ago
           let membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: false });
+          _log('membership-cached');
           if (membership?.joined) {
-            // Cache says joined — trust it (5min TTL is short enough for security)
             channelJoined = true;
           } else {
-            // Cache says not-joined OR cache miss — do a real Telegram check
             membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: true });
+            _log('membership-force');
             channelJoined = Boolean(membership?.joined);
           }
         } catch (e) {
@@ -155,41 +137,27 @@ export function createUserHandlers(deps) {
         channelJoined = Boolean(freshUserRow?.channel_joined);
       }
 
-      // ROOT-CAUSE FIX for admin detection instability:
-      //
-      // Previously, bootstrap only checked isAdminTelegramId(env, userId) — which
-      // ONLY checks env vars (ADMIN_TELEGRAM_ID / ADMIN_TELEGRAM_IDS). DB admins
-      // (added via the admin panel) got is_admin=false from bootstrap → the admin
-      // entry button was never shown → they could NEVER open the admin panel.
-      //
-      // This caused: "بعضی وقت‌ها پنل مدیریت نمایش داده نمی‌شود" for DB admins.
-      //
-      // FIX: Check BOTH env super admin AND DB admins table. This matches the
-      // logic in handleIsAdmin() so bootstrap and is-admin agree.
       let isUserAdmin = isAdminTelegramId(env, userId);
+      _log('isAdmin-check');
       if (!isUserAdmin && isDatabaseConfigured(env) && adminRepo) {
         try {
           await adminRepo.ensureSchema(env).catch(() => {});
           const dbAdmin = await adminRepo.getAdminByTelegramId(env, userId);
-          if (dbAdmin && dbAdmin.active) {
-            isUserAdmin = true;
-          }
+          if (dbAdmin && dbAdmin.active) isUserAdmin = true;
         } catch (e) {
-          // Non-fatal — don't let admin check failure break bootstrap
           console.warn('[BOOTSTRAP] Admin DB check failed:', e?.message);
         }
       }
-
+      _log('admin-done');
 
       return jsonResponse({
         status: 'success',
         user: userRepo.normalizeRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
-        watchlist,
-        bot_username: String(env.BOT_USERNAME || ''),
-        channel_joined: channelJoined,
-        is_admin: isUserAdmin,
+        watchlist, bot_username: String(env.BOT_USERNAME || ''), channel_joined: channelJoined, is_admin: isUserAdmin,
       }, {}, env);
     } catch (error) {
+      _log('catch');
+      console.log(JSON.stringify({ scope: 'boot-trace-ERROR', ms: Date.now() - _t0, error: error?.message }));
       console.warn(safeError('bootstrap-user', error));
       return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, env);
     }

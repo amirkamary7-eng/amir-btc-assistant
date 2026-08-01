@@ -1335,13 +1335,34 @@ async function getReferralRewardPerInvite(env) {
 // WebSocket connections are bound to the request context that created them.
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
+  // ── PROFILING ──────────────────────────────────────────────────────
+  // When env._profileCollector is an array (set by the handler), each
+  // queryDb call records per-phase wall-time:
+  //   tPoolCreate — `new Pool()` (synchronous, ≈ CPU time)
+  //   tQuery      — `pool.query()` (wall time; CPU portion = TLS handshake
+  //                 + message encode/decode; network wait is NOT CPU)
+  //   tPoolEnd    — `await pool.end()` (wall time; CPU ≈ close-frame encode)
+  // This lets us determine whether Pool lifecycle overhead dominates.
+  const _prof = env && Array.isArray(env._profileCollector) ? env._profileCollector : null;
+  const _label = _prof ? String(sqlText).slice(0, 80).replace(/\s+/g, ' ') : null;
+
+  const _t0 = _prof ? Date.now() : 0;
   const pool = createPool(env);
+  const _tPoolCreate = _prof ? Date.now() - _t0 : 0;
   if (!pool) throw new Error('Database not configured');
 
+  let _tQuery = 0;
+  let _tPoolEnd = 0;
+  let result;
+  let thrown = null;
+
   try {
+    const _tQ0 = _prof ? Date.now() : 0;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        return await pool.query(sqlText, params);
+        result = await pool.query(sqlText, params);
+        thrown = null;
+        break;
       } catch (error) {
         const msg = String(error?.message || '');
         const isTransient = msg.includes('530') ||
@@ -1351,17 +1372,35 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
                             msg.includes('timeout') ||
                             msg.includes('fetch failed') ||
                             msg.includes('network');
-        if (attempt === retries || !isTransient) throw error;
+        if (attempt === retries || !isTransient) { thrown = error; break; }
         const ms = Math.min(300 * 2 ** attempt, 2000);
         await new Promise((r) => setTimeout(r, ms));
       }
     }
+    if (_prof) _tQuery = Date.now() - _tQ0;
   } finally {
     // CRITICAL: close the Pool synchronously in finally. This MUST be awaited
     // so the WebSocket is released before queryDb returns. If pool.end() were
     // fire-and-forget, the WebSocket could outlive the request context.
+    const _tE0 = _prof ? Date.now() : 0;
     try { await pool.end(); } catch {}
+    if (_prof) _tPoolEnd = Date.now() - _tE0;
   }
+
+  if (_prof) {
+    _prof.push({
+      label: _label,
+      tPoolCreate: _tPoolCreate,
+      tQuery: _tQuery,
+      tPoolEnd: _tPoolEnd,
+      tTotal: _tPoolCreate + _tQuery + _tPoolEnd,
+      retries: retries,
+      error: thrown ? String(thrown.message).slice(0, 100) : null,
+    });
+  }
+
+  if (thrown) throw thrown;
+  return result;
 }
 
 /**
@@ -1376,21 +1415,68 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * This is the ONLY place a Pool is used; regular queries go through neon() HTTP.
  */
 async function queryDbTransaction(env, queries) {
+  // ── PROFILING ──────────────────────────────────────────────────────
+  // Records: tPoolCreate, tConnect (pool.connect — pays TLS handshake),
+  // tQueries (sum of all client.query), tCommit, tPoolEnd.
+  // KEY INSIGHT: tConnect is paid ONCE for the whole transaction; each
+  // subsequent client.query reuses the same WebSocket → ~0 CPU per extra
+  // query. This is why batching N queries into 1 transaction saves ~N× the
+  // TLS handshake CPU.
+  const _prof = env && Array.isArray(env._profileCollector) ? env._profileCollector : null;
+  const _t0 = _prof ? Date.now() : 0;
   const pool = createPool(env);
+  const _tPoolCreate = _prof ? Date.now() - _t0 : 0;
   if (!pool) throw new Error('Database not configured');
 
   let client;
+  let _tConnect = 0;
+  let _tQueries = 0;
+  let _tCommit = 0;
+  let _tPoolEnd = 0;
   try {
+    const _tC0 = _prof ? Date.now() : 0;
     client = await pool.connect();
+    if (_prof) _tConnect = Date.now() - _tC0;
+
     await client.query('BEGIN');
     const results = [];
     for (const { sql, params } of queries) {
+      const _tQQ0 = _prof ? Date.now() : 0;
       results.push(await client.query(sql, params));
+      if (_prof) _tQueries += Date.now() - _tQQ0;
     }
+    const _tCM0 = _prof ? Date.now() : 0;
     await client.query('COMMIT');
+    if (_prof) _tCommit = Date.now() - _tCM0;
+
+    if (_prof) {
+      _prof.push({
+        label: `TRANSACTION[${queries.length} queries]`,
+        tPoolCreate: _tPoolCreate,
+        tConnect: _tConnect,
+        tQueries: _tQueries,
+        tCommit: _tCommit,
+        tPoolEnd: 0,
+        tTotal: _tPoolCreate + _tConnect + _tQueries + _tCommit,
+        mode: 'transaction',
+      });
+    }
     return results;
   } catch (error) {
     try { if (client) await client.query('ROLLBACK'); } catch {}
+    if (_prof) {
+      _prof.push({
+        label: `TRANSACTION[ERROR]`,
+        tPoolCreate: _tPoolCreate,
+        tConnect: _tConnect,
+        tQueries: _tQueries,
+        tCommit: 0,
+        tPoolEnd: 0,
+        tTotal: _tPoolCreate + _tConnect + _tQueries,
+        mode: 'transaction',
+        error: String(error?.message).slice(0, 100),
+      });
+    }
     throw error;
   } finally {
     if (client) {
@@ -1398,7 +1484,17 @@ async function queryDbTransaction(env, queries) {
     }
     // CRITICAL: fully close the per-call pool so its WebSocket (and the request
     // context it is bound to) is released. Awaited → never fire-and-forget.
+    const _tE0 = _prof ? Date.now() : 0;
     try { await pool.end(); } catch {}
+    if (_prof) _tPoolEnd = Date.now() - _tE0;
+    // Backfill tPoolEnd into the last pushed entry for this transaction
+    if (_prof && _prof.length > 0) {
+      const last = _prof[_prof.length - 1];
+      if (last && last.mode === 'transaction') {
+        last.tPoolEnd = _tPoolEnd;
+        last.tTotal = (last.tTotal || 0) + _tPoolEnd;
+      }
+    }
   }
 }
 
@@ -6666,6 +6762,58 @@ export default {
       if (request.method === 'POST' && /^\/api\/analyses\/[^/]+\/view$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
         return await analysisHandlers.handleIncrementView(request, env, analysisId);
+      }
+
+      // ── PROFILING: isolated queryDb vs neon() HTTP comparison ──
+      // GET /api/admin/_profile-ping?mode=pool|neon|both
+      // Runs a trivial SELECT 1 and returns per-phase timing.
+      // Requires admin (same as other admin endpoints).
+      if (request.method === 'GET' && url.pathname === '/api/admin/_profile-ping') {
+        const mode = url.searchParams.get('mode') || 'both';
+        const result = { mode, samples: [] };
+
+        // Admin check
+        const authResult = await authenticateTelegramRequest(request, env);
+        if (authResult.error) return authResult.error;
+        if (!isAdminTelegramId(env, authResult.user.id)) {
+          return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
+        }
+        if (!isDatabaseConfigured(env)) {
+          return jsonResponse({ error: 'Database not configured' }, { status: 503 }, env);
+        }
+
+        const runs = parseInt(url.searchParams.get('runs') || '3', 10);
+        for (let i = 0; i < runs; i++) {
+          if (mode === 'pool' || mode === 'both') {
+            const t0 = Date.now();
+            const tPoolStart = Date.now();
+            const pool = createPool(env);
+            const tPoolCreate = Date.now() - tPoolStart;
+            const tQStart = Date.now();
+            try { await pool.query('SELECT 1 AS x'); } catch (e) { result.poolError = String(e.message).slice(0,120); }
+            const tQuery = Date.now() - tQStart;
+            const tEStart = Date.now();
+            try { await pool.end(); } catch {}
+            const tPoolEnd = Date.now() - tEStart;
+            result.samples.push({ run: i+1, method: 'pool', tPoolCreate, tQuery, tPoolEnd, tTotal: Date.now() - t0 });
+          }
+          if (mode === 'neon' || mode === 'both') {
+            const t0 = Date.now();
+            const sql = getSharedNeon(env);
+            if (!sql) {
+              result.samples.push({ run: i+1, method: 'neon', error: 'neon() client init failed' });
+            } else {
+              const tQStart = Date.now();
+              try {
+                const rows = await sql`SELECT 1 AS x`;
+                result.samples.push({ run: i+1, method: 'neon', tQuery: Date.now() - tQStart, tTotal: Date.now() - t0, rowCount: rows?.length });
+              } catch (e) {
+                result.samples.push({ run: i+1, method: 'neon', tQuery: Date.now() - tQStart, tTotal: Date.now() - t0, error: String(e.message).slice(0, 120) });
+              }
+            }
+          }
+        }
+        return jsonResponse(result, {}, env);
       }
 
       // ── Analyses: Admin endpoints (new paths) ──

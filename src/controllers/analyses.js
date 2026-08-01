@@ -328,9 +328,28 @@ export function createAnalysisHandlers(deps) {
 
   /**
    * POST /api/admin/analyses — Create (admin only).
+   *
+   * Profiling: append `?_profile=1` to the request URL. The response will
+   * include a `_profile` object with per-queryDb wall-time breakdown:
+   *   - tPoolCreate (new Pool — synchronous, ≈ CPU)
+   *   - tQuery      (pool.query — wall; CPU portion = TLS handshake + parse)
+   *   - tPoolEnd    (await pool.end — wall; CPU ≈ close-frame encode)
+   * Plus a `_phaseProfile` with cumulative wall-time per handler phase.
    */
   async function handleCreate(request, env, ctx) {
+    const _t0 = Date.now();
+    const _phase = (name) => {
+      if (!_phases) return;
+      _phases.push({ name, ms: Date.now() - _t0 });
+    };
+    const _phases = [];
+
+    // Activate profiling collector — queryDb/queryDbTransaction will push to it
+    env._profileCollector = [];
+
+    _phase('entry');
     const authResult = await requireAdmin(request, env);
+    _phase('requireAdmin');
     if (authResult.error) return authResult.error;
     if (!isAdminTelegramId(env, authResult.user.id)) {
       return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
@@ -340,14 +359,21 @@ export function createAnalysisHandlers(deps) {
     }
 
     const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: true }, env);
+    _phase('parsePayload');
     if (parsed.error) return parsed.error;
+
+    // Detect profiling flag
+    const url = new URL(request.url);
+    const wantProfile = url.searchParams.get('_profile') === '1';
 
     try {
       await analysisRepo.ensureSchema(env);
+      _phase('ensureSchema');
 
       // Featured limit check (max 5)
       if (parsed.payload.featured && !parsed.payload.force_featured) {
         const featuredCount = await analysisRepo.countFeatured(env);
+        _phase('countFeatured');
         if (featuredCount >= 5) {
           return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: featuredCount, max: 5 }, {}, env);
         }
@@ -355,24 +381,47 @@ export function createAnalysisHandlers(deps) {
       // If force_featured, un-feature the oldest first
       if (parsed.payload.featured && parsed.payload.force_featured) {
         await analysisRepo.unsetOldestFeatured(env);
+        _phase('unsetOldestFeatured');
       }
 
       const analysis = await analysisRepo.create(env, authResult.user.id, parsed.payload);
+      _phase('create');
       const version = await invalidateAnalysesCache(env);
-
-      // Fetch fresh stats + featured (KV may be stale on other instances)
-      const [stats, featured] = await Promise.all([
-        analysisRepo.getStats(env),
-        analysisRepo.getFeatured(env),
-      ]);
+      _phase('invalidateCache');
 
       // Notify joined users (non-blocking)
       const notify = notifyNewAnalysis(env, analysis, ctx);
       if (ctx?.waitUntil) ctx.waitUntil(notify.catch(() => {}));
       else notify.catch(() => {});
 
-      return jsonResponse({ status: 'success', analysis, version, stats, featured }, {}, env);
+      _phase('response');
+
+      const baseResponse = { status: 'success', analysis, version };
+
+      if (wantProfile) {
+        // Build per-query summary
+        const queries = env._profileCollector || [];
+        const pool = {
+          totalPoolCreateMs: queries.reduce((s, q) => s + (q.tPoolCreate || 0), 0),
+          totalQueryMs: queries.reduce((s, q) => s + (q.tQuery || (q.tConnect || 0) + (q.tQueries || 0) + (q.tCommit || 0)), 0),
+          totalPoolEndMs: queries.reduce((s, q) => s + (q.tPoolEnd || 0), 0),
+          queryCount: queries.length,
+        };
+        return jsonResponse({
+          ...baseResponse,
+          _profile: {
+            totalWallMs: Date.now() - _t0,
+            queries,
+            pool,
+            phases: _phases,
+            note: 'Wall time. CPU ≈ tPoolCreate + (TLS handshake portion of tQuery) + tPoolEnd. Network wait in tQuery is NOT CPU.',
+          },
+        }, {}, env);
+      }
+
+      return jsonResponse(baseResponse, {}, env);
     } catch (error) {
+      _phase('catch');
       console.warn(safeError('create-analysis', error));
       return safeDbErrorResponse(error, {}, env);
     }
