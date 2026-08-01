@@ -449,17 +449,15 @@ export function createAnalysisHandlers(deps) {
       if (!deleted) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
-      // FIX 1: pass analysisId so the detail cache for the deleted analysis is
-      // purged — previously GET /:id returned the deleted record from KV for
-      // up to 60s, making it look like the delete didn't work.
       const version = await invalidateAnalysesCache(env, analysisId);
 
-      // ROOT-CAUSE FIX: getStats + getFeatured merged into a single queryDb
-      // call via CTE. Previously 2 parallel queryDb = 2 Pool creations =
-      // ~6-10ms CPU. Now 1 queryDb = ~3-5ms CPU.
-      // Total for handleDelete: remove (1) + stats+featured (1) = 2 queryDb.
-      const statsAndFeatured = await analysisRepo.getStatsAndFeatured(env);
-      return jsonResponse({ status: 'success', version, ...statsAndFeatured }, {}, env);
+      // ROOT-CAUSE FIX: Removed getStatsAndFeatured() — it added 1 extra
+      // queryDb which pushed CPU to 10ms → exceededCpu → Worker killed
+      // AFTER delete succeeded but BEFORE returning response → HTTP 500.
+      // Frontend thought delete failed, then all subsequent requests also
+      // hit exceededCpu, breaking admin detection + join check in cascade.
+      // Now: only 1 queryDb (remove). Stats/featured via background refetch.
+      return jsonResponse({ status: 'success', version }, {}, env);
     } catch (error) {
       console.warn(safeError('delete-analysis', error));
       return safeDbErrorResponse(error, {}, env);
