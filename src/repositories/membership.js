@@ -299,22 +299,28 @@ export function createMembershipRepository(deps) {
   // ─── Stats ───────────────────────────────────────────────────────────────
 
   async function counts(env) {
-    const [total, approved, vip, suspended] = await Promise.all([
-      queryDb(env, 'SELECT COUNT(*)::int AS c FROM membership_users').then(r => r.rows[0].c),
-      queryDb(env, "SELECT COUNT(*)::int AS c FROM membership_users WHERE membership_status = 'APPROVED'").then(r => r.rows[0].c),
-      queryDb(env, "SELECT COUNT(*)::int AS c FROM membership_users WHERE membership_level IN ('VIP','PREMIUM','ELITE')").then(r => r.rows[0].c),
-      queryDb(env, "SELECT COUNT(*)::int AS c FROM membership_users WHERE membership_status = 'SUSPENDED'").then(r => r.rows[0].c),
-    ]);
-    return { totalUsers: total, approvedUsers: approved, vipUsers: vip, suspendedUsers: suspended };
+    // Single query with conditional aggregation — 1 DB round-trip instead of 4.
+    const row = await queryDb(env,
+      `SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE membership_status = 'APPROVED')::int AS approved,
+        COUNT(*) FILTER (WHERE membership_level IN ('VIP','PREMIUM','ELITE'))::int AS vip,
+        COUNT(*) FILTER (WHERE membership_status = 'SUSPENDED')::int AS suspended
+       FROM membership_users`
+    ).then(r => r.rows[0]);
+    return { totalUsers: row.total, approvedUsers: row.approved, vipUsers: row.vip, suspendedUsers: row.suspended };
   }
 
   async function requestCounts(env) {
-    const [total, pending, rejected] = await Promise.all([
-      queryDb(env, 'SELECT COUNT(*)::int AS c FROM membership_requests').then(r => r.rows[0].c),
-      queryDb(env, "SELECT COUNT(*)::int AS c FROM membership_requests WHERE status = 'PENDING'").then(r => r.rows[0].c),
-      queryDb(env, "SELECT COUNT(*)::int AS c FROM membership_requests WHERE status = 'REJECTED'").then(r => r.rows[0].c),
-    ]);
-    return { totalRequests: total, pendingRequests: pending, rejectedRequests: rejected };
+    // Single query with conditional aggregation — 1 DB round-trip instead of 3.
+    const row = await queryDb(env,
+      `SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE status = 'PENDING')::int AS pending,
+        COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS rejected
+       FROM membership_requests`
+    ).then(r => r.rows[0]);
+    return { totalRequests: row.total, pendingRequests: row.pending, rejectedRequests: row.rejected };
   }
 
   function exchangeBreakdown(env) {
