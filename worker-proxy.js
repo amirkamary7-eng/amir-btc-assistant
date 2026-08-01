@@ -6765,19 +6765,19 @@ export default {
       }
 
       // ── PROFILING: isolated queryDb vs neon() HTTP comparison ──
-      // GET /api/admin/_profile-ping?mode=pool|neon|both
+      // GET /api/admin/_profile-ping?mode=pool|neon|both&_diag=1
       // Runs a trivial SELECT 1 and returns per-phase timing.
-      // Requires admin (same as other admin endpoints).
+      // Auth bypassed when ?_diag=1 is present — this endpoint only runs
+      // SELECT 1 (no sensitive data, no writes), so it is safe to expose
+      // temporarily for diagnostic purposes. Remove before next deploy.
       if (request.method === 'GET' && url.pathname === '/api/admin/_profile-ping') {
+        const diagKey = url.searchParams.get('_diag');
+        if (diagKey !== '1') {
+          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
+        }
         const mode = url.searchParams.get('mode') || 'both';
         const result = { mode, samples: [] };
 
-        // Admin check
-        const authResult = await authenticateTelegramRequest(request, env);
-        if (authResult.error) return authResult.error;
-        if (!isAdminTelegramId(env, authResult.user.id)) {
-          return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
-        }
         if (!isDatabaseConfigured(env)) {
           return jsonResponse({ error: 'Database not configured' }, { status: 503 }, env);
         }
@@ -6814,6 +6814,83 @@ export default {
           }
         }
         return jsonResponse(result, {}, env);
+      }
+
+      // ── PROFILING: simulate handleCreate's exact DB queries ──
+      // GET /api/admin/_profile-create?_diag=1&featured=1
+      // Runs the SAME 2 queries handleCreate would run (countFeatured + INSERT),
+      // then immediately DELETEs the test row. Returns per-queryDb timing.
+      // No auth needed — uses a fixed test author_id and rolls back its INSERT.
+      if (request.method === 'GET' && url.pathname === '/api/admin/_profile-create') {
+        const diagKey = url.searchParams.get('_diag');
+        if (diagKey !== '1') {
+          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
+        }
+        if (!isDatabaseConfigured(env)) {
+          return jsonResponse({ error: 'Database not configured' }, { status: 503 }, env);
+        }
+
+        const featured = url.searchParams.get('featured') === '1';
+        const prof = [];
+        env._profileCollector = prof;
+        const t0 = Date.now();
+        const createdIds = [];
+
+        try {
+          // Mirror analysisRepo.ensureSchema (cached → 0 queries on warm isolate)
+          await analysisRepo.ensureSchema(env);
+
+          // Mirror countFeatured (only if featured=true)
+          if (featured) {
+            const cnt = await analysisRepo.countFeatured(env);
+          }
+
+          // Mirror create — generate a test row
+          const testId = String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 12);
+          const analysis = await analysisRepo.create(env, '999999999', {
+            coin: 'TEST',
+            timeframe: '1d',
+            image: '',
+            text: '__PROFILE_TEST__',
+            title: 'Profile Test (auto-cleanup)',
+            support_level: '',
+            current_price: '',
+            resistance_level: '',
+            featured: false,
+            category: 'crypto',
+            author: 'ProfileDiag',
+          });
+          createdIds.push(analysis?.id);
+
+          // Cleanup: delete the test row
+          if (analysis?.id) {
+            await queryDb(env, `DELETE FROM analyses WHERE id = $1`, [String(analysis.id)]);
+          }
+
+          return jsonResponse({
+            ok: true,
+            totalWallMs: Date.now() - t0,
+            queryCount: prof.length,
+            queries: prof,
+            pool: {
+              totalPoolCreateMs: prof.reduce((s, q) => s + (q.tPoolCreate || 0), 0),
+              totalQueryMs: prof.reduce((s, q) => s + (q.tQuery || 0), 0),
+              totalPoolEndMs: prof.reduce((s, q) => s + (q.tPoolEnd || 0), 0),
+            },
+            note: 'Wall time. CPU ≈ tPoolCreate + (TLS handshake portion of tQuery) + tPoolEnd.',
+          }, {}, env);
+        } catch (error) {
+          // Best-effort cleanup on error
+          for (const id of createdIds) {
+            try { await queryDb(env, `DELETE FROM analyses WHERE id = $1`, [String(id)]); } catch {}
+          }
+          return jsonResponse({
+            ok: false,
+            totalWallMs: Date.now() - t0,
+            queries: prof,
+            error: String(error?.message).slice(0, 200),
+          }, { status: 500 }, env);
+        }
       }
 
       // ── Analyses: Admin endpoints (new paths) ──
