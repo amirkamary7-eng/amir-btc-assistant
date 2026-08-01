@@ -11690,8 +11690,13 @@ body.jl-locked .cd-fullscreen {
 /* #endregion */
 
 
-/* ═══ Membership Module — Premium Badge (inside profile card) ══════════════ */
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Membership Module — Premium Badge + Popup + Admin Panel
+   Aligned with existing design system (referral-entry-card / adm-stat-card-v2)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Premium Badge (inside profile-card, top-left corner) ────────────────── */
 .membership-badge {
     position: absolute;
     top: 14px;
@@ -11699,89 +11704,77 @@ body.jl-locked .cd-fullscreen {
     z-index: 4;
     cursor: pointer;
     outline: none;
-    border-radius: 10px;
-    transition: transform 0.2s ease;
-}
-.membership-badge:active { transform: scale(0.95); }
-.membership-badge:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-
-/* Premium badge — glass + gold gradient + glow */
-.membership-badge--premium {
-    position: relative;
-    overflow: hidden;
-    border: 1px solid rgba(255, 200, 100, 0.35);
-    border-radius: 10px;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(252, 211, 77, 0.12));
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    box-shadow: 0 2px 12px rgba(245, 158, 11, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-    transition: all 0.25s ease;
-}
-.membership-badge--premium:hover {
-    transform: translateY(-1px) scale(1.04);
-    box-shadow: 0 4px 18px rgba(245, 158, 11, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 200, 100, 0.55);
-}
-.membership-badge--premium .mb-badge-glow {
-    position: absolute;
-    inset: -4px;
-    border-radius: 12px;
-    background: radial-gradient(circle at center, rgba(252, 211, 77, 0.3), transparent 70%);
-    opacity: 0.6;
-    animation: mb-badge-pulse 2.5s ease-in-out infinite;
-    pointer-events: none;
-}
-@keyframes mb-badge-pulse {
-    0%, 100% { opacity: 0.4; transform: scale(1); }
-    50% { opacity: 0.7; transform: scale(1.08); }
-}
-.membership-badge--premium .mb-badge-shimmer {
-    position: absolute;
-    top: 0; left: -100%;
-    width: 60%; height: 100%;
-    background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.25) 50%, transparent 70%);
-    animation: mb-badge-shimmer 3.5s ease-in-out infinite;
-    pointer-events: none;
-}
-@keyframes mb-badge-shimmer {
-    0% { left: -60%; }
-    60%, 100% { left: 110%; }
-}
-
-/* Free badge — subtle */
-.membership-badge--free {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    transition: all 0.2s ease;
-}
-.membership-badge--free:hover {
-    background: rgba(255, 138, 0, 0.1);
-    border-color: rgba(255, 138, 0, 0.3);
-}
-
-/* Badge body (icon + text) */
-.mb-badge-body {
-    position: relative;
-    z-index: 1;
+    border: none;
+    background: none;
+    padding: 0;
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
+    gap: 5px;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.membership-badge--premium .mb-badge-icon {
+.membership-badge:active { transform: scale(0.93); }
+.membership-badge:focus-visible { box-shadow: 0 0 0 2px var(--accent); border-radius: 12px; }
+
+/* Diamond icon — 3D effect with gradient + glow + shimmer */
+.mb-diamond {
+    position: relative;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.mb-diamond-svg {
+    position: relative;
+    z-index: 2;
+    width: 18px;
+    height: 18px;
+}
+/* Glow behind diamond */
+.mb-diamond-glow {
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(245, 158, 11, 0.45), transparent 65%);
+    filter: blur(4px);
+    animation: mb-diamond-pulse 3s ease-in-out infinite;
+    pointer-events: none;
+}
+@keyframes mb-diamond-pulse {
+    0%, 100% { opacity: 0.5; transform: scale(0.95); }
+    50% { opacity: 0.85; transform: scale(1.1); }
+}
+/* Floating rotation — very subtle */
+.mb-diamond-float {
+    animation: mb-diamond-float 4s ease-in-out infinite;
+}
+@keyframes mb-diamond-float {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    25% { transform: translateY(-1.5px) rotate(2deg); }
+    75% { transform: translateY(-0.5px) rotate(-2deg); }
+}
+/* Shimmer sweep across diamond surface */
+.mb-diamond-shimmer {
+    position: absolute;
+    top: 0; left: -50%;
+    width: 40%; height: 100%;
+    background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.6) 50%, transparent 70%);
+    animation: mb-diamond-shimmer 3.5s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 3;
+    border-radius: 50%;
+}
+@keyframes mb-diamond-shimmer {
+    0% { left: -50%; opacity: 0; }
+    20% { opacity: 1; }
+    60%, 100% { left: 110%; opacity: 0; }
+}
+
+/* Premium (VIP+) state — gold */
+.membership-badge--premium .mb-diamond-svg {
     color: #FCD34D;
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
-}
-.membership-badge--free .mb-badge-icon {
-    color: var(--accent);
-}
-.mb-badge-text {
-    font-size: 10px;
-    font-weight: 700;
-    white-space: nowrap;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4)) drop-shadow(0 0 6px rgba(245, 158, 11, 0.5));
 }
 .membership-badge--premium .mb-badge-text {
     background: linear-gradient(135deg, #FCD34D, #F59E0B);
@@ -11789,8 +11782,34 @@ body.jl-locked .cd-fullscreen {
     background-clip: text;
     color: transparent;
 }
+.membership-badge--premium:hover { transform: translateY(-1px) scale(1.05); }
+
+/* Free/Locked state — dark gray + dim gold */
+.membership-badge--free .mb-diamond-glow {
+    background: radial-gradient(circle, rgba(107, 122, 141, 0.25), transparent 65%);
+    animation: none;
+    opacity: 0.4;
+}
+.membership-badge--free .mb-diamond-svg {
+    color: rgba(245, 158, 11, 0.35);
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+.membership-badge--free .mb-diamond-shimmer { display: none; }
 .membership-badge--free .mb-badge-text {
-    color: var(--accent);
+    color: rgba(174, 183, 194, 0.6);
+}
+.membership-badge--free:hover .mb-diamond-svg {
+    color: rgba(245, 158, 11, 0.55);
+}
+.membership-badge--free:hover .mb-badge-text {
+    color: rgba(252, 211, 77, 0.7);
+}
+
+.mb-badge-text {
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
 }
 
 /* Loading skeleton */
@@ -11798,10 +11817,11 @@ body.jl-locked .cd-fullscreen {
     border: 1px solid var(--border);
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.03);
+    padding: 4px 10px;
 }
 .mb-badge-skeleton {
     width: 70px;
-    height: 14px;
+    height: 12px;
     border-radius: 4px;
     background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08), rgba(255,255,255,0.04));
     background-size: 200% 100%;
@@ -11812,19 +11832,21 @@ body.jl-locked .cd-fullscreen {
     100% { background-position: -200% 0; }
 }
 
-/* ═══ Membership Popup ════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   Premium Popup — feature intro (NOT banner)
+   ═══════════════════════════════════════════════════════════════════════════ */
 .mb-popup-overlay {
     position: fixed;
     inset: 0;
     z-index: 9999;
-    background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
-    animation: mb-fade-in 0.3s ease;
+    animation: mb-fade-in 0.35s ease;
 }
 @keyframes mb-fade-in {
     from { opacity: 0; }
@@ -11832,156 +11854,443 @@ body.jl-locked .cd-fullscreen {
 }
 .mb-popup {
     position: relative;
-    background: var(--bg-card);
-    border: 1px solid rgba(255, 200, 100, 0.25);
-    border-radius: var(--radius);
-    padding: 32px 24px 24px;
-    max-width: 340px;
+    background:
+        radial-gradient(120% 80% at 50% 0%, rgba(245, 158, 11, 0.08), transparent 60%),
+        linear-gradient(180deg, #0F1828 0%, #0B1020 100%);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    border-radius: 22px;
+    padding: 28px 22px 20px;
+    max-width: 380px;
     width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
     text-align: center;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 30px rgba(245, 158, 11, 0.15);
-    animation: mb-scale-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 50px rgba(245, 158, 11, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    animation: mb-popup-in 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
-@keyframes mb-scale-in {
-    from { transform: scale(0.92); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
+@keyframes mb-popup-in {
+    from { transform: scale(0.9) translateY(20px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
 }
-.mb-popup-glow {
+.mb-popup-close {
     position: absolute;
-    top: -40px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 160px;
-    height: 160px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(245, 158, 11, 0.2), transparent 70%);
-    pointer-events: none;
-}
-.mb-popup-badge {
-    position: relative;
-    z-index: 1;
-    width: 64px;
-    height: 64px;
-    margin: 0 auto 16px;
-    border-radius: 50%;
+    top: 14px;
+    right: 14px;
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    color: #c8d1e0;
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #F59E0B, #FCD34D);
-    color: #fff;
-    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.5);
+    transition: all 0.2s ease;
+    z-index: 10;
 }
-.mb-popup-badge--gold {
-    animation: mb-badge-pulse 2s ease-in-out infinite;
-}
-.mb-popup-title {
+.mb-popup-close:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+/* Popup header — large diamond + title */
+.mb-popup-header {
     position: relative;
-    z-index: 1;
-    font-size: 17px;
-    font-weight: 800;
-    color: var(--text);
-    margin-bottom: 8px;
-}
-.mb-popup-level {
-    position: relative;
-    z-index: 1;
-    display: inline-block;
-    padding: 3px 12px;
-    border-radius: 8px;
-    background: rgba(245, 158, 11, 0.18);
-    color: #FCD34D;
-    font-size: 13px;
-    font-weight: 700;
-    margin-bottom: 12px;
-}
-.mb-popup-lifetime {
-    position: relative;
-    z-index: 1;
-    font-size: 13px;
-    color: #FCD34D;
-    margin-bottom: 8px;
-    font-weight: 600;
-}
-.mb-popup-date {
-    position: relative;
-    z-index: 1;
-    font-size: 12px;
-    color: var(--text-sub);
-    margin-bottom: 16px;
-}
-.mb-popup-msg {
-    position: relative;
-    z-index: 1;
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--text-secondary);
     margin-bottom: 20px;
 }
-.mb-popup-btn {
+.mb-popup-diamond {
     position: relative;
-    z-index: 1;
-    width: 100%;
-    padding: 12px;
-    border-radius: 12px;
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s ease;
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
-.mb-popup-btn:hover { background: var(--accent-hover); }
-.mb-popup-btn:active { transform: scale(0.97); }
-.mb-popup--activation { max-width: 360px; }
-.mb-steps {
+.mb-popup-diamond-glow {
+    position: absolute;
+    inset: -16px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(245, 158, 11, 0.35), transparent 65%);
+    filter: blur(8px);
+    animation: mb-diamond-pulse 3s ease-in-out infinite;
+    pointer-events: none;
+}
+.mb-popup-diamond-icon {
     position: relative;
     z-index: 1;
-    margin: 16px 0;
+    width: 48px;
+    height: 48px;
+    color: #FCD34D;
+    filter: drop-shadow(0 2px 8px rgba(245, 158, 11, 0.5));
+    animation: mb-diamond-float 4s ease-in-out infinite;
+}
+.mb-popup-diamond-shimmer {
+    position: absolute;
+    top: 10%; left: -30%;
+    width: 50%; height: 80%;
+    background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.5) 50%, transparent 70%);
+    animation: mb-diamond-shimmer 3s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 2;
+    border-radius: 50%;
+}
+.mb-popup-title {
+    font-size: 17px;
+    font-weight: 800;
+    color: #fff;
+    margin: 0 0 6px;
+    letter-spacing: -0.3px;
+}
+.mb-popup-subtitle {
+    font-size: 12.5px;
+    color: #8B96A8;
+    line-height: 1.5;
+    margin: 0;
+    max-width: 300px;
+    margin: 0 auto;
+}
+
+/* Benefits — glass cards with icons */
+.mb-benefits {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    margin: 20px 0;
 }
-.mb-step {
+.mb-benefit {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
-    border-radius: 10px;
+    padding: 11px 12px;
+    border-radius: 13px;
     background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--border);
-    font-size: 13px;
-    color: var(--text-secondary);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(8px);
+    transition: all 0.25s ease;
+    text-align: right;
 }
-.mb-step-num {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
+.mb-benefit:hover {
+    background: rgba(245, 158, 11, 0.05);
+    border-color: rgba(245, 158, 11, 0.15);
+    transform: translateX(-2px);
+}
+.mb-benefit-icon {
     flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(245, 158, 11, 0.18);
-    color: #FCD34D;
-    font-size: 12px;
-    font-weight: 700;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.06));
+    border: 1px solid rgba(245, 158, 11, 0.15);
+    color: #F5A623;
 }
-.mb-step-final {
-    position: relative;
-    z-index: 1;
-    padding: 12px;
-    border-radius: 10px;
-    text-align: center;
-    background: rgba(245, 158, 11, 0.1);
-    color: #FCD34D;
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 20px;
-    border: 1px solid rgba(245, 158, 11, 0.2);
+.mb-benefit-text {
+    flex: 1;
+    min-width: 0;
+}
+.mb-benefit-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.3;
+}
+.mb-benefit-desc {
+    font-size: 10.5px;
+    color: #6B7A8D;
+    margin-top: 1px;
 }
 
-/* ═══ Membership Admin — uses existing design system, no custom classes ═══ */
-/* The admin panel uses .admin-list-item, .adm-card-top, .adm-card-meta,
-   .admin-badge, .admin-btn, .adm-stat-card-v2, .admin-pagination — all
-   existing classes from the admin design system. No overrides needed. */
+/* Timeline — activation steps */
+.mb-timeline {
+    position: relative;
+    margin: 20px 0 16px;
+    padding: 0;
+    list-style: none;
+}
+.mb-timeline::before {
+    content: '';
+    position: absolute;
+    right: 15px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.3), rgba(245, 158, 11, 0.05));
+}
+.mb-timeline-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+}
+.mb-timeline-num {
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #0F1828, #0B1020);
+    border: 2px solid rgba(245, 158, 11, 0.3);
+    color: #F5A623;
+    font-size: 13px;
+    font-weight: 800;
+}
+.mb-timeline-item:last-child .mb-timeline-num {
+    background: linear-gradient(135deg, #F59E0B, #FCD34D);
+    border-color: rgba(252, 211, 77, 0.5);
+    color: #0B1020;
+}
+.mb-timeline-text {
+    flex: 1;
+    font-size: 12.5px;
+    color: #AEB7C2;
+    line-height: 1.4;
+}
+.mb-timeline-item:last-child .mb-timeline-text {
+    color: #FCD34D;
+    font-weight: 600;
+}
+
+/* CTA button — Bitunix registration */
+.mb-cta-register {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 13px;
+    border-radius: 14px;
+    border: none;
+    background: linear-gradient(135deg, #F5A623, #FFCC4D);
+    color: #020611;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    box-shadow: 0 4px 16px rgba(245, 166, 35, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    margin-bottom: 12px;
+}
+.mb-cta-register:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(245, 166, 35, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.mb-cta-register:active { transform: scale(0.97); }
+
+/* UID submission form */
+.mb-uid-form {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 14px;
+    padding: 14px;
+    margin-top: 12px;
+}
+.mb-uid-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #8B96A8;
+    margin-bottom: 6px;
+    text-align: right;
+}
+.mb-uid-input {
+    width: 100%;
+    padding: 11px 14px;
+    border-radius: 11px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: all 0.2s ease;
+    text-align: left;
+    direction: ltr;
+}
+.mb-uid-input::placeholder { color: #4A5568; }
+.mb-uid-input:focus {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(0, 0, 0, 0.35);
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+}
+.mb-uid-submit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 10px;
+    padding: 11px;
+    border-radius: 12px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.1);
+    color: #F5A623;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+}
+.mb-uid-submit:hover {
+    background: rgba(245, 158, 11, 0.18);
+    border-color: rgba(245, 158, 11, 0.45);
+}
+.mb-uid-submit:active { transform: scale(0.97); }
+.mb-uid-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Success state */
+.mb-success {
+    text-align: center;
+    padding: 20px 10px;
+}
+.mb-success-icon {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(0, 200, 150, 0.2), rgba(0, 200, 150, 0.05));
+    border: 1px solid rgba(0, 200, 150, 0.3);
+    color: #00c896;
+    animation: mb-success-pop 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes mb-success-pop {
+    0% { transform: scale(0); }
+    60% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+}
+.mb-success-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 6px;
+}
+.mb-success-msg {
+    font-size: 12.5px;
+    color: #8B96A8;
+    line-height: 1.5;
+}
+
+/* Pending state */
+.mb-pending {
+    text-align: center;
+    padding: 20px 10px;
+}
+.mb-pending-icon {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.05));
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #F5A623;
+    animation: mb-pending-spin 3s linear infinite;
+}
+@keyframes mb-pending-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+.mb-pending-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 6px;
+}
+.mb-pending-msg {
+    font-size: 12.5px;
+    color: #8B96A8;
+    line-height: 1.5;
+}
+.mb-pending-progress {
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.06);
+    margin-top: 14px;
+    overflow: hidden;
+}
+.mb-pending-progress-bar {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #F5A623, #FFCC4D);
+    animation: mb-progress 2s ease-in-out infinite;
+}
+@keyframes mb-progress {
+    0% { width: 0%; }
+    50% { width: 70%; }
+    100% { width: 100%; }
+}
+
+/* VIP status page (when already premium) */
+.mb-vip-status {
+    text-align: center;
+}
+.mb-vip-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(252, 211, 77, 0.08));
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    margin: 6px 0 16px;
+}
+.mb-vip-badge-text {
+    font-size: 13px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #FCD34D, #F59E0B);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+.mb-vip-info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 16px 0;
+}
+.mb-vip-info-item {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 11px;
+    padding: 10px;
+    text-align: center;
+}
+.mb-vip-info-label {
+    font-size: 10px;
+    color: #6B7A8D;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+.mb-vip-info-val {
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+}
+.mb-vip-lifetime {
+    grid-column: 1 / -1;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.04));
+    border-color: rgba(245, 158, 11, 0.2);
+}
+.mb-vip-lifetime .mb-vip-info-val {
+    color: #FCD34D;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Membership Admin Panel — uses existing adm- classes + premium enhancements
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* Admin panel uses existing .adm-stat-card-v2, .adm-list-item, .adm-card-top,
+   .admin-badge, .admin-btn, .admin-pagination classes.
+   No custom overrides needed — fully aligned with design system. */
