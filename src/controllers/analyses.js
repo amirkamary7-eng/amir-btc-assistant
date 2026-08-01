@@ -429,26 +429,76 @@ export function createAnalysisHandlers(deps) {
 
   /**
    * DELETE /api/admin/analyses/:id — Delete (admin only, double-confirm in frontend).
+   *
+   * TRACING MODE: When ?_trace=1 is present, every step is logged to KV
+   * (diag:trace:delete) so we can see exactly where the first exception occurs.
    */
   async function handleDelete(request, env, analysisId) {
-    const authResult = await requireAdmin(request, env);
+    const url = new URL(request.url);
+    const wantTrace = url.searchParams.get('_trace') === '1';
+    const _t0 = Date.now();
+    const _steps = [];
+    // Enable queryDb tracing — queryDb will push to this array
+    if (wantTrace) env._traceSteps = [];
+    const _trace = async (step, data = {}) => {
+      const entry = { step, ms: Date.now() - _t0, ts: Date.now(), ...data };
+      _steps.push(entry);
+      if (wantTrace) {
+        try {
+          await writeAppCache(env, 'diag:trace:delete', JSON.stringify({
+            analysisId, steps: _steps, queryDbCalls: env._traceSteps, lastStep: step, tMs: Date.now() - _t0,
+          }, 300));
+        } catch {}
+      }
+    };
+
+    await _trace('entry', { analysisId, hasReqPool: !!env._reqPool, wantTrace });
+
+    let authResult;
+    try {
+      await _trace('requireAdmin-start');
+      authResult = await requireAdmin(request, env);
+      await _trace('requireAdmin-done', { error: !!authResult.error, userId: authResult.user?.id });
+    } catch (e) {
+      await _trace('requireAdmin-EXCEPTION', { error: String(e?.message).slice(0, 200), stack: String(e?.stack).slice(0, 500) });
+      throw e;
+    }
     if (authResult.error) return authResult.error;
     if (!isAdminTelegramId(env, authResult.user.id)) {
+      await _trace('forbidden', { userId: authResult.user.id });
       return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
     }
     if (!isDatabaseConfigured(env)) {
+      await _trace('db-not-configured');
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
 
+    await _trace('db-configured', { hasReqPool: !!env._reqPool });
+
     try {
+      await _trace('remove-start');
       const deleted = await analysisRepo.remove(env, analysisId);
+      await _trace('remove-done', { deleted, hasReqPool: !!env._reqPool });
+
       if (!deleted) {
+        await _trace('not-found');
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
 
+      await _trace('invalidateCache-start');
       const version = await invalidateAnalysesCache(env, analysisId);
-      return jsonResponse({ status: 'success', version }, {}, env);
+      await _trace('invalidateCache-done', { version });
+
+      await _trace('response-ready');
+      const resp = jsonResponse({ status: 'success', version, _trace: wantTrace ? _steps : undefined }, {}, env);
+      await _trace('response-sent');
+      return resp;
     } catch (error) {
+      await _trace('CATCH-exception', {
+        error: String(error?.message).slice(0, 300),
+        stack: String(error?.stack).slice(0, 1000),
+        hasReqPool: !!env._reqPool,
+      });
       console.warn(safeError('delete-analysis', error));
       return safeDbErrorResponse(error, {}, env);
     }
