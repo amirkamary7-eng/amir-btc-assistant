@@ -162,8 +162,7 @@
                                 "AI_DAILY_IMAGE_LIMIT": 3,
                                 "AI_COOLDOWN_SECONDS": 4,
                                 "REFERRAL_TOKENS_PER_INVITE": 3,
-                                "BOT_USERNAME": "Amir_BTC_AssistantBot",
-                                "DIAG_MODE": "no-notify"
+                                "BOT_USERNAME": "Amir_BTC_AssistantBot"
                         }
                 }
         }
