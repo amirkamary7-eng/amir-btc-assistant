@@ -355,6 +355,7 @@ export function createAnalysisHandlers(deps) {
     const url = new URL(request.url);
     const wantProfile = url.searchParams.get('_profile') === '1';
     const diagBypass = url.searchParams.get('_diag') === '1';
+    const noCleanup = url.searchParams.get('_nocleanup') === '1';
     // Mode priority: query param > env var > 'full'
     const mode = url.searchParams.get('_mode') || env.DIAG_MODE || 'full';
 
@@ -446,7 +447,7 @@ export function createAnalysisHandlers(deps) {
         _phase('invalidateCache');
 
         // Cleanup: if this was a diag test, delete the created row
-        if (diagBypass && analysis?.id) {
+        if (diagBypass && analysis?.id && !noCleanup) {
           await _blackbox('diag-cleanup');
           await queryDb(env, `DELETE FROM analyses WHERE id = $1`, [String(analysis.id)]);
           _phase('diag-cleanup');
@@ -492,7 +493,7 @@ export function createAnalysisHandlers(deps) {
         _phase('invalidateCache-skipped');
 
         // Cleanup: if this was a diag test, delete the created row
-        if (diagBypass && analysis?.id) {
+        if (diagBypass && analysis?.id && !noCleanup) {
           await _blackbox('diag-cleanup');
           await queryDb(env, `DELETE FROM analyses WHERE id = $1`, [String(analysis.id)]);
           _phase('diag-cleanup');
