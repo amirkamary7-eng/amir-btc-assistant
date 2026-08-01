@@ -46,6 +46,20 @@ import { createMarketOverviewService } from './src/services/market_overview_serv
  * - مسیرهای کلیدی `/api/*` مستقیماً روی Worker اجرا می‌شوند.
  */
 
+// ── ISOLATE TRACKING (diagnostic — answers: "did Create/Delete cause a cold isolate?") ──
+// Module-level: set ONCE when the isolate starts. Survives all requests in this isolate.
+// If two requests have the SAME _isolateId → same isolate (warm).
+// If they DIFFER → isolate was recycled between them.
+const _isolateId = (() => {
+  try {
+    return globalThis.crypto?.randomUUID?.() || `iso-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  } catch {
+    return `iso-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+})();
+let _isolateRequestCount = 0;
+const _isolateBootTs = Date.now();
+
 // ============================================================================
 //#region ثابت‌ها و ابزارهای کمکی
 // ============================================================================
@@ -6110,6 +6124,32 @@ async function runScheduledAlertsBaseline(controller, env) {
 // ============================================================================
 export default {
   async fetch(request, env, ctx) {
+    // ── ISOLATE TRACKING ──
+    // Increment per-request counter and capture request start time.
+    // These are added to response headers so the client can see if the
+    // isolate changed between requests.
+    _isolateRequestCount++;
+    const _reqStartTs = Date.now();
+    const _reqIsoReqNum = _isolateRequestCount;
+    const _reqIsoAgeMs = _reqStartTs - _isolateBootTs;
+
+    // Helper: stamp a Response with isolate-tracking headers.
+    // Called on EVERY response path (success, error, OPTIONS, 404, etc.)
+    const _stampResponse = (response) => {
+      try {
+        if (response && response.headers && typeof response.headers.set === 'function') {
+          response.headers.set('X-Iso-Id', _isolateId);
+          response.headers.set('X-Iso-Req', String(_reqIsoReqNum));
+          response.headers.set('X-Iso-Age-Ms', String(_reqIsoAgeMs));
+          response.headers.set('X-Req-Wall-Ms', String(Date.now() - _reqStartTs));
+          // _isolateBootTs lets the client compute how long the isolate
+          // has been alive when this request arrived.
+          response.headers.set('X-Iso-Boot-Ts', String(_isolateBootTs));
+        }
+      } catch {}
+      return response;
+    };
+
     _currentRequestOrigin = request.headers.get('Origin');
     // Set env accessors for fetchFearGreed (called from various places)
     env_CMC_API_KEY = env.CMC_API_KEY || null;
@@ -6119,12 +6159,16 @@ export default {
       setEnvSendTelegramMessage(sendTelegramMessage);
     }
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
+      return _stampResponse(new Response(null, {
         status: 204,
         headers: withCors({}, env),
-      });
+      }));
     }
 
+    // Wrap the entire request handling in an inner function so we can
+    // stamp isolate-tracking headers on EVERY response path (including
+    // errors, 404s, etc.) without modifying each `return` statement.
+    const _handleRequest = async () => {
     try {
       const url = new URL(request.url);
 
@@ -7398,6 +7442,21 @@ export default {
       // (created + closed inside each queryDb call). No module-level Pool
       // state exists — nothing to clean up. This is the ONLY safe pattern
       // for @neondatabase/serverless Pool in Cloudflare Workers.
+    }
+    }; // end _handleRequest
+
+    // Execute the handler and stamp isolate-tracking headers on the response.
+    try {
+      const response = await _handleRequest();
+      return _stampResponse(response);
+    } catch (e) {
+      // If _handleRequest itself threw (shouldn't happen — it has its own
+      // try/catch), return a stamped 500.
+      console.error('FATAL: _handleRequest threw:', e?.message);
+      return _stampResponse(new Response(JSON.stringify({ status: 'error', message: 'Fatal handler error' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', ...withCors({}, env) },
+      }));
     }
   },
 
