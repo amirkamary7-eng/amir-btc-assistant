@@ -82,9 +82,52 @@ export function createAnalysisHandlers(deps) {
    * Pass analysisId on update and delete to purge that specific detail entry.
    */
   async function invalidateAnalysesCache(env, analysisId = null) {
+    // INSTRUMENTATION: capture each stage of this function
+    const _diag = {
+      stage: 'enter',
+      newVersion: null,
+      kvPutExecuted: false,
+      kvPutError: null,
+      immediateGetResult: null,
+      immediateGetError: null,
+    };
+
     const version = generateVersion();
+    _diag.newVersion = String(version);
+
+    // Read BEFORE put — to see what the old value was
+    let _beforePut = null;
+    try {
+      _beforePut = await env.APP_CACHE?.get?.(ANALYSES_VERSION_KEY);
+      _diag.beforePut = _beforePut;
+    } catch (e) {
+      _diag.beforeGetError = String(e?.message).slice(0, 200);
+    }
+
+    _diag.stage = 'before-kv-put';
+
     // Write a tombstone version so all clients know to refetch
-    await writeAppCache(env, ANALYSES_VERSION_KEY, String(version), 86400 * 7);
+    try {
+      await writeAppCache(env, ANALYSES_VERSION_KEY, String(version), 86400 * 7);
+      _diag.kvPutExecuted = true;
+    } catch (e) {
+      _diag.kvPutError = String(e?.message).slice(0, 300);
+      _diag.kvPutExecuted = false;
+    }
+
+    _diag.stage = 'after-kv-put';
+
+    // IMMEDIATE KV.get in the SAME Worker — does it see the new value?
+    try {
+      const _immediate = await env.APP_CACHE?.get?.(ANALYSES_VERSION_KEY);
+      _diag.immediateGetResult = _immediate;
+      _diag.immediateGetMatches = (_immediate === String(version));
+    } catch (e) {
+      _diag.immediateGetError = String(e?.message).slice(0, 200);
+    }
+
+    _diag.stage = 'after-immediate-get';
+
     // Delete list cache so next request hits DB
     try { await env.APP_CACHE?.delete?.(ANALYSES_LIST_KEY); } catch {}
     // Delete featured cache
@@ -95,6 +138,12 @@ export function createAnalysisHandlers(deps) {
     if (analysisId) {
       try { await env.APP_CACHE?.delete?.(`${DETAIL_CACHE_PREFIX}${analysisId}`); } catch {}
     }
+
+    _diag.stage = 'return';
+
+    // Stash on env so handleDelete can include it in the response
+    env._invalidateCacheDiag = _diag;
+
     return version;
   }
 
@@ -478,7 +527,9 @@ export function createAnalysisHandlers(deps) {
       }
 
       const version = await invalidateAnalysesCache(env, analysisId);
-      return jsonResponse({ status: 'success', version }, {}, env);
+      // Include the instrumentation data in the response
+      const _diag = env._invalidateCacheDiag || null;
+      return jsonResponse({ status: 'success', version, _invalidateCacheDiag: _diag }, {}, env);
     } catch (error) {
       console.warn(safeError('delete-analysis', error));
       return safeDbErrorResponse(error, {}, env);
