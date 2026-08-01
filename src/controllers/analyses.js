@@ -694,54 +694,62 @@ export function createAnalysisHandlers(deps) {
   // ── Notification ───────────────────────────────────────────────────────
 
   async function notifyNewAnalysis(env, analysis, ctx) {
+    const _notifyStart = Date.now();
     if (!notificationRepo || !sendTelegramMessage || !queryDb) return;
     const coinLabel = String(analysis.coin || '').toUpperCase() || 'Crypto';
     const title = `📊 تحلیل جدید: ${coinLabel}`;
     const message = analysis.title || `تحلیل ${coinLabel} (${analysis.timeframe}) منتشر شد.`;
 
+    // DIAG: log notify start to KV blackbox
+    const _notifyLog = async (step, data = {}) => {
+      try {
+        await writeAppCache(env, 'diag:blackbox:notify', JSON.stringify({
+          step, ts: Date.now(), tMs: Date.now() - _notifyStart, ...data,
+        }), 300);
+      } catch {}
+    };
+
     try {
+      await _notifyLog('start', { coin: analysis.coin });
       // Limit to 50 users max to prevent waitUntil timeout
       const usersResult = await queryDb(env, `SELECT telegram_id FROM users WHERE channel_joined = TRUE LIMIT 50`);
       const allUserIds = usersResult.rows.map((r) => String(r.telegram_id));
-      if (allUserIds.length === 0) return;
+      await _notifyLog('users-fetched', { userCount: allUserIds.length });
+      if (allUserIds.length === 0) {
+        await _notifyLog('no-users', {});
+        return;
+      }
 
-      // ROOT CAUSE FIX (notification settings compliance):
-      // Previously called `notificationRepo.filterUsersByPreference(env, allUserIds, 'analysis')`
-      // which reads the LEGACY boolean `analysis` column (default TRUE, but users
-      // who toggled it off in the old settings UI have analysis=FALSE). This
-      // pre-filtered users BEFORE dispatch, so dispatch's own
-      // getUserChannelPreference('analysis') check on the NEW ch_analysis
-      // column was never reached for filtered users.
-      //
-      // Now we pass ALL joined users to dispatch and let it internally check
-      // ch_analysis (default 'both' — fail-open). Users with ch_analysis='none'
-      // are filtered inside dispatch. Same pattern as the calendar fix (RC-4).
       if (notificationPlatformRepo) {
         const NOTIFY_TIMEOUT_MS = 20000;
         const startTime = Date.now();
+        let dispatched = 0;
+        let errors = 0;
         for (const uid of allUserIds) {
           if (Date.now() - startTime > NOTIFY_TIMEOUT_MS) {
+            await _notifyLog('timeout-reached', { dispatched, errors, remaining: allUserIds.length - dispatched - errors });
             console.warn('notifyNewAnalysis: timeout reached');
             break;
           }
-          await notificationPlatformRepo.dispatch(env, {
-            userId: uid,
-            templateKey: 'analysis_published',
-            // ROOT CAUSE FIX: was 'news' — but the UI toggle is ch_analysis.
-            // The template 'analysis_published' seed has category='news' which
-            // would override this via finalCategory = template.category.
-            // Both are now fixed: category here is 'analysis', and the
-            // template seed is updated to category='analysis' in
-            // notification_platform.js.
-            category: 'analysis',
-            priority: 'medium',
-            channel: 'both',
-            metadata: { coin: analysis.coin, name: analysis.title || '' },
-            title, message,
-          }).catch(() => {});
+          try {
+            await notificationPlatformRepo.dispatch(env, {
+              userId: uid,
+              templateKey: 'analysis_published',
+              category: 'analysis',
+              priority: 'medium',
+              channel: 'both',
+              metadata: { coin: analysis.coin, name: analysis.title || '' },
+              title, message,
+            });
+            dispatched++;
+          } catch {
+            errors++;
+          }
         }
+        await _notifyLog('done', { dispatched, errors, totalUsers: allUserIds.length, totalMs: Date.now() - _notifyStart });
       }
     } catch (err) {
+      await _notifyLog('error', { error: String(err?.message).slice(0, 100) });
       console.warn(safeError('notify-new-analysis', err));
     }
   }

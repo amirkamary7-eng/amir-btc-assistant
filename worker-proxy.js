@@ -6958,6 +6958,10 @@ export default {
           const bootBb = await readAppCache(env, 'diag:blackbox:bootstrap');
           result.bootstrap = bootBb ? JSON.parse(bootBb) : null;
         } catch (e) { result.bootstrap = { error: String(e.message).slice(0, 100) }; }
+        try {
+          const notifyBb = await readAppCache(env, 'diag:blackbox:notify');
+          result.notify = notifyBb ? JSON.parse(notifyBb) : null;
+        } catch (e) { result.notify = { error: String(e.message).slice(0, 100) }; }
         return jsonResponse(result, {}, env);
       }
 
