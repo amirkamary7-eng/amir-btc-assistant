@@ -27,6 +27,15 @@ export function createUserRepository(deps) {
    *   - Opened Mini App: WHERE mini_app_opened_at IS NOT NULL
    */
   async function ensureTable(env) {
+    // ════════════════════════════════════════════════════════════════════
+    // DIAGNOSTIC TEST: NO-OP MODE
+    // All DDL queries disabled to test if ensureTable is the root cause
+    // of Error 1102 (exceededCpu). If 503s disappear → confirmed.
+    // If 503s persist → ensureTable is NOT the root cause.
+    // ════════════════════════════════════════════════════════════════════
+    _tableEnsured = true;
+    return;
+    /* eslint-disable no-unreachable */
     if (_tableEnsured) return;
     try {
       await queryDb(env, `

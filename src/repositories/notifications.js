@@ -15,6 +15,10 @@ export function createNotificationRepository(deps) {
    */
   let _tableEnsured = false;
   async function ensureTable(env) {
+    // DIAGNOSTIC TEST: NO-OP MODE
+    _tableEnsured = true;
+    return;
+    /* eslint-disable no-unreachable */
     if (_tableEnsured) return;
     try {
       await queryDb(env, `

@@ -23,6 +23,10 @@ export function createRewardCenterRepository(deps) {
    * Uses CREATE TABLE IF NOT EXISTS so it's safe to run multiple times.
    */
   async function ensureSchema(env) {
+    // DIAGNOSTIC TEST: NO-OP MODE
+    _schemaVerified = true;
+    return;
+    /* eslint-disable no-unreachable */
     if (_schemaVerified) return;
     if (!isDatabaseConfigured(env)) { _schemaVerified = true; return; }
 

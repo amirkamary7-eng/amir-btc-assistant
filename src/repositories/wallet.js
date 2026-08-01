@@ -17,6 +17,10 @@ export function createWalletRepository(deps) {
    * token_transactions; created_at to token_balances. Also creates indexes.
    */
   async function ensureSchema(env) {
+    // DIAGNOSTIC TEST: NO-OP MODE
+    _schemaVerified = true;
+    return;
+    /* eslint-disable no-unreachable */
     if (_schemaVerified) return;
     const batchSql = `
       ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'completed';

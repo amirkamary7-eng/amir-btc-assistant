@@ -22,6 +22,10 @@ export function createAdminRepository(deps) {
   // ---------------------------------------------------------------------------
 
   async function ensureSchema(env) {
+    // DIAGNOSTIC TEST: NO-OP MODE
+    _schemaVerified = true;
+    return;
+    /* eslint-disable no-unreachable */
     if (_schemaVerified) return;
     // ROOT-CAUSE FIX: Merge ALL schema migrations into a SINGLE queryDb call.
     // Previously this was 5 separate queryDb calls (CREATE TABLE + 4 ALTER TABLE),

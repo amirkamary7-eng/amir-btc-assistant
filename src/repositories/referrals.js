@@ -20,6 +20,10 @@ export function createReferralRepository(deps) {
    * Also creates indexes for leaderboard and history queries.
    */
   async function ensureSchema(env) {
+    // DIAGNOSTIC TEST: NO-OP MODE
+    _schemaVerified = true;
+    return;
+    /* eslint-disable no-unreachable */
     if (_schemaVerified) return;
     // ROOT-CAUSE FIX: Merge ALL schema migrations into a SINGLE queryDb call.
     // Previously this was 2 separate queryDb calls (batch SQL + DO block),
