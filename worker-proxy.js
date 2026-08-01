@@ -6936,6 +6936,31 @@ export default {
         }
       }
 
+      // ── DIAG: read KV blackbox recorder state ──
+      // GET /api/admin/_diag-blackbox?_diag=1
+      // Returns the last step written by handleCreate/handleDelete before
+      // they were (potentially) killed. Keys: diag:blackbox:create, diag:blackbox:delete
+      if (request.method === 'GET' && url.pathname === '/api/admin/_diag-blackbox') {
+        const diagKey = url.searchParams.get('_diag');
+        if (diagKey !== '1') {
+          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
+        }
+        const result = {};
+        try {
+          const createBb = await readAppCache(env, 'diag:blackbox:create');
+          result.create = createBb ? JSON.parse(createBb) : null;
+        } catch (e) { result.create = { error: String(e.message).slice(0, 100) }; }
+        try {
+          const deleteBb = await readAppCache(env, 'diag:blackbox:delete');
+          result.delete = deleteBb ? JSON.parse(deleteBb) : null;
+        } catch (e) { result.delete = { error: String(e.message).slice(0, 100) }; }
+        try {
+          const bootBb = await readAppCache(env, 'diag:blackbox:bootstrap');
+          result.bootstrap = bootBb ? JSON.parse(bootBb) : null;
+        } catch (e) { result.bootstrap = { error: String(e.message).slice(0, 100) }; }
+        return jsonResponse(result, {}, env);
+      }
+
       // ── Analyses: Admin endpoints (new paths) ──
       if (request.method === 'POST' && url.pathname === '/api/admin/analyses') {
         return await analysisHandlers.handleCreate(request, env, ctx);

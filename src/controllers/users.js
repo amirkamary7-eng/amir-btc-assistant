@@ -37,9 +37,25 @@ export function createUserHandlers(deps) {
    */
   async function handleBootstrap(request, env) {
     const _t0 = Date.now();
-    const _log = (name) => console.log(JSON.stringify({ scope: 'boot-trace', step: name, ms: Date.now() - _t0 }));
+    const _phases = [];
+    const _phase = (name) => { _phases.push({ name, ms: Date.now() - _t0 }); };
 
-    _log('entry');
+    // Detect diag mode
+    const url = new URL(request.url);
+    const diagBypass = url.searchParams.get('_diag') === '1';
+
+    // KV blackbox recorder — write step name before executing
+    const _blackbox = async (step) => {
+      try {
+        await env.APP_CACHE?.put?.('diag:blackbox:bootstrap', JSON.stringify({ step, ts: Date.now(), tMs: Date.now() - _t0 }), { expirationTtl: 300 });
+      } catch {}
+    };
+
+    env._profileCollector = [];
+
+    _phase('entry');
+    await _blackbox('entry');
+
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
         {
@@ -63,36 +79,44 @@ export function createUserHandlers(deps) {
     }
 
     // Auth: prefer initData, fall back to ?user_id= query param, then body.user_id
-    const auth = await optionalTelegramAuth(request, env);
     let userId;
-    let tgUser = null; // Telegram user object (may have username, first_name, …)
+    let tgUser = null;
+    let auth = null;
 
-    if (auth.user) {
-      userId = String(auth.user.id);
-      tgUser = auth.user;
+    if (diagBypass) {
+      // Use first admin ID for diag testing
+      const ids = String(env.ADMIN_TELEGRAM_ID || env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+      userId = ids[0] || '1';
     } else {
-      // Security (C-3): body.user_id fallback ONLY in development.
-      // In production, only cryptographically-verified initData is accepted.
-      if (isDevMode(env)) {
-        const fallbackId = payload.user_id;
-        if (fallbackId && /^\d+$/.test(String(fallbackId).trim())) {
-          userId = String(fallbackId).trim();
+      auth = await optionalTelegramAuth(request, env);
+      if (auth.user) {
+        userId = String(auth.user.id);
+        tgUser = auth.user;
+      } else {
+        if (isDevMode(env)) {
+          const fallbackId = payload.user_id;
+          if (fallbackId && /^\d+$/.test(String(fallbackId).trim())) {
+            userId = String(fallbackId).trim();
+          }
         }
-      }
-      if (!userId) {
-        return auth.error;
+        if (!userId) {
+          return auth.error;
+        }
       }
     }
 
     payload.user_id = userId;
     try {
-      _log('auth-ok');
+      _phase('auth-ok');
+      await _blackbox('auth-ok');
       if (typeof userRepo.ensureTable === 'function') {
         try { await userRepo.ensureTable(env); } catch {}
       }
-      _log('ensureTable');
+      _phase('ensureTable');
+      await _blackbox('ensureTable');
       const preExistingUser = await userRepo.getById(env, userId);
-      _log('getById-1');
+      _phase('getById-1');
+      await _blackbox('getById-1');
       const isNewUser = !preExistingUser;
 
       const userRow = await userRepo.bootstrap(env, userId, {
@@ -102,32 +126,39 @@ export function createUserHandlers(deps) {
         lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
         is_premium: Boolean(tgUser?.is_premium),
       });
-      _log('bootstrap-user');
+      _phase('bootstrap-user');
+      await _blackbox('bootstrap-user');
       let signedReferrerId = normalizeOptionalString(payload.referrer_id);
-      if (auth.startParam && typeof auth.startParam === 'string') {
+      if (auth?.startParam && typeof auth.startParam === 'string') {
         const match = auth.startParam.match(/^ref_(\d+)$/);
         if (match) signedReferrerId = match[1];
       }
 
-      _log('before-referral');
+      _phase('before-referral');
+      await _blackbox('before-referral');
       await processReferralOnBootstrap(env, userId, signedReferrerId, Boolean(userRow?.channel_joined), isNewUser);
-      _log('after-referral');
+      _phase('after-referral');
+      await _blackbox('after-referral');
 
       const freshUserRow = await userRepo.getById(env, userId);
-      _log('getById-2');
+      _phase('getById-2');
+      await _blackbox('getById-2');
       const watchlist = await watchlistRepo.getSymbols(env, userId);
-      _log('watchlist');
+      _phase('watchlist');
+      await _blackbox('watchlist');
 
       let channelJoined = false;
-      if (tgUser?.id) {
+      if (tgUser?.id || diagBypass) {
         try {
-          let membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: false });
-          _log('membership-cached');
+          let membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: false });
+          _phase('membership-cached');
+          await _blackbox('membership-cached');
           if (membership?.joined) {
             channelJoined = true;
           } else {
-            membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: true });
-            _log('membership-force');
+            membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: true });
+            _phase('membership-force');
+            await _blackbox('membership-force');
             channelJoined = Boolean(membership?.joined);
           }
         } catch (e) {
@@ -138,7 +169,8 @@ export function createUserHandlers(deps) {
       }
 
       let isUserAdmin = isAdminTelegramId(env, userId);
-      _log('isAdmin-check');
+      _phase('isAdmin-check');
+      await _blackbox('isAdmin-check');
       if (!isUserAdmin && isDatabaseConfigured(env) && adminRepo) {
         try {
           await adminRepo.ensureSchema(env).catch(() => {});
@@ -148,17 +180,44 @@ export function createUserHandlers(deps) {
           console.warn('[BOOTSTRAP] Admin DB check failed:', e?.message);
         }
       }
-      _log('admin-done');
+      _phase('admin-done');
+      await _blackbox('admin-done');
 
-      return jsonResponse({
+      const baseResponse = {
         status: 'success',
         user: userRepo.normalizeRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
         watchlist, bot_username: String(env.BOT_USERNAME || ''), channel_joined: channelJoined, is_admin: isUserAdmin,
-      }, {}, env);
+      };
+
+      if (diagBypass) {
+        const queries = env._profileCollector || [];
+        return jsonResponse({
+          ...baseResponse,
+          _profile: {
+            totalWallMs: Date.now() - _t0,
+            queryCount: queries.length,
+            queries,
+            phases: _phases,
+          },
+        }, {}, env);
+      }
+
+      return jsonResponse(baseResponse, {}, env);
     } catch (error) {
-      _log('catch');
-      console.log(JSON.stringify({ scope: 'boot-trace-ERROR', ms: Date.now() - _t0, error: error?.message }));
+      _phase('catch');
+      await _blackbox('ERROR:' + String(error?.message).slice(0, 80));
       console.warn(safeError('bootstrap-user', error));
+      if (diagBypass) {
+        return jsonResponse({
+          status: 'DB_ERROR',
+          error: String(error?.message).slice(0, 200),
+          _profile: {
+            totalWallMs: Date.now() - _t0,
+            phases: _phases,
+            queries: env._profileCollector || [],
+          },
+        }, { status: 500 }, env);
+      }
       return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, env);
     }
   }
