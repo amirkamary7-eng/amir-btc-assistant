@@ -1360,6 +1360,53 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   const _prof = env && Array.isArray(env._profileCollector) ? env._profileCollector : null;
   const _label = _prof ? String(sqlText).slice(0, 80).replace(/\s+/g, ' ') : null;
 
+  // ════════════════════════════════════════════════════════════════════
+  // A/B TEST: Request-scoped shared pool
+  // If env._reqPool is set (by the route wrapper), reuse it instead of
+  // creating a per-call Pool. This means ALL queryDb calls within one
+  // request share ONE WebSocket → ONE TLS handshake → ~100ms CPU total
+  // (instead of 5×100ms=500ms for 5 separate queryDb calls).
+  //
+  // The pool is created by the route dispatcher (in the fetch handler)
+  // and closed in its finally block after the handler returns.
+  // ════════════════════════════════════════════════════════════════════
+  if (env && env._reqPool) {
+    const _tQ0 = _prof ? Date.now() : 0;
+    try {
+      const result = await env._reqPool.query(sqlText, params);
+      if (_prof) {
+        const _tQuery = Date.now() - _tQ0;
+        _prof.push({
+          label: _label,
+          tPoolCreate: 0,   // Pool already exists — no creation cost
+          tQuery: _tQuery,
+          tPoolEnd: 0,      // Pool closed by route dispatcher, not here
+          tTotal: _tQuery,
+          shared: true,     // Mark: this query used the shared pool
+          error: null,
+        });
+      }
+      return result;
+    } catch (error) {
+      if (_prof) {
+        const _tQuery = Date.now() - _tQ0;
+        _prof.push({
+          label: _label,
+          tPoolCreate: 0,
+          tQuery: _tQuery,
+          tPoolEnd: 0,
+          tTotal: _tQuery,
+          shared: true,
+          error: String(error?.message || '').slice(0, 100),
+        });
+      }
+      // If the shared pool is broken, clear it so future calls in this
+      // request fall back to per-call pools.
+      env._reqPool = null;
+      throw error;
+    }
+  }
+
   const _t0 = _prof ? Date.now() : 0;
   const pool = createPool(env);
   const _tPoolCreate = _prof ? Date.now() - _t0 : 0;
@@ -7011,7 +7058,13 @@ export default {
 
       // ── Analyses: Admin endpoints (new paths) ──
       if (request.method === 'POST' && url.pathname === '/api/admin/analyses') {
-        return await analysisHandlers.handleCreate(request, env, ctx);
+        // A/B TEST: Create request-scoped shared pool (1 TLS handshake for all queries)
+        env._reqPool = createPool(env);
+        try {
+          return await analysisHandlers.handleCreate(request, env, ctx);
+        } finally {
+          if (env._reqPool) { try { await env._reqPool.end(); } catch {} env._reqPool = null; }
+        }
       }
 
       if (request.method === 'PUT' && /^\/api\/admin\/analyses\/[^/]+$/u.test(url.pathname)) {
@@ -7021,7 +7074,13 @@ export default {
 
       if (request.method === 'DELETE' && /^\/api\/admin\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[4] || '';
-        return await analysisHandlers.handleDelete(request, env, analysisId);
+        // A/B TEST: Create request-scoped shared pool (1 TLS handshake for all queries)
+        env._reqPool = createPool(env);
+        try {
+          return await analysisHandlers.handleDelete(request, env, analysisId);
+        } finally {
+          if (env._reqPool) { try { await env._reqPool.end(); } catch {} env._reqPool = null; }
+        }
       }
 
       // ── Analyses: Legacy admin paths (backward compat) ──
@@ -7307,7 +7366,13 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
-        return await userHandlers.handleBootstrap(request, env);
+        // A/B TEST: Create request-scoped shared pool (1 TLS handshake for all queries)
+        env._reqPool = createPool(env);
+        try {
+          return await userHandlers.handleBootstrap(request, env);
+        } finally {
+          if (env._reqPool) { try { await env._reqPool.end(); } catch {} env._reqPool = null; }
+        }
       }
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
