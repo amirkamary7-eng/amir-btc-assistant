@@ -6709,6 +6709,47 @@ export default {
         return await analysisHandlers.handleIncrementView(request, env, analysisId);
       }
 
+      // ── VERIFY: check DB record + cache state (for scenario tracing) ──
+      // GET /api/admin/_verify/:id?_diag=1
+      // Returns: does the analysis exist in DB? what's the current cache version?
+      if (request.method === 'GET' && /^\/api\/admin\/_verify\/[^/]+$/.test(url.pathname)) {
+        const diagKey = url.searchParams.get('_diag');
+        if (diagKey !== '1') {
+          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
+        }
+        const analysisId = url.pathname.split('/')[4] || '';
+        const result = { analysisId, db: null, cache: null };
+
+        // Check DB
+        if (isDatabaseConfigured(env)) {
+          try {
+            const dbResult = await queryDb(env, 'SELECT id, coin, title, created_at FROM analyses WHERE id = $1', [String(analysisId)]);
+            result.db = { exists: dbResult.rows.length > 0, row: dbResult.rows[0] || null };
+          } catch (e) {
+            result.db = { exists: null, error: String(e?.message).slice(0, 200) };
+          }
+        }
+
+        // Check cache
+        try {
+          const version = await readAppCache(env, 'analyses:version');
+          const list = await readAppCache(env, 'analyses:list');
+          const featured = await readAppCache(env, 'analyses:featured');
+          const stats = await readAppCache(env, 'analyses:stats');
+          result.cache = {
+            version: version || null,
+            listPresent: !!list,
+            listLength: list ? (JSON.parse(list).length) : 0,
+            featuredPresent: !!featured,
+            statsPresent: !!stats,
+          };
+        } catch (e) {
+          result.cache = { error: String(e?.message).slice(0, 200) };
+        }
+
+        return jsonResponse(result, {}, env);
+      }
+
       // ── Analyses: Admin endpoints (new paths) ──
       if (request.method === 'POST' && url.pathname === '/api/admin/analyses') {
         return withSharedPool(env, () => analysisHandlers.handleCreate(request, env, ctx));
