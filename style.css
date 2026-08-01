@@ -6612,63 +6612,6 @@ strong.down { color: var(--red); }
     object-fit: fill; /* container is 2:1, images are 2:1 → perfect fit, no crop */
     object-position: center;
 }
-.hero-slide-shade {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, rgba(2, 6, 17, 0) 55%, rgba(2, 6, 17, 0.55) 100%);
-    pointer-events: none;
-    z-index: 1;
-}
-/* Banner 2 (Bitunix): stronger bottom-right shade so the CTA in the bottom-right
-   safe area has guaranteed contrast over the gift-box coins. */
-.hero-slide-shade--right {
-    background:
-        linear-gradient(180deg, rgba(2, 6, 17, 0) 50%, rgba(2, 6, 17, 0.7) 100%),
-        linear-gradient(270deg, rgba(2, 6, 17, 0.6) 0%, rgba(2, 6, 17, 0) 45%);
-}
-/* Premium CTA — flex child of .hero-slide (NO absolute positioning).
-   Positioned via the parent's flex layout + per-banner align-self/margin.
-   Safe areas verified via VLM image-composition analysis. */
-.hero-cta {
-    position: relative;
-    z-index: 2;
-    background: linear-gradient(135deg, #F5A623, #FFCC4D);
-    border: none;
-    color: #020611;
-    font-weight: 700;
-    padding: 0 8px; /* tighter horizontal padding */
-    height: 34px; /* refined: 36px → 34px */
-    width: auto;
-    min-width: 105px;
-    border-radius: 9px; /* refined: 10px → 9px */
-    cursor: pointer;
-    font-size: 11px; /* refined: 12px → 11px */
-    line-height: 1;
-    pointer-events: auto;
-    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
-    box-shadow: 0 4px 12px rgba(245, 166, 35, 0.28);
-    white-space: nowrap;
-    display: inline-flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-}
-.hero-cta:active {
-    transform: scale(0.95);
-    box-shadow: 0 3px 10px rgba(245, 166, 35, 0.3);
-    filter: brightness(0.95);
-}
-/* Banner 1 (AMIRBTC channel): position UNCHANGED (bottom-left safe zone).
-   Only size reduced: 130→122px width, 44→40px height, padding tuned to 14px. */
-.hero-cta--channel {
-    margin-right: auto;
-    margin-left: 4%;
-    margin-bottom: 3px; /* move 3px higher than bitunix */
-}
-.hero-cta--bitunix {
-    margin-left: auto;
-    margin-right: -10px;
-    margin-top: 3px; /* move 3px lower than channel */
-}
-
 /* ─── Unified Banner CTA Component ──────────────────────────────────────────
    Both buttons use the SAME base styles (same width/height/radius/padding/position).
    Only the position (left/top/width/height) differs — matching the designed
@@ -6678,8 +6621,8 @@ strong.down { color: var(--red); }
    and object-fit: fill is used, percentage positions map EXACTLY to image pixels
    at ALL screen sizes. Buttons stay perfectly aligned on any mobile/desktop.
 
-   Channel banner button: Left 16.5%, Top 80.3%, Right 42.4%, Bottom 88.0%
-   Premium banner button: Left 9.6%, Top 82.8%, Right 44.7%, Bottom 91.8%
+   Premium banner button (banner-premium.webp): Left 16.5%, Top 80.3%, Right 42.4%, Bottom 88.0%
+   Channel banner button (banner-channel.webp): Left 9.6%, Top 82.8%, Right 44.7%, Bottom 91.8%
    ─────────────────────────────────────────────────────────────────────────── */
 .hero-cta--channel-v2,
 .hero-cta--premium-v2 {
@@ -6724,20 +6667,20 @@ strong.down { color: var(--red); }
     transform: scale(0.96);
 }
 
-/* Channel CTA — exact position matching designed placeholder */
+/* Channel CTA — exact position matching designed placeholder in channel banner image */
 .hero-cta--channel-v2 {
-    left: 16.5%;
-    top: 80.3%;
-    width: calc(42.4% - 16.5%);   /* 25.9% */
-    height: calc(88.0% - 80.3%);  /* 7.7% */
-}
-
-/* Premium CTA — exact position matching designed placeholder */
-.hero-cta--premium-v2 {
     left: 9.6%;
     top: 82.8%;
     width: calc(44.7% - 9.6%);    /* 35.1% */
     height: calc(91.8% - 82.8%);  /* 9.0% */
+}
+
+/* Premium CTA — exact position matching designed placeholder in premium banner image */
+.hero-cta--premium-v2 {
+    left: 16.5%;
+    top: 80.3%;
+    width: calc(42.4% - 16.5%);   /* 25.9% */
+    height: calc(88.0% - 80.3%);  /* 7.7% */
 }
 
 /* Ripple animation for both CTAs */
@@ -7893,7 +7836,6 @@ html[dir="rtl"] .market-ticker-track {
 }
 
 @media (min-width: 412px) {
-    .hero-cta { font-size: 12px; height: 40px; }
     .dma-card { flex: 0 0 240px; height: 210px; }
     .dfa-skel-card { flex: 0 0 240px; height: 210px; }
     .dc-card { flex: 0 0 224px; min-height: 140px; }
