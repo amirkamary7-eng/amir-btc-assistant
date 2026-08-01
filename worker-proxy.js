@@ -46,20 +46,6 @@ import { createMarketOverviewService } from './src/services/market_overview_serv
  * - مسیرهای کلیدی `/api/*` مستقیماً روی Worker اجرا می‌شوند.
  */
 
-// ── ISOLATE TRACKING (diagnostic — answers: "did Create/Delete cause a cold isolate?") ──
-// Module-level: set ONCE when the isolate starts. Survives all requests in this isolate.
-// If two requests have the SAME _isolateId → same isolate (warm).
-// If they DIFFER → isolate was recycled between them.
-const _isolateId = (() => {
-  try {
-    return globalThis.crypto?.randomUUID?.() || `iso-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  } catch {
-    return `iso-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  }
-})();
-let _isolateRequestCount = 0;
-const _isolateBootTs = Date.now();
-
 // ============================================================================
 //#region ثابت‌ها و ابزارهای کمکی
 // ============================================================================
@@ -1349,81 +1335,27 @@ async function getReferralRewardPerInvite(env) {
 // WebSocket connections are bound to the request context that created them.
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // ── PROFILING ──────────────────────────────────────────────────────
-  // When env._profileCollector is an array (set by the handler), each
-  // queryDb call records per-phase wall-time:
-  //   tPoolCreate — `new Pool()` (synchronous, ≈ CPU time)
-  //   tQuery      — `pool.query()` (wall time; CPU portion = TLS handshake
-  //                 + message encode/decode; network wait is NOT CPU)
-  //   tPoolEnd    — `await pool.end()` (wall time; CPU ≈ close-frame encode)
-  // This lets us determine whether Pool lifecycle overhead dominates.
-  const _prof = env && Array.isArray(env._profileCollector) ? env._profileCollector : null;
-  const _label = _prof ? String(sqlText).slice(0, 80).replace(/\s+/g, ' ') : null;
-
-  // ════════════════════════════════════════════════════════════════════
   // A/B TEST: Request-scoped shared pool
   // If env._reqPool is set (by the route wrapper), reuse it instead of
   // creating a per-call Pool. This means ALL queryDb calls within one
-  // request share ONE WebSocket → ONE TLS handshake → ~100ms CPU total
-  // (instead of 5×100ms=500ms for 5 separate queryDb calls).
-  //
-  // The pool is created by the route dispatcher (in the fetch handler)
-  // and closed in its finally block after the handler returns.
-  // ════════════════════════════════════════════════════════════════════
+  // request share ONE WebSocket → ONE TLS handshake.
   if (env && env._reqPool) {
-    const _tQ0 = _prof ? Date.now() : 0;
     try {
-      const result = await env._reqPool.query(sqlText, params);
-      if (_prof) {
-        const _tQuery = Date.now() - _tQ0;
-        _prof.push({
-          label: _label,
-          tPoolCreate: 0,   // Pool already exists — no creation cost
-          tQuery: _tQuery,
-          tPoolEnd: 0,      // Pool closed by route dispatcher, not here
-          tTotal: _tQuery,
-          shared: true,     // Mark: this query used the shared pool
-          error: null,
-        });
-      }
-      return result;
+      return await env._reqPool.query(sqlText, params);
     } catch (error) {
-      if (_prof) {
-        const _tQuery = Date.now() - _tQ0;
-        _prof.push({
-          label: _label,
-          tPoolCreate: 0,
-          tQuery: _tQuery,
-          tPoolEnd: 0,
-          tTotal: _tQuery,
-          shared: true,
-          error: String(error?.message || '').slice(0, 100),
-        });
-      }
-      // If the shared pool is broken, clear it so future calls in this
-      // request fall back to per-call pools.
+      // If the shared pool is broken, clear it so future calls fall back.
       env._reqPool = null;
       throw error;
     }
   }
 
-  const _t0 = _prof ? Date.now() : 0;
   const pool = createPool(env);
-  const _tPoolCreate = _prof ? Date.now() - _t0 : 0;
   if (!pool) throw new Error('Database not configured');
 
-  let _tQuery = 0;
-  let _tPoolEnd = 0;
-  let result;
-  let thrown = null;
-
   try {
-    const _tQ0 = _prof ? Date.now() : 0;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        result = await pool.query(sqlText, params);
-        thrown = null;
-        break;
+        return await pool.query(sqlText, params);
       } catch (error) {
         const msg = String(error?.message || '');
         const isTransient = msg.includes('530') ||
@@ -1433,35 +1365,14 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
                             msg.includes('timeout') ||
                             msg.includes('fetch failed') ||
                             msg.includes('network');
-        if (attempt === retries || !isTransient) { thrown = error; break; }
+        if (attempt === retries || !isTransient) throw error;
         const ms = Math.min(300 * 2 ** attempt, 2000);
         await new Promise((r) => setTimeout(r, ms));
       }
     }
-    if (_prof) _tQuery = Date.now() - _tQ0;
   } finally {
-    // CRITICAL: close the Pool synchronously in finally. This MUST be awaited
-    // so the WebSocket is released before queryDb returns. If pool.end() were
-    // fire-and-forget, the WebSocket could outlive the request context.
-    const _tE0 = _prof ? Date.now() : 0;
     try { await pool.end(); } catch {}
-    if (_prof) _tPoolEnd = Date.now() - _tE0;
   }
-
-  if (_prof) {
-    _prof.push({
-      label: _label,
-      tPoolCreate: _tPoolCreate,
-      tQuery: _tQuery,
-      tPoolEnd: _tPoolEnd,
-      tTotal: _tPoolCreate + _tQuery + _tPoolEnd,
-      retries: retries,
-      error: thrown ? String(thrown.message).slice(0, 100) : null,
-    });
-  }
-
-  if (thrown) throw thrown;
-  return result;
 }
 
 /**
@@ -1476,86 +1387,27 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * This is the ONLY place a Pool is used; regular queries go through neon() HTTP.
  */
 async function queryDbTransaction(env, queries) {
-  // ── PROFILING ──────────────────────────────────────────────────────
-  // Records: tPoolCreate, tConnect (pool.connect — pays TLS handshake),
-  // tQueries (sum of all client.query), tCommit, tPoolEnd.
-  // KEY INSIGHT: tConnect is paid ONCE for the whole transaction; each
-  // subsequent client.query reuses the same WebSocket → ~0 CPU per extra
-  // query. This is why batching N queries into 1 transaction saves ~N× the
-  // TLS handshake CPU.
-  const _prof = env && Array.isArray(env._profileCollector) ? env._profileCollector : null;
-  const _t0 = _prof ? Date.now() : 0;
   const pool = createPool(env);
-  const _tPoolCreate = _prof ? Date.now() - _t0 : 0;
   if (!pool) throw new Error('Database not configured');
 
   let client;
-  let _tConnect = 0;
-  let _tQueries = 0;
-  let _tCommit = 0;
-  let _tPoolEnd = 0;
   try {
-    const _tC0 = _prof ? Date.now() : 0;
     client = await pool.connect();
-    if (_prof) _tConnect = Date.now() - _tC0;
-
     await client.query('BEGIN');
     const results = [];
     for (const { sql, params } of queries) {
-      const _tQQ0 = _prof ? Date.now() : 0;
       results.push(await client.query(sql, params));
-      if (_prof) _tQueries += Date.now() - _tQQ0;
     }
-    const _tCM0 = _prof ? Date.now() : 0;
     await client.query('COMMIT');
-    if (_prof) _tCommit = Date.now() - _tCM0;
-
-    if (_prof) {
-      _prof.push({
-        label: `TRANSACTION[${queries.length} queries]`,
-        tPoolCreate: _tPoolCreate,
-        tConnect: _tConnect,
-        tQueries: _tQueries,
-        tCommit: _tCommit,
-        tPoolEnd: 0,
-        tTotal: _tPoolCreate + _tConnect + _tQueries + _tCommit,
-        mode: 'transaction',
-      });
-    }
     return results;
   } catch (error) {
     try { if (client) await client.query('ROLLBACK'); } catch {}
-    if (_prof) {
-      _prof.push({
-        label: `TRANSACTION[ERROR]`,
-        tPoolCreate: _tPoolCreate,
-        tConnect: _tConnect,
-        tQueries: _tQueries,
-        tCommit: 0,
-        tPoolEnd: 0,
-        tTotal: _tPoolCreate + _tConnect + _tQueries,
-        mode: 'transaction',
-        error: String(error?.message).slice(0, 100),
-      });
-    }
     throw error;
   } finally {
     if (client) {
       try { client.release(); } catch {}
     }
-    // CRITICAL: fully close the per-call pool so its WebSocket (and the request
-    // context it is bound to) is released. Awaited → never fire-and-forget.
-    const _tE0 = _prof ? Date.now() : 0;
     try { await pool.end(); } catch {}
-    if (_prof) _tPoolEnd = Date.now() - _tE0;
-    // Backfill tPoolEnd into the last pushed entry for this transaction
-    if (_prof && _prof.length > 0) {
-      const last = _prof[_prof.length - 1];
-      if (last && last.mode === 'transaction') {
-        last.tPoolEnd = _tPoolEnd;
-        last.tTotal = (last.tTotal || 0) + _tPoolEnd;
-      }
-    }
   }
 }
 
@@ -6171,32 +6023,6 @@ async function runScheduledAlertsBaseline(controller, env) {
 // ============================================================================
 export default {
   async fetch(request, env, ctx) {
-    // ── ISOLATE TRACKING ──
-    // Increment per-request counter and capture request start time.
-    // These are added to response headers so the client can see if the
-    // isolate changed between requests.
-    _isolateRequestCount++;
-    const _reqStartTs = Date.now();
-    const _reqIsoReqNum = _isolateRequestCount;
-    const _reqIsoAgeMs = _reqStartTs - _isolateBootTs;
-
-    // Helper: stamp a Response with isolate-tracking headers.
-    // Called on EVERY response path (success, error, OPTIONS, 404, etc.)
-    const _stampResponse = (response) => {
-      try {
-        if (response && response.headers && typeof response.headers.set === 'function') {
-          response.headers.set('X-Iso-Id', _isolateId);
-          response.headers.set('X-Iso-Req', String(_reqIsoReqNum));
-          response.headers.set('X-Iso-Age-Ms', String(_reqIsoAgeMs));
-          response.headers.set('X-Req-Wall-Ms', String(Date.now() - _reqStartTs));
-          // _isolateBootTs lets the client compute how long the isolate
-          // has been alive when this request arrived.
-          response.headers.set('X-Iso-Boot-Ts', String(_isolateBootTs));
-        }
-      } catch {}
-      return response;
-    };
-
     _currentRequestOrigin = request.headers.get('Origin');
     // Set env accessors for fetchFearGreed (called from various places)
     env_CMC_API_KEY = env.CMC_API_KEY || null;
@@ -6206,16 +6032,12 @@ export default {
       setEnvSendTelegramMessage(sendTelegramMessage);
     }
     if (request.method === 'OPTIONS') {
-      return _stampResponse(new Response(null, {
+      return new Response(null, {
         status: 204,
         headers: withCors({}, env),
-      }));
+      });
     }
 
-    // Wrap the entire request handling in an inner function so we can
-    // stamp isolate-tracking headers on EVERY response path (including
-    // errors, 404s, etc.) without modifying each `return` statement.
-    const _handleRequest = async () => {
     try {
       const url = new URL(request.url);
 
@@ -6855,207 +6677,6 @@ export default {
         return await analysisHandlers.handleIncrementView(request, env, analysisId);
       }
 
-      // ── PROFILING: isolated queryDb vs neon() HTTP comparison ──
-      // GET /api/admin/_profile-ping?mode=pool|neon|both&_diag=1
-      // Runs a trivial SELECT 1 and returns per-phase timing.
-      // Auth bypassed when ?_diag=1 is present — this endpoint only runs
-      // SELECT 1 (no sensitive data, no writes), so it is safe to expose
-      // temporarily for diagnostic purposes. Remove before next deploy.
-      if (request.method === 'GET' && url.pathname === '/api/admin/_profile-ping') {
-        const diagKey = url.searchParams.get('_diag');
-        if (diagKey !== '1') {
-          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
-        }
-        const mode = url.searchParams.get('mode') || 'both';
-        const result = { mode, samples: [] };
-
-        if (!isDatabaseConfigured(env)) {
-          return jsonResponse({ error: 'Database not configured' }, { status: 503 }, env);
-        }
-
-        const runs = parseInt(url.searchParams.get('runs') || '3', 10);
-        for (let i = 0; i < runs; i++) {
-          if (mode === 'pool' || mode === 'both') {
-            const t0 = Date.now();
-            const tPoolStart = Date.now();
-            const pool = createPool(env);
-            const tPoolCreate = Date.now() - tPoolStart;
-            const tQStart = Date.now();
-            try { await pool.query('SELECT 1 AS x'); } catch (e) { result.poolError = String(e.message).slice(0,120); }
-            const tQuery = Date.now() - tQStart;
-            const tEStart = Date.now();
-            try { await pool.end(); } catch {}
-            const tPoolEnd = Date.now() - tEStart;
-            result.samples.push({ run: i+1, method: 'pool', tPoolCreate, tQuery, tPoolEnd, tTotal: Date.now() - t0 });
-          }
-          if (mode === 'neon' || mode === 'both') {
-            const t0 = Date.now();
-            const sql = getSharedNeon(env);
-            if (!sql) {
-              result.samples.push({ run: i+1, method: 'neon', error: 'neon() client init failed' });
-            } else {
-              const tQStart = Date.now();
-              try {
-                const rows = await sql`SELECT 1 AS x`;
-                result.samples.push({ run: i+1, method: 'neon', tQuery: Date.now() - tQStart, tTotal: Date.now() - t0, rowCount: rows?.length });
-              } catch (e) {
-                result.samples.push({ run: i+1, method: 'neon', tQuery: Date.now() - tQStart, tTotal: Date.now() - t0, error: String(e.message).slice(0, 120) });
-              }
-            }
-          }
-        }
-        return jsonResponse(result, {}, env);
-      }
-
-      // ── PROFILING: simulate handleCreate's exact DB queries ──
-      // GET /api/admin/_profile-create?_diag=1&featured=1
-      // Runs the SAME 2 queries handleCreate would run (countFeatured + INSERT),
-      // then immediately DELETEs the test row. Returns per-queryDb timing.
-      // No auth needed — uses a fixed test author_id and rolls back its INSERT.
-      if (request.method === 'GET' && url.pathname === '/api/admin/_profile-create') {
-        const diagKey = url.searchParams.get('_diag');
-        if (diagKey !== '1') {
-          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
-        }
-        if (!isDatabaseConfigured(env)) {
-          return jsonResponse({ error: 'Database not configured' }, { status: 503 }, env);
-        }
-
-        const featured = url.searchParams.get('featured') === '1';
-        const prof = [];
-        env._profileCollector = prof;
-        const t0 = Date.now();
-        const createdIds = [];
-
-        try {
-          // Mirror analysisRepo.ensureSchema (cached → 0 queries on warm isolate)
-          await analysisRepo.ensureSchema(env);
-
-          // Mirror countFeatured (only if featured=true)
-          if (featured) {
-            const cnt = await analysisRepo.countFeatured(env);
-          }
-
-          // Mirror create — generate a test row
-          const testId = String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 12);
-          const analysis = await analysisRepo.create(env, '999999999', {
-            coin: 'TEST',
-            timeframe: '1d',
-            image: '',
-            text: '__PROFILE_TEST__',
-            title: 'Profile Test (auto-cleanup)',
-            support_level: '',
-            current_price: '',
-            resistance_level: '',
-            featured: false,
-            category: 'crypto',
-            author: 'ProfileDiag',
-          });
-          createdIds.push(analysis?.id);
-
-          // Cleanup: delete the test row
-          if (analysis?.id) {
-            await queryDb(env, `DELETE FROM analyses WHERE id = $1`, [String(analysis.id)]);
-          }
-
-          return jsonResponse({
-            ok: true,
-            totalWallMs: Date.now() - t0,
-            queryCount: prof.length,
-            queries: prof,
-            pool: {
-              totalPoolCreateMs: prof.reduce((s, q) => s + (q.tPoolCreate || 0), 0),
-              totalQueryMs: prof.reduce((s, q) => s + (q.tQuery || 0), 0),
-              totalPoolEndMs: prof.reduce((s, q) => s + (q.tPoolEnd || 0), 0),
-            },
-            note: 'Wall time. CPU ≈ tPoolCreate + (TLS handshake portion of tQuery) + tPoolEnd.',
-          }, {}, env);
-        } catch (error) {
-          // Best-effort cleanup on error
-          for (const id of createdIds) {
-            try { await queryDb(env, `DELETE FROM analyses WHERE id = $1`, [String(id)]); } catch {}
-          }
-          return jsonResponse({
-            ok: false,
-            totalWallMs: Date.now() - t0,
-            queries: prof,
-            error: String(error?.message).slice(0, 200),
-          }, { status: 500 }, env);
-        }
-      }
-
-      // ── PROFILING: queryDbTransaction batch test ──
-      // GET /api/admin/_profile-txn?_diag=1&queries=4
-      // Runs N trivial SELECT 1 inside a single transaction, returning
-      // per-phase timing. This shows whether TLS handshake is paid once
-      // (tConnect) and reused across queries (tQueries should be tiny).
-      if (request.method === 'GET' && url.pathname === '/api/admin/_profile-txn') {
-        const diagKey = url.searchParams.get('_diag');
-        if (diagKey !== '1') {
-          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
-        }
-        if (!isDatabaseConfigured(env)) {
-          return jsonResponse({ error: 'Database not configured' }, { status: 503 }, env);
-        }
-
-        const n = Math.min(10, Math.max(1, parseInt(url.searchParams.get('queries') || '4', 10)));
-        const prof = [];
-        env._profileCollector = prof;
-        const t0 = Date.now();
-
-        const queries = [];
-        for (let i = 0; i < n; i++) {
-          queries.push({ sql: 'SELECT 1 AS x', params: [] });
-        }
-
-        try {
-          await queryDbTransaction(env, queries);
-          return jsonResponse({
-            ok: true,
-            totalWallMs: Date.now() - t0,
-            queryCount: n,
-            queries: prof,
-            note: 'tConnect is paid ONCE for the whole transaction. Each subsequent query reuses the WebSocket.',
-          }, {}, env);
-        } catch (error) {
-          return jsonResponse({
-            ok: false,
-            totalWallMs: Date.now() - t0,
-            queries: prof,
-            error: String(error?.message).slice(0, 200),
-          }, { status: 500 }, env);
-        }
-      }
-
-      // ── DIAG: read KV blackbox recorder state ──
-      // GET /api/admin/_diag-blackbox?_diag=1
-      // Returns the last step written by handleCreate/handleDelete before
-      // they were (potentially) killed. Keys: diag:blackbox:create, diag:blackbox:delete
-      if (request.method === 'GET' && url.pathname === '/api/admin/_diag-blackbox') {
-        const diagKey = url.searchParams.get('_diag');
-        if (diagKey !== '1') {
-          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
-        }
-        const result = {};
-        try {
-          const createBb = await readAppCache(env, 'diag:blackbox:create');
-          result.create = createBb ? JSON.parse(createBb) : null;
-        } catch (e) { result.create = { error: String(e.message).slice(0, 100) }; }
-        try {
-          const deleteBb = await readAppCache(env, 'diag:blackbox:delete');
-          result.delete = deleteBb ? JSON.parse(deleteBb) : null;
-        } catch (e) { result.delete = { error: String(e.message).slice(0, 100) }; }
-        try {
-          const bootBb = await readAppCache(env, 'diag:blackbox:bootstrap');
-          result.bootstrap = bootBb ? JSON.parse(bootBb) : null;
-        } catch (e) { result.bootstrap = { error: String(e.message).slice(0, 100) }; }
-        try {
-          const notifyBb = await readAppCache(env, 'diag:blackbox:notify');
-          result.notify = notifyBb ? JSON.parse(notifyBb) : null;
-        } catch (e) { result.notify = { error: String(e.message).slice(0, 100) }; }
-        return jsonResponse(result, {}, env);
-      }
-
       // ── Analyses: Admin endpoints (new paths) ──
       if (request.method === 'POST' && url.pathname === '/api/admin/analyses') {
         // A/B TEST: Create request-scoped shared pool (1 TLS handshake for all queries)
@@ -7366,10 +6987,12 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
-        // CONFIRMATION TEST: shared pool DISABLED for bootstrap only.
-        // If Error 1102 returns ONLY on bootstrap → shared pool is the definitive fix.
-        // Create/Delete still use shared pool (see below).
-        return await userHandlers.handleBootstrap(request, env);
+        env._reqPool = createPool(env);
+        try {
+          return await userHandlers.handleBootstrap(request, env);
+        } finally {
+          if (env._reqPool) { try { await env._reqPool.end(); } catch {} env._reqPool = null; }
+        }
       }
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
@@ -7504,21 +7127,6 @@ export default {
       // (created + closed inside each queryDb call). No module-level Pool
       // state exists — nothing to clean up. This is the ONLY safe pattern
       // for @neondatabase/serverless Pool in Cloudflare Workers.
-    }
-    }; // end _handleRequest
-
-    // Execute the handler and stamp isolate-tracking headers on the response.
-    try {
-      const response = await _handleRequest();
-      return _stampResponse(response);
-    } catch (e) {
-      // If _handleRequest itself threw (shouldn't happen — it has its own
-      // try/catch), return a stamped 500.
-      console.error('FATAL: _handleRequest threw:', e?.message);
-      return _stampResponse(new Response(JSON.stringify({ status: 'error', message: 'Fatal handler error' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json', ...withCors({}, env) },
-      }));
     }
   },
 

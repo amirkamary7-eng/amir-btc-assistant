@@ -328,209 +328,46 @@ export function createAnalysisHandlers(deps) {
 
   /**
    * POST /api/admin/analyses — Create (admin only).
-   *
-   * BINARY SEARCH DIAGNOSTIC MODES (via env.DIAG_MODE or ?_mode=):
-   *   full              — everything on (default, production behavior)
-   *   no-notify         — skip ctx.waitUntil(notifyNewAnalysis)
-   *   no-cache          — invalidateAnalysesCache is a no-op (no KV writes/deletes)
-   *   no-notify-no-cache— skip both notify and cache invalidation
-   *   no-db             — skip ALL DB queries (return stub success without creating)
-   *   stub              — return immediately, no auth, no DB, no KV, no notify
-   *
-   * Profiling: append ?_profile=1 to get per-queryDb timing in the response.
-   * Auth bypass: append ?_diag=1 to skip Telegram auth (uses env.ADMIN_TELEGRAM_ID).
-   *
-   * KV blackbox: each step writes 'diag:blackbox:create' = {step,ts} BEFORE
-   * executing. If the Worker is killed mid-handler, reading this KV key
-   * reveals the last step that started.
    */
   async function handleCreate(request, env, ctx) {
-    const _t0 = Date.now();
-    const _phases = [];
-    const _phase = (name) => { _phases.push({ name, ms: Date.now() - _t0 }); };
-
-    // Activate profiling collector — queryDb/queryDbTransaction will push to it
-    env._profileCollector = [];
-
-    const url = new URL(request.url);
-    const wantProfile = url.searchParams.get('_profile') === '1';
-    const diagBypass = url.searchParams.get('_diag') === '1';
-    const noCleanup = url.searchParams.get('_nocleanup') === '1';
-    // Mode priority: query param > env var > 'full'
-    const mode = url.searchParams.get('_mode') || env.DIAG_MODE || 'full';
-
-    // KV blackbox recorder — write step name before executing
-    const _blackbox = async (step) => {
-      try {
-        await writeAppCache(env, 'diag:blackbox:create', JSON.stringify({ step, ts: Date.now(), mode, tMs: Date.now() - _t0 }), 300);
-      } catch {}
-    };
-
-    _phase('entry');
-    await _blackbox('entry');
-
-    // STUB mode: return immediately, nothing else
-    if (mode === 'stub') {
-      return jsonResponse({ status: 'success', _mode: mode, _phases: _phases, _msg: 'stub — no auth, no DB, no KV, no notify' }, {}, env);
+    const authResult = await requireAdmin(request, env);
+    if (authResult.error) return authResult.error;
+    if (!isAdminTelegramId(env, authResult.user.id)) {
+      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
     }
-
-    // Auth — bypass with ?_diag=1 (uses first admin ID from env)
-    let adminUserId;
-    if (diagBypass) {
-      // Use the first configured admin ID
-      const ids = String(env.ADMIN_TELEGRAM_ID || env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-      adminUserId = ids[0] || '1';
-    } else {
-      await _blackbox('requireAdmin');
-      const authResult = await requireAdmin(request, env);
-      _phase('requireAdmin');
-      if (authResult.error) return authResult.error;
-      if (!isAdminTelegramId(env, authResult.user.id)) {
-        return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
-      }
-      adminUserId = authResult.user.id;
-    }
-
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
 
-    let parsed;
-    if (diagBypass) {
-      // Use a default payload for diag testing
-      parsed = { payload: {
-        coin: 'DIAG', timeframe: '1d', image: '', text: '__DIAG_TEST__',
-        title: 'Diag Test', support_level: '', current_price: '', resistance_level: '',
-        featured: false, force_featured: false, category: 'crypto', author: 'Diag',
-      }};
-    } else {
-      parsed = parseAnalysisPayload(await request.text(), { requireAuthor: true }, env);
-    }
-    _phase('parsePayload');
+    const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: true }, env);
     if (parsed.error) return parsed.error;
 
-    // NO-DB mode: return stub success without touching DB or KV
-    if (mode === 'no-db') {
-      _phase('response');
-      return jsonResponse({ status: 'success', _mode: mode, _phases: _phases, _msg: 'no-db — skipped all DB queries' }, {}, env);
-    }
-
     try {
-      await _blackbox('ensureSchema');
       await analysisRepo.ensureSchema(env);
-      _phase('ensureSchema');
 
       // Featured limit check (max 5)
       if (parsed.payload.featured && !parsed.payload.force_featured) {
-        await _blackbox('countFeatured');
         const featuredCount = await analysisRepo.countFeatured(env);
-        _phase('countFeatured');
         if (featuredCount >= 5) {
           return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: featuredCount, max: 5 }, {}, env);
         }
       }
       // If force_featured, un-feature the oldest first
       if (parsed.payload.featured && parsed.payload.force_featured) {
-        await _blackbox('unsetOldestFeatured');
         await analysisRepo.unsetOldestFeatured(env);
-        _phase('unsetOldestFeatured');
       }
 
-      await _blackbox('create');
-      const analysis = await analysisRepo.create(env, adminUserId, parsed.payload);
-      _phase('create');
+      const analysis = await analysisRepo.create(env, authResult.user.id, parsed.payload);
 
-      // Cache invalidation — skip in no-cache mode
-      if (mode !== 'no-cache' && mode !== 'no-notify-no-cache') {
-        await _blackbox('invalidateCache');
-        const version = await invalidateAnalysesCache(env);
-        _phase('invalidateCache');
+      const version = await invalidateAnalysesCache(env);
 
-        // Cleanup: if this was a diag test, delete the created row
-        if (diagBypass && analysis?.id && !noCleanup) {
-          await _blackbox('diag-cleanup');
-          await queryDb(env, `DELETE FROM analyses WHERE id = $1`, [String(analysis.id)]);
-          _phase('diag-cleanup');
-        }
+      // Notify subscribers (best-effort, fire-and-forget)
+      const notify = notifyNewAnalysis(env, analysis, ctx);
+      if (ctx?.waitUntil) ctx.waitUntil(notify.catch(() => {}));
+      else notify.catch(() => {});
 
-        // Notify — skip in no-notify mode
-        if (mode !== 'no-notify' && mode !== 'no-notify-no-cache') {
-          await _blackbox('notify-start');
-          const notify = notifyNewAnalysis(env, analysis, ctx);
-          if (ctx?.waitUntil) ctx.waitUntil(notify.catch(() => {}));
-          else notify.catch(() => {});
-          _phase('notify-start');
-        }
-
-        _phase('response');
-        await _blackbox('response-sent');
-
-        const baseResponse = { status: 'success', analysis, version, _mode: mode };
-
-        if (wantProfile || diagBypass) {
-          const queries = env._profileCollector || [];
-          const pool = {
-            totalPoolCreateMs: queries.reduce((s, q) => s + (q.tPoolCreate || 0), 0),
-            totalQueryMs: queries.reduce((s, q) => s + (q.tQuery || (q.tConnect || 0) + (q.tQueries || 0) + (q.tCommit || 0)), 0),
-            totalPoolEndMs: queries.reduce((s, q) => s + (q.tPoolEnd || 0), 0),
-            queryCount: queries.length,
-          };
-          return jsonResponse({
-            ...baseResponse,
-            _profile: {
-              totalWallMs: Date.now() - _t0,
-              queries,
-              pool,
-              phases: _phases,
-              mode,
-            },
-          }, {}, env);
-        }
-
-        return jsonResponse(baseResponse, {}, env);
-      } else {
-        // no-cache mode: skip invalidateAnalysesCache entirely
-        _phase('invalidateCache-skipped');
-
-        // Cleanup: if this was a diag test, delete the created row
-        if (diagBypass && analysis?.id && !noCleanup) {
-          await _blackbox('diag-cleanup');
-          await queryDb(env, `DELETE FROM analyses WHERE id = $1`, [String(analysis.id)]);
-          _phase('diag-cleanup');
-        }
-
-        // Notify — skip in no-notify-no-cache mode
-        if (mode !== 'no-notify-no-cache') {
-          await _blackbox('notify-start');
-          const notify = notifyNewAnalysis(env, analysis, ctx);
-          if (ctx?.waitUntil) ctx.waitUntil(notify.catch(() => {}));
-          else notify.catch(() => {});
-          _phase('notify-start');
-        }
-
-        _phase('response');
-        await _blackbox('response-sent');
-
-        const baseResponse = { status: 'success', analysis, version: Date.now(), _mode: mode };
-
-        if (wantProfile || diagBypass) {
-          const queries = env._profileCollector || [];
-          return jsonResponse({
-            ...baseResponse,
-            _profile: {
-              totalWallMs: Date.now() - _t0,
-              queries,
-              phases: _phases,
-              mode,
-            },
-          }, {}, env);
-        }
-
-        return jsonResponse(baseResponse, {}, env);
-      }
+      return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {
-      _phase('catch');
-      await _blackbox('ERROR:' + String(error?.message).slice(0, 80));
       console.warn(safeError('create-analysis', error));
       return safeDbErrorResponse(error, {}, env);
     }
@@ -592,101 +429,26 @@ export function createAnalysisHandlers(deps) {
 
   /**
    * DELETE /api/admin/analyses/:id — Delete (admin only, double-confirm in frontend).
-   *
-   * BINARY SEARCH DIAGNOSTIC MODES (same as handleCreate):
-   *   full, no-notify (N/A for delete), no-cache, no-db, stub
-   *
-   * Auth bypass: ?_diag=1 (needs an existing analysis ID to delete; use _profile-create first)
-   * KV blackbox: 'diag:blackbox:delete'
    */
   async function handleDelete(request, env, analysisId) {
-    const _t0 = Date.now();
-    const _phases = [];
-    const _phase = (name) => { _phases.push({ name, ms: Date.now() - _t0 }); };
-
-    env._profileCollector = [];
-
-    const url = new URL(request.url);
-    const wantProfile = url.searchParams.get('_profile') === '1';
-    const diagBypass = url.searchParams.get('_diag') === '1';
-    const mode = url.searchParams.get('_mode') || env.DIAG_MODE || 'full';
-
-    const _blackbox = async (step) => {
-      try {
-        await writeAppCache(env, 'diag:blackbox:delete', JSON.stringify({ step, ts: Date.now(), mode, tMs: Date.now() - _t0, analysisId }), 300);
-      } catch {}
-    };
-
-    _phase('entry');
-    await _blackbox('entry');
-
-    // STUB mode: return immediately
-    if (mode === 'stub') {
-      return jsonResponse({ status: 'success', _mode: mode, _phases: _phases, _msg: 'stub — no auth, no DB, no KV' }, {}, env);
+    const authResult = await requireAdmin(request, env);
+    if (authResult.error) return authResult.error;
+    if (!isAdminTelegramId(env, authResult.user.id)) {
+      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
     }
-
-    // Auth
-    if (!diagBypass) {
-      await _blackbox('requireAdmin');
-      const authResult = await requireAdmin(request, env);
-      _phase('requireAdmin');
-      if (authResult.error) return authResult.error;
-      if (!isAdminTelegramId(env, authResult.user.id)) {
-        return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
-      }
-    }
-
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
 
-    // NO-DB mode: return stub success without touching DB or KV
-    if (mode === 'no-db') {
-      _phase('response');
-      return jsonResponse({ status: 'success', _mode: mode, _phases: _phases, _msg: 'no-db — skipped all DB queries' }, {}, env);
-    }
-
     try {
-      await _blackbox('remove');
       const deleted = await analysisRepo.remove(env, analysisId);
-      _phase('remove');
       if (!deleted) {
-        return jsonResponse({ status: 'error', message: 'Not found', _mode: mode, _phases: _phases }, { status: 404 }, env);
+        return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
 
-      // Cache invalidation — skip in no-cache mode
-      let version;
-      if (mode !== 'no-cache' && mode !== 'no-notify-no-cache') {
-        await _blackbox('invalidateCache');
-        version = await invalidateAnalysesCache(env, analysisId);
-        _phase('invalidateCache');
-      } else {
-        _phase('invalidateCache-skipped');
-        version = Date.now();
-      }
-
-      _phase('response');
-      await _blackbox('response-sent');
-
-      const baseResponse = { status: 'success', version, _mode: mode };
-
-      if (wantProfile || diagBypass) {
-        const queries = env._profileCollector || [];
-        return jsonResponse({
-          ...baseResponse,
-          _profile: {
-            totalWallMs: Date.now() - _t0,
-            queries,
-            phases: _phases,
-            mode,
-          },
-        }, {}, env);
-      }
-
-      return jsonResponse(baseResponse, {}, env);
+      const version = await invalidateAnalysesCache(env, analysisId);
+      return jsonResponse({ status: 'success', version }, {}, env);
     } catch (error) {
-      _phase('catch');
-      await _blackbox('ERROR:' + String(error?.message).slice(0, 80));
       console.warn(safeError('delete-analysis', error));
       return safeDbErrorResponse(error, {}, env);
     }
@@ -695,40 +457,24 @@ export function createAnalysisHandlers(deps) {
   // ── Notification ───────────────────────────────────────────────────────
 
   async function notifyNewAnalysis(env, analysis, ctx) {
-    const _notifyStart = Date.now();
     if (!notificationRepo || !sendTelegramMessage || !queryDb) return;
     const coinLabel = String(analysis.coin || '').toUpperCase() || 'Crypto';
     const title = `📊 تحلیل جدید: ${coinLabel}`;
     const message = analysis.title || `تحلیل ${coinLabel} (${analysis.timeframe}) منتشر شد.`;
 
-    // DIAG: log notify start to KV blackbox
-    const _notifyLog = async (step, data = {}) => {
-      try {
-        await writeAppCache(env, 'diag:blackbox:notify', JSON.stringify({
-          step, ts: Date.now(), tMs: Date.now() - _notifyStart, ...data,
-        }), 300);
-      } catch {}
-    };
-
     try {
-      await _notifyLog('start', { coin: analysis.coin });
       // Limit to 50 users max to prevent waitUntil timeout
       const usersResult = await queryDb(env, `SELECT telegram_id FROM users WHERE channel_joined = TRUE LIMIT 50`);
       const allUserIds = usersResult.rows.map((r) => String(r.telegram_id));
-      await _notifyLog('users-fetched', { userCount: allUserIds.length });
       if (allUserIds.length === 0) {
-        await _notifyLog('no-users', {});
         return;
       }
 
       if (notificationPlatformRepo) {
         const NOTIFY_TIMEOUT_MS = 20000;
         const startTime = Date.now();
-        let dispatched = 0;
-        let errors = 0;
         for (const uid of allUserIds) {
           if (Date.now() - startTime > NOTIFY_TIMEOUT_MS) {
-            await _notifyLog('timeout-reached', { dispatched, errors, remaining: allUserIds.length - dispatched - errors });
             console.warn('notifyNewAnalysis: timeout reached');
             break;
           }
@@ -742,15 +488,10 @@ export function createAnalysisHandlers(deps) {
               metadata: { coin: analysis.coin, name: analysis.title || '' },
               title, message,
             });
-            dispatched++;
-          } catch {
-            errors++;
-          }
+          } catch {}
         }
-        await _notifyLog('done', { dispatched, errors, totalUsers: allUserIds.length, totalMs: Date.now() - _notifyStart });
       }
     } catch (err) {
-      await _notifyLog('error', { error: String(err?.message).slice(0, 100) });
       console.warn(safeError('notify-new-analysis', err));
     }
   }

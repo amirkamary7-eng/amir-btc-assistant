@@ -52,10 +52,6 @@ export function createAlertRepository(deps) {
    * AUDIT-002 FIX: Added idx_price_alerts_status_created for cron query optimization.
    */
   async function ensureTable(env) {
-    // DIAGNOSTIC TEST: NO-OP MODE
-    _tableEnsured = true;
-    return;
-    /* eslint-disable no-unreachable */
     if (_tableEnsured) return;
     await queryDb(env, `
       CREATE TABLE IF NOT EXISTS price_alerts (

@@ -62,10 +62,6 @@ export function createWheelRepository(deps) {
    * - wheel_rewards: reward pool configuration
    */
   async function ensureSchema(env) {
-    // DIAGNOSTIC TEST: NO-OP MODE
-    _schemaVerified = true;
-    return;
-    /* eslint-disable no-unreachable */
     if (_schemaVerified) return;
     const batchSql = `
       CREATE TABLE IF NOT EXISTS wheel_spins (

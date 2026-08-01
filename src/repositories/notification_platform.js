@@ -26,10 +26,6 @@ export function createNotificationPlatformRepository(deps) {
   let _schemaVerified = false;
 
   async function ensureSchema(env) {
-    // DIAGNOSTIC TEST: NO-OP MODE
-    _schemaVerified = true;
-    return;
-    /* eslint-disable no-unreachable */
     if (_schemaVerified) return;
     if (!isDatabaseConfigured(env)) { _schemaVerified = true; return; }
 
