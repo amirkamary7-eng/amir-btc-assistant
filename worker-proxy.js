@@ -1366,26 +1366,13 @@ async function getReferralRewardPerInvite(env) {
 // WebSocket connections are bound to the request context that created them.
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  // TRACE: if env._traceSteps is an array, log this queryDb call
-  const _traceSteps = env && Array.isArray(env._traceSteps) ? env._traceSteps : null;
-  const _sqlLabel = _traceSteps ? String(sqlText).slice(0, 100).replace(/\s+/g, ' ') : null;
-  const _qStart = _traceSteps ? Date.now() : 0;
-
-  // A/B TEST: Request-scoped shared pool
-  // If env._reqPool is set (by the route wrapper), reuse it instead of
-  // creating a per-call Pool. This means ALL queryDb calls within one
-  // request share ONE WebSocket → ONE TLS handshake.
+  // Request-scoped shared pool: if env._reqPool is set (by the route wrapper),
+  // reuse it instead of creating a per-call Pool. This means ALL queryDb calls
+  // within one request share ONE WebSocket → ONE TLS handshake.
   if (env && env._reqPool) {
     try {
-      const result = await env._reqPool.query(sqlText, params);
-      if (_traceSteps) {
-        _traceSteps.push({ type: 'queryDb', sql: _sqlLabel, ms: Date.now() - _qStart, pool: 'shared', success: true });
-      }
-      return result;
+      return await env._reqPool.query(sqlText, params);
     } catch (error) {
-      if (_traceSteps) {
-        _traceSteps.push({ type: 'queryDb', sql: _sqlLabel, ms: Date.now() - _qStart, pool: 'shared', success: false, error: String(error?.message).slice(0, 200) });
-      }
       // If the shared pool is broken, clear it so future calls fall back.
       env._reqPool = null;
       throw error;
@@ -1398,11 +1385,7 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const result = await pool.query(sqlText, params);
-        if (_traceSteps) {
-          _traceSteps.push({ type: 'queryDb', sql: _sqlLabel, ms: Date.now() - _qStart, pool: 'per-call', success: true, attempt });
-        }
-        return result;
+        return await pool.query(sqlText, params);
       } catch (error) {
         const msg = String(error?.message || '');
         const isTransient = msg.includes('530') ||
@@ -1412,12 +1395,7 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
                             msg.includes('timeout') ||
                             msg.includes('fetch failed') ||
                             msg.includes('network');
-        if (attempt === retries || !isTransient) {
-          if (_traceSteps) {
-            _traceSteps.push({ type: 'queryDb', sql: _sqlLabel, ms: Date.now() - _qStart, pool: 'per-call', success: false, attempt, error: msg.slice(0, 200) });
-          }
-          throw error;
-        }
+        if (attempt === retries || !isTransient) throw error;
         const ms = Math.min(300 * 2 ** attempt, 2000);
         await new Promise((r) => setTimeout(r, ms));
       }
@@ -6729,30 +6707,6 @@ export default {
       if (request.method === 'POST' && /^\/api\/analyses\/[^/]+\/view$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
         return await analysisHandlers.handleIncrementView(request, env, analysisId);
-      }
-
-      // ── TRACE: read delete trace from KV ──
-      // GET /api/admin/_trace?_diag=1
-      // Returns the last delete trace + admin panel traces.
-      if (request.method === 'GET' && url.pathname === '/api/admin/_trace') {
-        const diagKey = url.searchParams.get('_diag');
-        if (diagKey !== '1') {
-          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
-        }
-        const result = {};
-        try {
-          const delTrace = await readAppCache(env, 'diag:trace:delete');
-          result.delete = delTrace ? JSON.parse(delTrace) : null;
-        } catch (e) { result.delete = { error: String(e.message).slice(0, 100) }; }
-        try {
-          const adminTrace = await readAppCache(env, 'diag:trace:admin');
-          result.admin = adminTrace ? JSON.parse(adminTrace) : null;
-        } catch (e) { result.admin = { error: String(e.message).slice(0, 100) }; }
-        try {
-          const bootTrace = await readAppCache(env, 'diag:trace:bootstrap');
-          result.bootstrap = bootTrace ? JSON.parse(bootTrace) : null;
-        } catch (e) { result.bootstrap = { error: String(e.message).slice(0, 100) }; }
-        return jsonResponse(result, {}, env);
       }
 
       // ── Analyses: Admin endpoints (new paths) ──
