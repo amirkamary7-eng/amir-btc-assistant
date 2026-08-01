@@ -875,6 +875,12 @@
             <div class="wallet-watermark"><img loading="lazy" src="assets/token-logo.png" alt=""></div>
         </div>
 
+        <!-- ═══ Membership Card ═════════════════════════════════════════════ -->
+        <div id="membership-card" class="membership-card skeleton-loading" onclick="if(window.MembershipApp)MembershipApp.open()">
+            <div class="mb-card-glow"></div>
+            <div class="mb-card-content"></div>
+        </div>
+
         <div class="referral-entry-card" id="referral-entry-card" onclick="if(window.ReferralApp)ReferralApp.openReferral()">
             <div class="rec-glow"></div>
             <div class="rec-top">
@@ -1463,6 +1469,8 @@
     <script src="assistant.js" defer></script>
     <script src="wallet.js" defer></script>
     <script src="referral.js" defer></script>
+    <script src="membership-user.js" defer></script>
+    <script src="membership-admin.js" defer></script>
     <!-- PERFORMANCE: admin.js lazy-loaded via dynamic import in openAdminPanel() -->
     <script src="app.js" defer></script>
     <!-- #endregion -->
@@ -1560,6 +1568,10 @@
                         <button class="adm-nav-item" data-admin-section="publisher" onclick="switchAdminSection('publisher', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
                             <span>انتشار تلگرام</span>
+                        </button>
+                        <button class="adm-nav-item" data-admin-section="membership" onclick="switchAdminSection('membership', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z"/><path d="M5 20h14"/></svg>
+                            <span>عضویت ویژه</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="system-controls" onclick="switchAdminSection('system-controls', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
@@ -2567,6 +2579,33 @@
                             </div>
                         </div>
                     </div>
+                </section>
+
+                <!-- ═══ Membership Admin Section ═════════════════════════════════ -->
+                <section class="adm-section" id="admin-section-membership">
+                    <div class="adm-section-head">
+                        <h3 class="adm-section-title">مدیریت عضویت ویژه</h3>
+                        <button class="adm-refresh-btn" onclick="loadAdminMembership()">به‌روزرسانی</button>
+                    </div>
+                    <div id="admin-membership-stats" class="adm-stats-grid"></div>
+                    <div class="adm-filter-bar" style="margin:16px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                        <input type="text" id="mb-search" class="adm-input" placeholder="جستجو (شناسه، نام، صرافی...)" oninput="MembershipAdmin.onSearch(this.value)" style="flex:1;min-width:200px"/>
+                        <select id="mb-status-filter" class="adm-select" onchange="MembershipAdmin.onFilterChange()">
+                            <option value="">همه وضعیت‌ها</option>
+                            <option value="PENDING">در انتظار</option>
+                            <option value="APPROVED">تأیید شده</option>
+                            <option value="REJECTED">رد شده</option>
+                        </select>
+                        <select id="mb-exchange-filter" class="adm-select" onchange="MembershipAdmin.onFilterChange()">
+                            <option value="">همه صرافی‌ها</option>
+                            <option>Bitunix</option><option>Bybit</option><option>Binance</option>
+                            <option>OKX</option><option>MEXC</option><option>Gate</option>
+                            <option>KuCoin</option><option>Bitget</option><option>Coinex</option><option>Other</option>
+                        </select>
+                        <button class="adm-btn adm-btn-gold" onclick="MembershipAdmin.exportCsv()">خروجی CSV</button>
+                    </div>
+                    <div id="admin-membership-list" class="adm-list"></div>
+                    <div id="admin-membership-pagination"></div>
                 </section>
             </main>
         </div>

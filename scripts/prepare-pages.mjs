@@ -19,6 +19,8 @@ const hashedFiles = [
   'referral.js',
   'referral.css',
   'admin.js',
+  'membership-user.js',
+  'membership-admin.js',
 ];
 
 // ============================================================================

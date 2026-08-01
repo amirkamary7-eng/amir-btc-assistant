@@ -9311,6 +9311,8 @@ function loadUser() {
         // Fix: reload wallet card now that the user is confirmed — resolves race condition
         // where loadProfileCard() ran earlier while UserContext was still pending
         window.WalletApp?.loadProfileCard();
+        // Load membership card on profile load (non-blocking, cached in-memory)
+        window.MembershipApp?.loadCard();
     } else if (UserContext.isPending()) {
         const pn = $('profile-name'); if (pn) pn.innerText = t('loading_user');
         const pu = $('profile-username'); if (pu) pu.innerText = '...';

@@ -136,6 +136,7 @@ const ADMIN_SECTION_PERMS = {
     'notification-center': ['notifications.send','notifications.manage'],
     'alert-economy':       ['market.alerts'],
     'publisher':           ['analysis.publish','news.publish','notifications.send'],
+    'membership':          null,  // all admins can manage membership
     'system-controls':     ['system.settings','system.maintenance'],
     'system-health':       ['system.settings'],
     'logs':                ['system.logs'],
@@ -627,6 +628,7 @@ function switchAdminSection(section, btn) {
         case 'notification-center': loadNpOverview(); break;
         case 'alert-economy': loadAlertEconomyDashboard(); break;
         case 'publisher': loadPublisherOverview(); break;
+        case 'membership': loadAdminMembership(); break;
         case 'system-controls': loadMaintenanceSettings(); break;
         case 'system-health': loadAdminSystemHealth(); break;
         case 'logs': loadAdminLogs(1); break;
@@ -3107,6 +3109,16 @@ async function loadPublisherOverview() {
     // But if news tab is active, auto-load news (most common entry point).
     if (_pubCurrentTab === 'news') {
         loadPublisherNews(1);
+    }
+}
+
+/** Membership section loader — delegates to MembershipAdmin (from membership-admin.js). */
+async function loadAdminMembership() {
+    if (window.MembershipAdmin && typeof window.MembershipAdmin.load === 'function') {
+        await window.MembershipAdmin.load();
+    } else {
+        const container = document.getElementById('admin-membership-list');
+        if (container) container.innerHTML = '<div class="admin-empty">در حال بارگذاری ماژول عضویت...</div>';
     }
 }
 window.loadPublisherOverview = loadPublisherOverview;

@@ -36,6 +36,8 @@ import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
 import { createPublisherRepository } from './src/repositories/publisher.js';
 import { createPublisherHandlers } from './src/controllers/publisher.js';
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
+import { createMembershipRepository } from './src/repositories/membership.js';
+import { createMembershipHandlers } from './src/controllers/membership.js';
 
 /**
  * Cloudflare Worker Shell
@@ -4215,6 +4217,22 @@ const publisherHandlers = createPublisherHandlers({
 // ── Market Overview Service (CMC) — all CMC calls centralized here ──
 const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCache, fetchJson });
 
+// ── Membership Module — factory wiring ──────────────────────────────────────
+const membershipRepo = createMembershipRepository({ queryDb, queryDbTransaction });
+const membershipHandlers = createMembershipHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  isAdminTelegramId,
+  isDatabaseConfigured,
+  readAppCache,
+  writeAppCache,
+  safeDbErrorResponse,
+  buildBodyFieldValidationError,
+  readJsonBody,
+  membershipRepo,
+  queryDbTransaction,
+});
+
 async function handleChartResolve(request, env) {
   const url = new URL(request.url);
   const rawSymbol = url.searchParams.get('symbol');
@@ -6847,6 +6865,76 @@ export default {
         const type = decodeURIComponent(parts[parts.length - 2]);
         const refId = decodeURIComponent(parts[parts.length - 1]);
         return withSharedPool(env, () => publisherHandlers.handleCheckDedup(request, env, type, refId));
+      }
+
+      // ── Membership Module — User Routes ───────────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/membership/status') {
+        return withSharedPool(env, () => membershipHandlers.handleGetStatus(request, env));
+      }
+      if (request.method === 'GET' && url.pathname === '/api/membership/request') {
+        return withSharedPool(env, () => membershipHandlers.handleGetMyRequests(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/membership/request') {
+        return withSharedPool(env, () => membershipHandlers.handleSubmitRequest(request, env));
+      }
+
+      // ── Membership Module — Admin Routes ──────────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/admin/membership/stats') {
+        return withSharedPool(env, () => membershipHandlers.handleGetStats(request, env));
+      }
+      if (request.method === 'GET' && url.pathname === '/api/admin/membership/requests') {
+        return withSharedPool(env, () => membershipHandlers.handleListRequests(request, env));
+      }
+      if (request.method === 'GET' && url.pathname === '/api/admin/membership/requests/export') {
+        return withSharedPool(env, () => membershipHandlers.handleExportRequests(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/requests/bulk-approve') {
+        return withSharedPool(env, () => membershipHandlers.handleBulkApprove(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/requests/bulk-reject') {
+        return withSharedPool(env, () => membershipHandlers.handleBulkReject(request, env));
+      }
+      if (/^\/api\/admin\/membership\/request\/[^/]+$/.test(url.pathname) && request.method === 'GET') {
+        return withSharedPool(env, () => membershipHandlers.handleGetRequest(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/approve') {
+        return withSharedPool(env, () => membershipHandlers.handleApprove(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/reject') {
+        return withSharedPool(env, () => membershipHandlers.handleReject(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/suspend') {
+        return withSharedPool(env, () => membershipHandlers.handleSuspend(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/reactivate') {
+        return withSharedPool(env, () => membershipHandlers.handleReactivate(request, env));
+      }
+      if (request.method === 'GET' && url.pathname === '/api/admin/membership/users') {
+        return withSharedPool(env, () => membershipHandlers.handleListUsers(request, env));
+      }
+      if (request.method === 'GET' && url.pathname === '/api/admin/membership/users/export') {
+        return withSharedPool(env, () => membershipHandlers.handleExportUsers(request, env));
+      }
+      if (/^\/api\/admin\/membership\/users\/[^/]+$/.test(url.pathname) && request.method === 'GET') {
+        return withSharedPool(env, () => membershipHandlers.handleGetUserDetail(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/users/suspend') {
+        return withSharedPool(env, () => membershipHandlers.handleManualSuspend(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/users/reactivate') {
+        return withSharedPool(env, () => membershipHandlers.handleManualReactivate(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/users/expire') {
+        return withSharedPool(env, () => membershipHandlers.handleManualExpire(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/users/set-level') {
+        return withSharedPool(env, () => membershipHandlers.handleSetLevel(request, env));
+      }
+      if (request.method === 'GET' && url.pathname === '/api/admin/membership/logs') {
+        return withSharedPool(env, () => membershipHandlers.handleListLogs(request, env));
+      }
+      if (request.method === 'GET' && url.pathname === '/api/admin/membership/logs/export') {
+        return withSharedPool(env, () => membershipHandlers.handleExportLogs(request, env));
       }
 
       if (request.method === 'GET' && url.pathname === '/api/notifications') {
