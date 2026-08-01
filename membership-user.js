@@ -2,11 +2,12 @@
  * MembershipApp — Premium badge for the Mini App profile card.
  *
  * Renders a 3D diamond badge INSIDE the existing .profile-card (top-left corner).
- * NO separate membership card is added to the profile page.
+ * Also applies premium effects to the entire .profile-card when VIP.
  *
- * VIP/PREMIUM/ELITE → gold diamond badge with glow + shimmer + float.
- * FREE/other → locked dim badge.
- * Click → opens premium popup (feature intro, NOT banner).
+ * VIP/PREMIUM/ELITE → gold diamond with strong glow + halo + shimmer + spark.
+ *   Profile card gets gold border + breathing halo + periodic border shine.
+ * FREE → locked dim metallic badge with lock icon + subtle glow.
+ * Click → opens premium popup with 6-step timeline + status display.
  */
 (function () {
   'use strict';
@@ -51,27 +52,42 @@
   }
 
   // 3D Diamond SVG icon
-  var DIAMOND_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  var DIAMOND_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M6 3h12l4 6-10 13L2 9z"/>' +
     '<path d="M11 3 8 9l4 13 4-13-3-6"/>' +
     '<path d="M2 9h20"/>' +
     '</svg>';
 
-  /** Render the badge INTO the existing profile card's #membership-badge slot. */
+  // Lock icon SVG
+  var LOCK_SVG = '<svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+
+  /** Render the badge + apply profile card effects. */
   function renderBadge(status) {
     var badge = document.getElementById('membership-badge');
+    var profileCard = document.querySelector('.profile-card');
     if (!badge) return;
 
     var premium = isPremium(status);
     badge.className = 'membership-badge ' + (premium ? 'membership-badge--premium' : 'membership-badge--free');
     badge.innerHTML =
       '<div class="mb-diamond mb-diamond-float">' +
+        (premium ? '<div class="mb-diamond-halo"></div>' : '') +
         '<div class="mb-diamond-glow"></div>' +
         '<div class="mb-diamond-svg">' + DIAMOND_SVG + '</div>' +
-        (premium ? '<div class="mb-diamond-shimmer"></div>' : '') +
+        '<div class="mb-diamond-shimmer"></div>' +
+        (!premium ? '<div class="mb-lock-icon">' + LOCK_SVG + '</div>' : '') +
       '</div>' +
       '<span class="mb-badge-text">' + (premium ? 'Premium Member' : 'فعال‌سازی Premium') + '</span>';
     badge.title = premium ? 'عضو ویژه AMIRBTC' : 'ارتقا به عضویت ویژه';
+
+    // Apply/remove premium effects on profile card
+    if (profileCard) {
+      if (premium) {
+        profileCard.classList.add('profile-card--premium');
+      } else {
+        profileCard.classList.remove('profile-card--premium');
+      }
+    }
   }
 
   function renderSkeleton() {
@@ -118,7 +134,6 @@
     if (isPremium(_cache)) {
       openVipStatusPopup(_cache);
     } else {
-      // Check if there's a pending request
       checkPendingAndOpenPopup();
     }
   }
@@ -149,6 +164,26 @@
     _popupOpen = false;
   }
 
+  // ─── Compute step status from request data ───────────────────────────────
+  // Steps: 1=register, 2=UID, 3=deposit, 4=first_trade, 5=review, 6=activation
+  function computeStepStatus(request, status) {
+    if (!request) {
+      // No request submitted yet — only step 1 might be done (user exists)
+      return ['pending', 'todo', 'todo', 'todo', 'todo', 'todo'];
+    }
+    if (request.status === 'APPROVED' || (status && isPremium(status))) {
+      return ['done', 'done', 'done', 'done', 'done', 'done'];
+    }
+    if (request.status === 'PENDING') {
+      // Request submitted → steps 1+2 done, 3+4 unknown (pending), 5 in review, 6 todo
+      return ['done', 'done', 'pending', 'todo', 'pending', 'todo'];
+    }
+    if (request.status === 'REJECTED') {
+      return ['done', 'done', 'todo', 'todo', 'rejected', 'todo'];
+    }
+    return ['pending', 'todo', 'todo', 'todo', 'todo', 'todo'];
+  }
+
   // ─── VIP Status Popup ────────────────────────────────────────────────────
 
   function openVipStatusPopup(status) {
@@ -166,6 +201,7 @@
         '</button>' +
         '<div class="mb-popup-header">' +
           '<div class="mb-popup-diamond">' +
+            '<div class="mb-popup-diamond-halo"></div>' +
             '<div class="mb-popup-diamond-glow"></div>' +
             '<div class="mb-popup-diamond-icon">' + DIAMOND_SVG + '</div>' +
             '<div class="mb-popup-diamond-shimmer"></div>' +
@@ -214,6 +250,9 @@
     closePopup();
     _popupOpen = true;
 
+    // Compute step status
+    var steps = computeStepStatus(null, _cache);
+
     var overlay = document.createElement('div');
     overlay.className = 'mb-popup-overlay';
     overlay.onclick = function (e) { if (e.target === overlay) closePopup(); };
@@ -224,6 +263,7 @@
         '</button>' +
         '<div class="mb-popup-header">' +
           '<div class="mb-popup-diamond">' +
+            '<div class="mb-popup-diamond-halo"></div>' +
             '<div class="mb-popup-diamond-glow"></div>' +
             '<div class="mb-popup-diamond-icon">' + DIAMOND_SVG + '</div>' +
             '<div class="mb-popup-diamond-shimmer"></div>' +
@@ -239,13 +279,16 @@
           benefitRow('gift', 'جوایز و کمپین‌های ویژه', 'شرکت در کمپین‌های اختصاصی') +
           benefitRow('shield', 'نشان Premium در پروفایل', 'badge ویژه در پروفایل شما') +
         '</div>' +
-        // Timeline
+        // Timeline — 6 steps
         '<ul class="mb-timeline">' +
-          '<li class="mb-timeline-item"><div class="mb-timeline-num">۱</div><div class="mb-timeline-text">ثبت‌نام از طریق لینک رسمی Bitunix</div></li>' +
-          '<li class="mb-timeline-item"><div class="mb-timeline-num">۲</div><div class="mb-timeline-text">ثبت UID صرافی</div></li>' +
-          '<li class="mb-timeline-item"><div class="mb-timeline-num">۳</div><div class="mb-timeline-text">بررسی توسط تیم</div></li>' +
-          '<li class="mb-timeline-item"><div class="mb-timeline-num">۴</div><div class="mb-timeline-text">فعال‌سازی دائمی Premium</div></li>' +
+          timelineStep(1, 'ثبت‌نام از طریق لینک رسمی Bitunix', steps[0]) +
+          timelineStep(2, 'ثبت UID صرافی', steps[1]) +
+          timelineStep(3, 'واریز اولیه به حساب صرافی', steps[2]) +
+          timelineStep(4, 'انجام اولین معامله (First Trade)', steps[3]) +
+          timelineStep(5, 'بررسی اطلاعات توسط تیم', steps[4]) +
+          timelineStep(6, 'فعال‌سازی دائمی Premium', steps[5]) +
         '</ul>' +
+        '<div class="mb-timeline-note">عضویت Premium پس از تکمیل تمام مراحل و تأیید اطلاعات توسط تیم فعال خواهد شد.</div>' +
         // Register button
         '<button class="mb-cta-register" onclick="MembershipApp.openBitunix()">' +
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>' +
@@ -274,6 +317,9 @@
     closePopup();
     _popupOpen = true;
 
+    // Compute step status for pending request
+    var steps = computeStepStatus(request, _cache);
+
     var overlay = document.createElement('div');
     overlay.className = 'mb-popup-overlay';
     overlay.onclick = function (e) { if (e.target === overlay) closePopup(); };
@@ -282,12 +328,27 @@
         '<button class="mb-popup-close" onclick="MembershipApp.closePopup()" aria-label="بستن">' +
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
         '</button>' +
-        '<div class="mb-pending">' +
-          '<div class="mb-pending-icon">' +
-            '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' +
+        '<div class="mb-popup-header">' +
+          '<div class="mb-popup-diamond">' +
+            '<div class="mb-popup-diamond-halo"></div>' +
+            '<div class="mb-popup-diamond-glow"></div>' +
+            '<div class="mb-popup-diamond-icon">' + DIAMOND_SVG + '</div>' +
+            '<div class="mb-popup-diamond-shimmer"></div>' +
           '</div>' +
-          '<div class="mb-pending-title">درخواست شما در حال بررسی است</div>' +
-          '<div class="mb-pending-msg">درخواست عضویت شما با موفقیت ثبت شده و در حال بررسی توسط تیم مدیریت است. این فرآیند معمولاً چند ساعت طول می‌کشد.</div>' +
+          '<h2 class="mb-popup-title">درخواست شما در حال بررسی است</h2>' +
+          '<p class="mb-popup-subtitle">درخواست عضویت شما ثبت شده و در حال بررسی توسط تیم مدیریت است.</p>' +
+        '</div>' +
+        // Timeline with current status
+        '<ul class="mb-timeline">' +
+          timelineStep(1, 'ثبت‌نام از طریق لینک رسمی Bitunix', steps[0]) +
+          timelineStep(2, 'ثبت UID صرافی', steps[1]) +
+          timelineStep(3, 'واریز اولیه به حساب صرافی', steps[2]) +
+          timelineStep(4, 'انجام اولین معامله (First Trade)', steps[3]) +
+          timelineStep(5, 'بررسی اطلاعات توسط تیم', steps[4]) +
+          timelineStep(6, 'فعال‌سازی دائمی Premium', steps[5]) +
+        '</ul>' +
+        '<div class="mb-timeline-note">عضویت Premium پس از تکمیل تمام مراحل و تأیید اطلاعات توسط تیم فعال خواهد شد.</div>' +
+        '<div class="mb-pending">' +
           '<div class="mb-pending-progress"><div class="mb-pending-progress-bar"></div></div>' +
           '<div style="margin-top:14px;font-size:11px;color:#6B7A8D">صرافی: ' + esc(request.exchange_name) + ' · UID: <span dir="ltr">' + esc(request.exchange_uid) + '</span></div>' +
         '</div>' +
@@ -329,7 +390,6 @@
   // ─── Actions ──────────────────────────────────────────────────────────────
 
   function openBitunix() {
-    // Open Bitunix registration referral link
     var url = 'https://www.bitunix.com/register?vipCode=AMIRBTC';
     if (window.Telegram?.WebApp?.openLink) {
       window.Telegram.WebApp.openLink(url);
@@ -381,7 +441,8 @@
     }
   }
 
-  // Benefit row helper
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+
   function benefitRow(iconKey, title, desc) {
     var icons = {
       diamond: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h12l4 6-10 13L2 9z"/><path d="M11 3 8 9l4 13 4-13-3-6"/></svg>',
@@ -397,6 +458,22 @@
         '<div class="mb-benefit-desc">' + esc(desc) + '</div>' +
       '</div>' +
     '</div>';
+  }
+
+  function timelineStep(num, text, stepStatus) {
+    var cls = 'mb-timeline-item';
+    if (stepStatus === 'done') cls += ' mb-timeline-item--done';
+    else if (stepStatus === 'pending') cls += ' mb-timeline-item--pending';
+
+    var stepContent = num;
+    if (stepStatus === 'done') {
+      stepContent = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+    }
+
+    return '<li class="' + cls + '">' +
+      '<div class="mb-timeline-step">' + stepContent + '</div>' +
+      '<div class="mb-timeline-text">' + esc(text) + '</div>' +
+    '</li>';
   }
 
   // Expose globally
