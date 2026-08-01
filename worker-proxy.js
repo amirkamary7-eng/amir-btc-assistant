@@ -7366,13 +7366,10 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
-        // A/B TEST: Create request-scoped shared pool (1 TLS handshake for all queries)
-        env._reqPool = createPool(env);
-        try {
-          return await userHandlers.handleBootstrap(request, env);
-        } finally {
-          if (env._reqPool) { try { await env._reqPool.end(); } catch {} env._reqPool = null; }
-        }
+        // CONFIRMATION TEST: shared pool DISABLED for bootstrap only.
+        // If Error 1102 returns ONLY on bootstrap → shared pool is the definitive fix.
+        // Create/Delete still use shared pool (see below).
+        return await userHandlers.handleBootstrap(request, env);
       }
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
