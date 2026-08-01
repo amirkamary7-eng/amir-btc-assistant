@@ -6893,6 +6893,49 @@ export default {
         }
       }
 
+      // ── PROFILING: queryDbTransaction batch test ──
+      // GET /api/admin/_profile-txn?_diag=1&queries=4
+      // Runs N trivial SELECT 1 inside a single transaction, returning
+      // per-phase timing. This shows whether TLS handshake is paid once
+      // (tConnect) and reused across queries (tQueries should be tiny).
+      if (request.method === 'GET' && url.pathname === '/api/admin/_profile-txn') {
+        const diagKey = url.searchParams.get('_diag');
+        if (diagKey !== '1') {
+          return jsonResponse({ detail: 'Missing Telegram init data' }, { status: 401 }, env);
+        }
+        if (!isDatabaseConfigured(env)) {
+          return jsonResponse({ error: 'Database not configured' }, { status: 503 }, env);
+        }
+
+        const n = Math.min(10, Math.max(1, parseInt(url.searchParams.get('queries') || '4', 10)));
+        const prof = [];
+        env._profileCollector = prof;
+        const t0 = Date.now();
+
+        const queries = [];
+        for (let i = 0; i < n; i++) {
+          queries.push({ sql: 'SELECT 1 AS x', params: [] });
+        }
+
+        try {
+          await queryDbTransaction(env, queries);
+          return jsonResponse({
+            ok: true,
+            totalWallMs: Date.now() - t0,
+            queryCount: n,
+            queries: prof,
+            note: 'tConnect is paid ONCE for the whole transaction. Each subsequent query reuses the WebSocket.',
+          }, {}, env);
+        } catch (error) {
+          return jsonResponse({
+            ok: false,
+            totalWallMs: Date.now() - t0,
+            queries: prof,
+            error: String(error?.message).slice(0, 200),
+          }, { status: 500 }, env);
+        }
+      }
+
       // ── Analyses: Admin endpoints (new paths) ──
       if (request.method === 'POST' && url.pathname === '/api/admin/analyses') {
         return await analysisHandlers.handleCreate(request, env, ctx);
