@@ -490,48 +490,6 @@ export function createAnalysisHandlers(deps) {
     }
   }
 
-  // ── Notification ───────────────────────────────────────────────────────
-
-  async function notifyNewAnalysis(env, analysis, ctx) {
-    if (!notificationRepo || !sendTelegramMessage || !queryDb) return;
-    const coinLabel = String(analysis.coin || '').toUpperCase() || 'Crypto';
-    const title = `📊 تحلیل جدید: ${coinLabel}`;
-    const message = analysis.title || `تحلیل ${coinLabel} (${analysis.timeframe}) منتشر شد.`;
-
-    try {
-      // Limit to 50 users max to prevent waitUntil timeout
-      const usersResult = await queryDb(env, `SELECT telegram_id FROM users WHERE channel_joined = TRUE LIMIT 50`);
-      const allUserIds = usersResult.rows.map((r) => String(r.telegram_id));
-      if (allUserIds.length === 0) {
-        return;
-      }
-
-      if (notificationPlatformRepo) {
-        const NOTIFY_TIMEOUT_MS = 20000;
-        const startTime = Date.now();
-        for (const uid of allUserIds) {
-          if (Date.now() - startTime > NOTIFY_TIMEOUT_MS) {
-            console.warn('notifyNewAnalysis: timeout reached');
-            break;
-          }
-          try {
-            await notificationPlatformRepo.dispatch(env, {
-              userId: uid,
-              templateKey: 'analysis_published',
-              category: 'analysis',
-              priority: 'medium',
-              channel: 'both',
-              metadata: { coin: analysis.coin, name: analysis.title || '' },
-              title, message,
-            });
-          } catch {}
-        }
-      }
-    } catch (err) {
-      console.warn(safeError('notify-new-analysis', err));
-    }
-  }
-
   // ── Legacy compatibility wrappers (old routes) ─────────────────────────
   // These keep the old POST/PUT/DELETE /api/analyses paths working.
 

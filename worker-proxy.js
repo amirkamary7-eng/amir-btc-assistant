@@ -6055,29 +6055,30 @@ async function runScheduledAlertsBaseline(controller, env) {
         if (deliverToMiniApp && isDatabaseConfigured(env)) {
           try {
             const tDispatchStart = Date.now();
-            const notificationId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-            await queryDb(env, `
-              INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
-              VALUES ($1, $2, $3, $4, $5, $6, FALSE, 'high', 'price_alert', 'mini_app', 'delivered', NOW())
-            `, [
-              notificationId,
-              String(userId),
-              'price_alert',
-              `🔔 هشدار قیمت ${symbol}`,
-              text,
-              JSON.stringify({
-                symbol,
-                price: String(currentPrice),
-                alert_id: alertId,
-                target_price: String(targetPrice),
-                direction,
-                trigger_reason: triggerReason,
-              }),
-            ]);
+            // UNIFIED: Use dispatch() (which calls sendNotification) for in-app
+            // notification. This respects user settings and is idempotent.
+            if (notificationPlatformRepo?.dispatch) {
+              await notificationPlatformRepo.dispatch(env, {
+                userId: String(userId),
+                title: `🔔 هشدار قیمت ${symbol}`,
+                message: text,
+                category: 'price_alert',
+                priority: 'high',
+                channel: 'mini_app',
+                metadata: {
+                  symbol,
+                  price: String(currentPrice),
+                  alert_id: alertId,
+                  target_price: String(targetPrice),
+                  direction,
+                  trigger_reason: triggerReason,
+                },
+              });
+            }
             inAppDelivered = true;
             timing.dispatch_ms = Date.now() - tDispatchStart;
           } catch (notifErr) {
-            console.warn('In-app notification INSERT failed for price alert:', notifErr?.message || notifErr);
+            console.warn('In-app notification dispatch failed for price alert:', notifErr?.message || notifErr);
             resultPayload.dispatch_errors.push({
               alert_id: alertId,
               error: notifErr?.message || String(notifErr),
