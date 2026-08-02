@@ -12740,3 +12740,176 @@ window.hideJoinStatusBar = hideJoinStatusBar;
 window.clearJoinLockSafetyTimer = clearJoinLockSafetyTimer;
 
 //#endregion
+
+// ============================================================================
+// DIAGNOSTIC PANEL — Calendar Debug
+// ============================================================================
+// This panel helps diagnose calendar issues by showing:
+// - Current BUILD_ID and app.js hash (proves which version is running)
+// - Server time vs device time
+// - API response with event statuses
+// - Filter computation results
+// - Force cache-bust button
+//
+// Open by: typing 'debugcal' in any input, or calling window.showCalendarDebug()
+
+function showCalendarDebug() {
+    // Remove existing panel
+    const existing = document.getElementById('cal-debug-panel');
+    if (existing) { existing.remove(); return; }
+
+    const panel = document.createElement('div');
+    panel.id = 'cal-debug-panel';
+    panel.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,0.95);overflow-y:auto;padding:16px;font-family:monospace;font-size:11px;color:#0f0;line-height:1.6;';
+
+    const tz = 'Asia/Tehran';
+    const now = new Date();
+    const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+    const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
+
+    // Get BUILD_ID from the inline script
+    const buildIdMatch = document.documentElement.outerHTML.match(/BUILD_ID\s*=\s*'([^']+)'/);
+    const buildId = buildIdMatch ? buildIdMatch[1] : 'NOT_FOUND';
+
+    // Get app.js hash from script tags
+    const appScript = Array.from(document.querySelectorAll('script[src]')).find(s => s.src.includes('/app.'));
+    const appJsHash = appScript ? appScript.src.split('/').pop() : 'NOT_FOUND';
+
+    // Get localStorage build ID
+    const storedBuildId = localStorage.getItem('app_build_id') || 'NOT_SET';
+
+    panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h2 style="color:#F5A623;font-size:16px;">🔍 Calendar Debug Panel</h2>
+            <button onclick="this.parentElement.parentElement.remove()" style="background:#333;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;">✕ Close</button>
+        </div>
+
+        <div style="background:#111;padding:12px;border-radius:8px;margin-bottom:12px;">
+            <h3 style="color:#F5A623;font-size:13px;margin-bottom:8px;">📋 Version Info</h3>
+            <div>BUILD_ID (HTML): <span style="color:#0f0">${buildId}</span></div>
+            <div>app.js hash: <span style="color:#0f0">${appJsHash}</span></div>
+            <div>localStorage build_id: <span style="color:#0f0">${storedBuildId}</span></div>
+            <div>Match: <span style="color:${buildId === storedBuildId ? '#0f0' : '#f00'}">${buildId === storedBuildId ? 'YES' : 'NO (stale!)'}</span></div>
+        </div>
+
+        <div style="background:#111;padding:12px;border-radius:8px;margin-bottom:12px;">
+            <h3 style="color:#F5A623;font-size:13px;margin-bottom:8px;">⏰ Time Info</h3>
+            <div>Device time (UTC): <span style="color:#0f0">${now.toISOString()}</span></div>
+            <div>Device timezone: <span style="color:#0f0">${Intl.DateTimeFormat().resolvedOptions().timeZone}</span></div>
+            <div>Tehran time: <span style="color:#0f0">${now.toLocaleString('en-GB', {timeZone: tz})}</span></div>
+            <div>Tehran today: <span style="color:#0f0">${todayParts.join('-')}</span></div>
+            <div>todayStart (UTC): <span style="color:#0f0">${todayStart.toISOString()}</span></div>
+        </div>
+
+        <div style="background:#111;padding:12px;border-radius:8px;margin-bottom:12px;">
+            <h3 style="color:#F5A623;font-size:13px;margin-bottom:8px;">🌐 API Response</h3>
+            <div id="cal-debug-api" style="color:#0f0;">Loading...</div>
+        </div>
+
+        <div style="background:#111;padding:12px;border-radius:8px;margin-bottom:12px;">
+            <h3 style="color:#F5A623;font-size:13px;margin-bottom:8px;">🔧 Actions</h3>
+            <button onclick="forceCalendarCacheBust()" style="background:#F5A623;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;margin-right:8px;">🔄 Force Cache Bust + Reload</button>
+            <button onclick="window.location.reload(true)" style="background:#333;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">Hard Reload</button>
+        </div>
+
+        <div style="background:#111;padding:12px;border-radius:8px;margin-bottom:12px;">
+            <h3 style="color:#F5A623;font-size:13px;margin-bottom:8px;">📖 How to use</h3>
+            <div style="color:#aaa;font-size:10px;">
+                1. Check if BUILD_ID matches localStorage. If not, click "Force Cache Bust".<br>
+                2. Check if app.js hash is <span style="color:#0f0">app.c25c8a3f.js</span> (latest).<br>
+                3. Check API response shows 95 events with correct statuses.<br>
+                4. Take a screenshot of this panel and send to support.
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    // Fetch API data and display
+    fetch('/api/calendar/events?_=' + Date.now(), { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+            const apiDiv = document.getElementById('cal-debug-api');
+            if (!data || !data.events) {
+                apiDiv.innerHTML = '<span style="color:#f00">ERROR: No events in API response</span>';
+                return;
+            }
+            const ev = data.events;
+            const statusCounts = {};
+            for (const e of ev) statusCounts[e.status] = (statusCounts[e.status] || 0) + 1;
+
+            // Compute filter results
+            const todayCount = ev.filter(e => {
+                const d = new Date(e.timestamp);
+                const p = d.toLocaleDateString('en-CA', {timeZone: tz}).split('-');
+                const day = new Date(Date.UTC(Number(p[0]), Number(p[1])-1, Number(p[2])));
+                return day.getTime() === todayStart.getTime();
+            }).length;
+            const tomorrowCount = ev.filter(e => {
+                const d = new Date(e.timestamp);
+                const p = d.toLocaleDateString('en-CA', {timeZone: tz}).split('-');
+                const day = new Date(Date.UTC(Number(p[0]), Number(p[1])-1, Number(p[2])));
+                return day.getTime() === todayStart.getTime() + 86400000;
+            }).length;
+
+            apiDiv.innerHTML = `
+                <div>server_time: <span style="color:#0f0">${data.server_time || 'N/A'}</span></div>
+                <div>last_updated: <span style="color:#0f0">${data.last_updated || 'N/A'}</span></div>
+                <div>isolate_cache_age: <span style="color:#0f0">${data.isolate_cache_age_seconds || 'N/A'}s</span></div>
+                <div>Total events: <span style="color:#0f0">${ev.length}</span></div>
+                <div>Status: <span style="color:#0f0">${JSON.stringify(statusCounts)}</span></div>
+                <div>Filter today: <span style="color:#0f0">${todayCount}</span> events</div>
+                <div>Filter tomorrow: <span style="color:#0f0">${tomorrowCount}</span> events</div>
+                <div>Filter week: <span style="color:#0f0">${ev.length}</span> events (all)</div>
+                <div style="margin-top:8px;color:#aaa;">First 5 events:</div>
+                ${ev.slice(0,5).map((e,i) => {
+                    const d = new Date(e.timestamp);
+                    const tehranDate = d.toLocaleDateString('en-CA', {timeZone: tz});
+                    const diffH = Math.round((d.getTime() - now.getTime())/3600000);
+                    return `<div style="color:#888;">${i+1}. ${e.title.slice(0,25)} | ${e.timestamp} | Tehran: ${tehranDate} | diff: ${diffH}h | status: ${e.status}</div>`;
+                }).join('')}
+            `;
+        })
+        .catch(e => {
+            document.getElementById('cal-debug-api').innerHTML = '<span style="color:#f00">Fetch error: ' + e.message + '</span>';
+        });
+}
+
+function forceCalendarCacheBust() {
+    // Clear all caches
+    localStorage.removeItem('app_build_id');
+    sessionStorage.setItem('app_cache_bust', '1');
+    // Force reload with cache-bust query param
+    const url = window.location.pathname + '?_cb=' + Date.now() + (window.location.hash || '');
+    window.location.replace(url);
+}
+
+// Expose globally
+window.showCalendarDebug = showCalendarDebug;
+window.forceCalendarCacheBust = forceCalendarCacheBust;
+
+// Auto-open if URL has #debugcal or ?debugcal
+if (window.location.hash === '#debugcal' || window.location.search.includes('debugcal')) {
+    setTimeout(showCalendarDebug, 2000);
+}
+
+// Also add a long-press on the calendar section header to open debug
+let _calHeaderPressTimer = null;
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        const header = document.querySelector('#dashboard-calendar').previousElementSibling;
+        if (header) {
+            header.addEventListener('touchstart', () => {
+                _calHeaderPressTimer = setTimeout(() => {
+                    showCalendarDebug();
+                }, 3000); // 3 second long-press
+            });
+            header.addEventListener('touchend', () => {
+                if (_calHeaderPressTimer) clearTimeout(_calHeaderPressTimer);
+            });
+            header.addEventListener('touchmove', () => {
+                if (_calHeaderPressTimer) clearTimeout(_calHeaderPressTimer);
+            });
+        }
+    }, 3000);
+});
