@@ -7079,26 +7079,25 @@ html[dir="rtl"] .market-ticker-track {
     inset: 0;
     border-radius: 50%;
     background: rgba(255,255,255,0.12);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(255,255,255,0.06);
+    /* backdrop-filter: blur removed — unnecessary and may interfere with img rendering */
+    border: 1px solid rgba(255,255,255,0.18);
 }
 .dms-trend-graphic.bullish svg.trend-bull-bear {
-    filter: drop-shadow(0 0 8px rgba(34,197,94,0.5));
+    /* filter: drop-shadow removed — causes blur on downcaled images */
 }
 .dms-trend-graphic.bullish::before {
     background: rgba(34,197,94,0.18);
     border-color: rgba(34,197,94,0.35);
 }
 .dms-trend-graphic.bearish svg.trend-bull-bear {
-    filter: drop-shadow(0 0 8px rgba(239,68,68,0.5));
+    /* filter: drop-shadow removed — causes blur on downcaled images */
 }
 .dms-trend-graphic.bearish::before {
     background: rgba(239,68,68,0.18);
     border-color: rgba(239,68,68,0.35);
 }
 .dms-trend-graphic.neutral svg.trend-bull-bear {
-    filter: drop-shadow(0 0 6px rgba(245,166,35,0.4));
+    /* filter: drop-shadow removed — causes blur on downcaled images */
 }
 .dms-trend-graphic.neutral::before {
     background: rgba(245,166,35,0.18);
@@ -7877,15 +7876,16 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
     position: relative;
     z-index: 1;
     border-radius: 50%;
+    image-rendering: auto;
 }
 .dms-trend-graphic.bullish img.trend-bull-bear-img {
-    filter: drop-shadow(0 0 10px rgba(34,197,94,0.5));
+    /* filter: drop-shadow removed — it applies Gaussian blur to entire image */
 }
 .dms-trend-graphic.bearish img.trend-bull-bear-img {
-    filter: drop-shadow(0 0 10px rgba(239,68,68,0.5));
+    /* filter: drop-shadow removed — it applies Gaussian blur to entire image */
 }
 .dms-trend-graphic.neutral img.trend-bull-bear-img {
-    filter: drop-shadow(0 0 8px rgba(245,166,35,0.4));
+    /* filter: drop-shadow removed — it applies Gaussian blur to entire image */
 }
 @media (max-width: 430px) {
     .dms-trend-graphic img.trend-bull-bear-img {
