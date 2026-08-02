@@ -1426,15 +1426,35 @@ strong.down { color: var(--red); }
     margin-bottom: 14px;
 }
 .ni-cal-segment {
-    flex: 1; height: 40px; border-radius: 10px; border: none;
+    flex: 1; min-width: 0; height: 44px; border-radius: 10px; border: none;
     background: transparent; color: #A5B4C7;
-    font-size: 13px; font-weight: 600; cursor: pointer;
+    font-size: 12px; font-weight: 600; cursor: pointer;
     transition: all 0.2s ease; font-family: inherit;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; padding: 4px 2px;
+}
+.ni-cal-segment-label {
+    font-size: 12px; font-weight: 600; line-height: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 100%;
+}
+.ni-cal-segment-count {
+    font-size: 10px; font-weight: 700; line-height: 1;
+    padding: 2px 6px; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #6B7A8D;
+    min-width: 18px; text-align: center;
+    transition: all 0.2s ease;
 }
 .ni-cal-segment.active {
     background: linear-gradient(135deg, rgba(245, 166, 35, 0.18), rgba(245, 166, 35, 0.06));
     color: #F5A623; box-shadow: 0 0 12px rgba(245, 166, 35, 0.1);
 }
+.ni-cal-segment.active .ni-cal-segment-count {
+    background: rgba(245, 166, 35, 0.22);
+    color: #F5A623;
+}
+.ni-cal-segment:active { transform: scale(0.97); }
 
 /* Country filter chips */
 .ni-cal-countries {

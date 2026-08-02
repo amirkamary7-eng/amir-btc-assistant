@@ -384,7 +384,12 @@ let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
 let calendarEvents = [];
 let calendarLoading = false;
-let currentCalendarTab = 'today';
+// ROOT CAUSE FIX (calendar "doesn't show" bug):
+// Previously defaulted to 'today'. On most days (weekends, holidays, low-impact
+// days) "today" only has 0-3 events, so users opened News→Calendar and thought
+// the calendar was broken. Defaulting to 'week' immediately shows ~95 events,
+// giving users confidence that the calendar is populated.
+let currentCalendarTab = 'week';
 let currentTvWidget = null; // P1-5: track TradingView widget for cleanup
 let currentTvInterval = localStorage.getItem('tv_interval') || '60';
 let currentTvChartInfo = null;
@@ -7164,6 +7169,56 @@ function startCalCountdown() {
 
 const MAJOR_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CAD', 'AUD', 'NZD', 'CHF'];
 
+/**
+ * Compute per-tab event counts for the segmented control badges.
+ * Returns { today, tomorrow, week, all } counts.
+ * Uses the SAME Tehran-tz-aware date math as the filter in renderCalendarV2
+ * so the badges always match the actual filtered list.
+ */
+function getCalendarTabCounts(events) {
+    const counts = { today: 0, tomorrow: 0, week: 0, all: 0 };
+    if (!Array.isArray(events) || !events.length) return counts;
+    const tz = 'Asia/Tehran';
+    const now = new Date();
+    const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+    const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
+    const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+    const weekEnd = new Date(todayStart.getTime() + 7 * 86400000);
+    for (const e of events) {
+        if (!e || !e.timestamp) continue;
+        const d = new Date(e.timestamp);
+        if (isNaN(d.getTime())) continue;
+        const parts = d.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+        const day = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+        if (day.getTime() === todayStart.getTime()) counts.today++;
+        if (day.getTime() === tomorrowStart.getTime()) counts.tomorrow++;
+        if (day >= todayStart && day < weekEnd) counts.week++;
+        counts.all++;
+    }
+    return counts;
+}
+
+/**
+ * Build the segmented-control HTML for the calendar tabs.
+ * Includes count badges so users immediately see how many events are in
+ * each tab — preventing the "calendar is empty" misconception when "today"
+ * has only 1-3 events.
+ */
+function buildCalendarSegmentsHtml(counts) {
+    const c = counts || { today: 0, tomorrow: 0, week: 0, all: 0 };
+    const tabs = [
+        { key: 'today',    label: 'امروز',     count: c.today },
+        { key: 'tomorrow', label: 'فردا',      count: c.tomorrow },
+        { key: 'week',     label: 'این هفته',  count: c.week },
+        { key: 'all',      label: 'همه',       count: c.all }
+    ];
+    return `<div class="ni-cal-segments">` + tabs.map(t => `
+        <button class="ni-cal-segment${currentCalendarTab === t.key ? ' active' : ''}" data-cal-tab="${t.key}" onclick="switchCalendarTab('${t.key}', this)">
+            <span class="ni-cal-segment-label">${t.label}</span>
+            <span class="ni-cal-segment-count">${t.count}</span>
+        </button>`).join('') + `</div>`;
+}
+
 function renderCalendarV2() {
     const container = document.getElementById('news-list');
     if (!container) return;
@@ -7195,12 +7250,8 @@ function renderCalendarV2() {
         if (container.dataset.calSignature === skelSig) return;
         container.dataset.calSignature = skelSig;
         if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
-        const segmentsHtml = `
-        <div class="ni-cal-segments">
-            <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
-            <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
-            <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
-        </div>`;
+        // Show "—" placeholders for counts while loading
+        const segmentsHtml = buildCalendarSegmentsHtml({ today: '—', tomorrow: '—', week: '—', all: '—' });
         container.innerHTML = segmentsHtml + `
             <div class="ni-skeleton-card"></div>
             <div class="ni-skeleton-card"></div>
@@ -7210,17 +7261,16 @@ function renderCalendarV2() {
     }
 
     loadCalendarEvents().then(events => {
+        // Compute per-tab counts ONCE so the segmented control badges are
+        // always accurate, regardless of which render path is taken.
+        const tabCounts = getCalendarTabCounts(events);
+
         if (!events.length) {
             const emptySig = '__empty_' + currentCalendarTab + '_' + currentCalCountry + '_' + currentLang;
             if (container.dataset.calSignature === emptySig) return;
             container.dataset.calSignature = emptySig;
             if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
-            const segmentsHtml = `
-            <div class="ni-cal-segments">
-                <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
-                <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
-                <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
-            </div>`;
+            const segmentsHtml = buildCalendarSegmentsHtml(tabCounts);
             container.innerHTML = segmentsHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویداد اقتصادی یافت نشد</div></div>`;
             return;
         }
@@ -7249,6 +7299,8 @@ function renderCalendarV2() {
             if (currentCalendarTab === 'today') return eventDay.getTime() === todayStart.getTime();
             if (currentCalendarTab === 'tomorrow') return eventDay.getTime() === tomorrowStart.getTime();
             if (currentCalendarTab === 'week') return eventDay >= todayStart && eventDay < weekEnd;
+            // 'all' (or any other value) → show every event regardless of date
+            if (currentCalendarTab === 'all') return true;
             return true;
         });
 
@@ -7269,12 +7321,10 @@ function renderCalendarV2() {
             if (container.dataset.calSignature === noMatchSig) return;
             container.dataset.calSignature = noMatchSig;
             if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
-            const segmentsHtml = `
-            <div class="ni-cal-segments">
-                <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
-                <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
-                <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
-            </div>`;
+            // Note: tabCounts reflect ALL events (not country-filtered) so the
+            // user can see e.g. "today has 1 event total, but 0 for USD" — they
+            // understand the filter is what's empty, not the calendar itself.
+            const segmentsHtml = buildCalendarSegmentsHtml(tabCounts);
             const countriesHtml = `
             <div class="ni-cal-countries">
                 <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">همه</button>
@@ -7336,13 +7386,8 @@ function renderCalendarV2() {
         const impactLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
         const statusLabel = { past: 'گذشته', live: 'در حال اجرا', upcoming: 'در انتظار' };
 
-        // Segmented control (today/tomorrow/week)
-        const segmentsHtml = `
-        <div class="ni-cal-segments">
-            <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
-            <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
-            <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
-        </div>`;
+        // Segmented control with count badges (today/tomorrow/week/all)
+        const segmentsHtml = buildCalendarSegmentsHtml(tabCounts);
 
         const countriesHtml = `
         <div class="ni-cal-countries">
