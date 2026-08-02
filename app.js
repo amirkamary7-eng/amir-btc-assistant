@@ -7171,19 +7171,33 @@ const MAJOR_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CAD', 'AUD', 'NZD'
 
 /**
  * Compute per-tab event counts for the segmented control badges.
- * Returns { today, tomorrow, week, all } counts.
- * Uses the SAME Tehran-tz-aware date math as the filter in renderCalendarV2
- * so the badges always match the actual filtered list.
+ * Returns { today, tomorrow, week } counts.
+ *
+ * ROOT CAUSE FIX for "0/0/0 when All=79" bug:
+ * The calendar API returns events for "this week" from the provider's
+ * perspective (nfs.faireconomy.media/ff_calendar_thisweek.json). The
+ * provider's "this week" may not align with the USER's device date.
+ *
+ * Previously, the "This Week" filter used the USER's date range
+ * (today to today+7). If the user's device date was outside the
+ * provider's week, ALL events fell outside the range → 0 events.
+ *
+ * FIX: "This Week" now counts ALL events from the API response.
+ * The API already returns only current-week events (filtered by the
+ * Worker's cutoffPast/cutoffFuture), so there's no need for the
+ * frontend to re-filter by the user's date.
+ *
+ * "Today" and "Tomorrow" still filter by the user's Tehran date.
+ * These CAN be 0 on days with no events — that's correct behavior.
  */
 function getCalendarTabCounts(events) {
-    const counts = { today: 0, tomorrow: 0, week: 0, all: 0 };
+    const counts = { today: 0, tomorrow: 0, week: 0 };
     if (!Array.isArray(events) || !events.length) return counts;
     const tz = 'Asia/Tehran';
     const now = new Date();
     const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
     const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
     const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-    const weekEnd = new Date(todayStart.getTime() + 7 * 86400000);
     for (const e of events) {
         if (!e || !e.timestamp) continue;
         const d = new Date(e.timestamp);
@@ -7192,25 +7206,24 @@ function getCalendarTabCounts(events) {
         const day = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
         if (day.getTime() === todayStart.getTime()) counts.today++;
         if (day.getTime() === tomorrowStart.getTime()) counts.tomorrow++;
-        if (day >= todayStart && day < weekEnd) counts.week++;
-        counts.all++;
+        // "This Week" = ALL events from the API (API already returns
+        // current-week data from the provider — no re-filtering needed).
+        counts.week++;
     }
     return counts;
 }
 
 /**
  * Build the segmented-control HTML for the calendar tabs.
- * Includes count badges so users immediately see how many events are in
- * each tab — preventing the "calendar is empty" misconception when "today"
- * has only 1-3 events.
+ * Only 3 tabs: Today / Tomorrow / This Week.
+ * Each tab has equal width (flex:1) and a count badge.
  */
 function buildCalendarSegmentsHtml(counts) {
-    const c = counts || { today: 0, tomorrow: 0, week: 0, all: 0 };
+    const c = counts || { today: 0, tomorrow: 0, week: 0 };
     const tabs = [
         { key: 'today',    label: 'امروز',     count: c.today },
         { key: 'tomorrow', label: 'فردا',      count: c.tomorrow },
-        { key: 'week',     label: 'این هفته',  count: c.week },
-        { key: 'all',      label: 'همه',       count: c.all }
+        { key: 'week',     label: 'این هفته',  count: c.week }
     ];
     return `<div class="ni-cal-segments">` + tabs.map(t => `
         <button class="ni-cal-segment${currentCalendarTab === t.key ? ' active' : ''}" data-cal-tab="${t.key}" onclick="switchCalendarTab('${t.key}', this)">
@@ -7298,9 +7311,14 @@ function renderCalendarV2() {
             const eventDay = new Date(Date.UTC(Number(eventParts[0]), Number(eventParts[1]) - 1, Number(eventParts[2])));
             if (currentCalendarTab === 'today') return eventDay.getTime() === todayStart.getTime();
             if (currentCalendarTab === 'tomorrow') return eventDay.getTime() === tomorrowStart.getTime();
-            if (currentCalendarTab === 'week') return eventDay >= todayStart && eventDay < weekEnd;
-            // 'all' (or any other value) → show every event regardless of date
-            if (currentCalendarTab === 'all') return true;
+            // ROOT CAUSE FIX: "This Week" shows ALL events from the API.
+            // The API already returns only current-week events (filtered by
+            // the Worker's cutoffPast/cutoffFuture). Previously, this filter
+            // used the USER's date range (todayStart to weekEnd), which caused
+            // 0 events when the user's device date didn't align with the
+            // provider's week. Now we show all events regardless of the
+            // user's date — the API is the source of truth for "this week".
+            if (currentCalendarTab === 'week') return true;
             return true;
         });
 
