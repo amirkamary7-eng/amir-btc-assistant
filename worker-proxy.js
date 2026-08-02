@@ -7435,6 +7435,21 @@ export default {
               console.warn('[CRON] calendar failed:', e?.message);
             }
           }
+
+          // Process broadcast notification batch (5 users per minute)
+          // Runs AFTER alerts/calendar to avoid CPU contention.
+          // Each batch: ~11 queryDb (SELECT broadcast + SELECT users + 5×(SELECT pref + INSERT notif))
+          // But these are I/O bound (per-call Pool, ~5ms wall each), low CPU.
+          if (notificationPlatformRepo?.processBroadcastBatch) {
+            try {
+              const result = await notificationPlatformRepo.processBroadcastBatch(env, sendTelegramMessage);
+              if (result.processed > 0) {
+                console.log('[CRON] broadcast batch:', JSON.stringify(result));
+              }
+            } catch (e) {
+              console.warn('[CRON] broadcast batch failed:', e?.message);
+            }
+          }
         }
 
         // === EVERY 15 MIN: maintenance + heavy jobs (split to stay under 10ms) ===
