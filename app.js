@@ -10678,8 +10678,8 @@ function renderDashboardMarketStatus() {
     if (ratio > 0.58) {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
-        // Bull image (green bull, transparent background for dark dashboard)
-        trendGraphic = `<img src="assets/market/neutral.png" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐂</span>'">`;
+        // Bull image (originally named neutral.webp — it's the green bull)
+        trendGraphic = `<img src="assets/market/neutral.webp" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐂</span>'">`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
@@ -10688,8 +10688,7 @@ function renderDashboardMarketStatus() {
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
-        // Bear image (transparent background for dark dashboard)
-        trendGraphic = `<img src="assets/market/bear.png" alt="Bear" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐻</span>'">`;
+        trendGraphic = `<img src="assets/market/bear.webp" alt="Bear" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐻</span>'">`;
     }
 
     const trendHTML = `
