@@ -6671,16 +6671,16 @@ strong.down { color: var(--red); }
 .hero-cta--channel-v2 {
     left: 9.6%;
     top: 82.8%;
-    width: calc(44.7% - 9.6%);    /* 35.1% */
-    height: calc(91.8% - 82.8%);  /* 9.0% */
+    width: calc(45.3% - 9.6%);    /* slightly wider (+~2px) */
+    height: calc(92.4% - 82.8%);  /* slightly taller (+~2px) */
 }
 
 /* Premium CTA — exact position matching designed placeholder in premium banner image */
 .hero-cta--premium-v2 {
     left: 16.5%;
     top: 80.3%;
-    width: calc(42.4% - 16.5%);   /* 25.9% */
-    height: calc(88.0% - 80.3%);  /* 7.7% */
+    width: calc(43.0% - 16.5%);   /* slightly wider (+~2px) */
+    height: calc(88.6% - 80.3%);  /* slightly taller (+~2px) */
 }
 
 /* Ripple animation for both CTAs */
@@ -12828,10 +12828,21 @@ body.jl-locked .cd-fullscreen {
     to   { opacity: 1; transform: translateX(0); }
 }
 .mb-welcome-b-icon {
-    font-size: 18px;
     flex-shrink: 0;
-    width: 24px;
-    text-align: center;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(245, 166, 35, 0.15), rgba(245, 166, 35, 0.05));
+    border: 1px solid rgba(245, 166, 35, 0.2);
+    color: #F5A623;
+    filter: drop-shadow(0 0 4px rgba(245, 166, 35, 0.3));
+}
+.mb-welcome-b-icon svg {
+    width: 18px;
+    height: 18px;
 }
 
 /* ── CTA button ── */

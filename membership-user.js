@@ -220,15 +220,23 @@
             '<div class="mb-welcome-diamond-shimmer"></div>' +
           '</div>' +
           '<div class="mb-welcome-badge">PREMIUM</div>' +
-          '<h2 class="mb-welcome-title">🎉 تبریک!</h2>' +
+          '<h2 class="mb-welcome-title">تبریک!</h2>' +
           '<p class="mb-welcome-subtitle">عضویت ' + esc(levelLabel) + ' شما با موفقیت فعال شد</p>' +
           '<div class="mb-welcome-divider"></div>' +
           '<p class="mb-welcome-desc">اکنون تمام امکانات ویژه برای شما فعال است.<br>از تجربه اختصاصی AmirBTC Assistant لذت ببرید.</p>' +
           '<div class="mb-welcome-benefits">' +
-            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">📊</span><span>چارت‌ها و تحلیل‌های اختصاصی</span></div>' +
-            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">💎</span><span>نشان Premium در پروفایل</span></div>' +
-            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">⚡</span><span>اولویت در قابلیت‌های جدید</span></div>' +
-            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">🎁</span><span>کمپین‌ها و جوایز ویژه</span></div>' +
+            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">' +
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 3 5-6"/><polyline points="18 3 21 3 21 6"/></svg>' +
+            '</span><span>چارت‌ها و تحلیل‌های اختصاصی</span></div>' +
+            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">' +
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l4 6-10 13L2 9z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/></svg>' +
+            '</span><span>نشان Premium در پروفایل</span></div>' +
+            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">' +
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' +
+            '</span><span>اولویت در قابلیت‌های جدید</span></div>' +
+            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">' +
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>' +
+            '</span><span>کمپین‌ها و جوایز ویژه</span></div>' +
           '</div>' +
           '<button class="mb-welcome-cta" onclick="MembershipApp.closeWelcomePopup()">' +
             '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
