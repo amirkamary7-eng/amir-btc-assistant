@@ -3869,21 +3869,29 @@ async function fetchCalendarEvents(env) {
 
     if (events.length > 0) {
       // Fresh fetch succeeded — write to KV cache + isolate cache
-      await writeAppCache(
-        env,
-        CALENDAR_CACHE_KEY,
-        JSON.stringify(events),
-        getNumericEnv(env, 'CALENDAR_CACHE_TTL', 600),
-      );
+      try {
+        await writeAppCache(
+          env,
+          CALENDAR_CACHE_KEY,
+          JSON.stringify(events),
+          getNumericEnv(env, 'CALENDAR_CACHE_TTL', 600),
+        );
+        console.log('[CALENDAR] KV write: success (' + events.length + ' events)');
+      } catch (kvErr) {
+        console.warn('[CALENDAR] KV write FAILED: ' + (kvErr?.message || kvErr));
+      }
       _calendarIsolateCache = events;
       _calendarIsolateCacheAt = Date.now();
+      console.log('[CALENDAR] isolate cache updated: ' + events.length + ' events');
       return events;
     }
 
-    // 3. Upstream returned empty. ROOT CAUSE FIX (RC-1): serve the
-    // in-memory isolate cache rather than returning []. This survives
-    // upstream outages that exceed the KV TTL (10 min). The isolate cache
-    // is at most a few hours old (isolate lifetime).
+    // 3. Upstream returned empty. ROOT CAUSE FIX: serve the in-memory isolate
+    // cache rather than returning []. This handles:
+    //   a) Upstream API intermittently returns empty (rate limited, downtime)
+    //   b) KV write failed (limit exceeded) so next request has no KV cache
+    //   c) Different isolate has no cache (cold start on different colo)
+    // The isolate cache may be from a previous request on THIS isolate.
     if (_calendarIsolateCache && _calendarIsolateCache.length > 0) {
       // ROOT CAUSE FIX (RC-B): Write the isolate cache back to KV with a
       // ROOT CAUSE FIX (B-1): TTL bumped from 120s to 300s.
@@ -4447,8 +4455,18 @@ async function handleChartResolve(request, env) {
 
 async function handleCalendarEvents(env) {
   const _t0 = Date.now();
-  const events = await fetchCalendarEvents(env);
-  console.log('[CALENDAR] fetchCalendarEvents: ' + (Date.now() - _t0) + 'ms, events=' + (events?.length || 0));
+  let events = [];
+  try {
+    events = await fetchCalendarEvents(env);
+    console.log('[CALENDAR] fetchCalendarEvents: ' + (Date.now() - _t0) + 'ms, events=' + (events?.length || 0));
+    if (!events || !Array.isArray(events)) {
+      console.warn('[CALENDAR] fetchCalendarEvents returned non-array: ' + typeof events);
+      events = [];
+    }
+  } catch (e) {
+    console.warn('[CALENDAR] fetchCalendarEvents ERROR: ' + e?.message + ' (' + (Date.now() - _t0) + 'ms)');
+    events = [];
+  }
 
   // Compute category counts from cached news
   let category_counts = { all: 0, crypto: 0, forex: 0, economy: 0 };

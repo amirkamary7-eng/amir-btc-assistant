@@ -3291,13 +3291,22 @@ async function loadReferralStats() {
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
 async function loadCalendarEvents(force = false) {
-    if (calendarEvents.length && !force) return calendarEvents;
+    const _hadCache = calendarEvents.length > 0;
+    console.log('[CAL-FE] loadCalendarEvents start: force=' + force + ' hadCache=' + _hadCache + ' existing=' + calendarEvents.length);
+    if (calendarEvents.length && !force) {
+        console.log('[CAL-FE] short-circuit: returning cached ' + calendarEvents.length + ' events');
+        return calendarEvents;
+    }
     if (!API_BASE) return [];
-    if (calendarLoading) return calendarEvents;
+    if (calendarLoading) {
+        console.log('[CAL-FE] already loading, returning existing ' + calendarEvents.length + ' events');
+        return calendarEvents;
+    }
     calendarLoading = true;
     try {
         const data = await apiFetch('/api/calendar/events');
         const fresh = data.events || [];
+        console.log('[CAL-FE] API response: events=' + fresh.length + ' status=' + (data.status || '?'));
         // ROOT CAUSE FIX for "calendar data disappears intermittently":
         // Previously, on API error (catch block) we set calendarEvents = [],
         // destroying previously-loaded data. And if the API returned an empty
@@ -3312,6 +3321,7 @@ async function loadCalendarEvents(force = false) {
         // line of defence.
         if (fresh.length > 0) {
             calendarEvents = fresh;
+            console.log('[CAL-FE] updated calendarEvents: ' + calendarEvents.length + ' events');
             // DASHBOARD SPEED OPTIMIZATION: persist to localStorage so the
             // next cold open can render the dashboard calendar instantly.
             try {
@@ -3321,16 +3331,16 @@ async function loadCalendarEvents(force = false) {
             // No previous data and fresh is empty — keep calendarEvents as []
             // so the empty state shows. This is the true "no data" case.
             calendarEvents = [];
+            console.log('[CAL-FE] empty response, no cache — calendarEvents=[]');
+        } else {
+            console.log('[CAL-FE] empty response but have cache — keeping ' + calendarEvents.length + ' events');
         }
-        // else: fresh is empty BUT we have previous data → keep previous data.
     } catch (e) {
-        console.warn('loadCalendarEvents:', e);
-        // ROOT CAUSE FIX: do NOT destroy existing calendarEvents on error.
-        // Preserve the last good data so the calendar never goes blank due
-        // to a transient network/API failure.
+        console.warn('[CAL-FE] ERROR:', e?.message || e, '— preserving ' + calendarEvents.length + ' existing events');
     } finally {
         calendarLoading = false;
     }
+    console.log('[CAL-FE] returning: ' + calendarEvents.length + ' events');
     return calendarEvents;
 }
 
