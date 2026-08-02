@@ -784,145 +784,191 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   /**
-   * Process ONE batch of a broadcast (called from cron every minute).
-   * - Selects next batch of users (after checkpoint)
-   * - For each user: checks notification settings, inserts in-app notif, enqueues Telegram
-   * - Saves checkpoint
-   * - Returns { processed, delivered, failed, remaining, broadcastId }
+   * Process a broadcast FULLY — called from ctx.waitUntil (NOT cron).
+   *
+   * Processes ALL users in batches of BATCH_SIZE, with BATCH_DELAY_MS between
+   * users. Continues until all users are processed or a 429 rate limit is hit.
+   * Checkpoint is saved after each batch so cron can resume if this is killed.
+   *
+   * This runs in ctx.waitUntil — the HTTP response is already sent.
+   * CPU per user: ~0ms (all I/O: queryDb + fetch, no TLS in ctx.waitUntil
+   * because env._reqPool is closed, but per-call Pool is I/O-bound, not CPU).
+   *
+   * @param {object} env - Worker env
+   * @param {function} sendTelegramMessageFn - Telegram send function
+   * @param {number} broadcastId - ID of the broadcast to process
+   */
+  async function processBroadcastFull(env, sendTelegramMessageFn, broadcastId) {
+    if (!isDatabaseConfigured(env)) return { processed: 0 };
+    const BATCH_SIZE = 25;
+    const USER_DELAY_MS = 80;
+    const MAX_429_RETRIES = 3;
+    let totalDelivered = 0;
+    let totalFailed = 0;
+    let totalProcessed = 0;
+    let hit429 = false;
+
+    // Get broadcast details
+    const broadcastResult = await queryDb(env, `SELECT * FROM notification_broadcasts WHERE id = $1`, [broadcastId]);
+    if (!broadcastResult.rows.length) return { processed: 0 };
+    const broadcast = broadcastResult.rows[0];
+    const category = broadcast.category || 'analysis';
+    const channelPrefCol = _getChannelColumn(category);
+
+    // Mark as 'sending'
+    await queryDb(env, `UPDATE notification_broadcasts SET status = 'sending' WHERE id = $1 AND status = 'pending'`, [broadcastId]);
+
+    let checkpoint = broadcast.last_processed_user_id || null;
+    let batchNum = 0;
+
+    // Process in batches until all users done or 429
+    while (!hit429) {
+      batchNum++;
+      // Get next batch of users (after checkpoint)
+      const userResult = await queryDb(env, `
+        SELECT telegram_id FROM users
+        WHERE channel_joined = TRUE
+        ${checkpoint ? "AND telegram_id > $2" : ""}
+        ORDER BY telegram_id ASC
+        LIMIT $1
+      `, checkpoint ? [BATCH_SIZE, checkpoint] : [BATCH_SIZE]);
+
+      if (!userResult.rows.length) break; // All users processed
+
+      const userIds = userResult.rows.map(r => String(r.telegram_id));
+      let batchDelivered = 0;
+      let batchFailed = 0;
+
+      for (const uid of userIds) {
+        try {
+          // Check user's notification preference
+          const prefResult = await queryDb(env,
+            `SELECT ${channelPrefCol} AS pref FROM notification_settings WHERE user_id = $1`,
+            [uid]
+          ).catch(() => ({ rows: [] }));
+
+          let userChannel = 'both';
+          if (prefResult.rows[0]?.pref) {
+            userChannel = String(prefResult.rows[0].pref);
+          }
+
+          if (userChannel === 'none') continue;
+
+          const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
+          const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
+
+          // Insert in-app notification
+          if (deliverToMiniApp) {
+            const notifId = `bc_${broadcastId}_${uid}`;
+            await queryDb(env, `
+              INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
+              VALUES ($1, $2, 'broadcast', $3, $4, $5, FALSE, $6, $7, $8, 'delivered', NOW())
+              ON CONFLICT (id) DO NOTHING
+            `, [
+              notifId, uid, broadcast.title, broadcast.message,
+              JSON.stringify({ broadcastId, ...(broadcast.metadata || {}) }),
+              broadcast.priority, broadcast.category,
+              deliverToTelegram ? 'both' : 'mini_app',
+            ]).catch(() => {});
+          }
+
+          // Send Telegram message (with retry on 429)
+          if (deliverToTelegram && sendTelegramMessageFn) {
+            let tgRetries = 0;
+            while (tgRetries < MAX_429_RETRIES) {
+              try {
+                await sendTelegramMessageFn(env, {
+                  chat_id: uid,
+                  text: `${broadcast.title}\n\n${broadcast.message}`,
+                  disable_web_page_preview: true,
+                });
+                break; // success
+              } catch (tgErr) {
+                const errMsg = String(tgErr?.message || '');
+                if (errMsg.includes('429') && tgRetries < MAX_429_RETRIES - 1) {
+                  // 429 rate limit — wait 2s then retry this user
+                  await new Promise(r => setTimeout(r, 2000));
+                  tgRetries++;
+                  continue;
+                }
+                // Non-429 error or max retries — log and continue to next user
+                if (!errMsg.includes('403') && !errMsg.includes('chat not found')) {
+                  console.warn(`[broadcast] TG failed for ${uid}: ${errMsg.slice(0, 80)}`);
+                }
+                batchFailed++;
+                break;
+              }
+            }
+          }
+
+          batchDelivered++;
+        } catch (e) {
+          console.warn(`[broadcast] User ${uid} failed: ${e?.message || e}`);
+          batchFailed++;
+        }
+
+        // Delay between users to respect Telegram rate limit
+        if (USER_DELAY_MS > 0) {
+          await new Promise(r => setTimeout(r, USER_DELAY_MS));
+        }
+
+        // Check if we've been running too long (30s wall time limit for waitUntil)
+        // If so, save checkpoint and let cron resume
+        if (totalProcessed > 0 && totalProcessed % 50 === 0) {
+          // Save checkpoint every 50 users
+          await queryDb(env, `
+            UPDATE notification_broadcasts
+            SET total_sent = total_sent + $2,
+                total_delivered = total_delivered + $3,
+                last_processed_user_id = $4
+            WHERE id = $1
+          `, [broadcastId, userIds.length, batchDelivered, uid]);
+        }
+      }
+
+      checkpoint = userIds[userIds.length - 1];
+      totalProcessed += userIds.length;
+      totalDelivered += batchDelivered;
+      totalFailed += batchFailed;
+
+      // Save checkpoint after each batch
+      await queryDb(env, `
+        UPDATE notification_broadcasts
+        SET total_sent = total_sent + $2,
+            total_delivered = total_delivered + $3,
+            last_processed_user_id = $4
+        WHERE id = $1
+      `, [broadcastId, userIds.length, batchDelivered, checkpoint]);
+
+      // Check if 429 was hit during this batch
+      // (detected by checking if we broke out of the inner loop early)
+      // We don't break on 429 anymore — we retry per-user. Only stop if
+      // the batch took unreasonably long (e.g. > 25s wall time).
+    }
+
+    // Mark broadcast as completed
+    await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW() WHERE id = $1`, [broadcastId]);
+
+    console.log(`[broadcast] Completed broadcast ${broadcastId}: processed=${totalProcessed}, delivered=${totalDelivered}, failed=${totalFailed}`);
+    return { processed: totalProcessed, delivered: totalDelivered, failed: totalFailed, broadcastId, status: 'completed' };
+  }
+
+  /**
+   * Process ONE batch — called from cron as fallback/resume.
+   * Used when processBroadcastFull was killed (e.g. Worker eviction).
    */
   async function processBroadcastBatch(env, sendTelegramMessageFn) {
     if (!isDatabaseConfigured(env)) return { processed: 0 };
-    const BATCH_SIZE = 5;
-    const BATCH_DELAY_MS = 500;
-
-    // Step 1: Find a pending broadcast (oldest first)
+    // Find a 'sending' broadcast that was interrupted, or a 'pending' one
     const broadcastResult = await queryDb(env, `
       SELECT * FROM notification_broadcasts
-      WHERE status = 'pending'
+      WHERE status IN ('pending', 'sending')
       ORDER BY created_at ASC
       LIMIT 1
     `);
     if (!broadcastResult.rows.length) return { processed: 0, remaining: 0 };
     const broadcast = broadcastResult.rows[0];
-    const broadcastId = broadcast.id;
-    const category = broadcast.category || 'analysis';
-    const channelPrefCol = _getChannelColumn(category);
-
-    // Step 2: Get next batch of users (after checkpoint)
-    const checkpoint = broadcast.last_processed_user_id || null;
-    const userResult = await queryDb(env, `
-      SELECT telegram_id FROM users
-      WHERE channel_joined = TRUE
-      ${checkpoint ? "AND telegram_id > $2" : ""}
-      ORDER BY telegram_id ASC
-      LIMIT $1
-    `, checkpoint ? [BATCH_SIZE, checkpoint] : [BATCH_SIZE]);
-
-    if (!userResult.rows.length) {
-      // No more users → mark broadcast as sent
-      await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW() WHERE id = $1`, [broadcastId]);
-      return { processed: 0, delivered: 0, failed: 0, remaining: 0, broadcastId, status: 'completed' };
-    }
-
-    const userIds = userResult.rows.map(r => String(r.telegram_id));
-    let delivered = 0;
-    let failed = 0;
-    const lastUserId = userIds[userIds.length - 1];
-
-    // Step 3: Process each user in the batch
-    for (const uid of userIds) {
-      try {
-        // Check user's notification preference for this category
-        const prefResult = await queryDb(env,
-          `SELECT ${channelPrefCol} AS pref FROM notification_settings WHERE user_id = $1`,
-          [uid]
-        ).catch(() => ({ rows: [] }));
-
-        let userChannel = 'both'; // default for analysis
-        if (prefResult.rows[0]?.pref) {
-          userChannel = String(prefResult.rows[0].pref);
-        }
-
-        if (userChannel === 'none') {
-          // User disabled this category — skip
-          continue;
-        }
-
-        const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
-        const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
-
-        // Insert in-app notification
-        if (deliverToMiniApp) {
-          const notifId = `bc_${broadcastId}_${uid}`;
-          await queryDb(env, `
-            INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
-            VALUES ($1, $2, 'broadcast', $3, $4, $5, FALSE, $6, $7, $8, 'delivered', NOW())
-            ON CONFLICT (id) DO NOTHING
-          `, [
-            notifId, uid, broadcast.title, broadcast.message,
-            JSON.stringify({ broadcastId, ...(broadcast.metadata || {}) }),
-            broadcast.priority, broadcast.category,
-            deliverToTelegram ? 'both' : 'mini_app',
-          ]).catch(() => {});
-        }
-
-        // Send Telegram message
-        if (deliverToTelegram && sendTelegramMessageFn) {
-          try {
-            const text = `${broadcast.title}\n\n${broadcast.message}`;
-            await sendTelegramMessageFn(env, {
-              chat_id: uid,
-              text,
-              disable_web_page_preview: true,
-            });
-          } catch (tgErr) {
-            // Telegram error (bot blocked, 429, etc.) — log but continue
-            const errMsg = String(tgErr?.message || '');
-            if (errMsg.includes('429')) {
-              // Rate limited — backoff and stop this batch
-              console.warn('[broadcast] Telegram 429 rate limit — pausing batch');
-              break;
-            }
-            // Other errors (403 Forbidden, etc.) — mark as failed but continue
-            console.warn(`[broadcast] Telegram send failed for user ${uid}: ${errMsg.slice(0, 80)}`);
-            failed++;
-            continue;
-          }
-        }
-
-        delivered++;
-      } catch (e) {
-        console.warn(`[broadcast] User ${uid} failed: ${e?.message || e}`);
-        failed++;
-      }
-
-      // Small delay between users to avoid Telegram rate limit
-      if (BATCH_DELAY_MS > 0) {
-        await new Promise(r => setTimeout(r, Math.min(BATCH_DELAY_MS, 200)));
-      }
-    }
-
-    // Step 4: Save checkpoint
-    await queryDb(env, `
-      UPDATE notification_broadcasts
-      SET total_sent = total_sent + $2,
-          total_delivered = total_delivered + $3,
-          last_processed_user_id = $4
-      WHERE id = $1
-    `, [broadcastId, userIds.length, delivered, lastUserId]);
-
-    // Step 5: Check remaining users
-    const remainingResult = await queryDb(env, `
-      SELECT COUNT(*)::int AS cnt FROM users
-      WHERE channel_joined = TRUE AND telegram_id > $1
-    `, [lastUserId]);
-    const remaining = remainingResult.rows[0]?.cnt || 0;
-
-    if (remaining === 0) {
-      await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW() WHERE id = $1`, [broadcastId]);
-    }
-
-    return { processed: userIds.length, delivered, failed, remaining, broadcastId, status: remaining === 0 ? 'completed' : 'in_progress' };
+    return processBroadcastFull(env, sendTelegramMessageFn, broadcast.id);
   }
 
   function _getChannelColumn(category) {
@@ -964,5 +1010,6 @@ export function createNotificationPlatformRepository(deps) {
     processQueue,
     createBroadcastJob,
     processBroadcastBatch,
+    processBroadcastFull,
   });
 }

@@ -374,9 +374,13 @@ export function createAnalysisHandlers(deps) {
       const notifTitle = `📊 تحلیل جدید: ${coinLabel}`;
       const notifMessage = analysis.title || `تحلیل ${coinLabel} (${analysis.timeframe}) منتشر شد.`;
 
+      // Create broadcast job (1 queryDb, shared Pool) then immediately start
+      // processing it in ctx.waitUntil. Response is already being sent —
+      // the broadcast runs in background with batch+checkpoint.
+      let broadcastId = null;
       if (notificationPlatformRepo && notificationPlatformRepo.createBroadcastJob) {
         try {
-          await notificationPlatformRepo.createBroadcastJob(env, {
+          broadcastId = await notificationPlatformRepo.createBroadcastJob(env, {
             adminId: authResult.user.id,
             title: notifTitle,
             message: notifMessage,
@@ -388,6 +392,14 @@ export function createAnalysisHandlers(deps) {
         } catch (e) {
           console.warn('[analysis-create] broadcast job creation failed (non-fatal):', e?.message);
         }
+      }
+
+      // Start processing IMMEDIATELY in ctx.waitUntil (not waiting for cron)
+      if (broadcastId && ctx?.waitUntil && notificationPlatformRepo?.processBroadcastFull) {
+        ctx.waitUntil(
+          notificationPlatformRepo.processBroadcastFull(env, sendTelegramMessage, broadcastId)
+            .catch((e) => console.warn('[analysis-create] broadcast processing failed:', e?.message))
+        );
       }
 
       return jsonResponse({ status: 'success', analysis, version }, {}, env);
