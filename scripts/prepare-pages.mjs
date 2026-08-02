@@ -261,6 +261,14 @@ async function main() {
   await copyIndexHtml();
   console.log('  Copied index.html');
 
+  // Copy calendar-data.json (static calendar data — avoids provider rate limits)
+  try {
+    await copyFile(path.join(projectRoot, 'assets', 'calendar-data.json'), path.join(outputDir, 'calendar-data.json'));
+    console.log('  Copied calendar-data.json');
+  } catch {
+    console.log('  calendar-data.json not found — skipping');
+  }
+
   const assetRenameMap = await copyAssetsWithHash();
   console.log('  Copied & hashed assets');
 

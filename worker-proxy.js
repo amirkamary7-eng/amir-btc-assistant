@@ -3759,40 +3759,42 @@ function mapCalendarEvent(item, now, cutoffPast, cutoffFuture) {
 }
 
 async function fetchCalendarFeed() {
-  const urls = [
-    'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
-    'https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json',
+  const sources = [
+    { url: 'https://amir-btc-assistant-pages.pages.dev/calendar-data.json', type: 'pages-static' },
+    { url: 'https://nfs.faireconomy.media/ff_calendar_thisweek.json', type: 'direct' },
   ];
 
-  for (const url of urls) {
+  for (const source of sources) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
       const _t0 = Date.now();
-      const response = await fetch(url, {
+      const response = await fetch(source.url, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'Mozilla/5.0',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         },
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-      console.log('[CALENDAR] provider ' + url.split('//')[1].split('/')[0] + ': HTTP ' + response.status + ' in ' + (Date.now() - _t0) + 'ms');
+      const ms = Date.now() - _t0;
+      const host = source.url.split('//')[1].split('/')[0];
+      console.log('[CALENDAR] provider ' + host + ' (' + source.type + '): HTTP ' + response.status + ' in ' + ms + 'ms');
 
-      if (!response.ok) {
+      if (response.status === 429 || response.status === 530 || !response.ok) {
         continue;
       }
 
       const body = await response.json();
       if (Array.isArray(body) && body.length > 0) {
-        console.log('[CALENDAR] provider returned ' + body.length + ' events');
+        console.log('[CALENDAR] provider returned ' + body.length + ' events (' + source.type + ')');
         return body;
       } else {
-        console.warn('[CALENDAR] provider returned empty or non-array: ' + (Array.isArray(body) ? 'array[0]' : typeof body));
+        console.warn('[CALENDAR] provider returned empty or non-array');
       }
     } catch (e) {
-      console.warn('[CALENDAR] provider fetch error: ' + (e?.message || e));
+      console.warn('[CALENDAR] provider fetch error (' + source.type + '): ' + (e?.message || e));
     }
   }
 
@@ -3826,11 +3828,12 @@ async function fetchCalendarEvents(env) {
     const _tFlightStart = Date.now();
 
     // 0. Try in-memory isolate cache FIRST (instant, no I/O)
-    // This prevents KV read latency (200ms+) on every request.
-    // Isolate cache is refreshed whenever KV or upstream succeeds.
+    // Use a LONG TTL (30 min) because calendar data changes weekly.
+    // This is the PRIMARY cache — KV is secondary (and often fails due to
+    // KV write limit). Isolate cache survives as long as the Worker is alive.
     const _isolateAge = _calendarIsolateCacheAt ? Date.now() - _calendarIsolateCacheAt : Infinity;
-    if (_calendarIsolateCache && _calendarIsolateCache.length > 0 && _isolateAge < 120000) {
-      // Isolate cache is fresh (< 2 min) — serve immediately
+    if (_calendarIsolateCache && _calendarIsolateCache.length > 0 && _isolateAge < 1800000) {
+      // Isolate cache is fresh (< 30 min) — serve immediately
       console.log('[CALENDAR] isolate cache hit: age=' + Math.round(_isolateAge / 1000) + 's, events=' + _calendarIsolateCache.length);
       return _calendarIsolateCache;
     }
@@ -3859,17 +3862,37 @@ async function fetchCalendarEvents(env) {
     const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const _tFetchStart = Date.now();
     const rawEvents = await fetchCalendarFeed();
-    console.log('[CALENDAR] upstream fetch: ' + (Date.now() - _tFetchStart) + 'ms, rawEvents=' + (rawEvents?.length || 0));
+    console.log('[CALENDAR] upstream fetch: ' + (Date.now() - _tFetchStart) + 'ms, rawEvents=' + (rawEvents?.length || 0) + ' isArray=' + Array.isArray(rawEvents));
 
-    const events = rawEvents
-      .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
-      .filter((item) => item !== null)
-      .sort((left, right) => {
-        if (!left.timestamp && !right.timestamp) return 0;
-        if (!left.timestamp) return 1;
-        if (!right.timestamp) return -1;
-        return left.timestamp.localeCompare(right.timestamp);
-      });
+    // Check if events are already mapped (from Pages static file)
+    // Pages static has: {title, country, flag, time, date, impact, impact_label, ...}
+    // Direct provider has: {title, country, date, time, impact, forecast, ...}
+    const isAlreadyMapped = Array.isArray(rawEvents) && rawEvents.length > 0 && rawEvents[0]?.flag !== undefined;
+
+    let events;
+    if (isAlreadyMapped) {
+      // Events from Pages static are already mapped — use directly
+      events = rawEvents
+        .filter((item) => {
+          if (!item.timestamp) return true;
+          const d = new Date(item.timestamp);
+          return d >= cutoffPast && d <= cutoffFuture;
+        })
+        .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+      console.log('[CALENDAR] using pre-mapped events: ' + events.length);
+    } else {
+      // Events from direct provider — map them
+      events = (Array.isArray(rawEvents) ? rawEvents : [])
+        .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
+        .filter((item) => item !== null)
+        .sort((left, right) => {
+          if (!left.timestamp && !right.timestamp) return 0;
+          if (!left.timestamp) return 1;
+          if (!right.timestamp) return -1;
+          return left.timestamp.localeCompare(right.timestamp);
+        });
+      console.log('[CALENDAR] after map/filter: events=' + events.length + ' (from ' + (rawEvents?.length || 0) + ' raw)');
+    }
 
     if (events.length > 0) {
       // Fresh fetch succeeded — write to KV cache + isolate cache
@@ -6410,6 +6433,27 @@ export default {
         return await handleCalendarEvents(env);
       }
 
+      // TEMP: Calendar provider diagnostic
+      if (request.method === 'GET' && url.pathname === '/api/calendar/diag') {
+        const results = [];
+        for (const url of ['https://nfs.faireconomy.media/ff_calendar_thisweek.json', 'https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json']) {
+          const t0 = Date.now();
+          try {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 5000);
+            const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal });
+            clearTimeout(tid);
+            const body = await res.text();
+            let count = 'parse-error';
+            try { const j = JSON.parse(body); count = Array.isArray(j) ? j.length : 'not-array'; } catch {}
+            results.push({ url, status: res.status, ms: Date.now() - t0, bodyLength: body.length, events: count });
+          } catch (e) {
+            results.push({ url, error: e?.message || String(e), ms: Date.now() - t0 });
+          }
+        }
+        return jsonResponse({ results, isolateCache: _calendarIsolateCache?.length || 0, isolateAge: _calendarIsolateCacheAt ? Date.now() - _calendarIsolateCacheAt : null }, {}, env);
+      }
+
       // ── Calendar Reminders (per-user, stored in PostgreSQL) ──
       // POST   /api/calendar/reminders      — create/update
       // GET    /api/calendar/reminders      — list user's reminders
@@ -6690,7 +6734,7 @@ export default {
       // etc.). Market data has zero user-specific value — no auth required.
       // The Worker still rate-limits by client IP (line 4149) so anonymous
       // access cannot be abused.
-      const _DATA_PATHS = /^\/api\/(forex|analyses|calendar\/events|farsi-news)(\/|$)/;
+      const _DATA_PATHS = /^\/api\/(forex|analyses|farsi-news)(\/|$)/;
       const _isProdEnv = String(env.APP_ENV || '').toLowerCase() === 'production';
       if (_isProdEnv && _DATA_PATHS.test(url.pathname)) {
         const _dataAuth = await authenticateTelegramRequest(request, env);
@@ -7511,6 +7555,30 @@ export default {
           }
           try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); } catch (e) {
             console.warn('[CRON] calendar failed:', e?.message);
+          }
+
+          // Refresh calendar isolate cache from upstream (every 15 min)
+          // This keeps _calendarIsolateCache populated even when HTTP requests
+          // get rate-limited by the provider.
+          try {
+            const rawEvents = await fetchCalendarFeed();
+            if (Array.isArray(rawEvents) && rawEvents.length > 0) {
+              const now = new Date();
+              const cutoffPast = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+              const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+              const events = rawEvents
+                .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
+                .filter((item) => item !== null)
+                .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+              if (events.length > 0) {
+                _calendarIsolateCache = events;
+                _calendarIsolateCacheAt = Date.now();
+                try { await writeAppCache(env, CALENDAR_CACHE_KEY, JSON.stringify(events), 600); } catch {}
+                console.log('[CRON] calendar cache refreshed: ' + events.length + ' events');
+              }
+            }
+          } catch (e) {
+            console.warn('[CRON] calendar cache refresh failed:', e?.message);
           }
 
           // Phase 2: Lightweight DB jobs
