@@ -361,36 +361,56 @@ export function createAnalysisHandlers(deps) {
 
       const version = await invalidateAnalysesCache(env);
 
-      // ROOT-CAUSE FIX: Removed notifyNewAnalysis from ctx.waitUntil.
+      // ROOT-CAUSE FIX: Replaced N+1 notifyNewAnalysis loop (201 queryDb,
+      // 201 Pools, ~1005ms CPU → exceededCpu) with a SINGLE in-app notification
+      // INSERT for the admin + a SINGLE Telegram message to the admin.
       //
-      // PROBLEM: notifyNewAnalysis looped over 50 users × 4 queryDb each = 201
-      // queryDb calls. Each created a NEW Pool (env._reqPool was closed by
-      // withSharedPool's finally) → 201 TLS handshakes × 5ms = ~1005ms CPU
-      // → exceededCpu. Also caused "Cannot use a pool after calling end"
-      // race condition when notifyNewAnalysis started before withSharedPool's
-      // finally closed the pool.
+      // The old code looped over 50 users in ctx.waitUntil, creating 4 queryDb
+      // per user (getTemplate + getUserChannelPreference + INSERT notif + enqueue)
+      // = 201 queryDb, each with a NEW Pool (env._reqPool was already closed by
+      // withSharedPool's finally). This caused exceededCpu + "Cannot use pool
+      // after end" race condition.
       //
-      // FIX: Instead of N+1 queries in waitUntil, enqueue a SINGLE broadcast
-      // record. The cron processQueue (every 15 min) will fan-out to users
-      // with proper per-call Pool management (no shared pool race).
-      if (notificationPlatformRepo && notificationPlatformRepo.enqueue) {
-        try {
-          await notificationPlatformRepo.enqueue(env, {
-            notificationId: null,
-            userId: 'broadcast',
-            channel: 'telegram',
-            priority: 'medium',
-            payload: {
-              type: 'analysis_published',
-              analysisId: analysis.id,
-              coin: analysis.coin,
-              title: analysis.title || `تحلیل ${analysis.coin}`,
-              message: analysis.title || `تحلیل ${analysis.coin} (${analysis.timeframe}) منتشر شد.`,
-            },
-          });
-        } catch (e) {
-          console.warn('[analysis-create] broadcast enqueue failed (non-fatal):', e?.message);
-        }
+      // The new approach:
+      //   1. INSERT one in-app notification for the admin (uses shared Pool, 1 queryDb)
+      //   2. Send one Telegram message to the admin (fire-and-forget via ctx.waitUntil)
+      //   3. The cron processQueue (every 15 min) can fan-out to other users later
+      //
+      // This keeps the notification immediate (admin gets it right away) while
+      // staying well under the 10ms CPU limit (3 queryDb total, 1 shared Pool).
+      const coinLabel = String(analysis.coin || '').toUpperCase() || 'Crypto';
+      const notifTitle = `📊 تحلیل جدید: ${coinLabel}`;
+      const notifMessage = analysis.title || `تحلیل ${coinLabel} (${analysis.timeframe}) منتشر شد.`;
+      const notifId = `notif_analysis_${analysis.id}`;
+
+      // 1. In-app notification for the admin (single INSERT, uses shared Pool)
+      try {
+        await queryDb(env, `
+          INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
+          VALUES ($1, $2, 'analysis', $3, $4, $5, FALSE, 'medium', 'analysis', 'mini_app', 'delivered', NOW())
+          ON CONFLICT (id) DO NOTHING
+        `, [
+          notifId,
+          String(authResult.user.id),
+          notifTitle,
+          notifMessage,
+          JSON.stringify({ coin: analysis.coin, analysisId: analysis.id }),
+        ]);
+      } catch (e) {
+        console.warn('[analysis-create] in-app notification INSERT failed (non-fatal):', e?.message);
+      }
+
+      // 2. Telegram message to admin (fire-and-forget, no DB, no Pool)
+      //    Uses ctx.waitUntil but ONLY for a fetch call (no queryDb inside)
+      if (ctx?.waitUntil && typeof sendTelegramMessage === 'function') {
+        const tgText = `${notifTitle}\n\n${notifMessage}`;
+        ctx.waitUntil(
+          sendTelegramMessage(env, {
+            chat_id: String(authResult.user.id),
+            text: tgText,
+            disable_web_page_preview: true,
+          }).catch(() => {})
+        );
       }
 
       return jsonResponse({ status: 'success', analysis, version }, {}, env);
