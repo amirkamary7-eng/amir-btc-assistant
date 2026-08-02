@@ -1387,9 +1387,7 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
  */
 async function processPendingReferralReward(env, inviteeId, channelJoined) {
   const _t0 = Date.now();
-  console.log('[BOOT-TRACE] processPendingReferralReward ENTER channelJoined=' + channelJoined + ' invitee=' + inviteeId);
   if (!channelJoined) {
-    console.log('[BOOT-TRACE] processPendingReferralReward EXIT (channelJoined=false) dt=0ms');
     return null;
   }
 
@@ -1416,11 +1414,9 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
   );
   const pending = pendingResult.rows[0] || null;
   if (!pending) {
-    console.log('[BOOT-TRACE] processPendingReferralReward EXIT (no pending) dt=' + (Date.now() - _t0) + 'ms');
     return null;
   }
 
-  console.log('[BOOT-TRACE] processPendingReferralReward CREDITING START dt=' + (Date.now() - _t0) + 'ms');
   // Atomic: credit tokens + transaction record + rewarded=TRUE + channel_verified=TRUE
   await creditReferralWithReward(
     env,
@@ -1430,7 +1426,6 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
     rewardAmount,
     true, // alsoVerifyChannel
   );
-  console.log('[BOOT-TRACE] processPendingReferralReward CREDITING DONE dt=' + (Date.now() - _t0) + 'ms');
 
   return { referral_id: pending.id, rewarded: true };
 }
@@ -1646,17 +1641,13 @@ async function checkChannelMembership(userId, env) {
 }
 
 async function resolveChannelMembership(env, userId, { forceRefresh = false } = {}) {
-  const _rcmT0 = Date.now();
   const uid = String(userId);
-  console.log('[BOOT-TRACE] resolveChannelMembership ENTER forceRefresh=' + forceRefresh + ' uid=' + uid);
 
   if (uid.startsWith('guest_')) {
-    console.log('[BOOT-TRACE] resolveChannelMembership EXIT (guest) dt=0ms');
     return { joined: false, reason: 'guest_user' };
   }
 
   if (isAdminTelegramId(env, uid)) {
-    console.log('[BOOT-TRACE] resolveChannelMembership EXIT (admin) dt=0ms');
     return { joined: true, admin: true };
   }
 
@@ -1679,21 +1670,17 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false } = 
       }
     }
 
-    console.log('[BOOT-TRACE] resolveChannelMembership BEFORE-TELEGRAM-FETCH dt=' + (Date.now() - _rcmT0) + 'ms');
     const result = await checkChannelMembership(uid, env);
-    console.log('[BOOT-TRACE] resolveChannelMembership AFTER-TELEGRAM-FETCH dt=' + (Date.now() - _rcmT0) + 'ms joined=' + result.joined);
     if (result.joined) {
       await setCachedJoinStatus(env, uid, true);
       if (isDatabaseConfigured(env)) {
         await persistDbUserJoinState(env, uid, true);
         // Process any pending referral reward — non-critical, don't let failure affect membership
-        console.log('[BOOT-TRACE] resolveChannelMembership BEFORE-REWARD dt=' + (Date.now() - _rcmT0) + 'ms');
         try {
           await processPendingReferralReward(env, uid, true);
         } catch (refErr) {
           console.warn(safeError('referral-reward-failed', refErr));
         }
-        console.log('[BOOT-TRACE] resolveChannelMembership AFTER-REWARD dt=' + (Date.now() - _rcmT0) + 'ms');
       }
       return result;
     }
@@ -5246,128 +5233,6 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return handleHealth(env);
-      }
-
-      // ── INSTRUMENTATION: Bootstrap trace endpoint (temp, for exceededCpu root cause) ──
-      // Runs the SAME logic as handleBootstrap but returns trace timestamps in the response.
-      // Auth: X-Cron-Secret must match ALERTS_CRON_SHARED_SECRET
-      // Usage: curl -H "X-Cron-Secret: <secret>" "https://.../api/_boot-trace?user_id=123456789"
-      if (request.method === 'GET' && url.pathname === '/api/_boot-trace') {
-        const providedSecret = request.headers.get('X-Trace-Key') || '';
-        const expectedSecret = env.BOOT_TRACE_KEY || '';
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          return jsonResponse({ error: 'Unauthorized' }, { status: 403 }, env);
-        }
-        const traceUserId = url.searchParams.get('user_id') || '123456789';
-        const trace = [];
-        const t0 = Date.now();
-        const mark = (label) => trace.push({ step: label, dt: Date.now() - t0 });
-
-        try {
-          mark('start');
-          // Simulate handleBootstrap steps
-          if (typeof userRepo?.ensureTable === 'function') {
-            try { await userRepo.ensureTable(env); } catch {}
-          }
-          mark('ensureTable');
-
-          const preExistingUser = await userRepo.getById(env, traceUserId);
-          mark('getById1');
-
-          const userRow = await userRepo.bootstrap(env, traceUserId, {
-            username: 'trace_test', first_name: 'Trace', last_name: 'Test', lang: 'fa', is_premium: false,
-          });
-          mark('bootstrap-upsert');
-
-          // processReferralOnBootstrap
-          await processReferralOnBootstrap(env, traceUserId, null, Boolean(userRow?.channel_joined), !preExistingUser);
-          mark('processReferralOnBootstrap');
-
-          const freshUserRow = await userRepo.getById(env, traceUserId);
-          mark('getById2');
-
-          const watchlist = await watchlistRepo.getSymbols(env, traceUserId);
-          mark('watchlist');
-
-          // resolveChannelMembership (forceRefresh: false)
-          let membership1 = await resolveChannelMembership(env, traceUserId, { forceRefresh: false });
-          mark('resolveMembership1');
-
-          // resolveChannelMembership (forceRefresh: true) — only if first didn't join
-          if (!membership1?.joined) {
-            let membership2 = await resolveChannelMembership(env, traceUserId, { forceRefresh: true });
-            mark('resolveMembership2-force');
-          } else {
-            mark('resolveMembership2-skipped');
-          }
-
-          // Admin check
-          let isUserAdmin = isAdminTelegramId(env, traceUserId);
-          if (!isUserAdmin && isDatabaseConfigured(env) && adminRepo) {
-            try {
-              await adminRepo.ensureSchema(env).catch(() => {});
-              const dbAdmin = await adminRepo.getAdminByTelegramId(env, traceUserId);
-              if (dbAdmin && dbAdmin.active) isUserAdmin = true;
-            } catch {}
-          }
-          mark('admin-check');
-
-          return jsonResponse({
-            ok: true,
-            totalWallTime: Date.now() - t0,
-            trace: trace,
-            user: userRepo.normalizeRow(freshUserRow || userRow, watchlist),
-            channel_joined: membership1?.joined,
-            is_admin: isUserAdmin,
-          }, {}, env);
-        } catch (error) {
-          return jsonResponse({
-            ok: false,
-            error: error.message,
-            totalWallTime: Date.now() - t0,
-            trace: trace,
-            lastStep: trace[trace.length - 1]?.step || 'unknown',
-          }, { status: 500 }, env);
-        }
-      }
-
-      // ── TEMPORARY: Membership table check + migration (REMOVE after verification) ──
-      if (url.pathname === '/api/_membership-check' && request.method === 'POST') {
-        const key = request.headers.get('X-Trace-Key');
-        if (!key || key !== env.BOOT_TRACE_KEY) {
-          return jsonResponse({ error: 'Unauthorized' }, { status: 403 }, env);
-        }
-        try {
-          const statements = [
-            `DO $$ BEGIN CREATE TYPE membership_level AS ENUM ('FREE','VIP','PREMIUM','ELITE'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
-            `DO $$ BEGIN CREATE TYPE membership_status AS ENUM ('INACTIVE','PENDING','APPROVED','REJECTED','SUSPENDED','EXPIRED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
-            `DO $$ BEGIN CREATE TYPE membership_source AS ENUM ('MANUAL','EXCHANGE','GIVEAWAY','SUBSCRIPTION','PARTNER'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
-            `DO $$ BEGIN CREATE TYPE membership_request_status AS ENUM ('PENDING','APPROVED','REJECTED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
-            `DO $$ BEGIN CREATE TYPE exchange_verification_status AS ENUM ('NONE','PENDING','VERIFIED','FAILED','EXPIRED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
-            `CREATE TABLE IF NOT EXISTS membership_users (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, telegram_id TEXT NOT NULL UNIQUE, username TEXT, first_name TEXT, last_name TEXT, membership_level membership_level NOT NULL DEFAULT 'FREE', membership_status membership_status NOT NULL DEFAULT 'INACTIVE', membership_source membership_source NOT NULL DEFAULT 'MANUAL', approved_by TEXT, approved_at TIMESTAMPTZ, expire_at TIMESTAMPTZ, premium_badge_enabled BOOLEAN NOT NULL DEFAULT TRUE, referral_code TEXT, referral_verified_at TIMESTAMPTZ, profile_meta TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
-            `CREATE INDEX IF NOT EXISTS idx_mu_status ON membership_users (membership_status)`,
-            `CREATE INDEX IF NOT EXISTS idx_mu_level ON membership_users (membership_level)`,
-            `CREATE INDEX IF NOT EXISTS idx_mu_tgid ON membership_users (telegram_id)`,
-            `CREATE TABLE IF NOT EXISTS membership_requests (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, telegram_id TEXT NOT NULL, exchange_name TEXT NOT NULL, exchange_uid TEXT NOT NULL, status membership_request_status NOT NULL DEFAULT 'PENDING', note TEXT, admin_note TEXT, submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), reviewed_at TIMESTAMPTZ, reviewed_by TEXT, campaign_id TEXT, verification_status exchange_verification_status NOT NULL DEFAULT 'NONE', verification_data TEXT, verified_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
-            `CREATE INDEX IF NOT EXISTS idx_mr_tgid ON membership_requests (telegram_id)`,
-            `CREATE INDEX IF NOT EXISTS idx_mr_uid ON membership_requests (exchange_uid)`,
-            `CREATE INDEX IF NOT EXISTS idx_mr_status ON membership_requests (status)`,
-            `CREATE TABLE IF NOT EXISTS membership_audit_logs (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, admin_id TEXT NOT NULL, admin_username TEXT, target_telegram_id TEXT, request_id TEXT, action TEXT NOT NULL, level_before TEXT, level_after TEXT, status_before TEXT, status_after TEXT, detail TEXT, ip TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
-            `CREATE INDEX IF NOT EXISTS idx_mal_admin ON membership_audit_logs (admin_id)`,
-            `CREATE INDEX IF NOT EXISTS idx_mal_target ON membership_audit_logs (target_telegram_id)`,
-            `CREATE TABLE IF NOT EXISTS membership_admins (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, telegram_id TEXT NOT NULL UNIQUE, username TEXT, first_name TEXT, last_name TEXT, role TEXT NOT NULL DEFAULT 'ADMIN', active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
-            `CREATE TABLE IF NOT EXISTS exchange_campaigns (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, name TEXT NOT NULL, exchange_name TEXT NOT NULL, required_volume DOUBLE PRECISION NOT NULL DEFAULT 0, reward_level membership_level NOT NULL DEFAULT 'VIP', lifetime BOOLEAN NOT NULL DEFAULT TRUE, starts_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), ends_at TIMESTAMPTZ, active BOOLEAN NOT NULL DEFAULT TRUE, referral_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
-          ];
-          let succeeded = 0, errors = [];
-          for (const sql of statements) {
-            try { await queryDb(env, sql); succeeded++; }
-            catch (e) { errors.push({ sql: sql.slice(0,60), error: e.message }); }
-          }
-          const verify = await queryDb(env, "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'membership_%' OR table_name = 'exchange_campaigns' ORDER BY table_name");
-          return jsonResponse({ ok: true, succeeded, errors: errors.slice(0,5), tables: verify.rows.map(r => r.table_name) }, {}, env);
-        } catch (e) {
-          return jsonResponse({ ok: false, error: e.message }, { status: 500 }, env);
-        }
       }
 
       // ── DIAGNOSTIC: Admin endpoint tester (temp, for root cause analysis) ──

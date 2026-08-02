@@ -35,11 +35,6 @@ export function createUserHandlers(deps) {
    * for development/testing outside Telegram Webview.
    */
   async function handleBootstrap(request, env) {
-    const _bootT0 = Date.now();
-    let _bootQueryCount = 0;
-    // ── INSTRUMENTATION: wrap env to count queryDb calls (no logic change) ──
-    const _origQueryDb = env._reqPool ? null : null; // placeholder — we track via log
-    console.log('[BOOT-TRACE] handleBootstrap START ts=' + _bootT0);
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -65,7 +60,6 @@ export function createUserHandlers(deps) {
 
     // Auth: prefer initData, fall back to ?user_id= query param, then body.user_id
     const auth = await optionalTelegramAuth(request, env);
-    console.log('[BOOT-TRACE] step1-auth dt=' + (Date.now() - _bootT0) + 'ms user=' + (auth.user?.id || 'none'));
     let userId;
     let tgUser = null; // Telegram user object (may have username, first_name, …)
 
@@ -92,11 +86,9 @@ export function createUserHandlers(deps) {
       if (typeof userRepo.ensureTable === 'function') {
         try { await userRepo.ensureTable(env); } catch {}
       }
-      console.log('[BOOT-TRACE] step2-ensureTable dt=' + (Date.now() - _bootT0) + 'ms');
       // Check if user already exists — referral only allowed for new users (Design)
       const preExistingUser = await userRepo.getById(env, userId);
       const isNewUser = !preExistingUser;
-      console.log('[BOOT-TRACE] step3-getById1 dt=' + (Date.now() - _bootT0) + 'ms isNew=' + isNewUser);
 
       const userRow = await userRepo.bootstrap(env, userId, {
         username: normalizeOptionalString(payload.username) || normalizeOptionalString(tgUser?.username),
@@ -106,7 +98,6 @@ export function createUserHandlers(deps) {
         // Phase 2: Track Telegram premium status from initData
         is_premium: Boolean(tgUser?.is_premium),
       });
-      console.log('[BOOT-TRACE] step4-bootstrap-upsert dt=' + (Date.now() - _bootT0) + 'ms');
       const referrerId = normalizeOptionalString(payload.referrer_id);
       await diagLog(env, { scope: 'diag-handleBootstrap', userId, referrer_id: referrerId, isNewUser });
 
@@ -117,14 +108,12 @@ export function createUserHandlers(deps) {
         Boolean(userRow?.channel_joined),
         isNewUser,
       );
-      console.log('[BOOT-TRACE] step5-processReferral dt=' + (Date.now() - _bootT0) + 'ms');
       // Flush buffered diag logs to KV (1 write instead of 21+)
       if (typeof flushDiagLog === 'function') {
         try { await flushDiagLog(env); } catch {}
       }
       const freshUserRow = await userRepo.getById(env, userId);
       const watchlist = await watchlistRepo.getSymbols(env, userId);
-      console.log('[BOOT-TRACE] step6-getById2+watchlist dt=' + (Date.now() - _bootT0) + 'ms');
 
       // Membership check: use cache first (fast path for returning users),
       // fall back to real Telegram check only if cache is empty/stale.
@@ -134,14 +123,12 @@ export function createUserHandlers(deps) {
         try {
           // Step 1: try cache (forceRefresh: false) — instant if user verified <5min ago
           let membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: false });
-          console.log('[BOOT-TRACE] step7-resolveMembership1 dt=' + (Date.now() - _bootT0) + 'ms joined=' + membership?.joined);
           if (membership?.joined) {
             // Cache says joined — trust it (5min TTL is short enough for security)
             channelJoined = true;
           } else {
             // Cache says not-joined OR cache miss — do a real Telegram check
             membership = await resolveChannelMembership(env, String(tgUser.id), { forceRefresh: true });
-            console.log('[BOOT-TRACE] step8-resolveMembership2-force dt=' + (Date.now() - _bootT0) + 'ms joined=' + membership?.joined);
             channelJoined = Boolean(membership?.joined);
           }
           console.log(JSON.stringify({ scope: 'diag-bootstrap-membership-resolved', user_id: userId, tg_user_id: tgUser.id, membership_joined: membership?.joined, membership_reason: membership?.reason, final_channelJoined: channelJoined, db_had: Boolean(freshUserRow?.channel_joined) }));
@@ -155,7 +142,6 @@ export function createUserHandlers(deps) {
 
       console.log(JSON.stringify({ scope: 'diag-bootstrap-response', user_id: userId, channel_joined: channelJoined, is_admin: isAdminTelegramId(env, userId), db_had: Boolean(freshUserRow?.channel_joined) }));
 
-      console.log('[BOOT-TRACE] step9-admin-check dt=' + (Date.now() - _bootT0) + 'ms');
 
       return jsonResponse({
         status: 'success',
