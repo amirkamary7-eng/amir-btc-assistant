@@ -18,7 +18,7 @@
     <script>
     (function() {
       'use strict';
-      var BUILD_ID = '__BUILD_ID_PLACEHOLDER__';
+      var BUILD_ID = 'MSAR235Z-e79a93b';
       var VERSION_CHECK_URL = 'version.json';
       var STORAGE_KEY = 'app_build_id';
       var FORCE_BUST_KEY = 'app_cache_bust';
@@ -87,14 +87,25 @@
     })();
     </script>
 
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.ef0f947c.css">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- PERFORMANCE: TradingView tv.js lazy-loaded in openCoinDetail() — saves ~200KB on initial page load -->
-    <link rel="stylesheet" href="wallet.css">
-    <link rel="stylesheet" href="referral.css">
+    <!-- ── PERFORMANCE: Preload TradingView tv.js with high priority ── -->
+    <!-- Preload hint tells the browser to start fetching tv.js immediately,
+         without executing it. The actual <script> is injected by app.js
+         (preloadTradingViewScript) which then executes it. This cuts ~1-2s
+         off the first chart open. -->
+    <link rel="preload" href="https://s3.tradingview.com/tv.js" as="script">
+    <link rel="preconnect" href="https://s3.tradingview.com">
+    <link rel="preconnect" href="https://scanner.tradingview.com">
+    <link rel="stylesheet" href="wallet.ad1c97c0.css">
+    <link rel="stylesheet" href="referral.83622ad7.css">
+    <!-- WARM-START: Preconnect to Worker API for faster first API call -->
+    <link rel="preconnect" href="https://amir-btc-assistant-api-production.amirkamari9939.workers.dev" crossorigin>
+    <link rel="dns-prefetch href="https://telegram.org">
     <!-- Build-time: prepare-pages.mjs replaces this with WORKER_API_URL if set -->
     <!-- Fallback: Production Worker URL — ensures Cloudflare Pages GitHub Integration also works -->
-    <script>window.API_BASE = window.API_BASE || "https://amir-btc-assistant-api-production.amirkamari9939.workers.dev";</script>
+    <script>window.API_BASE = "https://amir-btc-assistant-api-production.amirkamari9939.workers.dev";</script>
+<script>window.ADMIN_JS_URL = "admin.90366321.js";</script>
 </head>
 <!-- #endregion -->
 <body>
@@ -137,17 +148,15 @@
     <!-- #region DashboardPage -->
     <!-- ویترین داشبورد: هرو اسلایدر، وضعیت بازار، واچ‌لیست، تحلیل ویژه، اخبار مهم، تقویم اقتصادی -->
     <section id="dashboard-page" class="page active">
-        <!-- 1. Hero Slider — 2 new banners: AMIRBTC Channel + Bitunix -->
+        <!-- 1. Hero Slider — 2 banners: AMIRBTC Channel + AMIRBTC Premium -->
         <div class="hero-banner-slider" id="hero-banner-slider">
             <div class="hero-slide active" data-slide="0" onclick="window.open('https://t.me/amir_btc_2024','_blank')">
-                <img src="assets/banner-analysis.png" alt="AMIRBTC کانال تحلیل" class="hero-slide-img" loading="eager" decoding="async" onerror="this.style.background='#0B1220'">
-                <div class="hero-slide-shade"></div>
-                <button class="hero-cta hero-cta--channel" type="button" onclick="event.stopPropagation();window.open('https://t.me/amir_btc_2024','_blank')">عضویت در کانال</button>
+                <img src="assets/b2ee5310.webp" alt="AMIRBTC کانال" class="hero-slide-img hero-slide-img--cover" loading="lazy" decoding="async" fetchpriority="low" onerror="this.style.background='#0B1220'">
+                <button class="hero-cta hero-cta--channel-v2" type="button" onclick="event.stopPropagation();window.open('https://t.me/amir_btc_2024','_blank')">عضویت در کانال</button>
             </div>
-            <div class="hero-slide" data-slide="1" onclick="window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">
-                <img src="assets/banner-bitunix.png" alt="Bitunix" class="hero-slide-img" loading="lazy" decoding="async" onerror="this.style.background='#0B1220'">
-                <div class="hero-slide-shade hero-slide-shade--right"></div>
-                <button class="hero-cta hero-cta--bitunix" type="button" onclick="event.stopPropagation();window.open('https://www.bitunix.com/register?vipCode=AMIRBTC','_blank')">ثبت‌نام و دریافت بونوس</button>
+            <div class="hero-slide" data-slide="1" onclick="if(window.MembershipApp)MembershipApp.open()">
+                <img src="assets/e584be8d.webp" alt="AMIRBTC Premium" class="hero-slide-img hero-slide-img--cover" loading="lazy" decoding="async" onerror="this.style.background='#0B1220'">
+                <button class="hero-cta hero-cta--premium-v2" type="button" onclick="event.stopPropagation();if(window.MembershipApp)MembershipApp.open()">فعال‌سازی Premium</button>
             </div>
             <div class="hero-slider-dots" id="hero-slider-dots">
                 <span class="hero-dot active" data-dot="0"></span>
@@ -195,6 +204,27 @@
                     <div class="dms-skel-circle"></div>
                     <div class="dms-skel-lines"><div class="dms-skel-line w-60"></div><div class="dms-skel-line w-40"></div></div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ── NEW: Market Heatmap — visual 24h changes ── -->
+        <div class="section-header">
+            <span class="section-title">
+                <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                <span data-i18n="heatmap_title">نقشه حرارتی بازار</span>
+            </span>
+            <span class="section-more" data-i18n="view_all" onclick="switchTab('market-page')">مشاهده همه</span>
+        </div>
+        <div class="heatmap-container" id="dashboard-heatmap">
+            <div class="heatmap-skeleton">
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
+                <div class="heatmap-skel-cell"></div>
             </div>
         </div>
 
@@ -271,9 +301,16 @@
         <div class="mkt-header">
             <div class="mkt-header-left">
                 <div class="mkt-header-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-                        <polyline points="17 6 23 6 23 12"/>
+                    <svg width="26" height="26" viewBox="0 0 28 28" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <!-- Candlestick 1 (green/bullish) -->
+                        <line x1="6" y1="4" x2="6" y2="24" stroke="#22C55E" stroke-width="1.2" opacity="0.5"/>
+                        <rect x="4" y="8" width="4" height="10" rx="1" fill="#22C55E" fill-opacity="0.9" stroke="#22C55E" stroke-width="0.5" stroke-opacity="0.6"/>
+                        <!-- Candlestick 2 (red/bearish) -->
+                        <line x1="14" y1="3" x2="14" y2="25" stroke="#EF4444" stroke-width="1.2" opacity="0.5"/>
+                        <rect x="12" y="10" width="4" height="7" rx="1" fill="#EF4444" fill-opacity="0.9" stroke="#EF4444" stroke-width="0.5" stroke-opacity="0.6"/>
+                        <!-- Candlestick 3 (green/bullish, taller — showing growth) -->
+                        <line x1="22" y1="5" x2="22" y2="23" stroke="#22C55E" stroke-width="1.2" opacity="0.5"/>
+                        <rect x="20" y="7" width="4" height="12" rx="1" fill="#22C55E" fill-opacity="0.9" stroke="#22C55E" stroke-width="0.5" stroke-opacity="0.6"/>
                     </svg>
                 </div>
                 <div class="mkt-header-text">
@@ -287,7 +324,7 @@
         </div>
 
         <!-- ═══ MKT: Compact Overview Cards (3 equal stat cards — exchange-style) ═══ -->
-        <div class="mkt-overview-grid">
+        <div class="mkt-overview-grid" id="mkt-overview-grid">
             <div class="mkt-stat-card" id="mkt-card-mcap">
                 <div class="mkt-stat-icon-wrap mkt-stat-icon-green">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
@@ -316,47 +353,54 @@
                 </div>
             </div>
         </div>
+        <!-- Live data source indicator + last update timestamp -->
+        <div class="mkt-overview-meta" id="mkt-overview-meta">
+            <span class="mkt-overview-source">
+                <span class="mkt-live-dot"></span>
+                <span id="mkt-source-text">CoinMarketCap</span>
+            </span>
+            <span class="mkt-overview-updated" id="mkt-overview-updated">--</span>
+        </div>
 
-        <!-- ═══ MKT: Fear & Greed + Market Status (REDESIGNED) ═══ -->
-        <div class="mkt-dashboard-row">
-            <div class="mkt-fg-card">
-                <div class="mkt-fg-header">
-                    <span class="mkt-fg-title">Fear &amp; Greed</span>
-                </div>
-                <div class="mkt-fg-gauge-wrap">
-                    <svg class="mkt-fg-gauge" viewBox="0 0 120 70" fill="none">
-                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="rgba(255,255,255,0.06)" stroke-width="7" stroke-linecap="round" fill="none"/>
-                        <path d="M 12 60 A 48 48 0 0 1 108 60" stroke="url(#mkt-fg-gradient)" stroke-width="7" stroke-linecap="round" fill="none" stroke-dasharray="150.8" stroke-dashoffset="150.8" id="fg-arc"/>
-                        <text x="60" y="48" text-anchor="middle" fill="#FFFFFF" font-size="22" font-weight="800" id="fg-gauge-text">--</text>
-                        <text x="60" y="62" text-anchor="middle" fill="#A5B4C7" font-size="8" font-weight="500" id="fg-gauge-label">--</text>
-                        <defs>
-                            <linearGradient id="mkt-fg-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" stop-color="#EF4444"/>
-                                <stop offset="35%" stop-color="#F5A623"/>
-                                <stop offset="65%" stop-color="#F5A623"/>
-                                <stop offset="100%" stop-color="#22C55E"/>
-                            </linearGradient>
-                        </defs>
-                    </svg>
-                </div>
-                <div class="mkt-fg-meta">
-                    <span>دیروز: <b id="mkt-fg-yesterday">--</b></span>
-                    <span>هفته قبل: <b id="mkt-fg-last-week">--</b></span>
-                </div>
-            </div>
-            <div class="mkt-status-card">
-                <div class="mkt-status-header">
-                    <span class="mkt-status-title">وضعیت بازار</span>
-                    <span class="mkt-status-total" id="mkt-status-total">0 ارز</span>
-                </div>
-                <div class="mkt-status-body">
-                    <!-- Triple-segment ratio bar: gainers | neutral | losers -->
-                    <div class="mkt-status-bar-wrap">
-                        <div class="mkt-status-bar" id="mkt-status-bar">
-                            <div class="mkt-status-fill-green" id="mkt-status-green" style="width:33%"></div>
-                            <div class="mkt-status-fill-neutral" id="mkt-status-neutral" style="width:34%"></div>
-                            <div class="mkt-status-fill-red" id="mkt-status-red" style="width:33%"></div>
+        <!-- ═══ MKT: Market Status Card (REDESIGNED — Premium Glassmorphism) ═══ -->
+        <div class="mkt-status-premium" id="mkt-status-premium">
+            <div class="mkt-status-premium-bg"></div>
+            <div class="mkt-status-premium-content">
+                <div class="mkt-status-premium-header">
+                    <div class="mkt-status-premium-title-row">
+                        <div class="mkt-status-premium-icon">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 14l4-8 4 5 5-9"/></svg>
                         </div>
+                        <span class="mkt-status-premium-title">وضعیت بازار</span>
+                        <span class="mkt-status-premium-badge" id="mkt-fg-badge">--</span>
+                    </div>
+                    <div class="mkt-status-premium-trend">
+                        <span class="mkt-trend-label">روند بازار</span>
+                        <span class="mkt-trend-value" id="mkt-trend-value">--</span>
+                    </div>
+                </div>
+                <div class="mkt-status-premium-fg">
+                    <div class="mkt-fg-score-display">
+                        <span class="mkt-fg-score-num" id="fg-gauge-text">--</span>
+                        <span class="mkt-fg-score-label" id="fg-gauge-label">--</span>
+                    </div>
+                    <div class="mkt-fg-gradient-bar-wrap">
+                        <div class="mkt-fg-gradient-bar">
+                            <div class="mkt-fg-gradient-fill"></div>
+                            <div class="mkt-fg-indicator" id="mkt-fg-indicator" style="left: 0%"></div>
+                        </div>
+                        <div class="mkt-fg-gradient-labels">
+                            <span>FEAR</span>
+                            <span>NEUTRAL</span>
+                            <span>GREED</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="mkt-status-premium-bar">
+                    <div class="mkt-status-bar" id="mkt-status-bar">
+                        <div class="mkt-status-fill-green" id="mkt-status-green" style="width:33%"></div>
+                        <div class="mkt-status-fill-neutral" id="mkt-status-neutral" style="width:34%"></div>
+                        <div class="mkt-status-fill-red" id="mkt-status-red" style="width:33%"></div>
                     </div>
                     <div class="mkt-status-labels">
                         <span class="mkt-status-up">
@@ -364,7 +408,7 @@
                             <b id="sentiment-gainers">0</b>
                             <small>صعودی</small>
                         </span>
-                        <span class="mkt-status-neutral">
+                        <span class="mkt-status-neutral-label">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#6B7A8D" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             <b id="sentiment-neutral">0</b>
                             <small>خنثی</small>
@@ -375,11 +419,8 @@
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
                         </span>
                     </div>
-                    <div class="mkt-status-sentiment">
-                        <span class="mkt-status-sentiment-label">احساس بازار:</span>
-                        <span class="mkt-status-sentiment-value" id="mkt-sentiment-value">--</span>
-                    </div>
                 </div>
+                <div class="mkt-status-premium-insight" id="mkt-status-insight">--</div>
             </div>
         </div>
 
@@ -407,11 +448,11 @@
 
         <!-- ═══ MKT: Filter Chips (EXPANDED — All/Gainers/Losers/Popular/BTC Pairs) ═══ -->
         <div class="mkt-filters" id="market-sub-tabs" role="tablist">
-            <button type="button" class="mkt-filter-chip active" data-sub-tab="top" onclick="switchSubTab('top', this)" role="tab">همه</button>
-            <button type="button" class="mkt-filter-chip" data-sub-tab="gainers" onclick="switchSubTab('gainers', this)" role="tab">بیشترین رشد</button>
-            <button type="button" class="mkt-filter-chip" data-sub-tab="losers" onclick="switchSubTab('losers', this)" role="tab">بیشترین ریزش</button>
-            <button type="button" class="mkt-filter-chip" data-sub-tab="popular" onclick="switchSubTab('popular', this)" role="tab">محبوب‌ها</button>
-            <button type="button" class="mkt-filter-chip" data-sub-tab="btcpairs" onclick="switchSubTab('btcpairs', this)" role="tab">جفت‌های BTC</button>
+            <button type="button" class="mkt-filter-chip active" data-sub-tab="top" onclick="switchSubTab('top', this)" role="tab" data-i18n="subtab_all">همه</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="gainers" onclick="switchSubTab('gainers', this)" role="tab" data-i18n="tab_gainers">رشد</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="losers" onclick="switchSubTab('losers', this)" role="tab" data-i18n="tab_losers">ریزش</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="popular" onclick="switchSubTab('popular', this)" role="tab" data-i18n="subtab_popular">محبوب</button>
+            <button type="button" class="mkt-filter-chip" data-sub-tab="btcpairs" onclick="switchSubTab('btcpairs', this)" role="tab" data-i18n="subtab_btc_pairs">جفت BTC</button>
         </div>
 
         <!-- ═══ MKT: BTC Pairs Sub-Groups — REMOVED (BTC tab now renders flat BTC pair list) ═══ -->
@@ -623,22 +664,28 @@
     <!-- #region NewsPage -->
     <!-- این بخش دسته‌بندی خبرها و خروجی تقویم اقتصادی را نمایش می‌دهد. -->
     <section id="news-page" class="page">
-        <!-- Premium Top Bar: Tabs + Filter + Search -->
+        <!-- Premium Top Bar — REDESIGNED: tabs and tools on separate rows.
+             Row 1: category tabs only (equal width, full coverage, no scroll).
+             Row 2: search + filter tools (larger touch targets, with labels). -->
         <div class="ni-topbar">
-            <div class="ni-tabs-row">
-                <div class="ni-tabs" id="news-tabs">
-                    <button class="ni-tab active" data-news="all" onclick="switchNewsTab('all', this)">همه</button>
-                    <button class="ni-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)">کریپتو</button>
-                    <button class="ni-tab" data-news="forex" onclick="switchNewsTab('forex', this)">فارکس</button>
-                    <button class="ni-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)">تقویم</button>
-                    <button class="ni-tab" data-news="saved" onclick="switchNewsTab('saved', this)">ذخیره شده</button>
-                </div>
-                <button class="ni-icon-btn" onclick="openNewsFilterSheet()" aria-label="فیلتر">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-                    <span class="ni-filter-dot" id="ni-filter-dot" style="display:none;"></span>
+            <!-- Row 1: Category tabs -->
+            <div class="ni-tabs" id="news-tabs">
+                <button class="ni-tab active" data-news="all" onclick="switchNewsTab('all', this)">همه</button>
+                <button class="ni-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)">کریپتو</button>
+                <button class="ni-tab" data-news="forex" onclick="switchNewsTab('forex', this)">فارکس</button>
+                <button class="ni-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)">تقویم</button>
+                <button class="ni-tab" data-news="saved" onclick="switchNewsTab('saved', this)">ذخیره شده</button>
+            </div>
+            <!-- Row 2: Tools (search + filter) — separated from tabs -->
+            <div class="ni-tools-row">
+                <button class="ni-tool-btn" onclick="openNewsSearch()" aria-label="جستجو">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <span>جستجو</span>
                 </button>
-                <button class="ni-icon-btn" onclick="openNewsSearch()" aria-label="جستجو">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <button class="ni-tool-btn" onclick="openNewsFilterSheet()" aria-label="فیلتر">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                    <span>فیلتر</span>
+                    <span class="ni-filter-dot" id="ni-filter-dot" style="display:none;"></span>
                 </button>
             </div>
         </div>
@@ -826,7 +873,7 @@
 
         <!-- AB Token Wallet Card -->
         <div id="wallet-preview-card" class="wallet-preview-card skeleton-loading" onclick="if(window.WalletApp)WalletApp.openWallet()">
-            <div class="wallet-watermark"><img loading="lazy" src="assets/token-logo.png" alt=""></div>
+            <div class="wallet-watermark"><img loading="lazy" src="assets/2fb8c491.png" alt=""></div>
         </div>
 
         <div class="referral-entry-card" id="referral-entry-card" onclick="if(window.ReferralApp)ReferralApp.openReferral()">
@@ -870,6 +917,23 @@
             <button class="rec-cta" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                 <span data-i18n="open_referral_center">باز کردن مرکز دعوت</span>
+            </button>
+        </div>
+
+        <!-- ── DANGER ZONE: Delete Account (root-cause fix for referral re-registration) ── -->
+        <div class="danger-zone-card" id="danger-zone-card">
+            <div class="danger-zone-header">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span data-i18n="danger_zone">منطقه خطر</span>
+            </div>
+            <p class="danger-zone-desc" data-i18n="delete_account_desc">حذف حساب کاربری به‌صورت دائمی تمام داده‌های شما (پاداش‌ها، دعوت‌ها، کیف پول، هشدارها) را پاک می‌کند. این عملیات قابل بازگشت نیست.</p>
+            <button class="danger-zone-btn" type="button" onclick="requestDeleteAccount()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span data-i18n="delete_account">حذف حساب کاربری</span>
             </button>
         </div>
     </section>
@@ -953,15 +1017,16 @@
                 <div class="af-row">
                     <div class="af-field"><label>لینک تصویر چارت</label><input type="text" id="analysis-image" placeholder="https://..." class="input-field"></div>
                 </div>
-                <div class="af-row">
-                    <div class="af-field af-field-half"><label>حمایت (اختیاری)</label><input type="text" id="analysis-support" placeholder="61700" class="input-field"></div>
-                    <div class="af-field af-field-half"><label>مقاومت (اختیاری)</label><input type="text" id="analysis-resistance" placeholder="65000" class="input-field"></div>
+                <div class="af-row af-row-3col">
+                    <div class="af-field af-field-third"><label>حمایت (اختیاری)</label><input type="text" id="analysis-support" placeholder="61700" class="input-field"></div>
+                    <div class="af-field af-field-third"><label>قیمت فعلی (اختیاری)</label><input type="text" id="analysis-current-price" placeholder="63200" class="input-field"></div>
+                    <div class="af-field af-field-third"><label>مقاومت (اختیاری)</label><input type="text" id="analysis-resistance" placeholder="65000" class="input-field"></div>
                 </div>
                 <div class="af-row">
                     <div class="af-field">
                         <label>متن تحلیل</label>
-                        <textarea id="analysis-text" placeholder="سناریوی اصلی: ...&#10;سناریوی جایگزین: ..." class="input-field" rows="6" maxlength="5000"></textarea>
-                        <div class="af-char-counter" id="analysis-text-counter">0 / 5000</div>
+                        <textarea id="analysis-text" placeholder="سناریوی اصلی: ...&#10;سناریوی جایگزین: ..." class="input-field" rows="6" maxlength="50000"></textarea>
+                        <div class="af-char-counter" id="analysis-text-counter">0 / 50000</div>
                     </div>
                 </div>
             </div>
@@ -1123,6 +1188,29 @@
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
                             <span>ثبت هشدار</span>
                         </button>
+                    </div>
+
+                    <!-- ── NEW: Quick Preset Buttons ── -->
+                    <div class="cd-alert-presets" id="cd-alert-presets">
+                        <span class="cd-alert-presets-label" data-i18n="alert_quick_presets">تنظیم سریع</span>
+                        <div class="cd-alert-presets-grid">
+                            <button type="button" class="cd-preset-btn cd-preset-up" data-preset="5up" onclick="applyAlertPreset('5up')">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 14 12 8 18 14"/></svg>
+                                <span data-i18n="alert_preset_5_up">۵٪ +</span>
+                            </button>
+                            <button type="button" class="cd-preset-btn cd-preset-up" data-preset="10up" onclick="applyAlertPreset('10up')">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 14 12 8 18 14"/></svg>
+                                <span data-i18n="alert_preset_10_up">۱۰٪ +</span>
+                            </button>
+                            <button type="button" class="cd-preset-btn cd-preset-down" data-preset="5down" onclick="applyAlertPreset('5down')">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 10 12 16 18 10"/></svg>
+                                <span data-i18n="alert_preset_5_down">۵٪ -</span>
+                            </button>
+                            <button type="button" class="cd-preset-btn cd-preset-down" data-preset="10down" onclick="applyAlertPreset('10down')">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 10 12 16 18 10"/></svg>
+                                <span data-i18n="alert_preset_10_down">۱۰٪ -</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Active alerts list -->
@@ -1370,14 +1458,16 @@
     <button class="scroll-top-btn" id="scroll-top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Scroll to top">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
     </button>
-    <script src="notifications.js"></script>
-    <script src="assistant.js"></script>
-    <script src="wallet.js"></script>
-    <script src="referral.js"></script>
-    <script src="membership-user.js"></script>
-    <script src="membership-admin.js"></script>
+    <!-- WARM-START: defer scripts so they parse in parallel with HTML,
+         not blocking first paint. Scripts execute in order before DOMContentLoaded. -->
+    <script src="notifications.d4b03712.js" defer></script>
+    <script src="assistant.aee8a585.js" defer></script>
+    <script src="wallet.08322919.js" defer></script>
+    <script src="referral.b688dd1c.js" defer></script>
+    <script src="membership-user.58bd659d.js" defer></script>
+    <script src="membership-admin.95780da7.js" defer></script>
     <!-- PERFORMANCE: admin.js lazy-loaded via dynamic import in openAdminPanel() -->
-    <script src="app.js"></script>
+    <script src="app.805b82cc.js" defer></script>
     <!-- #endregion -->
     <!-- #endregion -->
 
@@ -1474,6 +1564,10 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
                             <span>انتشار تلگرام</span>
                         </button>
+                        <button class="adm-nav-item" data-admin-section="membership" onclick="switchAdminSection('membership', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z"/><path d="M5 20h14"/></svg>
+                            <span>عضویت ویژه</span>
+                        </button>
                         <button class="adm-nav-item" data-admin-section="system-controls" onclick="switchAdminSection('system-controls', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             <span>کنترل سیستم</span>
@@ -1536,7 +1630,7 @@
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                             <span>تیکت‌ها</span>
                         </button>
-                        <button class="adm-quick-btn" onclick="switchAdminSection('broadcast', document.querySelector('.adm-nav-item[data-admin-section=&quot;broadcast&quot;]'))">
+                        <button class="adm-quick-btn" onclick="switchAdminSection('notification-center', document.querySelector('.adm-nav-item[data-admin-section=&quot;notification-center&quot;]'))">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
                             <span>پیام همگانی</span>
                         </button>
@@ -1574,23 +1668,24 @@
                                 <input type="text" id="admin-new-telegram-id" placeholder="مثال: 123456789" class="adm-input">
                             </div>
                             <div class="adm-form-field">
-                                <label class="adm-form-label">نقش</label>
-                                <select id="admin-new-role" class="adm-input">
-                                    <option value="admin">مدیر</option>
-                                    <option value="moderator">ناظم</option>
-                                    <option value="viewer">بیننده</option>
+                                <label class="adm-form-label">نقش (Role)</label>
+                                <select id="admin-new-role" class="adm-input" onchange="_onAdminRoleChange()">
+                                    <option value="support_agent">Support Agent</option>
+                                    <option value="support_manager">Support Manager</option>
+                                    <option value="news_editor">News Editor</option>
+                                    <option value="content_manager">Content Manager</option>
+                                    <option value="market_analyst">Market Analyst</option>
+                                    <option value="wallet_manager">Wallet Manager</option>
+                                    <option value="marketing_manager">Marketing Manager</option>
+                                    <option value="moderator">Moderator</option>
+                                    <option value="administrator">Administrator</option>
                                 </select>
                             </div>
                         </div>
                         <div class="adm-form-field">
-                            <label class="adm-form-label">دسترسی‌ها</label>
+                            <label class="adm-form-label">دسترسی‌ها (Permissions) — بر اساس نقش پر می‌شود، قابل ویرایش</label>
                             <div class="adm-perm-checks" id="admin-new-permissions">
-                                <label class="adm-chip"><input type="checkbox" value="analysis"> تحلیل</label>
-                                <label class="adm-chip"><input type="checkbox" value="tickets"> تیکت</label>
-                                <label class="adm-chip"><input type="checkbox" value="broadcast"> پیام</label>
-                                <label class="adm-chip"><input type="checkbox" value="rewards"> پاداش</label>
-                                <label class="adm-chip"><input type="checkbox" value="users"> کاربران</label>
-                                <label class="adm-chip"><input type="checkbox" value="wallet"> کیف پول</label>
+                                <!-- Filled dynamically by _renderAdminPermChecks() -->
                             </div>
                         </div>
                         <div class="adm-form-actions">
@@ -2407,11 +2502,20 @@
                     <div class="tgpub-panel" id="tgpub-panel-settings">
                         <div class="pub-settings-grid">
                             <div class="pub-settings-card">
-                                <div class="pub-card-section-title">تنظیمات کلی</div>
+                                <div class="pub-card-section-title">تنظیمات کانال تلگرام</div>
                                 <div class="pub-form">
                                     <div class="pub-form-field">
-                                        <label>شناسه کانال</label>
+                                        <label>Bot Token</label>
+                                        <input type="text" id="tgpub-bot-token" class="pub-input" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" style="direction:ltr;text-align:right;" autocomplete="off">
+                                        <small style="color:var(--text-sub);font-size:11px;margin-top:4px;display:block;">توکن بات را اینجا وارد کنید — نیازی به تغییر Environment نیست</small>
+                                    </div>
+                                    <div class="pub-form-field">
+                                        <label>شناسه کانال (Chat ID)</label>
                                         <input type="text" id="tgpub-channel-id" class="pub-input" placeholder="@username یا -100123456" style="direction:ltr;text-align:right;">
+                                    </div>
+                                    <div class="pub-form-field">
+                                        <label>یوزرنیم کانال (اختیاری)</label>
+                                        <input type="text" id="tgpub-channel-username" class="pub-input" placeholder="@my_channel" style="direction:ltr;text-align:right;">
                                     </div>
                                     <div class="pub-form-field">
                                         <label>فاصله بین ارسال‌ها (میلی‌ثانیه) — ۱۰۰۰ تا ۱۰۰۰۰</label>
@@ -2471,6 +2575,47 @@
                         </div>
                     </div>
                 </section>
+
+                <!-- ═══ Membership Admin Section ═════════════════════════════════ -->
+                <section class="adm-section" id="admin-section-membership">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">عضویت ویژه</h3>
+                            <p class="adm-section-desc">مدیریت درخواست‌های عضویت صرافی و کاربران VIP</p>
+                        </div>
+                        <button class="admin-btn admin-btn-ghost admin-btn-sm" onclick="loadAdminMembership()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:4px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>
+                            به‌روزرسانی
+                        </button>
+                    </div>
+                    <!-- Stats grid (uses existing adm-stat-card-v2 pattern) -->
+                    <div id="admin-membership-stats" class="adm-stats-grid" style="margin-bottom:16px;"></div>
+                    <!-- Filter bar (uses existing adm-search-bar + admin-filters pattern) -->
+                    <div class="adm-search-bar">
+                        <svg class="adm-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="text" id="mb-search" class="adm-input adm-search-input" placeholder="جستجو بر اساس ID، نام، صرافی، UID..." oninput="MembershipAdmin.onSearch(this.value)">
+                    </div>
+                    <div class="admin-filters-row">
+                        <select id="mb-status-filter" class="admin-input" style="flex:1;min-width:120px" onchange="MembershipAdmin.onFilterChange()">
+                            <option value="">همه وضعیت‌ها</option>
+                            <option value="PENDING">در انتظار</option>
+                            <option value="APPROVED">تأیید شده</option>
+                            <option value="REJECTED">رد شده</option>
+                        </select>
+                        <select id="mb-exchange-filter" class="admin-input" style="flex:1;min-width:120px" onchange="MembershipAdmin.onFilterChange()">
+                            <option value="">همه صرافی‌ها</option>
+                            <option>Bitunix</option><option>Bybit</option><option>Binance</option>
+                            <option>OKX</option><option>MEXC</option><option>Gate</option>
+                            <option>KuCoin</option><option>Bitget</option><option>Coinex</option><option>Other</option>
+                        </select>
+                        <button class="admin-btn admin-btn-ghost admin-btn-sm" onclick="MembershipAdmin.exportCsv()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            خروجی CSV
+                        </button>
+                    </div>
+                    <div id="admin-membership-list" class="adm-list"></div>
+                    <div class="admin-pagination" id="admin-membership-pagination"></div>
+                </section>
             </main>
         </div>
     </div>
@@ -2481,44 +2626,201 @@
          Admins see a bypass button; regular users cannot close or bypass it.
          ════════════════════════════════════════════════════════════════ -->
     <div id="maintenance-overlay" class="maint-overlay" style="display:none;">
-        <!-- Floating particles background -->
+        <!-- Ambient particle background -->
         <div class="maint-particles" id="maint-particles"></div>
 
+        <!-- Data stream lines -->
+        <div class="maint-data-streams">
+            <div class="maint-stream-line maint-stream-1"></div>
+            <div class="maint-stream-line maint-stream-2"></div>
+            <div class="maint-stream-line maint-stream-3"></div>
+        </div>
+
         <div class="maint-content">
-            <!-- Premium animated icon: duotone gear + wrench with glow -->
-            <div class="maint-icon-scene">
-                <div class="maint-icon-glow"></div>
-                <div class="maint-icon-ring"></div>
-                <svg class="maint-icon-gear" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <!-- ═══ Premium Mechanical Core — Reactor Engine ═══ -->
+            <div class="maint-core-scene">
+                <!-- Layer 0: Deep ambient glow -->
+                <div class="maint-core-deepglow"></div>
+                <!-- Layer 1: Outer aurora glow -->
+                <div class="maint-core-aurora"></div>
+                <!-- Layer 2: Bottom reflection -->
+                <div class="maint-core-reflection"></div>
+
+                <!-- Layer 3: SVG Ring System -->
+                <svg class="maint-core-svg" viewBox="0 0 240 240" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <defs>
-                        <linearGradient id="maint-gear-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#FFCC4D"/>
+                        <!-- Metallic gold gradient -->
+                        <linearGradient id="mc-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#FFE9A0"/>
+                            <stop offset="30%" stop-color="#F5A623"/>
+                            <stop offset="70%" stop-color="#D4881A"/>
+                            <stop offset="100%" stop-color="#A66A10"/>
+                        </linearGradient>
+                        <!-- Light gold for inner elements -->
+                        <linearGradient id="mc-gold-bright" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#FFF3D0"/>
+                            <stop offset="50%" stop-color="#FFD96B"/>
                             <stop offset="100%" stop-color="#F5A623"/>
                         </linearGradient>
-                        <linearGradient id="maint-wrench-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" stop-color="#FFD96B"/>
-                            <stop offset="100%" stop-color="#E8941A"/>
+                        <!-- Steel/dark gradient for depth -->
+                        <linearGradient id="mc-steel" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#1e2d42"/>
+                            <stop offset="50%" stop-color="#141e2e"/>
+                            <stop offset="100%" stop-color="#0a1220"/>
                         </linearGradient>
+                        <!-- Core hexagon gradient -->
+                        <radialGradient id="mc-core-grad" cx="50%" cy="40%" r="60%">
+                            <stop offset="0%" stop-color="#FFF8E0"/>
+                            <stop offset="30%" stop-color="#FFD96B"/>
+                            <stop offset="70%" stop-color="#F5A623"/>
+                            <stop offset="100%" stop-color="#B8740F"/>
+                        </radialGradient>
+                        <!-- Glow filter -->
+                        <filter id="mc-glow" x="-100%" y="-100%" width="300%" height="300%">
+                            <feGaussianBlur stdDeviation="2" result="blur"/>
+                            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                        </filter>
+                        <filter id="mc-glow-strong" x="-100%" y="-100%" width="300%" height="300%">
+                            <feGaussianBlur stdDeviation="4" result="blur"/>
+                            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                        </filter>
                     </defs>
-                    <!-- Outer gear (duotone: filled dark + gold teeth) -->
-                    <path d="M60 8 L67 22 L82 18 L84 34 L99 38 L94 53 L107 62 L94 71 L99 86 L84 90 L82 106 L67 102 L60 116 L53 102 L38 106 L36 90 L21 86 L26 71 L13 62 L26 53 L21 38 L36 34 L38 18 L53 22 Z"
-                          fill="url(#maint-gear-grad)" opacity="0.15"/>
-                    <path d="M60 8 L67 22 L82 18 L84 34 L99 38 L94 53 L107 62 L94 71 L99 86 L84 90 L82 106 L67 102 L60 116 L53 102 L38 106 L36 90 L21 86 L26 71 L13 62 L26 53 L21 38 L36 34 L38 18 L53 22 Z"
-                          stroke="url(#maint-gear-grad)" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
-                    <circle cx="60" cy="62" r="22" stroke="url(#maint-gear-grad)" stroke-width="2.5" fill="rgba(245,166,35,0.06)"/>
-                    <circle cx="60" cy="62" r="10" fill="url(#maint-gear-grad)" opacity="0.3"/>
-                    <!-- Wrench overlay (crossed through center) -->
-                    <g transform="translate(60 62) rotate(45)">
-                        <rect x="-3" y="-26" width="6" height="40" rx="3" fill="url(#maint-wrench-grad)"/>
-                        <path d="M-8 -26 Q-8 -34 0 -34 Q8 -34 8 -26 L8 -20 L4 -20 L4 -24 Q4 -28 0 -28 Q-4 -28 -4 -24 L-4 -20 L-8 -20 Z" fill="url(#maint-wrench-grad)"/>
-                        <circle cx="0" cy="14" r="5" fill="url(#maint-wrench-grad)"/>
-                        <circle cx="0" cy="14" r="2.5" fill="#0B1220"/>
+
+                    <!-- ═══ Ring 1: Outermost HUD compass (slow CW, 20s) ═══ -->
+                    <g class="mc-ring-outer" filter="url(#mc-glow)">
+                        <!-- Main circle -->
+                        <circle cx="120" cy="120" r="110" fill="none" stroke="url(#mc-gold)" stroke-width="0.5" opacity="0.3"/>
+                        <!-- Tick marks every 15° -->
+                        <g stroke="url(#mc-gold)" stroke-width="1" opacity="0.4">
+                            <line x1="120" y1="10" x2="120" y2="18"/>
+                            <line x1="120" y1="222" x2="120" y2="230"/>
+                            <line x1="10" y1="120" x2="18" y2="120"/>
+                            <line x1="222" y1="120" x2="230" y2="120"/>
+                        </g>
+                        <g stroke="url(#mc-gold)" stroke-width="0.6" opacity="0.25">
+                            <line x1="172" y1="22" x2="168" y2="29" transform="rotate(0 120 120)"/>
+                            <line x1="218" y1="68" x2="211" y2="72"/>
+                            <line x1="218" y1="172" x2="211" y2="168"/>
+                            <line x1="172" y1="218" x2="168" y2="211"/>
+                            <line x1="68" y1="218" x2="72" y2="211"/>
+                            <line x1="22" y1="172" x2="29" y2="168"/>
+                            <line x1="22" y1="68" x2="29" y2="72"/>
+                            <line x1="68" y1="22" x2="72" y2="29"/>
+                        </g>
+                        <!-- Arc segments (4 gaps) -->
+                        <path d="M 120 16 A 104 104 0 0 1 224 120" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+                        <path d="M 224 120 A 104 104 0 0 1 120 224" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+                        <path d="M 120 224 A 104 104 0 0 1 16 120" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+                        <path d="M 16 120 A 104 104 0 0 1 120 16" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+                        <!-- Corner accents (diamond markers at cardinal points) -->
+                        <rect x="117" y="6" width="6" height="6" rx="1" fill="url(#mc-gold-bright)" opacity="0.6" transform="rotate(45 120 9)"/>
+                        <rect x="117" y="228" width="6" height="6" rx="1" fill="url(#mc-gold-bright)" opacity="0.6" transform="rotate(45 120 231)"/>
+                        <rect x="6" y="117" width="6" height="6" rx="1" fill="url(#mc-gold-bright)" opacity="0.6" transform="rotate(45 9 120)"/>
+                        <rect x="228" y="117" width="6" height="6" rx="1" fill="url(#mc-gold-bright)" opacity="0.6" transform="rotate(45 231 120)"/>
+                    </g>
+
+                    <!-- ═══ Ring 2: Middle mechanical ring (CCW, 14s) ═══ -->
+                    <g class="mc-ring-mid" filter="url(#mc-glow)">
+                        <!-- Dashed circle -->
+                        <circle cx="120" cy="120" r="88" fill="none" stroke="url(#mc-gold)" stroke-width="1" stroke-dasharray="6 4" opacity="0.4"/>
+                        <!-- Inner solid ring -->
+                        <circle cx="120" cy="120" r="82" fill="none" stroke="url(#mc-gold)" stroke-width="0.5" opacity="0.2"/>
+                        <!-- 8 segment arcs with gaps -->
+                        <g stroke="url(#mc-gold-bright)" stroke-width="2" opacity="0.5" stroke-linecap="round" fill="none">
+                            <path d="M 120 42 A 78 78 0 0 1 175 65"/>
+                            <path d="M 198 120 A 78 78 0 0 1 175 175"/>
+                            <path d="M 120 198 A 78 78 0 0 1 65 175"/>
+                            <path d="M 42 120 A 78 78 0 0 1 65 65"/>
+                        </g>
+                        <!-- Notch markers (small rectangles) -->
+                        <g fill="url(#mc-gold)" opacity="0.5">
+                            <rect x="118" y="38" width="4" height="8" rx="1"/>
+                            <rect x="118" y="194" width="4" height="8" rx="1"/>
+                            <rect x="38" y="118" width="8" height="4" rx="1"/>
+                            <rect x="194" y="118" width="8" height="4" rx="1"/>
+                        </g>
+                    </g>
+
+                    <!-- ═══ Ring 3: Inner gear ring (CW, 9s) ═══ -->
+                    <g class="mc-ring-inner" filter="url(#mc-glow)">
+                        <!-- 16-tooth gear ring -->
+                        <circle cx="120" cy="120" r="62" fill="none" stroke="url(#mc-gold)" stroke-width="0.5" opacity="0.2"/>
+                        <circle cx="120" cy="120" r="56" fill="none" stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.4" stroke-dasharray="3 1.5"/>
+                        <!-- Inner solid -->
+                        <circle cx="120" cy="120" r="50" fill="url(#mc-steel)" opacity="0.6"/>
+                        <circle cx="120" cy="120" r="50" fill="none" stroke="url(#mc-gold)" stroke-width="1" opacity="0.5"/>
+                        <!-- 8 spokes -->
+                        <g stroke="url(#mc-gold)" stroke-width="1.5" opacity="0.3" stroke-linecap="round">
+                            <line x1="120" y1="72" x2="120" y2="88"/>
+                            <line x1="120" y1="152" x2="120" y2="168"/>
+                            <line x1="72" y1="120" x2="88" y2="120"/>
+                            <line x1="152" y1="120" x2="168" y2="120"/>
+                            <line x1="86" y1="86" x2="97" y2="97" opacity="0.5"/>
+                            <line x1="143" y1="143" x2="154" y2="154" opacity="0.5"/>
+                            <line x1="154" y1="86" x2="143" y2="97" opacity="0.5"/>
+                            <line x1="86" y1="154" x2="97" y2="143" opacity="0.5"/>
+                        </g>
+                    </g>
+
+                    <!-- ═══ Central Hexagonal Core ═══ -->
+                    <g class="mc-core-hex" filter="url(#mc-glow-strong)">
+                        <!-- Outer hexagon -->
+                        <polygon points="120,88 148,104 148,136 120,152 92,136 92,104"
+                                 fill="url(#mc-core-grad)" opacity="0.9" stroke="url(#mc-gold-bright)" stroke-width="1.5" stroke-linejoin="round"/>
+                        <!-- Inner hexagon (darker) -->
+                        <polygon points="120,96 140,108 140,132 120,144 100,132 100,108"
+                                 fill="url(#mc-steel)" opacity="0.7" stroke="url(#mc-gold)" stroke-width="0.8" stroke-linejoin="round"/>
+                        <!-- Center dot (pulsing energy) -->
+                        <circle cx="120" cy="120" r="8" fill="url(#mc-core-grad)" opacity="0.8">
+                            <animate attributeName="r" values="6;10;6" dur="2.5s" repeatCount="indefinite"/>
+                            <animate attributeName="opacity" values="0.8;1;0.8" dur="2.5s" repeatCount="indefinite"/>
+                        </circle>
+                        <!-- Inner glow dot -->
+                        <circle cx="120" cy="120" r="3" fill="#FFF8E0" opacity="0.9">
+                            <animate attributeName="r" values="2;4;2" dur="2.5s" repeatCount="indefinite"/>
+                        </circle>
+                    </g>
+
+                    <!-- ═══ Energy beams (6 radial lines, pulsing) ═══ -->
+                    <g class="mc-beams" opacity="0.6">
+                        <line x1="120" y1="120" x2="120" y2="58" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.4" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.5;0.1" dur="3s" repeatCount="indefinite"/>
+                        </line>
+                        <line x1="120" y1="120" x2="174" y2="89" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.3" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.4;0.1" dur="3s" repeatCount="indefinite" begin="0.5s"/>
+                        </line>
+                        <line x1="120" y1="120" x2="174" y2="151" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.3" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.4;0.1" dur="3s" repeatCount="indefinite" begin="1s"/>
+                        </line>
+                        <line x1="120" y1="120" x2="120" y2="182" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.4" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.5;0.1" dur="3s" repeatCount="indefinite" begin="1.5s"/>
+                        </line>
+                        <line x1="120" y1="120" x2="66" y2="151" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.3" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.4;0.1" dur="3s" repeatCount="indefinite" begin="2s"/>
+                        </line>
+                        <line x1="120" y1="120" x2="66" y2="89" stroke="url(#mc-gold-bright)" stroke-width="1" opacity="0.3" stroke-linecap="round">
+                            <animate attributeName="opacity" values="0.1;0.4;0.1" dur="3s" repeatCount="indefinite" begin="2.5s"/>
+                        </line>
                     </g>
                 </svg>
+
+                <!-- Orbiting particles (CSS-animated, GPU-accelerated) -->
+                <div class="mc-orbit mc-orbit-1"><div class="mc-orbit-dot"></div></div>
+                <div class="mc-orbit mc-orbit-2"><div class="mc-orbit-dot"></div></div>
+                <div class="mc-orbit mc-orbit-3"><div class="mc-orbit-dot"></div></div>
+                <div class="mc-orbit mc-orbit-4"><div class="mc-orbit-dot"></div></div>
+
+                <!-- Top light source (subtle highlight from above) -->
+                <div class="maint-core-toplight"></div>
             </div>
 
             <!-- Premium badge -->
             <div class="maint-badge">AMIRBTC</div>
+
+            <!-- Dynamic status text (rotates) -->
+            <div class="maint-status-rotator" id="maint-status-rotator">
+                <span class="maint-status-text maint-status-active">در حال بهینه‌سازی سیستم...</span>
+            </div>
 
             <!-- Text content -->
             <h2 class="maint-title" id="maint-title">در حال ساخت آینده‌ای بهتر!</h2>

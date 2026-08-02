@@ -11,7 +11,7 @@ const WalletApp = (() => {
   // =============================================
   const WT_FA = {
     wallet_title: 'کیف پول توکن AB',
-    wallet_subtitle: 'دستیار امیر بیت‌کوین',
+    wallet_subtitle: 'مرکز مدیریت دارایی‌های شما',
     ab_token_wallet: 'کیف پول توکن AB',
     current_balance: 'موجودی فعلی',
     available_balance: 'موجودی قابل استفاده',
@@ -51,7 +51,7 @@ const WalletApp = (() => {
     coming_soon: 'به‌زودی',
     copied: 'کپی شد',
     ref_copied: 'لینک دعوت کپی شد!',
-    join_amir: 'به دستیار امیر بیت‌کوین بپیوندید و توکن AB کسب کنید!',
+    join_amir: 'به AmirBTC بپیوندید و توکن AB کسب کنید!',
     open_wallet: 'باز کردن کیف پول',
     login_to_view: 'برای مشاهده کیف پول وارد شوید',
     build_future: 'آینده را بسازید',
@@ -77,8 +77,10 @@ const WalletApp = (() => {
     referral: 'دعوت',
     rewards: 'جایزه‌ها',
     history: 'تاریخچه',
-    brand_quote: 'AMIRBTC — جایی که هر توکن ارزش دارد',
-    token_slogan: 'توکن AB — ارزشی بی‌نهایت، رشدی بی‌پایان.',
+    brand_quote: 'امیر بیت‌کوین — دستیار حرفه‌ای بازار',
+    token_slogan: 'توکن AB، واحد پاداش داخلی اپ — برای دسترسی به خدمات ویژه، جوایز و امکانات اختصاصی.',
+    token_info_title: 'توکن AB چیست؟',
+    token_info_body: 'توکن AB یک دارایی دیجیتال داخلی مینی‌اپ است که جایزه فعالیت‌های شماست. این توکن فقط در محیط اپ کاربرد دارد و قابلیت برداشت یا انتقال به کیف پول خارجی را ندارد. از توکن AB برای استفاده از خدمات ویژه، دریافت جوایز و دسترسی به امکانات اختصاصی مینی‌اپ استفاده کنید.',
     tier_bronze: 'برنز',
     tier_silver: 'نقره',
     tier_gold: 'طلایی',
@@ -167,8 +169,10 @@ const WalletApp = (() => {
     referral: 'Referral',
     rewards: 'Rewards',
     history: 'History',
-    brand_quote: 'AMIRBTC — Where Every Token Has Value',
-    token_slogan: 'AB Token — Infinite Value, Endless Growth.',
+    brand_quote: 'AmirBTC — Your Professional Market Assistant',
+    token_slogan: 'AB Token is the in-app reward unit — for premium features, rewards, and exclusive access.',
+    token_info_title: 'What is AB Token?',
+    token_info_body: 'AB Token is an internal mini-app digital asset that rewards your activity. It can only be used within the app and cannot be withdrawn or transferred to external wallets. Use AB Token to access premium features, claim rewards, and unlock exclusive in-app capabilities.',
     tier_bronze: 'Bronze',
     tier_silver: 'Silver',
     tier_gold: 'Gold',
@@ -268,7 +272,7 @@ const WalletApp = (() => {
   let walletSummary = null;
   let historyLoading = false;
   let historyOffset = 0;
-  let _tokenLogo = 'assets/token-logo.png';
+  let _tokenLogo = 'assets/2fb8c491.png';
   const DAILY_REWARD = 10;
 
   /** Escape HTML to prevent XSS when rendering dynamic content. */
@@ -282,7 +286,7 @@ const WalletApp = (() => {
    * falling back to the default path.
    */
   function getTokenLogo() {
-    if (_tokenLogo !== 'assets/token-logo.png') return _tokenLogo;
+    if (_tokenLogo !== 'assets/2fb8c491.png') return _tokenLogo;
     const img = document.querySelector('#wallet-preview-card .wallet-watermark img');
     if (img && img.src) {
       _tokenLogo = img.src;
@@ -419,6 +423,9 @@ const WalletApp = (() => {
     card.classList.remove('skeleton-loading');
     card.innerHTML = `
       <div class="wallet-watermark"><img src="${getTokenLogo()}" alt=""></div>
+      <button class="wallet-info-btn" onclick="event.stopPropagation(); WalletApp.showTokenInfo()" aria-label="AB Token info">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      </button>
       <div class="wallet-preview-top">
         <div class="wallet-preview-logo"><img src="${getTokenLogo()}" alt="AB Token"></div>
         <div class="wallet-preview-info">
@@ -622,22 +629,27 @@ const WalletApp = (() => {
             </div>
             <button class="checkin-btn" id="daily-claim-btn" onclick="WalletApp.claimDaily()">${esc(WT('claim'))}</button>
           </div>
-          <div class="wallet-earn-card">
+          <div class="wallet-earn-card" id="mission-analysis-read">
             <div class="earn-reward">+5 AB</div>
             <div class="earn-title">${esc(WT('read_analysis'))}</div>
             <div class="earn-desc">${esc(WT('view_premium_reports'))}</div>
           </div>
-          <div class="wallet-earn-card">
+          <div class="wallet-earn-card" id="mission-news-view">
             <div class="earn-reward">+3 AB</div>
             <div class="earn-title">${esc(WT('view_news'))}</div>
             <div class="earn-desc">${esc(WT('stay_updated'))}</div>
           </div>
-          <div class="wallet-earn-card">
+          <div class="wallet-earn-card" id="mission-calendar-view">
+            <div class="earn-reward">+2 AB</div>
+            <div class="earn-title">مشاهده تقویم اقتصادی</div>
+            <div class="earn-desc">رویدادهای بازار را دنبال کنید</div>
+          </div>
+          <div class="wallet-earn-card" id="mission-daily-open">
             <div class="earn-reward">+10 AB</div>
             <div class="earn-title">${esc(WT('open_app_daily'))}</div>
             <div class="earn-desc">${esc(WT('active_daily'))}</div>
           </div>
-          <div class="wallet-earn-card">
+          <div class="wallet-earn-card" id="mission-invite-friend">
             <div class="earn-reward">+50 AB</div>
             <div class="earn-title">${esc(WT('invite_friend'))}</div>
             <div class="earn-desc">${esc(WT('earn_per_referral'))}</div>
@@ -835,11 +847,42 @@ const WalletApp = (() => {
   // =============================================
   // API Calls
   // =============================================
+  // ── DASHBOARD SPEED OPTIMIZATION: In-memory cache for wallet responses ──
+  // Wallet data changes rarely (only on claim/transaction). Caching eliminates
+  // redundant API calls on openWallet/closeWallet, cutting latency from
+  // ~250-600ms to ~0-30ms for repeat opens within the TTL window.
+  const _walletCache = {
+    wallet: null,      // /api/wallet response
+    claim: null,       // /api/wallet/claim response
+    summary: null,     // /api/wallet/summary response
+    walletAt: 0,
+    claimAt: 0,
+    summaryAt: 0,
+  };
+  const WALLET_CACHE_TTL = 30;   // seconds — wallet balance/history
+  const CLAIM_CACHE_TTL = 60;    // seconds — daily claim status (changes once/day)
+  const SUMMARY_CACHE_TTL = 60;  // seconds — aggregate stats
+
+  function invalidateWalletCache() {
+    _walletCache.wallet = null;
+    _walletCache.claim = null;
+    _walletCache.summary = null;
+    _walletCache.walletAt = 0;
+    _walletCache.claimAt = 0;
+    _walletCache.summaryAt = 0;
+  }
+
   async function fetchWallet() {
+    // Cache-first: if we have fresh data, return it without a network call
+    if (_walletCache.wallet && (Date.now() - _walletCache.walletAt < WALLET_CACHE_TTL * 1000)) {
+      return _walletCache.wallet;
+    }
     try {
       const data = await window.apiFetch('/api/wallet');
       if (data.status === 'success') {
         walletData = data;
+        _walletCache.wallet = data;
+        _walletCache.walletAt = Date.now();
         return data;
       }
     } catch (e) {
@@ -849,10 +892,15 @@ const WalletApp = (() => {
   }
 
   async function fetchClaimStatus() {
+    if (_walletCache.claim && (Date.now() - _walletCache.claimAt < CLAIM_CACHE_TTL * 1000)) {
+      return _walletCache.claim;
+    }
     try {
       const data = await window.apiFetch('/api/wallet/claim');
       if (data.status === 'success') {
         claimStatus = data;
+        _walletCache.claim = data;
+        _walletCache.claimAt = Date.now();
         return data;
       }
     } catch (e) {
@@ -862,10 +910,15 @@ const WalletApp = (() => {
   }
 
   async function fetchSummary() {
+    if (_walletCache.summary && (Date.now() - _walletCache.summaryAt < SUMMARY_CACHE_TTL * 1000)) {
+      return _walletCache.summary;
+    }
     try {
       const data = await window.apiFetch('/api/wallet/summary');
       if (data && data.status === 'success') {
         walletSummary = data;
+        _walletCache.summary = data;
+        _walletCache.summaryAt = Date.now();
         return data;
       }
     } catch (e) {
@@ -925,15 +978,42 @@ const WalletApp = (() => {
       return;
     }
 
-    renderProfileCardSkeleton();
+    // ROOT CAUSE FIX (wallet P0): Hydrate from localStorage BEFORE fetching.
+    // Other dashboard sections (Market, News, Analysis, Calendar) all hydrate
+    // from localStorage and render instantly. Wallet was the only section
+    // that showed skeleton until the API responded (150-300ms).
+    // Now we render from cached wallet data immediately, then refresh in
+    // background — matching the perceived speed of other sections.
+    try {
+      const cachedStr = localStorage.getItem('wallet_state_cache');
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr);
+        if (cached && cached.data && cached.data.status === 'success') {
+          // Render from cache immediately — no skeleton
+          renderProfileCard(cached.data);
+        }
+      }
+    } catch (_) { /* bad cache — fall through to skeleton + fetch */ }
+
+    // If cache didn't render, show skeleton
+    if (card.classList.contains('skeleton-loading') || !card.querySelector('.wallet-preview-balance')) {
+      renderProfileCardSkeleton();
+    }
+
     const data = await fetchWallet();
     if (data) {
       renderProfileCard(data);
+      // Persist to localStorage for instant render on next open
+      try {
+        localStorage.setItem('wallet_state_cache', JSON.stringify({ data, ts: Date.now() }));
+      } catch (_) {}
     } else {
-      // API error or transient failure — show fallback with safe defaults
-      card.classList.remove('skeleton-loading');
-      const fallbackData = { balance: 0, tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 } };
-      renderProfileCard(fallbackData);
+      // API error — show fallback only if no cached data was rendered
+      if (!card.querySelector('.wallet-preview-balance')) {
+        card.classList.remove('skeleton-loading');
+        const fallbackData = { balance: 0, tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 } };
+        renderProfileCard(fallbackData);
+      }
     }
   }
 
@@ -956,35 +1036,94 @@ const WalletApp = (() => {
     if (!page) return;
     page.classList.remove('open');
     document.body.style.overflow = '';
-    // Refresh profile card
-    loadProfileCard();
+    // ROOT CAUSE FIX (O3): Previously closeWallet always called loadProfileCard()
+    // which fires GET /api/wallet — a redundant call since the wallet data was
+    // just fetched on openWallet. Now we skip the re-fetch if walletData is
+    // fresh (< 30s old). The profile card re-renders synchronously from the
+    // cached data, eliminating 1 API round-trip on every wallet close.
+    if (walletData && _walletCache.wallet && (Date.now() - _walletCache.walletAt < WALLET_CACHE_TTL * 1000)) {
+      // Render profile card from cached walletData — no API call needed
+      try { renderProfileCard(walletData); } catch (_) { loadProfileCard(); }
+    } else {
+      loadProfileCard();
+    }
   }
 
   async function loadWalletData() {
     walletSummary = null;
-    const [walletRes, claimRes, summaryRes] = await Promise.all([
-      fetchWallet(),
-      fetchClaimStatus(),
-      fetchSummary(),
-    ]);
 
-    if (walletRes) {
-      renderWalletPage(walletRes);
-      walletData = walletRes;
-      // Referral link + stats moved to Referral Center (separate module)
-    } else {
-      // API error — show fallback with safe defaults instead of permanent error state
+    // ROOT CAUSE FIX (wallet P1): Progressive rendering.
+    // Previously, Promise.all waited for ALL 3 API calls before rendering
+    // anything. The slowest call (usually fetchSummary with its aggregate
+    // SQL query) blocked the entire wallet page.
+    //
+    // Now we fire all 3 in parallel but render each section independently
+    // as soon as it resolves:
+    //   1. fetchWallet resolves first (often cached) → render full page immediately
+    //   2. fetchClaimStatus resolves → update claim button
+    //   3. fetchSummary resolves → update summary strip
+    //
+    // This cuts perceived time-to-content from max(call1,call2,call3)
+    // to just call1 (typically 30-50ms from in-memory cache).
+
+    // Fire all 3 in parallel
+    const walletPromise = fetchWallet();
+    const claimPromise = fetchClaimStatus();
+    const summaryPromise = fetchSummary();
+
+    // Render wallet page as soon as wallet data arrives (don't wait for others)
+    walletPromise.then(walletRes => {
+      if (walletRes) {
+        renderWalletPage(walletRes);
+        walletData = walletRes;
+        // Persist to localStorage for instant render on next open
+        try {
+          localStorage.setItem('wallet_state_cache', JSON.stringify({ data: walletRes, ts: Date.now() }));
+        } catch (_) {}
+      } else {
+        // API error — show fallback
+        const fallbackData = {
+          balance: 0,
+          tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 },
+          history: [],
+        };
+        renderWalletPage(fallbackData);
+      }
+    }).catch(() => {
       const fallbackData = {
         balance: 0,
         tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 },
         history: [],
       };
       renderWalletPage(fallbackData);
-    }
+    });
 
-    if (claimRes) {
-      updateClaimButton(claimRes.claimed_today);
-    }
+    // Update claim button when claim status arrives
+    claimPromise.then(claimRes => {
+      if (claimRes) {
+        updateClaimButton(claimRes.claimed_today);
+      }
+    }).catch(() => {});
+
+    // Update summary strip when summary arrives (optional — buildSummaryStrip
+    // handles null walletSummary gracefully)
+    summaryPromise.then(summaryRes => {
+      if (summaryRes) {
+        walletSummary = summaryRes;
+        // Re-render just the summary strip if the page is open
+        const summaryStrip = document.querySelector('.wallet-summary-strip');
+        if (summaryStrip && walletData) {
+          // Only update if the wallet page is already rendered
+          const newHtml = buildSummaryStrip(summaryRes.tier || walletData.tier);
+          if (newHtml) {
+            const temp = document.createElement('div');
+            temp.innerHTML = newHtml;
+            const newStrip = temp.firstElementChild;
+            if (newStrip) summaryStrip.replaceWith(newStrip);
+          }
+        }
+      }
+    }).catch(() => {});
   }
 
   // loadWalletReferralStats removed — referral moved to Referral Center module
@@ -1032,6 +1171,9 @@ const WalletApp = (() => {
         card?.appendChild(badge);
       }
       // Refresh wallet data
+      // ROOT CAUSE FIX: invalidate cache so fetchWallet actually hits the API
+      // instead of returning the stale pre-claim balance.
+      invalidateWalletCache();
       const walletRes = await fetchWallet();
       if (walletRes) renderWalletPage(walletRes);
       // Show success popup
@@ -1082,6 +1224,47 @@ const WalletApp = (() => {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  /**
+   * Show a popup explaining what AB Token is.
+   * Called when the user taps the info icon on the wallet card.
+   */
+  function showTokenInfo() {
+    // Remove any existing popup
+    const existing = document.getElementById('token-info-popup');
+    if (existing) { existing.remove(); return; }
+
+    const popup = document.createElement('div');
+    popup.id = 'token-info-popup';
+    popup.className = 'token-info-popup';
+    popup.setAttribute('dir', detectLang() === 'fa' ? 'rtl' : 'ltr');
+    popup.innerHTML = `
+      <div class="token-info-popup-overlay" onclick="WalletApp.closeTokenInfo()"></div>
+      <div class="token-info-popup-card">
+        <div class="token-info-popup-header">
+          <div class="token-info-popup-icon">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          </div>
+          <h3>${esc(WT('token_info_title'))}</h3>
+          <button class="token-info-popup-close" onclick="WalletApp.closeTokenInfo()" aria-label="Close">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="token-info-popup-body">${esc(WT('token_info_body'))}</div>
+      </div>
+    `;
+    document.body.appendChild(popup);
+    requestAnimationFrame(() => popup.classList.add('visible'));
+    // Haptic feedback
+    try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light'); } catch (_) {}
+  }
+
+  function closeTokenInfo() {
+    const popup = document.getElementById('token-info-popup');
+    if (!popup) return;
+    popup.classList.remove('visible');
+    setTimeout(() => popup.remove(), 250);
+  }
+
   return {
     loadProfileCard,
     openWallet,
@@ -1090,6 +1273,10 @@ const WalletApp = (() => {
     loadMoreHistory,
     scrollToSection,
     getTokenLogo,
+    showTokenInfo,
+    closeTokenInfo,
+    _invalidateCache: invalidateWalletCache,
+    _refreshWalletData: loadWalletData,
   };
 })();
 

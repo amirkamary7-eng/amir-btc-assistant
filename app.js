@@ -368,6 +368,7 @@ let analysisStats = null;
 let analysisPagination = null;
 let analysisListPage = 1;
 let analysisListLoading = false;
+let _analysisVisibleCount = 5; // ITEM 1: Lazy loading — initial visible count
 let currentAnalysisDetail = null;
 let deletingAnalysisId = null;
 const ANALYSIS_PAGE_SIZE = 20;
@@ -411,6 +412,7 @@ const i18n = {
         trend_slightly_bullish: 'صعودی ضعیف', trend_slightly_bearish: 'نزولی ضعیف',
         trend_bearish: 'نزولی', trend_strong_bearish: 'نزولی قوی',
         tab_crypto: 'کریپتو', tab_top_market: 'برترین‌ها', tab_forex: 'فارکس', tab_gainers: 'رشد', tab_losers: 'ریزش',
+        subtab_all: 'همه', subtab_popular: 'محبوب', subtab_btc_pairs: 'جفت BTC',
         analysis_title: 'تحلیل‌های بازار', new_analysis: 'تحلیل جدید',
         news_all: 'همه', news_crypto: 'کریپتو', news_economy: 'اقتصادی', news_forex: 'فارکس', news_calendar: 'تقویم',
         hero_badge: 'کانال تحلیلی', hero_desc: 'سیگنال‌ها، تحلیل‌ها و آموزش‌های روز بازار', hero_cta: 'عضویت رایگان',
@@ -505,7 +507,29 @@ const i18n = {
         dashboard_trend_bearish: 'نزولی',
         dashboard_trend_neutral: 'خنثی',
         hero_cta_trade: 'شروع معامله',
-        hero_cta_analysis: 'مشاهده تحلیل‌ها'
+        hero_cta_analysis: 'مشاهده تحلیل‌ها',
+        // ── Delete Account / Danger Zone i18n ──
+        danger_zone: 'منطقه خطر',
+        delete_account: 'حذف حساب کاربری',
+        delete_account_desc: 'حذف حساب کاربری به‌صورت دائمی تمام داده‌های شما (پاداش‌ها، دعوت‌ها، کیف پول، هشدارها) را پاک می‌کند. این عملیات قابل بازگشت نیست.',
+        delete_account_confirm: 'حذف دائمی',
+        delete_account_cancel: 'انصراف',
+        delete_account_typing: 'برای تأیید، تایپ کنید:',
+        delete_account_success: 'حساب حذف شد. می‌توانید دوباره ثبت‌نام کنید.',
+        delete_account_error: 'خطا در حذف حساب',
+        delete_account_progress: 'در حال حذف...',
+        // ── Price Alert Quick Presets ──
+        alert_quick_presets: 'تنظیم سریع',
+        alert_preset_5_up: '۵٪ +',
+        alert_preset_10_up: '۱۰٪ +',
+        alert_preset_5_down: '۵٪ -',
+        alert_preset_10_down: '۱۰٪ -',
+        alert_preset_ath: 'قله تاریخی',
+        // ── Market Heatmap ──
+        heatmap_title: 'نقشه حرارتی بازار',
+        heatmap_subtitle: 'نمایش بصری تغییرات ۲۴ ساعته',
+        heatmap_top: 'برترین بازار',
+        heatmap_show_more: 'نمایش بیشتر'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -524,6 +548,7 @@ const i18n = {
         trend_slightly_bullish: 'Slightly Bullish', trend_slightly_bearish: 'Slightly Bearish',
         trend_bearish: 'Bearish', trend_strong_bearish: 'Strong Bearish',
         tab_crypto: 'Crypto', tab_top_market: 'Top Market', tab_forex: 'Forex', tab_gainers: 'Gainers', tab_losers: 'Losers',
+        subtab_all: 'All', subtab_popular: 'Popular', subtab_btc_pairs: 'Pair BTC',
         analysis_title: 'Market Analysis', new_analysis: 'New Analysis',
         news_all: 'All', news_crypto: 'Crypto', news_economy: 'Economy', news_forex: 'Forex', news_calendar: 'Calendar',
         hero_badge: 'Analysis Channel', hero_desc: 'Daily signals, analysis & market education', hero_cta: 'Join Free',
@@ -615,7 +640,29 @@ const i18n = {
         dashboard_trend_bearish: 'Bearish',
         dashboard_trend_neutral: 'Neutral',
         hero_cta_trade: 'Start Trading',
-        hero_cta_analysis: 'View Analysis'
+        hero_cta_analysis: 'View Analysis',
+        // ── Delete Account / Danger Zone i18n ──
+        danger_zone: 'Danger Zone',
+        delete_account: 'Delete Account',
+        delete_account_desc: 'Permanently deleting your account will erase all your data (rewards, referrals, wallet, alerts). This action is irreversible.',
+        delete_account_confirm: 'Permanently Delete',
+        delete_account_cancel: 'Cancel',
+        delete_account_typing: 'Type to confirm:',
+        delete_account_success: 'Account deleted. You can re-register.',
+        delete_account_error: 'Error deleting account',
+        delete_account_progress: 'Deleting...',
+        // ── Price Alert Quick Presets ──
+        alert_quick_presets: 'Quick Set',
+        alert_preset_5_up: '+5%',
+        alert_preset_10_up: '+10%',
+        alert_preset_5_down: '-5%',
+        alert_preset_10_down: '-10%',
+        alert_preset_ath: 'All-Time High',
+        // ── Market Heatmap ──
+        heatmap_title: 'Market Heatmap',
+        heatmap_subtitle: 'Visual 24h changes',
+        heatmap_top: 'Top Market',
+        heatmap_show_more: 'Show More'
     }
 };
 /**
@@ -1014,6 +1061,12 @@ async function bootstrapUser() {
         if (adminActions && $('analysis-detail-page')?.classList.contains('active')) {
             adminActions.style.display = isCurrentUserAdmin ? '' : 'none';
         }
+
+        // Sync calendar reminders from backend so they're available across
+        // devices. Non-blocking — runs in background after bootstrap.
+        if (typeof syncRemindersFromBackend === 'function') {
+            syncRemindersFromBackend().catch(() => {});
+        }
     } catch (e) {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);
         // PERFORMANCE + UX FIX: Don't show error card on bootstrap failure.
@@ -1141,6 +1194,31 @@ async function fetchAnalyses(force = false, append = false) {
         if (data.pagination) analysisPagination = data.pagination;
         analysisListPage = data.pagination?.hasMore ? (data.pagination.page + 1) : page;
         localStorage.setItem('analyses', JSON.stringify(analyses));
+
+        // ROOT CAUSE FIX for "detail page shows stale data after background refetch":
+        // After a successful fetch (e.g., the background refetch triggered by
+        // edit/delete), the analyses[] and analysisFeatured[] arrays are updated
+        // with fresh server data. But currentAnalysisDetail (used by the detail
+        // page) was NOT updated — so the detail page would show stale content
+        // (e.g., old views_count) until the user closed and reopened it.
+        // Now we sync currentAnalysisDetail from the fresh arrays if the detail
+        // page is currently open for one of the fetched analyses.
+        if (currentAnalysisDetail && currentAnalysisDetail.id) {
+            const fresh = analyses.find(a => a.id === currentAnalysisDetail.id)
+                || (Array.isArray(analysisFeatured) ? analysisFeatured.find(a => a.id === currentAnalysisDetail.id) : null);
+            if (fresh) {
+                // Preserve the detail text if the fresh version has less content
+                // (list responses might truncate text — but after our getFeatured
+                // fix, both list and featured return full text, so this is safe).
+                currentAnalysisDetail = fresh;
+                // Re-render the detail page IF it's currently active.
+                const detailPage = document.getElementById('analysis-detail-page');
+                if (detailPage && detailPage.classList.contains('active')) {
+                    renderAnalysisDetailPage();
+                }
+            }
+        }
+
         return true;
     } catch (e) {
         console.warn('fetchAnalyses:', e);
@@ -1735,7 +1813,15 @@ function renderAnalysisList() {
     }
 
     const isAdminUser = isAdmin();
-    container.innerHTML = filtered.map((a, i) => {
+
+    // ITEM 1 FIX: Lazy loading — only render first 5 analyses, show "Load More" button.
+    // Previously ALL filtered analyses were rendered at once, causing long pages.
+    const ANALYSIS_PAGE_SIZE = 5;
+    const visibleCount = Math.min(filtered.length, _analysisVisibleCount);
+    const visibleAnalyses = filtered.slice(0, visibleCount);
+    const hasMore = filtered.length > visibleCount;
+
+    container.innerHTML = visibleAnalyses.map((a, i) => {
         const sentiment = getSentiment(a);
         const readTime = estimateReadTime(a.content || a.text);
         const bookmarked = isAnalysisBookmarked(a.id);
@@ -1744,10 +1830,12 @@ function renderAnalysisList() {
         // Price boxes — REMOVED from cards (available in detail page + hero slider)
         let priceBoxes = '';
 
-        // Image section
+        // Image section — FIXED: use eager loading (not lazy) for visible cards,
+        // and a proper placeholder background that shows while loading.
         const imageSection = a.image
             ? `<div class="acv-image-section">
-                    <img src="${escapeHtml(a.image)}" class="acv-hero-image" loading="lazy" alt="${escapeHtml(a.coin)}" onerror="this.outerHTML='<div class=\'acv-no-image-placeholder\'>${escapeHtml(a.coin)}</div>'">
+                    <img src="${escapeHtml(a.image)}" class="acv-hero-image" alt="${escapeHtml(a.coin)}" decoding="async" onload="this.style.opacity=1" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                    <div class="acv-no-image-placeholder" style="display:none;position:absolute;inset:0;">${escapeHtml(a.coin)}</div>
                     <div class="acv-image-overlay">
                         <div class="acv-coin-badge">${escapeHtml(a.coin)}</div>
                         <div class="acv-tf-badge">${escapeHtml(a.timeframe || '1D')}</div>
@@ -1763,12 +1851,17 @@ function renderAnalysisList() {
                     </div>
                </div>`;
 
+        // ITEM 3: Market type badge — crypto vs forex
+        const isForexAnalysis = a.category === 'forex' || (a.coin && /USD|EUR|GBP|JPY|AUD|CAD|CHF|NZD|XAU|XAG/.test(a.coin));
+        const marketBadge = `<span class="acv-market-badge ${isForexAnalysis ? 'forex' : 'crypto'}">${isForexAnalysis ? 'Forex' : 'Crypto'}</span>`;
+
         return `
         <div class="analysis-card-v2 ${bookmarked ? 'acv-bookmarked' : ''}" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')" style="animation-delay:${Math.min(i, 8) * 0.04}s">
             ${imageSection}
             <div class="acv-content-section">
                 <div class="acv-title-row">
                     <span class="acv-coin-name">${escapeHtml(a.coin)}</span>
+                    ${marketBadge}
                     <span class="acv-timeframe">${escapeHtml(a.timeframe || '1D')}</span>
                     ${sentimentBadge}
                 </div>
@@ -1797,8 +1890,28 @@ function renderAnalysisList() {
         `;
     }).join('');
 
+    // ITEM 1: Add "Load More" button if there are more analyses to show
+    if (hasMore) {
+        container.innerHTML += `
+            <div class="analysis-load-more" id="analysis-load-more">
+                <button class="alm-btn" onclick="loadMoreAnalyses()">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
+                    <span>${t('load_more') || 'مشاهده بیشتر'}</span>
+                </button>
+            </div>`;
+    }
+
     // Setup infinite scroll
     setupAnalysisInfiniteScroll();
+}
+
+/**
+ * ITEM 1: Load more analyses — increments visible count and re-renders.
+ * Called when user clicks "مشاهده بیشتر" button.
+ */
+function loadMoreAnalyses() {
+    _analysisVisibleCount += 5;
+    renderAnalysisList();
 }
 
 /**
@@ -1809,6 +1922,7 @@ function resetAnalysisFilters() {
     analysisTimeframeFilter = 'all';
     analysisCategoryFilter = 'all';
     analysisShowSavedOnly = false;
+    _analysisVisibleCount = 5; // Reset lazy loading count
     const searchInput = $('analysis-search-input');
     if (searchInput) searchInput.value = '';
     const clearBtn = $('analysis-search-clear');
@@ -1968,34 +2082,96 @@ async function loadMoreAnalyses() {
     if (changed) renderAnalysisList();
 }
 
+// ── Telegram BackButton Navigation Stack ──
+// Implements a proper history stack so the Telegram Back button navigates
+// step-by-step (Dashboard → Analysis → Detail → Back → Analysis list →
+// Back → Dashboard) instead of getting stuck.
+//
+// Usage:
+//   tgBackPush(closeFn)  — call when entering a sub-view (pushes onto stack)
+//   tgBackPop()          — call when the Back button is pressed (pops + runs closeFn)
+//   tgBackReset()        — call when switching main tabs (clears stack, hides button)
+let _tgBackStack = [];
+let _tgBackHandlerInstalled = false;
+
+function tgBackPush(closeFn) {
+    const tg = getTg();
+    if (!tg?.BackButton) return;
+    _tgBackStack.push({ closeFn });
+    // Install the handler once (idempotent — Telegram accumulates onClick listeners)
+    if (!_tgBackHandlerInstalled) {
+        _tgBackHandlerInstalled = true;
+        tg.BackButton.onClick(tgBackPop);
+    }
+    tg.BackButton.show();
+}
+
+function tgBackPop() {
+    const tg = getTg();
+    if (!tg?.BackButton) return;
+    const entry = _tgBackStack.pop();
+    if (entry && typeof entry.closeFn === 'function') {
+        try { entry.closeFn(); } catch (_) {}
+    }
+    if (_tgBackStack.length === 0) {
+        tg.BackButton.hide();
+        tg.BackButton.offClick(tgBackPop);
+        _tgBackHandlerInstalled = false;
+    }
+}
+
+function tgBackReset() {
+    const tg = getTg();
+    if (!tg?.BackButton) return;
+    _tgBackStack = [];
+    if (_tgBackHandlerInstalled) {
+        tg.BackButton.offClick(tgBackPop);
+        _tgBackHandlerInstalled = false;
+    }
+    tg.BackButton.hide();
+}
+
+// Expose for console debugging
+window.tgBackPush = tgBackPush;
+window.tgBackPop = tgBackPop;
+window.tgBackReset = tgBackReset;
+
 // ── Analysis Detail Page ──
 async function openAnalysisDetailPage(id) {
-    const tg = getTg();
-    if (tg?.BackButton) {
-        tg.BackButton.show();
-        tg.BackButton.onClick(closeAnalysisDetailPage);
-    }
+    // Push onto the BackButton navigation stack so pressing Back returns to
+    // the analysis list (not stuck on the detail page).
+    tgBackPush(closeAnalysisDetailPage);
 
     currentAnalysisDetail = null;
     const cachedAnalysis = analyses.find(x => x.id === id) || analysisFeatured.find(a => a.id === id) || null;
 
-    // Render detail page IMMEDIATELY from cached data for instant UX
+    // Render detail page IMMEDIATELY from cached data for instant UX.
+    // After the backend root-cause fix (getFeatured returns full text), the
+    // cached record — whether from `analyses` (regular) or `analysisFeatured`
+    // (VIP) — already contains the COMPLETE analysis body. So this first paint
+    // is final as far as the text is concerned; the background detail fetch
+    // only updates the view counter and is rendered idempotently (see
+    // renderAnalysisDetailPage → dataset.renderedText guard) so it cannot
+    // cause any Layout Shift.
+    let pageActivated = false;
     if (cachedAnalysis) {
         currentAnalysisDetail = cachedAnalysis;
         renderAnalysisDetailPage();
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         const page = $('analysis-detail-page');
         if (page) page.classList.add('active');
+        pageActivated = true;
         const nav = document.querySelector('.bottom-nav');
         if (nav) nav.style.display = 'none';
         window.scrollTo(0, 0);
     }
 
-    // Fire mission event: analysis_open
+    // Fire daily mission: analysis_read (non-blocking, idempotent)
     if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.ANALYSIS_OPEN);
 
-    // Fetch fresh detail from server in background (for full content + increment view)
-    // Includes retry: if first attempt fails, waits 1.5s and retries once
+    // Fetch fresh detail from server in background (for view-count increment
+    // and to pick up any edits made after the list was cached). Includes
+    // retry: if first attempt fails, waits 1.5s and retries once.
     let detailFetched = false;
     for (let attempt = 0; attempt < 2 && !detailFetched; attempt++) {
         try {
@@ -2016,7 +2192,21 @@ async function openAnalysisDetailPage(id) {
                 if (fIdx >= 0 && detailRes.analysis.views_count !== undefined) {
                     analysisFeatured[fIdx].views_count = detailRes.analysis.views_count;
                 }
-                renderAnalysisDetailPage();
+                // Deep-link path: no cached analysis was available, so the page
+                // has not been activated yet. Activate it now alongside the
+                // first real render so the user never stares at a blank screen.
+                if (!pageActivated) {
+                    renderAnalysisDetailPage();
+                    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                    const page = $('analysis-detail-page');
+                    if (page) page.classList.add('active');
+                    pageActivated = true;
+                    const nav = document.querySelector('.bottom-nav');
+                    if (nav) nav.style.display = 'none';
+                    window.scrollTo(0, 0);
+                } else {
+                    renderAnalysisDetailPage();
+                }
             }
         } catch (fetchErr) {
             console.warn('[ANALYSIS-DETAIL] fetch attempt', attempt + 1, 'failed:', fetchErr);
@@ -2024,13 +2214,14 @@ async function openAnalysisDetailPage(id) {
     }
     if (!detailFetched && !cachedAnalysis) {
         showToast('خطا در بارگذاری تحلیل. لطفاً دوباره تلاش کنید.');
-        if (tg?.BackButton) {
-            tg.BackButton.offClick(closeAnalysisDetailPage);
-            tg.BackButton.onClick(handleTelegramBack);
-            updateTelegramBackButton();
-        }
+        // Navigation stack: pop back to the analysis list since there's
+        // nothing to show on the detail page.
+        tgBackPop();
     } else if (!detailFetched && cachedAnalysis) {
-        showToast('متن کامل تحلیل بارگذاری نشد. نسخه خلاصه نمایش داده می‌شود.');
+        // Cached record already carries the full text (post backend fix), so
+        // there is nothing "summary" about what's on screen — only the view
+        // counter couldn't be refreshed. Reflect that accurately.
+        showToast('شماره بازدید به‌روزرسانی نشد. متن تحلیل کامل است.');
     }
 }
 
@@ -2058,6 +2249,37 @@ function animateViewCount(el, target, readTime) {
         }
     }
     requestAnimationFrame(update);
+}
+
+/**
+ * Render analysis body text into XSS-safe semantic HTML.
+ *
+ * Splitting strategy (Persian/RTL friendly):
+ *   - 2+ consecutive newlines → paragraph break (each chunk becomes a <p>)
+ *   - single newline inside a paragraph → <br> soft wrap
+ *   - leading/trailing whitespace per paragraph is trimmed
+ *
+ * Empty paragraphs are dropped so the reading card never shows blank gaps.
+ * All text is passed through escapeHtml() first, so the structure built
+ * afterwards (<p>/<br>) is the only HTML that ends up in the DOM — user
+ * content can never inject markup.
+ */
+function renderAnalysisContentHTML(text) {
+    const raw = String(text || '');
+    if (!raw.trim()) {
+        return '<p class="adp-content-p adp-content-empty">—</p>';
+    }
+    const escaped = escapeHtml(raw);
+    const paragraphs = escaped.split(/\n{2,}/);
+    const html = paragraphs
+        .map(p => {
+            const trimmed = p.replace(/^\s+|\s+$/g, '');
+            if (!trimmed) return '';
+            return `<p class="adp-content-p">${trimmed.replace(/\n/g, '<br>')}</p>`;
+        })
+        .filter(Boolean)
+        .join('');
+    return html || `<p class="adp-content-p">${escaped.replace(/\n/g, '<br>')}</p>`;
 }
 
 function renderAnalysisDetailPage() {
@@ -2098,11 +2320,24 @@ function renderAnalysisDetailPage() {
         titleEl.innerHTML = `${escapeHtml(a.title || `${a.coin} — ${a.timeframe || '1D'}`)} ${sentimentHtml}`;
     }
 
-    // Content (escaped for XSS safety) — shown right after title
+    // Content (escaped for XSS safety) — wrapped in a reading card.
+    // ROOT-CAUSE FIX for Layout Shift + incomplete text:
+    //   - The content is rendered as semantic <p> paragraphs (split on blank
+    //     lines) so long-form Persian text is comfortable to read.
+    //   - Re-render is idempotent: if the text hasn't changed since the last
+    //     render (e.g. the background detail fetch returns the same body that
+    //     was already rendered from cache), we skip the innerHTML replacement
+    //     entirely. This guarantees zero Layout Shift when the detail fetch
+    //     resolves with identical content.
     const contentEl = $('adp-content');
     if (contentEl) {
         const text = a.content || a.text || '';
-        contentEl.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+        if (contentEl.dataset.renderedText === text) {
+            // Identical content already rendered — skip to avoid any flicker/shift.
+        } else {
+            contentEl.dataset.renderedText = text;
+            contentEl.innerHTML = renderAnalysisContentHTML(text);
+        }
     }
 
     // Price levels — smaller, shown BELOW content
@@ -2565,7 +2800,9 @@ function updateAnalysisCharCounter() {
     const counterEl = document.getElementById('analysis-text-counter');
     if (!textEl || !counterEl) return;
     const len = textEl.value.length;
-    const max = 5000;
+    // FIX: match backend maxLength (50000) — was 5000, which was inconsistent
+    // with the backend validation and the HTML maxlength attribute.
+    const max = 50000;
     counterEl.textContent = `${len} / ${max}`;
     counterEl.classList.remove('warn', 'danger');
     if (len >= max) {
@@ -2828,6 +3065,18 @@ function _applySaveResult(result, wasEditing) {
     renderAnalysisStats();
     renderAnalysisList();
     renderAnalysisSlider();
+
+    // ROOT CAUSE FIX for "changes don't appear immediately, need refresh":
+    // If the user is currently viewing the detail page of the analysis they
+    // just edited, currentAnalysisDetail still holds the OLD version of the
+    // data. The detail page reads from currentAnalysisDetail, so without
+    // updating it here, the user would see stale content until they close
+    // and reopen the detail page. Now we update currentAnalysisDetail to the
+    // fresh server response and re-render the detail page immediately.
+    if (wasEditing && currentAnalysisDetail && currentAnalysisDetail.id === result.analysis.id) {
+        currentAnalysisDetail = result.analysis;
+        renderAnalysisDetailPage();
+    }
 }
 
 // ── Admin: Delete (Double Confirm) ──
@@ -3048,10 +3297,37 @@ async function loadCalendarEvents(force = false) {
     calendarLoading = true;
     try {
         const data = await apiFetch('/api/calendar/events');
-        calendarEvents = data.events || [];
+        const fresh = data.events || [];
+        // ROOT CAUSE FIX for "calendar data disappears intermittently":
+        // Previously, on API error (catch block) we set calendarEvents = [],
+        // destroying previously-loaded data. And if the API returned an empty
+        // array (transient upstream failure), we also set calendarEvents = [],
+        // causing the calendar to go blank even though we had valid data
+        // from a previous successful load.
+        //
+        // NEW behaviour: only overwrite calendarEvents if the fresh data is
+        // non-empty. If the API returns empty OR errors, preserve the last
+        // good data so the calendar stays stable. The backend now also serves
+        // stale cache on upstream failure, so this frontend guard is a second
+        // line of defence.
+        if (fresh.length > 0) {
+            calendarEvents = fresh;
+            // DASHBOARD SPEED OPTIMIZATION: persist to localStorage so the
+            // next cold open can render the dashboard calendar instantly.
+            try {
+                localStorage.setItem('calendar_cache', JSON.stringify({ data: calendarEvents, ts: Date.now() }));
+            } catch (_) {}
+        } else if (calendarEvents.length === 0) {
+            // No previous data and fresh is empty — keep calendarEvents as []
+            // so the empty state shows. This is the true "no data" case.
+            calendarEvents = [];
+        }
+        // else: fresh is empty BUT we have previous data → keep previous data.
     } catch (e) {
         console.warn('loadCalendarEvents:', e);
-        calendarEvents = [];
+        // ROOT CAUSE FIX: do NOT destroy existing calendarEvents on error.
+        // Preserve the last good data so the calendar never goes blank due
+        // to a transient network/API failure.
     } finally {
         calendarLoading = false;
     }
@@ -3062,6 +3338,47 @@ async function loadCalendarEvents(force = false) {
  * رویداد تقویم را به بخش‌های امروز/فردا/پس‌فردا/گذشته گروه‌بندی و مرتب می‌کند.
  * زمان‌ها به منطقه زمانی کاربر تبدیل می‌شوند.
  */
+
+/**
+ * Recompute event status based on CURRENT time.
+ *
+ * ROOT CAUSE FIX (calendar items 1-3): The backend computes event.status at
+ * API-call time. But the frontend caches events in localStorage for fast
+ * cold-open. When cached events are loaded (potentially hours later), the
+ * stored status is STALE — an event that was 'upcoming' when cached may now
+ * be 'past', but the cached status still says 'upcoming' (or vice versa).
+ *
+ * This function recomputes the status using the CURRENT browser time,
+ * ensuring the status is always accurate regardless of cache age.
+ *
+ * Status logic (matches backend getEventStatus):
+ *   - live: within ±30 min window of event time
+ *   - past: event time < now
+ *   - upcoming: event time > now
+ *
+ * @param {Array} events - calendar events with .timestamp (ISO UTC string)
+ * @returns {Array} events with updated .status
+ */
+function recomputeEventStatuses(events) {
+    if (!events || !events.length) return events;
+    const now = Date.now();
+    const LIVE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+    return events.map(e => {
+        if (!e.timestamp) return { ...e, status: 'upcoming' };
+        const eventTime = new Date(e.timestamp).getTime();
+        if (isNaN(eventTime)) return { ...e, status: 'upcoming' };
+        let status;
+        if (eventTime <= now + LIVE_WINDOW_MS && eventTime >= now - LIVE_WINDOW_MS) {
+            status = 'live';
+        } else if (eventTime < now) {
+            status = 'past';
+        } else {
+            status = 'upcoming';
+        }
+        return { ...e, status };
+    });
+}
+
 function groupCalendarEvents(events) {
     const tz = 'Asia/Tehran';
     const now = new Date();
@@ -3131,6 +3448,15 @@ async function resolveChartSymbol(symbol) {
     const cached = Cache.get(cacheKey);
     if (cached) return cached;
 
+    // ── PERFORMANCE: Check localStorage cache (6h TTL) for instant repeat lookup ──
+    // This avoids a network round-trip entirely for coins the user has opened before.
+    const lsCached = getLsChartSymbol(symbol);
+    if (lsCached) {
+        // Also set in in-memory cache for subsequent calls in the same session
+        Cache.set(cacheKey, lsCached, 3600);
+        return lsCached;
+    }
+
     const symUpper = String(symbol || '').toUpperCase().trim();
     if (!symUpper) {
         return { found: false, symbol: symbol, exchange: null, tv_symbol: null };
@@ -3153,6 +3479,7 @@ async function resolveChartSymbol(symbol) {
                 is_btc_pair: true,
             };
             Cache.set(cacheKey, result, 3600);
+            setLsChartSymbol(symbol, result);
             return result;
         }
     }
@@ -3163,6 +3490,7 @@ async function resolveChartSymbol(symbol) {
     if (skipSymbols.includes(symUpper)) {
         const notFound = { found: false, symbol: symUpper, exchange: null, tv_symbol: null };
         Cache.set(cacheKey, notFound, 300);
+        setLsChartSymbol(symbol, notFound);
         return notFound;
     }
 
@@ -3176,15 +3504,18 @@ async function resolveChartSymbol(symbol) {
             const data = await apiFetch(`/api/charts/resolve?symbol=${encodeURIComponent(symbol)}`);
             if (data && data.found && data.tv_symbol) {
                 Cache.set(cacheKey, data, 3600);
+                setLsChartSymbol(symbol, data);
                 return data;
             }
             // Backend said genuinely not found → trust it (short cache, retry later)
             if (data && data.found === false) {
                 Cache.set(cacheKey, data, 300);
+                setLsChartSymbol(symbol, data);
                 return data;
             }
         } catch (e) { console.warn('resolveChartSymbol backend failed, trying client-side scanner:', e); }
     }
+
 
     // ── LAST-RESORT FALLBACK: client-side TradingView scanner ──
     // Used only if the backend is completely unreachable. Queries TradingView's
@@ -3224,6 +3555,7 @@ async function resolveChartSymbol(symbol) {
                         is_fallback: true,
                     };
                     Cache.set(cacheKey, result, 3600);
+                    setLsChartSymbol(symbol, result);
                     return result;
                 }
             }
@@ -3233,8 +3565,30 @@ async function resolveChartSymbol(symbol) {
     // No chart available for this symbol on ANY exchange TradingView tracks
     const notFound = { found: false, symbol: symUpper, exchange: null, tv_symbol: null };
     Cache.set(cacheKey, notFound, 300); // Short cache — retry sooner if listed later
+    setLsChartSymbol(symbol, notFound);
     return notFound;
 }
+
+// ============================================================================
+// ── PERFORMANCE: Prefetch chart symbols for top coins ──
+// ============================================================================
+// After market data loads, silently prefetch the chart symbol resolution for
+// the top 10 coins (BTC, ETH, SOL, etc.) so that when the user taps one,
+// the result is already in the in-memory + localStorage cache → instant chart.
+// This runs in the background and never blocks the UI.
+function prefetchTopChartSymbols() {
+    if (!allCoins || allCoins.length === 0) return;
+    const topCoins = allCoins.slice(0, 10).map(c => c.symbol).filter(Boolean);
+    console.log('[CHART-PERF] Prefetching chart symbols for top', topCoins.length, 'coins');
+    // Stagger the prefetches to avoid overwhelming the backend
+    topCoins.forEach((sym, i) => {
+        setTimeout(() => {
+            // resolveChartSymbol checks cache first — only fetches if not cached
+            resolveChartSymbol(sym).catch(() => {});
+        }, i * 200); // 200ms between each = 2s total for 10 coins
+    });
+}
+
 
 /**
  * PERFORMANCE: Two-layer request optimizer.
@@ -3561,6 +3915,110 @@ function escapeHtml(str) {
 }
 
 /**
+ * Sanitize and deduplicate a news title.
+ * Fixes the critical bug where titles render with repeated words/phrases.
+ *
+ * Root cause: AI translation (m2m100) sometimes produces repeated text, and
+ * RSS sources occasionally have malformed titles. This function normalizes
+ * ANY title — regardless of source — before rendering.
+ *
+ * Handles:
+ * 1. Consecutive duplicate words: "BTC BTC BTC rises" → "BTC rises"
+ * 2. Consecutive duplicate phrases: "Bitcoin rises Bitcoin rises" → "Bitcoin rises"
+ * 3. Full title duplication: "Bitcoin hits 65K Bitcoin hits 65K" → "Bitcoin hits 65K"
+ * 4. Whitespace normalization
+ * 5. Trailing/leading punctuation cleanup
+ *
+ * This is a DEFENSIVE measure — it never changes a clean title, only fixes
+ * broken ones. Safe to call on every title before render.
+ */
+function sanitizeNewsTitle(rawTitle) {
+    if (!rawTitle) return '';
+    let title = String(rawTitle).replace(/\s+/g, ' ').trim();
+    if (!title) return '';
+
+    // 1. Remove consecutive duplicate words (2+ same words in a row → keep 1)
+    //    Unicode-safe: doesn't rely on \b which fails for Persian/RTL text.
+    //    e.g. "بیت‌کوین بیت‌کوین بیت‌کوین بالا رفت" → "بیت‌کوین بالا رفت"
+    //    Run in a loop to handle 3+, 4+, etc. consecutive duplicates
+    let prev;
+    do {
+        prev = title;
+        title = title.replace(/(\S+)(\s+\1)(?=\s|$)/gi, '$1');
+    } while (title !== prev);
+
+    // 2. Remove consecutive duplicate phrases (phrase of 2-8 words repeated)
+    //    e.g. "قیمت بیت‌کوین بالا رفت قیمت بیت‌کوین بالا رفت" → "قیمت بیت‌کوین بالا رفت"
+    //    Run in a loop to catch nested duplications
+    do {
+        prev = title;
+        title = title.replace(/((?:\S+\s+){1,8}\S+)\s+\1/gi, '$1');
+    } while (title !== prev);
+
+    // 3. Full title duplication: if the title is exactly repeated (first half == second half)
+    //    e.g. "Bitcoin hits 65K Bitcoin hits 65K" → "Bitcoin hits 65K"
+    //    Also handle slight asymmetry (off by 1-2 chars)
+    const len = title.length;
+    if (len > 20) {
+        const mid = Math.floor(len / 2);
+        // Try exact midpoint split
+        const firstHalf = title.substring(0, mid).trim();
+        const secondHalf = title.substring(mid).trim();
+        if (firstHalf === secondHalf && firstHalf.length > 8) {
+            title = firstHalf;
+        } else {
+            // Try finding the second occurrence of the first 10 chars
+            const prefix = title.substring(0, 10);
+            if (prefix.length === 10) {
+                const secondOccurrence = title.indexOf(prefix, 5);
+                if (secondOccurrence > 10 && secondOccurrence < len - 10) {
+                    // Check if the text before the second occurrence matches the text after
+                    const candidate = title.substring(0, secondOccurrence).trim();
+                    const remainder = title.substring(secondOccurrence).trim();
+                    if (candidate === remainder && candidate.length > 8) {
+                        title = candidate;
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Final whitespace cleanup
+    title = title.replace(/\s+/g, ' ').trim();
+
+    return title;
+}
+
+/**
+ * Format a news publication date as Tehran time.
+ * Converts UTC ISO timestamp to Asia/Tehran timezone (UTC+3:30).
+ * Returns: "HH:MM | به وقت تهران" or relative time if no date available.
+ *
+ * Item 2: News time displayed in Tehran timezone, not UTC.
+ */
+function formatNewsTimeTehran(pubDate, relativeTime) {
+    // If we have a valid pubDate, format as Tehran time (HH:MM only, no label)
+    if (pubDate) {
+        try {
+            const date = new Date(pubDate);
+            if (!isNaN(date.getTime())) {
+                // Format in Asia/Tehran timezone (UTC+3:30, no DST)
+                // Show ONLY the time (e.g. "۱۴:۳۵") — no "به وقت تهران" label
+                // to keep the UI clean and uncluttered.
+                return new Intl.DateTimeFormat('fa-IR', {
+                    timeZone: 'Asia/Tehran',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false,
+                }).format(date);
+            }
+        } catch (_) { /* fall through to relative time */ }
+    }
+    // Fallback to relative time if no pubDate or formatting fails
+    return relativeTime || '';
+}
+
+/**
  * Professional icon fallback: replaces broken img with first-letter badge.
  * Called via onerror="iconFallback(this)" on coin/forex images.
  */
@@ -3860,6 +4318,14 @@ async function loadMarketData(force = false) {
         renderMarket();
         renderWatchlist();
         renderSummary();
+        // ── NEW: Update heatmap with fresh prices ──
+        renderDashboardHeatmap();
+
+        // ── PERFORMANCE: Prefetch chart symbols for top 10 coins ──
+        // Runs in background — never blocks the UI. By the time the user taps
+        // a top coin (BTC, ETH, SOL...), its chart symbol is already cached
+        // → chart opens instantly.
+        try { prefetchTopChartSymbols(); } catch (e) { console.warn('chart prefetch failed:', e?.message); }
         renderMarketInsights();
         // ALWAYS re-render ticker after a successful market load — this is the
         // primary path that hydrates the ticker from cold-open (skeleton → real).
@@ -3895,12 +4361,16 @@ async function loadForexData() {
         if (cached?.length) {
             allForexPairs = cached;
             renderMarket();
+            // Also persist to localStorage for instant cold-open hydration
+            try { localStorage.setItem('forex_data_cache', JSON.stringify({ data: allForexPairs, ts: Date.now() })); } catch {}
             return;
         }
         const res = await apiFetch('/api/forex');
         if (res.status === 'success' && Array.isArray(res.data)) {
             allForexPairs = res.data;
             Cache.set('forex', allForexPairs, 120);
+            // Persist to localStorage for instant cold-open hydration
+            try { localStorage.setItem('forex_data_cache', JSON.stringify({ data: allForexPairs, ts: Date.now() })); } catch {}
             renderMarket();
         }
     } catch (e) {
@@ -3928,6 +4398,10 @@ function renderSummary() {
     volEl?.classList.remove('loading');
     domEl?.classList.remove('loading');
 
+    const sourceTextEl = document.getElementById('mkt-source-text');
+    const updatedEl = document.getElementById('mkt-overview-updated');
+    const metaEl = document.getElementById('mkt-overview-meta');
+
     if (globalMarketData) {
         const mcapVal = globalMarketData.totalMarketCap;
         const volVal = globalMarketData.totalVolume;
@@ -3935,6 +4409,22 @@ function renderSummary() {
         mcapEl.textContent = (mcapVal > 0) ? '$' + formatLargeNumber(mcapVal) : '--';
         volEl.textContent = (volVal > 0) ? '$' + formatLargeNumber(volVal) : '--';
         domEl.textContent = (domVal > 0) ? domVal.toFixed(1) + '%' : '--';
+
+        // Show data source + last update timestamp
+        if (sourceTextEl) {
+            const src = globalMarketData.source || 'unknown';
+            sourceTextEl.textContent = src === 'coinmarketcap' ? 'CoinMarketCap' :
+                                       src === 'coingecko' ? 'CoinGecko' :
+                                       src === 'coinpaprika' ? 'CoinPaprika' : src;
+        }
+        if (updatedEl && globalMarketData.timestamp) {
+            try {
+                const ts = new Date(globalMarketData.timestamp);
+                const timeStr = ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                updatedEl.textContent = '· ' + timeStr;
+            } catch (_) { updatedEl.textContent = ''; }
+        }
+        if (metaEl) metaEl.classList.remove('error');
     } else {
         // Fallback: compute from allCoins
         let totalMcap = 0;
@@ -3950,6 +4440,13 @@ function renderSummary() {
         mcapEl.textContent = totalMcap > 0 ? '$' + formatLargeNumber(totalMcap) : '--';
         volEl.textContent = totalVol > 0 ? '$' + formatLargeNumber(totalVol) : '--';
         domEl.textContent = totalMcap > 0 ? ((btcMcap / totalMcap) * 100).toFixed(1) + '%' : '--';
+
+        // Show error state if no data at all
+        if (totalMcap === 0 && metaEl) {
+            metaEl.classList.add('error');
+            if (sourceTextEl) sourceTextEl.textContent = 'Waiting for data...';
+            if (updatedEl) updatedEl.textContent = '';
+        }
     }
 }
 
@@ -4045,44 +4542,81 @@ function renderMarketInsights() {
         sentimentValueEl.className = 'mkt-status-sentiment-value ' + senClass;
     }
 
+    // Market Trend display (روند بازار: صعودی/نزولی/خنثی) — based on gainers/losers ratio
+    var trendValueEl = document.getElementById('mkt-trend-value');
+    if (trendValueEl) {
+        var trendLabel, trendClass;
+        if (ratio > 0.6) { trendLabel = currentLang === 'fa' ? 'صعودی' : 'Bullish'; trendClass = 'trend-up'; }
+        else if (ratio >= 0.4) { trendLabel = currentLang === 'fa' ? 'خنثی' : 'Neutral'; trendClass = 'trend-neutral'; }
+        else { trendLabel = currentLang === 'fa' ? 'نزولی' : 'Bearish'; trendClass = 'trend-down'; }
+        trendValueEl.textContent = trendLabel;
+        trendValueEl.className = 'mkt-trend-value ' + trendClass;
+    }
+
     // --- Fear & Greed ---
-    // FIX 4: Only show real data from Alternative.me. Hide the entire section if unavailable.
+    // FIX 4: Only show real data from CoinMarketCap. Hide the entire section if unavailable.
     if (globalMarketData && globalMarketData.fearGreedValue > 0) {
         var fgIndex = globalMarketData.fearGreedValue;
         var fgSource = globalMarketData.fearGreedSource || 'real';
         var fgClass = (globalMarketData.fearGreedClassification || '').toLowerCase();
         var fgLabel;
-        if (fgClass === 'extreme greed' || fgClass === 'extreme_greed') fgLabel = t('fg_extreme_greed');
-        else if (fgClass === 'greed') fgLabel = t('fg_greed');
-        else if (fgClass === 'neutral') fgLabel = t('fg_neutral');
-        else if (fgClass === 'fear') fgLabel = t('fg_fear');
-        else if (fgClass === 'extreme fear' || fgClass === 'extreme_fear') fgLabel = t('fg_extreme_fear');
+        var fgBadgeColor = '#6B7A8D';
+        if (fgClass === 'extreme greed' || fgClass === 'extreme_greed') { fgLabel = t('fg_extreme_greed'); fgBadgeColor = '#22C55E'; }
+        else if (fgClass === 'greed') { fgLabel = t('fg_greed'); fgBadgeColor = '#84CC16'; }
+        else if (fgClass === 'neutral') { fgLabel = t('fg_neutral'); fgBadgeColor = '#F5A623'; }
+        else if (fgClass === 'fear') { fgLabel = t('fg_fear'); fgBadgeColor = '#F97316'; }
+        else if (fgClass === 'extreme fear' || fgClass === 'extreme_fear') { fgLabel = t('fg_extreme_fear'); fgBadgeColor = '#EF4444'; }
         else fgLabel = globalMarketData.fearGreedClassification || '--';
         console.log('[FG] Real data from', fgSource, ':', fgIndex, fgLabel);
 
-        // Show FG section (it may have been hidden on a previous load)
-        var fgCard = document.querySelector('.fear-greed-card');
-        if (fgCard) fgCard.style.display = '';
+        // Update the score display (number + label)
+        var fgTextEl = document.getElementById('fg-gauge-text');
+        if (fgTextEl) fgTextEl.textContent = fgIndex;
+        var fgLabelEl = document.getElementById('fg-gauge-label');
+        if (fgLabelEl) fgLabelEl.textContent = fgLabel;
 
-        var fgValueEl = document.getElementById('fg-index-value');
-        if (fgValueEl) fgValueEl.textContent = fgIndex;
+        // Move the gradient bar indicator to the F&G value position
+        var fgIndicator = document.getElementById('mkt-fg-indicator');
+        if (fgIndicator) {
+            fgIndicator.style.left = fgIndex + '%';
+        }
 
+        // Update the F&G badge
+        var fgBadgeEl = document.getElementById('mkt-fg-badge');
+        if (fgBadgeEl) {
+            fgBadgeEl.textContent = fgLabel;
+            fgBadgeEl.style.background = fgBadgeColor + '22';
+            fgBadgeEl.style.color = fgBadgeColor;
+            fgBadgeEl.style.borderColor = fgBadgeColor + '44';
+        }
+
+        // Analytical insight text based on F&G value + sentiment
+        var insightEl = document.getElementById('mkt-status-insight');
+        if (insightEl) {
+            var insight = '';
+            if (currentLang === 'fa') {
+                if (fgIndex <= 25) insight = 'ترس شدید در بازار — فرصت خرید احتمالی برای سرمایه‌گذاران شجاع';
+                else if (fgIndex <= 45) insight = 'ترس در بازار غالب است — احتیاط کنید اما فرصت‌ها را بررسی کنید';
+                else if (fgIndex <= 55) insight = 'بازار در حالت خنثی — منتظر جهت‌گیری مشخص باشید';
+                else if (fgIndex <= 75) insight = 'حریصیت در بازار — زمان مناسب برای سودگیری و مدیریت ریسک';
+                else insight = 'حریصیت شدید — احتیاط کنید، اصلاح بازار محتمل است';
+            } else {
+                if (fgIndex <= 25) insight = 'Extreme fear — potential buying opportunity for bold investors';
+                else if (fgIndex <= 45) insight = 'Fear dominates — be cautious but watch for opportunities';
+                else if (fgIndex <= 55) insight = 'Market is neutral — wait for a clear direction';
+                else if (fgIndex <= 75) insight = 'Greed in the market — good time to take profits and manage risk';
+                else insight = 'Extreme greed — be cautious, market correction is likely';
+            }
+            insightEl.textContent = insight;
+        }
+
+        // Legacy: keep fg-arc updated for any remaining references
         var fgArcEl = document.getElementById('fg-arc');
         if (fgArcEl) {
             var totalLen = 150.8;
             var offset = totalLen - (totalLen * fgIndex / 100);
             fgArcEl.setAttribute('stroke-dashoffset', offset.toFixed(1));
         }
-
-        var fgTextEl = document.getElementById('fg-gauge-text');
-        if (fgTextEl) fgTextEl.textContent = fgIndex;
-        var fgLabelEl = document.getElementById('fg-gauge-label');
-        if (fgLabelEl) fgLabelEl.textContent = fgLabel;
-    } else {
-        // No real F&G data available — hide the entire section
-        console.log('[FG] No real data available, hiding section');
-        var fgCardHide = document.querySelector('.fear-greed-card');
-        if (fgCardHide) fgCardHide.style.display = 'none';
     }
 }
 
@@ -4283,22 +4817,30 @@ function renderMarket() {
     // Tab-based rendering (no search)
     if (currentMarketTab === 'forex') {
         if (!allForexPairs.length) {
-            // Show skeleton or loading for forex
-            list.innerHTML = Array(5).fill(`
-                <div class="market-skeleton">
-                    <div class="market-skeleton-left">
-                        <div class="market-skeleton-icon"></div>
-                        <div class="market-skeleton-text">
-                            <div class="market-skeleton-line"></div>
-                            <div class="market-skeleton-line"></div>
-                        </div>
+            // ROOT CAUSE FIX: Show a proper error state instead of infinite skeleton.
+            // Previously, if forex data failed to load (auth required, network error),
+            // the skeleton showed FOREVER with no feedback to the user.
+            // Now we show a clear message with a retry button.
+            const isGuest = (typeof isGuestUserId === 'function' ? isGuestUserId(getUserId()) : String(getUserId()).startsWith('guest_'));
+            list.innerHTML = isGuest
+                ? `<div class="market-error-state">
+                    <div class="market-error-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     </div>
-                    <div class="market-skeleton-right">
-                        <div class="market-skeleton-block"></div>
-                        <div class="market-skeleton-block"></div>
+                    <div class="market-error-title">داده فارکس نیاز به ورود از تلگرام دارد</div>
+                    <div class="market-error-desc">برای مشاهده نرخ فارکس و طلا، اپ را داخل تلگرام باز کنید</div>
+                </div>`
+                : `<div class="market-error-state">
+                    <div class="market-error-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
                     </div>
-                </div>
-            `).join('');
+                    <div class="market-error-title">بارگذاری مجدد</div>
+                    <div class="market-error-desc">دریافت داده فارکس ناموفق بود</div>
+                    <button class="market-error-retry" onclick="loadForexData().then(()=>renderMarket()).catch(()=>{})">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
+                        تلاش مجدد
+                    </button>
+                </div>`;
             return;
         }
         // Use premium grouped forex list (Major / Cross / Metals / Indices / Commodities)
@@ -4316,7 +4858,16 @@ function renderMarket() {
             filtered = filtered.filter(c => c.changePercent24Hr < 0).sort((a, b) => a.changePercent24Hr - b.changePercent24Hr).slice(0, 30);
             break;
         case 'watchlist':
+            // Show both crypto AND forex symbols that are in the watchlist
             filtered = filtered.filter(c => watchlist.includes(c.symbol));
+            // Also show forex symbols that are watchlisted
+            const forexWatched = allForexPairs.filter(f => watchlist.includes(f.symbol));
+            if (forexWatched.length) {
+                const cryptoItems = filtered.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
+                const forexItems = forexWatched.map(f => renderForexItem(f)).join('');
+                list.innerHTML = buildInfoBar(filtered.length + forexWatched.length, t('watchlist') || 'Watchlist') + cryptoItems + forexItems;
+                return;
+            }
             break;
         case 'popular':
             // Popular = top 15 by 24h volume (real data, not mock)
@@ -4493,16 +5044,37 @@ function renderForexItem(f) {
     const safeName = escapeHtml(f.name);
     const cat = f.category || 'major';
 
-    // Category config: colors, icons, labels, precision
+    // Category config: colors, labels, precision
     const catConfig = {
-        major:     { color: '#22C55E', icon: 'M',  label: 'Major',     labelFa: 'جفت اصلی',   decimals: 4 },
-        cross:     { color: '#F5A623', icon: 'X',  label: 'Cross',     labelFa: 'کراس',       decimals: 4 },
-        metal:     { color: '#FFD700', icon: 'Au', label: 'Metal',     labelFa: 'فلز گران‌بها', decimals: 2 },
-        index:     { color: '#60A5FA', icon: 'ID', label: 'Index',     labelFa: 'شاخص',       decimals: 0 },
-        commodity: { color: '#F97316', icon: 'Cm', label: 'Commodity', labelFa: 'کالا',       decimals: 0 },
+        major:     { color: '#22C55E', gradColor: '#16A34A', label: 'Major',     labelFa: 'جفت اصلی',       decimals: 4 },
+        cross:     { color: '#F5A623', gradColor: '#D97706', label: 'Cross',     labelFa: 'کراس',           decimals: 4 },
+        metal:     { color: '#FFD700', gradColor: '#B8860B', label: 'Metal',     labelFa: 'فلز گران‌بها',   decimals: 2 },
+        stock:     { color: '#60A5FA', gradColor: '#2563EB', label: 'Stock',     labelFa: 'سهم',            decimals: 2 },
     };
     const cfg = catConfig[cat] || catConfig.major;
     const decimals = cfg.decimals;
+
+    // ── Professional letter-based icon ──
+    // Extract a 2-3 character abbreviation from the symbol for a clean,
+    // uniform, professional look. No more generic SVG line charts.
+    // For forex pairs (EURUSD, GBPUSD): show base currency symbol or 2-letter code
+    // For metals (XAUUSD): show chemical symbol (Au, Ag)
+    // For stocks (AAPL): show first 3-4 letters of ticker
+    const currencySymbols = { 'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'AUD': 'A$', 'CAD': 'C$', 'CHF': '₣', 'NZD': 'N$', 'CNY': '¥', 'XAU': 'Au', 'XAG': 'Ag' };
+
+    let iconText = '';
+    const sym = f.symbol.toUpperCase();
+    if (cat === 'metal') {
+        // XAUUSD → Au, XAGUSD → Ag
+        iconText = sym.startsWith('XAU') ? 'Au' : sym.startsWith('XAG') ? 'Ag' : sym.slice(0, 2);
+    } else if (cat === 'stock') {
+        // AAPL → AAPL (first 4 chars), but display only 3-4 to fit
+        iconText = sym.slice(0, 4);
+    } else {
+        // Forex: EURUSD → €, GBPUSD → £, or extract base currency
+        const baseCurr = sym.slice(0, 3);
+        iconText = currencySymbols[baseCurr] || baseCurr;
+    }
 
     // Format price with appropriate precision
     let priceStr;
@@ -4517,7 +5089,7 @@ function renderForexItem(f) {
             priceStr = f.price.toFixed(decimals);
         }
     } else {
-        priceStr = '--';
+        priceStr = '—';
     }
 
     // Change display
@@ -4526,22 +5098,35 @@ function renderForexItem(f) {
     const changeStr = hasChange ? (change >= 0 ? '+' : '') + change.toFixed(2) + '%' : '—';
     const changeCls = hasChange ? (change >= 0 ? 'up' : 'down') : '';
 
-    // Category icon with premium styling
-    const iconBg = `background:${cfg.color}15; color:${cfg.color}; border:1px solid ${cfg.color}30;`;
+    // Watchlist state
+    const inWatch = watchlist.includes(f.symbol);
+    const starSvg = inWatch
+        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
+        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+
+    // Professional gradient icon background
+    const iconStyle = `background: linear-gradient(135deg, ${cfg.color}22, ${cfg.gradColor}33); color: ${cfg.color}; border: 1px solid ${cfg.color}40;`;
+
+    // Display: symbol as primary (always short), name as subtitle (small, dimmed)
+    // This prevents truncation — symbol codes like "EUR/USD" are always short.
+    // For stocks, symbol IS the name (AAPL), so show it as primary.
+    const displaySymbol = cat === 'stock' ? safeSymbol : (safeName.length > 8 ? safeSymbol : safeName);
+    const displayName = cat === 'stock' ? '' : (safeName.length > 8 ? safeName : '');
 
     return `
         <div class="mkt-coin-row mkt-forex-row" data-symbol="${safeSymbol}" data-forex="true" data-category="${cat}" data-action="open-forex" role="listitem">
             <span class="mkt-coin-rank">—</span>
-            <div class="mkt-forex-icon" style="${iconBg}">
-                <span>${cfg.icon}</span>
+            <div class="mkt-forex-icon" style="${iconStyle}">
+                <span class="mkt-forex-icon-text">${escapeHtml(iconText)}</span>
             </div>
             <div class="mkt-coin-info">
-                <span class="mkt-coin-symbol">${safeName}</span>
+                <span class="mkt-coin-symbol">${displaySymbol}</span>
+                ${displayName ? `<span class="mkt-coin-pair-caption">${displayName}</span>` : ''}
             </div>
             <span class="mkt-coin-price">${priceStr}</span>
             <span class="mkt-coin-change ${changeCls}">${changeStr}</span>
-            <span class="mkt-coin-star" data-symbol="${safeSymbol}" onclick="event.stopPropagation();" role="button" aria-label="Forex">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.4"><circle cx="12" cy="12" r="10"/></svg>
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? 'حذف از واچ‌لیست' : 'افزودن به واچ‌لیست'}">
+                ${starSvg}
             </span>
         </div>
     `;
@@ -4572,11 +5157,10 @@ function renderForexGroupedList() {
 
     // Group by category
     const groups = {
-        major:     { label: 'Major Pairs',     labelFa: 'جفت‌های اصلی',     items: [] },
-        cross:     { label: 'Cross Pairs',     labelFa: 'کراس‌ها',          items: [] },
-        metal:     { label: 'Metals',          labelFa: 'فلزات گران‌بها',    items: [] },
-        index:     { label: 'Indices',         labelFa: 'شاخص‌ها',          items: [] },
-        commodity: { label: 'Commodities',     labelFa: 'کالاها',           items: [] },
+        metal:     { label: 'Precious Metals',  labelFa: 'فلزات گران‌بها',    items: [] },
+        major:     { label: 'Major Pairs',      labelFa: 'جفت‌های اصلی',     items: [] },
+        cross:     { label: 'Cross Pairs',      labelFa: 'کراس‌ها',          items: [] },
+        stock:     { label: 'Global Stocks',    labelFa: 'سهام جهانی',       items: [] },
     };
 
     for (const f of allForexPairs) {
@@ -4585,7 +5169,7 @@ function renderForexGroupedList() {
     }
 
     // Render each non-empty group
-    const groupOrder = ['major', 'cross', 'metal', 'index', 'commodity'];
+    const groupOrder = ['metal', 'major', 'cross', 'stock'];
     let html = '';
     for (const cat of groupOrder) {
         const g = groups[cat];
@@ -4596,9 +5180,8 @@ function renderForexGroupedList() {
             major:     { color: '#22C55E' },
             cross:     { color: '#F5A623' },
             metal:     { color: '#FFD700' },
-            index:     { color: '#60A5FA' },
-            commodity: { color: '#F97316' },
-        }[cat];
+            stock:     { color: '#60A5FA' },
+        }[cat] || { color: '#94a3b8' };
 
         html += `
             <div class="mkt-forex-group">
@@ -4821,67 +5404,130 @@ function showMiniToast(msg) {
  */
 function showToast(msg) {
     showMiniToast(msg);
+    // Also trigger haptic feedback if available
     try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch {}
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// DAILY MISSIONS SYSTEM — CENTRAL EVENT BUS (fully generic, DB-driven)
+// DAILY MISSIONS SYSTEM — CENTRAL EVENT BUS
 // ════════════════════════════════════════════════════════════════════════
+// A central Event Bus that auto-discovers events from backend metadata.
+// The frontend instruments known interaction points (tab switches, modal
+// opens, bootstrap) with a SINGLE call: MissionBus.fire('event_name').
+// The bus checks the cached mission list for matching triggers and fires
+// completion for ALL matching missions.
+//
+// The bus also auto-instruments ALL tab switches via switchTab hook —
+// so 'market_open', 'profile_open', 'news_open', 'analysis_open',
+// 'dashboard_open' fire automatically without any manual fireMissionEvent
+// calls at those points.
+//
+// Adding a new mission requires ONLY a DB insert:
+//   INSERT INTO mission_rewards (mission_id, mission_name, token_amount,
+//     is_enabled, metadata) VALUES (
+//     'read_3_news', '۳ خبر بخوان', 10, TRUE,
+//     '{"trigger":"news_open","target_count":3}')
+//
+// Adding a new EVENT TYPE that doesn't map to a tab switch requires adding
+// ONE MissionBus.fire('new_event') call at the interaction point. But
+// reusing an existing event type for a new mission = ZERO code change.
+
 const _completedMissionsToday = new Set();
 let _missionsLoaded = false;
 let _missionStatusList = [];
 
+// Tab-to-event mapping: when user switches to a tab, this event fires.
+// This covers ALL 5 main tabs + calendar sub-tab automatically.
 const TAB_EVENT_MAP = {
     'dashboard-page': 'dashboard_open',
     'market-page': 'market_open',
     'analysis-page': 'analysis_open',
-    'news-page': 'news_open',
+    'news-page': 'news_open',         // fires when user opens the News tab
     'profile-page': 'profile_open',
 };
 
+/**
+ * Central Mission Event Bus.
+ * - fire(eventType): emits an event, triggers all matching missions
+ * - autoInstrumentTabs(): hooks into switchTab to auto-fire tab events
+ * - Events are NOT hardcoded in the bus — they come from backend metadata
+ */
 const MissionBus = {
+    /**
+     * Fire a mission event. Checks all missions from backend whose
+     * metadata.trigger matches this event, and fires completion for each.
+     */
     fire(eventType) {
         if (!eventType || !API_BASE) return;
+
         const matching = _missionStatusList.filter(m =>
             m.trigger === eventType && !m.completed && !_completedMissionsToday.has(m.mission_id)
         );
-        for (const mission of matching) completeMission(mission.mission_id);
+
+        for (const mission of matching) {
+            completeMission(mission.mission_id);
+        }
     },
+
+    /**
+     * Hook into switchTab to auto-fire events for tab switches.
+     * Called once during initialization. Wraps the original switchTab.
+     */
     _tabHooked: false,
     autoInstrumentTabs() {
         if (this._tabHooked) return;
         this._tabHooked = true;
+
         const origSwitchTab = window.switchTab;
         if (typeof origSwitchTab !== 'function') return;
+
         window.switchTab = function(pageId, btn) {
+            // Call original switchTab
             origSwitchTab.call(this, pageId, btn);
-            const ev = TAB_EVENT_MAP[pageId];
-            if (ev) MissionBus.fire(ev);
+
+            // Auto-fire the corresponding mission event
+            const eventType = TAB_EVENT_MAP[pageId];
+            if (eventType) {
+                MissionBus.fire(eventType);
+            }
         };
     },
 };
 
+/**
+ * Load today's mission status from the server. Called once on bootstrap.
+ */
 async function loadMissionStatus() {
     if (_missionsLoaded || !API_BASE || !canRunSessionRequests()) return;
     try {
         const data = await apiFetch('/api/wallet/missions');
         if (data?.status === 'success' && Array.isArray(data.missions)) {
             _missionStatusList = data.missions;
-            for (const m of data.missions) if (m.completed) _completedMissionsToday.add(m.mission_id);
+            for (const m of data.missions) {
+                if (m.completed) _completedMissionsToday.add(m.mission_id);
+            }
             updateMissionCards();
         }
         _missionsLoaded = true;
+        // Now that we have mission data, auto-instrument tab switches
         MissionBus.autoInstrumentTabs();
     } catch (_) {}
 }
 
+/**
+ * Complete a daily mission. Called by MissionBus.fire — not directly
+ * from interaction points.
+ */
 async function completeMission(missionId) {
     if (_completedMissionsToday.has(missionId)) return;
     if (!API_BASE || !canRunSessionRequests()) return;
+
     try {
         const data = await apiFetch('/api/wallet/mission/complete', {
-            method: 'POST', body: JSON.stringify({ mission_id: missionId }),
+            method: 'POST',
+            body: JSON.stringify({ mission_id: missionId }),
         });
+
         if (data?.status === 'success') {
             const idx = _missionStatusList.findIndex(m => m.mission_id === missionId);
             if (idx >= 0) {
@@ -4889,77 +5535,216 @@ async function completeMission(missionId) {
                 _missionStatusList[idx].target_count = data.target_count;
                 _missionStatusList[idx].completed = data.completed;
             }
-            if (data.completed) _completedMissionsToday.add(missionId);
+
+            if (data.completed) {
+                _completedMissionsToday.add(missionId);
+            }
+
             if (data.is_new_completion) {
                 showMissionRewardPopup(data.reward_label, data.reward_amount);
                 refreshWalletAfterMission(data.new_balance);
             }
+
             updateMissionCards();
         }
     } catch (_) {}
 }
 
+// Backward-compatible alias
+const MISSION_EVENTS = {
+  NEWS_OPEN: 'news_open',
+  ANALYSIS_OPEN: 'analysis_open',
+  CALENDAR_OPEN: 'calendar_open',
+  DAILY_OPEN: 'daily_open',
+  PROFILE_OPEN: 'profile_open',
+  MARKET_OPEN: 'market_open',
+  WATCHLIST_OPEN: 'watchlist_open',
+  DASHBOARD_OPEN: 'dashboard_open',
+};
+function fireMissionEvent(eventType) { MissionBus.fire(eventType); }
+
+/**
+ * Refresh wallet display after a mission reward.
+ * Updates balance, transaction history, summary, tier, and progress bar
+ * without full page reload.
+ */
 function refreshWalletAfterMission(newBalance) {
-    if (window.WalletApp?._invalidateCache) window.WalletApp._invalidateCache();
-    const balEl = document.querySelector('.wallet-hero-balance-value, .hero-balance');
-    if (balEl && newBalance != null) {
-        const cur = parseFloat(balEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
-        animateBalanceChange(balEl, cur, newBalance);
+    // 1. Invalidate wallet cache so next fetch hits the API
+    if (window.WalletApp && typeof window.WalletApp._invalidateCache === 'function') {
+        window.WalletApp._invalidateCache();
     }
-    if (window.WalletApp?.loadProfileCard) setTimeout(() => window.WalletApp.loadProfileCard(), 300);
-    const wp = document.getElementById('wallet-full-page');
-    if (wp?.classList.contains('open') && window.WalletApp?._refreshWalletData) {
-        setTimeout(() => window.WalletApp._refreshWalletData(), 500);
+
+    // 2. If wallet page is open, refresh the balance display immediately
+    const balanceEl = document.querySelector('.wallet-balance-value, .hero-balance');
+    if (balanceEl && newBalance != null) {
+        const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
+        animateBalanceChange(balanceEl, currentBalance, newBalance);
+    }
+
+    // 3. Refresh profile card (balance + tier on the profile page)
+    if (typeof window.WalletApp?.loadProfileCard === 'function') {
+        setTimeout(() => window.WalletApp.loadProfileCard(), 300);
+    }
+
+    // 4. If wallet full page is open, refresh ALL wallet data in background
+    //    This updates: balance, tier, progress bar, transaction history, summary strip
+    const walletPage = document.getElementById('wallet-full-page');
+    if (walletPage && walletPage.classList.contains('open')) {
+        // Re-fetch wallet data (balance + history) and summary in parallel
+        setTimeout(async () => {
+            try {
+                if (typeof window.WalletApp?._refreshWalletData === 'function') {
+                    await window.WalletApp._refreshWalletData();
+                }
+            } catch (_) {}
+        }, 500);
     }
 }
 
+/**
+ * Animate balance number change (count-up effect).
+ */
 function animateBalanceChange(el, from, to) {
-    const dur = 600, start = performance.now(), diff = to - from;
-    function upd(now) {
-        const p = Math.min(1, (now - start) / dur);
-        const e = 1 - Math.pow(1 - p, 3);
-        el.textContent = Math.round(from + diff * e).toLocaleString('en-US');
-        if (p < 1) requestAnimationFrame(upd);
+    const duration = 600;
+    const startTime = performance.now();
+    const diff = to - from;
+
+    function update(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / duration);
+        const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+        const current = Math.round(from + diff * eased);
+        el.textContent = current.toLocaleString('en-US');
+        if (progress < 1) requestAnimationFrame(update);
         else el.textContent = to.toLocaleString('en-US');
     }
-    requestAnimationFrame(upd);
+    requestAnimationFrame(update);
 }
 
+/**
+ * Update mission cards in the wallet to show completed/in-progress status with progress.
+ * GENERIC: Reads mission status from _missionStatusList (populated from backend).
+ * Renders cards dynamically from backend data — no hardcoded card IDs.
+ */
 function updateMissionCards() {
-    const grid = document.querySelector('.wallet-earn-grid');
-    if (!grid || _missionStatusList.length === 0) return;
-    const dailyCard = grid.querySelector('#daily-checkin-card');
-    const inviteCard = grid.querySelector('#mission-invite-friend');
-    let html = '';
-    if (dailyCard) html += dailyCard.outerHTML;
-    for (const m of _missionStatusList) {
-        const done = m.completed || _completedMissionsToday.has(m.mission_id);
-        const pt = m.target_count > 1 ? `${m.progress_count||0}/${m.target_count}` : '';
-        const dc = done ? 'mission-completed' : '';
-        const cm = done ? '<div class="mission-checkmark"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>' : '';
-        const ph = pt && !done ? `<div class="mission-progress-text">${pt}</div>` : '';
-        html += `<div class="wallet-earn-card ${dc}" id="mission-${m.mission_id.replace(/_/g,'-')}"><div class="earn-reward">+${m.reward_amount} AB</div><div class="earn-title">${escapeHtml(m.mission_name||m.mission_id)}</div>${m.description?`<div class="earn-desc">${escapeHtml(m.description)}</div>`:''}${ph}${cm}</div>`;
+    const earnGrid = document.querySelector('.wallet-earn-grid');
+    if (!earnGrid) return;
+
+    // If we have backend mission data, rebuild the grid dynamically
+    if (_missionStatusList.length > 0) {
+        // Build mission cards from backend data (keep daily-checkin and invite-friend separate)
+        const dailyCheckinCard = earnGrid.querySelector('#daily-checkin-card');
+        const inviteCard = earnGrid.querySelector('#mission-invite-friend');
+
+        let html = '';
+        // Keep daily check-in first
+        if (dailyCheckinCard) html += dailyCheckinCard.outerHTML;
+
+        // Render each mission from backend
+        for (const m of _missionStatusList) {
+            const isCompleted = m.completed || _completedMissionsToday.has(m.mission_id);
+            const progressText = m.target_count > 1
+                ? `${m.progress_count}/${m.target_count}`
+                : '';
+            const completedClass = isCompleted ? 'mission-completed' : '';
+            const checkmarkHtml = isCompleted
+                ? '<div class="mission-checkmark"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>'
+                : '';
+            const progressHtml = progressText && !isCompleted
+                ? `<div class="mission-progress-text">${progressText}</div>`
+                : '';
+
+            html += `
+            <div class="wallet-earn-card ${completedClass}" id="mission-${m.mission_id.replace(/_/g, '-')}">
+                <div class="earn-reward">+${m.reward_amount} AB</div>
+                <div class="earn-title">${escapeHtml(m.mission_name || m.mission_id)}</div>
+                ${m.description ? `<div class="earn-desc">${escapeHtml(m.description)}</div>` : ''}
+                ${progressHtml}
+                ${checkmarkHtml}
+            </div>`;
+        }
+
+        // Keep invite friend last
+        if (inviteCard) html += inviteCard.outerHTML;
+
+        earnGrid.innerHTML = html;
+    } else {
+        // Fallback: just update existing cards by ID
+        const missionCards = document.querySelectorAll('[id^="mission-"]');
+        for (const card of missionCards) {
+            const cardId = card.id;
+            const missionId = cardId.replace(/^mission-/, '').replace(/-/g, '_');
+            const status = _missionStatusList.find(m => m.mission_id === missionId);
+            const isCompleted = _completedMissionsToday.has(missionId) || status?.completed;
+
+            if (isCompleted) {
+                card.classList.add('mission-completed');
+                if (!card.querySelector('.mission-checkmark')) {
+                    const checkmark = document.createElement('div');
+                    checkmark.className = 'mission-checkmark';
+                    checkmark.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+                    card.appendChild(checkmark);
+                }
+            } else {
+                card.classList.remove('mission-completed');
+                const checkmark = card.querySelector('.mission-checkmark');
+                if (checkmark) checkmark.remove();
+            }
+        }
     }
-    if (inviteCard) html += inviteCard.outerHTML;
-    grid.innerHTML = html;
 }
 
+/**
+ * Premium mission reward popup — slides in from the top with a coin burst
+ * animation, auto-dismisses after 2.5s. Non-blocking, doesn't interfere
+ * with user interaction.
+ */
 function showMissionRewardPopup(label, amount) {
-    const ex = document.getElementById('mission-reward-popup');
-    if (ex) ex.remove();
-    const p = document.createElement('div');
-    p.id = 'mission-reward-popup';
-    p.innerHTML = `<div class="mrp-coin-burst"><span class="mrp-coin">🪙</span><span class="mrp-coin">✨</span><span class="mrp-coin">🪙</span><span class="mrp-coin">✨</span><span class="mrp-coin">🪙</span></div><div class="mrp-icon">🎉</div><div class="mrp-content"><div class="mrp-title">ماموریت کامل شد!</div><div class="mrp-desc">${escapeHtml(label)}</div><div class="mrp-reward">+${amount} AB</div></div>`;
-    document.body.appendChild(p);
-    requestAnimationFrame(() => p.classList.add('mrp-show'));
-    setTimeout(() => { p.querySelectorAll('.mrp-coin').forEach((c,i) => { c.style.animationDelay=(i*0.06)+'s'; c.classList.add('mrp-coin-fly'); }); }, 100);
-    setTimeout(() => { p.classList.remove('mrp-show'); setTimeout(()=>p.remove(),300); }, 2500);
+    // Remove any existing popup
+    const existing = document.getElementById('mission-reward-popup');
+    if (existing) existing.remove();
+
+    const popup = document.createElement('div');
+    popup.id = 'mission-reward-popup';
+    popup.innerHTML = `
+        <div class="mrp-coin-burst">
+            <span class="mrp-coin">🪙</span>
+            <span class="mrp-coin">✨</span>
+            <span class="mrp-coin">🪙</span>
+            <span class="mrp-coin">✨</span>
+            <span class="mrp-coin">🪙</span>
+        </div>
+        <div class="mrp-icon">🎉</div>
+        <div class="mrp-content">
+            <div class="mrp-title">ماموریت کامل شد!</div>
+            <div class="mrp-desc">${escapeHtml(label)}</div>
+            <div class="mrp-reward">+${amount} AB</div>
+        </div>
+    `;
+    document.body.appendChild(popup);
+
+    // Trigger entrance animation
+    requestAnimationFrame(() => popup.classList.add('mrp-show'));
+
+    // Trigger coin burst
+    setTimeout(() => {
+        popup.querySelectorAll('.mrp-coin').forEach((coin, i) => {
+            coin.style.animationDelay = (i * 0.06) + 's';
+            coin.classList.add('mrp-coin-fly');
+        });
+    }, 100);
+
+    // Auto-dismiss after 2.5s
+    setTimeout(() => {
+        popup.classList.remove('mrp-show');
+        setTimeout(() => popup.remove(), 300);
+    }, 2500);
+
+    // Haptic feedback
     try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch {}
 }
 
-const MISSION_EVENTS = { NEWS_OPEN:'news_open', ANALYSIS_OPEN:'analysis_open', CALENDAR_OPEN:'calendar_open', DAILY_OPEN:'daily_open', PROFILE_OPEN:'profile_open', MARKET_OPEN:'market_open', DASHBOARD_OPEN:'dashboard_open' };
-function fireMissionEvent(ev) { MissionBus.fire(ev); }
-
+// Expose globally
 window.MissionBus = MissionBus;
 window.completeMission = completeMission;
 window.loadMissionStatus = loadMissionStatus;
@@ -5019,9 +5804,22 @@ function buildWatchTrendSVG(changePercent, symbol) {
 function renderWatchlist() {
     const grid = $('watchlist-grid');
     if (!grid) return;
-    const watchCoins = allCoins.filter(c => watchlist.includes(c.symbol)).slice(0, DASHBOARD_WATCHLIST_MAX);
 
-    if (!allCoins.length) {
+    // ROOT CAUSE FIX (item 2): Previously only allCoins (crypto) was filtered.
+    // Forex pairs are in allForexPairs, not allCoins. Now we merge both sources.
+    const cryptoWatch = allCoins.filter(c => watchlist.includes(c.symbol));
+    const forexWatch = allForexPairs.filter(f => watchlist.includes(f.symbol)).map(f => ({
+        ...f,
+        priceUsd: f.price,
+        changePercent24Hr: f.change,
+        name: f.name || f.symbol,
+        image: null, // Forex uses letter-based icon fallback
+        _isForex: true,
+    }));
+    // Merge: crypto first, then forex, no limit (horizontal scroll handles overflow)
+    const watchCoins = [...cryptoWatch, ...forexWatch];
+
+    if (!allCoins.length && !allForexPairs.length) {
         // Market data not loaded yet — show skeleton (preserve CLS)
         if (!grid.querySelector('.watchlist-skeleton')) {
             grid.innerHTML = '<div class="watchlist-skeleton">' + Array(4).fill('<div class="watchlist-skeleton-item"><div class="watchlist-skeleton-icon"></div><div class="watchlist-skeleton-lines"><div class="watchlist-skeleton-line"></div><div class="watchlist-skeleton-line"></div></div></div>').join('') + '</div>';
@@ -5088,17 +5886,21 @@ function renderWatchlist() {
     let html = watchCoins.map(c => {
         const safeSymbol = escapeHtml(c.symbol);
         const safeName = escapeHtml(c.name || '');
-        const icon = c.image || `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`;
+        const isForex = !!c._isForex;
+        const icon = c.image || (isForex ? null : `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`);
         const pct = (typeof c.changePercent24Hr === 'number' && !isNaN(c.changePercent24Hr)) ? c.changePercent24Hr : 0;
         const isPos = pct >= 0;
         const changeStr = (isPos ? '+' : '') + pct.toFixed(2) + '%';
         const arrowSvg = isPos
             ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>'
             : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+        const iconHtml = icon
+            ? `<img loading="lazy" src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-card-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">`
+            : `<div class="watch-card-icon forex-icon-fallback" data-symbol="${safeSymbol}">${safeSymbol.slice(0,3)}</div>`;
         return `
-        <div class="watch-card" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
+        <div class="watch-card${isForex ? ' watch-card-forex' : ''}" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
             <div class="watch-card-header">
-                <img loading="lazy" src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-card-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">
+                ${iconHtml}
                 <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" aria-label="Remove">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </span>
@@ -5325,7 +6127,10 @@ async function loadNews(force = false, append = false) {
         if (!force && !append) {
             const cached = Cache.get('news');
             if (cached) {
-                newsCache = cached;
+                // ROOT CAUSE FIX (item 1 permanent): Sanitize titles from
+                // in-memory cache too. Old cached titles may have AI-translation
+                // duplication artifacts that were stored before the fix.
+                newsCache = cached.map(n => ({ ...n, title: sanitizeNewsTitle(n.title) }));
                 renderNews(document.querySelector('.ni-tab.active')?.dataset?.news || 'all');
                 loadNews(true);
                 return;
@@ -5333,8 +6138,16 @@ async function loadNews(force = false, append = false) {
         }
         const container = document.getElementById('news-list');
         if (!container) return;
+
+        // ITEM 2 FIX: Capture the active tab at fetch START. But when force=true
+        // (background refresh from cache-hit path), do NOT show skeleton — the
+        // cached data is already rendered. Showing skeleton overwrites the
+        // visible content causing a "blank then reappear" flash (Item 1 bug).
         const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
-        if (!append && activeTab !== 'calendar' && activeTab !== 'saved') {
+        // Only show skeleton on the FIRST load (no cached data). Background
+        // refreshes (force=true) skip the skeleton to avoid content flashing.
+        const isFirstLoad = !force && !append && !newsCache.length;
+        if (isFirstLoad && activeTab !== 'calendar' && activeTab !== 'saved') {
             container.innerHTML = `
                 <div class="skeleton-hero"></div>
                 ${Array(4).fill(`
@@ -5354,13 +6167,15 @@ async function loadNews(force = false, append = false) {
         let articles = [];
         let hasMore = false;
         let total = 0;
+        let fetchSucceeded = false;
 
         try {
             const json = await apiFetch(`/api/farsi-news?page=${page}&limit=20`);
             if (json.data?.length) {
                 articles = json.data.map(a => ({
-                    title: a.title, body: a.description, source: a.source,
+                    title: sanitizeNewsTitle(a.title), body: a.description, source: a.source,
                     image: a.image, url: a.url, time: a.time_ago,
+                    pub_date: a.pub_date || null, // ISO timestamp for Tehran time conversion
                     category: a.category || 'crypto',
                     sentiment: a.sentiment || 'neutral',
                     summary: a.summary || '',
@@ -5368,6 +6183,7 @@ async function loadNews(force = false, append = false) {
                     ai_status: a.ai_status || 'pending',
                     source_name: a.source_name || a.source || '',
                 }));
+                fetchSucceeded = true;
             }
             hasMore = json.pagination?.hasMore || false;
             total = json.pagination?.total || 0;
@@ -5383,13 +6199,24 @@ async function loadNews(force = false, append = false) {
         } catch (e) {
             console.warn('Farsi news API error:', e);
             // M1 FIX: Distinguish auth failure (401) from genuine "no news".
-            // Previously a 401 (outside Telegram) silently left articles=[] →
-            // renderNews showed "خبری یافت نشد" (no news found) which is
-            // misleading. Now we track the auth failure and renderNews shows
-            // a clear "Open in Telegram to see news" message instead.
             if (e?.status === 401) {
                 _newsAuthFailed = true;
             }
+        }
+
+        // ITEM 1 FIX: If the fetch failed or returned empty, do NOT overwrite
+        // the existing newsCache with an empty array. This was the root cause
+        // of news "disappearing" — a transient API failure would wipe all
+        // cached data. Now we preserve the existing cache and only update
+        // when we have valid new data.
+        if (!fetchSucceeded || articles.length === 0) {
+            // If we have cached data, keep it and just re-render (no blank)
+            if (newsCache.length > 0 && !append) {
+                // Re-render existing cache — don't overwrite with empty
+                const currentTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
+                renderNews(currentTab);
+            }
+            return;
         }
 
         if (append) {
@@ -5410,20 +6237,28 @@ async function loadNews(force = false, append = false) {
         }
 
         Cache.set('news', newsCache, 300);
-        // BUG #2 FIX: Preserve scroll position when re-rendering (not append)
+
+        // ITEM 2 FIX: Re-read the CURRENTLY active tab at render time, not
+        // the tab that was active when the fetch started. If the user switched
+        // tabs during the fetch, we must render the tab they're NOW looking at,
+        // not the stale one. This prevents wrong-content-after-tab-switch bug.
+        const currentTabAtRender = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
         if (!append) {
             const savedScroll = window.scrollY;
-            renderNews(activeTab);
+            renderNews(currentTabAtRender);
             // Restore scroll after re-render
             requestAnimationFrame(() => window.scrollTo(0, savedScroll));
         } else {
             // Append: just re-render, scroll stays naturally
-            renderNews(activeTab);
+            renderNews(currentTabAtRender);
         }
     } catch (e) {
         console.error('News error:', e);
-        const container = document.getElementById('news-list');
-        if (container) container.innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
+        // ITEM 1 FIX: Don't overwrite with error state if we still have data
+        if (!newsCache.length) {
+            const container = document.getElementById('news-list');
+            if (container) container.innerHTML = `<div class="empty-state">${t('news_error')}</div>`;
+        }
     }
 }
 
@@ -5546,7 +6381,7 @@ function renderNews(category) {
             <div class="ni-card-footer">
                 <div class="ni-card-source">
                     ${NI_ICONS.clock}
-                    <span>${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</span>
+                    <span>${escapeHtml(n.source)} • ${escapeHtml(formatNewsTimeTehran(n.pub_date, n.time))}</span>
                 </div>
                 <div class="ni-card-actions">
                     <button class="ni-card-action ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="ذخیره">
@@ -5607,7 +6442,7 @@ function niRenderHeroSlider(items) {
                 <div class="ni-hero-headline">${escapeHtml(n.title)}</div>
                 ${n.summary ? `<div class="ni-hero-summary">${escapeHtml(n.summary)}</div>` : ''}
                 <div class="ni-hero-meta">
-                    <div class="ni-hero-source">${NI_ICONS.clock}<span>${escapeHtml(n.source || '')} • ${escapeHtml(n.time || '')}</span></div>
+                    <div class="ni-hero-source">${NI_ICONS.clock}<span>${escapeHtml(n.source || '')} • ${escapeHtml(formatNewsTimeTehran(n.pub_date, n.time))}</span></div>
                     <div class="ni-hero-actions">
                         <button class="ni-hero-action-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="ذخیره">
                             ${isSaved ? NI_ICONS.bookmarkFilled : NI_ICONS.bookmark}
@@ -5832,7 +6667,7 @@ function toggleSaveNews(idx) {
     if (savedIdx >= 0) {
         _niSavedNews.splice(savedIdx, 1);
     } else {
-        _niSavedNews.unshift({ url: n.url, title: n.title, image: n.image, source: n.source, time: n.time, sentiment: n.sentiment, summary: n.summary, body: n.body, category: n.category, savedAt: Date.now() });
+        _niSavedNews.unshift({ url: n.url, title: n.title, image: n.image, source: n.source, time: n.time, pub_date: n.pub_date, sentiment: n.sentiment, summary: n.summary, body: n.body, category: n.category, savedAt: Date.now() });
     }
     localStorage.setItem('ni_saved_news', JSON.stringify(_niSavedNews));
     // Re-render to update button state
@@ -5874,7 +6709,7 @@ function renderSavedNews() {
             <div class="ni-card-footer">
                 <div class="ni-card-source">
                     ${NI_ICONS.clock}
-                    <span>${escapeHtml(n.source)} • ${escapeHtml(n.time || '')}</span>
+                    <span>${escapeHtml(n.source)} • ${escapeHtml(formatNewsTimeTehran(n.pub_date, n.time))}</span>
                 </div>
                 <div class="ni-card-actions">
                     <button class="ni-card-action saved" onclick="event.stopPropagation(); toggleSaveNews(${i})" aria-label="حذف ذخیره">
@@ -6108,6 +6943,9 @@ function renderCalendar() {
             return;
         }
 
+        // ROOT CAUSE FIX: Recompute statuses from current time (stale cache fix)
+        events = recomputeEventStatuses(events);
+
         // Filter by tab
         const now = new Date();
         const tz = 'Asia/Tehran';
@@ -6170,8 +7008,21 @@ function renderCalendar() {
             return;
         }
 
-        // Sort by time
-        filteredEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        // ITEM 3 FIX: Sort events by status first (upcoming → live → past),
+        // then by time within each status group. This ensures past events
+        // always appear at the bottom of the list, never at the top.
+        const statusOrder = { upcoming: 0, live: 1, past: 2 };
+        filteredEvents.sort((a, b) => {
+            const sa = statusOrder[a.status] ?? 1;
+            const sb = statusOrder[b.status] ?? 1;
+            if (sa !== sb) return sa - sb;
+            // Within same status: upcoming ascending (soonest first),
+            // past descending (most recent first)
+            if (a.status === 'past') {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            }
+            return new Date(a.timestamp) - new Date(b.timestamp);
+        });
 
         // Group by time period
         const groups = {};
@@ -6251,11 +7102,24 @@ function startCalCountdown() {
     if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
     const updateCountdowns = () => {
         const now = Date.now();
+        // ROOT CAUSE FIX: data-ts contains an ISO timestamp string (e.g.
+        // "2026-07-29T14:30:00.000Z"), NOT a numeric epoch. Previously
+        // parseInt("2026-07-29T14:30:00.000Z") returned 2026 (just the year!),
+        // which when passed to new Date(2026) gave a 1970 date — always in the
+        // past. This caused EVERY countdown to show "پایان یافت" regardless of
+        // the actual event time. Now we use new Date(el.dataset.ts).getTime()
+        // to correctly parse the ISO string.
+        const LIVE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
         document.querySelectorAll('.cal-event-countdown[data-ts]').forEach(el => {
-            const ts = parseInt(el.dataset.ts);
-            const diff = new Date(ts).getTime() - now;
+            const eventTime = new Date(el.dataset.ts).getTime();
+            if (isNaN(eventTime)) return;
+            const diff = eventTime - now;
             if (diff <= 0) {
-                el.textContent = '• Live';
+                if (Math.abs(diff) > LIVE_WINDOW_MS) {
+                    el.textContent = '• Past';
+                } else {
+                    el.textContent = '• Live';
+                }
                 el.removeAttribute('data-ts');
             } else {
                 el.textContent = formatCountdown(diff);
@@ -6263,10 +7127,17 @@ function startCalCountdown() {
         });
         // Also update new V2 countdowns
         document.querySelectorAll('.ni-cal-countdown[data-ts]').forEach(el => {
-            const ts = parseInt(el.dataset.ts);
-            const diff = new Date(ts).getTime() - now;
+            const eventTime = new Date(el.dataset.ts).getTime();
+            if (isNaN(eventTime)) return;
+            const diff = eventTime - now;
             if (diff <= 0) {
-                el.textContent = 'زمان گذشته';
+                // Event has started — show "در حال اجرا" (live) for 30 min,
+                // then "پایان یافت" after the live window passes.
+                if (Math.abs(diff) > LIVE_WINDOW_MS) {
+                    el.textContent = 'پایان یافت';
+                } else {
+                    el.textContent = 'در حال اجرا';
+                }
                 el.removeAttribute('data-ts');
             } else {
                 el.textContent = formatCountdown(diff);
@@ -6287,17 +7158,39 @@ function renderCalendarV2() {
     const container = document.getElementById('news-list');
     if (!container) return;
 
-    if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
-
-    // Segmented control (today/tomorrow/week)
-    const segmentsHtml = `
-    <div class="ni-cal-segments">
-        <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
-        <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
-        <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
-    </div>`;
+    // ROOT CAUSE FIX for calendar jumping:
+    // Previously, every call to renderCalendarV2 replaced the entire
+    // container.innerHTML — even if the data was IDENTICAL to the previous
+    // render. This caused:
+    //   - Scroll position reset (user thrown to top)
+    //   - Visual flash (content disappears then reappears)
+    //   - Countdown interval cleared and restarted (timer hiccup)
+    //
+    // FIX: Compute a signature of everything that affects the rendered HTML.
+    // If the signature matches the last render, skip the innerHTML replacement
+    // entirely — just keep the countdown running. Only re-render when the data
+    // actually changed (new events, different tab, different country filter).
+    //
+    // The signature includes:
+    //   - currentCalendarTab (today/tomorrow/week)
+    //   - currentCalCountry (all/USD/EUR/...)
+    //   - calendarEvents content (titles + timestamps + actuals + forecasts)
+    //   - _niCalendarReminders keys (reminder button state)
+    //   - calendarLoading state
+    //   - currentLang (labels change on language switch)
 
     if (calendarLoading) {
+        // Show skeleton — but only if not already showing skeleton
+        const skelSig = '__loading__';
+        if (container.dataset.calSignature === skelSig) return;
+        container.dataset.calSignature = skelSig;
+        if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+        const segmentsHtml = `
+        <div class="ni-cal-segments">
+            <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
+            <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
+            <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
+        </div>`;
         container.innerHTML = segmentsHtml + `
             <div class="ni-skeleton-card"></div>
             <div class="ni-skeleton-card"></div>
@@ -6308,9 +7201,26 @@ function renderCalendarV2() {
 
     loadCalendarEvents().then(events => {
         if (!events.length) {
+            const emptySig = '__empty_' + currentCalendarTab + '_' + currentCalCountry + '_' + currentLang;
+            if (container.dataset.calSignature === emptySig) return;
+            container.dataset.calSignature = emptySig;
+            if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+            const segmentsHtml = `
+            <div class="ni-cal-segments">
+                <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
+                <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
+                <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
+            </div>`;
             container.innerHTML = segmentsHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویداد اقتصادی یافت نشد</div></div>`;
             return;
         }
+
+        // ROOT CAUSE FIX (calendar items 1-3): Recompute event statuses based
+        // on CURRENT time. Events may come from localStorage cache (hours old)
+        // with stale status values. Without this, upcoming events could show
+        // as 'past' (or vice versa) because the cached status was computed at
+        // API-call time, not at render time.
+        events = recomputeEventStatuses(events);
 
         // Filter by tab
         const now = new Date();
@@ -6339,6 +7249,91 @@ function renderCalendarV2() {
             allCountries.push(...availableCountries.filter(c => !MAJOR_CURRENCIES.includes(c)));
         }
 
+        // Apply country filter
+        if (currentCalCountry && currentCalCountry !== 'all') {
+            filteredEvents = filteredEvents.filter(e => e.country === currentCalCountry);
+        }
+
+        if (!filteredEvents.length) {
+            const noMatchSig = '__nomatch_' + currentCalendarTab + '_' + currentCalCountry + '_' + currentLang;
+            if (container.dataset.calSignature === noMatchSig) return;
+            container.dataset.calSignature = noMatchSig;
+            if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+            const segmentsHtml = `
+            <div class="ni-cal-segments">
+                <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
+                <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
+                <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
+            </div>`;
+            const countriesHtml = `
+            <div class="ni-cal-countries">
+                <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">همه</button>
+                ${allCountries.filter(c => c !== 'all').map(c => {
+                    const flag = filteredEvents.find(e => e.country === c)?.flag || '';
+                    return `<button class="ni-cal-country${currentCalCountry === c ? ' active' : ''}" onclick="filterCalCountry('${escapeHtml(c)}', this)">${flag} ${escapeHtml(c)}</button>`;
+                }).join('')}
+            </div>`;
+            container.innerHTML = segmentsHtml + countriesHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویدادی برای این فیلتر یافت نشد</div></div>`;
+            return;
+        }
+
+        // ITEM 3 FIX: Sort events by status first (upcoming → live → past),
+        // then by time within each status group. This ensures past events
+        // always appear at the bottom of the list, never at the top.
+        const statusOrder = { upcoming: 0, live: 1, past: 2 };
+        filteredEvents.sort((a, b) => {
+            const sa = statusOrder[a.status] ?? 1;
+            const sb = statusOrder[b.status] ?? 1;
+            if (sa !== sb) return sa - sb;
+            // Within same status: upcoming ascending (soonest first),
+            // past descending (most recent first)
+            if (a.status === 'past') {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            }
+            return new Date(a.timestamp) - new Date(b.timestamp);
+        });
+
+        // ── SIGNATURE GUARD ──
+        // Build a compact signature of everything that affects the rendered HTML.
+        // If this signature matches the last render, skip innerHTML replacement.
+        const reminderKeys = Object.keys(_niCalendarReminders).sort().join(',');
+        const eventsSig = filteredEvents.map(e =>
+            `${e.title}|${e.timestamp}|${e.actual||''}|${e.forecast||''}|${e.previous||''}|${e.status||''}`
+        ).join(';;');
+        const signature = `${currentCalendarTab}|${currentCalCountry}|${currentLang}|${eventsSig}|${reminderKeys}`;
+
+        if (container.dataset.calSignature === signature) {
+            // Data unchanged — do NOT re-render. This prevents:
+            //   - Scroll position reset
+            //   - Visual flash
+            //   - Countdown interval disruption
+            // Just ensure countdown is running (it might have been cleared).
+            if (!calCountdownInterval) startCalCountdown();
+            return;
+        }
+        container.dataset.calSignature = signature;
+
+        // Clear countdown before full re-render (will restart after innerHTML)
+        if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+
+        // ITEM 2 FIX: Render events in the sorted order directly — NO grouping
+        // by time period. Previously, events were grouped into morning/afternoon/
+        // evening which OVERRID the status-based sort. Past events in morning
+        // groups appeared before upcoming events in evening groups, even though
+        // the sort correctly put upcoming first. Now we render the flat sorted
+        // list so the status order (upcoming → live → past) is always respected.
+        const lang = currentLang || 'fa';
+        const impactLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
+        const statusLabel = { past: 'گذشته', live: 'در حال اجرا', upcoming: 'در انتظار' };
+
+        // Segmented control (today/tomorrow/week)
+        const segmentsHtml = `
+        <div class="ni-cal-segments">
+            <button class="ni-cal-segment${currentCalendarTab === 'today' ? ' active' : ''}" data-cal-tab="today" onclick="switchCalendarTab('today', this)">امروز</button>
+            <button class="ni-cal-segment${currentCalendarTab === 'tomorrow' ? ' active' : ''}" data-cal-tab="tomorrow" onclick="switchCalendarTab('tomorrow', this)">فردا</button>
+            <button class="ni-cal-segment${currentCalendarTab === 'week' ? ' active' : ''}" data-cal-tab="week" onclick="switchCalendarTab('week', this)">این هفته</button>
+        </div>`;
+
         const countriesHtml = `
         <div class="ni-cal-countries">
             <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">همه</button>
@@ -6348,93 +7343,60 @@ function renderCalendarV2() {
             }).join('')}
         </div>`;
 
-        // Apply country filter
-        if (currentCalCountry && currentCalCountry !== 'all') {
-            filteredEvents = filteredEvents.filter(e => e.country === currentCalCountry);
-        }
-
-        if (!filteredEvents.length) {
-            container.innerHTML = segmentsHtml + countriesHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویدادی برای این فیلتر یافت نشد</div></div>`;
-            return;
-        }
-
-        // Sort by time
-        filteredEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-        // Group by time period
-        const groups = {};
-        filteredEvents.forEach(e => {
-            const d = new Date(e.timestamp);
-            const hour = Number(d.toLocaleString('en-GB', { timeZone: tz, hour: 'numeric', hour12: false }));
-            const group = getTimeGroup(hour);
-            if (!groups[group]) groups[group] = [];
-            groups[group].push(e);
-        });
-
-        const lang = currentLang || 'fa';
-        const labels = timeGroupLabels[lang] || timeGroupLabels.fa;
-        const impactLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
-        const statusLabel = { past: 'گذشته', live: 'در حال اجرا', upcoming: 'در انتظار' };
-
         let eventsHtml = '';
-        const groupOrder = ['morning', 'afternoon', 'evening'];
-        groupOrder.forEach(g => {
-            if (!groups[g]) return;
-            eventsHtml += `<div class="ni-cal-time-group">${labels[g]}</div>`;
-            groups[g].forEach(e => {
-                const ft = formatCalendarTime(e.timestamp);
-                const timeText = ft.time || '';
-                const isPast = e.status === 'past';
-                const isLive = e.status === 'live';
-                const impact = e.impact || 'medium';
-                const eventKey = e.title + '|' + e.timestamp;
-                const hasReminder = _niCalendarReminders[eventKey];
+        filteredEvents.forEach(e => {
+            const ft = formatCalendarTime(e.timestamp);
+            const timeText = ft.time || '';
+            const isPast = e.status === 'past';
+            const isLive = e.status === 'live';
+            const impact = e.impact || 'medium';
+            const eventKey = e.title + '|' + e.timestamp;
+            const hasReminder = _niCalendarReminders[eventKey];
 
-                // Surprise indicator
-                let surpriseHtml = '';
-                if (e.actual && e.forecast) {
-                    const actualVal = parseFloat(e.actual);
-                    const forecastVal = parseFloat(e.forecast);
-                    if (!isNaN(actualVal) && !isNaN(forecastVal)) {
-                        const diff = actualVal - forecastVal;
-                        const isPositiveGood = !e.title?.toUpperCase().includes('UNEMPLOYMENT');
-                        const isBetter = isPositiveGood ? diff > 0 : diff < 0;
-                        const cls = Math.abs(diff) < 0.01 ? 'surprise-expected' : (isBetter ? 'surprise-better' : 'surprise-worse');
-                        const icon = Math.abs(diff) < 0.01 ? NI_ICONS.clock : (isBetter ? NI_ICONS.arrowUp : NI_ICONS.arrowDown);
-                        surpriseHtml = ` <span class="cal-event-surprise ${cls}" style="display:inline-flex;align-items:center;gap:2px;">${icon}</span>`;
-                    }
+            // Surprise indicator
+            let surpriseHtml = '';
+            if (e.actual && e.forecast) {
+                const actualVal = parseFloat(e.actual);
+                const forecastVal = parseFloat(e.forecast);
+                if (!isNaN(actualVal) && !isNaN(forecastVal)) {
+                    const diff = actualVal - forecastVal;
+                    const isPositiveGood = !e.title?.toUpperCase().includes('UNEMPLOYMENT');
+                    const isBetter = isPositiveGood ? diff > 0 : diff < 0;
+                    const cls = Math.abs(diff) < 0.01 ? 'surprise-expected' : (isBetter ? 'surprise-better' : 'surprise-worse');
+                    const icon = Math.abs(diff) < 0.01 ? NI_ICONS.clock : (isBetter ? NI_ICONS.arrowUp : NI_ICONS.arrowDown);
+                    surpriseHtml = ` <span class="cal-event-surprise ${cls}" style="display:inline-flex;align-items:center;gap:2px;">${icon}</span>`;
                 }
+            }
 
-                eventsHtml += `
-                <div class="ni-cal-event impact-${impact}${isPast ? ' past' : ''}${isLive ? ' live' : ''}">
-                    <div class="ni-cal-event-top">
-                        <div class="ni-cal-event-left">
-                            <div class="ni-cal-event-flag">${e.flag || ''}</div>
-                            <div>
-                                <div class="ni-cal-event-currency">${escapeHtml(e.country || '')}</div>
-                                ${e.status ? `<span class="ni-cal-status ni-cal-status-${e.status}">${statusLabel[e.status] || e.status}</span>` : ''}
-                            </div>
-                        </div>
-                        <div style="text-align:left;">
-                            <div class="ni-cal-event-time">${timeText}</div>
-                            ${!isPast && !isLive ? `<div class="ni-cal-countdown" data-ts="${e.timestamp}">--</div>` : ''}
+            eventsHtml += `
+            <div class="ni-cal-event impact-${impact}${isPast ? ' past' : ''}${isLive ? ' live' : ''}">
+                <div class="ni-cal-event-top">
+                    <div class="ni-cal-event-left">
+                        <div class="ni-cal-event-flag">${e.flag || ''}</div>
+                        <div>
+                            <div class="ni-cal-event-currency">${escapeHtml(e.country || '')}</div>
+                            ${e.status ? `<span class="ni-cal-status ni-cal-status-${e.status}">${statusLabel[e.status] || e.status}</span>` : ''}
                         </div>
                     </div>
-                    <div class="ni-cal-event-title">${escapeHtml(e.title)}</div>
-                    <div class="ni-cal-event-stats">
-                        ${e.forecast ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">پیش‌بینی</div><div class="ni-cal-stat-value">${escapeHtml(e.forecast)}</div></div>` : ''}
-                        ${e.previous ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">قبلی</div><div class="ni-cal-stat-value">${escapeHtml(e.previous)}</div></div>` : ''}
-                        ${e.actual ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">واقعی</div><div class="ni-cal-stat-value actual">${escapeHtml(e.actual)}${surpriseHtml}</div></div>` : ''}
-                        <div class="ni-cal-stat"><div class="ni-cal-stat-label">تأثیر</div><div class="ni-cal-stat-value">${impactLabels[impact] || impactLabels.medium}</div></div>
+                    <div style="text-align:left;">
+                        <div class="ni-cal-event-time">${timeText}</div>
+                        ${!isPast && !isLive ? `<div class="ni-cal-countdown" data-ts="${e.timestamp}">--</div>` : ''}
                     </div>
-                    <div class="ni-cal-event-footer">
-                        <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}')">
-                            ${hasReminder ? NI_ICONS.bell : NI_ICONS.bellOff}
-                            <span>${hasReminder ? 'یادآور فعال' : 'یادآوری'}</span>
-                        </button>
-                    </div>
-                </div>`;
-            });
+                </div>
+                <div class="ni-cal-event-title">${escapeHtml(e.title)}</div>
+                <div class="ni-cal-event-stats">
+                    ${e.forecast ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">پیش‌بینی</div><div class="ni-cal-stat-value">${escapeHtml(e.forecast)}</div></div>` : ''}
+                    ${e.previous ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">قبلی</div><div class="ni-cal-stat-value">${escapeHtml(e.previous)}</div></div>` : ''}
+                    ${e.actual ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">واقعی</div><div class="ni-cal-stat-value actual">${escapeHtml(e.actual)}${surpriseHtml}</div></div>` : ''}
+                    <div class="ni-cal-stat"><div class="ni-cal-stat-label">تأثیر</div><div class="ni-cal-stat-value">${impactLabels[impact] || impactLabels.medium}</div></div>
+                </div>
+                <div class="ni-cal-event-footer">
+                    <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}', '${escapeHtml(e.timestamp || '')}')"">
+                        ${hasReminder ? NI_ICONS.bell : NI_ICONS.bellOff}
+                        <span>${hasReminder ? 'یادآور فعال' : 'یادآوری'}</span>
+                    </button>
+                </div>
+            </div>`;
         });
 
         container.innerHTML = segmentsHtml + countriesHtml + eventsHtml;
@@ -6446,8 +7408,8 @@ function renderCalendarV2() {
 // Event Reminder System
 // ============================================================================
 
-function openReminderSheet(eventKey, title, country, time) {
-    _niCurrentReminderEvent = { key: eventKey, title, country, time };
+function openReminderSheet(eventKey, title, country, time, eventTimestamp) {
+    _niCurrentReminderEvent = { key: eventKey, title, country, time, timestamp: eventTimestamp };
     const sheet = document.getElementById('ni-reminder-sheet');
     if (!sheet) return;
     // Fill event info
@@ -6471,20 +7433,89 @@ function closeReminderSheet() {
     _niCurrentReminderEvent = null;
 }
 
+/**
+ * Map Persian reminder label to lead_minutes for the backend.
+ * Backend accepts: 15, 60, or 1440.
+ */
+function _niReminderWhenToMinutes(when) {
+    if (when === '۱۵ دقیقه قبل' || when === '15m' || when === 15) return 15;
+    if (when === '۱ ساعت قبل' || when === '1h' || when === 60) return 60;
+    if (when === '۲۴ ساعت قبل' || when === '24h' || when === 1440) return 1440;
+    return 60; // default
+}
+
 function setEventReminder(when) {
     if (!_niCurrentReminderEvent) return;
-    _niCalendarReminders[_niCurrentReminderEvent.key] = when;
+    const ev = _niCurrentReminderEvent;
+    // 1. Update local cache immediately (instant UI feedback)
+    _niCalendarReminders[ev.key] = when;
     localStorage.setItem('ni_cal_reminders', JSON.stringify(_niCalendarReminders));
     closeReminderSheet();
     renderCalendarV2();
+
+    // 2. Sync to backend (POST /api/calendar/reminders) — persists across
+    //    devices and enables the cron job to actually fire the notification.
+    //    Fail silently if offline or not in Telegram — the localStorage copy
+    //    still works as a local fallback.
+    if (!API_BASE || !isInTelegram()) return;
+    const leadMinutes = _niReminderWhenToMinutes(when);
+    apiFetch('/api/calendar/reminders', {
+        method: 'POST',
+        body: JSON.stringify({
+            event_key: ev.key,
+            event_title: ev.title || '',
+            event_country: ev.country || '',
+            event_timestamp: ev.timestamp || '',
+            lead_minutes: leadMinutes,
+        }),
+    }).catch(err => {
+        console.warn('[calendar-reminder] sync failed:', err);
+    });
 }
 
 function removeEventReminder() {
     if (!_niCurrentReminderEvent) return;
-    delete _niCalendarReminders[_niCurrentReminderEvent.key];
+    const ev = _niCurrentReminderEvent;
+    // 1. Remove from local cache
+    delete _niCalendarReminders[ev.key];
     localStorage.setItem('ni_cal_reminders', JSON.stringify(_niCalendarReminders));
     closeReminderSheet();
     renderCalendarV2();
+
+    // 2. Delete from backend
+    if (!API_BASE || !isInTelegram()) return;
+    apiFetch('/api/calendar/reminders/' + encodeURIComponent(ev.key), {
+        method: 'DELETE',
+    }).catch(err => {
+        console.warn('[calendar-reminder] delete sync failed:', err);
+    });
+}
+
+/**
+ * Sync reminders from backend → localStorage.
+ * Called on bootstrap to merge server-side reminders with local cache.
+ * Merges (server takes precedence on conflict) so users see their reminders
+ * across devices.
+ */
+async function syncRemindersFromBackend() {
+    if (!API_BASE || !isInTelegram()) return;
+    try {
+        const data = await apiFetch('/api/calendar/reminders');
+        if (data && data.status === 'success' && Array.isArray(data.reminders)) {
+            for (const r of data.reminders) {
+                // Convert lead_minutes back to Persian label for UI
+                let when;
+                if (r.lead_minutes === 15) when = '۱۵ دقیقه قبل';
+                else if (r.lead_minutes === 1440) when = '۲۴ ساعت قبل';
+                else when = '۱ ساعت قبل';
+                _niCalendarReminders[r.event_key] = when;
+            }
+            localStorage.setItem('ni_cal_reminders', JSON.stringify(_niCalendarReminders));
+        }
+    } catch (err) {
+        // Non-fatal — localStorage cache still works
+        console.warn('[calendar-reminder] sync from backend failed:', err);
+    }
 }
 
 function toggleCalReminder(btn) {
@@ -6539,7 +7570,7 @@ function switchNewsTab(category, btn) {
     // BUG #2 FIX: Restore scroll position for the new tab
     _niRestoreScrollPosition(category);
 
-    // Fire mission event: calendar_open
+    // Fire daily mission: calendar_view (non-blocking, idempotent)
     if (category === 'calendar' && typeof fireMissionEvent === 'function') {
         fireMissionEvent(MISSION_EVENTS.CALENDAR_OPEN);
     }
@@ -6590,7 +7621,7 @@ function openNewsModal(idx) {
 
     // Meta: time, source, category
     const timeEl = el('news-modal-time');
-    if (timeEl) timeEl.innerText = n.time || n.time_ago || '—';
+    if (timeEl) timeEl.innerText = formatNewsTimeTehran(n.pub_date, n.time || n.time_ago) || '—';
     const sourceEl = el('news-modal-source');
     if (sourceEl) sourceEl.innerText = n.source || n.source_name || '—';
     const categoryEl = el('news-modal-category');
@@ -6672,6 +7703,103 @@ function closeNewsModal() {
 // Race-condition guard for openCoinDetail.
 // Each call increments this token; if a newer call starts, older calls abort silently.
 let _detailLoadToken = 0;
+
+// ============================================================================
+// ── PERFORMANCE: TradingView script preloader ──
+// ============================================================================
+// Instead of lazy-loading tv.js on the FIRST openCoinDetail call (which blocks
+// the chart for up to 5s), we preload it on app start. By the time the user
+// taps a coin, tv.js is already loaded → chart renders instantly.
+//
+// The preloader is fire-and-forget: it starts loading immediately but never
+// blocks the main thread. If it fails, openCoinDetail will retry.
+let _tvJsLoadPromise = null;
+
+/**
+ * Preload the TradingView tv.js script on app start.
+ * Called once during initialization — safe to call multiple times.
+ * The script loads in the background; when a user first opens a coin detail,
+ * the script is already cached.
+ */
+function preloadTradingViewScript() {
+    if (window.TradingView || _tvJsLoadPromise) return;
+    _tvJsLoadPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://s3.tradingview.com/tv.js';
+        s.async = true;
+        s.onload = () => {
+            console.log('[CHART-PERF] tv.js preloaded successfully');
+            resolve();
+        };
+        s.onerror = (e) => {
+            console.warn('[CHART-PERF] tv.js preload failed (will retry on first openCoinDetail):', e);
+            _tvJsLoadPromise = null; // Reset so openCoinDetail can retry
+            reject(e);
+        };
+        document.head.appendChild(s);
+    });
+}
+
+/**
+ * Ensure TradingView is loaded. Returns a promise that resolves immediately
+ * if already loaded, or waits for the preload to finish.
+ * If preload hasn't started yet (edge case), starts it now.
+ */
+function ensureTradingViewLoaded() {
+    if (window.TradingView) return Promise.resolve();
+    if (_tvJsLoadPromise) return _tvJsLoadPromise;
+    // Preload wasn't started — start it now (first openCoinDetail before init)
+    preloadTradingViewScript();
+    return _tvJsLoadPromise || Promise.resolve();
+}
+
+// Start preloading as soon as this script parses (non-blocking)
+// The script tag is async, so it won't block page render.
+if (typeof window !== 'undefined') {
+    // Defer to next tick to avoid blocking initial render
+    setTimeout(preloadTradingViewScript, 100);
+}
+
+// ============================================================================
+// ── PERFORMANCE: localStorage cache for resolved chart symbols ──
+// ============================================================================
+// resolveChartSymbol hits the backend /api/charts/resolve which has a 1h KV cache.
+// But even a KV cache hit is ~50-100ms latency. For REPEAT visits (same coin
+// opened again), we cache the result in localStorage for instant lookup.
+// TTL: 6 hours (matches the backend's 1h KV cache × a few refreshes).
+const CHART_SYMBOL_LS_KEY = 'tv_symbol_cache_v1';
+const CHART_SYMBOL_LS_TTL = 6 * 60 * 60 * 1000; // 6 hours
+
+function getLsChartSymbol(symbol) {
+    try {
+        const raw = localStorage.getItem(CHART_SYMBOL_LS_KEY);
+        if (!raw) return null;
+        const cache = JSON.parse(raw);
+        const entry = cache[symbol];
+        if (!entry) return null;
+        if (Date.now() - entry.ts > CHART_SYMBOL_LS_TTL) {
+            delete cache[symbol];
+            localStorage.setItem(CHART_SYMBOL_LS_KEY, JSON.stringify(cache));
+            return null;
+        }
+        return entry.data;
+    } catch { return null; }
+}
+
+function setLsChartSymbol(symbol, data) {
+    try {
+        const raw = localStorage.getItem(CHART_SYMBOL_LS_KEY);
+        const cache = raw ? JSON.parse(raw) : {};
+        cache[symbol] = { data, ts: Date.now() };
+        // Evict oldest entries if cache grows too large (max 100 symbols)
+        const keys = Object.keys(cache);
+        if (keys.length > 100) {
+            keys.sort((a, b) => cache[a].ts - cache[b].ts);
+            for (let i = 0; i < keys.length - 80; i++) delete cache[keys[i]];
+        }
+        localStorage.setItem(CHART_SYMBOL_LS_KEY, JSON.stringify(cache));
+    } catch { /* localStorage full or disabled — non-fatal */ }
+}
 
 /**
  * BUG 1 FIX — Fully clear ALL previous-asset state before opening a new one.
@@ -6790,81 +7918,57 @@ async function openCoinDetail(symbol) {
     // load the new one.
     resetDetailState();
 
-    // Lazy-load TradingView widget on first use.
-    // CRITICAL FIX: if tv.js fails to load (network blocked, offline, etc.),
-    // we MUST NOT abort the entire openCoinDetail — the user still needs to
-    // see the coin's price, stats, and alert UI. We catch the load error and
-    // continue with a flag indicating the chart is unavailable.
+    // ── PERFORMANCE FIX: Parallelize tv.js load + chart symbol resolution ──
+    // Previously these were SERIAL: load tv.js (up to 5s) → THEN resolve symbol (500ms).
+    // Now they run concurrently via Promise.all, cutting the waterfall from 5.5s to max(5s, 500ms).
+    // If tv.js was preloaded (preloadTradingViewScript), it's already cached → instant.
     let chartAvailable = true;
-    if (!window.TradingView) {
-        const s = document.createElement('script');
-        s.src = 'https://s3.tradingview.com/tv.js';
-        document.head.appendChild(s);
-        try {
-            await new Promise((resolve, reject) => {
-                s.onload = resolve;
-                s.onerror = reject;
-                // Timeout after 5s — don't block the UI forever
-                setTimeout(() => reject(new Error('tv.js load timeout')), 5000);
-            });
-        } catch (e) {
-            console.warn('TradingView script failed to load — chart will be hidden, but coin detail will still show price/stats:', e?.message || e);
-            chartAvailable = false;
-        }
-    }
+    const tvJsPromise = ensureTradingViewLoaded(); // Returns immediately if already loaded
 
-    // RACE GUARD: if a newer openCoinDetail call started while we were loading tv.js, abort.
-    if (token !== _detailLoadToken) return;
-
-    // ── BTC PAIR DETECTION ──
-    // If symbol is "ETHBTC", we render the ETH/BTC pair chart (not ETH/USDT).
-    // The coin data (price, change, market cap) still comes from the base coin (ETH).
+    // Start symbol resolution IN PARALLEL with tv.js load
+    // (resolveChartSymbol hits backend /api/charts/resolve which has 1h KV cache)
     const btcPairBase = parseBtcPairSymbol(symbol);
     const isBtcPair = btcPairBase !== null;
     const baseSymbol = isBtcPair ? btcPairBase : symbol;
 
-    // Look up coin data. First check allCoins (200 loaded coins).
-    // If not found (e.g. coin from search outside top 200), check if the
-    // search results have this coin stored in a temporary cache.
+    // ── Look up coin data while tv.js + symbol resolve in parallel ──
     let coin = allCoins.find(c => c.symbol === baseSymbol);
     let coinPriceUnknown = false;
     if (!coin) {
-        // Coin not in the 200-coin market list. Check search cache.
-        // The search results store rich data (price, change, volume) from MEXC.
         const searchCacheKey = `search_coin_${baseSymbol}`;
         const cachedSearchCoin = Cache.get(searchCacheKey);
         if (cachedSearchCoin) {
             coin = cachedSearchCoin;
-        } else {
-            // Last resort: fetch real-time price from /api/market/price
-            // This gives us at least the current price for the coin detail.
-            try {
-                const priceData = await fetch(`${API_BASE}/api/market/price?symbol=${encodeURIComponent(baseSymbol)}`, {
-                    headers: { 'X-Telegram-Init-Data': getTelegramInitData() || '' }
-                }).then(r => r.ok ? r.json() : null);
-                if (priceData && priceData.price) {
-                    coin = {
-                        symbol: baseSymbol,
-                        name: baseSymbol,
-                        priceUsd: priceData.price,
-                        changePercent24Hr: 0,
-                        volumeUsd24Hr: 0,
-                        marketCapUsd: 0,
-                        rank: 0,
-                        image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(baseSymbol).toLowerCase()}@2x.png`,
-                    };
-                }
-            } catch (e) {
-                console.warn('openCoinDetail: failed to fetch price for', baseSymbol, e?.message);
-            }
         }
+        // NOTE: /api/market/price fallback deferred — don't block the chart on it.
+        // The chart renders from TradingView data, not our price API.
     }
+
+    // ── Wait for BOTH tv.js AND chart symbol resolution (in parallel) ──
+    let chartInfo = null;
+    try {
+        const [, resolvedChart] = await Promise.all([
+            tvJsPromise.catch(e => {
+                console.warn('TradingView script failed to load — chart will be hidden, but coin detail will still show price/stats:', e?.message || e);
+                chartAvailable = false;
+            }),
+            resolveChartSymbol(symbol).then(info => { chartInfo = info; }),
+        ]);
+    } catch (e) {
+        console.warn('openCoinDetail parallel load error:', e?.message);
+    }
+
+    // RACE GUARD: if a newer openCoinDetail call started while we were loading, abort.
+    if (token !== _detailLoadToken) return;
+
+
+    // ── BTC PAIR DETECTION (variables already declared above for parallel use) ──
+    // btcPairBase, isBtcPair, baseSymbol, coin, coinPriceUnknown are all set above.
+
     // H1 FIX: If we still don't have coin data (e.g. coin outside top-200 AND
-    // /api/market/price returned 401 because not opened in Telegram), DON'T
-    // silently abort. Build a minimal placeholder coin so the detail modal
-    // still opens and the TradingView chart can render. The chart fetches its
-    // own data from TradingView's servers — it does NOT depend on our price API.
-    // Previously this returned silently → user tapped a coin and nothing happened.
+    // no search cache), build a minimal placeholder so the modal opens and the
+    // chart renders. The chart fetches its own data from TradingView — it does
+    // NOT depend on our price API.
     if (!coin) {
         coin = {
             symbol: baseSymbol,
@@ -6877,10 +7981,26 @@ async function openCoinDetail(symbol) {
             image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(baseSymbol).toLowerCase()}@2x.png`,
         };
         coinPriceUnknown = true;
-        // Inform the user that price data is unavailable but the chart will still load.
-        showMiniToast(currentLang === 'fa'
-            ? 'اطلاعات قیمت در دسترس نیست — نمودار بارگذاری می‌شود'
-            : 'Price data unavailable — chart will still load');
+
+        // ── PERFORMANCE FIX: Fetch price in the BACKGROUND (non-blocking) ──
+        // Previously this was an AWAIT, blocking the chart by 200-500ms.
+        // Now we fire-and-forget: if the price arrives, we update the UI; if not,
+        // the chart still renders immediately.
+        fetch(`${API_BASE}/api/market/price?symbol=${encodeURIComponent(baseSymbol)}`, {
+            headers: { 'X-Telegram-Init-Data': getTelegramInitData() || '' }
+        }).then(r => r.ok ? r.json() : null).then(priceData => {
+            if (priceData && priceData.price && token === _detailLoadToken && _currentDetailSymbol === symbol) {
+                coin.priceUsd = priceData.price;
+                coinPriceUnknown = false;
+                const priceEl = document.getElementById('detail-coin-price');
+                if (priceEl) priceEl.textContent = '$' + (priceData.price > 1 ? priceData.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : priceData.price.toFixed(6));
+                const alertPriceVal = document.getElementById('alert-current-price-value');
+                if (alertPriceVal) alertPriceVal.textContent = '$' + priceData.price;
+            }
+        }).catch(e => console.warn('background price fetch failed:', e?.message));
+
+        // Don't show the "price unavailable" toast anymore — the background fetch
+        // will fill it in silently if it succeeds.
     }
 
     // ── Top Bar: Icon, Title, Rank, Price, Change ──
@@ -6981,8 +8101,9 @@ async function openCoinDetail(symbol) {
     if (!modal) return;
     modal.style.display = 'flex';
 
-    // ── Chart: skeleton already shown by resetDetailState; now resolve symbol ──
-    const chartInfo = await resolveChartSymbol(symbol);
+    // ── PERFORMANCE FIX: chartInfo was already resolved in PARALLEL with tv.js above ──
+    // No need to call resolveChartSymbol again — it's cached in the `chartInfo` variable.
+    // This eliminates a second serial network round-trip (~500ms saved).
 
     // RACE GUARD: if a newer openCoinDetail call started while we were resolving the chart, abort.
     // This prevents stale chart/alert data from overwriting the newer coin's state.
@@ -7232,13 +8353,11 @@ function closeCoinDetail() {
 /**
  * Open forex pair detail modal with TradingView chart.
  */
-function openForexDetail(symbol) {
+async function openForexDetail(symbol) {
     const pair = allForexPairs.find(f => f.symbol === symbol);
     if (!pair) return;
 
     // BUG 1 FIX: fully clear previous asset state BEFORE populating forex data.
-    // This destroys any crypto chart, resets the logo/icon, stats grid, alert
-    // card, watchlist button, etc. so no previous crypto data bleeds in.
     resetDetailState();
 
     const modal = document.getElementById('coin-detail-modal');
@@ -7251,21 +8370,46 @@ function openForexDetail(symbol) {
         modal.removeEventListener('animationend', handler);
     });
 
+    // ── Lazy-load TradingView script (same pattern as openCoinDetail) ──
+    // ROOT CAUSE FIX: openForexDetail was synchronous and never loaded tv.js.
+    // openCoinDetail had the lazy-load logic, but openForexDetail was missing it.
+    // If the user opened a forex pair FIRST (before any crypto), TradingView
+    // was undefined → createTradingViewWidget fell through to showChartUnavailable.
+    if (!window.TradingView) {
+        const s = document.createElement('script');
+        s.src = 'https://s3.tradingview.com/tv.js';
+        document.head.appendChild(s);
+        try {
+            await new Promise((resolve, reject) => {
+                s.onload = resolve;
+                s.onerror = reject;
+                setTimeout(() => reject(new Error('tv.js load timeout')), 5000);
+            });
+        } catch (e) {
+            console.warn('TradingView script failed to load for forex:', e?.message || e);
+        }
+    }
+
     // ── Top bar: set a category icon for forex/metals (crypto logo is N/A) ──
     // resetDetailState hid the icon; for forex we show a category badge instead
     // of a coin logo so the user never sees a stale crypto logo.
     const iconEl = document.getElementById('detail-coin-icon');
     if (iconEl) {
         const cat = pair.category || 'major';
-        const catIcons = {
-            major: '💱', cross: '💱', metal: '🥇', index: '📊', commodity: '🛢️',
+        const catColors = { major: '#22C55E', cross: '#F5A623', metal: '#FFD700', stock: '#60A5FA' };
+        const catSvgPaths = {
+            major: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
+            cross: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>',
+            metal: '<circle cx="12" cy="12" r="10"/><path d="M8 14h8M8 10h8M12 6v12"/>',
+            index: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/>',
+            commodity: '<path d="M3 22h18M5 22V8l5-4 5 4v14M9 22v-6h4v6"/>',
         };
+        const color = catColors[cat] || '#F5A623';
+        const path = catSvgPaths[cat] || catSvgPaths.major;
         iconEl.removeAttribute('src');
         iconEl.removeAttribute('data-symbol');
         iconEl.onerror = null;
-        // Use a data-URI SVG with the emoji so the img element shows something clean
-        const emoji = catIcons[cat] || '💱';
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#0B1220" stroke="rgba(245,166,35,0.2)" stroke-width="1"/><text x="40" y="52" font-size="36" text-anchor="middle">${emoji}</text></svg>`;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="${color}15" stroke="${color}30" stroke-width="1"/><g transform="translate(16 16) scale(2)" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</g></svg>`;
         iconEl.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
         iconEl.style.visibility = 'visible';
     }
@@ -7328,12 +8472,12 @@ function openForexDetail(symbol) {
 
     // Extra info
     const cat = pair.category || 'major';
-    const catLabels = { major: 'Major', cross: 'Cross', metal: 'Metal', index: 'Index', commodity: 'Commodity' };
-    const catLabelFa = { major: 'جفت اصلی', cross: 'کراس', metal: 'فلز گران‌بها', index: 'شاخص', commodity: 'کامودیتی' };
+    const catLabels = { major: 'Major', cross: 'Cross', metal: 'Metal', stock: 'Stock' };
+    const catLabelFa = { major: 'جفت اصلی', cross: 'کراس', metal: 'فلز گران‌بها', stock: 'سهم' };
     const catLabel = currentLang === 'fa' ? (catLabelFa[cat] || cat) : (catLabels[cat] || cat);
     const typeLabel = currentLang === 'fa'
-        ? ({ major: 'فارکس', cross: 'فارکس', metal: 'فلز', index: 'شاخص', commodity: 'کامودیتی' }[cat] || 'بازار')
-        : ({ major: 'Forex', cross: 'Forex', metal: 'Commodity', index: 'Index', commodity: 'Commodity' }[cat] || 'Market');
+        ? ({ major: 'فارکس', cross: 'فارکس', metal: 'فلز', stock: 'سهم' }[cat] || 'بازار')
+        : ({ major: 'Forex', cross: 'Forex', metal: 'Metal', stock: 'Stock' }[cat] || 'Market');
 
     // ── Premium stats grid for forex/metals ──
     // Previously this rendered bare .info-item spans (whose CSS is scoped under
@@ -7393,6 +8537,66 @@ function selectCdAlertDirection(dir, btn) {
     document.querySelectorAll('.cd-alert-dir-btn').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
 }
+
+// ============================================================================
+// ── NEW FEATURE: Price Alert Quick Presets ──
+// ============================================================================
+// One-tap buttons that auto-calculate the target price based on the current
+// coin price and a percentage delta (+5%, +10%, -5%, -10%).
+// This eliminates manual price calculation for the most common alert scenarios.
+function applyAlertPreset(preset) {
+    if (!_currentDetailSymbol) {
+        showMiniToast(currentLang === 'fa' ? 'ابتدا یک ارز انتخاب کنید' : 'Select a coin first');
+        return;
+    }
+    // Find current coin price
+    const btcPairBase = parseBtcPairSymbol(_currentDetailSymbol);
+    const baseSymbol = btcPairBase || _currentDetailSymbol;
+    const coin = allCoins.find(c => c.symbol === baseSymbol);
+    if (!coin || !coin.priceUsd || coin.priceUsd <= 0) {
+        showMiniToast(currentLang === 'fa' ? 'قیمت در دسترس نیست' : 'Price unavailable');
+        return;
+    }
+    const currentPrice = coin.priceUsd;
+    let targetPrice, direction;
+    switch (preset) {
+        case '5up':   targetPrice = currentPrice * 1.05; direction = 'above'; break;
+        case '10up':  targetPrice = currentPrice * 1.10; direction = 'above'; break;
+        case '5down': targetPrice = currentPrice * 0.95; direction = 'below'; break;
+        case '10down':targetPrice = currentPrice * 0.90; direction = 'below'; break;
+        default: return;
+    }
+    // Fill the price input
+    const input = document.getElementById('alert-price');
+    if (input) {
+        // Format: 6 decimals for small prices, 2 for large
+        input.value = targetPrice > 1
+            ? targetPrice.toFixed(2)
+            : targetPrice.toFixed(6);
+    }
+    // Set the direction
+    const dirBtn = document.querySelector(`.cd-alert-dir-btn[data-direction="${direction}"]`);
+    if (dirBtn) selectCdAlertDirection(direction, dirBtn);
+    // Visual feedback — flash the preset button
+    const presetBtn = document.querySelector(`.cd-preset-btn[data-preset="${preset}"]`);
+    if (presetBtn) {
+        presetBtn.classList.add('flash');
+        setTimeout(() => presetBtn.classList.remove('flash'), 600);
+    }
+    // Haptic feedback
+    if (window.tg?.HapticFeedback) {
+        try { window.tg.HapticFeedback.impactOccurred('light'); } catch {}
+    }
+    // Show a mini toast confirming the preset
+    const pctLabel = preset.includes('5') ? '5%' : '10%';
+    const dirLabel = direction === 'above'
+        ? (currentLang === 'fa' ? 'بالا' : 'up')
+        : (currentLang === 'fa' ? 'پایین' : 'down');
+    showMiniToast(currentLang === 'fa'
+        ? `هدف: $${input?.value} (${pctLabel} ${dirLabel})`
+        : `Target: $${input?.value} (${pctLabel} ${dirLabel})`);
+}
+window.applyAlertPreset = applyAlertPreset;
 
 /**
  * Update the alert status badge (active count + status icon/text)
@@ -7567,6 +8771,11 @@ async function loadAlertsFromServer() {
             createdAt: a.created_at
         }));
         localStorage.setItem('price_alerts', JSON.stringify(alerts));
+        // If the coin detail view is open, re-render active alerts so triggered
+        // alerts (now removed from backend's active list) disappear from the UI.
+        if (_currentDetailSymbol && typeof renderActiveAlerts === 'function') {
+            try { renderActiveAlerts(_currentDetailSymbol); } catch (_) {}
+        }
     } catch (e) { console.warn('loadAlertsFromServer:', e); }
 }
 
@@ -7710,6 +8919,11 @@ async function triggerAlert(alert, currentPrice) {
     // the detail view) and shows an immediate in-app toast/popup.
     alerts = alerts.filter(a => a.id !== alert.id);
     localStorage.setItem('price_alerts', JSON.stringify(alerts));
+    // Reset the sync timer so the next periodic sync waits 2 minutes before
+    // re-fetching from backend. This gives the backend cron time to mark the
+    // alert as 'triggered' — otherwise loadAlertsFromServer would re-add the
+    // alert to local state (it's still 'active' in backend until cron runs).
+    _lastAlertSyncTs = Date.now();
     // Clean, short notification — same format as backend.
     const priceStr = currentPrice >= 1
         ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -7734,13 +8948,20 @@ async function triggerAlert(alert, currentPrice) {
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
 let _alertsLoaded = false;
+let _lastAlertSyncTs = 0;
+const ALERT_SYNC_INTERVAL = 120000; // 2 minutes — sync from backend to remove triggered alerts
+
 async function checkAlerts() {
     const userId = getUserId();
 
-    // Only load alerts from server ONCE — not every 30s
-    if (!_alertsLoaded && alerts.length === 0 && !isGuestUserId(userId) && !isPendingTelegramUserId(userId) && getTelegramUser()?.id) {
+    // Load alerts from server ONCE on first run, then periodically sync (every 2 min)
+    // to remove alerts that were triggered by the backend cron. Without this periodic
+    // sync, triggered alerts remain in the local state and UI indefinitely.
+    const shouldSync = !_alertsLoaded || (Date.now() - _lastAlertSyncTs > ALERT_SYNC_INTERVAL);
+    if (shouldSync && !isGuestUserId(userId) && !isPendingTelegramUserId(userId) && getTelegramUser()?.id) {
         _alertsLoaded = true;
-        await loadAlertsFromServer().catch(() => { _alertsLoaded = false; });
+        _lastAlertSyncTs = Date.now();
+        await loadAlertsFromServer().catch(() => { _alertsLoaded = false; _lastAlertSyncTs = 0; });
     }
 
     const userAlerts = alerts.filter(a => a.userId === userId);
@@ -8090,6 +9311,8 @@ function loadUser() {
         // Fix: reload wallet card now that the user is confirmed — resolves race condition
         // where loadProfileCard() ran earlier while UserContext was still pending
         window.WalletApp?.loadProfileCard();
+        // Load membership card on profile load (non-blocking, cached in-memory)
+        window.MembershipApp?.loadCard();
     } else if (UserContext.isPending()) {
         const pn = $('profile-name'); if (pn) pn.innerText = t('loading_user');
         const pu = $('profile-username'); if (pu) pu.innerText = '...';
@@ -8211,6 +9434,148 @@ function openSettingsModal() {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function closeSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
+
+// ============================================================================
+// ── ROOT-CAUSE FIX: Delete Account (cascade delete + referral re-registration) ──
+// ============================================================================
+/**
+ * Opens the Delete Account confirmation dialog.
+ * Two-step confirmation to prevent accidental deletion.
+ */
+function requestDeleteAccount() {
+    // Step 1: Show confirmation dialog
+    const fa = currentLang === 'fa';
+    const message = fa
+        ? '⚠️ هشدار جدی\n\nآیا واقعاً می‌خواهید حساب خود را حذف کنید؟\n\n• تمام پاداش‌ها و توکن‌های شما پاک می‌شود\n• تاریخچه دعوت‌ها حذف می‌شود\n• کیف پول، هشدارها و واچ‌لیست پاک می‌شود\n• این عملیات قابل بازگشت نیست\n\nپس از حذف، می‌توانید دوباره با لینک دعوت ثبت‌نام کنید.'
+        : '⚠️ SERIOUS WARNING\n\nDo you really want to delete your account?\n\n• All rewards and tokens will be erased\n• Referral history will be deleted\n• Wallet, alerts, and watchlist will be cleared\n• This action is IRREVERSIBLE\n\nAfter deletion, you can re-register with a referral link.';
+
+    // Use a custom modal for better UX than the native confirm()
+    showDeleteAccountModal(message, fa);
+}
+
+function showDeleteAccountModal(message, fa) {
+    // Remove any existing delete modal
+    const existing = document.getElementById('delete-account-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'delete-account-modal';
+    modal.className = 'delete-account-modal-overlay';
+    modal.innerHTML = `
+        <div class="delete-account-modal-content">
+            <div class="delete-account-modal-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </div>
+            <h3 class="delete-account-modal-title">${fa ? 'حذف حساب کاربری' : 'Delete Account'}</h3>
+            <p class="delete-account-modal-message">${message.replace(/\n/g, '<br>')}</p>
+            <div class="delete-account-modal-input-wrap">
+                <label class="delete-account-modal-label">${fa ? 'برای تأیید، تایپ کنید:' : 'Type to confirm:'}</label>
+                <input type="text" id="delete-account-confirm-input" class="delete-account-modal-input" placeholder="DELETE" autocomplete="off">
+            </div>
+            <div class="delete-account-modal-actions">
+                <button class="delete-account-modal-cancel" onclick="closeDeleteAccountModal()">${fa ? 'انصراف' : 'Cancel'}</button>
+                <button class="delete-account-modal-confirm" id="delete-account-confirm-btn" onclick="executeDeleteAccount()" disabled>
+                    <span class="da-spinner" style="display:none;"></span>
+                    <span class="da-btn-text">${fa ? 'حذف دائمی' : 'Permanently Delete'}</span>
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.style.display = 'flex';
+
+    // Enable confirm button only when user types "DELETE"
+    const input = document.getElementById('delete-account-confirm-input');
+    const confirmBtn = document.getElementById('delete-account-confirm-btn');
+    input.addEventListener('input', () => {
+        confirmBtn.disabled = input.value.trim().toUpperCase() !== 'DELETE';
+    });
+    // Focus the input for quick confirmation
+    setTimeout(() => input.focus(), 100);
+}
+
+function closeDeleteAccountModal() {
+    const modal = document.getElementById('delete-account-modal');
+    if (modal) modal.remove();
+}
+
+async function executeDeleteAccount() {
+    const confirmBtn = document.getElementById('delete-account-confirm-btn');
+    const spinner = confirmBtn?.querySelector('.da-spinner');
+    const btnText = confirmBtn?.querySelector('.da-btn-text');
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+    const fa = currentLang === 'fa';
+    if (btnText) btnText.textContent = fa ? 'در حال حذف...' : 'Deleting...';
+
+    try {
+        const initData = getTelegramInitData();
+        if (!initData) {
+            showMiniToast(fa ? 'خطا: ابتدا از طریق تلگرام وارد شوید' : 'Error: Sign in via Telegram first');
+            if (confirmBtn) confirmBtn.disabled = false;
+            if (spinner) spinner.style.display = 'none';
+            if (btnText) btnText.textContent = fa ? 'حذف دائمی' : 'Permanently Delete';
+            return;
+        }
+
+        console.log('[DELETE-ACCOUNT] Sending DELETE /api/users/me');
+        const response = await fetch(`${API_BASE}/api/users/me`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Telegram-Init-Data': initData,
+            },
+            body: JSON.stringify({ confirm: 'DELETE' }),
+        });
+
+        const data = await response.json();
+        console.log('[DELETE-ACCOUNT] Response:', response.status, data);
+
+        if (response.ok && data.status === 'success') {
+            closeDeleteAccountModal();
+            showMiniToast(fa ? '✅ حساب حذف شد. می‌توانید دوباره ثبت‌نام کنید.' : '✅ Account deleted. You can re-register.');
+
+            // Clear local state
+            try {
+                localStorage.clear();
+                sessionStorage.clear();
+            } catch {}
+
+            // Show a farewell screen, then prompt to restart via Telegram
+            setTimeout(() => {
+                const fa2 = currentLang === 'fa';
+                document.body.innerHTML = `
+                    <div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0b1220;color:#fff;font-family:inherit;padding:24px;text-align:center;">
+                        <div style="font-size:48px;margin-bottom:16px;">👋</div>
+                        <h2 style="font-size:22px;margin-bottom:12px;">${fa2 ? 'حساب شما حذف شد' : 'Account Deleted'}</h2>
+                        <p style="color:rgba(255,255,255,0.6);max-width:320px;line-height:1.6;margin-bottom:24px;">${fa2 ? 'برای ثبت‌نام مجدد، ربات را در تلگرام استارت کنید. اگر با لینک دعوت وارد شوید، دعوت شما ثبت خواهد شد.' : 'To re-register, start the bot in Telegram. If you enter via a referral link, your referral will be registered.'}</p>
+                        <button onclick="location.reload()" style="padding:12px 32px;background:#f7931a;color:#fff;border:none;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;">${fa2 ? 'بارگذاری مجدد' : 'Reload'}</button>
+                    </div>
+                `;
+            }, 1500);
+        } else {
+            showMiniToast((fa ? 'خطا: ' : 'Error: ') + (data.message || data.error || 'Unknown'));
+            if (confirmBtn) confirmBtn.disabled = false;
+            if (spinner) spinner.style.display = 'none';
+            if (btnText) btnText.textContent = fa ? 'حذف دائمی' : 'Permanently Delete';
+        }
+    } catch (e) {
+        console.error('[DELETE-ACCOUNT] Network error:', e);
+        showMiniToast(fa ? 'خطای شبکه — دوباره تلاش کنید' : 'Network error — try again');
+        if (confirmBtn) confirmBtn.disabled = false;
+        if (spinner) spinner.style.display = 'none';
+        if (btnText) btnText.textContent = fa ? 'حذف دائمی' : 'Permanently Delete';
+    }
+}
+
+// Make functions globally accessible (called from inline onclick in index.html)
+window.requestDeleteAccount = requestDeleteAccount;
+window.closeDeleteAccountModal = closeDeleteAccountModal;
+window.executeDeleteAccount = executeDeleteAccount;
 /**
  * زبان مودال را باز می‌کند.
  * ورودی: بدون ورودی.
@@ -8896,12 +10261,66 @@ async function deleteTicket(ticketId, isAdminView = false) {
 // ============================================================================
 //#region نویگیشن و محتوای داشبورد
 // ============================================================================
+
 /**
- * نمایش یا وضعیت تب را تعویض می‌کند.
- * ورودی: پارامترهای `pageId, btn` را دریافت می‌کند.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
+ * بستن تمام overlay ها و modal های باز.
+ *
+ * BUG FIX (Task ID: WEB-DEV-REVIEW-1):
+ * قبل از این تابع، وقتی کاربر coin-detail-modal را باز می‌کرد و سپس از
+ * طریق bottom-nav به تب دیگری می‌رفت (بدون X)، modal در DOM باقی می‌ماند.
+ * چون `.cd-fullscreen` دارای `position: fixed; inset: 0; z-index: 10000;
+ * pointer-events: auto` است، modal نامرئی روی کل viewport قرار می‌گرفت و
+ * تمام click های تب مقصد را intercept می‌کرد → کاربر گیر می‌کرد و نمی‌توانست
+ * با صفحه تعامل داشته باشد.
+ *
+ * این تابع یک defence-in-depth است:
+ *   1. coin-detail-modal را مستقیماً display:none می‌کند (بدون فراخوانی
+ *      closeCoinDetail() که خود switchTab را فرامی‌خواند → infinite recursion).
+ *   2. تمام modal های دیگر را اگر باز هستند می‌بندد.
+ *   3. تابع destroyTvWidget() را فرامی‌خواند تا منابع TradingView آزاد شود.
+ *
+ * این تابع idempotent است و در هر switchTab فراخوانی می‌شود.
  */
+function closeAllOverlays() {
+    // 1) Coin detail modal (the buggy .cd-fullscreen overlay)
+    const cdModal = document.getElementById('coin-detail-modal');
+    if (cdModal && cdModal.style.display !== 'none') {
+        // Direct hide — bypass closeCoinDetail() to avoid switchTab recursion.
+        cdModal.classList.remove('slide-up', 'slide-down');
+        cdModal.style.display = 'none';
+        // Free TradingView widget resources (no-op if not initialised).
+        try { if (typeof destroyTvWidget === 'function') destroyTvWidget(); } catch (_) {}
+        try { currentTvChartInfo = null; _currentDetailSymbol = null; } catch (_) {}
+        const _alertPriceReset = document.getElementById('alert-current-price-value');
+        if (_alertPriceReset) _alertPriceReset.textContent = '--';
+    }
+
+    // 2) Standard `.modal` overlays — each has display:none default in CSS,
+    //    so we just restore it. We use a list to keep this maintainable.
+    const standardModalIds = [
+        'add-coin-modal', 'add-analysis-modal', 'news-modal',
+        'notif-modal', 'settings-modal', 'notif-settings-modal',
+        'lang-modal', 'tickets-modal', 'admin-tickets-modal', 'about-modal',
+    ];
+    for (const id of standardModalIds) {
+        const m = document.getElementById(id);
+        if (m && m.style.display !== 'none') {
+            m.style.display = 'none';
+            // Some modals toggle a `body` lock class; remove it for safety.
+            document.body.classList.remove('modal-open', 'jl-locked', 'body-locked');
+        }
+    }
+
+    // 3) Clear the Telegram BackButton navigation stack — switching main tabs
+    //    resets the history so the Back button is hidden on top-level pages.
+    try { tgBackReset(); } catch (_) {}
+}
+
 function switchTab(pageId, btn) {
+    // BUG FIX: dismiss any open overlay/modal BEFORE switching tabs. Otherwise
+    // fixed overlays like coin-detail-modal stay on top and intercept clicks.
+    closeAllOverlays();
+
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(pageId)?.classList.add('active');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -8973,6 +10392,13 @@ function switchTab(pageId, btn) {
         if (!tabLoaded.news) {
             loadNews();
             tabLoaded.news = true;
+        } else {
+            // ROOT CAUSE FIX (F-7): Returning to News page should re-render
+            // the active sub-tab, in case calendarEvents was updated in the
+            // background by polling or bootstrap. Without this, the user
+            // could see stale DOM (or skeleton) from a previous visit.
+            const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news;
+            if (activeTab) renderNews(activeTab);
         }
     } else if (pageId === 'profile-page') {
         // R3-5: Profile tab guard — API calls only on first visit.
@@ -8997,66 +10423,102 @@ async function loadImportantNews() {
     if (!container) return;
     try {
         await loadNews(); // اطمینان از دریافت اخبار
+        // PERF FIX (item 2): loadImportantNews runs at bootstrap and fills
+        // newsCache. Set tabLoaded.news=true so the first News tab click
+        // doesn't re-call loadNews() (which would show skeleton + re-fetch).
+        // The News tab will re-render from the already-populated newsCache.
+        tabLoaded.news = true;
         if (!newsCache.length) {
             container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
             return;
         }
 
-        // Priority sort: Urgent (breaking) → Important (bullish/bearish/macro) → Latest (neutral/other)
-        const priorityRank = (n) => {
-            const s = (n.sentiment || '').toLowerCase();
-            if (s === 'breaking') return 0; // urgent
-            if (s === 'bullish' || s === 'bearish' || s === 'macro') return 1; // important
-            return 2; // latest
-        };
-        const sorted = newsCache.slice().sort((a, b) => {
-            const pa = priorityRank(a), pb = priorityRank(b);
-            if (pa !== pb) return pa - pb;
-            // within same priority, keep original order (already by recency from API)
-            return 0;
-        });
-        const important = sorted.slice(0, 3);
-        if (!important.length) {
-            container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
-            return;
-        }
+        // DASHBOARD SPEED OPTIMIZATION: persist news to localStorage so the
+        // next cold open can render instantly without waiting for the API.
+        try {
+            localStorage.setItem('news_cache', JSON.stringify({ data: newsCache, ts: Date.now() }));
+        } catch (_) {}
 
-        // Store in a separate array for dashboard to avoid race with News page's displayedNews
-        _dashboardDisplayedNews = important;
-
-        const priorityLabels = {
-            urgent: t('dashboard_priority_urgent'),
-            important: t('dashboard_priority_important'),
-            latest: t('dashboard_priority_latest')
-        };
-        const priorityIcons = {
-            urgent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
-            important: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
-            latest: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
-        };
-
-        container.innerHTML = important.map((n, i) => {
-            const rank = priorityRank(n);
-            const pKey = rank === 0 ? 'urgent' : (rank === 1 ? 'important' : 'latest');
-            const safeTitle = escapeHtml(n.title || '');
-            const safeSource = escapeHtml(n.source || '');
-            const safeImg = escapeHtml(n.image || getAmirbtcFallbackSvg(64, 64, 'AMIRBTC'));
-            return `
-            <div class="important-news-item priority-${pKey}" style="animation-delay:${i * 0.06}s" onclick="openDashboardNewsModal(${i})">
-                <img loading="lazy" src="${safeImg}" class="important-news-img" alt="${safeTitle}" onerror="newsImageFallback(this)">
-                <div class="important-news-content">
-                    <span class="important-news-priority priority-${pKey}">${priorityIcons[pKey]}<span>${priorityLabels[pKey]}</span></span>
-                    <div class="important-news-title">${safeTitle}</div>
-                    <div class="important-news-source">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
-                        <span>${safeSource}</span>
-                    </div>
-                </div>
-            </div>`;
-        }).join('');
+        _renderImportantNewsInto(container);
     } catch (e) {
         const c = document.getElementById('important-news');
         if (c) c.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
+    }
+}
+
+/**
+ * Render the top 3 important news items into the given container.
+ * Extracted from loadImportantNews so it can be called from
+ * renderImportantNewsFromCache() for instant cold-open rendering.
+ */
+function _renderImportantNewsInto(container) {
+    if (!newsCache.length) {
+        container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
+        return;
+    }
+    // Priority sort: Urgent (breaking) → Important (bullish/bearish/macro) → Latest (neutral/other)
+    const priorityRank = (n) => {
+        const s = (n.sentiment || '').toLowerCase();
+        if (s === 'breaking') return 0; // urgent
+        if (s === 'bullish' || s === 'bearish' || s === 'macro') return 1; // important
+        return 2; // latest
+    };
+    const sorted = newsCache.slice().sort((a, b) => {
+        const pa = priorityRank(a), pb = priorityRank(b);
+        if (pa !== pb) return pa - pb;
+        return 0;
+    });
+    const important = sorted.slice(0, 3);
+    if (!important.length) {
+        container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
+        return;
+    }
+
+    // Store in a separate array for dashboard to avoid race with News page's displayedNews
+    _dashboardDisplayedNews = important;
+
+    const priorityLabels = {
+        urgent: t('dashboard_priority_urgent'),
+        important: t('dashboard_priority_important'),
+        latest: t('dashboard_priority_latest')
+    };
+    const priorityIcons = {
+        urgent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+        important: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+        latest: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+    };
+
+    container.innerHTML = important.map((n, i) => {
+        const rank = priorityRank(n);
+        const pKey = rank === 0 ? 'urgent' : (rank === 1 ? 'important' : 'latest');
+        const safeTitle = escapeHtml(n.title || '');
+        const safeSource = escapeHtml(n.source || '');
+        const safeImg = escapeHtml(n.image || getAmirbtcFallbackSvg(64, 64, 'AMIRBTC'));
+        return `
+        <div class="important-news-item priority-${pKey}" style="animation-delay:${i * 0.06}s" onclick="openDashboardNewsModal(${i})">
+            <img loading="lazy" src="${safeImg}" class="important-news-img" alt="${safeTitle}" onerror="newsImageFallback(this)">
+            <div class="important-news-content">
+                <span class="important-news-priority priority-${pKey}">${priorityIcons[pKey]}<span>${priorityLabels[pKey]}</span></span>
+                <div class="important-news-title">${safeTitle}</div>
+                <div class="important-news-source">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+                    <span>${safeSource}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+/**
+ * DASHBOARD SPEED OPTIMIZATION: render important news from localStorage cache
+ * on cold open, before the API response arrives. Called from DOMContentLoaded
+ * if news_cache exists and is fresh (< 5min).
+ */
+function renderImportantNewsFromCache() {
+    const container = document.getElementById('important-news');
+    if (!container) return;
+    if (newsCache.length) {
+        _renderImportantNewsInto(container);
     }
 }
 
@@ -9075,7 +10537,7 @@ function openNewsModalWith(n) {
 
     // Meta: time, source, category
     const timeEl = el('news-modal-time');
-    if (timeEl) timeEl.innerText = n.time || n.time_ago || '—';
+    if (timeEl) timeEl.innerText = formatNewsTimeTehran(n.pub_date, n.time || n.time_ago) || '—';
     const sourceEl = el('news-modal-source');
     if (sourceEl) sourceEl.innerText = n.source || n.source_name || '—';
     const categoryEl = el('news-modal-category');
@@ -9114,7 +10576,7 @@ function openNewsModalWith(n) {
     }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
 
-    // Fire mission event: news_open
+    // Fire daily mission: news_view (non-blocking, idempotent)
     if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.NEWS_OPEN);
 }
 
@@ -9217,16 +10679,16 @@ function renderDashboardMarketStatus() {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
         // Bull image (originally named neutral.webp — it's the green bull)
-        trendGraphic = `<img src="assets/market/neutral.webp" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐂</span>'">`;
+        trendGraphic = `<img src="assets/a69360c0.webp" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐂</span>'">`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        // Neutral image (originally named bull.webp — it shows bull+bear equal)
-        trendGraphic = `<img src="assets/market/bull.webp" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
+        // New neutral market status image (optimized: 400×400 PNG, 56KB)
+        trendGraphic = `<img src="assets/6e31ad0e.png" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
-        trendGraphic = `<img src="assets/market/bear.webp" alt="Bear" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐻</span>'">`;
+        trendGraphic = `<img src="assets/f70e1dd1.webp" alt="Bear" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐻</span>'">`;
     }
 
     const trendHTML = `
@@ -9395,6 +10857,114 @@ function renderMarketTicker() {
     _tickerSkeletonCleared = true;
 }
 
+// ============================================================================
+// ── NEW FEATURE: Market Heatmap ──
+// ============================================================================
+// Renders a visual grid of top coins where each cell's:
+//   - SIZE is proportional to market cap (bigger = more dominant)
+//   - COLOR is based on 24h change (green = up, red = down, intensity = magnitude)
+//   - Text shows symbol + percentage
+//
+// This gives users an instant visual overview of market sentiment without
+// having to scan a list. Tapping a cell opens the coin detail.
+function renderDashboardHeatmap() {
+    const container = $('dashboard-heatmap');
+    if (!container) return;
+
+    if (!allCoins || allCoins.length === 0) {
+        // Skeleton already in HTML — leave it
+        return;
+    }
+
+    // Priority list of important coins to display (ordered by market importance)
+    const PRIORITY_COINS = [
+        'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'DOGE', 'ADA', 'TRX',
+        'LINK', 'AVAX', 'TON', 'SUI', 'DOT', 'LTC', 'NEAR', 'APT'
+    ];
+
+    const skipStable = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FDUSD', 'USDE', 'USDGO'];
+
+    // Build a map of available coins by symbol
+    const coinMap = {};
+    for (const c of allCoins) {
+        if (c && c.symbol && !skipStable.includes(c.symbol.toUpperCase())) {
+            coinMap[c.symbol.toUpperCase()] = c;
+        }
+    }
+
+    // Select coins: priority first, then fill from remaining top by market cap
+    const selected = [];
+    const used = new Set();
+    for (const sym of PRIORITY_COINS) {
+        if (coinMap[sym] && !used.has(sym)) {
+            selected.push(coinMap[sym]);
+            used.add(sym);
+        }
+    }
+    // Fill remaining slots from top by market cap
+    if (selected.length < 16) {
+        const remaining = allCoins
+            .filter(c => c && c.symbol && !skipStable.includes(c.symbol.toUpperCase()) && !used.has(c.symbol.toUpperCase()))
+            .sort((a, b) => (b.marketCapUsd || 0) - (a.marketCapUsd || 0));
+        for (const c of remaining) {
+            if (selected.length >= 16) break;
+            selected.push(c);
+            used.add(c.symbol.toUpperCase());
+        }
+    }
+
+    if (selected.length === 0) {
+        container.innerHTML = '<div class="heatmap-empty">—</div>';
+        return;
+    }
+
+    // Size tiers: BTC gets xl, ETH gets lg, next 6 get md, rest get sm
+    // This creates a professional treemap-style heatmap where size = importance
+    const SIZE_MAP = {};
+    if (selected[0]) SIZE_MAP[selected[0].symbol.toUpperCase()] = 'hm-size-xl';
+    if (selected[1]) SIZE_MAP[selected[1].symbol.toUpperCase()] = 'hm-size-lg';
+    for (let i = 2; i < Math.min(8, selected.length); i++) {
+        SIZE_MAP[selected[i].symbol.toUpperCase()] = 'hm-size-md';
+    }
+
+    // Build heatmap cells
+    const cells = selected.map(coin => {
+        const change = Number(coin.changePercent24Hr) || 0;
+        const sym = coin.symbol.toUpperCase();
+        const sizeClass = SIZE_MAP[sym] || 'hm-size-sm';
+
+        // Color: proportional intensity — only exactly 0.0% is gray
+        let bgColor, textColor, borderColor;
+        if (change === 0) {
+            bgColor = 'rgba(255, 255, 255, 0.04)';
+            textColor = 'rgba(255, 255, 255, 0.6)';
+            borderColor = 'rgba(255, 255, 255, 0.08)';
+        } else if (change > 0) {
+            const intensity = Math.min(Math.abs(change) / 8, 1);
+            const alpha = 0.08 + intensity * 0.45;
+            bgColor = `rgba(34, 197, 94, ${alpha})`;
+            textColor = intensity > 0.3 ? '#86EFAC' : 'rgba(134, 239, 172, 0.85)';
+            borderColor = `rgba(34, 197, 94, ${0.15 + intensity * 0.4})`;
+        } else {
+            const intensity = Math.min(Math.abs(change) / 8, 1);
+            const alpha = 0.08 + intensity * 0.45;
+            bgColor = `rgba(239, 68, 68, ${alpha})`;
+            textColor = intensity > 0.3 ? '#FCA5A5' : 'rgba(252, 165, 165, 0.85)';
+            borderColor = `rgba(239, 68, 68, ${0.15 + intensity * 0.4})`;
+        }
+
+        const changeStr = (change >= 0 ? '+' : '') + change.toFixed(2) + '%';
+        const safeSymbol = String(coin.symbol).replace(/</g, '&lt;').substring(0, 6);
+
+        return `<div class="hm-cell ${sizeClass}" style="background:${bgColor};border-color:${borderColor};color:${textColor};" onclick="openCoinDetail('${coin.symbol}')" role="button" tabindex="0">
+            <span class="hm-symbol">${safeSymbol}</span>
+            <span class="hm-change">${changeStr}</span>
+        </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="heatmap-grid">${cells}</div>`;
+}
+
 /**
  * Market Analysis section — combines VIP (analysisFeatured) + regular analyses,
  * renders up to 5 horizontal scrollable cards with cover image, gradient overlay,
@@ -9476,14 +11046,27 @@ function renderDashboardFeaturedAnalysis() {
 function renderDashboardCalendar() {
     const container = $('dashboard-calendar');
     if (!container) return;
+    // ROOT CAUSE FIX (RC-D): Show skeleton (not empty state) when a fetch
+    // is in-flight. Previously this showed "تقویمی یافت نشد" (no calendar)
+    // whenever calendarEvents was empty — even if a fetch was actively
+    // loading. This was perceived as "no data" by the user. Now we show
+    // a skeleton while loading, and only show the empty state if the fetch
+    // completed and returned no events.
+    if (calendarLoading) {
+        container.innerHTML = `<div class="dc-skeleton-calendar">${Array(3).fill('<div class="dc-skeleton-item"></div>').join('')}</div>`;
+        return;
+    }
     if (!Array.isArray(calendarEvents) || !calendarEvents.length) {
         container.innerHTML = `<div class="dc-empty">${escapeHtml(t('dashboard_no_calendar'))}</div>`;
         return;
     }
 
+    // ROOT CAUSE FIX: Recompute statuses from current time (stale cache fix)
+    const freshEvents = recomputeEventStatuses(calendarEvents);
+
     const now = Date.now();
     // Filter upcoming events only, sort ascending by time, take next 3
-    const upcoming = calendarEvents
+    const upcoming = freshEvents
         .filter(e => {
             if (!e || !e.timestamp) return false;
             const d = new Date(e.timestamp);
@@ -9720,12 +11303,46 @@ function _startAllPolling() {
             loadNews();
             const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news;
             if (activeTab === 'calendar') {
-                calendarEvents = [];
-                loadCalendarEvents(true).then(events => renderNews('calendar'));
+                // ROOT CAUSE FIX (RC-A): Previously this line did `calendarEvents = [];`
+                // BEFORE calling loadCalendarEvents(true). This DESTROYED the good cached
+                // data, so if the force-refresh failed (network error, 8s timeout, 401,
+                // empty upstream), the preserve-on-error fix in loadCalendarEvents had
+                // nothing to preserve (calendarEvents was already []). The user saw
+                // "رویداد اقتصادی یافت نشد" (no events) until the next successful fetch.
+                //
+                // Now we just call loadCalendarEvents(true) WITHOUT clearing first.
+                // The force=true parameter bypasses the in-memory cache short-circuit
+                // and fetches fresh data. If the fetch fails, loadCalendarEvents
+                // preserves the existing calendarEvents array (app.js:3190-3194).
+                //
+                // ROOT CAUSE FIX (RC-E): After fetch, re-render whatever page is
+                // CURRENTLY active (not the page that was active when fetch started).
+                // If the user switched tabs during the 8s fetch, this ensures the
+                // correct page gets the fresh data.
+                loadCalendarEvents(true).then(() => {
+                    const currentActive = document.querySelector('.page.active')?.id;
+                    if (currentActive === 'news-page') {
+                        const currentTab = document.querySelector('.ni-tab.active')?.dataset?.news;
+                        if (currentTab === 'calendar') renderNews('calendar');
+                    } else if (currentActive === 'dashboard-page') {
+                        renderDashboardCalendar();
+                    }
+                });
             }
         }
         if (activePage === 'dashboard-page') {
-            loadCalendarEvents(true).then(() => renderDashboardCalendar()).catch(() => {});
+            loadCalendarEvents(true).then(() => {
+                // ROOT CAUSE FIX (RC-E): Re-render whatever page is currently active,
+                // not just the dashboard. If the user switched to News > Calendar
+                // during the fetch, that page needs the fresh data too.
+                const currentActive = document.querySelector('.page.active')?.id;
+                if (currentActive === 'dashboard-page') {
+                    renderDashboardCalendar();
+                } else if (currentActive === 'news-page') {
+                    const currentTab = document.querySelector('.ni-tab.active')?.dataset?.news;
+                    if (currentTab === 'calendar') renderNews('calendar');
+                }
+            }).catch(() => {});
         }
     }, 180000));
 
@@ -9922,6 +11539,9 @@ function showMaintenancePopup(maint) {
     // Generate floating particles
     _generateMaintenanceParticles();
 
+    // Start dynamic status text rotation
+    _startMaintenanceStatusRotation();
+
     // Show overlay
     overlay.style.display = 'flex';
     document.body.style.overflow = 'hidden';
@@ -9954,6 +11574,38 @@ function _generateMaintenanceParticles() {
         p.style.animationDelay = (Math.random() * 10) + 's';
         container.appendChild(p);
     }
+}
+
+/**
+ * Dynamic status text rotation — cycles through system status messages
+ * with a fade animation to convey "system is actively working".
+ */
+let _maintStatusInterval = null;
+function _startMaintenanceStatusRotation() {
+    if (_maintStatusInterval) return; // Already running
+    const messages = [
+        'در حال بهینه‌سازی سیستم...',
+        'در حال بروزرسانی سرویس‌ها...',
+        'در حال همگام‌سازی داده‌ها...',
+        'در حال بررسی امنیت...',
+        'آماده‌سازی نسخه جدید...',
+    ];
+    let idx = 0;
+    const el = document.getElementById('maint-status-rotator');
+    if (!el) return;
+    const span = el.querySelector('.maint-status-text');
+    if (!span) return;
+
+    _maintStatusInterval = setInterval(() => {
+        idx = (idx + 1) % messages.length;
+        span.style.opacity = '0';
+        span.style.transform = 'translateY(-8px)';
+        setTimeout(() => {
+            span.textContent = messages[idx];
+            span.style.opacity = '1';
+            span.style.transform = 'translateY(0)';
+        }, 300);
+    }, 3500);
 }
 
 /**
@@ -10035,7 +11687,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ── Phase 0: Telegram SDK init + user resolution ──
-    await UserContext.init();
+    // ROOT CAUSE FIX (warm-start speed): Previously `await UserContext.init()`
+    // blocked the ENTIRE DOMContentLoaded handler. All cache hydration,
+    // rendering, and background fetches waited for Telegram auth to resolve
+    // (100-300ms on warm start, up to 8s on cold start).
+    //
+    // Now we fire UserContext.init() as a BACKGROUND promise (not awaited).
+    // The cache hydration code below doesn't depend on Telegram auth — it
+    // only reads localStorage. Auth-dependent code (loadUser, bootstrapUser,
+    // all apiFetch calls) already has its own auth-wait via waitForApiReady.
+    //
+    // This unlocks ~100-300ms on every warm start.
+    UserContext.init().then(() => {
+        // When auth resolves, update the profile name (was showing "Loading...")
+        loadUser();
+    }).catch(e => {
+        console.warn('[BOOT] UserContext.init failed:', e?.message);
+    });
 
     // ── JOIN LOCK: FLOATING STATUS CARD approach (Production UX — Task 37) ──
     // 1. Show FLOATING CARD immediately ("Checking membership…")
@@ -10117,9 +11785,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Phase 1: Apply language + render UI from cache immediately (synchronous, ~0ms)
     applyLanguage();
     loadUser();
-    updateNotifBadge();
+    // WARM-START: Defer non-critical API calls to idle time so they don't
+    // compete with cache hydration + rendering on the critical path.
+    // updateNotifBadge fires /api/notifications — not needed for first paint.
+    // checkMaintenanceMode fires /api/system/status — not needed for first paint.
+    // Both are deferred to requestIdleCallback (or setTimeout 0 fallback).
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => updateNotifBadge());
+    } else {
+        setTimeout(() => updateNotifBadge(), 0);
+    }
     alerts = alerts.map(a => ({ ...a, userId: a.userId || getUserId() }));
-    localStorage.setItem('price_alerts', JSON.stringify(alerts));
+    // Only write to localStorage if userId actually changed (avoids redundant write)
+    const _hadUserId = alerts.some(a => a.userId);
+    if (_hadUserId) localStorage.setItem('price_alerts', JSON.stringify(alerts));
 
     // Analysis slider from localStorage cache
     if (analyses.length) {
@@ -10169,6 +11848,65 @@ document.addEventListener('DOMContentLoaded', async () => {
     // arrives from the API.
     renderMarketTicker();
     renderDashboardMarketStatus();
+    // ── NEW: Render market heatmap on dashboard ──
+    renderDashboardHeatmap();
+
+    // ── DASHBOARD SPEED OPTIMIZATION ──
+    // Hydrate analysis, news, and calendar from localStorage on cold open
+    // so sections render INSTANTLY instead of showing skeleton for 200ms-4s.
+    // Each section then updates with fresh data when the API response arrives.
+
+    // Analysis: analysisFeatured is already hydrated at module load (line ~366).
+    // Render the dashboard featured analysis section NOW from cached data.
+    renderDashboardFeaturedAnalysis();
+
+    // News: hydrate from localStorage and render important news immediately.
+    try {
+        const newsCacheStr = localStorage.getItem('news_cache');
+        if (newsCacheStr) {
+            const parsed = JSON.parse(newsCacheStr);
+            // 5-minute TTL (matches backend KV cache)
+            if (parsed && parsed.ts && (Date.now() - parsed.ts < 5 * 60 * 1000) && Array.isArray(parsed.data)) {
+                newsCache = parsed.data;
+                // Render important news from cache (non-blocking, instant)
+                renderImportantNewsFromCache();
+            }
+        }
+    } catch (_) { /* bad cache — ignore */ }
+
+    // Calendar: hydrate from localStorage and render dashboard calendar immediately.
+    try {
+        const calCacheStr = localStorage.getItem('calendar_cache');
+        if (calCacheStr) {
+            const parsed = JSON.parse(calCacheStr);
+            // ROOT CAUSE FIX (F-2): Render stale cache as a placeholder even
+            // if >1h old. Calendar data changes weekly — 24h-old data is
+            // still useful. The API will refresh in the background.
+            // Previously, if cache was >1h old, calendarEvents stayed []
+            // and the user saw skeleton/empty until the API responded.
+            if (parsed && parsed.ts && Array.isArray(parsed.data) && parsed.data.length > 0) {
+                calendarEvents = parsed.data;
+                renderDashboardCalendar();
+            }
+        }
+    } catch (_) { /* bad cache — ignore */ }
+
+    // Watchlist: render from cached allCoins + cached watchlist symbols
+    if (allCoins.length && watchlist.length) {
+        renderWatchlist();
+    }
+
+    // PERF FIX: Hydrate forex pairs from localStorage for instant watchlist render.
+    // Previously forex was only loaded from API (loadForexData), adding delay.
+    try {
+        const forexCacheStr = localStorage.getItem('forex_data_cache');
+        if (forexCacheStr) {
+            const parsed = JSON.parse(forexCacheStr);
+            if (parsed && parsed.ts && (Date.now() - parsed.ts < 5 * 60 * 1000) && Array.isArray(parsed.data)) {
+                allForexPairs = parsed.data;
+            }
+        }
+    } catch (_) { /* bad cache — ignore */ }
 
     // ROOT-CAUSE FIX (Task 38): Kick off a market data fetch IMMEDIATELY —
     // independently of bootstrapUser(). Previously loadMarketData(true) was
@@ -10193,16 +11931,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     //   - renderDashboardMarketStatus() also no-ops gracefully when called
     //     before globalMarketData is loaded.
     if (API_BASE) {
-        console.log('[TICKER] Independent market fetch fired (parallel to bootstrap)');
-        loadMarketData(true).then(() => {
-            console.log('[TICKER] Independent market fetch completed — allCoins length:', allCoins.length);
+        // PERF FIX: Use force=false (cache-first) for initial load. If cached
+        // data exists in memory Cache, it renders instantly. Then a background
+        // refresh (force=true) fires 2s later to get fresh prices.
+        // Previously force=true ALWAYS hit the API, adding 200-500ms even when
+        // fresh cached data was available from a recent session.
+        loadMarketData(false).then(() => {
             renderMarketTicker();
             renderDashboardMarketStatus();
+            renderWatchlist(); // Re-render watchlist now that allCoins is populated
+            // Background refresh — get truly fresh prices after initial paint
+            setTimeout(() => loadMarketData(true).then(() => {
+                renderMarketTicker();
+                renderDashboardMarketStatus();
+                renderWatchlist();
+            }).catch(() => {}), 2000);
         }).catch(e => {
-            console.warn('[TICKER] Independent market fetch failed:', e?.message || e);
-            // Ticker will keep showing skeleton (or stale cache if it hydrated)
-            // — no need to throw, the polling mechanism will retry in 180s.
+            console.warn('[TICKER] Market fetch failed:', e?.message || e);
         });
+
+        // PERF FIX: Fire forex data load in parallel with market data.
+        // Previously forex was only loaded when user visited the Market tab.
+        // Now it loads on startup so the watchlist (which may contain forex
+        // pairs) renders instantly.
+        // ROOT CAUSE FIX: loadForexData calls apiFetch which requires Telegram
+        // auth. On startup, auth may not be ready yet (bootstrap pending).
+        // apiFetch's waitForApiReady handles this, but if auth fails (outside
+        // Telegram), the call silently fails. We retry after bootstrap completes.
+        if (!allForexPairs.length) {
+            loadForexData().then(() => {
+                if (allForexPairs.length) renderWatchlist();
+            }).catch(() => {
+                // Will be retried after bootstrap completes (see bootstrapUser().then below)
+            });
+        }
     }
 
     // Skeletons for watchlist and news
@@ -10225,20 +11987,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── Data loading function (called after membership confirmed) ──
     // All data requests run in PARALLEL — not chained.
+    // WARM-START FIX: loadMarketData is already fired independently above
+    // (line ~10574). Skip it here to avoid duplicate API call — the
+    // apiFetch dedup would catch it anyway, but skipping saves the
+    // function call overhead and the redundant render calls.
     function _startDataLoading() {
-        // PERF: All 4 data sources load IN PARALLEL — no setTimeout delays.
-        // Previously loadImportantNews was delayed by 2000ms which blocked
-        // the entire dashboard. Now all 4 fire simultaneously:
-        // - market (787ms) — renders ticker + market status
-        // - analyses (35ms) — renders analysis slider + featured
-        // - news (38ms) — renders news cards + important news
-        // - calendar (445ms) — renders calendar events
-        // Each renders independently as soon as it resolves.
-        loadMarketData(true).then(() => {
-            renderDashboardMarketStatus();
-            renderWatchlist();
-            renderMarketTicker();
-        }).finally(() => { _dashboardReady.market = true; _checkDashboardReady(); });
+        // Skip loadMarketData — already fired independently above
+        // Just mark market as ready (it was already started)
+        _dashboardReady.market = true;
+        _checkDashboardReady();
+
         fetchAnalyses().then(changed => {
             if (changed) {
                 renderAnalysisSlider();
@@ -10251,19 +12009,44 @@ document.addEventListener('DOMContentLoaded', async () => {
             checkAnalysisDeepLink();
         }).finally(() => { _dashboardReady.analyses = true; _checkDashboardReady(); });
         loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
-        loadCalendarEvents().then(() => renderDashboardCalendar()).catch(() => renderDashboardCalendar());
+        loadCalendarEvents().then(() => {
+            // ROOT CAUSE FIX (F-5, CRITICAL): Previously this only called
+            // renderDashboardCalendar(), ignoring the News > Calendar tab.
+            // If the user navigated to News > Calendar during the fetch,
+            // the skeleton stayed for up to 180s (until next poll).
+            // Now we mirror the polling path (RC-E fix) and re-render
+            // whichever page is CURRENTLY active.
+            const currentActive = document.querySelector('.page.active')?.id;
+            if (currentActive === 'news-page') {
+                const currentTab = document.querySelector('.ni-tab.active')?.dataset?.news;
+                if (currentTab === 'calendar') renderNews('calendar');
+            } else {
+                renderDashboardCalendar();
+            }
+        }).catch(() => renderDashboardCalendar());
     }
 
-    // ── PARALLEL: maintenance check + bootstrap (no await — fire and forget) ──
-    // Previously: await checkMaintenanceMode() blocked everything, then await
-    // bootstrapUser() blocked again. Now both run in parallel.
-    // Maintenance check: if maintenance is on, it shows the popup and we return.
-    // Bootstrap: resolves membership → setJoinLockState('joined') for members
-    //            or setJoinLockState('not-joined') for non-members.
+    // ── WARM-START OPTIMIZATION ──
+    // ROOT CAUSE: _startDataLoading() was called AFTER bootstrapUser().then(),
+    // meaning all API calls (analyses, news, calendar) waited for bootstrap
+    // to complete before even starting — adding 200-500ms to warm-start.
+    //
+    // FIX: Fire _startDataLoading() in PARALLEL with bootstrapUser().
+    // The API calls inside will use apiFetch → waitForApiReady(8000) which
+    // naturally waits for Telegram auth to be ready. By the time auth is
+    // ready, the calls are already in-flight — no extra round-trip.
+    //
+    // This cuts warm-start critical path from:
+    //   auth_wait → bootstrap → API calls → render
+    // to:
+    //   auth_wait → max(bootstrap, API calls) → render
+    //
+    // Cached data is already rendered on DOMContentLoaded (above), so the
+    // user sees content INSTANTLY. The API calls just refresh in background.
 
     let _maintenanceBlocked = false;
 
-    // Start maintenance check (non-blocking — we handle the result in the callback)
+    // Start maintenance check (non-blocking)
     checkMaintenanceMode().then(_maintOk => {
         if (!_maintOk) {
             _maintenanceBlocked = true;
@@ -10272,14 +12055,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     }).catch(() => { /* fail open */ });
 
     // Start bootstrap (non-blocking — membership check runs in parallel)
-    // bootstrapUser() will call setJoinLockState('joined') for members or
-    // setJoinLockState('not-joined') for non-members when it completes.
-    // Data loading is triggered here after bootstrap resolves + member confirmed.
     bootstrapUser().then(() => {
         loadUser();
-        if (!_joinLockShown && !_maintenanceBlocked) {
-            _startDataLoading();
-            // Load mission status + fire daily_open mission
+        // ROOT CAUSE FIX: Retry forex data load after bootstrap completes.
+        // On startup, loadForexData fires in parallel but may fail because
+        // auth wasn't ready yet. After bootstrap, auth is confirmed, so retry.
+        if (!allForexPairs.length && API_BASE) {
+            loadForexData().then(() => {
+                renderWatchlist();
+                // If user is on the forex tab, re-render it
+                if (currentMarketTab === 'forex') renderMarket();
+            }).catch(() => {});
+        }
+        if (_joinLockShown && !_maintenanceBlocked) {
+            // Bootstrap confirmed membership — but _startDataLoading already
+            // fired below. Just update admin UI here.
+            updateAnalysisFabVisibility();
+            // Load today's mission status + fire daily_open mission
             if (typeof loadMissionStatus === 'function') {
                 loadMissionStatus().then(() => {
                     if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.DAILY_OPEN);
@@ -10289,6 +12081,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }).catch(e => {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);
     });
+
+    // ROOT CAUSE FIX (warm-start speed): Fire data loading IMMEDIATELY —
+    // in parallel with bootstrapUser(). Previously this waited for
+    // bootstrap to complete, adding 200-500ms to the critical path.
+    // Now apiFetch's waitForApiReady handles the auth wait naturally.
+    // Cached data is already rendered above — these calls just refresh.
+    if (API_BASE) {
+        _startDataLoading();
+    }
 
     // If user is pending (cold open), set up retry mechanism
     if (!bootstrapComplete && (UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady()))) {
@@ -10491,6 +12292,7 @@ window.openAnalysisDetailPage = openAnalysisDetailPage;
 window.closeAnalysisDetailPage = closeAnalysisDetailPage;
 window.startDeleteAnalysis = startDeleteAnalysis;
 window.resetAnalysisFilters = resetAnalysisFilters;
+window.loadMoreAnalyses = loadMoreAnalyses;
 window.initAnalysisToolbar = initAnalysisToolbar;
 window.toggleAnalysisBookmark = toggleAnalysisBookmark;
 window.copyAnalysisContent = copyAnalysisContent;

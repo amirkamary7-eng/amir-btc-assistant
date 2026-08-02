@@ -22,6 +22,146 @@ let _adminTicketsPage = 1;
 let _adminTransactionsPage = 1;
 let _adminLogsPage = 1;
 
+// ─── Permission & Role System (single source of truth) ───────────────────
+// These mirror the backend requireAdmin() permission checks. Each sidebar
+// section maps to one or more permissions. The sidebar is built dynamically
+// from the admin's actual permissions (fetched from /api/admin/is-admin).
+//
+// Permission keys MUST match the strings passed to requireAdmin(request, env, '<key>')
+// in src/controllers/admin.js — otherwise enforcement and UI will disagree.
+
+const ADMIN_PERMISSIONS = {
+    // Analysis
+    'analysis.publish':  { label: 'انتشار تحلیل', group: 'تحلیل' },
+    'analysis.edit':     { label: 'ویرایش تحلیل', group: 'تحلیل' },
+    'analysis.delete':   { label: 'حذف تحلیل', group: 'تحلیل' },
+    // News
+    'news.publish':      { label: 'انتشار خبر', group: 'اخبار' },
+    'news.edit':         { label: 'ویرایش خبر', group: 'اخبار' },
+    'news.delete':       { label: 'حذف خبر', group: 'اخبار' },
+    // Users
+    'users.view':        { label: 'مشاهده کاربران', group: 'کاربران' },
+    'users.manage':      { label: 'مدیریت کاربران', group: 'کاربران' },
+    'users.block':       { label: 'مسدودسازی کاربران', group: 'کاربران' },
+    // Admins
+    'admins.view':       { label: 'مشاهده مدیران', group: 'مدیران' },
+    'admins.add':        { label: 'افزودن مدیر', group: 'مدیران' },
+    'admins.edit':       { label: 'ویرایش مدیر', group: 'مدیران' },
+    'admins.delete':     { label: 'حذف مدیر', group: 'مدیران' },
+    // Wallet
+    'wallet.view':       { label: 'مشاهده کیف پول', group: 'کیف پول' },
+    'wallet.manage':     { label: 'مدیریت موجودی', group: 'کیف پول' },
+    'wallet.reward':     { label: 'ثبت پاداش', group: 'کیف پول' },
+    // Referral
+    'referral.manage':   { label: 'مدیریت ریفرال', group: 'ریفرال' },
+    'referral.reward':   { label: 'ثبت پاداش ریفرال', group: 'ریفرال' },
+    // Tickets
+    'tickets.view':      { label: 'مشاهده تیکت', group: 'تیکت' },
+    'tickets.reply':     { label: 'پاسخ به تیکت', group: 'تیکت' },
+    'tickets.close':     { label: 'بستن تیکت', group: 'تیکت' },
+    // Notifications
+    'notifications.send':    { label: 'ارسال اعلان', group: 'اعلان‌ها' },
+    'notifications.manage':  { label: 'مدیریت اعلان', group: 'اعلان‌ها' },
+    // Market
+    'market.manage':     { label: 'مدیریت وضعیت بازار', group: 'بازار' },
+    'market.alerts':     { label: 'مدیریت هشدارها', group: 'بازار' },
+    // System
+    'system.logs':       { label: 'مشاهده لاگ', group: 'سیستم' },
+    'system.settings':   { label: 'تنظیمات سیستم', group: 'سیستم' },
+    'system.maintenance':{ label: 'حالت نگهداری', group: 'سیستم' },
+    // Advertisement
+    'ads.banners':       { label: 'مدیریت بنرها', group: 'تبلیغات' },
+    'ads.manage':        { label: 'مدیریت تبلیغات', group: 'تبلیغات' },
+};
+
+// Each role maps to a fixed set of permissions. Super Admin always gets ['*'].
+const ADMIN_ROLES = {
+    'super_admin':       { label: 'Super Admin', permissions: ['*'] },
+    'administrator':     { label: 'Administrator', permissions: [
+        'analysis.publish','analysis.edit','analysis.delete',
+        'news.publish','news.edit','news.delete',
+        'users.view','users.manage','users.block',
+        'admins.view',
+        'wallet.view','wallet.manage','wallet.reward',
+        'referral.manage','referral.reward',
+        'tickets.view','tickets.reply','tickets.close',
+        'notifications.send','notifications.manage',
+        'market.manage','market.alerts',
+        'system.logs','system.settings','system.maintenance',
+        'ads.banners','ads.manage',
+    ]},
+    'content_manager':   { label: 'Content Manager', permissions: [
+        'analysis.publish','analysis.edit','analysis.delete',
+        'news.publish','news.edit','news.delete',
+    ]},
+    'market_analyst':    { label: 'Market Analyst', permissions: [
+        'analysis.publish','analysis.edit',
+        'market.manage','market.alerts',
+    ]},
+    'news_editor':       { label: 'News Editor', permissions: [
+        'news.publish','news.edit','news.delete',
+    ]},
+    'support_manager':   { label: 'Support Manager', permissions: [
+        'tickets.view','tickets.reply','tickets.close',
+        'users.view',
+    ]},
+    'support_agent':     { label: 'Support Agent', permissions: [
+        'tickets.view','tickets.reply',
+    ]},
+    'wallet_manager':    { label: 'Wallet Manager', permissions: [
+        'wallet.view','wallet.manage','wallet.reward',
+        'referral.manage','referral.reward',
+    ]},
+    'marketing_manager': { label: 'Marketing Manager', permissions: [
+        'notifications.send','notifications.manage',
+        'ads.banners','ads.manage',
+    ]},
+    'moderator':         { label: 'Moderator', permissions: [
+        'users.view','users.block',
+        'tickets.view','tickets.close',
+    ]},
+};
+
+// Map sidebar sections → required permission(s). A section is shown if the
+// admin has ANY of the listed permissions (or '*' / is_super).
+const ADMIN_SECTION_PERMS = {
+    'dashboard':           null,  // all admins see the dashboard
+    'users':               ['users.view','users.manage','users.block'],
+    'admins':              ['admins.view','admins.add','admins.edit','admins.delete'],
+    'tickets':             ['tickets.view','tickets.reply','tickets.close'],
+    'rewards':             ['wallet.reward','referral.reward'],
+    'transactions':        ['wallet.view','wallet.manage'],
+    'referrals':           ['referral.manage','referral.reward'],
+    'reward-center':       ['wallet.reward','referral.reward'],
+    'notification-center': ['notifications.send','notifications.manage'],
+    'alert-economy':       ['market.alerts'],
+    'publisher':           ['analysis.publish','news.publish','notifications.send'],
+    'membership':          null,  // all admins can manage membership
+    'system-controls':     ['system.settings','system.maintenance'],
+    'system-health':       ['system.settings'],
+    'logs':                ['system.logs'],
+};
+
+// Check if current admin has a permission (or '*' / is_super).
+function _adminHasPerm(perm) {
+    if (!_adminData) return false;
+    if (_adminData.is_super) return true;
+    const perms = _adminData.permissions || [];
+    if (perms.includes('*')) return true;
+    if (perm && perms.includes(perm)) return true;
+    return false;
+}
+
+// Check if current admin can access a section (any of its required perms).
+function _adminCanAccessSection(section) {
+    const required = ADMIN_SECTION_PERMS[section];
+    if (!required) return true; // no permission required (e.g. dashboard)
+    if (_adminData && _adminData.is_super) return true;
+    const perms = _adminData ? (_adminData.permissions || []) : [];
+    if (perms.includes('*')) return true;
+    return required.some(p => perms.includes(p));
+}
+
 // ─── Helpers ────────────────────────────────────────────────
 
 function adminEscapeHtml(str) {
@@ -277,10 +417,51 @@ function adminPagination(containerId, currentPage, totalPages, loadFn) {
 // ─── Initialize ─────────────────────────────────────────────
 
 async function initAdminPanel() {
-    // Admin detection is unified: isCurrentUserAdmin (set by bootstrapUser) is the
-    // single source of truth. No separate /api/admin/is-admin call needed.
-    // Admin entry button visibility is managed by updateAdminEntryButton() in app.js.
+    // Fetch the current admin's role + permissions from the backend.
+    // This is the SINGLE source of truth for sidebar visibility + permission
+    // checks. Without this, a newly-added admin sees all sidebar items but
+    // gets 403 on every click (the "new admin can't access panel" bug).
+    await _fetchAdminData();
     _adminPanelInitialized = true;
+}
+
+// Fetch the current admin's role + permissions from /api/admin/is-admin.
+// Stores the result in _adminData and rebuilds the sidebar accordingly.
+// Called on panel open AND after any role/permission change (add/edit/remove admin).
+async function _fetchAdminData() {
+    try {
+        const data = await adminApiFetch('/api/admin/is-admin');
+        if (data && data.is_admin) {
+            _adminData = {
+                is_admin: true,
+                role: data.role || '',
+                permissions: data.permissions || [],
+                is_super: Boolean(data.is_super),
+            };
+        } else {
+            _adminData = { is_admin: false, role: '', permissions: [], is_super: false };
+        }
+    } catch (e) {
+        console.warn('[ADMIN] _fetchAdminData failed:', e?.message);
+        _adminData = { is_admin: false, role: '', permissions: [], is_super: false };
+    }
+    // Rebuild sidebar based on actual permissions
+    _applySidebarPermissions();
+    _updateAdminSidebarUser();
+    return _adminData;
+}
+
+// Show/hide sidebar nav items based on _adminData permissions.
+// Items the admin can't access are hidden (display:none) — NOT removed — so
+// the DOM structure stays stable. This runs on every panel open.
+function _applySidebarPermissions() {
+    const navItems = document.querySelectorAll('.adm-nav-item, .admin-nav-item');
+    navItems.forEach(function (item) {
+        const section = item.getAttribute('data-admin-section');
+        if (!section) return;
+        const canAccess = _adminCanAccessSection(section);
+        item.style.display = canAccess ? '' : 'none';
+    });
 }
 
 // ─── Panel Open / Close ─────────────────────────────────────
@@ -310,14 +491,22 @@ function openAdminPanel() {
     panel.style.display = 'flex';
     _adminPanelOpen = true;
     document.body.style.overflow = 'hidden';
-    // Update admin sidebar user info
-    _updateAdminSidebarUser();
-    // Load dashboard by default
-    if (_currentAdminSection === 'dashboard') {
-        loadAdminDashboard();
-    } else {
-        switchAdminSection(_currentAdminSection, null);
-    }
+    // Fetch admin data (role + permissions) BEFORE building sidebar / loading
+    // any section. This ensures the sidebar reflects the admin's real access.
+    _fetchAdminData().then(function () {
+        // If the current section is not accessible, fall back to dashboard.
+        if (!_adminCanAccessSection(_currentAdminSection)) {
+            _currentAdminSection = 'dashboard';
+        }
+        // Update admin sidebar user info
+        _updateAdminSidebarUser();
+        // Load dashboard by default (or the current section if accessible)
+        if (_currentAdminSection === 'dashboard') {
+            loadAdminDashboard();
+        } else {
+            switchAdminSection(_currentAdminSection, null);
+        }
+    });
     // On mobile, start with sidebar closed (content visible).
     // On desktop, sidebar is always visible via CSS.
     closeAdminSidebar();
@@ -375,10 +564,22 @@ function _updateAdminSidebarUser() {
             if (nameEl) nameEl.textContent = fullName || 'مدیر';
             if (avatarEl) avatarEl.textContent = (u.first_name || 'A').charAt(0).toUpperCase();
         }
+        // Show the admin's real role + permission count from _adminData
+        if (roleEl) {
+            const role = _adminData.role || '';
+            const roleLabel = ADMIN_ROLES[role] ? ADMIN_ROLES[role].label : (role || 'مدیر');
+            const permCount = _adminData.is_super ? '∞' : (_adminData.permissions || []).length;
+            roleEl.textContent = roleLabel + ' · ' + permCount + ' دسترسی';
+        }
     } catch (e) { /* ignore */ }
 }
 
 function switchAdminSection(section, btn) {
+    // Permission guard: if the admin can't access this section, refuse + toast
+    if (!_adminCanAccessSection(section)) {
+        showAdminToast('شما به این بخش دسترسی ندارید', 'error');
+        return;
+    }
     _currentAdminSection = section;
     // Increment load token — any in-flight loader from a previous section
     // will see a stale token and discard its response.
@@ -427,6 +628,7 @@ function switchAdminSection(section, btn) {
         case 'notification-center': loadNpOverview(); break;
         case 'alert-economy': loadAlertEconomyDashboard(); break;
         case 'publisher': loadPublisherOverview(); break;
+        case 'membership': loadAdminMembership(); break;
         case 'system-controls': loadMaintenanceSettings(); break;
         case 'system-health': loadAdminSystemHealth(); break;
         case 'logs': loadAdminLogs(1); break;
@@ -810,29 +1012,64 @@ async function loadAdminList() {
         admins.forEach(function (admin) {
             const isActive = admin.active !== false && admin.is_active !== false;
             const role = admin.role || 'admin';
+            const isSuper = role === 'super_admin' || admin.is_super;
             const perms = admin.permissions || [];
-            const permBadges = perms.map(function (p) {
-                return adminBadge(p, 'blue');
-            }).join(' ');
+            const roleLabel = ADMIN_ROLES[role] ? ADMIN_ROLES[role].label : (isSuper ? 'Super Admin' : role);
+            const displayName = admin.name || admin.username || (admin.first_name ? (admin.first_name + (admin.last_name ? ' ' + admin.last_name : '')) : 'مدیر');
+            const tgId = String(admin.telegram_id || admin.id || '');
+            const username = admin.username ? '@' + admin.username : null;
+            const permCount = perms.includes('*') ? Object.keys(ADMIN_PERMISSIONS).length : perms.length;
 
-            html += '<div class="admin-list-item">' +
-                '<div class="admin-list-item-header">' +
-                '<span class="admin-list-item-title">' + adminEscapeHtml(admin.name || admin.username || 'Admin') +
-                ' <span style="color:var(--text-sub);font-weight:400;font-size:12px;">ID: ' + adminEscapeHtml(String(admin.telegram_id || admin.id || '')) + '</span></span>' +
-                adminBadge(role, role === 'super' ? 'red' : role === 'admin' ? 'orange' : 'gray') +
-                (isActive ? adminBadge('Active', 'green') : adminBadge('Inactive', 'red')) +
+            // Role badge color: super=red, administrator=orange, others=blue
+            const roleBadgeColor = isSuper ? 'red' : (role === 'administrator' ? 'orange' : 'blue');
+            // Status badge
+            const statusBadge = isActive ? adminBadge('ACTIVE', 'green') : adminBadge('BLOCKED', 'red');
+
+            // Permission summary: show count + up to 3 badges, then "+N"
+            let permBadgesHtml = '';
+            if (perms.includes('*') || isSuper) {
+                permBadgesHtml = adminBadge('FULL ACCESS', 'red');
+            } else if (permCount > 0) {
+                const shown = perms.slice(0, 3).map(function (p) {
+                    const def = ADMIN_PERMISSIONS[p];
+                    return adminBadge(def ? def.label : p, 'blue');
+                }).join(' ');
+                const extra = permCount > 3 ? ' <span class="admin-badge admin-badge-gray">+' + (permCount - 3) + '</span>' : '';
+                permBadgesHtml = shown + extra;
+            } else {
+                permBadgesHtml = adminBadge('بدون دسترسی', 'gray');
+            }
+
+            html += '<div class="admin-list-item adm-user-card">' +
+                // Row 1: avatar + name + role badge + status badge
+                '<div class="adm-card-top">' +
+                    '<div class="adm-card-avatar">' + adminEscapeHtml((displayName || 'م').charAt(0)) + '</div>' +
+                    '<div class="adm-card-id">' +
+                        '<div class="adm-card-name">' + adminEscapeHtml(displayName) + '</div>' +
+                        '<div class="adm-card-sub">' +
+                            (username ? adminEscapeHtml(username) + ' · ' : '') +
+                            'ID: <span class="adm-card-tgid">' + adminEscapeHtml(tgId) + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="adm-card-badges">' +
+                        adminBadge(roleLabel, roleBadgeColor) +
+                        statusBadge +
+                    '</div>' +
                 '</div>' +
-                '<div class="admin-list-item-meta">' +
-                'Role: ' + adminEscapeHtml(role) +
-                (admin.last_active ? ' &bull; Last active: ' + adminFormatDate(admin.last_active) : '') +
-                (admin.created_at ? ' &bull; Added: ' + adminFormatDate(admin.created_at) : '') +
+                // Row 2: meta info (joined, last active, perm count)
+                '<div class="adm-card-meta">' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">عضویت</span><span class="adm-meta-val">' + adminFormatDate(admin.created_at) + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">آخرین ورود</span><span class="adm-meta-val">' + (admin.last_active ? adminFormatDate(admin.last_active) : '—') + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">دسترسی‌ها</span><span class="adm-meta-val">' + permCount + '</span></span>' +
                 '</div>' +
-                (perms.length > 0 ? '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">' + permBadges + '</div>' : '') +
-                '<div style="margin-top:8px;display:flex;gap:6px;">' +
-                '<button class="admin-btn admin-btn-sm admin-btn-' + (isActive ? 'ghost' : 'green') +
-                '" onclick="toggleAdminActive(\'' + (admin.id || '') + '\', ' + isActive + ')">' +
-                (isActive ? 'Deactivate' : 'Activate') + '</button>' +
-                (role !== 'super' ? '<button class="admin-btn admin-btn-sm admin-btn-red" onclick="removeAdmin(\'' + (admin.id || '') + '\', \'' + (admin.telegram_id || '') + '\')">Remove</button>' : '') +
+                // Row 3: permission badges
+                '<div class="adm-card-perms">' + permBadgesHtml + '</div>' +
+                // Row 4: action buttons (fixed position)
+                '<div class="adm-card-actions">' +
+                    '<button class="admin-btn admin-btn-sm admin-btn-' + (isActive ? 'ghost' : 'green') +
+                    '" onclick="toggleAdminActive(\'' + (admin.id || '') + '\', ' + isActive + ')">' +
+                    (isActive ? 'غیرفعال‌سازی' : 'فعال‌سازی') + '</button>' +
+                    (!isSuper ? '<button class="admin-btn admin-btn-sm admin-btn-red" onclick="removeAdmin(\'' + (admin.id || '') + '\', \'' + (admin.telegram_id || '') + '\')">حذف</button>' : '<span class="adm-card-protected">حفاظت‌شده</span>') +
                 '</div>' +
                 '</div>';
         });
@@ -846,11 +1083,50 @@ async function loadAdminList() {
 function openAddAdminForm() {
     const form = document.getElementById('admin-add-form');
     if (form) form.style.display = 'flex';
+    // Render permission checkboxes grouped by category, pre-filled from the
+    // default role (support_agent). Changing the role updates the checkboxes.
+    _renderAdminPermChecks();
 }
 
 function closeAddAdminForm() {
     const form = document.getElementById('admin-add-form');
     if (form) form.style.display = 'none';
+}
+
+// Render permission checkboxes grouped by ADMIN_PERMISSIONS.group.
+// Pre-checks the permissions of the currently selected role.
+function _renderAdminPermChecks() {
+    const container = document.getElementById('admin-new-permissions');
+    if (!container) return;
+    const roleSelect = document.getElementById('admin-new-role');
+    const roleKey = roleSelect ? roleSelect.value : 'support_agent';
+    const roleDef = ADMIN_ROLES[roleKey] || { permissions: [] };
+    const rolePerms = roleDef.permissions.includes('*') ? Object.keys(ADMIN_PERMISSIONS) : roleDef.permissions;
+
+    // Group permissions by their .group field
+    const groups = {};
+    for (const [key, def] of Object.entries(ADMIN_PERMISSIONS)) {
+        if (!groups[def.group]) groups[def.group] = [];
+        groups[def.group].push({ key, label: def.label });
+    }
+
+    let html = '';
+    for (const [groupName, perms] of Object.entries(groups)) {
+        html += '<div class="adm-perm-group"><div class="adm-perm-group-label">' + adminEscapeHtml(groupName) + '</div><div class="adm-perm-group-items">';
+        for (const p of perms) {
+            const checked = rolePerms.includes(p.key) ? 'checked' : '';
+            html += '<label class="adm-chip"><input type="checkbox" value="' + adminEscapeHtml(p.key) + '" ' + checked + '> ' + adminEscapeHtml(p.label) + '</label>';
+        }
+        html += '</div></div>';
+    }
+    container.innerHTML = html;
+}
+
+// When the role <select> changes, re-render the permission checkboxes with
+// the new role's default permissions pre-checked. Existing manual edits are
+// overwritten — this is intentional (selecting a role = applying its template).
+function _onAdminRoleChange() {
+    _renderAdminPermChecks();
 }
 
 async function submitAddAdmin() {
@@ -859,7 +1135,11 @@ async function submitAddAdmin() {
     const permChecks = document.querySelectorAll('#admin-new-permissions input[type="checkbox"]');
 
     if (!telegramId || !telegramId.value.trim()) {
-        showAdminToast('Please enter a Telegram ID', 'error');
+        showAdminToast('لطفاً شناسه تلگرام را وارد کنید', 'error');
+        return;
+    }
+    if (!/^\d{5,20}$/.test(telegramId.value.trim())) {
+        showAdminToast('شناسه تلگرام باید عدد معتبر باشد', 'error');
         return;
     }
 
@@ -874,17 +1154,16 @@ async function submitAddAdmin() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 telegram_id: telegramId.value.trim(),
-                role: role ? role.value : 'admin',
+                role: role ? role.value : 'support_agent',
                 permissions: permissions
             })
         });
-        showAdminToast('Admin added successfully', 'success');
+        showAdminToast('مدیر با موفقیت افزوده شد', 'success');
         closeAddAdminForm();
         if (telegramId) telegramId.value = '';
-        permChecks.forEach(function (cb) { cb.checked = false; });
         loadAdminList();
     } catch (e) {
-        showAdminToast('Failed to add admin: ' + (e.message || 'Unknown error'), 'error');
+        showAdminToast('خطا در افزودن مدیر: ' + (e.message || 'Unknown error'), 'error');
         console.error('submitAddAdmin:', e);
     }
 }
@@ -957,26 +1236,42 @@ async function loadAdminUsers(page) {
 
         let html = '';
         users.forEach(function (u) {
-            // PHASE 2: Display real fields from backend (is_premium, is_active, language,
-            // last_active, mini_app_opened_at, bot_joined_at). Previously these were blank.
-            const statusBadge = u.is_active ? adminBadge('فعال', 'green') : adminBadge('غیرفعال', 'gray');
-            const premiumBadge = u.is_premium ? adminBadge('Premium', 'orange') : '';
-            const channelBadge = u.channel_joined ? adminBadge('عضو کانال', 'green') : '';
-            const miniAppBadge = u.mini_app_opened_at ? adminBadge('Mini App', 'blue') : '';
-            html += '<div class="admin-list-item">' +
-                '<div class="admin-list-item-header">' +
-                '<span class="admin-list-item-title">' + adminEscapeHtml(u.first_name || u.name || 'User') +
-                (u.last_name ? ' ' + adminEscapeHtml(u.last_name) : '') + '</span>' +
-                premiumBadge + statusBadge + channelBadge + miniAppBadge +
+            // Build a modern, uniform user card with aligned badges + meta grid.
+            const isActive = u.is_active !== false;
+            const isPremium = u.is_premium;
+            const channelJoined = u.channel_joined;
+            const displayName = (u.first_name || u.name || 'کاربر') + (u.last_name ? ' ' + u.last_name : '');
+            const tgId = String(u.telegram_id || u.id || '');
+            const username = u.username ? '@' + u.username : null;
+            const tokens = (u.token_balance !== undefined && u.token_balance !== null) ? u.token_balance : (u.tokens || 0);
+            const roleLabel = u.role || null; // if user has an admin role
+
+            // Badges — all same size, aligned in one row
+            const statusBadge = isActive ? adminBadge('ACTIVE', 'green') : adminBadge('BLOCKED', 'red');
+            const channelBadge = channelJoined ? adminBadge('JOINED', 'green') : adminBadge('NOT JOINED', 'gray');
+            const premiumBadge = isPremium ? adminBadge('PREMIUM', 'orange') : '';
+            const roleBadge = roleLabel ? adminBadge(roleLabel.toUpperCase(), 'blue') : '';
+
+            html += '<div class="admin-list-item adm-user-card">' +
+                // Row 1: avatar + name + badges
+                '<div class="adm-card-top">' +
+                    '<div class="adm-card-avatar' + (isPremium ? ' adm-card-avatar--premium' : '') + '">' + adminEscapeHtml((displayName || 'ک').charAt(0)) + '</div>' +
+                    '<div class="adm-card-id">' +
+                        '<div class="adm-card-name">' + adminEscapeHtml(displayName) + '</div>' +
+                        '<div class="adm-card-sub">' +
+                            (username ? adminEscapeHtml(username) + ' · ' : '') +
+                            'ID: <span class="adm-card-tgid">' + adminEscapeHtml(tgId) + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="adm-card-badges">' +
+                        statusBadge + channelBadge + premiumBadge + roleBadge +
+                    '</div>' +
                 '</div>' +
-                '<div class="admin-list-item-meta">' +
-                (u.username ? '@' + adminEscapeHtml(u.username) + ' &bull; ' : '') +
-                'ID: ' + adminEscapeHtml(String(u.telegram_id || u.id || '')) +
-                (u.language ? ' &bull; Lang: ' + adminEscapeHtml(u.language) : '') +
-                '</div>' +
-                '<div class="admin-list-item-meta">' +
-                'Joined: ' + adminFormatDate(u.created_at || u.join_date) +
-                (u.last_active ? ' &bull; Last active: ' + adminFormatDate(u.last_active) : ' &bull; Last active: --') +
+                // Row 2: meta grid — uniform columns
+                '<div class="adm-card-meta">' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">عضویت</span><span class="adm-meta-val">' + adminFormatDate(u.created_at || u.join_date) + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">آخرین فعالیت</span><span class="adm-meta-val">' + (u.last_active ? adminFormatDate(u.last_active) : '—') + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">توکن</span><span class="adm-meta-val">' + adminEscapeHtml(String(tokens)) + '</span></span>' +
                 '</div>' +
                 '</div>';
         });
@@ -1072,70 +1367,76 @@ async function loadAdminTickets(page) {
 
         let html = '';
         tickets.forEach(function (t) {
-            const statusBadge = t.status === 'open' ? adminBadge('Open', 'red') :
-                t.status === 'answered' ? adminBadge('Answered', 'orange') :
-                    t.status === 'closed' ? adminBadge('Closed', 'gray') :
-                        adminBadge(String(t.status || ''), 'gray');
+            const statusInfo = {
+                open: { label: 'باز', cls: 'tk-status-open', icon: '🔵' },
+                answered: { label: 'پاسخ داده شده', cls: 'tk-status-answered', icon: '🟡' },
+                closed: { label: 'بسته شده', cls: 'tk-status-closed', icon: '⚫' },
+            };
+            const si = statusInfo[t.status] || { label: String(t.status || ''), cls: 'tk-status-closed', icon: '⚪' };
             const isExpanded = !!_adminTicketsExpanded[t.id];
             const replies = (t.replies && t.replies.length) ? t.replies : [];
+            const priorityCls = t.priority === 'high' ? 'tk-priority-high' : (t.priority === 'medium' ? 'tk-priority-medium' : 'tk-priority-low');
 
-            html += '<div class="admin-list-item admin-ticket-item" id="adm-ticket-' + t.id + '">' +
-                '<div class="admin-list-item-header" style="cursor:pointer" onclick="toggleAdminTicketDetail(\'' + t.id + '\')">' +
-                '<span class="admin-list-item-title">' + adminEscapeHtml(t.subject || t.title || 'Ticket #' + (t.id || '')) + '</span>' +
-                statusBadge +
-                '<span class="admin-list-item-arrow" style="margin-left:auto;color:#6B7A8D">›</span>' +
+            html += '<div class="tk-card ' + (isExpanded ? 'tk-expanded' : '') + '" id="adm-ticket-' + t.id + '">' +
+                '<div class="tk-card-header" onclick="toggleAdminTicketDetail(\'' + t.id + '\')">' +
+                    '<div class="tk-card-header-left">' +
+                        '<span class="tk-card-icon ' + si.cls + '">' + si.icon + '</span>' +
+                        '<div class="tk-card-header-text">' +
+                            '<span class="tk-card-subject">' + adminEscapeHtml(t.subject || t.title || 'تیکت #' + (t.id || '')) + '</span>' +
+                            '<span class="tk-card-user">' + adminEscapeHtml(t.user_name || t.username || 'کاربر') + ' · ID: ' + adminEscapeHtml(String(t.telegram_id || t.user_id || '')) + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="tk-card-header-right">' +
+                        '<span class="tk-badge ' + si.cls + '">' + si.label + '</span>' +
+                        '<span class="tk-card-arrow ' + (isExpanded ? 'tk-arrow-open' : '') + '"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></span>' +
+                    '</div>' +
                 '</div>' +
-                '<div class="admin-list-item-meta">From: ' + adminEscapeHtml(t.user_name || t.username || 'User') +
-                ' (ID: ' + adminEscapeHtml(String(t.telegram_id || t.user_id || '')) + ')</div>' +
-                '<div class="admin-list-item-meta" style="margin-top:4px;white-space:pre-wrap;overflow:hidden;max-height:60px;">' +
-                adminEscapeHtml(t.message || t.last_message || '') +
-                '</div>' +
-                '<div class="admin-list-item-meta" style="margin-top:4px;">' +
-                adminFormatDate(t.created_at || t.date) +
-                (t.updated_at ? ' &bull; Updated: ' + adminFormatDate(t.updated_at) : '') +
+                '<div class="tk-card-preview">' + adminEscapeHtml((t.message || t.last_message || '').substring(0, 120)) + (t.message && t.message.length > 120 ? '…' : '') + '</div>' +
+                '<div class="tk-card-footer">' +
+                    '<span class="tk-card-date">' + adminFormatDate(t.created_at || t.date) + '</span>' +
+                    (t.updated_at ? '<span class="tk-card-updated">· به‌روزرسانی: ' + adminFormatDate(t.updated_at) + '</span>' : '') +
+                    (replies.length ? '<span class="tk-card-replies">💬 ' + replies.length + ' پاسخ</span>' : '') +
                 '</div>';
 
             // Expanded detail: conversation history + reply form + status controls
             if (isExpanded) {
-                html += '<div class="adm-ticket-detail" style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);">';
+                html += '<div class="tk-detail">';
 
                 // Conversation thread
-                if (replies.length) {
-                    html += '<div class="adm-ticket-thread" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">';
-                    // Original message
-                    html += '<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:10px 12px;">' +
-                        '<div style="font-size:11px;color:#6B7A8D;margin-bottom:4px;">' + adminEscapeHtml(t.user_name || 'User') + ' • ' + adminFormatDate(t.created_at) + '</div>' +
-                        '<div style="white-space:pre-wrap;font-size:13px;color:#A5B4C7;">' + adminEscapeHtml(t.message || t.body || '') + '</div>' +
+                html += '<div class="tk-thread adm-ticket-thread">';
+                // Original message
+                html += '<div class="tk-msg tk-msg-user">' +
+                    '<div class="tk-msg-header"><span class="tk-msg-author">' + adminEscapeHtml(t.user_name || 'کاربر') + '</span><span class="tk-msg-time">' + adminFormatDate(t.created_at) + '</span></div>' +
+                    '<div class="tk-msg-body">' + adminEscapeHtml(t.message || t.body || '') + '</div>' +
+                    '</div>';
+                // Replies
+                replies.forEach(function (r) {
+                    var isAdmin = r.from === 'admin' || r.is_admin;
+                    html += '<div class="tk-msg ' + (isAdmin ? 'tk-msg-admin' : 'tk-msg-user') + '">' +
+                        '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? 'مدیر' : adminEscapeHtml(t.user_name || 'کاربر')) + '</span><span class="tk-msg-time">' + adminFormatDate(r.at || r.created_at) + '</span></div>' +
+                        '<div class="tk-msg-body">' + adminEscapeHtml(r.message || r.text || '') + '</div>' +
                         '</div>';
-                    // Replies
-                    replies.forEach(function (r) {
-                        var isAdmin = r.from === 'admin' || r.is_admin;
-                        html += '<div style="background:' + (isAdmin ? 'rgba(245,166,35,0.08)' : 'rgba(255,255,255,0.03)') + ';border-radius:10px;padding:10px 12px;' + (isAdmin ? 'border:1px solid rgba(245,166,35,0.15);' : '') + '">' +
-                            '<div style="font-size:11px;color:' + (isAdmin ? '#F5A623' : '#6B7A8D') + ';margin-bottom:4px;">' + (isAdmin ? 'Admin' : adminEscapeHtml(t.user_name || 'User')) + ' • ' + adminFormatDate(r.at || r.created_at) + '</div>' +
-                            '<div style="white-space:pre-wrap;font-size:13px;color:#A5B4C7;">' + adminEscapeHtml(r.message || r.text || '') + '</div>' +
-                            '</div>';
-                    });
-                    html += '</div>';
-                }
+                });
+                html += '</div>';
 
                 // Reply form
-                html += '<div style="margin-bottom:10px;">' +
-                    '<textarea id="adm-reply-' + t.id + '" class="adm-input" placeholder="Type a reply..." style="width:100%;min-height:70px;font-size:13px;padding:10px 12px;border-radius:10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#fff;font-family:inherit;resize:vertical;box-sizing:border-area;"></textarea>' +
-                    '<button class="admin-btn admin-btn-gold" style="margin-top:6px;padding:8px 18px;font-size:12px;" onclick="adminReplyTicket(\'' + t.id + '\')">Send Reply</button>' +
+                html += '<div class="tk-reply-form">' +
+                    '<textarea id="adm-reply-' + t.id + '" class="tk-reply-input" placeholder="پاسخ خود را بنویسید..." rows="3"></textarea>' +
+                    '<button class="tk-btn tk-btn-primary" onclick="adminReplyTicket(\'' + t.id + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال پاسخ</button>' +
                     '</div>';
 
                 // Status controls
-                html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
+                html += '<div class="tk-actions">';
                 if (t.status !== 'closed') {
-                    html += '<button class="admin-btn" style="padding:6px 14px;font-size:11px;" onclick="adminSetTicketStatus(\'' + t.id + '\',\'closed\')">Close</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + t.id + '\',\'closed\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg> بستن</button>';
                 }
                 if (t.status !== 'open') {
-                    html += '<button class="admin-btn" style="padding:6px 14px;font-size:11px;" onclick="adminSetTicketStatus(\'' + t.id + '\',\'open\')">Reopen</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + t.id + '\',\'open\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> باز کردن</button>';
                 }
                 if (t.status !== 'answered') {
-                    html += '<button class="admin-btn" style="padding:6px 14px;font-size:11px;" onclick="adminSetTicketStatus(\'' + t.id + '\',\'answered\')">Mark Answered</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + t.id + '\',\'answered\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> پاسخ داده شده</button>';
                 }
-                html += '<button class="admin-btn admin-btn-danger" style="padding:6px 14px;font-size:11px;" onclick="adminDeleteTicket(\'' + t.id + '\')">Delete</button>';
+                html += '<button class="tk-btn tk-btn-danger" onclick="adminDeleteTicket(\'' + t.id + '\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> حذف</button>';
                 html += '</div>';
 
                 html += '</div>';
@@ -1175,9 +1476,9 @@ async function fetchTicketReplies(ticketId) {
         let html = '';
         data.replies.forEach(function (r) {
             const isAdmin = r.is_admin_reply;
-            html += '<div style="background:' + (isAdmin ? 'rgba(245,166,35,0.08)' : 'rgba(255,255,255,0.03)') + ';border-radius:10px;padding:10px 12px;' + (isAdmin ? 'border:1px solid rgba(245,166,35,0.15);' : '') + '">' +
-                '<div style="font-size:11px;color:' + (isAdmin ? '#F5A623' : '#6B7A8D') + ';margin-bottom:4px;">' + (isAdmin ? 'Admin' : 'User') + ' • ' + adminFormatDate(r.created_at) + '</div>' +
-                '<div style="white-space:pre-wrap;font-size:13px;color:#A5B4C7;">' + adminEscapeHtml(r.body || '') + '</div>' +
+            html += '<div class="tk-msg ' + (isAdmin ? 'tk-msg-admin' : 'tk-msg-user') + '">' +
+                '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? 'مدیر' : 'کاربر') + '</span><span class="tk-msg-time">' + adminFormatDate(r.created_at) + '</span></div>' +
+                '<div class="tk-msg-body">' + adminEscapeHtml(r.body || '') + '</div>' +
                 '</div>';
         });
         threadEl.innerHTML = html;
@@ -2810,6 +3111,16 @@ async function loadPublisherOverview() {
         loadPublisherNews(1);
     }
 }
+
+/** Membership section loader — delegates to MembershipAdmin (from membership-admin.js). */
+async function loadAdminMembership() {
+    if (window.MembershipAdmin && typeof window.MembershipAdmin.load === 'function') {
+        await window.MembershipAdmin.load();
+    } else {
+        const container = document.getElementById('admin-membership-list');
+        if (container) container.innerHTML = '<div class="admin-empty">در حال بارگذاری ماژول عضویت...</div>';
+    }
+}
 window.loadPublisherOverview = loadPublisherOverview;
 
 async function loadPublisherStats() {
@@ -3572,6 +3883,12 @@ async function loadPublisherSettings() {
         const s = data.settings;
         const el = (id) => document.getElementById(id);
         if (el('tgpub-channel-id')) el('tgpub-channel-id').value = s.channel_id || '';
+        if (el('tgpub-channel-username')) el('tgpub-channel-username').value = s.channel_username || '';
+        // Bot token: show placeholder if set, don't expose the actual token
+        if (el('tgpub-bot-token')) {
+            el('tgpub-bot-token').value = '';
+            el('tgpub-bot-token').placeholder = s.bot_token_set ? '••••••••' + s.bot_token.slice(-4) + ' (تنظیم شده — برای تغییر وارد کنید)' : '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11';
+        }
         if (el('tgpub-rate-limit')) el('tgpub-rate-limit').value = s.rate_limit_ms || 3000;
         if (el('tgpub-enabled')) el('tgpub-enabled').checked = !!s.enabled;
         if (el('tgpub-auto-news')) el('tgpub-auto-news').checked = !!s.auto_publish_news;
@@ -3600,6 +3917,8 @@ async function savePublisherSettings() {
     const payload = {
         enabled: !!(el('tgpub-enabled') && el('tgpub-enabled').checked),
         channel_id: (el('tgpub-channel-id') && el('tgpub-channel-id').value || '').trim(),
+        channel_username: (el('tgpub-channel-username') && el('tgpub-channel-username').value || '').trim(),
+        bot_token: (el('tgpub-bot-token') && el('tgpub-bot-token').value || '').trim(),
         rate_limit_ms: Number(el('tgpub-rate-limit') && el('tgpub-rate-limit').value) || 3000,
         auto_publish_news: !!(el('tgpub-auto-news') && el('tgpub-auto-news').checked),
         auto_publish_calendar: !!(el('tgpub-auto-calendar') && el('tgpub-auto-calendar').checked),
