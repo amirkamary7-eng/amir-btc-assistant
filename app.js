@@ -12815,10 +12815,11 @@ function showCalendarDebug() {
         <div style="background:#111;padding:12px;border-radius:8px;margin-bottom:12px;">
             <h3 style="color:#F5A623;font-size:13px;margin-bottom:8px;">📖 How to use</h3>
             <div style="color:#aaa;font-size:10px;">
-                1. Check if BUILD_ID matches localStorage. If not, click "Force Cache Bust".<br>
-                2. Check if app.js hash is <span style="color:#0f0">app.c25c8a3f.js</span> (latest).<br>
-                3. Check API response shows 95 events with correct statuses.<br>
-                4. Take a screenshot of this panel and send to support.
+                1. Check if BUILD_ID (HTML) matches localStorage build_id. If "NO (stale!)", click "Force Cache Bust".<br>
+                2. Check API response shows 95 events with correct statuses (mostly "upcoming").<br>
+                3. Check Filter today/tomorrow/week counts are non-zero.<br>
+                4. Take a screenshot of this panel and send to support.<br>
+                5. Open with: long-press (3s) on "تقویم اقتصادی" header, or add #debugcal to URL.
             </div>
         </div>
     `;
@@ -12826,7 +12827,8 @@ function showCalendarDebug() {
     document.body.appendChild(panel);
 
     // Fetch API data and display
-    fetch('/api/calendar/events?_=' + Date.now(), { cache: 'no-store' })
+    const _apiBase = (window.API_BASE || API_BASE || '').replace(/\/$/, '');
+    fetch(_apiBase + '/api/calendar/events?_=' + Date.now(), { cache: 'no-store' })
         .then(r => r.json())
         .then(data => {
             const apiDiv = document.getElementById('cal-debug-api');
@@ -12861,7 +12863,11 @@ function showCalendarDebug() {
                 <div>Filter today: <span style="color:#0f0">${todayCount}</span> events</div>
                 <div>Filter tomorrow: <span style="color:#0f0">${tomorrowCount}</span> events</div>
                 <div>Filter week: <span style="color:#0f0">${ev.length}</span> events (all)</div>
-                <div style="margin-top:8px;color:#aaa;">First 5 events:</div>
+                <div style="margin-top:8px;color:#aaa;">
+                Latest BUILD_ID: <span style="color:#0f0">${buildId}</span> (this HTML)<br>
+                If localStorage shows OLD build_id, click "Force Cache Bust" below.
+            </div>
+            <div style="margin-top:8px;color:#aaa;">First 5 events:</div>
                 ${ev.slice(0,5).map((e,i) => {
                     const d = new Date(e.timestamp);
                     const tehranDate = d.toLocaleDateString('en-CA', {timeZone: tz});
