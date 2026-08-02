@@ -44,9 +44,18 @@ CREATE TABLE IF NOT EXISTS membership_users (
   referral_code        TEXT,
   referral_verified_at TIMESTAMPTZ,
   profile_meta         TEXT,
+  -- Phase 4: Premium welcome popup — tracks if the one-time welcome popup
+  -- has been shown to this user after their first Premium activation.
+  -- Ensures the popup is displayed exactly once per Premium activation.
+  welcome_shown        BOOLEAN NOT NULL DEFAULT FALSE,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Idempotent column add for existing deployments (safe to run multiple times)
+DO $$ BEGIN
+  ALTER TABLE membership_users ADD COLUMN IF NOT EXISTS welcome_shown BOOLEAN NOT NULL DEFAULT FALSE;
+EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS idx_mu_status   ON membership_users (membership_status);
 CREATE INDEX IF NOT EXISTS idx_mu_level    ON membership_users (membership_level);
 CREATE INDEX IF NOT EXISTS idx_mu_source   ON membership_users (membership_source);

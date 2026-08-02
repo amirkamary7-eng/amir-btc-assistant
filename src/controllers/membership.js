@@ -22,6 +22,9 @@ export function createMembershipHandlers(deps) {
     readJsonBody,
     membershipRepo,
     queryDbTransaction,
+    notificationRepo,
+    sendTelegramMessage,
+    resolveWebAppUrl,
   } = deps;
 
   // ─── Constants ────────────────────────────────────────────────────────────
@@ -157,9 +160,11 @@ export function createMembershipHandlers(deps) {
         lifetime: user.membership_status === 'APPROVED' && !user.expire_at,
         approvedAt: user.approved_at,
         expireAt: user.expire_at,
+        welcomeShown: Boolean(user.welcome_shown),
       } : {
         level: 'FREE', status: 'INACTIVE', source: 'MANUAL',
         lifetime: false, approvedAt: null, expireAt: null,
+        welcomeShown: true,
       };
       await writeAppCache(env, cacheKey, JSON.stringify(dto), CACHE_TTL.STATUS);
       return jsonResponse({ ok: true, data: dto }, {}, env);
@@ -425,8 +430,69 @@ export function createMembershipHandlers(deps) {
           ],
         });
 
+        // ── Phase 4: Premium welcome notification (only on approve) ──
+        // Insert a one-time in-app notification into the notifications table.
+        // Uses a deterministic ID (notif_premium_<tgId>) so that ON CONFLICT DO NOTHING
+        // prevents duplicates even if approve is called multiple times.
+        if (action === 'approve') {
+          txQueries.push({
+            sql: `INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
+                  VALUES ($1, $2, 'membership', $3, $4, $5, FALSE, 'high', 'membership', 'mini_app', 'delivered', NOW())
+                  ON CONFLICT (id) DO NOTHING`,
+            params: [
+              `notif_premium_${req.telegram_id}`,
+              req.telegram_id,
+              '🎉 عضویت Premium فعال شد',
+              'تبریک! عضویت ویژه شما با موفقیت فعال شد. تمام امکانات اختصاصی اکنون در دسترس شماست. Mini App را باز کنید و از تجربه Premium لذت ببرید.',
+              JSON.stringify({ level: newLevel || 'VIP', approvedAt: now, source: 'exchange' }),
+            ],
+          });
+          // Also reset welcome_shown so the popup shows on next visit
+          txQueries.push({
+            sql: `UPDATE membership_users SET welcome_shown = FALSE WHERE telegram_id = $1`,
+            params: [req.telegram_id],
+          });
+        }
+
         await deps.queryDbTransaction(env, txQueries);
         await invalidateCaches(env, req.telegram_id);
+
+        // ── Phase 4: Send Telegram bot message (fire-and-forget) ──
+        // If sending fails, the approve must NOT fail — just log the error.
+        if (action === 'approve' && typeof sendTelegramMessage === 'function') {
+          try {
+            const webAppUrl = typeof resolveWebAppUrl === 'function' ? resolveWebAppUrl(env) : '';
+            const levelLabel = { VIP: 'VIP', PREMIUM: 'Premium', ELITE: 'Elite' }[newLevel || 'VIP'] || 'VIP';
+            const msgText = [
+              `🎉 تبریک! عضویت ${levelLabel} شما فعال شد.`,
+              ``,
+              `✨ مزایای عضویت ویژه شما:`,
+              `• دسترسی به چارت‌ها و تحلیل‌های اختصاصی`,
+              `• نشان Premium در پروفایل شما`,
+              `• اولویت در دریافت قابلیت‌های جدید`,
+              `• شرکت در کمپین‌ها و جوایز ویژه`,
+              ``,
+              `🚀 برای استفاده از تمام امکانات، Mini App را باز کنید:`,
+            ].join('\n');
+            const tgPayload = {
+              chat_id: req.telegram_id,
+              text: msgText,
+              parse_mode: 'HTML',
+              reply_markup: webAppUrl ? {
+                inline_keyboard: [[
+                  { text: '📱 باز کردن Mini App', web_app: { url: webAppUrl } },
+                ]],
+              } : undefined,
+            };
+            // Fire-and-forget — do NOT await, do NOT let failure affect approve
+            sendTelegramMessage(env, tgPayload, { retries: 1, timeoutMs: 5000 }).catch((tgErr) => {
+              console.warn('[membership] Telegram message failed for premium approval:', tgErr?.message || tgErr);
+            });
+          } catch (tgErr) {
+            console.warn('[membership] Telegram message setup failed:', tgErr?.message || tgErr);
+          }
+        }
+
         return jsonResponse({ ok: true, data: { ok: true, requestId: req.id } }, {}, env);
       } catch (e) { return safeDbErrorResponse(e, {}, env); }
     };
@@ -687,10 +753,30 @@ export function createMembershipHandlers(deps) {
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
+  // ─── Phase 4: Mark Welcome Popup as Shown ────────────────────────────────
+
+  /** POST /api/membership/welcome-shown — mark the one-time welcome popup as shown. */
+  async function handleMarkWelcomeShown(request, env) {
+    const auth = await requireUser(request, env);
+    if (auth.error) return auth.error;
+    if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
+    const tgId = String(auth.user.id);
+    try {
+      await membershipRepo.ensureSchema(env);
+      const updated = await membershipRepo.markWelcomeShown(env, tgId);
+      // Invalidate status cache so subsequent reads reflect welcomeShown=true
+      await env.APP_CACHE?.delete?.(ckStatus(tgId));
+      return jsonResponse({ ok: true, data: { marked: updated } }, {}, env);
+    } catch (e) {
+      return safeDbErrorResponse(e, {}, env);
+    }
+  }
+
   return {
     handleGetStatus,
     handleGetMyRequests,
     handleSubmitRequest,
+    handleMarkWelcomeShown,
     handleGetStats,
     handleListRequests,
     handleGetRequest,

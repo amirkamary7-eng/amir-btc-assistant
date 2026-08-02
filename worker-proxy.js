@@ -4231,6 +4231,9 @@ const membershipHandlers = createMembershipHandlers({
   readJsonBody,
   membershipRepo,
   queryDbTransaction,
+  notificationRepo,
+  sendTelegramMessage,
+  resolveWebAppUrl,
 });
 
 async function handleChartResolve(request, env) {
@@ -6876,6 +6879,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/api/membership/request') {
         return withSharedPool(env, () => membershipHandlers.handleSubmitRequest(request, env));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/membership/welcome-shown') {
+        return withSharedPool(env, () => membershipHandlers.handleMarkWelcomeShown(request, env));
       }
 
       // ── Membership Module — Admin Routes ──────────────────────────────────

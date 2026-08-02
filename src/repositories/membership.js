@@ -12,15 +12,34 @@ export function createMembershipRepository(deps) {
 
   // ─── Schema ──────────────────────────────────────────────────────────────
 
+  let _welcomeColumnEnsured = false;
+
   /** Idempotent schema check (tables created via membership-schema.sql). */
   async function ensureSchema(env) {
     // Lightweight existence check — if the tables don't exist, the queries
     // will error with a clear message telling the operator to run the SQL migration.
     try {
       await queryDb(env, 'SELECT 1 FROM membership_users LIMIT 1');
+      // Ensure welcome_shown column exists (Phase 4 — added after initial deploy).
+      // Runs once per isolate, then cached. Safe for existing deployments.
+      if (!_welcomeColumnEnsured) {
+        await queryDb(env, `ALTER TABLE membership_users ADD COLUMN IF NOT EXISTS welcome_shown BOOLEAN NOT NULL DEFAULT FALSE`);
+        _welcomeColumnEnsured = true;
+      }
     } catch (e) {
       console.warn('[membership] schema check failed — run scripts/membership-schema.sql:', e.message || e);
     }
+  }
+
+  /** Mark the one-time Premium welcome popup as shown for a user. */
+  async function markWelcomeShown(env, telegramId) {
+    const result = await queryDb(env,
+      `UPDATE membership_users SET welcome_shown = TRUE, updated_at = NOW()
+       WHERE telegram_id = $1 AND welcome_shown = FALSE
+       RETURNING id`,
+      [String(telegramId)]
+    );
+    return (result.rowCount || 0) > 0;
   }
 
   // ─── Membership Users ────────────────────────────────────────────────────
@@ -371,6 +390,7 @@ export function createMembershipRepository(deps) {
 
   return {
     ensureSchema,
+    markWelcomeShown,
     findByTelegramId,
     upsertByTelegramId,
     update,

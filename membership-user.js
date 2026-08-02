@@ -106,6 +106,8 @@
     }
   }
 
+  var _welcomeChecked = false;
+
   async function loadCard() {
     if (_cache || _loading) return;
     _loading = true;
@@ -115,6 +117,12 @@
       if (res && res.ok && res.data) {
         _cache = res.data;
         renderBadge(res.data);
+        // Phase 4: Auto-show one-time Premium welcome popup.
+        // Only shows if: user is premium AND welcomeShown === false AND not already checked this session.
+        if (isPremium(res.data) && res.data.welcomeShown === false && !_welcomeChecked) {
+          _welcomeChecked = true;
+          setTimeout(function () { openWelcomePopup(res.data); }, 600);
+        }
       } else {
         renderError();
       }
@@ -123,6 +131,14 @@
     } finally {
       _loading = false;
     }
+  }
+
+  /** Mark welcome popup as shown in backend (fire-and-forget, one-time). */
+  function markWelcomeShownInBackend() {
+    try {
+      apiFetch('/api/membership/welcome-shown', { method: 'POST' }).catch(function () {});
+    } catch (e) { /* non-critical */ }
+    if (_cache) { _cache.welcomeShown = true; }
   }
 
   /** Open membership detail. */
@@ -160,6 +176,77 @@
     if (overlay) {
       overlay.style.animation = 'mb-fade-in 0.2s ease reverse';
       setTimeout(function () { overlay.remove(); }, 200);
+    }
+    _popupOpen = false;
+  }
+
+  // ─── Phase 4: Premium Welcome Popup (one-time, auto-show) ────────────────
+  // Full-screen, glassmorphism, particle/sparkle animations, diamond glow.
+  // Shows exactly once per Premium activation — controlled by welcome_shown flag.
+
+  function openWelcomePopup(status) {
+    closePopup();
+    _popupOpen = true;
+
+    var levelLabel = { VIP: 'VIP', PREMIUM: 'پرمیوم', ELITE: 'الیت' }[status.level] || status.level;
+
+    // Build sparkle particles (12 floating dots)
+    var sparkles = '';
+    for (var i = 0; i < 12; i++) {
+      sparkles += '<span class="mb-welcome-sparkle" style="animation-delay:' + (i * 0.3) + 's;left:' + (5 + Math.random() * 90) + '%;top:' + (5 + Math.random() * 90) + '%"></span>';
+    }
+
+    // Build ring particles (6 orbiting dots)
+    var ringDots = '';
+    for (var r = 0; r < 6; r++) {
+      ringDots += '<span class="mb-welcome-ring-dot" style="animation-delay:' + (r * 0.5) + 's;transform:rotate(' + (r * 60) + 'deg) translateY(-50px)"></span>';
+    }
+
+    var overlay = document.createElement('div');
+    overlay.className = 'mb-popup-overlay mb-welcome-overlay';
+    overlay.onclick = function (e) { if (e.target === overlay) closeWelcomePopup(); };
+    overlay.innerHTML =
+      '<div class="mb-welcome-card">' +
+        '<div class="mb-welcome-bg-blur"></div>' +
+        sparkles +
+        '<div class="mb-welcome-content">' +
+          '<div class="mb-welcome-diamond-wrap">' +
+            '<div class="mb-welcome-ring">' + ringDots + '</div>' +
+            '<div class="mb-welcome-ring mb-welcome-ring-2"></div>' +
+            '<div class="mb-welcome-diamond-halo"></div>' +
+            '<div class="mb-welcome-diamond-glow"></div>' +
+            '<div class="mb-welcome-diamond-pulse"></div>' +
+            '<div class="mb-welcome-diamond-icon">' + DIAMOND_SVG + '</div>' +
+            '<div class="mb-welcome-diamond-shimmer"></div>' +
+          '</div>' +
+          '<div class="mb-welcome-badge">PREMIUM</div>' +
+          '<h2 class="mb-welcome-title">🎉 تبریک!</h2>' +
+          '<p class="mb-welcome-subtitle">عضویت ' + esc(levelLabel) + ' شما با موفقیت فعال شد</p>' +
+          '<div class="mb-welcome-divider"></div>' +
+          '<p class="mb-welcome-desc">اکنون تمام امکانات ویژه برای شما فعال است.<br>از تجربه اختصاصی AmirBTC Assistant لذت ببرید.</p>' +
+          '<div class="mb-welcome-benefits">' +
+            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">📊</span><span>چارت‌ها و تحلیل‌های اختصاصی</span></div>' +
+            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">💎</span><span>نشان Premium در پروفایل</span></div>' +
+            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">⚡</span><span>اولویت در قابلیت‌های جدید</span></div>' +
+            '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">🎁</span><span>کمپین‌ها و جوایز ویژه</span></div>' +
+          '</div>' +
+          '<button class="mb-welcome-cta" onclick="MembershipApp.closeWelcomePopup()">' +
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
+            'شروع استفاده' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    // Mark popup as shown in backend immediately after display
+    markWelcomeShownInBackend();
+  }
+
+  function closeWelcomePopup() {
+    var overlay = document.querySelector('.mb-welcome-overlay');
+    if (overlay) {
+      overlay.classList.add('mb-welcome-closing');
+      setTimeout(function () { overlay.remove(); }, 400);
     }
     _popupOpen = false;
   }
@@ -481,6 +568,7 @@
     loadCard: loadCard,
     open: open,
     closePopup: closePopup,
+    closeWelcomePopup: closeWelcomePopup,
     openBitunix: openBitunix,
     submitUid: submitUid,
     refresh: function () { _cache = null; return loadCard(); },
