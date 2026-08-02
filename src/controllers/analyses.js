@@ -162,6 +162,7 @@ export function createAnalysisHandlers(deps) {
    * GET /api/analyses — List with featured, stats, pagination.
    */
   async function handleList(request, env) {
+    const _t0 = Date.now();
     const url = new URL(request.url);
     const rawVersion = url.searchParams.get('version');
     let requestedVersion = null;
@@ -177,7 +178,9 @@ export function createAnalysisHandlers(deps) {
     const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
     const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') || '20', 10)));
 
+    const _tCacheStart = Date.now();
     const cachedState = await readCachedAnalysesState(env);
+    console.log('[ANALYSES] readCachedAnalysesState: ' + (Date.now() - _tCacheStart) + 'ms, version=' + cachedState.version);
 
     // Version match → unchanged (but return cached featured + stats for accuracy)
     if (requestedVersion !== null && cachedState.version !== null && requestedVersion === cachedState.version) {
@@ -219,15 +222,13 @@ export function createAnalysisHandlers(deps) {
     // Need fresh data from DB
     if (isDatabaseConfigured(env)) {
       try {
-        // ROOT-CAUSE FIX: Merge list + getFeatured + getStats into 1 queryDb.
-        // Previously 3 parallel queryDb = 3 Pool creations = 9-15ms CPU → exceededCpu.
-        // After Create/Delete, invalidateAnalysesCache deletes KV cache → every
-        // subsequent GET /api/analyses hits this path → 3 queryDb → exceededCpu → 500.
-        // This cascade breaks admin detection + join check.
-        // Now: 1 queryDb = 3-5ms CPU → under 10ms limit.
+        const _tSchema = Date.now();
         await analysisRepo.ensureSchema(env).catch(() => {});
+        console.log('[ANALYSES] ensureSchema: ' + (Date.now() - _tSchema) + 'ms');
 
+        const _tQuery = Date.now();
         const pageData = await analysisRepo.listWithStatsAndFeatured(env, page, limit);
+        console.log('[ANALYSES] listWithStatsAndFeatured: ' + (Date.now() - _tQuery) + 'ms, items=' + (pageData.analyses?.length || 0));
 
         // Cache featured separately (short TTL)
         if (pageData.featured) {
@@ -242,6 +243,7 @@ export function createAnalysisHandlers(deps) {
         // Cache the paginated list (used for version checking, not listAll)
         await updateAnalysesCache(env, pageData.analyses, version);
 
+        console.log('[ANALYSES] total: ' + (Date.now() - _t0) + 'ms (success)');
         return jsonResponse({
           status: 'success',
           featured: pageData.featured,
@@ -252,6 +254,7 @@ export function createAnalysisHandlers(deps) {
           unchanged: false,
         }, {}, env);
       } catch (error) {
+        console.warn('[ANALYSES] ERROR after ' + (Date.now() - _t0) + 'ms:', error?.message || error);
         console.warn(safeError('list-analyses', error));
         return safeDbErrorResponse(error, {}, env);
       }

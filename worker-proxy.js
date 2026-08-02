@@ -1292,7 +1292,7 @@ function createPool(env) {
     connectionString: databaseUrl,
     max: 1,
     idleTimeoutMillis: 0,
-    connectionTimeoutMillis: 8000,
+    connectionTimeoutMillis: 3000,
   });
   _traceStage('Pool.create', _t0);
   _traceLog('Pool.create', { poolId: _poolId, durationMs: Date.now() - _t0 });
@@ -1444,7 +1444,7 @@ async function getReferralRewardPerInvite(env) {
 // Cloudflare Workers. Module-level Pool caching does NOT work because
 // WebSocket connections are bound to the request context that created them.
 
-async function queryDb(env, sqlText, params = [], retries = 2) {
+async function queryDb(env, sqlText, params = [], retries = 1) {
   const _seq = _nextQuerySeq();
   const _sqlPreview = String(sqlText).replace(/\s+/g, ' ').slice(0, 120);
   const _t0 = Date.now();
@@ -3819,8 +3819,22 @@ async function fetchCalendarEvents(env) {
   // from all hitting the upstream when the KV cache expires. Only ONE
   // upstream fetch runs at a time; all concurrent callers share its result.
   return singleFlight('calendar:events:fetch', async () => {
+    const _tFlightStart = Date.now();
+
+    // 0. Try in-memory isolate cache FIRST (instant, no I/O)
+    // This prevents KV read latency (200ms+) on every request.
+    // Isolate cache is refreshed whenever KV or upstream succeeds.
+    const _isolateAge = _calendarIsolateCacheAt ? Date.now() - _calendarIsolateCacheAt : Infinity;
+    if (_calendarIsolateCache && _calendarIsolateCache.length > 0 && _isolateAge < 120000) {
+      // Isolate cache is fresh (< 2 min) — serve immediately
+      console.log('[CALENDAR] isolate cache hit: age=' + Math.round(_isolateAge / 1000) + 's, events=' + _calendarIsolateCache.length);
+      return _calendarIsolateCache;
+    }
+
     // 1. Try fresh KV cache (TTL-enforced by KV itself)
+    const _tKVRead = Date.now();
     const cachedEvents = await readAppCache(env, CALENDAR_CACHE_KEY);
+    console.log('[CALENDAR] KV read: ' + (Date.now() - _tKVRead) + 'ms, hit=' + (!!cachedEvents));
     if (cachedEvents) {
       try {
         const parsed = JSON.parse(cachedEvents);
@@ -3839,7 +3853,9 @@ async function fetchCalendarEvents(env) {
     const now = new Date();
     const cutoffPast = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
     const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const _tFetchStart = Date.now();
     const rawEvents = await fetchCalendarFeed();
+    console.log('[CALENDAR] upstream fetch: ' + (Date.now() - _tFetchStart) + 'ms, rawEvents=' + (rawEvents?.length || 0));
 
     const events = rawEvents
       .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
@@ -4430,7 +4446,9 @@ async function handleChartResolve(request, env) {
 }
 
 async function handleCalendarEvents(env) {
+  const _t0 = Date.now();
   const events = await fetchCalendarEvents(env);
+  console.log('[CALENDAR] fetchCalendarEvents: ' + (Date.now() - _t0) + 'ms, events=' + (events?.length || 0));
 
   // Compute category counts from cached news
   let category_counts = { all: 0, crypto: 0, forex: 0, economy: 0 };
