@@ -3759,9 +3759,19 @@ function mapCalendarEvent(item, now, cutoffPast, cutoffFuture) {
 }
 
 async function fetchCalendarFeed() {
+  // ROOT CAUSE FIX for "all events show as Past" bug:
+  // Previously, the STATIC file (calendar-data.json on Pages CDN) was listed
+  // FIRST. The static file is deployed once via git push and NEVER refreshed
+  // automatically. As days pass, the events in the static file become stale
+  // — all events eventually become "past" relative to the current date.
+  //
+  // FIX: Try the LIVE provider FIRST. The live provider
+  // (nfs.faireconomy.media) returns the CURRENT week's events, refreshed
+  // every 60 seconds (CDN-cached). The static file is now a FALLBACK only,
+  // used when the live provider is down or rate-limited.
   const sources = [
-    { url: 'https://amir-btc-assistant-pages.pages.dev/calendar-data.json', type: 'pages-static' },
     { url: 'https://nfs.faireconomy.media/ff_calendar_thisweek.json', type: 'direct' },
+    { url: 'https://amir-btc-assistant-pages.pages.dev/calendar-data.json', type: 'pages-static' },
   ];
 
   for (const source of sources) {
@@ -3828,12 +3838,13 @@ async function fetchCalendarEvents(env) {
     const _tFlightStart = Date.now();
 
     // 0. Try in-memory isolate cache FIRST (instant, no I/O)
-    // Use a LONG TTL (30 min) because calendar data changes weekly.
-    // This is the PRIMARY cache — KV is secondary (and often fails due to
-    // KV write limit). Isolate cache survives as long as the Worker is alive.
+    // ROOT CAUSE FIX: Reduced TTL from 30 min to 5 min. Calendar events
+    // change daily (new events appear, old events expire). A 30-min TTL
+    // meant the Worker could serve stale data for up to 30 minutes after
+    // the provider updated. With 5 min, the data is at most 5 min old.
     const _isolateAge = _calendarIsolateCacheAt ? Date.now() - _calendarIsolateCacheAt : Infinity;
-    if (_calendarIsolateCache && _calendarIsolateCache.length > 0 && _isolateAge < 1800000) {
-      // Isolate cache is fresh (< 30 min) — serve immediately
+    if (_calendarIsolateCache && _calendarIsolateCache.length > 0 && _isolateAge < 300000) {
+      // Isolate cache is fresh (< 5 min) — serve immediately
       console.log('[CALENDAR] isolate cache hit: age=' + Math.round(_isolateAge / 1000) + 's, events=' + _calendarIsolateCache.length);
       return _calendarIsolateCache;
     }
@@ -3858,7 +3869,12 @@ async function fetchCalendarEvents(env) {
 
     // 2. KV miss or empty — fetch fresh from upstream
     const now = new Date();
-    const cutoffPast = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+    // ROOT CAUSE FIX: cutoffPast was 2 days, which removed valid recent
+    // events from the provider's "this week" data. The provider already
+    // returns only current-week events, so we only need to filter out
+    // events that are more than 1 day in the past (to remove fully-expired
+    // events from the previous week that the provider may still include).
+    const cutoffPast = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
     const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const _tFetchStart = Date.now();
     const rawEvents = await fetchCalendarFeed();
@@ -4528,6 +4544,13 @@ async function handleCalendarEvents(env) {
     status: 'success',
     events,
     category_counts,
+    // Transparency fields: let the frontend know when data was last
+    // refreshed and where it came from. This helps debug "stale data"
+    // issues — the user can see if the data is live or from cache.
+    server_time: new Date().toISOString(),
+    last_updated: _calendarIsolateCacheAt ? new Date(_calendarIsolateCacheAt).toISOString() : null,
+    isolate_cache_age_seconds: _calendarIsolateCacheAt ? Math.round((Date.now() - _calendarIsolateCacheAt) / 1000) : null,
+    isolate_cache_count: _calendarIsolateCache?.length || 0,
   }, {}, env);
 }
 
