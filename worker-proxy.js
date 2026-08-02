@@ -3767,7 +3767,7 @@ async function fetchCalendarFeed() {
   for (const url of urls) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       const _t0 = Date.now();
       const response = await fetch(url, {
         method: 'GET',
@@ -3778,21 +3778,25 @@ async function fetchCalendarFeed() {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-      _traceStage('Calendar.fetch:' + url.slice(-40), _t0);
+      console.log('[CALENDAR] provider ' + url.split('//')[1].split('/')[0] + ': HTTP ' + response.status + ' in ' + (Date.now() - _t0) + 'ms');
 
       if (!response.ok) {
         continue;
       }
 
       const body = await response.json();
-      if (Array.isArray(body)) {
+      if (Array.isArray(body) && body.length > 0) {
+        console.log('[CALENDAR] provider returned ' + body.length + ' events');
         return body;
+      } else {
+        console.warn('[CALENDAR] provider returned empty or non-array: ' + (Array.isArray(body) ? 'array[0]' : typeof body));
       }
-    } catch {
-      // به fallback بعدی feed می‌رویم تا رفتار نسخه پایتونی حفظ شود.
+    } catch (e) {
+      console.warn('[CALENDAR] provider fetch error: ' + (e?.message || e));
     }
   }
 
+  console.warn('[CALENDAR] all providers failed or returned empty');
   return [];
 }
 
@@ -3886,42 +3890,52 @@ async function fetchCalendarEvents(env) {
       return events;
     }
 
-    // 3. Upstream returned empty. ROOT CAUSE FIX: serve the in-memory isolate
-    // cache rather than returning []. This handles:
-    //   a) Upstream API intermittently returns empty (rate limited, downtime)
-    //   b) KV write failed (limit exceeded) so next request has no KV cache
-    //   c) Different isolate has no cache (cold start on different colo)
-    // The isolate cache may be from a previous request on THIS isolate.
+    // 3. Upstream returned empty or error. NEVER return empty if we have
+    // any valid cached data. Priority: isolate cache → KV cache → stale KV.
+    // This ensures the calendar ALWAYS shows the last known good data,
+    // even during extended upstream outages.
+
+    // 3a. Try isolate cache (in-memory, instant)
     if (_calendarIsolateCache && _calendarIsolateCache.length > 0) {
-      // ROOT CAUSE FIX (RC-B): Write the isolate cache back to KV with a
-      // ROOT CAUSE FIX (B-1): TTL bumped from 120s to 300s.
-      // The old 120s TTL was shorter than the 180s frontend polling
-      // interval — so by the time the next poll fired, KV had expired
-      // and the upstream was hit again (another 16s timeout cycle).
-      // 300s > 180s ensures the KV cache survives at least one polling
-      // cycle, so sustained upstream slowness doesn't cause every other
-      // poll to fail.
+      console.log('[CALENDAR] upstream empty — serving isolate cache: ' + _calendarIsolateCache.length + ' events (age=' + Math.round((Date.now() - _calendarIsolateCacheAt) / 1000) + 's)');
+      // Try to refresh KV with isolate cache (in case KV expired)
       try {
         await writeAppCache(env, CALENDAR_CACHE_KEY, JSON.stringify(_calendarIsolateCache), 300);
       } catch {}
       return _calendarIsolateCache;
     }
 
-    // 4. No isolate cache either (cold start) — last resort: try a raw KV
-    // read with a long cacheTtl (edge cache might still have it even if
-    // origin expired). Best-effort, no guarantee.
+    // 3b. Try KV cache (may still have data even if isolate cache is empty)
+    try {
+      const kvCached = await readAppCache(env, CALENDAR_CACHE_KEY);
+      if (kvCached) {
+        const parsed = JSON.parse(kvCached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.log('[CALENDAR] upstream empty — serving KV cache: ' + parsed.length + ' events');
+          // Populate isolate cache so subsequent requests are instant
+          _calendarIsolateCache = parsed;
+          _calendarIsolateCacheAt = Date.now();
+          return parsed;
+        }
+      }
+    } catch {}
+
+    // 3c. Last resort: try raw KV read with long cacheTtl (edge cache)
     try {
       const rawCached = await env.APP_CACHE?.get?.(CALENDAR_CACHE_KEY, { cacheTtl: 86400 });
       if (rawCached) {
         const stale = JSON.parse(rawCached);
         if (Array.isArray(stale) && stale.length > 0) {
+          console.log('[CALENDAR] upstream empty — serving stale KV cache: ' + stale.length + ' events');
+          _calendarIsolateCache = stale;
+          _calendarIsolateCacheAt = Date.now();
           return stale;
         }
       }
-    } catch {
-      // KV read failed — nothing more we can do
-    }
+    } catch {}
 
+    // 3d. Truly no data anywhere — return empty
+    console.warn('[CALENDAR] no cached data available anywhere — returning empty');
     return [];
   });
 }
