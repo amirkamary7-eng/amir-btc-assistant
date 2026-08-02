@@ -10678,17 +10678,47 @@ function renderDashboardMarketStatus() {
     if (ratio > 0.58) {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
-        // Bull image (originally named neutral.webp — it's the green bull)
-        trendGraphic = `<img src="assets/market/neutral.webp" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐂</span>'">`;
+        // Bull — inline SVG (sharp at any size, no downscale blur)
+        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Bull">
+            <circle cx="50" cy="50" r="44" fill="rgba(34,197,94,0.08)" stroke="rgba(34,197,94,0.35)" stroke-width="1.5"/>
+            <path d="M30 45 Q30 30 42 32 L42 50 Z" fill="#22C55E" opacity="0.9"/>
+            <path d="M70 45 Q70 30 58 32 L58 50 Z" fill="#22C55E" opacity="0.9"/>
+            <path d="M30 45 Q50 35 70 45 Q65 70 50 72 Q35 70 30 45 Z" fill="#22C55E"/>
+            <circle cx="42" cy="52" r="2.5" fill="#0B0F14"/>
+            <circle cx="58" cy="52" r="2.5" fill="#0B0F14"/>
+            <path d="M44 62 Q50 66 56 62" stroke="#0B0F14" stroke-width="2" stroke-linecap="round" fill="none"/>
+            <path d="M30 45 L22 38 M70 45 L78 38" stroke="#22C55E" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M25 50 L20 48 M25 55 L19 55 M75 50 L80 48 M75 55 L81 55" stroke="#22C55E" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
+        </svg>`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        // New neutral market status image (optimized: 400×400 PNG, 56KB)
-        trendGraphic = `<img src="assets/market/neutral-new.png" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
+        // Neutral — inline SVG (sharp at any size, no downscale blur)
+        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Neutral">
+            <circle cx="50" cy="50" r="44" fill="rgba(245,166,35,0.08)" stroke="rgba(245,166,35,0.35)" stroke-width="1.5"/>
+            <path d="M22 50 Q22 38 32 38 Q42 38 42 50 Q42 62 32 62 Q22 62 22 50 Z" fill="#F5A623" opacity="0.85"/>
+            <path d="M22 50 L14 46 M22 54 L14 54" stroke="#F5A623" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="28" cy="48" r="1.8" fill="#0B0F14"/>
+            <path d="M58 50 Q58 38 68 38 Q78 38 78 50 Q78 62 68 62 Q58 62 58 50 Z" fill="#A0A8B5" opacity="0.85"/>
+            <path d="M78 50 L86 46 M78 54 L86 54" stroke="#A0A8B5" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="72" cy="48" r="1.8" fill="#0B0F14"/>
+            <path d="M42 50 L58 50" stroke="#F5A623" stroke-width="2" stroke-dasharray="3 2" opacity="0.6"/>
+        </svg>`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
-        trendGraphic = `<img src="assets/market/bear.webp" alt="Bear" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐻</span>'">`;
+        // Bear — inline SVG (sharp at any size, no downscale blur)
+        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Bear">
+            <circle cx="50" cy="50" r="44" fill="rgba(239,68,68,0.08)" stroke="rgba(239,68,68,0.35)" stroke-width="1.5"/>
+            <circle cx="32" cy="35" r="8" fill="#EF4444" opacity="0.8"/>
+            <circle cx="68" cy="35" r="8" fill="#EF4444" opacity="0.8"/>
+            <path d="M28 45 Q28 30 50 30 Q72 30 72 45 Q72 68 50 72 Q28 68 28 45 Z" fill="#EF4444"/>
+            <circle cx="40" cy="50" r="2.8" fill="#0B0F14"/>
+            <circle cx="60" cy="50" r="2.8" fill="#0B0F14"/>
+            <ellipse cx="50" cy="60" rx="4" ry="3" fill="#0B0F14"/>
+            <path d="M46 64 Q50 67 54 64" stroke="#0B0F14" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+            <path d="M35 58 L30 56 M38 62 L34 62 M65 58 L70 56 M62 62 L66 62" stroke="#0B0F14" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+        </svg>`;
     }
 
     const trendHTML = `
