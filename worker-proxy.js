@@ -94,6 +94,48 @@ function withCors(headers = {}, env = null) {
 // handle one request per invocation, so this is safe to keep module-scoped.
 let _currentRequestOrigin = null;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TEMPORARY INSTRUMENTATION — traces I/O timing to pinpoint 8s/30s delays.
+// Logs any stage > 500ms. Remove after root cause is confirmed.
+// ═══════════════════════════════════════════════════════════════════════════
+let _traceId = 'no-trace';
+let _traceEndpoint = '?';
+let _traceMethod = '?';
+
+function _setTraceContext(endpoint, method) {
+  _traceId = Math.random().toString(36).slice(2, 10);
+  _traceEndpoint = endpoint || '?';
+  _traceMethod = method || '?';
+}
+
+function _traceStage(stageName, startTime) {
+  const duration = Date.now() - startTime;
+  if (duration > 500) {
+    console.log(JSON.stringify({
+      type: 'TRACE_SLOW_STAGE',
+      traceId: _traceId,
+      endpoint: _traceEndpoint,
+      method: _traceMethod,
+      stage: stageName,
+      durationMs: duration,
+      ts: new Date().toISOString()
+    }));
+  }
+  return duration;
+}
+
+function _traceLog(stageName, extra) {
+  console.log(JSON.stringify({
+    type: 'TRACE',
+    traceId: _traceId,
+    endpoint: _traceEndpoint,
+    method: _traceMethod,
+    stage: stageName,
+    ...extra,
+    ts: new Date().toISOString()
+  }));
+}
+
 function jsonResponse(payload, init = {}, env = null) {
   const headers = withCors(init.headers, env);
   if (!headers.has('Content-Type')) {
@@ -184,9 +226,13 @@ async function readAppCache(env, key) {
 
   // FAIL-SAFE: KV read failure should return null (cache miss) not crash.
   // The caller will fall through to live data fetching.
+  const _t0 = Date.now();
   try {
-    return await env.APP_CACHE.get(key);
+    const _result = await env.APP_CACHE.get(key);
+    _traceStage('KV.read:' + key.slice(0, 40), _t0);
+    return _result;
   } catch (e) {
+    _traceStage('KV.read.ERROR:' + key.slice(0, 40), _t0);
     console.warn('readAppCache failed (non-fatal):', e.message || e);
     return null;
   }
@@ -228,7 +274,9 @@ async function writeAppCache(env, key, value, expirationTtl) {
     if (expirationTtl && expirationTtl > 0) {
       putOpts.expirationTtl = Math.max(60, Math.floor(expirationTtl));
     }
+    const _t0 = Date.now();
     await env.APP_CACHE.put(key, value, putOpts);
+    _traceStage('KV.write:' + key.slice(0, 40), _t0);
     _trackKvWrite(key);
     if (_kvWriteCache.size >= _KV_WRITE_CACHE_MAX) {
       const firstKey = _kvWriteCache.keys().next().value;
@@ -236,6 +284,7 @@ async function writeAppCache(env, key, value, expirationTtl) {
     }
     _kvWriteCache.set(key, value);
   } catch (e) {
+    _traceStage('KV.write.ERROR:' + key.slice(0, 40), Date.now());
     console.warn('[writeAppCache] KV.put FAILED for key:', key, '| error:', e.message || e);
   }
 }
@@ -940,6 +989,7 @@ async function sendTelegramMessage(env, payload, { retries = 1, timeoutMs = 8000
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      const _t0 = Date.now();
       const response = await fetch(buildTelegramApiUrl(env, apiMethod), {
         method: 'POST',
         headers: {
@@ -955,6 +1005,7 @@ async function sendTelegramMessage(env, payload, { retries = 1, timeoutMs = 8000
         // We MUST parse the JSON body and check data.ok === true.
         const data = await response.json();
         if (data.ok === true) {
+          _traceStage('Telegram.fetch:' + apiMethod + ' (attempt ' + (attempt+1) + ')', _t0);
           clearTimeout(timer);
           return { ok: true, result: data.result, messageId: data.result?.message_id };
         }
@@ -1212,14 +1263,17 @@ function getSharedNeon(env) {
 // `await pool.end()`-ed within queryDbTransaction so its WebSocket (and the
 // request context it binds to) never escapes that call.
 function createPool(env) {
+  const _t0 = Date.now();
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) return null;
-  return new Pool({
+  const _pool = new Pool({
     connectionString: databaseUrl,
     max: 1,
     idleTimeoutMillis: 0,
     connectionTimeoutMillis: 8000,
   });
+  _traceStage('Pool.create', _t0);
+  return _pool;
 }
 
 /**
@@ -1368,13 +1422,18 @@ async function getReferralRewardPerInvite(env) {
 // WebSocket connections are bound to the request context that created them.
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
+  const _sqlPreview = String(sqlText).replace(/\s+/g, ' ').slice(0, 60);
+  const _t0 = Date.now();
   // Request-scoped shared pool: if env._reqPool is set (by the route wrapper),
   // reuse it instead of creating a per-call Pool. This means ALL queryDb calls
   // within one request share ONE WebSocket → ONE TLS handshake.
   if (env && env._reqPool) {
     try {
-      return await env._reqPool.query(sqlText, params);
+      const _result = await env._reqPool.query(sqlText, params);
+      _traceStage('queryDb.shared:' + _sqlPreview, _t0);
+      return _result;
     } catch (error) {
+      _traceStage('queryDb.shared.ERROR:' + _sqlPreview, _t0);
       // If the shared pool is broken, clear it so future calls fall back.
       env._reqPool = null;
       throw error;
@@ -1387,7 +1446,9 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        return await pool.query(sqlText, params);
+        const _result = await pool.query(sqlText, params);
+        _traceStage('queryDb.pool:' + _sqlPreview + ' (attempt ' + (attempt+1) + ')', _t0);
+        return _result;
       } catch (error) {
         const msg = String(error?.message || '');
         const isTransient = msg.includes('530') ||
@@ -1397,13 +1458,19 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
                             msg.includes('timeout') ||
                             msg.includes('fetch failed') ||
                             msg.includes('network');
-        if (attempt === retries || !isTransient) throw error;
+        if (attempt === retries || !isTransient) {
+          _traceStage('queryDb.pool.ERROR:' + _sqlPreview + ' (attempt ' + (attempt+1) + ', ' + msg.slice(0, 60) + ')', _t0);
+          throw error;
+        }
+        _traceLog('queryDb.retry', { sql: _sqlPreview, attempt: attempt + 1, error: msg.slice(0, 80) });
         const ms = Math.min(300 * 2 ** attempt, 2000);
         await new Promise((r) => setTimeout(r, ms));
       }
     }
   } finally {
+    const _tEnd = Date.now();
     try { await pool.end(); } catch {}
+    _traceStage('queryDb.poolEnd:' + _sqlPreview, _tEnd);
   }
 }
 
@@ -1419,20 +1486,26 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * This is the ONLY place a Pool is used; regular queries go through neon() HTTP.
  */
 async function queryDbTransaction(env, queries) {
+  const _t0 = Date.now();
+  const _numQueries = queries ? queries.length : 0;
   const pool = createPool(env);
   if (!pool) throw new Error('Database not configured');
 
   let client;
+  const _tConnect = Date.now();
   try {
     client = await pool.connect();
+    _traceStage('queryDbTransaction.connect (' + _numQueries + ' queries)', _tConnect);
     await client.query('BEGIN');
     const results = [];
     for (const { sql, params } of queries) {
       results.push(await client.query(sql, params));
     }
     await client.query('COMMIT');
+    _traceStage('queryDbTransaction.total (' + _numQueries + ' queries)', _t0);
     return results;
   } catch (error) {
+    _traceStage('queryDbTransaction.ERROR (' + _numQueries + ' queries, ' + String(error?.message || '').slice(0, 60) + ')', _t0);
     try { if (client) await client.query('ROLLBACK'); } catch {}
     throw error;
   } finally {
@@ -2465,6 +2538,8 @@ const EXTERNAL_FETCH_TIMEOUT_MS = 8000;
  * are slow.
  */
 async function fetchJsonWithTimeout(url, timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS) {
+  const _t0 = Date.now();
+  const _urlPreview = String(url).slice(0, 60);
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -2476,6 +2551,7 @@ async function fetchJsonWithTimeout(url, timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS) 
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
+    _traceStage('fetchJson:' + _urlPreview, _t0);
 
     if (!response.ok) {
       return { ok: false, body: null };
@@ -2682,6 +2758,7 @@ async function fetchAllNewsRss() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
       try {
+        const _t0 = Date.now();
         const response = await fetch(source.url, {
           method: 'GET',
           headers: {
@@ -2691,6 +2768,7 @@ async function fetchAllNewsRss() {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
+        _traceStage('RSS.fetch:' + source.name, _t0);
         const rssText = await response.text();
         if (response.ok && rssText.includes('<item>')) {
           return { rssText, sourceName: source.name, category: source.category, skipTranslate: !!source.skipTranslate };
@@ -3614,6 +3692,7 @@ async function fetchCalendarFeed() {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+      const _t0 = Date.now();
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -3623,6 +3702,7 @@ async function fetchCalendarFeed() {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
+      _traceStage('Calendar.fetch:' + url.slice(-40), _t0);
 
       if (!response.ok) {
         continue;
@@ -4364,6 +4444,7 @@ async function fetchFearGreed() {
     try {
       const controller = new AbortController();
       const tid = setTimeout(() => controller.abort(), 8000);
+      const _t0 = Date.now();
       const res = await fetch('https://pro-api.coinmarketcap.com/v3/fear-and-greed/historical', {
         headers: {
           'Accept': 'application/json',
@@ -4372,6 +4453,7 @@ async function fetchFearGreed() {
         signal: controller.signal,
       });
       clearTimeout(tid);
+      _traceStage('fetchFearGreed.CMC', _t0);
       if (res.ok) {
         const body = await res.json();
         const data = body?.data;
@@ -6075,6 +6157,9 @@ async function runScheduledAlertsBaseline(controller, env) {
 export default {
   async fetch(request, env, ctx) {
     _currentRequestOrigin = request.headers.get('Origin');
+    // TEMP: set trace context for instrumentation
+    const _url = new URL(request.url);
+    _setTraceContext(_url.pathname, request.method);
     // Set env accessors for fetchFearGreed (called from various places)
     env_CMC_API_KEY = env.CMC_API_KEY || null;
     env_APP_CACHE = env.APP_CACHE || null;
