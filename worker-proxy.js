@@ -96,16 +96,23 @@ let _currentRequestOrigin = null;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TEMPORARY INSTRUMENTATION — traces I/O timing to pinpoint 8s/30s delays.
-// Logs any stage > 500ms. Remove after root cause is confirmed.
+// Logs ALL queryDb calls (not just >500ms) to find the FIRST timeout.
 // ═══════════════════════════════════════════════════════════════════════════
 let _traceId = 'no-trace';
 let _traceEndpoint = '?';
 let _traceMethod = '?';
+let _traceQuerySeq = 0;
 
 function _setTraceContext(endpoint, method) {
   _traceId = Math.random().toString(36).slice(2, 10);
   _traceEndpoint = endpoint || '?';
   _traceMethod = method || '?';
+  _traceQuerySeq = 0;
+}
+
+function _nextQuerySeq() {
+  _traceQuerySeq += 1;
+  return _traceQuerySeq;
 }
 
 function _traceStage(stageName, startTime) {
@@ -132,6 +139,26 @@ function _traceLog(stageName, extra) {
     method: _traceMethod,
     stage: stageName,
     ...extra,
+    ts: new Date().toISOString()
+  }));
+}
+
+// ALWAYS log queryDb — not just slow ones. This finds the FIRST timeout.
+function _traceQuery(opts) {
+  console.log(JSON.stringify({
+    type: 'TRACE_QUERY',
+    traceId: _traceId,
+    endpoint: _traceEndpoint,
+    method: _traceMethod,
+    querySeq: opts.seq,
+    poolType: opts.poolType,         // 'shared' | 'new'
+    sql: opts.sql,                    // SQL preview (first 120 chars)
+    startMs: opts.startMs,
+    endMs: opts.endMs,
+    durationMs: opts.durationMs,
+    status: opts.status,              // 'ok' | 'error' | 'timeout'
+    error: opts.error || null,        // error message if any
+    attempt: opts.attempt || 1,
     ts: new Date().toISOString()
   }));
 }
@@ -1266,6 +1293,7 @@ function createPool(env) {
   const _t0 = Date.now();
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) return null;
+  const _poolId = 'p' + Math.random().toString(36).slice(2, 8);
   const _pool = new Pool({
     connectionString: databaseUrl,
     max: 1,
@@ -1273,6 +1301,8 @@ function createPool(env) {
     connectionTimeoutMillis: 8000,
   });
   _traceStage('Pool.create', _t0);
+  _traceLog('Pool.create', { poolId: _poolId, durationMs: Date.now() - _t0 });
+  _pool._tracePoolId = _poolId;
   return _pool;
 }
 
@@ -1422,7 +1452,8 @@ async function getReferralRewardPerInvite(env) {
 // WebSocket connections are bound to the request context that created them.
 
 async function queryDb(env, sqlText, params = [], retries = 2) {
-  const _sqlPreview = String(sqlText).replace(/\s+/g, ' ').slice(0, 60);
+  const _seq = _nextQuerySeq();
+  const _sqlPreview = String(sqlText).replace(/\s+/g, ' ').slice(0, 120);
   const _t0 = Date.now();
   // Request-scoped shared pool: if env._reqPool is set (by the route wrapper),
   // reuse it instead of creating a per-call Pool. This means ALL queryDb calls
@@ -1430,27 +1461,51 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   if (env && env._reqPool) {
     try {
       const _result = await env._reqPool.query(sqlText, params);
-      _traceStage('queryDb.shared:' + _sqlPreview, _t0);
+      const _t1 = Date.now();
+      _traceStage('queryDb.shared:' + _sqlPreview.slice(0, 60), _t0);
+      _traceQuery({
+        seq: _seq, poolType: 'shared', sql: _sqlPreview,
+        startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+        status: _t1 - _t0 >= 7900 ? 'timeout' : 'ok', attempt: 1
+      });
       return _result;
     } catch (error) {
-      _traceStage('queryDb.shared.ERROR:' + _sqlPreview, _t0);
+      const _t1 = Date.now();
+      const _errMsg = String(error?.message || '').slice(0, 200);
+      const _isTimeout = _t1 - _t0 >= 7900 || _errMsg.includes('timeout') || _errMsg.includes('Timed out');
+      _traceStage('queryDb.shared.ERROR:' + _sqlPreview.slice(0, 60), _t0);
+      _traceQuery({
+        seq: _seq, poolType: 'shared', sql: _sqlPreview,
+        startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+        status: _isTimeout ? 'timeout' : 'error', error: _errMsg, attempt: 1
+      });
       // If the shared pool is broken, clear it so future calls fall back.
       env._reqPool = null;
       throw error;
     }
   }
 
+  const _tPoolCreate = Date.now();
   const pool = createPool(env);
   if (!pool) throw new Error('Database not configured');
 
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
+      const _tAttempt = Date.now();
       try {
         const _result = await pool.query(sqlText, params);
-        _traceStage('queryDb.pool:' + _sqlPreview + ' (attempt ' + (attempt+1) + ')', _t0);
+        const _t1 = Date.now();
+        _traceStage('queryDb.pool:' + _sqlPreview.slice(0, 60) + ' (attempt ' + (attempt+1) + ')', _t0);
+        _traceQuery({
+          seq: _seq, poolType: 'new', sql: _sqlPreview,
+          startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+          status: _t1 - _t0 >= 7900 ? 'timeout' : 'ok', attempt: attempt + 1
+        });
         return _result;
       } catch (error) {
+        const _t1 = Date.now();
         const msg = String(error?.message || '');
+        const _isTimeout = _t1 - _tAttempt >= 7900 || msg.includes('timeout') || msg.includes('Timed out');
         const isTransient = msg.includes('530') ||
                             msg.includes('1016') ||
                             msg.includes('ECONNRESET') ||
@@ -1459,10 +1514,15 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
                             msg.includes('fetch failed') ||
                             msg.includes('network');
         if (attempt === retries || !isTransient) {
-          _traceStage('queryDb.pool.ERROR:' + _sqlPreview + ' (attempt ' + (attempt+1) + ', ' + msg.slice(0, 60) + ')', _t0);
+          _traceStage('queryDb.pool.ERROR:' + _sqlPreview.slice(0, 60) + ' (attempt ' + (attempt+1) + ', ' + msg.slice(0, 60) + ')', _t0);
+          _traceQuery({
+            seq: _seq, poolType: 'new', sql: _sqlPreview,
+            startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+            status: _isTimeout ? 'timeout' : 'error', error: msg.slice(0, 200), attempt: attempt + 1
+          });
           throw error;
         }
-        _traceLog('queryDb.retry', { sql: _sqlPreview, attempt: attempt + 1, error: msg.slice(0, 80) });
+        _traceLog('queryDb.retry', { seq: _seq, sql: _sqlPreview.slice(0, 60), attempt: attempt + 1, error: msg.slice(0, 80) });
         const ms = Math.min(300 * 2 ** attempt, 2000);
         await new Promise((r) => setTimeout(r, ms));
       }
@@ -1470,7 +1530,7 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   } finally {
     const _tEnd = Date.now();
     try { await pool.end(); } catch {}
-    _traceStage('queryDb.poolEnd:' + _sqlPreview, _tEnd);
+    _traceStage('queryDb.poolEnd:' + _sqlPreview.slice(0, 60), _tEnd);
   }
 }
 
@@ -1486,8 +1546,11 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
  * This is the ONLY place a Pool is used; regular queries go through neon() HTTP.
  */
 async function queryDbTransaction(env, queries) {
+  const _seq = _nextQuerySeq();
   const _t0 = Date.now();
   const _numQueries = queries ? queries.length : 0;
+  const _sqlPreviews = queries ? queries.map(q => String(q.sql).replace(/\s+/g, ' ').slice(0, 80)).join(' | ') : '';
+  const _tPoolCreate = Date.now();
   const pool = createPool(env);
   if (!pool) throw new Error('Database not configured');
 
@@ -1495,17 +1558,37 @@ async function queryDbTransaction(env, queries) {
   const _tConnect = Date.now();
   try {
     client = await pool.connect();
+    const _tConnectEnd = Date.now();
     _traceStage('queryDbTransaction.connect (' + _numQueries + ' queries)', _tConnect);
+    _traceQuery({
+      seq: _seq, poolType: 'new-txn', sql: '[CONNECT] ' + _sqlPreviews.slice(0, 120),
+      startMs: _tConnect, endMs: _tConnectEnd, durationMs: _tConnectEnd - _tConnect,
+      status: _tConnectEnd - _tConnect >= 7900 ? 'timeout' : 'ok', attempt: 1
+    });
     await client.query('BEGIN');
     const results = [];
     for (const { sql, params } of queries) {
       results.push(await client.query(sql, params));
     }
     await client.query('COMMIT');
+    const _t1 = Date.now();
     _traceStage('queryDbTransaction.total (' + _numQueries + ' queries)', _t0);
+    _traceQuery({
+      seq: _seq, poolType: 'new-txn', sql: '[TOTAL ' + _numQueries + 'Q] ' + _sqlPreviews.slice(0, 120),
+      startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+      status: _t1 - _t0 >= 7900 ? 'timeout' : 'ok', attempt: 1
+    });
     return results;
   } catch (error) {
-    _traceStage('queryDbTransaction.ERROR (' + _numQueries + ' queries, ' + String(error?.message || '').slice(0, 60) + ')', _t0);
+    const _t1 = Date.now();
+    const _errMsg = String(error?.message || '').slice(0, 200);
+    const _isTimeout = _t1 - _t0 >= 7900 || _errMsg.includes('timeout') || _errMsg.includes('Timed out');
+    _traceStage('queryDbTransaction.ERROR (' + _numQueries + ' queries, ' + _errMsg.slice(0, 60) + ')', _t0);
+    _traceQuery({
+      seq: _seq, poolType: 'new-txn', sql: '[ERROR] ' + _sqlPreviews.slice(0, 120),
+      startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+      status: _isTimeout ? 'timeout' : 'error', error: _errMsg, attempt: 1
+    });
     try { if (client) await client.query('ROLLBACK'); } catch {}
     throw error;
   } finally {
