@@ -10678,44 +10678,15 @@ function renderDashboardMarketStatus() {
     if (ratio > 0.58) {
         trendLabel = t('dashboard_trend_bullish');
         trendClass = 'bullish';
-        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Bull">
-            <circle cx="50" cy="50" r="44" fill="rgba(34,197,94,0.08)" stroke="rgba(34,197,94,0.35)" stroke-width="1.5"/>
-            <path d="M30 42 Q30 28 40 30 L40 48 Z" fill="#22C55E" opacity="0.9"/>
-            <path d="M70 42 Q70 28 60 30 L60 48 Z" fill="#22C55E" opacity="0.9"/>
-            <path d="M28 44 Q50 34 72 44 Q68 68 50 71 Q32 68 28 44 Z" fill="#22C55E"/>
-            <circle cx="42" cy="50" r="2.5" fill="#0B0F14"/>
-            <circle cx="58" cy="50" r="2.5" fill="#0B0F14"/>
-            <path d="M44 60 Q50 64 56 60" stroke="#0B0F14" stroke-width="2" stroke-linecap="round" fill="none"/>
-            <path d="M30 42 L22 36 M70 42 L78 36" stroke="#22C55E" stroke-width="2.5" stroke-linecap="round"/>
-            <path d="M25 48 L19 46 M25 53 L18 53 M75 48 L81 46 M75 53 L82 53" stroke="#22C55E" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
-        </svg>`;
+        trendGraphic = `<img src="assets/market/neutral.webp" alt="Bull" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐂</span>'">`;
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Neutral">
-            <circle cx="50" cy="50" r="44" fill="rgba(245,166,35,0.08)" stroke="rgba(245,166,35,0.35)" stroke-width="1.5"/>
-            <path d="M22 48 Q22 36 32 36 Q42 36 42 48 Q42 60 32 60 Q22 60 22 48 Z" fill="#F5A623" opacity="0.85"/>
-            <path d="M22 48 L14 44 M22 52 L14 52" stroke="#F5A623" stroke-width="2" stroke-linecap="round"/>
-            <circle cx="28" cy="46" r="1.8" fill="#0B0F14"/>
-            <path d="M58 48 Q58 36 68 36 Q78 36 78 48 Q78 60 68 60 Q58 60 58 48 Z" fill="#A0A8B5" opacity="0.85"/>
-            <path d="M78 48 L86 44 M78 52 L86 52" stroke="#A0A8B5" stroke-width="2" stroke-linecap="round"/>
-            <circle cx="72" cy="46" r="1.8" fill="#0B0F14"/>
-            <path d="M42 48 L58 48" stroke="#F5A623" stroke-width="2" stroke-dasharray="3 2" opacity="0.6"/>
-        </svg>`;
+        trendGraphic = `<img src="assets/market/neutral-new.png" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
-        trendGraphic = `<svg class="trend-bull-bear" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Bear">
-            <circle cx="50" cy="50" r="44" fill="rgba(239,68,68,0.08)" stroke="rgba(239,68,68,0.35)" stroke-width="1.5"/>
-            <circle cx="32" cy="34" r="7" fill="#EF4444" opacity="0.8"/>
-            <circle cx="68" cy="34" r="7" fill="#EF4444" opacity="0.8"/>
-            <path d="M28 44 Q28 30 50 30 Q72 30 72 44 Q72 66 50 70 Q28 66 28 44 Z" fill="#EF4444"/>
-            <circle cx="40" cy="48" r="2.8" fill="#0B0F14"/>
-            <circle cx="60" cy="48" r="2.8" fill="#0B0F14"/>
-            <ellipse cx="50" cy="58" rx="4" ry="3" fill="#0B0F14"/>
-            <path d="M46 62 Q50 65 54 62" stroke="#0B0F14" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-            <path d="M35 56 L30 54 M38 60 L34 60 M65 56 L70 54 M62 60 L66 60" stroke="#0B0F14" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
-        </svg>`;
+        trendGraphic = `<img src="assets/market/bear.webp" alt="Bear" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>🐻</span>'">`;
     }
 
     const trendHTML = `

@@ -6670,17 +6670,17 @@ strong.down { color: var(--red); }
 /* Channel CTA — exact position matching designed placeholder in channel banner image */
 .hero-cta--channel-v2 {
     left: 9.6%;
-    top: 76.0%;
+    top: 81.0%;
     width: calc(45.9% - 9.6%);
-    height: calc(87.0% - 76.0%);
+    height: calc(92.0% - 81.0%);
 }
 
 /* Premium CTA — exact position matching designed placeholder in premium banner image */
 .hero-cta--premium-v2 {
     left: 16.5%;
-    top: 76.0%;
+    top: 78.0%;
     width: calc(43.6% - 16.5%);
-    height: calc(87.0% - 76.0%);
+    height: calc(89.0% - 78.0%);
 }
 
 /* Ripple animation for both CTAs */
