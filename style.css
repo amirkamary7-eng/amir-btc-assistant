@@ -6671,16 +6671,16 @@ strong.down { color: var(--red); }
 .hero-cta--channel-v2 {
     left: 9.6%;
     top: 82.8%;
-    width: calc(45.3% - 9.6%);    /* slightly wider (+~2px) */
-    height: calc(92.4% - 82.8%);  /* slightly taller (+~2px) */
+    width: calc(45.9% - 9.6%);    /* slightly wider (+~2px) */
+    height: calc(93.0% - 82.8%);  /* slightly taller (+~2px) */
 }
 
 /* Premium CTA — exact position matching designed placeholder in premium banner image */
 .hero-cta--premium-v2 {
     left: 16.5%;
     top: 80.3%;
-    width: calc(43.0% - 16.5%);   /* slightly wider (+~2px) */
-    height: calc(88.6% - 80.3%);  /* slightly taller (+~2px) */
+    width: calc(43.6% - 16.5%);   /* slightly wider (+~2px) */
+    height: calc(89.2% - 80.3%);  /* slightly taller (+~2px) */
 }
 
 /* Ripple animation for both CTAs */
@@ -7078,31 +7078,31 @@ html[dir="rtl"] .market-ticker-track {
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    background: rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.03);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(255,255,255,0.18);
+    border: 1px solid rgba(255,255,255,0.06);
 }
 .dms-trend-graphic.bullish svg.trend-bull-bear {
     filter: drop-shadow(0 0 8px rgba(34,197,94,0.5));
 }
 .dms-trend-graphic.bullish::before {
-    background: rgba(34,197,94,0.14);
-    border-color: rgba(34,197,94,0.30);
+    background: rgba(34,197,94,0.06);
+    border-color: rgba(34,197,94,0.15);
 }
 .dms-trend-graphic.bearish svg.trend-bull-bear {
     filter: drop-shadow(0 0 8px rgba(239,68,68,0.5));
 }
 .dms-trend-graphic.bearish::before {
-    background: rgba(239,68,68,0.14);
-    border-color: rgba(239,68,68,0.30);
+    background: rgba(239,68,68,0.06);
+    border-color: rgba(239,68,68,0.15);
 }
 .dms-trend-graphic.neutral svg.trend-bull-bear {
     filter: drop-shadow(0 0 6px rgba(245,166,35,0.4));
 }
 .dms-trend-graphic.neutral::before {
-    background: rgba(245,166,35,0.14);
-    border-color: rgba(245,166,35,0.30);
+    background: rgba(245,166,35,0.06);
+    border-color: rgba(245,166,35,0.15);
 }
 .dms-trend-label-big {
     font-size: 14px;
