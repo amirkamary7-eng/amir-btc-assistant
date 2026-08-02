@@ -10682,7 +10682,7 @@ function renderDashboardMarketStatus() {
     } else if (ratio >= 0.42) {
         trendLabel = t('dashboard_trend_neutral');
         trendClass = 'neutral';
-        trendGraphic = `<img src="assets/market/neutral-new.png" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
+        trendGraphic = `<img src="assets/market/bull.webp" alt="Neutral" class="trend-bull-bear-img" loading="eager" decoding="async" width="90" height="90" onerror="this.outerHTML='<span class=trend-fallback>⚖️</span>'">`;
     } else {
         trendLabel = t('dashboard_trend_bearish');
         trendClass = 'bearish';
