@@ -47,11 +47,7 @@ export function createAnalysisRepository(deps) {
    */
   let _schemaVerified = false;
   async function ensureSchema(env) {
-    console.log('[ENTER-EXIT] analysisRepo.ensureSchema ENTER (verified=' + _schemaVerified + ')');
-    if (_schemaVerified) {
-      console.log('[ENTER-EXIT] analysisRepo.ensureSchema EXIT (cached, skip)');
-      return;
-    }
+    if (_schemaVerified) return;
     // FIX: CREATE TABLE IF NOT EXISTS as a safety net. Previously ensureSchema
     // only ran ALTER TABLE ADD COLUMN — if the base table didn't exist (e.g.
     // external SQLAlchemy migration never ran on this DB), the ALTER failed
@@ -95,15 +91,11 @@ export function createAnalysisRepository(deps) {
       CREATE INDEX IF NOT EXISTS idx_analyses_featured ON analyses (featured) WHERE featured = TRUE;
     `;
     try {
-      console.log('[ENTER-EXIT] analysisRepo.ensureSchema → queryDb(batchSql) ENTER');
       await queryDb(env, batchSql);
-      console.log('[ENTER-EXIT] analysisRepo.ensureSchema → queryDb(batchSql) EXIT');
     } catch (e) {
-      console.log('[ENTER-EXIT] analysisRepo.ensureSchema → queryDb(batchSql) ERROR: ' + e.message);
       console.warn('Analysis schema migration warning:', e.message);
     }
     _schemaVerified = true;
-    console.log('[ENTER-EXIT] analysisRepo.ensureSchema EXIT (done)');
   }
 
   /**
@@ -391,11 +383,9 @@ export function createAnalysisRepository(deps) {
    * Insert a new analysis and return the serialized row.
    */
   async function create(env, adminUserId, payload) {
-    console.log('[ENTER-EXIT] analysisRepo.create ENTER');
     // NOTE: Featured limit (max 5) is enforced by the controller.
     // The controller may call unsetOldestFeatured() before this if force_featured=true.
     // NOTE: 15 columns, 15 values ($1..$13 + NOW() + NOW())
-    console.log('[ENTER-EXIT] analysisRepo.create → queryDb(INSERT) ENTER');
     const result = await queryDb(
       env,
       `INSERT INTO analyses (id, title, coin, timeframe, image, text, support_level, current_price, resistance_level, featured, category, author, author_id, created_at, updated_at)
@@ -417,8 +407,6 @@ export function createAnalysisRepository(deps) {
         String(adminUserId),
       ],
     );
-    console.log('[ENTER-EXIT] analysisRepo.create → queryDb(INSERT) EXIT');
-    console.log('[ENTER-EXIT] analysisRepo.create EXIT');
     return serializeAnalysisRow(result.rows[0]);
   }
   async function update(env, analysisId, payload) {

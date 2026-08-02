@@ -652,7 +652,6 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
   }
 }
 async function authenticateTelegramRequest(request, env) {
-  console.log('[ENTER-EXIT] authenticateTelegramRequest ENTER');
   try {
     const initData = getTelegramInitData(request);
     if (!initData) {
@@ -684,7 +683,6 @@ async function authenticateTelegramRequest(request, env) {
       };
     }
 
-    console.log('[ENTER-EXIT] authenticateTelegramRequest EXIT (success)');
     return { error: null, user: validated.user, startParam: validated.startParam || null };
   } catch (e) {
     // SECURITY: If validateTelegramInitData throws (malformed initData, crypto error),
@@ -705,24 +703,18 @@ async function authenticateTelegramRequest(request, env) {
  * Caller is responsible for only calling this in production.
  */
 async function requireChannelJoin(user, env) {
-  console.log('[ENTER-EXIT] requireChannelJoin ENTER');
   if (!user || !user.id) {
     return jsonResponse({ detail: 'Authentication required' }, { status: 401 }, env);
   }
   if (isAdminTelegramId(env, user.id)) {
-    console.log('[ENTER-EXIT] requireChannelJoin EXIT (admin bypass)');
     return null; // Admin always passes
   }
   try {
-    console.log('[ENTER-EXIT] requireChannelJoin → resolveChannelMembership ENTER');
     const membership = await resolveChannelMembership(env, String(user.id), { forceRefresh: false, skipRewardProcessing: true });
-    console.log('[ENTER-EXIT] requireChannelJoin → resolveChannelMembership EXIT');
     if (membership?.joined) {
-      console.log('[ENTER-EXIT] requireChannelJoin EXIT (member)');
       return null; // Member — allowed
     }
   } catch {
-    console.log('[ENTER-EXIT] requireChannelJoin CATCH');
   }
   return jsonResponse({ detail: 'Channel membership required', code: 'CHANNEL_JOIN_REQUIRED' }, { status: 403 }, env);
 }
@@ -1324,26 +1316,17 @@ function createPool(env) {
  * outlives the request.
  */
 async function withSharedPool(env, fn) {
-  console.log('[ENTER-EXIT] withSharedPool ENTER');
   if (!isDatabaseConfigured(env)) {
-    console.log('[ENTER-EXIT] withSharedPool EXIT (no DB, direct fn)');
     return fn();
   }
-  console.log('[ENTER-EXIT] withSharedPool → createPool ENTER');
   env._reqPool = createPool(env);
-  console.log('[ENTER-EXIT] withSharedPool → createPool EXIT');
   try {
-    console.log('[ENTER-EXIT] withSharedPool → fn() ENTER');
-    const _result = await fn();
-    console.log('[ENTER-EXIT] withSharedPool → fn() EXIT');
-    return _result;
+    return await fn();
   } finally {
-    console.log('[ENTER-EXIT] withSharedPool → finally (pool.end) ENTER');
     if (env._reqPool) {
       try { await env._reqPool.end(); } catch {}
       env._reqPool = null;
     }
-    console.log('[ENTER-EXIT] withSharedPool → finally (pool.end) EXIT');
   }
 }
 
@@ -1465,15 +1448,12 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
   const _seq = _nextQuerySeq();
   const _sqlPreview = String(sqlText).replace(/\s+/g, ' ').slice(0, 120);
   const _t0 = Date.now();
-  console.log('[ENTER-EXIT] queryDb ENTER seq=' + _seq + ' sql=' + _sqlPreview.slice(0, 50));
   // Request-scoped shared pool: if env._reqPool is set (by the route wrapper),
   // reuse it instead of creating a per-call Pool. This means ALL queryDb calls
   // within one request share ONE WebSocket → ONE TLS handshake.
   if (env && env._reqPool) {
     try {
-      console.log('[ENTER-EXIT] queryDb → shared pool.query() BEFORE AWAIT seq=' + _seq);
       const _result = await env._reqPool.query(sqlText, params);
-      console.log('[ENTER-EXIT] queryDb → shared pool.query() AFTER AWAIT seq=' + _seq);
       const _t1 = Date.now();
       _traceStage('queryDb.shared:' + _sqlPreview.slice(0, 60), _t0);
       _traceQuery({
@@ -1506,9 +1486,7 @@ async function queryDb(env, sqlText, params = [], retries = 2) {
     for (let attempt = 0; attempt <= retries; attempt++) {
       const _tAttempt = Date.now();
       try {
-        console.log('[ENTER-EXIT] queryDb → new pool.query() BEFORE AWAIT seq=' + _seq + ' attempt=' + (attempt+1));
         const _result = await pool.query(sqlText, params);
-        console.log('[ENTER-EXIT] queryDb → new pool.query() AFTER AWAIT seq=' + _seq + ' attempt=' + (attempt+1));
         const _t1 = Date.now();
         _traceStage('queryDb.pool:' + _sqlPreview.slice(0, 60) + ' (attempt ' + (attempt+1) + ')', _t0);
         _traceQuery({

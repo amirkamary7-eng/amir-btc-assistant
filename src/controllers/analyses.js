@@ -330,10 +330,7 @@ export function createAnalysisHandlers(deps) {
    * POST /api/admin/analyses — Create (admin only).
    */
   async function handleCreate(request, env, ctx) {
-    console.log('[ENTER-EXIT] handleCreate ENTER');
-    console.log('[ENTER-EXIT] handleCreate → requireAdmin ENTER');
     const authResult = await requireAdmin(request, env);
-    console.log('[ENTER-EXIT] handleCreate → requireAdmin EXIT');
     if (authResult.error) return authResult.error;
     if (!isAdminTelegramId(env, authResult.user.id)) {
       return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
@@ -342,51 +339,62 @@ export function createAnalysisHandlers(deps) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
 
-    console.log('[ENTER-EXIT] handleCreate → parseAnalysisPayload ENTER');
     const parsed = parseAnalysisPayload(await request.text(), { requireAuthor: true }, env);
-    console.log('[ENTER-EXIT] handleCreate → parseAnalysisPayload EXIT');
     if (parsed.error) return parsed.error;
 
     try {
-      console.log('[ENTER-EXIT] handleCreate → ensureSchema ENTER');
       await analysisRepo.ensureSchema(env);
-      console.log('[ENTER-EXIT] handleCreate → ensureSchema EXIT');
 
       // Featured limit check (max 5)
       if (parsed.payload.featured && !parsed.payload.force_featured) {
-        console.log('[ENTER-EXIT] handleCreate → countFeatured ENTER');
         const featuredCount = await analysisRepo.countFeatured(env);
-        console.log('[ENTER-EXIT] handleCreate → countFeatured EXIT');
         if (featuredCount >= 5) {
           return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: featuredCount, max: 5 }, {}, env);
         }
       }
       // If force_featured, un-feature the oldest first
       if (parsed.payload.featured && parsed.payload.force_featured) {
-        console.log('[ENTER-EXIT] handleCreate → unsetOldestFeatured ENTER');
         await analysisRepo.unsetOldestFeatured(env);
-        console.log('[ENTER-EXIT] handleCreate → unsetOldestFeatured EXIT');
       }
 
-      console.log('[ENTER-EXIT] handleCreate → analysisRepo.create ENTER');
       const analysis = await analysisRepo.create(env, authResult.user.id, parsed.payload);
-      console.log('[ENTER-EXIT] handleCreate → analysisRepo.create EXIT');
 
-      console.log('[ENTER-EXIT] handleCreate → invalidateAnalysesCache ENTER');
       const version = await invalidateAnalysesCache(env);
-      console.log('[ENTER-EXIT] handleCreate → invalidateAnalysesCache EXIT');
 
-      // Notify subscribers (best-effort, fire-and-forget)
-      console.log('[ENTER-EXIT] handleCreate → notifyNewAnalysis START');
-      const notify = notifyNewAnalysis(env, analysis, ctx);
-      if (ctx?.waitUntil) ctx.waitUntil(notify.catch(() => {}));
-      else notify.catch(() => {});
-      console.log('[ENTER-EXIT] handleCreate → notifyNewAnalysis DISPATCHED');
+      // ROOT-CAUSE FIX: Removed notifyNewAnalysis from ctx.waitUntil.
+      //
+      // PROBLEM: notifyNewAnalysis looped over 50 users × 4 queryDb each = 201
+      // queryDb calls. Each created a NEW Pool (env._reqPool was closed by
+      // withSharedPool's finally) → 201 TLS handshakes × 5ms = ~1005ms CPU
+      // → exceededCpu. Also caused "Cannot use a pool after calling end"
+      // race condition when notifyNewAnalysis started before withSharedPool's
+      // finally closed the pool.
+      //
+      // FIX: Instead of N+1 queries in waitUntil, enqueue a SINGLE broadcast
+      // record. The cron processQueue (every 15 min) will fan-out to users
+      // with proper per-call Pool management (no shared pool race).
+      if (notificationPlatformRepo && notificationPlatformRepo.enqueue) {
+        try {
+          await notificationPlatformRepo.enqueue(env, {
+            notificationId: null,
+            userId: 'broadcast',
+            channel: 'telegram',
+            priority: 'medium',
+            payload: {
+              type: 'analysis_published',
+              analysisId: analysis.id,
+              coin: analysis.coin,
+              title: analysis.title || `تحلیل ${analysis.coin}`,
+              message: analysis.title || `تحلیل ${analysis.coin} (${analysis.timeframe}) منتشر شد.`,
+            },
+          });
+        } catch (e) {
+          console.warn('[analysis-create] broadcast enqueue failed (non-fatal):', e?.message);
+        }
+      }
 
-      console.log('[ENTER-EXIT] handleCreate EXIT (success)');
       return jsonResponse({ status: 'success', analysis, version }, {}, env);
     } catch (error) {
-      console.log('[ENTER-EXIT] handleCreate CATCH error:', error?.message || String(error));
       console.warn(safeError('create-analysis', error));
       return safeDbErrorResponse(error, {}, env);
     }
