@@ -7165,6 +7165,100 @@ export default {
         }, {}, env);
       }
 
+      // ── NOTIFICATION DELETE DIAGNOSTIC ──
+      // Proves whether notifications reappear after delete, and WHY.
+      // Requires Telegram auth (uses _protectedUser from global middleware).
+      // Steps:
+      //   1. Shows current notifications (with IDs) BEFORE delete
+      //   2. Shows any broadcasts in 'pending'/'sending' status
+      //   3. Shows KV cache content
+      //   4. Does NOT delete — just reports state for the user to verify
+      if (request.method === 'GET' && url.pathname === '/api/notif-delete-diag') {
+        const result = { server_time: new Date().toISOString(), steps: [] };
+
+        // Step 1: Check broadcasts in 'pending' or 'sending' status
+        try {
+          const broadcasts = await queryDb(env,
+            `SELECT id, title, status, created_at, sent_at, total_sent, total_delivered, last_processed_user_id
+             FROM notification_broadcasts
+             WHERE status IN ('pending', 'sending')
+             ORDER BY created_at ASC LIMIT 10`
+          ).catch(() => ({ rows: [] }));
+          result.steps.push({
+            step: '1_active_broadcasts',
+            count: broadcasts.rows.length,
+            broadcasts: broadcasts.rows.map(r => ({
+              id: r.id, title: (r.title||'').slice(0,50), status: r.status,
+              created_at: r.created_at, sent_at: r.sent_at,
+              total_sent: r.total_sent, total_delivered: r.total_delivered,
+            })),
+          });
+        } catch (e) { result.steps.push({ step: '1_active_broadcasts', error: e?.message }); }
+
+        // Step 2: Check ALL broadcasts (including 'sent') in last 24h
+        try {
+          const recentBroadcasts = await queryDb(env,
+            `SELECT id, title, status, created_at, sent_at
+             FROM notification_broadcasts
+             WHERE created_at > NOW() - INTERVAL '24 hours'
+             ORDER BY created_at DESC LIMIT 10`
+          ).catch(() => ({ rows: [] }));
+          result.steps.push({
+            step: '2_recent_broadcasts_24h',
+            count: recentBroadcasts.rows.length,
+            broadcasts: recentBroadcasts.rows.map(r => ({
+              id: r.id, title: (r.title||'').slice(0,50), status: r.status,
+              created_at: r.created_at, sent_at: r.sent_at,
+            })),
+          });
+        } catch (e) { result.steps.push({ step: '2_recent_broadcasts_24h', error: e?.message }); }
+
+        // Step 3: If user is authenticated, show their notifications with IDs
+        if (_protectedUser?.id) {
+          try {
+            const userId = String(_protectedUser.id);
+            const notifs = await queryDb(env,
+              `SELECT id, type, title, read_status, deleted_at, created_at
+               FROM notifications
+               WHERE user_id = $1
+               ORDER BY created_at DESC LIMIT 20`,
+              [userId]
+            ).catch(() => ({ rows: [] }));
+            result.steps.push({
+              step: '3_user_notifications',
+              userId: userId,
+              count: notifs.rows.length,
+              notifications: notifs.rows.map(r => ({
+                id: r.id,
+                type: r.type,
+                title: (r.title||'').slice(0,40),
+                read_status: r.read_status,
+                deleted_at: r.deleted_at,
+                created_at: r.created_at,
+                is_broadcast: String(r.id).startsWith('bc_'),
+                is_notif_prefix: String(r.id).startsWith('notif_'),
+              })),
+            });
+
+            // Step 4: Check KV cache for this user
+            try {
+              const cached = await env.APP_CACHE?.get?.('notif_cache_' + userId).catch(() => null);
+              result.steps.push({
+                step: '4_kv_cache',
+                cacheKey: 'notif_cache_' + userId,
+                hasCache: !!cached,
+                cacheLength: cached ? cached.length : 0,
+                cachePreview: cached ? cached.slice(0, 200) : null,
+              });
+            } catch (e) { result.steps.push({ step: '4_kv_cache', error: e?.message }); }
+          } catch (e) { result.steps.push({ step: '3_user_notifications', error: e?.message }); }
+        } else {
+          result.steps.push({ step: '3_user_notifications', note: 'no authenticated user' });
+        }
+
+        return jsonResponse(result, {}, env);
+      }
+
       // Future: /api/news/stream SSE endpoint for breaking news push.
       // Requires Durable Object for true WebSocket, or simple SSE stream.
       // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
