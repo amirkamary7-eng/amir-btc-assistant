@@ -29,6 +29,17 @@ export function createWheelHandlers(deps) {
       return jsonResponse({ status: 'success', daily_spin: { available: false }, premium_spins: 0, config: { is_enabled: true, segment_count: 8, maintenance_mode: false } }, {}, env);
     }
     try {
+      // ROOT CAUSE FIX for [WHEEL-STATUS] "column spin_date does not exist":
+      // wheelRepo.ensureSchema() was DEFINED but NEVER CALLED from anywhere.
+      // If the wheel_spins table was created by an older code version (before
+      // the spin_date column was added), the column doesn't exist → SQL error
+      // on every query that references spin_date.
+      // ensureSchema runs CREATE TABLE IF NOT EXISTS + ALTER TABLE ADD COLUMN
+      // IF NOT EXISTS, so it's idempotent and safe to call on every request.
+      if (typeof wheelRepo?.ensureSchema === 'function') {
+        await wheelRepo.ensureSchema(env).catch(() => {});
+      }
+
       // ROOT CAUSE FIX (2.1): Read max_spins_per_user from wheel_config
       // (default 3) and pass to getOrCreateDailySpins so it creates the
       // correct number of daily spins.
@@ -83,6 +94,12 @@ export function createWheelHandlers(deps) {
     if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
+    }
+
+    // ROOT CAUSE FIX: ensureSchema must run before any wheel query.
+    // See handleStatus for full explanation.
+    if (typeof wheelRepo?.ensureSchema === 'function') {
+      try { await wheelRepo.ensureSchema(env); } catch {}
     }
 
     // ── Kill switch + config checks ──

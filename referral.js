@@ -1167,15 +1167,20 @@ const ReferralApp = (() => {
     if (!page) return;
     applyDir(page);
     applyTierVars(page, 'Bronze'); // default until summary loads
-    page.innerHTML = buildSkeleton();
     page.classList.add('open');
     document.body.style.overflow = 'hidden';
 
-    // PERF FIX (item 5): Render from localStorage cache INSTANTLY, even if
-    // expired (stale-while-revalidate pattern). Previously, expired cache was
-    // discarded and the skeleton showed for 250-600ms while 6 API calls were
-    // in flight. Now returning users see their data immediately (<50ms).
-    let usedCache = false;
+    // ROOT CAUSE FIX for flicker: Previously, openReferral() ALWAYS did
+    // page.innerHTML = buildSkeleton() which WIPED the entire page, then
+    // rendered cached data (~50ms later), then rendered fresh API data
+    // (~300ms later). This 3-stage render (skeleton→cache→fresh) caused
+    // visible flicker every time the page opened.
+    //
+    // FIX: If we have cached data, render it IMMEDIATELY (no skeleton).
+    // Only show skeleton if there's NO cache (first visit ever).
+    // The background API refresh still runs, but it only calls renderPage()
+    // ONCE (after all 6 calls settle via Promise.allSettled), not twice.
+    let hasCache = false;
     try {
       const cachedStr = localStorage.getItem('referral_cache');
       if (cachedStr) {
@@ -1183,15 +1188,19 @@ const ReferralApp = (() => {
         if (cached && cached.ts && cached.data) {
           historyOffset = (cached.data.history?.length) || 0;
           renderPage(cached.data);
-          usedCache = true;
+          hasCache = true;
         }
       }
     } catch (_) { /* bad cache — ignore */ }
 
+    // Only show skeleton if NO cache (first visit)
+    if (!hasCache) {
+      page.innerHTML = buildSkeleton();
+    }
+
     // Load all data in parallel (background refresh)
-    // PERF FIX: Removed redundant fetchBalance() — fetchWalletSummary()
-    // already returns balance + tier + stats. Reduced from 7 calls to 6.
     // Using Promise.allSettled so one slow/failed call doesn't block rendering.
+    // Render ONLY ONCE after all calls settle — no intermediate renders.
     (async () => {
       const results = await Promise.allSettled([
         fetchStats(),
@@ -1210,7 +1219,6 @@ const ReferralApp = (() => {
       const lastPrize = results[5].status === 'fulfilled' ? results[5].value : null;
 
       const tier = summary?.tier || { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 };
-      // summary already contains balance — no need for a separate fetchBalance() call
       const balance = summary?.balance ?? 0;
 
       const data = {
@@ -1227,7 +1235,6 @@ const ReferralApp = (() => {
       renderPage(data);
 
       // Persist to localStorage for instant render on next open
-      // Increased TTL from 60s to 120s — referral data changes slowly
       try {
         localStorage.setItem('referral_cache', JSON.stringify({ data, ts: Date.now() }));
       } catch (_) {}

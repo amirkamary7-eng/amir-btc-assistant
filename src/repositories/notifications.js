@@ -33,6 +33,15 @@ export function createNotificationRepository(deps) {
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)`);
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read_status = FALSE`);
 
+      // ROOT CAUSE FIX for "notifications reappear after delete":
+      // Add deleted_at column for soft-delete. The broadcast cron uses
+      // INSERT ... ON CONFLICT (id) DO NOTHING, so if a notification was
+      // hard-deleted, the cron would RE-CREATE it (new row, no conflict).
+      // With soft-delete, the row stays → ON CONFLICT prevents re-creation.
+      // The list/unreadCount queries filter WHERE deleted_at IS NULL.
+      await queryDb(env, `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`).catch(() => {});
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_active ON notifications(user_id, created_at DESC) WHERE deleted_at IS NULL`).catch(() => {});
+
       // Notification settings table — stores per-user notification preferences
       await queryDb(env, `
         CREATE TABLE IF NOT EXISTS notification_settings (
@@ -225,6 +234,8 @@ export function createNotificationRepository(deps) {
   /**
    * List notifications for a user, ordered by newest first.
    * Supports pagination via limit (default 50).
+   * ROOT CAUSE FIX: filters WHERE deleted_at IS NULL so soft-deleted
+   * notifications don't appear.
    */
   async function list(env, userId, limit = 50) {
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
@@ -233,7 +244,7 @@ export function createNotificationRepository(deps) {
       `
         SELECT id, user_id, type, title, message, metadata, read_status, created_at
         FROM notifications
-        WHERE user_id = $1
+        WHERE user_id = $1 AND deleted_at IS NULL
         ORDER BY created_at DESC
         LIMIT $2
       `,
@@ -244,6 +255,8 @@ export function createNotificationRepository(deps) {
 
   /**
    * Count unread notifications for a user.
+   * ROOT CAUSE FIX: filters WHERE deleted_at IS NULL so soft-deleted
+   * notifications don't count as unread.
    */
   async function unreadCount(env, userId) {
     const result = await queryDb(
@@ -251,7 +264,7 @@ export function createNotificationRepository(deps) {
       `
         SELECT COUNT(*)::int AS count
         FROM notifications
-        WHERE user_id = $1 AND read_status = FALSE
+        WHERE user_id = $1 AND read_status = FALSE AND deleted_at IS NULL
       `,
       [String(userId)],
     );
@@ -299,11 +312,14 @@ export function createNotificationRepository(deps) {
    * only cleared the local array, so notifications "came back" on next poll.
    */
   async function deleteNotification(env, notificationId, userId) {
+    // SOFT-DELETE FIX: Uses UPDATE deleted_at instead of DELETE so the
+    // broadcast cron's INSERT ... ON CONFLICT (id) DO NOTHING prevents
+    // re-creation of the notification on the next cron tick.
     const result = await queryDb(
       env,
       `
-        DELETE FROM notifications
-        WHERE id = $1 AND user_id = $2
+        UPDATE notifications SET deleted_at = NOW()
+        WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
         RETURNING id
       `,
       [String(notificationId), String(userId)],
@@ -318,11 +334,14 @@ export function createNotificationRepository(deps) {
    * the local array — no API call. Notifications reappeared on next poll.
    */
   async function deleteAll(env, userId) {
+    // SOFT-DELETE FIX: Uses UPDATE deleted_at instead of DELETE so the
+    // broadcast cron's INSERT ... ON CONFLICT (id) DO NOTHING prevents
+    // re-creation of notifications on the next cron tick.
     const result = await queryDb(
       env,
       `
-        DELETE FROM notifications
-        WHERE user_id = $1
+        UPDATE notifications SET deleted_at = NOW()
+        WHERE user_id = $1 AND deleted_at IS NULL
         RETURNING id
       `,
       [String(userId)],

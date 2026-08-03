@@ -7462,6 +7462,12 @@ export default {
         // The trace instrumentation is KEPT to verify the fix works.
         return withSharedPool(env, async () => {
           const trace = request._cpuTrace || [];
+
+          // ROOT CAUSE FIX: ensure deleted_at column exists (soft-delete fix).
+          // ensureTable is idempotent and cached (_tableEnsured flag), so it
+          // only runs once per isolate. Safe to call on every request.
+          try { await notificationRepo.ensureTable(env); } catch {}
+
           const stepAsync = async (name, fn) => {
             const before = performance.now();
             try {
@@ -7506,12 +7512,14 @@ export default {
               // FIX 3: Single DB query with window function for unread count
               // Instead of 2 separate queries (list + COUNT), use one query
               // that returns both notifications AND the unread count.
+              // ROOT CAUSE FIX: filter deleted_at IS NULL so soft-deleted
+              // notifications don't appear or count as unread.
               const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
               const dbResult = await stepAsync('db_combined_query', () => queryDb(env,
                 `SELECT id, user_id, type, title, message, metadata, read_status, created_at,
                         COUNT(*) FILTER (WHERE read_status = FALSE) OVER () AS total_unread
                  FROM notifications
-                 WHERE user_id = $1
+                 WHERE user_id = $1 AND deleted_at IS NULL
                  ORDER BY created_at DESC
                  LIMIT $2`,
                 [userId, safeLimit]
