@@ -9204,6 +9204,9 @@ async function markAllRead() {
                 updateNotifBadge();
                 renderNotifications();
                 showMiniToast(t('done') || 'Done');
+                // Bump sequence so any in-flight poll (with stale unread data)
+                // is discarded and doesn't overwrite the "all read" state.
+                _notifReqSeq++;
             } else {
                 console.warn('markAllRead: API returned non-success', res);
                 showMiniToast(t('error_generic') || 'Error');
@@ -9236,6 +9239,11 @@ async function clearAllNotifications() {
                 renderNotifications();
                 closeNotifModal();
                 showMiniToast(t('done') || 'Cleared');
+                // Bump sequence so any in-flight poll (with stale data from
+                // before the delete) is discarded and doesn't overwrite the
+                // empty array. This is the ROOT CAUSE FIX for "notifications
+                // reappear after delete".
+                _notifReqSeq++;
             } else {
                 console.warn('clearAllNotifications: API returned non-success', res);
                 showMiniToast(t('error_generic') || 'Error');
@@ -9265,6 +9273,8 @@ async function deleteNotification(id) {
                 notifications = notifications.filter(n => n.id !== id);
                 updateNotifBadge();
                 renderNotifications();
+                // Bump sequence so in-flight poll doesn't overwrite
+                _notifReqSeq++;
             }
             return;
         }
@@ -9277,10 +9287,31 @@ async function deleteNotification(id) {
 /**
  * Notifications را از سرور بارگذاری می‌کند — DB source of truth.
  */
+// ROOT CAUSE FIX for "notifications reappear after delete":
+// The 60s poll (loadNotificationsFromServer) can return STALE data from a
+// request that was in-flight BEFORE the user clicked "Delete All" or
+// "Mark All Read". The stale response overwrites the local state, making
+// notifications "reappear".
+//
+// FIX: Use a sequence number. Each call to loadNotificationsFromServer
+// increments _notifReqSeq. When the response arrives, we only apply it
+// if _notifReqSeq hasn't changed (no newer request was started). If a
+// newer request was started (e.g. after delete), the stale response is
+// silently discarded.
+let _notifReqSeq = 0;
+
 async function loadNotificationsFromServer() {
+    const mySeq = ++_notifReqSeq;
     try {
         if (API_BASE && !UserContext.isGuest()) {
             const data = await apiFetch('/api/notifications');
+            // STALE RESPONSE GUARD: if a newer request was started (e.g.
+            // user clicked delete/mark-all-read while this was in-flight),
+            // discard this response — it contains stale data.
+            if (mySeq !== _notifReqSeq) {
+                console.log('[NOTIF] Discarding stale poll response (seq', mySeq, '!= current', _notifReqSeq, ')');
+                return;
+            }
             if (data && Array.isArray(data.notifications)) {
                 notifications = data.notifications.map(n => ({
                     id: n.id,
@@ -9302,7 +9333,7 @@ async function loadNotificationsFromServer() {
         }
     } catch (e) { console.warn('loadNotificationsFromServer:', e); }
     // Fallback: render from in-memory array
-    renderNotifications();
+    if (mySeq === _notifReqSeq) renderNotifications();
 }
 /**
  * notifications را در رابط کاربری رندر می‌کند.
