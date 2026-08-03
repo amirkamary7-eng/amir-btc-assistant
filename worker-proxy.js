@@ -6477,6 +6477,41 @@ export default {
         return jsonResponse({ results, isolateCache: _calendarIsolateCache?.length || 0, isolateAge: _calendarIsolateCacheAt ? Date.now() - _calendarIsolateCacheAt : null }, {}, env);
       }
 
+      // ── CRON MONITOR: Shows last 200 cron phase execution logs ──
+      // This endpoint proves whether cron phases complete successfully.
+      // If a phase is "started" but never "complete", the Worker was killed
+      // (exceededCpu) during that phase.
+      if (request.method === 'GET' && url.pathname === '/api/cron-monitor') {
+        const log = globalThis._cronMonitorLog || [];
+        // Group by tick ID to show per-tick summary
+        const ticks = {};
+        for (const entry of log) {
+          if (!ticks[entry.tick]) ticks[entry.tick] = [];
+          ticks[entry.tick].push(entry);
+        }
+        const tickSummaries = Object.entries(ticks).map(([tickId, entries]) => {
+          const sorted = entries.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+          const first = sorted[0];
+          const last = sorted[sorted.length - 1];
+          const phases = entries.map(e => e.phase + ':' + e.status);
+          return {
+            tickId,
+            start: first.ts,
+            minute: first.minute,
+            cron: first.cron,
+            elapsed_ms: last.elapsed_ms,
+            phaseCount: entries.length,
+            phases,
+          };
+        });
+        return jsonResponse({
+          server_time: new Date().toISOString(),
+          totalLogEntries: log.length,
+          totalTicks: Object.keys(ticks).length,
+          ticks: tickSummaries.slice(-50), // last 50 ticks
+        }, {}, env);
+      }
+
       // ── Calendar Reminders (per-user, stored in PostgreSQL) ──
       // POST   /api/calendar/reminders      — create/update
       // GET    /api/calendar/reminders      — list user's reminders
@@ -7520,6 +7555,36 @@ export default {
 
   async scheduled(controller, env, ctx) {
     // ═══════════════════════════════════════════════════════════════════
+    // CRON MONITORING — tracks each phase's execution for exceededCpu proof
+    // ═══════════════════════════════════════════════════════════════════
+    const _cronTickId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const _cronTickStart = Date.now();
+    const _cronTickMinute = new Date().getUTCMinutes();
+    const _cronTickExpr = controller.cron || '* * * * *';
+    // Each phase logs its completion to this array.
+    // If the Worker is killed (exceededCpu), the phase that was running
+    // will NOT have its completion logged — revealing which phase killed it.
+    if (!globalThis._cronMonitorLog) globalThis._cronMonitorLog = [];
+    const _logPhase = (phase, status, extra) => {
+      const entry = {
+        tick: _cronTickId,
+        ts: new Date().toISOString(),
+        cron: _cronTickExpr,
+        minute: _cronTickMinute,
+        phase,
+        status,
+        elapsed_ms: Date.now() - _cronTickStart,
+        ...extra,
+      };
+      globalThis._cronMonitorLog.push(entry);
+      // Keep only last 200 entries
+      if (globalThis._cronMonitorLog.length > 200) {
+        globalThis._cronMonitorLog = globalThis._cronMonitorLog.slice(-200);
+      }
+    };
+    _logPhase('start', 'begin');
+
+    // ═══════════════════════════════════════════════════════════════════
     // ROOT-CAUSE FIX for exceededCpu on cron triggers:
     //
     // PROBLEM: The entire cron body was wrapped in ONE ctx.waitUntil().
@@ -7554,20 +7619,24 @@ export default {
           const minute = new Date().getUTCMinutes();
           const runAlerts = minute % 2 === 0;
           if (runAlerts) {
-            try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
+            try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1-alerts', 'ok'); } catch (e) {
+              _logPhase('phase1-alerts', 'error', { error: e?.message });
               console.warn('[CRON] alerts failed:', e?.message);
             }
           } else {
-            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); } catch (e) {
+            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); _logPhase('phase1-calendar', 'ok'); } catch (e) {
+              _logPhase('phase1-calendar', 'error', { error: e?.message });
               console.warn('[CRON] calendar failed:', e?.message);
             }
           }
         }
         if (isEvery15Min) {
-          try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
+          try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1-alerts', 'ok'); } catch (e) {
+            _logPhase('phase1-alerts', 'error', { error: e?.message });
             console.warn('[CRON] alerts failed:', e?.message);
           }
-          try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); } catch (e) {
+          try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); _logPhase('phase1-calendar-check', 'ok'); } catch (e) {
+            _logPhase('phase1-calendar-check', 'error', { error: e?.message });
             console.warn('[CRON] calendar failed:', e?.message);
           }
           // Refresh calendar isolate cache from upstream
@@ -7586,13 +7655,17 @@ export default {
                 _calendarIsolateCacheAt = Date.now();
                 try { await writeAppCache(env, CALENDAR_CACHE_KEY, JSON.stringify(events), 600); } catch {}
                 console.log('[CRON] calendar cache refreshed: ' + events.length + ' events');
+                _logPhase('phase1-calendar-cache', 'ok', { events: events.length });
               }
             }
           } catch (e) {
+            _logPhase('phase1-calendar-cache', 'error', { error: e?.message });
             console.warn('[CRON] calendar cache refresh failed:', e?.message);
           }
         }
+        _logPhase('phase1', 'complete');
       } catch (e) {
+        _logPhase('phase1', 'error', { error: e?.message });
         console.error('[CRON] Phase 1 error:', e?.message);
       }
     })());
@@ -7605,7 +7678,9 @@ export default {
           if (result.processed > 0) {
             console.log('[CRON] broadcast batch:', JSON.stringify(result));
           }
+          _logPhase('phase1b-broadcast', 'ok', { processed: result.processed });
         } catch (e) {
+          _logPhase('phase1b-broadcast', 'error', { error: e?.message });
           console.warn('[CRON] broadcast batch failed:', e?.message);
         }
       })());
@@ -7615,51 +7690,54 @@ export default {
     if (isEvery15Min) {
       ctx.waitUntil((async () => {
         try {
-          try { await retryFailedReferralRewards(env); } catch (e) {
+          try { await retryFailedReferralRewards(env); _logPhase('phase2-referral', 'ok'); } catch (e) {
+            _logPhase('phase2-referral', 'error', { error: e?.message });
             console.warn('[CRON] referral retry failed:', e?.message);
           }
-          try { await retryFailedWheelRewards(env); } catch (e) {
+          try { await retryFailedWheelRewards(env); _logPhase('phase2-wheel', 'ok'); } catch (e) {
+            _logPhase('phase2-wheel', 'error', { error: e?.message });
             console.warn('[CRON] wheel retry failed:', e?.message);
           }
+          _logPhase('phase2', 'complete');
         } catch (e) {
+          _logPhase('phase2', 'error', { error: e?.message });
           console.error('[CRON] Phase 2 error:', e?.message);
         }
       })());
 
       // ── PHASE 3: Heavy jobs (alternating, separate ctx.waitUntil per job) ──
-      // Splitting into individual ctx.waitUntil() calls gives each job its
-      // own 10ms CPU budget instead of sharing one budget across all jobs.
       const minute = new Date().getUTCMinutes();
       if (minute === 0 || minute === 30) {
         // First 15-min tick of the half-hour: notification queue + market overview
         if (notificationPlatformRepo?.processQueue) {
           ctx.waitUntil((async () => {
-            try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage); } catch (e) {
+            try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage); _logPhase('phase3-queue', 'ok'); } catch (e) {
+              _logPhase('phase3-queue', 'error', { error: e?.message });
               console.warn('[CRON] notif queue failed:', e?.message);
             }
           })());
         }
         if (env.CMC_API_KEY) {
           ctx.waitUntil((async () => {
-            try { await marketOverviewSvc.refreshOverview(env); } catch (e) {
+            try { await marketOverviewSvc.refreshOverview(env); _logPhase('phase3-market', 'ok'); } catch (e) {
+              _logPhase('phase3-market', 'error', { error: e?.message });
               console.warn('[CRON] market overview failed:', e?.message);
             }
           })());
         }
       } else {
         // Second 15-min tick: publisher + news AI (SEPARATE ctx.waitUntil each!)
-        // processNewsAIBatch does 42 env.AI.run() calls = ~200-600ms CPU.
-        // It MUST have its own ctx.waitUntil() to avoid exceeding the 10ms
-        // limit when combined with the publisher queue.
         if (publisherHandlers?.processPublisherQueue) {
           ctx.waitUntil((async () => {
-            try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); } catch (e) {
+            try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); _logPhase('phase3-publisher', 'ok'); } catch (e) {
+              _logPhase('phase3-publisher', 'error', { error: e?.message });
               console.warn('[CRON] publisher failed:', e?.message);
             }
           })());
         }
         ctx.waitUntil((async () => {
-          try { await processNewsAIBatch(env); } catch (e) {
+          try { await processNewsAIBatch(env); _logPhase('phase3-newsai', 'ok'); } catch (e) {
+            _logPhase('phase3-newsai', 'error', { error: e?.message });
             console.warn('[CRON] news AI failed:', e?.message);
           }
         })());
