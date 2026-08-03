@@ -7045,6 +7045,97 @@ export default {
 
       // ── DIAGNOSTIC: List available Gemini models ──
 
+      // ── NOTIFICATIONS CPU TRACE ──
+      // Instrumented version of /api/notifications that logs wall-time per step.
+      // This route is BEFORE the PROTECTED_PATHS gate so it controls its own auth.
+      // It replicates the EXACT same steps that /api/notifications goes through:
+      //   1. authenticateTelegramRequest (HMAC)
+      //   2. requireChannelJoin (KV read + DB query + maybe Telegram API)
+      //   3. authenticateTelegramRequest AGAIN (inside handleList — redundant)
+      //   4. DB query: notificationRepo.list
+      //   5. DB query: notificationRepo.unreadCount
+      //   6. JSON serialize
+      if (request.method === 'GET' && url.pathname === '/api/notif-cpu-trace') {
+        const trace = [];
+        const t0 = performance.now();
+        const stepAsync = async (name, fn) => {
+          const before = performance.now();
+          try {
+            const r = await fn();
+            const after = performance.now();
+            trace.push({ step: name, wall_delta_ms: Math.round((after - before) * 100) / 100 });
+            return r;
+          } catch (e) {
+            const after = performance.now();
+            trace.push({ step: name + '_ERROR', wall_delta_ms: Math.round((after - before) * 100) / 100, error: String(e?.message || e).slice(0, 200) });
+            throw e;
+          }
+        };
+        const stepSync = (name, fn) => {
+          const before = performance.now();
+          const r = fn();
+          const after = performance.now();
+          trace.push({ step: name, wall_delta_ms: Math.round((after - before) * 100) / 100 });
+          return r;
+        };
+
+        try {
+          // STEP 1: Auth (1st — global middleware equivalent)
+          const authState = await stepAsync('1_auth_telegram_1st', () => authenticateTelegramRequest(request, env));
+          if (authState.error) {
+            return jsonResponse({ status: 'auth_error', trace, total_wall_ms: Math.round((performance.now() - t0) * 100) / 100 }, { status: 401 }, env);
+          }
+
+          // STEP 2: requireChannelJoin (membership check — KV + DB + maybe Telegram API)
+          const userId = String(authState.user.id);
+          const joinBlocked = await stepAsync('2_requireChannelJoin', () => requireChannelJoin(authState.user, env));
+          if (joinBlocked) {
+            return jsonResponse({ status: 'join_required', trace, total_wall_ms: Math.round((performance.now() - t0) * 100) / 100 }, { status: 403 }, env);
+          }
+
+          // STEP 3: Auth (2nd — inside handleList — REDUNDANT?)
+          await stepAsync('3_auth_telegram_2nd_redundant', () => authenticateTelegramRequest(request, env));
+
+          // STEP 4: Parse query params
+          const parsedUrl = stepSync('4_parse_url', () => new URL(request.url));
+          const limit = stepSync('4_parse_limit', () => parseInt(parsedUrl.searchParams.get('limit') || '50', 10) || 50);
+
+          // STEP 5: DB queries (Promise.all of list + unreadCount)
+          let notifications, unread;
+          await stepAsync('5_db_promise_all', async () => {
+            [notifications, unread] = await Promise.all([
+              stepAsync('5a_db_list', () => notificationRepo.list(env, userId, limit)),
+              stepAsync('5b_db_unreadCount', () => notificationRepo.unreadCount(env, userId)),
+            ]);
+          });
+
+          // STEP 6: JSON serialize
+          stepSync('6_json_serialize', () => JSON.stringify({
+            status: 'success', notifications, unread_count: unread,
+          }));
+
+          const totalWall = Math.round((performance.now() - t0) * 100) / 100;
+
+          return jsonResponse({
+            status: 'success',
+            notifications_count: notifications?.length || 0,
+            unread_count: unread,
+            trace,
+            total_wall_ms: totalWall,
+            auth_call_count: 2,
+            db_query_count: 3,
+          }, {}, env);
+        } catch (error) {
+          const totalWall = Math.round((performance.now() - t0) * 100) / 100;
+          return jsonResponse({
+            status: 'error',
+            message: String(error?.message || error).slice(0, 300),
+            trace,
+            total_wall_ms: totalWall,
+          }, { status: 500 }, env);
+        }
+      }
+
       // Future: /api/news/stream SSE endpoint for breaking news push.
       // Requires Durable Object for true WebSocket, or simple SSE stream.
       // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
