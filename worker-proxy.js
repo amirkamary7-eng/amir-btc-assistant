@@ -7165,14 +7165,47 @@ export default {
         }, {}, env);
       }
 
+      // Future: /api/news/stream SSE endpoint for breaking news push.
+      // Requires Durable Object for true WebSocket, or simple SSE stream.
+      // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
+
+      // Diagnostic endpoints — development only, block in production
+      if (/^\/api\/_diag\//.test(url.pathname) && !isDevMode(env)) {
+        return jsonResponse({ detail: 'Not found' }, { status: 404 }, env);
+      }
+
+
+      // ── Auth + Channel Join gate for protected routes (PRODUCTION ONLY) ──
+      // Evaluated once; reused by all protected handlers below.
+      // Unprotected routes (health, market, charts, calendar, public analyses, bootstrap) are above this line.
+      let _protectedUser = null;
+      let _joinBlocked = null;
+      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|notif-delete-diag)/;
+      const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
+
+      // ── CPU TRACE: attach trace array to request for instrumentation ──
+      // The global middleware and route handlers both write to this array.
+      // For /api/notifications, the trace is written to KV in the route handler.
+      if (!request._cpuTrace) request._cpuTrace = [];
+      const _gateT0 = performance.now();
+
+      if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
+        const _authT0 = performance.now();
+        const _authState = await authenticateTelegramRequest(request, env);
+        request._cpuTrace.push({ step: 'global_auth', wall_ms: Math.round((performance.now() - _authT0) * 100) / 100 });
+        if (_authState.error) return _authState.error;
+        _protectedUser = _authState.user;
+
+        const _joinT0 = performance.now();
+        _joinBlocked = await requireChannelJoin(_protectedUser, env);
+        request._cpuTrace.push({ step: 'global_requireChannelJoin', wall_ms: Math.round((performance.now() - _joinT0) * 100) / 100 });
+        if (_joinBlocked) return _joinBlocked;
+      }
+      request._cpuTrace.push({ step: 'global_gate_total', wall_ms: Math.round((performance.now() - _gateT0) * 100) / 100 });
+
       // ── NOTIFICATION DELETE DIAGNOSTIC ──
       // Proves whether notifications reappear after delete, and WHY.
-      // Requires Telegram auth (uses _protectedUser from global middleware).
-      // Steps:
-      //   1. Shows current notifications (with IDs) BEFORE delete
-      //   2. Shows any broadcasts in 'pending'/'sending' status
-      //   3. Shows KV cache content
-      //   4. Does NOT delete — just reports state for the user to verify
+      // Placed AFTER PROTECTED_PATHS gate so _protectedUser is set.
       if (request.method === 'GET' && url.pathname === '/api/notif-delete-diag') {
         const result = { server_time: new Date().toISOString(), steps: [] };
 
@@ -7195,7 +7228,7 @@ export default {
           });
         } catch (e) { result.steps.push({ step: '1_active_broadcasts', error: e?.message }); }
 
-        // Step 2: Check ALL broadcasts (including 'sent') in last 24h
+        // Step 2: Check ALL broadcasts in last 24h
         try {
           const recentBroadcasts = await queryDb(env,
             `SELECT id, title, status, created_at, sent_at
@@ -7213,7 +7246,7 @@ export default {
           });
         } catch (e) { result.steps.push({ step: '2_recent_broadcasts_24h', error: e?.message }); }
 
-        // Step 3: If user is authenticated, show their notifications with IDs
+        // Step 3: User's notifications with IDs
         if (_protectedUser?.id) {
           try {
             const userId = String(_protectedUser.id);
@@ -7229,18 +7262,15 @@ export default {
               userId: userId,
               count: notifs.rows.length,
               notifications: notifs.rows.map(r => ({
-                id: r.id,
-                type: r.type,
-                title: (r.title||'').slice(0,40),
-                read_status: r.read_status,
-                deleted_at: r.deleted_at,
+                id: r.id, type: r.type, title: (r.title||'').slice(0,40),
+                read_status: r.read_status, deleted_at: r.deleted_at,
                 created_at: r.created_at,
                 is_broadcast: String(r.id).startsWith('bc_'),
                 is_notif_prefix: String(r.id).startsWith('notif_'),
               })),
             });
 
-            // Step 4: Check KV cache for this user
+            // Step 4: KV cache
             try {
               const cached = await env.APP_CACHE?.get?.('notif_cache_' + userId).catch(() => null);
               result.steps.push({
@@ -7248,7 +7278,6 @@ export default {
                 cacheKey: 'notif_cache_' + userId,
                 hasCache: !!cached,
                 cacheLength: cached ? cached.length : 0,
-                cachePreview: cached ? cached.slice(0, 200) : null,
               });
             } catch (e) { result.steps.push({ step: '4_kv_cache', error: e?.message }); }
           } catch (e) { result.steps.push({ step: '3_user_notifications', error: e?.message }); }
@@ -7258,44 +7287,6 @@ export default {
 
         return jsonResponse(result, {}, env);
       }
-
-      // Future: /api/news/stream SSE endpoint for breaking news push.
-      // Requires Durable Object for true WebSocket, or simple SSE stream.
-      // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
-
-      // Diagnostic endpoints — development only, block in production
-      if (/^\/api\/_diag\//.test(url.pathname) && !isDevMode(env)) {
-        return jsonResponse({ detail: 'Not found' }, { status: 404 }, env);
-      }
-
-
-      // ── Auth + Channel Join gate for protected routes (PRODUCTION ONLY) ──
-      // Evaluated once; reused by all protected handlers below.
-      // Unprotected routes (health, market, charts, calendar, public analyses, bootstrap) are above this line.
-      let _protectedUser = null;
-      let _joinBlocked = null;
-      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications)/;
-      const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
-
-      // ── CPU TRACE: attach trace array to request for instrumentation ──
-      // The global middleware and route handlers both write to this array.
-      // For /api/notifications, the trace is written to KV in the route handler.
-      if (!request._cpuTrace) request._cpuTrace = [];
-      const _gateT0 = performance.now();
-
-      if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
-        const _authT0 = performance.now();
-        const _authState = await authenticateTelegramRequest(request, env);
-        request._cpuTrace.push({ step: 'global_auth', wall_ms: Math.round((performance.now() - _authT0) * 100) / 100 });
-        if (_authState.error) return _authState.error;
-        _protectedUser = _authState.user;
-
-        const _joinT0 = performance.now();
-        _joinBlocked = await requireChannelJoin(_protectedUser, env);
-        request._cpuTrace.push({ step: 'global_requireChannelJoin', wall_ms: Math.round((performance.now() - _joinT0) * 100) / 100 });
-        if (_joinBlocked) return _joinBlocked;
-      }
-      request._cpuTrace.push({ step: 'global_gate_total', wall_ms: Math.round((performance.now() - _gateT0) * 100) / 100 });
 
       // ── Analyses: Public endpoints ──
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
