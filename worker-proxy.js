@@ -6527,9 +6527,12 @@ export default {
           const last = sorted[sorted.length - 1];
           const phases = entries.map(e => e.phase + ':' + e.status);
           // Check if this tick has a "start" but no "complete" for the overall phase
+          // New code uses phase1a (split from phase1), old code uses phase1.
+          // Check for BOTH to handle ticks from old and new code.
           const hasStart = entries.some(e => e.phase === 'start');
-          const hasPhase1Complete = entries.some(e => e.phase === 'phase1' && e.status === 'complete');
-          const hasPhase2Complete = entries.some(e => e.phase === 'phase2' && e.status === 'complete');
+          const hasPhase1Complete = entries.some(e =>
+            (e.phase === 'phase1' || e.phase === 'phase1a') && e.status === 'complete'
+          );
           const killed = hasStart && !hasPhase1Complete;
           return {
             tickId,
