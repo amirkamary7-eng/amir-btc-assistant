@@ -7183,13 +7183,25 @@ export default {
       const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications)/;
       const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
 
+      // ── CPU TRACE: attach trace array to request for instrumentation ──
+      // The global middleware and route handlers both write to this array.
+      // For /api/notifications, the trace is written to KV in the route handler.
+      if (!request._cpuTrace) request._cpuTrace = [];
+      const _gateT0 = performance.now();
+
       if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
+        const _authT0 = performance.now();
         const _authState = await authenticateTelegramRequest(request, env);
+        request._cpuTrace.push({ step: 'global_auth', wall_ms: Math.round((performance.now() - _authT0) * 100) / 100 });
         if (_authState.error) return _authState.error;
         _protectedUser = _authState.user;
+
+        const _joinT0 = performance.now();
         _joinBlocked = await requireChannelJoin(_protectedUser, env);
+        request._cpuTrace.push({ step: 'global_requireChannelJoin', wall_ms: Math.round((performance.now() - _joinT0) * 100) / 100 });
         if (_joinBlocked) return _joinBlocked;
       }
+      request._cpuTrace.push({ step: 'global_gate_total', wall_ms: Math.round((performance.now() - _gateT0) * 100) / 100 });
 
       // ── Analyses: Public endpoints ──
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
@@ -7423,13 +7435,16 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/notifications') {
         // ── CPU TRACE INSTRUMENTATION ──
-        // Wraps handleList with per-step timing. The trace is:
-        //   1. Written to KV (key: notif_trace_{id}) for later retrieval
-        //   2. Returned in X-Notif-Trace response header (base64-encoded JSON)
-        // The response body is UNCHANGED — no breaking changes.
+        // The global middleware (auth + requireChannelJoin) already ran and
+        // wrote to request._cpuTrace. This handler adds the remaining steps:
+        //   - auth_redundant: handleList calls authenticateTelegramRequest AGAIN
+        //   - db_list: notificationRepo.list (SELECT notifications)
+        //   - db_unreadCount: notificationRepo.unreadCount (SELECT COUNT)
+        //   - json_serialize: JSON.stringify
+        // The full trace (global + handler) is written to KV + response header.
         return withSharedPool(env, async () => {
-          const trace = [];
-          const t0 = performance.now();
+          const trace = request._cpuTrace || [];
+          const t0 = trace[0] ? 0 : performance.now(); // global gate already measured
           const stepAsync = async (name, fn) => {
             const before = performance.now();
             try {
@@ -7445,51 +7460,49 @@ export default {
           };
 
           try {
-            // Replicate handleList with instrumentation
-            const authState = await stepAsync('auth_1_global', () => authenticateTelegramRequest(request, env));
+            // STEP: Redundant auth (handleList calls authenticateTelegramRequest again)
+            const authState = await stepAsync('handler_auth_redundant', () => authenticateTelegramRequest(request, env));
             if (authState.error) return authState.error;
-
-            // Note: requireChannelJoin already ran in the global middleware (line ~7155).
-            // But handleList calls authenticateTelegramRequest AGAIN internally.
-            // We measure the redundant call here.
-            await stepAsync('auth_2_handleList_redundant', () => authenticateTelegramRequest(request, env));
 
             const userId = String(authState.user.id);
             const parsedUrl = new URL(request.url);
             const limit = parseInt(parsedUrl.searchParams.get('limit') || '50', 10) || 50;
 
+            // STEP: DB queries (Promise.all of list + unreadCount)
             let notifications, unread;
-            await stepAsync('db_promise_all', async () => {
+            await stepAsync('handler_db_promise_all', async () => {
               [notifications, unread] = await Promise.all([
-                stepAsync('db_list', () => notificationRepo.list(env, userId, limit)),
-                stepAsync('db_unreadCount', () => notificationRepo.unreadCount(env, userId)),
+                stepAsync('handler_db_list', () => notificationRepo.list(env, userId, limit)),
+                stepAsync('handler_db_unreadCount', () => notificationRepo.unreadCount(env, userId)),
               ]);
             });
 
+            // STEP: JSON serialize
             const body = { status: 'success', notifications, unread_count: unread };
-            // Measure JSON serialize (sync)
             const _tJsonBefore = performance.now();
             JSON.stringify(body);
-            trace.push({ step: 'json_serialize', wall_ms: Math.round((performance.now() - _tJsonBefore) * 100) / 100 });
+            trace.push({ step: 'handler_json_serialize', wall_ms: Math.round((performance.now() - _tJsonBefore) * 100) / 100 });
 
-            const totalWall = Math.round((performance.now() - t0) * 100) / 100;
-            trace.push({ step: 'TOTAL', wall_ms: totalWall });
+            // Calculate total from global gate start
+            const totalWall = trace.reduce((sum, t) => sum + (t.wall_ms || 0), 0);
+            trace.push({ step: 'TOTAL', wall_ms: Math.round(totalWall * 100) / 100 });
 
             // Write trace to KV (best-effort, non-blocking)
             const traceId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             if (env.APP_CACHE) {
               env.APP_CACHE.put('notif_trace_' + traceId, JSON.stringify({
-                traceId, ts: new Date().toISOString(), userId, trace, total_wall_ms: totalWall,
-                auth_calls: 2, db_queries: 3, notifications_count: notifications?.length || 0,
+                traceId, ts: new Date().toISOString(), userId, trace, total_wall_ms: Math.round(totalWall * 100) / 100,
+                auth_calls: trace.filter(t => t.step.includes('auth')).length,
+                db_queries: trace.filter(t => t.step.includes('db_')).length,
+                notifications_count: notifications?.length || 0,
               }), { expirationTtl: 3600 }).catch(() => {});
             }
 
             // Return normal response + trace in header
             const response = jsonResponse(body, {}, env);
-            // Add trace as header (base64 to avoid encoding issues)
             try {
               const traceB64 = btoa(JSON.stringify(trace));
-              response.headers.set('X-Notif-Trace', traceB64.slice(0, 8000)); // header size limit
+              response.headers.set('X-Notif-Trace', traceB64.slice(0, 8000));
               response.headers.set('X-Notif-Trace-Id', traceId);
             } catch {}
             return response;
