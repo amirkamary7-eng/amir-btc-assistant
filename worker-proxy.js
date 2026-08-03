@@ -7659,64 +7659,77 @@ export default {
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
-    // ── PHASE 1: Time-sensitive (alerts + calendar) ──
-    // Each gets its own ctx.waitUntil() so CPU is measured separately.
+    // ── PHASE 1a: Alerts OR Calendar check (own ctx.waitUntil) ──
+    // ROOT CAUSE FIX: Previously alerts + calendar cache refresh were in
+    // the SAME ctx.waitUntil. The calendar cache refresh (fetchCalendarFeed
+    // + mapCalendarEvent for 95 events + writeAppCache) added ~5ms CPU
+    // on top of alerts (~5ms) = 10ms → exceededCpu.
+    // Now they're split: 1a = alerts/calendar check, 1c = cache refresh.
     ctx.waitUntil((async () => {
       try {
         if (isEveryMinute) {
           const minute = new Date().getUTCMinutes();
           const runAlerts = minute % 2 === 0;
           if (runAlerts) {
-            try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1-alerts', 'ok'); } catch (e) {
-              _logPhase('phase1-alerts', 'error', { error: e?.message });
+            try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
+              _logPhase('phase1a-alerts', 'error', { error: e?.message });
               console.warn('[CRON] alerts failed:', e?.message);
             }
           } else {
-            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); _logPhase('phase1-calendar', 'ok'); } catch (e) {
-              _logPhase('phase1-calendar', 'error', { error: e?.message });
+            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); _logPhase('phase1a-calendar', 'ok'); } catch (e) {
+              _logPhase('phase1a-calendar', 'error', { error: e?.message });
               console.warn('[CRON] calendar failed:', e?.message);
             }
           }
         }
         if (isEvery15Min) {
-          try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1-alerts', 'ok'); } catch (e) {
-            _logPhase('phase1-alerts', 'error', { error: e?.message });
+          try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
+            _logPhase('phase1a-alerts', 'error', { error: e?.message });
             console.warn('[CRON] alerts failed:', e?.message);
           }
-          try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); _logPhase('phase1-calendar-check', 'ok'); } catch (e) {
-            _logPhase('phase1-calendar-check', 'error', { error: e?.message });
+          try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); _logPhase('phase1a-calendar-check', 'ok'); } catch (e) {
+            _logPhase('phase1a-calendar-check', 'error', { error: e?.message });
             console.warn('[CRON] calendar failed:', e?.message);
           }
-          // Refresh calendar isolate cache from upstream
-          try {
-            const rawEvents = await fetchCalendarFeed();
-            if (Array.isArray(rawEvents) && rawEvents.length > 0) {
-              const now = new Date();
-              const cutoffPast = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
-              const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-              const events = rawEvents
-                .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
-                .filter((item) => item !== null)
-                .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-              if (events.length > 0) {
-                _calendarIsolateCache = events;
-                _calendarIsolateCacheAt = Date.now();
-                try { await writeAppCache(env, CALENDAR_CACHE_KEY, JSON.stringify(events), 600); } catch {}
-                console.log('[CRON] calendar cache refreshed: ' + events.length + ' events');
-                _logPhase('phase1-calendar-cache', 'ok', { events: events.length });
-              }
-            }
-          } catch (e) {
-            _logPhase('phase1-calendar-cache', 'error', { error: e?.message });
-            console.warn('[CRON] calendar cache refresh failed:', e?.message);
-          }
         }
-        _logPhase('phase1', 'complete');
+        _logPhase('phase1a', 'complete');
       } catch (e) {
-        _logPhase('phase1', 'error', { error: e?.message });
-        console.error('[CRON] Phase 1 error:', e?.message);
+        _logPhase('phase1a', 'error', { error: e?.message });
+        console.error('[CRON] Phase 1a error:', e?.message);
       }
     })());
+
+    // ── PHASE 1c: Calendar cache refresh (15-min only, SEPARATE ctx.waitUntil) ──
+    // This does fetchCalendarFeed + mapCalendarEvent (95 events) + writeAppCache.
+    // It consumes ~5ms CPU on its own. Splitting it from Phase 1a ensures
+    // it doesn't push the combined CPU over 10ms.
+    if (isEvery15Min) {
+      ctx.waitUntil((async () => {
+        try {
+          const rawEvents = await fetchCalendarFeed();
+          if (Array.isArray(rawEvents) && rawEvents.length > 0) {
+            const now = new Date();
+            const cutoffPast = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
+            const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+            const events = rawEvents
+              .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
+              .filter((item) => item !== null)
+              .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+            if (events.length > 0) {
+              _calendarIsolateCache = events;
+              _calendarIsolateCacheAt = Date.now();
+              try { await writeAppCache(env, CALENDAR_CACHE_KEY, JSON.stringify(events), 600); } catch {}
+              console.log('[CRON] calendar cache refreshed: ' + events.length + ' events');
+              _logPhase('phase1c-calendar-cache', 'ok', { events: events.length });
+            }
+          }
+          _logPhase('phase1c', 'complete');
+        } catch (e) {
+          _logPhase('phase1c', 'error', { error: e?.message });
+          console.warn('[CRON] calendar cache refresh failed:', e?.message);
+        }
+      })());
+    }
 
     // ── PHASE 1b: Broadcast batch (1-min only, separate ctx.waitUntil) ──
     if (isEveryMinute && notificationPlatformRepo?.processBroadcastBatch) {
