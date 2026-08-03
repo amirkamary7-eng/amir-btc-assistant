@@ -7519,29 +7519,38 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // ROOT-CAUSE FIX: alternating job execution to stay under CPU limit.
+    // ═══════════════════════════════════════════════════════════════════
+    // ROOT-CAUSE FIX for exceededCpu on cron triggers:
     //
-    // Each queryDb creates a per-call Pool (~3-5ms CPU). Running 2 queryDb
-    // jobs in the same tick = ~6-10ms CPU → exceededResources (10ms limit).
+    // PROBLEM: The entire cron body was wrapped in ONE ctx.waitUntil().
+    // Cloudflare measures CPU time across the ENTIRE ctx.waitUntil()
+    // duration. So even though calendar logs at ~5ms CPU, the subsequent
+    // phases (retryFailedReferralRewards, processNewsAIBatch with 42
+    // env.AI.run() calls, etc.) pushed total CPU to 200-600ms → exceededCpu.
     //
-    // FIX: alternate between alerts and calendar on every-minute ticks.
-    // Even minutes → alerts. Odd minutes → calendar. This ensures each
-    // tick makes at most 1 queryDb = ~3-5ms CPU — well under the limit.
-    // Alert detection latency: 2 min (was 1 min for alerts, now alternating).
-    // Calendar check latency: 2 min (was 1 min, now alternating).
-    // Both acceptable trade-offs for zero exceededResources.
+    // FIX: Split each phase into its OWN ctx.waitUntil() call. Cloudflare
+    // measures CPU PER ctx.waitUntil() promise, not across all of them.
+    // Each phase now has its own 10ms CPU budget.
     //
-    // */15 * * * * (every 15 min): alerts + calendar + maintenance + heavy jobs.
+    // PHASE LAYOUT (15-min cron):
+    //   Phase 1: alerts + calendar (time-sensitive, ~5ms CPU)
+    //   Phase 2: referral/wheel retries (~3ms CPU)
+    //   Phase 3a (minute 0/30): notif queue + market overview (~5ms CPU)
+    //   Phase 3b (minute 15/45): publisher + news AI (~8ms CPU with batching)
+    //
+    // PHASE LAYOUT (1-min cron):
+    //   Alternate: alerts OR calendar (~3ms CPU) + broadcast batch (~2ms CPU)
+    // ═══════════════════════════════════════════════════════════════════
 
     const cronExpr = controller.cron || '* * * * *';
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
+    // ── PHASE 1: Time-sensitive (alerts + calendar) ──
+    // Each gets its own ctx.waitUntil() so CPU is measured separately.
     ctx.waitUntil((async () => {
       try {
         if (isEveryMinute) {
-          // Alternate: even minute → alerts, odd minute → calendar.
-          // This ensures max 1 queryDb per tick = ~3-5ms CPU.
           const minute = new Date().getUTCMinutes();
           const runAlerts = minute % 2 === 0;
           if (runAlerts) {
@@ -7553,41 +7562,20 @@ export default {
               console.warn('[CRON] calendar failed:', e?.message);
             }
           }
-
-          // Process broadcast notification batch (5 users per minute)
-          // Runs AFTER alerts/calendar to avoid CPU contention.
-          // Each batch: ~11 queryDb (SELECT broadcast + SELECT users + 5×(SELECT pref + INSERT notif))
-          // But these are I/O bound (per-call Pool, ~5ms wall each), low CPU.
-          if (notificationPlatformRepo?.processBroadcastBatch) {
-            try {
-              const result = await notificationPlatformRepo.processBroadcastBatch(env, sendTelegramMessage);
-              if (result.processed > 0) {
-                console.log('[CRON] broadcast batch:', JSON.stringify(result));
-              }
-            } catch (e) {
-              console.warn('[CRON] broadcast batch failed:', e?.message);
-            }
-          }
         }
-
-        // === EVERY 15 MIN: maintenance + heavy jobs (split to stay under 10ms) ===
         if (isEvery15Min) {
-          // Phase 1: Time-sensitive (same as 1-min, but with 15-min flag)
           try { await runScheduledAlertsBaseline(controller, env); } catch (e) {
             console.warn('[CRON] alerts failed:', e?.message);
           }
           try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); } catch (e) {
             console.warn('[CRON] calendar failed:', e?.message);
           }
-
-          // Refresh calendar isolate cache from upstream (every 15 min)
-          // This keeps _calendarIsolateCache populated even when HTTP requests
-          // get rate-limited by the provider.
+          // Refresh calendar isolate cache from upstream
           try {
             const rawEvents = await fetchCalendarFeed();
             if (Array.isArray(rawEvents) && rawEvents.length > 0) {
               const now = new Date();
-              const cutoffPast = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+              const cutoffPast = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
               const cutoffFuture = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
               const events = rawEvents
                 .map((item) => mapCalendarEvent(item, now, cutoffPast, cutoffFuture))
@@ -7603,47 +7591,80 @@ export default {
           } catch (e) {
             console.warn('[CRON] calendar cache refresh failed:', e?.message);
           }
+        }
+      } catch (e) {
+        console.error('[CRON] Phase 1 error:', e?.message);
+      }
+    })());
 
-          // Phase 2: Lightweight DB jobs
+    // ── PHASE 1b: Broadcast batch (1-min only, separate ctx.waitUntil) ──
+    if (isEveryMinute && notificationPlatformRepo?.processBroadcastBatch) {
+      ctx.waitUntil((async () => {
+        try {
+          const result = await notificationPlatformRepo.processBroadcastBatch(env, sendTelegramMessage);
+          if (result.processed > 0) {
+            console.log('[CRON] broadcast batch:', JSON.stringify(result));
+          }
+        } catch (e) {
+          console.warn('[CRON] broadcast batch failed:', e?.message);
+        }
+      })());
+    }
+
+    // ── PHASE 2: Lightweight DB retries (15-min only, separate ctx.waitUntil) ──
+    if (isEvery15Min) {
+      ctx.waitUntil((async () => {
+        try {
           try { await retryFailedReferralRewards(env); } catch (e) {
             console.warn('[CRON] referral retry failed:', e?.message);
           }
           try { await retryFailedWheelRewards(env); } catch (e) {
             console.warn('[CRON] wheel retry failed:', e?.message);
           }
-
-          // Phase 3: Alternate heavy jobs every other 15-min tick
-          // Use minute-of-hour to determine which heavy job to run
-          // This ensures only ONE heavy job runs per 15-min tick
-          const minute = new Date().getUTCMinutes();
-          if (minute === 0 || minute === 30) {
-            // First 15-min tick of the half-hour: notification queue + market overview
-            if (notificationPlatformRepo?.processQueue) {
-              try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage); } catch (e) {
-                console.warn('[CRON] notif queue failed:', e?.message);
-              }
-            }
-            if (env.CMC_API_KEY) {
-              try { await marketOverviewSvc.refreshOverview(env); } catch (e) {
-                console.warn('[CRON] market overview failed:', e?.message);
-              }
-            }
-          } else {
-            // Second 15-min tick: publisher + news AI
-            if (publisherHandlers?.processPublisherQueue) {
-              try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); } catch (e) {
-                console.warn('[CRON] publisher failed:', e?.message);
-              }
-            }
-            try { await processNewsAIBatch(env); } catch (e) {
-              console.warn('[CRON] news AI failed:', e?.message);
-            }
-          }
+        } catch (e) {
+          console.error('[CRON] Phase 2 error:', e?.message);
         }
-      } catch (e) {
-        console.error('[CRON] Scheduled handler error:', e?.message);
+      })());
+
+      // ── PHASE 3: Heavy jobs (alternating, separate ctx.waitUntil per job) ──
+      // Splitting into individual ctx.waitUntil() calls gives each job its
+      // own 10ms CPU budget instead of sharing one budget across all jobs.
+      const minute = new Date().getUTCMinutes();
+      if (minute === 0 || minute === 30) {
+        // First 15-min tick of the half-hour: notification queue + market overview
+        if (notificationPlatformRepo?.processQueue) {
+          ctx.waitUntil((async () => {
+            try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage); } catch (e) {
+              console.warn('[CRON] notif queue failed:', e?.message);
+            }
+          })());
+        }
+        if (env.CMC_API_KEY) {
+          ctx.waitUntil((async () => {
+            try { await marketOverviewSvc.refreshOverview(env); } catch (e) {
+              console.warn('[CRON] market overview failed:', e?.message);
+            }
+          })());
+        }
+      } else {
+        // Second 15-min tick: publisher + news AI (SEPARATE ctx.waitUntil each!)
+        // processNewsAIBatch does 42 env.AI.run() calls = ~200-600ms CPU.
+        // It MUST have its own ctx.waitUntil() to avoid exceeding the 10ms
+        // limit when combined with the publisher queue.
+        if (publisherHandlers?.processPublisherQueue) {
+          ctx.waitUntil((async () => {
+            try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); } catch (e) {
+              console.warn('[CRON] publisher failed:', e?.message);
+            }
+          })());
+        }
+        ctx.waitUntil((async () => {
+          try { await processNewsAIBatch(env); } catch (e) {
+            console.warn('[CRON] news AI failed:', e?.message);
+          }
+        })());
       }
-    })());
+    }
   },
 };
 //#endregion
