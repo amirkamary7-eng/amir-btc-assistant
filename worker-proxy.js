@@ -6477,15 +6477,47 @@ export default {
         return jsonResponse({ results, isolateCache: _calendarIsolateCache?.length || 0, isolateAge: _calendarIsolateCacheAt ? Date.now() - _calendarIsolateCacheAt : null }, {}, env);
       }
 
-      // ── CRON MONITOR: Shows last 200 cron phase execution logs ──
+      // ── CRON MONITOR: Shows last 200 cron phase execution logs from KV ──
       // This endpoint proves whether cron phases complete successfully.
       // If a phase is "started" but never "complete", the Worker was killed
       // (exceededCpu) during that phase.
       if (request.method === 'GET' && url.pathname === '/api/cron-monitor') {
-        const log = globalThis._cronMonitorLog || [];
-        // Group by tick ID to show per-tick summary
+        // Read from KV (persists across isolates)
+        let kvEntries = [];
+        try {
+          if (env.APP_CACHE?.list) {
+            const listed = await env.APP_CACHE.list({ prefix: 'cron_log_', limit: 1000 });
+            if (listed && listed.keys) {
+              const entries = await Promise.all(
+                listed.keys.map(k => env.APP_CACHE.get(k.name).catch(() => null))
+              );
+              for (const e of entries) {
+                if (e) {
+                  try { kvEntries.push(JSON.parse(e)); } catch {}
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[cron-monitor] KV list failed:', e?.message);
+        }
+
+        // Also include in-memory log (for same-isolate reads)
+        const memLog = globalThis._cronMonitorLog || [];
+
+        // Merge and deduplicate by tick+phase
+        const allEntries = [...kvEntries, ...memLog];
+        const seen = new Set();
+        const deduped = allEntries.filter(e => {
+          const key = e.tick + '_' + e.phase;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        // Group by tick ID
         const ticks = {};
-        for (const entry of log) {
+        for (const entry of deduped) {
           if (!ticks[entry.tick]) ticks[entry.tick] = [];
           ticks[entry.tick].push(entry);
         }
@@ -6494,6 +6526,11 @@ export default {
           const first = sorted[0];
           const last = sorted[sorted.length - 1];
           const phases = entries.map(e => e.phase + ':' + e.status);
+          // Check if this tick has a "start" but no "complete" for the overall phase
+          const hasStart = entries.some(e => e.phase === 'start');
+          const hasPhase1Complete = entries.some(e => e.phase === 'phase1' && e.status === 'complete');
+          const hasPhase2Complete = entries.some(e => e.phase === 'phase2' && e.status === 'complete');
+          const killed = hasStart && !hasPhase1Complete;
           return {
             tickId,
             start: first.ts,
@@ -6502,12 +6539,16 @@ export default {
             elapsed_ms: last.elapsed_ms,
             phaseCount: entries.length,
             phases,
+            killed: killed, // true if Worker was killed before phase1 completed
           };
-        });
+        }).sort((a, b) => new Date(a.start) - new Date(b.start));
+
         return jsonResponse({
           server_time: new Date().toISOString(),
-          totalLogEntries: log.length,
+          totalLogEntries: deduped.length,
           totalTicks: Object.keys(ticks).length,
+          ticksKilled: tickSummaries.filter(t => t.killed).length,
+          ticksOk: tickSummaries.filter(t => !t.killed).length,
           ticks: tickSummaries.slice(-50), // last 50 ticks
         }, {}, env);
       }
@@ -7556,14 +7597,12 @@ export default {
   async scheduled(controller, env, ctx) {
     // ═══════════════════════════════════════════════════════════════════
     // CRON MONITORING — tracks each phase's execution for exceededCpu proof
+    // Uses KV with per-phase keys (atomic writes, no read-modify-write)
     // ═══════════════════════════════════════════════════════════════════
     const _cronTickId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
     const _cronTickStart = Date.now();
     const _cronTickMinute = new Date().getUTCMinutes();
     const _cronTickExpr = controller.cron || '* * * * *';
-    // Each phase logs its completion to this array.
-    // If the Worker is killed (exceededCpu), the phase that was running
-    // will NOT have its completion logged — revealing which phase killed it.
     if (!globalThis._cronMonitorLog) globalThis._cronMonitorLog = [];
     const _logPhase = (phase, status, extra) => {
       const entry = {
@@ -7576,11 +7615,20 @@ export default {
         elapsed_ms: Date.now() - _cronTickStart,
         ...extra,
       };
+      // In-memory (fast, but per-isolate)
       globalThis._cronMonitorLog.push(entry);
-      // Keep only last 200 entries
       if (globalThis._cronMonitorLog.length > 200) {
         globalThis._cronMonitorLog = globalThis._cronMonitorLog.slice(-200);
       }
+      // KV: write each phase as a SEPARATE key (atomic, no race conditions)
+      // Key format: cron_log_{tickId}_{phase}
+      // /api/cron-monitor lists all keys with prefix "cron_log_" and aggregates
+      try {
+        if (env.APP_CACHE) {
+          const key = 'cron_log_' + _cronTickId + '_' + phase;
+          env.APP_CACHE.put(key, JSON.stringify(entry), { expirationTtl: 3600 }).catch(() => {});
+        }
+      } catch {}
     };
     _logPhase('start', 'begin');
 
