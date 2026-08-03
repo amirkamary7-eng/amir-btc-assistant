@@ -9195,6 +9195,8 @@ function closeNotifModal() {
  * if the API call succeeds. If it fails, we show an error toast.
  */
 async function markAllRead() {
+    const reqId = 'MARK_ALL_' + Date.now();
+    _logNotifEvent('MARK_ALL_READ_START', { reqId, notifCount: notifications.length });
     try {
         if (API_BASE && !UserContext.isGuest()) {
             const res = await apiFetch('/api/notifications/read-all', { method: 'POST' });
@@ -9207,14 +9209,17 @@ async function markAllRead() {
                 // Bump sequence so any in-flight poll (with stale unread data)
                 // is discarded and doesn't overwrite the "all read" state.
                 _notifReqSeq++;
+                _logNotifEvent('MARK_ALL_READ_END', { reqId, success: true, newSeq: _notifReqSeq });
             } else {
                 console.warn('markAllRead: API returned non-success', res);
+                _logNotifEvent('MARK_ALL_READ_END', { reqId, success: false, error: 'non-success' });
                 showMiniToast(t('error_generic') || 'Error');
             }
             return;
         }
     } catch (e) {
         console.warn('markAllRead API failed:', e);
+        _logNotifEvent('MARK_ALL_READ_END', { reqId, success: false, error: e?.message });
         showMiniToast(t('error_generic') || 'Error');
     }
     // Fallback for guests: update local state only
@@ -9230,6 +9235,8 @@ async function markAllRead() {
  */
 async function clearAllNotifications() {
     if(!confirm(t('confirm_clear_notif'))) return;
+    const reqId = 'DELETE_ALL_' + Date.now();
+    _logNotifEvent('DELETE_ALL_START', { reqId, notifCount: notifications.length });
     try {
         if (API_BASE && !UserContext.isGuest()) {
             const res = await apiFetch('/api/notifications', { method: 'DELETE' });
@@ -9244,14 +9251,17 @@ async function clearAllNotifications() {
                 // empty array. This is the ROOT CAUSE FIX for "notifications
                 // reappear after delete".
                 _notifReqSeq++;
+                _logNotifEvent('DELETE_ALL_END', { reqId, success: true, newSeq: _notifReqSeq, deleted: res.deleted_count });
             } else {
                 console.warn('clearAllNotifications: API returned non-success', res);
+                _logNotifEvent('DELETE_ALL_END', { reqId, success: false, error: 'non-success' });
                 showMiniToast(t('error_generic') || 'Error');
             }
             return;
         }
     } catch (e) {
         console.warn('clearAllNotifications API failed:', e);
+        _logNotifEvent('DELETE_ALL_END', { reqId, success: false, error: e?.message });
         showMiniToast(t('error_generic') || 'Error');
     }
     // Fallback for guests: clear local state only
@@ -9266,6 +9276,8 @@ async function clearAllNotifications() {
  * DELETE /api/notifications/:id to remove from DB permanently.
  */
 async function deleteNotification(id) {
+    const reqId = 'DELETE_ONE_' + Date.now();
+    _logNotifEvent('DELETE_ONE_START', { reqId, notifId: id, notifCount: notifications.length });
     try {
         if (API_BASE && !UserContext.isGuest()) {
             const res = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' });
@@ -9275,10 +9287,14 @@ async function deleteNotification(id) {
                 renderNotifications();
                 // Bump sequence so in-flight poll doesn't overwrite
                 _notifReqSeq++;
+                _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: true, newSeq: _notifReqSeq });
             }
             return;
         }
-    } catch (e) { console.warn('deleteNotification:', e); }
+    } catch (e) {
+        console.warn('deleteNotification:', e);
+        _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: false, error: e?.message });
+    }
     // Fallback for guests
     notifications = notifications.filter(n => n.id !== id);
     updateNotifBadge();
@@ -9298,10 +9314,43 @@ async function deleteNotification(id) {
 // if _notifReqSeq hasn't changed (no newer request was started). If a
 // newer request was started (e.g. after delete), the stale response is
 // silently discarded.
+//
+// EVENT LOG: _notifEventLog captures every notification-related event
+// with timestamps, sequence numbers, and notification counts. This
+// proves the race condition with real data.
 let _notifReqSeq = 0;
+const _notifEventLog = [];
+const _MAX_NOTIF_EVENTS = 200;
+
+function _logNotifEvent(type, extra) {
+    const event = {
+        ts: new Date().toISOString(),
+        ms: Date.now(),
+        type: type,
+        seq: _notifReqSeq,
+        notifCount: notifications.length,
+        ...extra,
+    };
+    _notifEventLog.push(event);
+    console.log('[NOTIF-EVENT]', type, '| seq:', event.seq, '| notifs:', event.notifCount, extra || '');
+    // Trim to prevent memory growth
+    if (_notifEventLog.length > _MAX_NOTIF_EVENTS) {
+        _notifEventLog.splice(0, _notifEventLog.length - _MAX_NOTIF_EVENTS);
+    }
+}
+
+window.getNotifEventLog = function() {
+    return JSON.parse(JSON.stringify(_notifEventLog));
+};
+window.clearNotifEventLog = function() {
+    _notifEventLog.length = 0;
+    console.log('[NOTIF-EVENT] Log cleared');
+};
 
 async function loadNotificationsFromServer() {
     const mySeq = ++_notifReqSeq;
+    const reqId = 'GET_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+    _logNotifEvent('GET_START', { reqId, mySeq });
     try {
         if (API_BASE && !UserContext.isGuest()) {
             const data = await apiFetch('/api/notifications');
@@ -9309,10 +9358,12 @@ async function loadNotificationsFromServer() {
             // user clicked delete/mark-all-read while this was in-flight),
             // discard this response — it contains stale data.
             if (mySeq !== _notifReqSeq) {
+                _logNotifEvent('GET_STALE_DROPPED', { reqId, mySeq, currentSeq: _notifReqSeq, dataNotifs: data?.notifications?.length || 0 });
                 console.log('[NOTIF] Discarding stale poll response (seq', mySeq, '!= current', _notifReqSeq, ')');
                 return;
             }
             if (data && Array.isArray(data.notifications)) {
+                const oldCount = notifications.length;
                 notifications = data.notifications.map(n => ({
                     id: n.id,
                     title: n.title || '',
@@ -9320,6 +9371,7 @@ async function loadNotificationsFromServer() {
                     read: Boolean(n.read),
                     date: n.created_at || new Date().toISOString(),
                 }));
+                _logNotifEvent('GET_APPLIED', { reqId, mySeq, oldCount, newCount: notifications.length, serverUnread: data.unread_count });
                 // Update badge with server-provided unread count
                 const badge = $('notif-badge');
                 if (badge) {
@@ -9331,9 +9383,15 @@ async function loadNotificationsFromServer() {
                 return;
             }
         }
-    } catch (e) { console.warn('loadNotificationsFromServer:', e); }
+    } catch (e) {
+        _logNotifEvent('GET_ERROR', { reqId, mySeq, error: e?.message });
+        console.warn('loadNotificationsFromServer:', e);
+    }
     // Fallback: render from in-memory array
-    if (mySeq === _notifReqSeq) renderNotifications();
+    if (mySeq === _notifReqSeq) {
+        _logNotifEvent('GET_FALLBACK', { reqId, mySeq });
+        renderNotifications();
+    }
 }
 /**
  * notifications را در رابط کاربری رندر می‌کند.
