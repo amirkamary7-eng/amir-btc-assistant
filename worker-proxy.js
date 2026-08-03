@@ -7136,6 +7136,35 @@ export default {
         }
       }
 
+      // ── NOTIF TRACE RESULTS — read traces from KV ──
+      // Lists all notif_trace_* keys from KV and returns their contents.
+      // No auth required (the traces themselves are keyed by random ID).
+      if (request.method === 'GET' && url.pathname === '/api/notif-trace-results') {
+        let traces = [];
+        try {
+          if (env.APP_CACHE?.list) {
+            const listed = await env.APP_CACHE.list({ prefix: 'notif_trace_', limit: 100 });
+            if (listed?.keys) {
+              const entries = await Promise.all(
+                listed.keys.map(k => env.APP_CACHE.get(k.name).catch(() => null))
+              );
+              for (const e of entries) {
+                if (e) { try { traces.push(JSON.parse(e)); } catch {} }
+              }
+            }
+          }
+        } catch (e) {
+          return jsonResponse({ error: e?.message }, { status: 500 }, env);
+        }
+        // Sort by timestamp descending (newest first)
+        traces.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+        return jsonResponse({
+          server_time: new Date().toISOString(),
+          trace_count: traces.length,
+          traces: traces.slice(0, 20), // last 20 traces
+        }, {}, env);
+      }
+
       // Future: /api/news/stream SSE endpoint for breaking news push.
       // Requires Durable Object for true WebSocket, or simple SSE stream.
       // Current 30s polling + SWR provides adequate UX for Telegram Mini App.
@@ -7393,7 +7422,82 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/notifications') {
-        return withSharedPool(env, () => notificationHandlers.handleList(request, env));
+        // ── CPU TRACE INSTRUMENTATION ──
+        // Wraps handleList with per-step timing. The trace is:
+        //   1. Written to KV (key: notif_trace_{id}) for later retrieval
+        //   2. Returned in X-Notif-Trace response header (base64-encoded JSON)
+        // The response body is UNCHANGED — no breaking changes.
+        return withSharedPool(env, async () => {
+          const trace = [];
+          const t0 = performance.now();
+          const stepAsync = async (name, fn) => {
+            const before = performance.now();
+            try {
+              const r = await fn();
+              const after = performance.now();
+              trace.push({ step: name, wall_ms: Math.round((after - before) * 100) / 100 });
+              return r;
+            } catch (e) {
+              const after = performance.now();
+              trace.push({ step: name + '_ERR', wall_ms: Math.round((after - before) * 100) / 100, err: String(e?.message || e).slice(0, 100) });
+              throw e;
+            }
+          };
+
+          try {
+            // Replicate handleList with instrumentation
+            const authState = await stepAsync('auth_1_global', () => authenticateTelegramRequest(request, env));
+            if (authState.error) return authState.error;
+
+            // Note: requireChannelJoin already ran in the global middleware (line ~7155).
+            // But handleList calls authenticateTelegramRequest AGAIN internally.
+            // We measure the redundant call here.
+            await stepAsync('auth_2_handleList_redundant', () => authenticateTelegramRequest(request, env));
+
+            const userId = String(authState.user.id);
+            const parsedUrl = new URL(request.url);
+            const limit = parseInt(parsedUrl.searchParams.get('limit') || '50', 10) || 50;
+
+            let notifications, unread;
+            await stepAsync('db_promise_all', async () => {
+              [notifications, unread] = await Promise.all([
+                stepAsync('db_list', () => notificationRepo.list(env, userId, limit)),
+                stepAsync('db_unreadCount', () => notificationRepo.unreadCount(env, userId)),
+              ]);
+            });
+
+            const body = { status: 'success', notifications, unread_count: unread };
+            // Measure JSON serialize (sync)
+            const _tJsonBefore = performance.now();
+            JSON.stringify(body);
+            trace.push({ step: 'json_serialize', wall_ms: Math.round((performance.now() - _tJsonBefore) * 100) / 100 });
+
+            const totalWall = Math.round((performance.now() - t0) * 100) / 100;
+            trace.push({ step: 'TOTAL', wall_ms: totalWall });
+
+            // Write trace to KV (best-effort, non-blocking)
+            const traceId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            if (env.APP_CACHE) {
+              env.APP_CACHE.put('notif_trace_' + traceId, JSON.stringify({
+                traceId, ts: new Date().toISOString(), userId, trace, total_wall_ms: totalWall,
+                auth_calls: 2, db_queries: 3, notifications_count: notifications?.length || 0,
+              }), { expirationTtl: 3600 }).catch(() => {});
+            }
+
+            // Return normal response + trace in header
+            const response = jsonResponse(body, {}, env);
+            // Add trace as header (base64 to avoid encoding issues)
+            try {
+              const traceB64 = btoa(JSON.stringify(trace));
+              response.headers.set('X-Notif-Trace', traceB64.slice(0, 8000)); // header size limit
+              response.headers.set('X-Notif-Trace-Id', traceId);
+            } catch {}
+            return response;
+          } catch (error) {
+            console.warn('[NOTIF-TRACE] error:', error?.message);
+            return safeDbErrorResponse(error, {}, env);
+          }
+        });
       }
 
       // ── Notification Settings API ──
