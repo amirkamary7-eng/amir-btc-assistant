@@ -653,6 +653,82 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // Phase 4: CRASH RECOVERY
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Phase 4: Requeue stale queue items stuck in 'processing'.
+   *
+   * When processQueue claims items (status→'processing') and the worker
+   * crashes before marking them 'processed', these items are stuck forever
+   * — processQueue only selects 'pending'. This function resets items
+   * stuck in 'processing' for more than 5 minutes back to 'pending' so
+   * they can be retried.
+   *
+   * Uses processed_at as the claim timestamp (set to NOW() when claimed).
+   * 5-minute timeout matches broadcast recovery.
+   *
+   * Called from cron every 5 minutes.
+   */
+  async function requeueStaleQueueItems(env) {
+    if (!isDatabaseConfigured(env)) return { requeued: 0 };
+    try {
+      const result = await queryDb(env, `
+        UPDATE notification_queue
+        SET status = 'pending'
+        WHERE status = 'processing'
+          AND processed_at < NOW() - INTERVAL '5 minutes'
+      `);
+      const requeued = result.rowCount || 0;
+      if (requeued > 0) {
+        console.log(`[Phase 4] Requeued ${requeued} stale queue items`);
+      }
+      return { requeued };
+    } catch (e) {
+      console.warn('[Phase 4] requeueStaleQueueItems error:', e?.message);
+      return { requeued: 0 };
+    }
+  }
+
+  /**
+   * Phase 4: Requeue stale broadcasts stuck in 'sending'.
+   *
+   * When processBroadcastFull claims a broadcast (status→'sending') and
+   * the worker crashes before marking it 'sent', the broadcast is stuck.
+   * processBroadcastBatch selects 'pending' and 'sending', but without
+   * CAS claim (Phase 5), two isolates could process it simultaneously.
+   *
+   * This function resets broadcasts stuck in 'sending' for more than 5
+   * minutes back to 'pending' so processBroadcastBatch can resume them.
+   * The checkpoint (last_processed_user_id) ensures resume from where
+   * it left off — dedupKey prevents duplicate notifications.
+   *
+   * Called from cron every 5 minutes.
+   */
+  async function requeueStaleBroadcasts(env) {
+    if (!isDatabaseConfigured(env)) return { requeued: 0 };
+    try {
+      // Reset broadcasts stuck in 'sending' for more than 5 minutes.
+      // Uses created_at as proxy for staleness (broadcasts are usually
+      // processed within minutes). Phase 8 will add claimed_at for precision.
+      const result = await queryDb(env, `
+        UPDATE notification_broadcasts
+        SET status = 'pending'
+        WHERE status = 'sending'
+          AND created_at < NOW() - INTERVAL '5 minutes'
+      `);
+      const requeued = result.rowCount || 0;
+      if (requeued > 0) {
+        console.log(`[Phase 4] Requeued ${requeued} stale broadcasts`);
+      }
+      return { requeued };
+    } catch (e) {
+      console.warn('[Phase 4] requeueStaleBroadcasts error:', e?.message);
+      return { requeued: 0 };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // MAPPERS
   // ═══════════════════════════════════════════════════════════
 
@@ -1075,5 +1151,8 @@ export function createNotificationPlatformRepository(deps) {
     createBroadcastJob,
     processBroadcastBatch,
     processBroadcastFull,
+    // Phase 4: Crash Recovery
+    requeueStaleQueueItems,
+    requeueStaleBroadcasts,
   });
 }

@@ -7995,7 +7995,29 @@ export default {
 
     const cronExpr = controller.cron || '* * * * *';
     const isEveryMinute = cronExpr === '* * * * *';
+    const isEvery5Min = cronExpr === '*/5 * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
+
+    // ── Phase 4: Crash Recovery (every 5 min) ──
+    // Requeue stale queue items and broadcasts stuck in 'processing'/'sending'
+    // for more than 5 minutes. Prevents permanent message loss on worker crash.
+    if (isEvery5Min && notificationPlatformRepo) {
+      ctx.waitUntil((async () => {
+        try {
+          const qResult = notificationPlatformRepo.requeueStaleQueueItems
+            ? await notificationPlatformRepo.requeueStaleQueueItems(env)
+            : { requeued: 0 };
+          const bResult = notificationPlatformRepo.requeueStaleBroadcasts
+            ? await notificationPlatformRepo.requeueStaleBroadcasts(env)
+            : { requeued: 0 };
+          if (qResult.requeued > 0 || bResult.requeued > 0) {
+            console.log('[CRON] Phase 4 requeue:', JSON.stringify({ queue: qResult.requeued, broadcasts: bResult.requeued }));
+          }
+        } catch (e) {
+          console.warn('[CRON] Phase 4 requeue failed:', e?.message);
+        }
+      })());
+    }
 
     // ── PHASE 1a: Alerts OR Calendar check (own ctx.waitUntil) ──
     // ROOT CAUSE FIX: Previously alerts + calendar cache refresh were in
@@ -8089,6 +8111,19 @@ export default {
     if (isEvery15Min) {
       ctx.waitUntil((async () => {
         try {
+          // Phase 4: Also run requeue on 15-min tick as fallback (in case */5 cron
+          // is not deployed due to account plan limits). 15-min is less frequent
+          // than ideal 5-min, but still prevents permanent message loss.
+          if (notificationPlatformRepo?.requeueStaleQueueItems) {
+            try { await notificationPlatformRepo.requeueStaleQueueItems(env); } catch (e) {
+              console.warn('[CRON] Phase 4 requeueStaleQueueItems (15min) failed:', e?.message);
+            }
+          }
+          if (notificationPlatformRepo?.requeueStaleBroadcasts) {
+            try { await notificationPlatformRepo.requeueStaleBroadcasts(env); } catch (e) {
+              console.warn('[CRON] Phase 4 requeueStaleBroadcasts (15min) failed:', e?.message);
+            }
+          }
           try { await retryFailedReferralRewards(env); _logPhase('phase2-referral', 'ok'); } catch (e) {
             _logPhase('phase2-referral', 'error', { error: e?.message });
             console.warn('[CRON] referral retry failed:', e?.message);
