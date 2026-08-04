@@ -178,6 +178,13 @@ export function createNotificationPlatformRepository(deps) {
         )
       `);
 
+      // ── Phase 7: Telegram delivery tracking column ──
+      // Stores the Telegram API message_id after successful send.
+      // On retry (requeueStaleQueueItems → processQueue), processQueue checks
+      // this column: if non-NULL, the message was already sent → skip send,
+      // mark as processed. This prevents duplicate in "sent but response lost" scenario.
+      await queryDb(env, `ALTER TABLE notification_queue ADD COLUMN IF NOT EXISTS telegram_message_id BIGINT`).catch(() => {});
+
       // ── Phase 3: Idempotency migration for notification_queue ──
       // UNIQUE constraint on (notification_id, user_id) ensures that duplicate
       // enqueue calls (e.g., from concurrent requests or broadcast processing)
@@ -668,6 +675,20 @@ export function createNotificationPlatformRepository(deps) {
         const payload = item.payload || {};
         const text = `${payload.title ? payload.title + '\n' : ''}${payload.message || ''}`;
         if (item.channel === 'telegram' && sendTelegramMessageFn) {
+          // Phase 7: Check if message was already sent (telegram_message_id non-NULL).
+          // This prevents duplicate in "sent but response lost" scenario:
+          // sendTelegramMessage succeeded but worker crashed before UPDATE to 'processed'.
+          // requeueStaleQueueItems (Phase 4) resets to 'pending', processQueue picks
+          // it up again — but telegram_message_id is already set → skip send, mark processed.
+          if (item.telegram_message_id) {
+            await queryDb(env,
+              `UPDATE notification_queue SET status = 'processed', processed_at = NOW() WHERE id = $1`,
+              [item.id]
+            );
+            processed++;
+            continue;
+          }
+
           // Phase 2: Build Telegram payload with rich message fields
           const tgPayload = {
             chat_id: item.user_id,
@@ -682,11 +703,23 @@ export function createNotificationPlatformRepository(deps) {
           } else {
             tgPayload.disable_web_page_preview = true;
           }
-          await sendTelegramMessageFn(env, tgPayload);
+          const tgResult = await sendTelegramMessageFn(env, tgPayload);
+
+          // Phase 7: Store telegram_message_id for exactly-once delivery on retry.
+          // sendTelegramMessage returns { ok, result, messageId } on success.
+          const tgMsgId = tgResult?.messageId || tgResult?.result?.message_id || null;
+          await queryDb(env,
+            `UPDATE notification_queue
+             SET status = 'processed', processed_at = NOW(), telegram_message_id = $2
+             WHERE id = $1`,
+            [item.id, tgMsgId]
+          );
+          processed++;
+        } else {
+          // Non-telegram channel — just mark as processed
+          await queryDb(env, `UPDATE notification_queue SET status = 'processed', processed_at = NOW() WHERE id = $1`, [item.id]);
+          processed++;
         }
-        // Success → mark as processed
-        await queryDb(env, `UPDATE notification_queue SET status = 'processed', processed_at = NOW() WHERE id = $1`, [item.id]);
-        processed++;
       } catch (e) {
         // Failure → revert to 'pending' for retry, increment attempts.
         // If max_attempts exceeded, mark as 'failed' (no more retries).
