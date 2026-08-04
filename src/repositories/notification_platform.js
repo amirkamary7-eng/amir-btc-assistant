@@ -158,6 +158,8 @@ export function createNotificationPlatformRepository(deps) {
       await queryDb(env, `ALTER TABLE notification_broadcasts ADD COLUMN IF NOT EXISTS last_processed_user_id TEXT`).catch(() => {});
       await queryDb(env, `ALTER TABLE notification_broadcasts ADD COLUMN IF NOT EXISTS batch_size INTEGER NOT NULL DEFAULT 5`).catch(() => {});
       await queryDb(env, `ALTER TABLE notification_broadcasts ADD COLUMN IF NOT EXISTS batch_delay_ms INTEGER NOT NULL DEFAULT 500`).catch(() => {});
+      // Phase 8: claimed_at for precise broadcast staleness detection
+      await queryDb(env, `ALTER TABLE notification_broadcasts ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`).catch(() => {});
 
       // Notification queue table (for batch processing + retry)
       await queryDb(env, `
@@ -184,6 +186,12 @@ export function createNotificationPlatformRepository(deps) {
       // this column: if non-NULL, the message was already sent → skip send,
       // mark as processed. This prevents duplicate in "sent but response lost" scenario.
       await queryDb(env, `ALTER TABLE notification_queue ADD COLUMN IF NOT EXISTS telegram_message_id BIGINT`).catch(() => {});
+
+      // Phase 8: claimed_at for precise queue staleness detection
+      // Set to NOW() when processQueue claims an item (status→'processing').
+      // requeueStaleQueueItems uses this (instead of processed_at) to detect
+      // stale items: WHERE status='processing' AND claimed_at < NOW() - INTERVAL '5 min'
+      await queryDb(env, `ALTER TABLE notification_queue ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`).catch(() => {});
 
       // ── Phase 3: Idempotency migration for notification_queue ──
       // UNIQUE constraint on (notification_id, user_id) ensures that duplicate
@@ -240,11 +248,11 @@ export function createNotificationPlatformRepository(deps) {
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_category ON notifications (category)`).catch(() => {});
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_priority ON notifications (priority)`).catch(() => {});
 
-      // Phase 6: Additional performance indexes
-      // Index for requeueStaleQueueItems (WHERE status='processing' AND processed_at < ...)
-      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_queue_processing ON notification_queue (processed_at) WHERE status = 'processing'`).catch(() => {});
-      // Index for requeueStaleBroadcasts (WHERE status='sending' AND created_at < ...)
-      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_broadcasts_stale ON notification_broadcasts (created_at) WHERE status = 'sending'`).catch(() => {});
+      // Phase 6/8: Performance indexes for recovery queries
+      // Index for requeueStaleQueueItems (WHERE status='processing' AND claimed_at < ...)
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_queue_processing ON notification_queue (claimed_at) WHERE status = 'processing'`).catch(() => {});
+      // Index for requeueStaleBroadcasts (WHERE status='sending' AND claimed_at < ...)
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_broadcasts_stale ON notification_broadcasts (claimed_at) WHERE status = 'sending'`).catch(() => {});
       // Index for unread count queries (user_id, read_status WHERE deleted_at IS NULL)
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_user_unread_active ON notifications (user_id) WHERE read_status = FALSE AND deleted_at IS NULL`).catch(() => {});
 
@@ -650,7 +658,7 @@ export function createNotificationPlatformRepository(deps) {
     try {
       queue = await queryDb(env, `
         UPDATE notification_queue
-        SET status = 'processing', processed_at = NOW()
+        SET status = 'processing', processed_at = NOW(), claimed_at = NOW()
         WHERE id IN (
           SELECT id FROM notification_queue
           WHERE status = 'pending' AND attempts < max_attempts
@@ -758,11 +766,14 @@ export function createNotificationPlatformRepository(deps) {
   async function requeueStaleQueueItems(env) {
     if (!isDatabaseConfigured(env)) return { requeued: 0 };
     try {
+      // Phase 8: Use claimed_at (set when processQueue claims item) instead of processed_at.
+      // claimed_at is more precise — it marks the exact moment processing started,
+      // not the last UPDATE time (processed_at was reused for both claim and complete).
       const result = await queryDb(env, `
         UPDATE notification_queue
-        SET status = 'pending'
+        SET status = 'pending', claimed_at = NULL
         WHERE status = 'processing'
-          AND processed_at < NOW() - INTERVAL '5 minutes'
+          AND claimed_at < NOW() - INTERVAL '5 minutes'
       `);
       const requeued = result.rowCount || 0;
       if (requeued > 0) {
@@ -793,14 +804,15 @@ export function createNotificationPlatformRepository(deps) {
   async function requeueStaleBroadcasts(env) {
     if (!isDatabaseConfigured(env)) return { requeued: 0 };
     try {
-      // Reset broadcasts stuck in 'sending' for more than 5 minutes.
-      // Uses created_at as proxy for staleness (broadcasts are usually
-      // processed within minutes). Phase 8 will add claimed_at for precision.
+      // Phase 8: Use claimed_at (set when processBroadcastFull CAS-claims broadcast)
+      // instead of created_at. claimed_at precisely marks when processing started.
+      // Broadcasts that have been in 'sending' for more than 5 minutes since claim
+      // are considered crashed and reset to 'pending' for resume.
       const result = await queryDb(env, `
         UPDATE notification_broadcasts
-        SET status = 'pending'
+        SET status = 'pending', claimed_at = NULL
         WHERE status = 'sending'
-          AND created_at < NOW() - INTERVAL '5 minutes'
+          AND claimed_at < NOW() - INTERVAL '5 minutes'
       `);
       const requeued = result.rowCount || 0;
       if (requeued > 0) {
@@ -1093,7 +1105,7 @@ export function createNotificationPlatformRepository(deps) {
     // → this isolate exits immediately (no wasted CPU, no duplicate processing).
     const claimResult = await queryDb(env,
       `UPDATE notification_broadcasts
-       SET status = 'sending'
+       SET status = 'sending', claimed_at = NOW()
        WHERE id = $1 AND status = 'pending'
        RETURNING id`, [broadcastId]
     );
@@ -1196,7 +1208,7 @@ export function createNotificationPlatformRepository(deps) {
     }
 
     // Mark broadcast as completed
-    await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW() WHERE id = $1`, [broadcastId]);
+    await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW(), claimed_at = NULL WHERE id = $1`, [broadcastId]);
 
     console.log(`[broadcast] Completed broadcast ${broadcastId}: processed=${totalProcessed}, delivered=${totalDelivered}, failed=${totalFailed}`);
     return { processed: totalProcessed, delivered: totalDelivered, failed: totalFailed, broadcastId, status: 'completed' };
