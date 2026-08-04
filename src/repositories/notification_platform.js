@@ -1135,18 +1135,26 @@ export function createNotificationPlatformRepository(deps) {
       let batchDelivered = 0;
       let batchFailed = 0;
 
+      // Phase 9: Batch user preference query (eliminate N+1).
+      // Instead of 25 individual SELECT queries (one per user), use a single
+      // query with IN clause to fetch all preferences at once.
+      // Falls back to 'both' (default) for users with no settings row.
+      const prefMap = new Map();
+      if (userIds.length > 0) {
+        const placeholders = userIds.map((_, i) => `$${i + 1}`).join(',');
+        const prefResult = await queryDb(env,
+          `SELECT user_id, ${channelPrefCol} AS pref FROM notification_settings WHERE user_id IN (${placeholders})`,
+          userIds
+        ).catch(() => ({ rows: [] }));
+        for (const row of prefResult.rows || []) {
+          prefMap.set(String(row.user_id), String(row.pref));
+        }
+      }
+
       for (const uid of userIds) {
         try {
-          // Check user's notification preference
-          const prefResult = await queryDb(env,
-            `SELECT ${channelPrefCol} AS pref FROM notification_settings WHERE user_id = $1`,
-            [uid]
-          ).catch(() => ({ rows: [] }));
-
-          let userChannel = 'both';
-          if (prefResult.rows[0]?.pref) {
-            userChannel = String(prefResult.rows[0].pref);
-          }
+          // Phase 9: Read from batch-fetched preference map (no N+1 query)
+          const userChannel = prefMap.get(uid) || 'both';
 
           if (userChannel === 'none') continue;
 
