@@ -398,11 +398,25 @@ export function createAnalysisHandlers(deps) {
       }
 
       // Start processing IMMEDIATELY in ctx.waitUntil (not waiting for cron)
+      // CRITICAL: Detach env._reqPool BEFORE ctx.waitUntil so processBroadcastFull
+      // creates independent per-call Pools (not the request's shared Pool which
+      // will be closed by withSharedPool's finally block after response is sent).
+      // Without this, processBroadcastFull would try to use env._reqPool after
+      // it's been closed → "Cannot perform I/O on behalf of a different request".
       if (broadcastId && ctx?.waitUntil && notificationPlatformRepo?.processBroadcastFull) {
+        const _savedPool = env._reqPool;
+        const _savedReqId = env._poolReqId;
+        env._reqPool = null;
+        env._poolReqId = null;
+
         ctx.waitUntil(
           notificationPlatformRepo.processBroadcastFull(env, sendTelegramMessage, broadcastId)
             .catch((e) => console.warn('[analysis-create] broadcast processing failed:', e?.message))
         );
+
+        // Restore the Pool for any remaining queries in this request
+        env._reqPool = _savedPool;
+        env._poolReqId = _savedReqId;
       }
 
       return jsonResponse({ status: 'success', analysis, version }, {}, env);

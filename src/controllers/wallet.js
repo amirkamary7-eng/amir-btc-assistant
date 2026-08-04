@@ -295,8 +295,9 @@ export function createWalletHandlers(deps) {
           newBalance = result.newBalance;
 
           // Dispatch notification via NotificationService
+          // Await — ensures notification completes BEFORE withSharedPool closes the DB pool.
           if (rewardGranted && notificationService) {
-            notificationService.create(env, {
+            await notificationService.create(env, {
               userId,
               category: 'wallet',
               priority: 'low',

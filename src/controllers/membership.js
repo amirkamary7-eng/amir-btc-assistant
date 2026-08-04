@@ -480,8 +480,10 @@ export function createMembershipHandlers(deps) {
               };
             }
 
-            // Fire-and-forget — do NOT let notification failure affect approve
-            notificationService.create(env, {
+            // Await — ensures notification completes BEFORE withSharedPool closes the DB pool.
+            // Fire-and-forget would cause "Cannot perform I/O on behalf of a different request"
+            // because the Promise would outlive the request's env._reqPool.
+            await notificationService.create(env, {
               userId: String(req.telegram_id),
               category: 'membership',
               priority: 'high',
