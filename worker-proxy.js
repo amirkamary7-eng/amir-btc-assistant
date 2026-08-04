@@ -7968,15 +7968,12 @@ export default {
       if (globalThis._cronMonitorLog.length > 200) {
         globalThis._cronMonitorLog = globalThis._cronMonitorLog.slice(-200);
       }
-      // KV: write each phase as a SEPARATE key (atomic, no race conditions)
-      // Key format: cron_log_{tickId}_{phase}
-      // /api/cron-monitor lists all keys with prefix "cron_log_" and aggregates
-      try {
-        if (env.APP_CACHE) {
-          const key = 'cron_log_' + _cronTickId + '_' + phase;
-          env.APP_CACHE.put(key, JSON.stringify(entry), { expirationTtl: 3600 }).catch(() => {});
-        }
-      } catch {}
+      // ROOT-CAUSE FIX: KV writes for cron monitoring are DISABLED in production.
+      // Previously: each phase wrote a separate KV key (cron_log_{tickId}_{phase})
+      // = 1,440+ writes/day, which exhausted the Free Plan 1,000 writes/day limit.
+      // Now: only in-memory log (globalThis._cronMonitorLog) is used.
+      // /api/cron-monitor reads from in-memory log (same-isolate only).
+      // This is acceptable — cron monitoring is a dev diagnostic, not critical.
     };
     _logPhase('start', 'begin');
 
@@ -7984,14 +7981,20 @@ export default {
     // ROOT-CAUSE FIX for exceededCpu on cron triggers:
     //
     // PROBLEM: The entire cron body was wrapped in ONE ctx.waitUntil().
-    // Cloudflare measures CPU time across the ENTIRE ctx.waitUntil()
-    // duration. So even though calendar logs at ~5ms CPU, the subsequent
-    // phases (retryFailedReferralRewards, processNewsAIBatch with 42
-    // env.AI.run() calls, etc.) pushed total CPU to 200-600ms → exceededCpu.
+    // Cloudflare measures CPU time across the ENTIRE invocation (the
+    // scheduled() function call), including ALL ctx.waitUntil() promises.
+    // So splitting phases into separate ctx.waitUntil() calls does NOT
+    // give each phase its own 10ms CPU budget — the CPU limit applies
+    // to the entire invocation.
     //
-    // FIX: Split each phase into its OWN ctx.waitUntil() call. Cloudflare
-    // measures CPU PER ctx.waitUntil() promise, not across all of them.
-    // Each phase now has its own 10ms CPU budget.
+    // FIX (Phase 1): Reduced cron frequency from * * * * * (1,440 ticks/day)
+    // to */5 * * * * (288 ticks/day) — 80% reduction in CPU pressure.
+    // Each phase is still in its own ctx.waitUntil() for isolation (errors
+    // in one phase don't crash others), but this does NOT reduce CPU usage.
+    //
+    // NOTE: The previous comment claimed "CPU is measured PER ctx.waitUntil()
+    // promise" — this was INCORRECT. Cloudflare measures CPU across the
+    // entire invocation, including all ctx.waitUntil() promises.
     //
     // PHASE LAYOUT (15-min cron):
     //   Phase 1: alerts + calendar (time-sensitive, ~5ms CPU)
