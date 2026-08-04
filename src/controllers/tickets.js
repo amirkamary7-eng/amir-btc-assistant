@@ -59,16 +59,22 @@ export function createTicketHandlers(deps) {
     try {
       const ticket = await ticketRepo.create(env, authState.user, payload);
 
-      // Notify all admins via Telegram (Task 2.13 + 3.2)
+      // Phase 2: Notify all admins via NotificationService (single entry point)
+      // All Telegram delivery goes through the queue — no direct sendTelegramMessage.
       try {
-        for (const adminStr of getAdminIds(env)) {
-          const adminId = Number(adminStr);
-          if (Number.isFinite(adminId)) {
-            await sendTelegramMessage(env, {
-              chat_id: adminId,
-              text: `🎫 تیکت جدید\nاز: ${ticket.user_name || ''} (${ticket.user_id})\nعنوان: ${ticket.title}\n\n${ticket.body}`,
-              disable_web_page_preview: true,
-            });
+        for (const adminId of getAdminIds(env)) {
+          if (notificationService) {
+            await notificationService.create(env, {
+              userId: String(adminId),
+              category: 'tickets',
+              priority: 'high',
+              channel: 'telegram',
+              forceChannel: true, // admin notifications always delivered
+              title: `🎫 تیکت جدید`,
+              message: `از: ${ticket.user_name || ''} (${ticket.user_id})\nعنوان: ${ticket.title}\n\n${ticket.body}`,
+              metadata: { ticket_id: String(ticket.id), title: ticket.title, kind: 'admin_new_ticket' },
+              dedupKey: `ticket_admin_${ticket.id}_${adminId}`,
+            }).catch(() => {});
           }
         }
       } catch (notifyErr) {

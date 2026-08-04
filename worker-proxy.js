@@ -1676,19 +1676,16 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
     } catch { /* notification failure should not break reward */ }
   }
 
-  // ── NEW: Direct Telegram message to inviter with reward details + buttons ──
-  // This is SEPARATE from the notification platform — it's a rich Telegram
-  // message with inline keyboard buttons, sent ONLY when the reward is
-  // actually credited (result.idempotent === false).
-  // The notification platform handles in-app + simple Telegram alerts;
-  // this message provides the premium UX the product requires:
-  //   🎉 تبریک! 👤 کاربر جدید... 🎁 +3 Token 💎 موجودی: XX
-  //   [👥 مشاهده رفرال‌ها] [🔗 لینک دعوت من]
-  if (result && !result.idempotent) {
+  // ── Phase 2: Rich Telegram message to inviter with reward details + buttons ──
+  // This is a premium UX message with inline keyboard buttons.
+  // Per Phase 2: all Telegram delivery goes through NotificationService → queue.
+  // The service supports telegramExtra (reply_markup, parse_mode) for rich messages.
+  // skipInApp:true because this is a rich Telegram message (the in-app notification
+  // was already created by the dispatch above).
+  if (notificationService && result && !result.idempotent) {
     try {
       const newBalance = result.newBalance || 0;
       const botUsername = String(env.BOT_USERNAME || '');
-      // Build the web_app URL for the referral center button
       const webAppUrl = resolveWebAppUrl(env);
       const referralCenterUrl = webAppUrl ? `${webAppUrl}?startapp=referral_center` : null;
       const myReferralLink = botUsername ? `https://t.me/${botUsername}?start=ref_${inviterId}` : null;
@@ -1715,16 +1712,27 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
         }]);
       }
 
-      await sendTelegramMessage(env, {
-        chat_id: String(inviterId),
-        text: messageText,
-        parse_mode: 'HTML',
-        reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined,
+      await notificationService.create(env, {
+        userId: String(inviterId),
+        category: 'referral',
+        priority: 'high',
+        channel: 'telegram',
+        forceChannel: true,
+        skipInApp: true,
+        title: '🎉 تبریک!',
+        message: messageText,
+        metadata: { kind: 'referral_rich_message', invitee_id: String(inviteeId), amount: String(amount), new_balance: String(newBalance) },
+        dedupKey: `referral_rich_${referralId}`,
+        telegramExtra: {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined,
+        },
       });
-      await diagLog(env, { scope: 'diag-referral-reward-message-SENT', inviterId, inviteeId, amount, newBalance });
+      await diagLog(env, { scope: 'diag-referral-reward-message-ENQUEUED', inviterId, inviteeId, amount, newBalance });
     } catch (msgErr) {
-      // Non-fatal — the reward was credited, just the message failed
-      console.warn('[REFERRAL] Reward message send failed (non-fatal):', msgErr?.message);
+      // Non-fatal — the reward was credited, just the message failed to enqueue
+      console.warn('[REFERRAL] Reward message enqueue failed (non-fatal):', msgErr?.message);
       await diagLog(env, { scope: 'diag-referral-reward-message-FAILED', error: msgErr?.message });
     }
   }
@@ -4477,6 +4485,8 @@ const membershipHandlers = createMembershipHandlers({
   membershipRepo,
   queryDbTransaction,
   notificationRepo,
+  notificationPlatformRepo,
+  notificationService,
   sendTelegramMessage,
   resolveWebAppUrl,
 });
@@ -6147,129 +6157,57 @@ async function runScheduledAlertsBaseline(controller, env) {
         const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
         const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
 
-        // ── (a) In-app notification — DIRECT INSERT (not dispatch) ──
-        // ROOT CAUSE FIX for DUPLICATE TELEGRAM messages (Bug 3):
-        // Previously, dispatch() was called with channel='mini_app'. BUT dispatch()
-        // OVERRIDES the channel parameter with the user's per-category preference
-        // (getUserChannelPreference). If user pref = 'both' (the default), then:
-        //   - effectiveChannel = 'both'
-        //   - deliverToTelegram = true → enqueue TG message in notification_queue
-        //   - AND the alert code below direct-sends via sendTelegramMessage
-        //   → user gets 2 TG messages (1 from queue, 1 direct)
+        // ── Phase 2: Unified delivery via NotificationService.create() ──
+        // Per Phase 2: ALL Telegram delivery goes through the queue.
+        // No direct sendTelegramMessage — the queue processor (cron) is the
+        // single authorized sender and handles retry via max_attempts.
         //
-        // FIX: Replace dispatch() with a DIRECT INSERT into the notifications table.
-        // This gives us full control: in-app INSERT only, NO Telegram enqueue.
-        // Telegram is handled solely by the direct send below.
-        if (deliverToMiniApp && isDatabaseConfigured(env)) {
-          try {
-            const tDispatchStart = Date.now();
-            // UNIFIED: Use NotificationService.create() for in-app notification.
-            // This respects user settings and is idempotent.
-            if (notificationService) {
-              await notificationService.create(env, {
-                userId: String(userId),
-                title: `🔔 هشدار قیمت ${symbol}`,
-                message: text,
-                category: 'price_alert',
-                priority: 'high',
-                channel: 'mini_app',
-                metadata: {
-                  symbol,
-                  price: String(currentPrice),
-                  alert_id: alertId,
-                  target_price: String(targetPrice),
-                  direction,
-                  trigger_reason: triggerReason,
-                },
-              });
-            }
-            inAppDelivered = true;
-            timing.dispatch_ms = Date.now() - tDispatchStart;
-          } catch (notifErr) {
-            console.warn('In-app notification dispatch failed for price alert:', notifErr?.message || notifErr);
-            resultPayload.dispatch_errors.push({
-              alert_id: alertId,
-              error: notifErr?.message || String(notifErr),
-              stack: notifErr?.stack?.slice(0, 200),
-            });
-          }
+        // Rich message (web_app button) is passed via telegramExtra.
+        const alertTitle = `🔔 هشدار قیمت ${symbol}`;
+        const telegramExtra = {
+          disable_web_page_preview: true,
+        };
+        if (webAppUrl) {
+          telegramExtra.reply_markup = {
+            inline_keyboard: [[{ text: 'Open Amir BTC Assistant 🚀', web_app: { url: webAppUrl } }]],
+          };
         }
 
-        // ── (b) Direct Telegram send (immediate, with retry) ──
-        // ROOT CAUSE FIX for LOST notifications:
-        // Previously: if sendTelegramMessage failed, the alert was already marked
-        // as 'triggered' → user never got notified. No retry.
-        //
-        // FIX: Try twice with a 1s delay between attempts. If both fail, enqueue
-        // in notification_queue as fallback (queue retries on next cron tick).
-        let telegramMessageId = null;
-        let telegramError = null;
-        if (deliverToTelegram) {
-          const tTgStart = Date.now();
-          try {
-            const chatIdValue = Number(userId);
-            const chatId = Number.isFinite(chatIdValue) ? chatIdValue : userId;
-            const tgPayload = { chat_id: chatId, text, disable_web_page_preview: true };
-            if (webAppUrl) {
-              tgPayload.reply_markup = {
-                inline_keyboard: [[{ text: 'Open Amir BTC Assistant 🚀', web_app: { url: webAppUrl } }]],
-              };
+        try {
+          const tDispatchStart = Date.now();
+          if (notificationService) {
+            const result = await notificationService.create(env, {
+              userId: String(userId),
+              title: alertTitle,
+              message: text,
+              category: 'price_alert',
+              priority: 'high',
+              channel: userChannel, // honor the preference we already resolved
+              forceChannel: true,   // we already checked — don't re-query
+              metadata: {
+                symbol,
+                price: String(currentPrice),
+                alert_id: alertId,
+                target_price: String(targetPrice),
+                direction,
+                trigger_reason: triggerReason,
+              },
+              dedupKey: `price_alert_${alertId}_${userId}`,
+              telegramExtra,
+            });
+            if (result.status === 'delivered') {
+              inAppDelivered = deliverToMiniApp;
+              telegramDelivered = deliverToTelegram;
             }
-
-            // Attempt 1
-            let tgResult = await sendTelegramMessage(env, tgPayload);
-            telegramMessageId = tgResult?.messageId || tgResult?.result?.message_id || null;
-
-            // Attempt 2 (retry if first failed) — NO setTimeout delay.
-            // Previously used `await new Promise(r => setTimeout(r, 1000))` which
-            // could resolve after the cron context ended → cross-request I/O error.
-            // Now: retry immediately. If both fail, enqueue in notification_queue
-            // for the next cron tick to retry.
-            if (!telegramMessageId) {
-              try {
-                tgResult = await sendTelegramMessage(env, tgPayload);
-                telegramMessageId = tgResult?.messageId || tgResult?.result?.message_id || null;
-              } catch (retryErr) {
-                telegramError = retryErr?.message || String(retryErr);
-              }
-            }
-
-            telegramDelivered = !!telegramMessageId;
-            timing.telegram_ms = Date.now() - tTgStart;
-
-            // Fallback: if both direct send attempts failed, enqueue in queue
-            // so the next cron tick can retry. This prevents lost notifications.
-            if (!telegramDelivered && notificationPlatformRepo) {
-              try {
-                // ROOT CAUSE FIX: payload must include title+message fields
-                // because processQueue (notification_platform.js:673-680)
-                // reconstructs the Telegram text as `${payload.title}\n${payload.message}`.
-                // The old payload shape ({chat_id, text, reply_markup}) caused
-                // processQueue to send an EMPTY message on retry.
-                const alertTitle = title || 'Price Alert';
-                await queryDb(env, `
-                  INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload, created_at)
-                  VALUES ($1, $2, 'telegram', 'high', 'pending', $3, NOW())
-                `, [
-                  `alert_${alertId}_${Date.now()}`,
-                  String(userId),
-                  JSON.stringify({
-                    chat_id: chatId,
-                    title: alertTitle,
-                    message: text,
-                    reply_markup: tgPayload.reply_markup || null,
-                  }),
-                ]);
-                console.warn('Telegram direct send failed twice — enqueued as fallback for queue retry');
-              } catch (qErr) {
-                console.warn('Fallback enqueue also failed:', qErr?.message);
-              }
-            }
-          } catch (tgErr) {
-            telegramError = tgErr?.message || String(tgErr);
-            timing.telegram_ms = Date.now() - tTgStart;
-            console.warn('Direct Telegram send failed for price alert:', telegramError);
           }
+          timing.dispatch_ms = Date.now() - tDispatchStart;
+        } catch (notifErr) {
+          console.warn('NotificationService.create failed for price alert:', notifErr?.message || notifErr);
+          resultPayload.dispatch_errors.push({
+            alert_id: alertId,
+            error: notifErr?.message || String(notifErr),
+            stack: notifErr?.stack?.slice(0, 200),
+          });
         }
 
         if (!inAppDelivered && !telegramDelivered) {

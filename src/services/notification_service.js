@@ -42,6 +42,10 @@ export function createNotificationService(deps) {
    *   @param {object} [opts.metadata]     - Arbitrary JSON metadata
    *   @param {string} [opts.icon]         - Icon name
    *   @param {string} [opts.actionUrl]    - Deep-link/action URL
+   *   @param {object} [opts.telegramExtra] - Rich Telegram fields: { reply_markup, parse_mode, disable_web_page_preview }
+   *   @param {boolean} [opts.skipInApp]    - If true, only enqueue Telegram (no in-app INSERT)
+   *   @param {string} [opts.dedupKey]      - If provided, notification id is deterministic (idempotent)
+   *   @param {boolean} [opts.forceChannel] - If true, ignore user preference (admin/system critical only)
    * @returns {Promise<{id: string|null, status: string}>}
    *   status: 'delivered' | 'filtered' | 'skipped' | 'error'
    */

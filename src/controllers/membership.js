@@ -23,6 +23,8 @@ export function createMembershipHandlers(deps) {
     membershipRepo,
     queryDbTransaction,
     notificationRepo,
+    notificationPlatformRepo,
+    notificationService,
     sendTelegramMessage,
     resolveWebAppUrl,
   } = deps;
@@ -430,24 +432,12 @@ export function createMembershipHandlers(deps) {
           ],
         });
 
-        // ── Phase 4: Premium welcome notification (only on approve) ──
-        // Insert a one-time in-app notification into the notifications table.
-        // Uses a deterministic ID (notif_premium_<tgId>) so that ON CONFLICT DO NOTHING
-        // prevents duplicates even if approve is called multiple times.
+        // ── Phase 2: Premium welcome notification (only on approve) ──
+        // Phase 2: Direct INSERT removed — moved OUT of transaction.
+        // After commit, NotificationService.create() handles both in-app
+        // notification AND Telegram delivery (with rich message support).
+        // welcome_shown reset stays in transaction (membership state).
         if (action === 'approve') {
-          txQueries.push({
-            sql: `INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status, created_at)
-                  VALUES ($1, $2, 'membership', $3, $4, $5, FALSE, 'high', 'membership', 'mini_app', 'delivered', NOW())
-                  ON CONFLICT (id) DO NOTHING`,
-            params: [
-              `notif_premium_${req.telegram_id}`,
-              req.telegram_id,
-              '🎉 عضویت Premium فعال شد',
-              'تبریک! عضویت ویژه شما با موفقیت فعال شد. تمام امکانات اختصاصی اکنون در دسترس شماست. Mini App را باز کنید و از تجربه Premium لذت ببرید.',
-              JSON.stringify({ level: newLevel || 'VIP', approvedAt: now, source: 'exchange' }),
-            ],
-          });
-          // Also reset welcome_shown so the popup shows on next visit
           txQueries.push({
             sql: `UPDATE membership_users SET welcome_shown = FALSE WHERE telegram_id = $1`,
             params: [req.telegram_id],
@@ -457,13 +447,16 @@ export function createMembershipHandlers(deps) {
         await deps.queryDbTransaction(env, txQueries);
         await invalidateCaches(env, req.telegram_id);
 
-        // ── Phase 4: Send Telegram bot message (fire-and-forget) ──
-        // If sending fails, the approve must NOT fail — just log the error.
-        if (action === 'approve' && typeof sendTelegramMessage === 'function') {
+        // Phase 2: Send premium welcome notification via NotificationService
+        // (single entry point). Handles in-app INSERT + Telegram enqueue with
+        // rich message (inline keyboard). No direct sendTelegramMessage.
+        // dedupKey ensures idempotency: re-approving won't duplicate.
+        if (action === 'approve' && notificationService) {
           try {
             const webAppUrl = typeof resolveWebAppUrl === 'function' ? resolveWebAppUrl(env) : '';
             const levelLabel = { VIP: 'VIP', PREMIUM: 'Premium', ELITE: 'Elite' }[newLevel || 'VIP'] || 'VIP';
-            const msgText = [
+            const inAppMessage = 'تبریک! عضویت ویژه شما با موفقیت فعال شد. تمام امکانات اختصاصی اکنون در دسترس شماست. Mini App را باز کنید و از تجربه Premium لذت ببرید.';
+            const telegramMessage = [
               `🎉 تبریک! عضویت ${levelLabel} شما فعال شد.`,
               ``,
               `✨ مزایای عضویت ویژه شما:`,
@@ -474,22 +467,36 @@ export function createMembershipHandlers(deps) {
               ``,
               `🚀 برای استفاده از تمام امکانات، Mini App را باز کنید:`,
             ].join('\n');
-            const tgPayload = {
-              chat_id: req.telegram_id,
-              text: msgText,
+
+            const telegramExtra = {
               parse_mode: 'HTML',
-              reply_markup: webAppUrl ? {
+              disable_web_page_preview: true,
+            };
+            if (webAppUrl) {
+              telegramExtra.reply_markup = {
                 inline_keyboard: [[
                   { text: '📱 باز کردن Mini App', web_app: { url: webAppUrl } },
                 ]],
-              } : undefined,
-            };
-            // Fire-and-forget — do NOT await, do NOT let failure affect approve
-            sendTelegramMessage(env, tgPayload, { retries: 1, timeoutMs: 5000 }).catch((tgErr) => {
-              console.warn('[membership] Telegram message failed for premium approval:', tgErr?.message || tgErr);
+              };
+            }
+
+            // Fire-and-forget — do NOT let notification failure affect approve
+            notificationService.create(env, {
+              userId: String(req.telegram_id),
+              category: 'membership',
+              priority: 'high',
+              channel: 'both',
+              forceChannel: true, // premium welcome is always delivered
+              title: '🎉 عضویت Premium فعال شد',
+              message: inAppMessage,
+              metadata: { level: newLevel || 'VIP', approvedAt: now, source: 'exchange' },
+              dedupKey: `premium_${req.telegram_id}`,
+              telegramExtra,
+            }).catch((tgErr) => {
+              console.warn('[membership] Notification enqueue failed for premium approval:', tgErr?.message || tgErr);
             });
           } catch (tgErr) {
-            console.warn('[membership] Telegram message setup failed:', tgErr?.message || tgErr);
+            console.warn('[membership] Notification setup failed:', tgErr?.message || tgErr);
           }
         }
 

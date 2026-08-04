@@ -535,29 +535,21 @@ export function createAdminHandlers(deps) {
       await adminRepo.insertTicketReply(env, ticketId, String(authedAdmin.telegram_id), message);
       await adminRepo.updateTicketStatus(env, ticketId, 'answered');
 
-      // Notify ticket owner
+      // Phase 2: Notify ticket owner via NotificationService (single entry point)
+      // No fallback — service is always available (wired in worker-proxy.js DI)
       try {
         const ownerId = String(ticketInfo.user_id);
-        const ownerIdNum = Number(ownerId);
-        // Send ticket reply notification via NotificationService (single entry point)
         if (notificationService) {
           await notificationService.create(env, {
             userId: ownerId,
-            // FIX: was 'system' → now 'tickets' to match UI toggle ch_tickets
             category: 'tickets',
             priority: 'medium',
             channel: 'both',
             title: `💬 پاسخ تیکت: ${ticketInfo.title || ''}`,
             message,
             metadata: { ticket_id: String(ticketId), title: ticketInfo.title || '' },
+            dedupKey: `admin_reply_${ticketId}_${Date.now()}`,
           }).catch(() => {});
-        } else if (Number.isFinite(ownerIdNum)) {
-          // Fallback: no notificationService, just send Telegram
-          await sendTelegramMessage(env, {
-            chat_id: ownerIdNum,
-            text: `💬 پاسخ تیکت: ${ticketInfo.title || ''}\n\n${message}`,
-            disable_web_page_preview: true,
-          });
         }
       } catch (notifyErr) {
         console.warn(safeError('admin-ticket-reply-notify', notifyErr));
@@ -678,11 +670,12 @@ export function createAdminHandlers(deps) {
       let sentCount = 0;
       let failedCount = 0;
 
-      // Send via NotificationService (single entry point — handles settings, queue, telegram)
+      // Phase 2: Send via NotificationService (single entry point — handles settings, queue, telegram)
+      // No fallback — service is always available (wired in worker-proxy.js DI)
       for (const userId of targetUsers) {
         try {
           if (notificationService) {
-            await notificationService.create(env, {
+            const result = await notificationService.create(env, {
               userId: String(userId),
               category: 'announcement',
               priority: 'high',
@@ -690,17 +683,13 @@ export function createAdminHandlers(deps) {
               title: '📢 اطلاعیه مدیریت',
               message: content,
               metadata: { broadcast_id: String(broadcast.id), target_type },
+              dedupKey: `admin_broadcast_${broadcast.id}_${userId}`,
             });
-            sentCount++;
+            if (result.status === 'delivered') sentCount++;
+            else if (result.status === 'filtered') { /* user opted out — not a failure */ }
+            else failedCount++;
           } else {
-            // Fallback: direct Telegram if service unavailable
-            const chatId = Number(userId);
-            if (Number.isFinite(chatId)) {
-              await sendTelegramMessage(env, { chat_id: chatId, text: content, disable_web_page_preview: true });
-              sentCount++;
-            } else {
-              failedCount++;
-            }
+            failedCount++;
           }
         } catch (sendErr) {
           failedCount++;

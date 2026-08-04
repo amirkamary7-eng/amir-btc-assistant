@@ -548,11 +548,23 @@ export function createNotificationPlatformRepository(deps) {
         const payload = item.payload || {};
         const text = `${payload.title ? payload.title + '\n' : ''}${payload.message || ''}`;
         if (item.channel === 'telegram' && sendTelegramMessageFn) {
-          await sendTelegramMessageFn(env, {
+          // Phase 2: Build Telegram payload with rich message fields
+          // (reply_markup, parse_mode, disable_web_page_preview) from
+          // telegramExtra stored in the queue payload by sendNotification().
+          const tgPayload = {
             chat_id: item.user_id,
             text,
-            disable_web_page_preview: true,
-          });
+          };
+          const tx = payload.telegramExtra;
+          if (tx && typeof tx === 'object') {
+            if (tx.reply_markup) tgPayload.reply_markup = tx.reply_markup;
+            if (tx.parse_mode) tgPayload.parse_mode = tx.parse_mode;
+            if (tx.disable_web_page_preview !== undefined) tgPayload.disable_web_page_preview = tx.disable_web_page_preview;
+            else tgPayload.disable_web_page_preview = true;
+          } else {
+            tgPayload.disable_web_page_preview = true;
+          }
+          await sendTelegramMessageFn(env, tgPayload);
         }
         await queryDb(env, `UPDATE notification_queue SET status = 'processed', processed_at = NOW() WHERE id = $1`, [item.id]);
         processed++;
@@ -700,6 +712,10 @@ export function createNotificationPlatformRepository(deps) {
       userId, templateKey, category, title, message,
       priority = 'medium', channel = 'both',
       metadata = {},
+      telegramExtra,    // Phase 2: rich message fields (reply_markup, parse_mode, disable_web_page_preview)
+      skipInApp = false, // Phase 2: skip in-app INSERT (for rich Telegram-only messages)
+      dedupKey,          // Phase 2: deterministic notification ID (for idempotency)
+      forceChannel = false, // Phase 2: ignore user preference (admin/system critical)
     } = opts;
 
     if (!userId) return { id: null, status: 'error', error: 'userId required' };
@@ -728,23 +744,27 @@ export function createNotificationPlatformRepository(deps) {
       }
     }
 
-    // Check user's notification preference
-    const channelPrefCol = _getChannelColumn(finalCategory);
-    const prefResult = await queryDb(env,
-      `SELECT ${channelPrefCol} AS pref FROM notification_settings WHERE user_id = $1`,
-      [String(userId)]
-    ).catch(() => ({ rows: [] }));
-
+    // Check user's notification preference (unless forceChannel)
     let userChannel = finalChannel;
-    if (prefResult.rows[0]?.pref) {
-      userChannel = String(prefResult.rows[0].pref);
+    if (!forceChannel) {
+      const channelPrefCol = _getChannelColumn(finalCategory);
+      const prefResult = await queryDb(env,
+        `SELECT ${channelPrefCol} AS pref FROM notification_settings WHERE user_id = $1`,
+        [String(userId)]
+      ).catch(() => ({ rows: [] }));
+      if (prefResult.rows[0]?.pref) {
+        userChannel = String(prefResult.rows[0].pref);
+      }
+      if (userChannel === 'none') return { id: null, status: 'filtered' };
     }
-    if (userChannel === 'none') return { id: null, status: 'filtered' };
 
-    const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
+    const deliverToMiniApp = (userChannel === 'mini_app' || userChannel === 'both') && !skipInApp;
     const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
 
-    const notificationId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    // Phase 2: deterministic notification ID if dedupKey provided
+    const notificationId = dedupKey
+      ? `notif_${String(dedupKey).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)}`
+      : `notif_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 
     // Insert in-app notification (idempotent)
     if (deliverToMiniApp) {
@@ -764,18 +784,16 @@ export function createNotificationPlatformRepository(deps) {
       }
     }
 
-    // Send Telegram message (with 429 retry)
-    if (deliverToTelegram && typeof sendTelegramMessage === 'function') {
-      // sendTelegramMessage is NOT in scope here — it's passed to processBroadcastFull
-      // For single-user notifications, we can't use sendTelegramMessage directly
-      // because it's not injected into notificationPlatformRepo deps.
-      // Instead, we enqueue to notification_queue for cron to send.
+    // Phase 2: Enqueue Telegram delivery with rich message support.
+    // ALL Telegram sends go through the queue — processQueue is the single
+    // authorized caller of sendTelegramMessage.
+    if (deliverToTelegram) {
       await enqueue(env, {
-        notificationId: deliverToMiniApp ? notificationId : null,
+        notificationId: notificationId, // Phase 2: always non-null (for future idempotency)
         userId: String(userId),
         channel: 'telegram',
         priority: finalPriority,
-        payload: { title: finalTitle, message: finalMessage },
+        payload: { title: finalTitle, message: finalMessage, telegramExtra },
       });
     }
 
@@ -821,12 +839,9 @@ export function createNotificationPlatformRepository(deps) {
   async function processBroadcastFull(env, sendTelegramMessageFn, broadcastId) {
     if (!isDatabaseConfigured(env)) return { processed: 0 };
     const BATCH_SIZE = 25;
-    const USER_DELAY_MS = 80;
-    const MAX_429_RETRIES = 3;
     let totalDelivered = 0;
     let totalFailed = 0;
     let totalProcessed = 0;
-    let hit429 = false;
 
     // Get broadcast details
     const broadcastResult = await queryDb(env, `SELECT * FROM notification_broadcasts WHERE id = $1`, [broadcastId]);
@@ -839,11 +854,10 @@ export function createNotificationPlatformRepository(deps) {
     await queryDb(env, `UPDATE notification_broadcasts SET status = 'sending' WHERE id = $1 AND status = 'pending'`, [broadcastId]);
 
     let checkpoint = broadcast.last_processed_user_id || null;
-    let batchNum = 0;
 
-    // Process in batches until all users done or 429
-    while (!hit429) {
-      batchNum++;
+    // Process in batches until all users done
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
       // Get next batch of users (after checkpoint)
       const userResult = await queryDb(env, `
         SELECT telegram_id FROM users
@@ -877,7 +891,7 @@ export function createNotificationPlatformRepository(deps) {
           const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
           const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
 
-          // Insert in-app notification
+          // Phase 2: Insert in-app notification (idempotent via deterministic ID)
           if (deliverToMiniApp) {
             const notifId = `bc_${broadcastId}_${uid}`;
             await queryDb(env, `
@@ -892,57 +906,27 @@ export function createNotificationPlatformRepository(deps) {
             ]).catch(() => {});
           }
 
-          // Send Telegram message (with retry on 429)
-          if (deliverToTelegram && sendTelegramMessageFn) {
-            let tgRetries = 0;
-            while (tgRetries < MAX_429_RETRIES) {
-              try {
-                await sendTelegramMessageFn(env, {
-                  chat_id: uid,
-                  text: `${broadcast.title}\n\n${broadcast.message}`,
-                  disable_web_page_preview: true,
-                });
-                break; // success
-              } catch (tgErr) {
-                const errMsg = String(tgErr?.message || '');
-                if (errMsg.includes('429') && tgRetries < MAX_429_RETRIES - 1) {
-                  // 429 rate limit — wait 2s then retry this user
-                  await new Promise(r => setTimeout(r, 2000));
-                  tgRetries++;
-                  continue;
-                }
-                // Non-429 error or max retries — log and continue to next user
-                if (!errMsg.includes('403') && !errMsg.includes('chat not found')) {
-                  console.warn(`[broadcast] TG failed for ${uid}: ${errMsg.slice(0, 80)}`);
-                }
-                batchFailed++;
-                break;
-              }
-            }
+          // Phase 2: Enqueue Telegram delivery (NO direct sendTelegramMessage)
+          // The queue processor (processQueue, cron) is the single authorized
+          // Telegram sender. It handles retry via max_attempts.
+          if (deliverToTelegram) {
+            const notifId = `bc_${broadcastId}_${uid}`;
+            await enqueue(env, {
+              notificationId: notifId,
+              userId: uid,
+              channel: 'telegram',
+              priority: broadcast.priority || 'medium',
+              payload: {
+                title: broadcast.title,
+                message: broadcast.message,
+              },
+            });
           }
 
           batchDelivered++;
         } catch (e) {
           console.warn(`[broadcast] User ${uid} failed: ${e?.message || e}`);
           batchFailed++;
-        }
-
-        // Delay between users to respect Telegram rate limit
-        if (USER_DELAY_MS > 0) {
-          await new Promise(r => setTimeout(r, USER_DELAY_MS));
-        }
-
-        // Check if we've been running too long (30s wall time limit for waitUntil)
-        // If so, save checkpoint and let cron resume
-        if (totalProcessed > 0 && totalProcessed % 50 === 0) {
-          // Save checkpoint every 50 users
-          await queryDb(env, `
-            UPDATE notification_broadcasts
-            SET total_sent = total_sent + $2,
-                total_delivered = total_delivered + $3,
-                last_processed_user_id = $4
-            WHERE id = $1
-          `, [broadcastId, userIds.length, batchDelivered, uid]);
         }
       }
 
@@ -959,11 +943,6 @@ export function createNotificationPlatformRepository(deps) {
             last_processed_user_id = $4
         WHERE id = $1
       `, [broadcastId, userIds.length, batchDelivered, checkpoint]);
-
-      // Check if 429 was hit during this batch
-      // (detected by checking if we broke out of the inner loop early)
-      // We don't break on 429 anymore — we retry per-user. Only stop if
-      // the batch took unreasonably long (e.g. > 25s wall time).
     }
 
     // Mark broadcast as completed
