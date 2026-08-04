@@ -6243,15 +6243,25 @@ async function runScheduledAlertsBaseline(controller, env) {
     // This reduces DB calls from 500+ to 1, cutting CPU by ~99%.
     if (_pendingUpdates.length > 0) {
       try {
-        // Build bulk UPDATE using CASE WHEN
+        // ROOT-CAUSE FIX: Use parameterized query instead of string interpolation.
+        // Previously: `WHEN ${Number(alertId)}` — but price_alerts.id is VARCHAR(64),
+        // so Number(non-numeric-string) = NaN → SQL "WHEN NaN THEN..." →
+        // PostgreSQL error: "column nan does not exist".
+        // Now: use $N placeholders for both id and price values.
+        // Note: $priceIdx::numeric cast is required because last_price is NUMERIC
+        // and pg sends JS numbers as float8 which doesn't auto-cast to numeric.
         const caseParts = [];
-        const idList = [];
+        const params = [];
+        const idPlaceholders = [];
         for (const { alertId, currentPrice } of _pendingUpdates) {
-          caseParts.push(`WHEN ${Number(alertId)} THEN ${Number(currentPrice)}`);
-          idList.push(Number(alertId));
+          const idIdx = params.length + 1;
+          const priceIdx = params.length + 2;
+          caseParts.push(`WHEN $${idIdx} THEN $${priceIdx}::numeric`);
+          params.push(String(alertId), Number(currentPrice));
+          idPlaceholders.push(`$${idIdx}`);
         }
-        const bulkSql = `UPDATE price_alerts SET last_price = CASE id ${caseParts.join(' ')} END, last_checked_at = NOW() WHERE id IN (${idList.join(',')})`;
-        await queryDb(env, bulkSql);
+        const bulkSql = `UPDATE price_alerts SET last_price = CASE id ${caseParts.join(' ')} END, last_checked_at = NOW() WHERE id IN (${idPlaceholders.join(',')})`;
+        await queryDb(env, bulkSql, params);
       } catch (bulkErr) {
         console.warn('[ALERTS] Bulk UPDATE failed:', bulkErr?.message);
       }
@@ -8042,6 +8052,24 @@ export default {
             }
           }
         }
+        // ROOT-CAUSE FIX: Also run alerts+calendar on 5-min cron (previously only
+        // on 1-min cron). Since 1-min cron was removed to reduce exceededCpu,
+        // 5-min cron now handles the alternating alerts/calendar pattern.
+        if (isEvery5Min) {
+          const minute = new Date().getUTCMinutes();
+          const runAlerts = minute % 10 === 0;  // every other 5-min tick
+          if (runAlerts) {
+            try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
+              _logPhase('phase1a-alerts', 'error', { error: e?.message });
+              console.warn('[CRON] alerts failed:', e?.message);
+            }
+          } else {
+            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); _logPhase('phase1a-calendar', 'ok'); } catch (e) {
+              _logPhase('phase1a-calendar', 'error', { error: e?.message });
+              console.warn('[CRON] calendar failed:', e?.message);
+            }
+          }
+        }
         if (isEvery15Min) {
           try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
             _logPhase('phase1a-alerts', 'error', { error: e?.message });
@@ -8091,8 +8119,12 @@ export default {
       })());
     }
 
-    // ── PHASE 1b: Broadcast batch (1-min only, separate ctx.waitUntil) ──
-    if (isEveryMinute && notificationPlatformRepo?.processBroadcastBatch) {
+    // ── PHASE 1b: Broadcast batch (every 5 min, separate ctx.waitUntil) ──
+    // ROOT-CAUSE FIX: Was previously on 1-min cron (isEveryMinute) which caused
+    // 1,440 cron ticks/day → 86% exceededCpu. Moved to 5-min cron to reduce
+    // CPU pressure. Broadcasts process within 5 min instead of 1 min — acceptable
+    // trade-off for staying under Free Plan 10ms CPU limit.
+    if (isEvery5Min && notificationPlatformRepo?.processBroadcastBatch) {
       ctx.waitUntil((async () => {
         try {
           const result = await notificationPlatformRepo.processBroadcastBatch(env, sendTelegramMessage);

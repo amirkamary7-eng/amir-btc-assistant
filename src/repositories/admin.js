@@ -902,7 +902,7 @@ export function createAdminRepository(deps) {
     // Each sub-query is wrapped in a CTE so missing tables don't break the whole query.
     const result = await queryDb(env, `
       SELECT * FROM (
-        SELECT 'log' AS type, id, NULL::text AS coin, NULL::text AS author,
+        SELECT 'log' AS type, id::text, NULL::text AS coin, NULL::text AS author,
                admin_id::text AS user_id, action, target_type, target_id,
                NULL::text AS title, NULL::text AS status, created_at
         FROM admin_logs ORDER BY created_at DESC LIMIT $1
