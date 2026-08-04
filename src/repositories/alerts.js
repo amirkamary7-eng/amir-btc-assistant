@@ -254,14 +254,14 @@ export function createAlertRepository(deps) {
    * NOTE: Does NOT call ensureTable (cron caller is responsible for that).
    * This avoids redundant DDL queries on every 5-min cron tick.
    */
-  async function listActiveForCron(env, limit = 500) {
+  async function listActiveForCron(env, limit = 500, pool = null) {
     const result = await queryDb(env, `
       SELECT id, user_id, symbol, price, direction, last_price, last_checked_at
       FROM price_alerts
       WHERE status = 'active'
       ORDER BY created_at DESC
       LIMIT $1
-    `, [Number(limit)]);
+    `, [Number(limit)], 1, pool);
     return result.rows;
   }
 

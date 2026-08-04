@@ -644,7 +644,7 @@ export function createNotificationPlatformRepository(deps) {
     } catch (e) { console.warn('Notification enqueue error:', e.message); }
   }
 
-  async function processQueue(env, sendTelegramMessageFn) {
+  async function processQueue(env, sendTelegramMessageFn, pool = null) {
     // PERF: Do NOT call ensureSchema here — it runs 16+ ALTER TABLE queries
     // (one per channel column) which adds 3+ seconds of latency.
     // ensureSchema is called by dispatch() on first use, which is enough.
@@ -668,7 +668,7 @@ export function createNotificationPlatformRepository(deps) {
           FOR UPDATE SKIP LOCKED
         )
         RETURNING *
-      `);
+      `, [], 1, pool);
     } catch (e) {
       // Table might not exist yet — skip silently
       return { processed: 0, error: 'queue_table_missing' };
@@ -763,18 +763,19 @@ export function createNotificationPlatformRepository(deps) {
    *
    * Called from cron every 5 minutes.
    */
-  async function requeueStaleQueueItems(env) {
+  async function requeueStaleQueueItems(env, pool = null) {
     if (!isDatabaseConfigured(env)) return { requeued: 0 };
     try {
       // Phase 8: Use claimed_at (set when processQueue claims item) instead of processed_at.
       // claimed_at is more precise — it marks the exact moment processing started,
       // not the last UPDATE time (processed_at was reused for both claim and complete).
+      // pool parameter: if passed, uses phase-scoped Pool (no createPool overhead).
       const result = await queryDb(env, `
         UPDATE notification_queue
         SET status = 'pending', claimed_at = NULL
         WHERE status = 'processing'
           AND claimed_at < NOW() - INTERVAL '5 minutes'
-      `);
+      `, [], 1, pool);
       const requeued = result.rowCount || 0;
       if (requeued > 0) {
         console.log(`[Phase 4] Requeued ${requeued} stale queue items`);
@@ -801,19 +802,20 @@ export function createNotificationPlatformRepository(deps) {
    *
    * Called from cron every 5 minutes.
    */
-  async function requeueStaleBroadcasts(env) {
+  async function requeueStaleBroadcasts(env, pool = null) {
     if (!isDatabaseConfigured(env)) return { requeued: 0 };
     try {
       // Phase 8: Use claimed_at (set when processBroadcastFull CAS-claims broadcast)
       // instead of created_at. claimed_at precisely marks when processing started.
       // Broadcasts that have been in 'sending' for more than 5 minutes since claim
       // are considered crashed and reset to 'pending' for resume.
+      // pool parameter: if passed, uses phase-scoped Pool (no createPool overhead).
       const result = await queryDb(env, `
         UPDATE notification_broadcasts
         SET status = 'pending', claimed_at = NULL
         WHERE status = 'sending'
           AND claimed_at < NOW() - INTERVAL '5 minutes'
-      `);
+      `, [], 1, pool);
       const requeued = result.rowCount || 0;
       if (requeued > 0) {
         console.log(`[Phase 4] Requeued ${requeued} stale broadcasts`);
@@ -1085,7 +1087,7 @@ export function createNotificationPlatformRepository(deps) {
    * @param {function} sendTelegramMessageFn - Telegram send function
    * @param {number} broadcastId - ID of the broadcast to process
    */
-  async function processBroadcastFull(env, sendTelegramMessageFn, broadcastId) {
+  async function processBroadcastFull(env, sendTelegramMessageFn, broadcastId, pool = null) {
     if (!isDatabaseConfigured(env)) return { processed: 0 };
     const BATCH_SIZE = 25;
     let totalDelivered = 0;
@@ -1093,7 +1095,7 @@ export function createNotificationPlatformRepository(deps) {
     let totalProcessed = 0;
 
     // Get broadcast details
-    const broadcastResult = await queryDb(env, `SELECT * FROM notification_broadcasts WHERE id = $1`, [broadcastId]);
+    const broadcastResult = await queryDb(env, `SELECT * FROM notification_broadcasts WHERE id = $1`, [broadcastId], 1, pool);
     if (!broadcastResult.rows.length) return { processed: 0 };
     const broadcast = broadcastResult.rows[0];
     const category = broadcast.category || 'analysis';
@@ -1107,7 +1109,7 @@ export function createNotificationPlatformRepository(deps) {
       `UPDATE notification_broadcasts
        SET status = 'sending', claimed_at = NOW()
        WHERE id = $1 AND status = 'pending'
-       RETURNING id`, [broadcastId]
+       RETURNING id`, [broadcastId], 1, pool
     );
     if (!claimResult.rows || claimResult.rows.length === 0) {
       // Another isolate already claimed this broadcast, OR it was already 'sending'/'sent'.
@@ -1226,7 +1228,7 @@ export function createNotificationPlatformRepository(deps) {
    * Process ONE batch — called from cron as fallback/resume.
    * Used when processBroadcastFull was killed (e.g. Worker eviction).
    */
-  async function processBroadcastBatch(env, sendTelegramMessageFn) {
+  async function processBroadcastBatch(env, sendTelegramMessageFn, pool = null) {
     if (!isDatabaseConfigured(env)) return { processed: 0 };
     // Phase 5: Only select 'pending' broadcasts (NOT 'sending').
     // Broadcasts stuck in 'sending' are handled by requeueStaleBroadcasts()
@@ -1237,10 +1239,10 @@ export function createNotificationPlatformRepository(deps) {
       WHERE status = 'pending'
       ORDER BY created_at ASC
       LIMIT 1
-    `);
+    `, [], 1, pool);
     if (!broadcastResult.rows.length) return { processed: 0, remaining: 0 };
     const broadcast = broadcastResult.rows[0];
-    return processBroadcastFull(env, sendTelegramMessageFn, broadcast.id);
+    return processBroadcastFull(env, sendTelegramMessageFn, broadcast.id, pool);
   }
 
 

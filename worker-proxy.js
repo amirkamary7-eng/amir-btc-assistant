@@ -1302,6 +1302,44 @@ function createPool(env) {
 }
 
 /**
+ * Phase-Scoped Pool helper for cron handlers.
+ *
+ * Creates a Pool and runs an async callback with it. The Pool is a LOCAL
+ * variable (NOT stored on env), so it's never visible to other requests —
+ * this prevents the "Cannot perform I/O on behalf of a different request"
+ * bug that occurred with env._reqPool.
+ *
+ * Usage (in cron handler):
+ *   const result = await withPhasePool(env, async (pool) => {
+ *     await requeueStaleQueueItems(env, pool);
+ *     await requeueStaleBroadcasts(env, pool);
+ *     return { ok: true };
+ *   });
+ *
+ * The pool is closed in `finally` so it's always released, even on error.
+ *
+ * NOTE: This is infrastructure only. It does NOT change cron behavior.
+ * The cron handler still uses parallel ctx.waitUntil() calls per phase.
+ * To use phase-scoped Pool, each phase's ctx.waitUntil must wrap its
+ * queryDb calls in withPhasePool. This will be done in Phase 2 after
+ * validation.
+ */
+async function withPhasePool(env, fn) {
+  if (!isDatabaseConfigured(env)) {
+    return fn(null);
+  }
+  const _phasePool = createPool(env);
+  if (!_phasePool) {
+    return fn(null);
+  }
+  try {
+    return await fn(_phasePool);
+  } finally {
+    try { await _phasePool.end(); } catch {}
+  }
+}
+
+/**
  * Wrap a handler with a request-scoped shared Pool.
  *
  * Creates ONE Pool (ONE TLS handshake to Supabase) that is reused by ALL
@@ -1445,10 +1483,39 @@ async function getReferralRewardPerInvite(env) {
 // Cloudflare Workers. Module-level Pool caching does NOT work because
 // WebSocket connections are bound to the request context that created them.
 
-async function queryDb(env, sqlText, params = [], retries = 1) {
+async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
   const _seq = _nextQuerySeq();
   const _sqlPreview = String(sqlText).replace(/\s+/g, ' ').slice(0, 120);
   const _t0 = Date.now();
+  // Phase-Scoped Pool: if a pool is explicitly passed (e.g., from cron handler),
+  // use it directly. This allows multiple queryDb calls to share ONE Pool
+  // without using env._reqPool (which would cause race conditions in parallel
+  // ctx.waitUntil phases). The pool is a LOCAL variable in the caller's closure,
+  // so it's NEVER visible to other requests → no "Cannot perform I/O" bug.
+  if (pool) {
+    try {
+      const _result = await pool.query(sqlText, params);
+      const _t1 = Date.now();
+      _traceStage('queryDb.phasePool:' + _sqlPreview.slice(0, 60), _t0);
+      _traceQuery({
+        seq: _seq, poolType: 'phasePool', sql: _sqlPreview,
+        startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+        status: _t1 - _t0 >= 7900 ? 'timeout' : 'ok', attempt: 1
+      });
+      return _result;
+    } catch (error) {
+      const _t1 = Date.now();
+      const _errMsg = String(error?.message || '').slice(0, 200);
+      const _isTimeout = _t1 - _t0 >= 7900 || _errMsg.includes('timeout') || _errMsg.includes('Timed out');
+      _traceStage('queryDb.phasePool.ERROR:' + _sqlPreview.slice(0, 60), _t0);
+      _traceQuery({
+        seq: _seq, poolType: 'phasePool', sql: _sqlPreview,
+        startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+        status: _isTimeout ? 'timeout' : 'error', error: _errMsg, attempt: 1
+      });
+      throw error;
+    }
+  }
   // Request-scoped shared pool: if env._reqPool is set (by the route wrapper),
   // reuse it instead of creating a per-call Pool. This means ALL queryDb calls
   // within one request share ONE WebSocket → ONE TLS handshake.
@@ -1480,14 +1547,14 @@ async function queryDb(env, sqlText, params = [], retries = 1) {
   }
 
   const _tPoolCreate = Date.now();
-  const pool = createPool(env);
-  if (!pool) throw new Error('Database not configured');
+  const _callPool = createPool(env);
+  if (!_callPool) throw new Error('Database not configured');
 
   try {
     for (let attempt = 0; attempt <= retries; attempt++) {
       const _tAttempt = Date.now();
       try {
-        const _result = await pool.query(sqlText, params);
+        const _result = await _callPool.query(sqlText, params);
         const _t1 = Date.now();
         _traceStage('queryDb.pool:' + _sqlPreview.slice(0, 60) + ' (attempt ' + (attempt+1) + ')', _t0);
         _traceQuery({
@@ -1523,7 +1590,7 @@ async function queryDb(env, sqlText, params = [], retries = 1) {
     }
   } finally {
     const _tEnd = Date.now();
-    try { await pool.end(); } catch {}
+    try { await _callPool.end(); } catch {}
     _traceStage('queryDb.poolEnd:' + _sqlPreview.slice(0, 60), _tEnd);
   }
 }
@@ -5614,7 +5681,7 @@ async function handleTelegramWebhook(request, env) {
 
 const CALENDAR_ALERT_SENT_PREFIX = 'cal_alert:';
 
-async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
+async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool = null) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
   if (!notificationPlatformRepo) return;
 
@@ -5666,6 +5733,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
       const usersResult = await queryDb(
         env,
         `SELECT telegram_id FROM users WHERE channel_joined = TRUE`,
+        [], 1, pool,
       );
       const allUserIds = usersResult.rows.map((r) => String(r.telegram_id));
       if (allUserIds.length === 0) continue;
@@ -5841,7 +5909,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
  * LOGGING: Every alert logs {alert_id, user_id, symbol, target_price, prev_price,
  *   current_price, direction, triggered, reason, latency_ms} for full audit trail.
  */
-async function runScheduledAlertsBaseline(controller, env) {
+async function runScheduledAlertsBaseline(controller, env, pool = null) {
   const t0 = Date.now();
   // Stage-by-stage latency tracking for performance monitoring
   let _tDbEnd = null;       // end of DB query phase
@@ -5904,14 +5972,14 @@ async function runScheduledAlertsBaseline(controller, env) {
 
     // Use the bulk cron query (only fetches active alerts, ordered by created_at DESC)
     const alerts = (typeof alertRepo?.listActiveForCron === 'function')
-      ? await alertRepo.listActiveForCron(env, maxAlerts)
+      ? await alertRepo.listActiveForCron(env, maxAlerts, pool)
       : (await queryDb(env, `
           SELECT id, user_id, symbol, price, direction, last_price, last_checked_at
           FROM price_alerts
           WHERE status = 'active'
           ORDER BY created_at DESC
           LIMIT $1
-        `, [maxAlerts])).rows;
+        `, [maxAlerts], 1, pool)).rows;
 
     resultPayload.checked_count = alerts.length;
     _tDbEnd = Date.now(); // Phase 1 done: DB query
@@ -6269,7 +6337,7 @@ async function runScheduledAlertsBaseline(controller, env) {
           idPlaceholders.push(`$${idIdx}`);
         }
         const bulkSql = `UPDATE price_alerts SET last_price = CASE id ${caseParts.join(' ')} END, last_checked_at = NOW() WHERE id IN (${idPlaceholders.join(',')})`;
-        await queryDb(env, bulkSql, params);
+        await queryDb(env, bulkSql, params, 1, pool);
       } catch (bulkErr) {
         console.warn('[ALERTS] Bulk UPDATE failed:', bulkErr?.message);
       }
