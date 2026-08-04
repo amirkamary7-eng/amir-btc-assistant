@@ -1002,8 +1002,21 @@ export function createNotificationPlatformRepository(deps) {
     const category = broadcast.category || 'analysis';
     const channelPrefCol = _getChannelColumn(category);
 
-    // Mark as 'sending'
-    await queryDb(env, `UPDATE notification_broadcasts SET status = 'sending' WHERE id = $1 AND status = 'pending'`, [broadcastId]);
+    // Phase 5: CAS Claim — Atomic Compare-And-Swap with loser-exit.
+    // UPDATE...WHERE status='pending' RETURNING id is atomic at DB level.
+    // If another isolate already claimed it (status='sending'), rowCount=0
+    // → this isolate exits immediately (no wasted CPU, no duplicate processing).
+    const claimResult = await queryDb(env,
+      `UPDATE notification_broadcasts
+       SET status = 'sending'
+       WHERE id = $1 AND status = 'pending'
+       RETURNING id`, [broadcastId]
+    );
+    if (!claimResult.rows || claimResult.rows.length === 0) {
+      // Another isolate already claimed this broadcast, OR it was already 'sending'/'sent'.
+      // Exit to avoid duplicate processing.
+      return { processed: 0, status: 'already_claimed', broadcastId };
+    }
 
     let checkpoint = broadcast.last_processed_user_id || null;
 
@@ -1110,10 +1123,13 @@ export function createNotificationPlatformRepository(deps) {
    */
   async function processBroadcastBatch(env, sendTelegramMessageFn) {
     if (!isDatabaseConfigured(env)) return { processed: 0 };
-    // Find a 'sending' broadcast that was interrupted, or a 'pending' one
+    // Phase 5: Only select 'pending' broadcasts (NOT 'sending').
+    // Broadcasts stuck in 'sending' are handled by requeueStaleBroadcasts()
+    // (Phase 4), which resets them to 'pending' after 5 min timeout.
+    // This prevents concurrent processBroadcastFull calls on the same broadcast.
     const broadcastResult = await queryDb(env, `
       SELECT * FROM notification_broadcasts
-      WHERE status IN ('pending', 'sending')
+      WHERE status = 'pending'
       ORDER BY created_at ASC
       LIMIT 1
     `);
