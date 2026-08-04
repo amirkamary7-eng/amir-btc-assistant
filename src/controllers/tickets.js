@@ -93,6 +93,7 @@ export function createTicketHandlers(deps) {
             title: `✅ تیکت شما ثبت شد`,
             message: `عنوان: ${ticket.title}\nبه زودی پاسخ داده می‌شود.`,
             metadata: { ticket_id: String(ticket.id), title: ticket.title },
+            dedupKey: `ticket_user_created_${ticket.id}`,
           }).catch(() => {});
         }
       } catch (notifyErr) {
@@ -216,6 +217,7 @@ export function createTicketHandlers(deps) {
             title: `💬 پاسخ تیکت: ${ticket.title}`,
             message,
             metadata: { ticket_id: String(ticketId), title: ticket.title },
+            dedupKey: `ticket_reply_${ticketId}_${Date.now()}`,
           }).catch(() => {});
         }
       } catch (notifyErr) {

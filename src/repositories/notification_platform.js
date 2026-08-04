@@ -134,6 +134,55 @@ export function createNotificationPlatformRepository(deps) {
         )
       `);
 
+      // ── Phase 3: Idempotency migration for notification_queue ──
+      // UNIQUE constraint on (notification_id, user_id) ensures that duplicate
+      // enqueue calls (e.g., from concurrent requests or broadcast processing)
+      // don't create duplicate queue rows → no duplicate Telegram messages.
+      //
+      // Migration steps (all idempotent, all data-safe):
+      //   1. Backfill NULL notification_id with deterministic unique ID
+      //   2. Remove duplicate rows (keep newest by id)
+      //   3. Set notification_id NOT NULL
+      //   4. Add UNIQUE constraint (if not exists)
+      try {
+        // Step 1: Backfill NULL notification_id with deterministic unique ID
+        // Don't delete — these may be legitimate pending TG messages
+        await queryDb(env, `
+          UPDATE notification_queue
+          SET notification_id = 'legacy_' || id::text
+          WHERE notification_id IS NULL
+        `).catch(() => {});
+
+        // Step 2: Remove duplicates — keep only the newest row per (notification_id, user_id)
+        await queryDb(env, `
+          DELETE FROM notification_queue
+          WHERE id NOT IN (
+            SELECT MAX(id) FROM notification_queue
+            GROUP BY notification_id, user_id
+          )
+        `).catch(() => {});
+
+        // Step 3: Set NOT NULL (safe — step 1 eliminated all NULLs)
+        await queryDb(env, `ALTER TABLE notification_queue ALTER COLUMN notification_id SET NOT NULL`).catch(() => {});
+
+        // Step 4: Add UNIQUE constraint (idempotent via DO block)
+        await queryDb(env, `
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint
+              WHERE conname = 'uq_notification_queue_dedup'
+            ) THEN
+              ALTER TABLE notification_queue
+                ADD CONSTRAINT uq_notification_queue_dedup
+                UNIQUE (notification_id, user_id);
+            END IF;
+          END $$
+        `).catch(() => {});
+      } catch (e) {
+        console.warn('[Phase 3] Queue idempotency migration (non-fatal):', e?.message);
+      }
+
       // Indexes
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_queue_pending ON notification_queue (status, priority, next_retry_at) WHERE status = 'pending'`).catch(() => {});
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_broadcasts_status ON notification_broadcasts (status, scheduled_at)`).catch(() => {});
@@ -512,11 +561,19 @@ export function createNotificationPlatformRepository(deps) {
   async function enqueue(env, { notificationId, userId, channel, priority, payload }) {
     // PERF: Do NOT call ensureSchema here — it adds 3+ seconds of latency.
     if (!isDatabaseConfigured(env)) return;
+    if (!notificationId) {
+      console.warn('Notification enqueue error: notificationId is required for idempotency');
+      return;
+    }
     try {
+      // Phase 3: ON CONFLICT (notification_id, user_id) DO NOTHING
+      // Prevents duplicate queue rows from concurrent enqueue calls.
+      // The UNIQUE constraint (added in ensureSchema migration) enforces this at DB level.
       await queryDb(env, `
         INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload, created_at)
         VALUES ($1, $2, $3, $4, 'pending', $5, NOW())
-      `, [notificationId, String(userId), channel, priority, JSON.stringify(payload || {})]);
+        ON CONFLICT (notification_id, user_id) DO NOTHING
+      `, [String(notificationId), String(userId), channel, priority, JSON.stringify(payload || {})]);
     } catch (e) { console.warn('Notification enqueue error:', e.message); }
   }
 
@@ -525,14 +582,25 @@ export function createNotificationPlatformRepository(deps) {
     // (one per channel column) which adds 3+ seconds of latency.
     // ensureSchema is called by dispatch() on first use, which is enough.
     if (!isDatabaseConfigured(env)) return { processed: 0 };
+
+    // Phase 3: Atomic claim with FOR UPDATE SKIP LOCKED
+    // Prevents concurrent processQueue ticks from processing the same items.
+    // UPDATE...SET status='processing'...RETURNING atomically claims items
+    // so concurrent ticks get disjoint sets.
     let queue;
     try {
       queue = await queryDb(env, `
-        SELECT * FROM notification_queue
-        WHERE status = 'pending' AND attempts < max_attempts
-        AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-        ORDER BY priority DESC, created_at ASC
-        LIMIT 50
+        UPDATE notification_queue
+        SET status = 'processing', processed_at = NOW()
+        WHERE id IN (
+          SELECT id FROM notification_queue
+          WHERE status = 'pending' AND attempts < max_attempts
+          AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+          ORDER BY priority DESC, created_at ASC
+          LIMIT 50
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *
       `);
     } catch (e) {
       // Table might not exist yet — skip silently
@@ -549,8 +617,6 @@ export function createNotificationPlatformRepository(deps) {
         const text = `${payload.title ? payload.title + '\n' : ''}${payload.message || ''}`;
         if (item.channel === 'telegram' && sendTelegramMessageFn) {
           // Phase 2: Build Telegram payload with rich message fields
-          // (reply_markup, parse_mode, disable_web_page_preview) from
-          // telegramExtra stored in the queue payload by sendNotification().
           const tgPayload = {
             chat_id: item.user_id,
             text,
@@ -566,10 +632,20 @@ export function createNotificationPlatformRepository(deps) {
           }
           await sendTelegramMessageFn(env, tgPayload);
         }
+        // Success → mark as processed
         await queryDb(env, `UPDATE notification_queue SET status = 'processed', processed_at = NOW() WHERE id = $1`, [item.id]);
         processed++;
       } catch (e) {
-        await queryDb(env, `UPDATE notification_queue SET attempts = attempts + 1, error = $2, next_retry_at = NOW() + INTERVAL '60 seconds' WHERE id = $1`, [item.id, String(e.message || '').substring(0, 200)]).catch(() => {});
+        // Failure → revert to 'pending' for retry, increment attempts.
+        // If max_attempts exceeded, mark as 'failed' (no more retries).
+        await queryDb(env, `
+          UPDATE notification_queue
+          SET status = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'pending' END,
+              attempts = attempts + 1,
+              error = $2,
+              next_retry_at = NOW() + INTERVAL '60 seconds'
+          WHERE id = $1
+        `, [item.id, String(e.message || '').substring(0, 200)]).catch(() => {});
         failed++;
       }
     }

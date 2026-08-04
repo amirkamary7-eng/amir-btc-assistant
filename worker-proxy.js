@@ -1663,6 +1663,7 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
           priority: 'medium',
           channel: 'mini_app',
           metadata: { invitee_id: String(inviteeId), referral_id: String(referralId) },
+          dedupKey: `referral_new_${referralId}`,
         }).catch(() => {}),
         notificationService.create(env, {
           userId: inviterId,
@@ -1671,6 +1672,7 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
           priority: 'high',
           channel: 'both',
           metadata: { amount: String(amount), referral_id: String(referralId), invitee_id: String(inviteeId) },
+          dedupKey: `referral_reward_${referralId}`,
         }).catch(() => {}),
       ]);
     } catch { /* notification failure should not break reward */ }
@@ -5687,6 +5689,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
             priority: 'medium',
             channel: 'both',
             metadata: { event_title: event.title, event_date: event.date, event_time: event.time, event_country: event.country },
+            dedupKey: `cal_event_${event.id}_${uid}`,
           });
           // dispatch returns {status: 'filtered'} if user opted out
           if (dispatchResult && dispatchResult.status !== 'filtered') {
@@ -5758,6 +5761,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
                 lead_minutes: reminder.lead_minutes,
                 reminder_id: reminder.id,
               },
+              dedupKey: `cal_reminder_${reminder.id}_${reminder.user_id}`,
             });
             if (dispatchResult && dispatchResult.status !== 'filtered') {
               reminderStats.dispatched++;

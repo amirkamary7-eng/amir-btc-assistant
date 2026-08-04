@@ -169,6 +169,7 @@ export function createWalletHandlers(deps) {
           priority: 'low',
           channel: 'mini_app',
           metadata: { amount: String(DAILY_REWARD), name: 'Daily Reward' },
+          dedupKey: `wallet_daily_${authState.user.id}_${new Date().toISOString().slice(0, 10)}`,
         }).catch(() => {});
       }
 
@@ -303,6 +304,7 @@ export function createWalletHandlers(deps) {
               title: '🎉 ماموریت کامل شد',
               message: `${label} — ${amount} AB دریافت کردید`,
               metadata: { mission_id: missionId, amount },
+              dedupKey: `wallet_mission_${missionId}_${userId}`,
             }).catch(() => {});
           }
         }

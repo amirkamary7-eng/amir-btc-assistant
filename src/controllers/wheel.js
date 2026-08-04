@@ -185,6 +185,7 @@ export function createWheelHandlers(deps) {
             priority: 'high',
             channel: 'mini_app',
             metadata: { amount: String(spinResult.reward.amount), name: spinResult.reward.label || 'Wheel' },
+            dedupKey: `wheel_reward_${authState.user.id}_${spinResult.spin_id}`,
           }).catch(() => {});
         }
       }
