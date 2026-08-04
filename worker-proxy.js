@@ -4583,8 +4583,8 @@ async function handleCalendarEvents(env) {
 // meaning the market data was NEVER cached in KV — every request hit the
 // upstream API. Now 60s (the minimum allowed by KV). writeAppCache also
 // clamps any sub-60 TTL up to 60 as a safety net.
-const MARKET_CACHE_TTL = 60; // 60 seconds — KV minimum; prices refresh every minute
-const MARKET_GLOBAL_CACHE_TTL = 300; // 5 minutes — global stats change less frequently
+const MARKET_CACHE_TTL = 300; // 5 minutes — ROOT-CAUSE FIX: was 60s, caused 1,440+ KV writes/day. 5 min is acceptable for price data.
+const MARKET_GLOBAL_CACHE_TTL = 900; // 15 minutes — global stats change less frequently
 const MARKET_FETCH_LIMIT = 200;
 const SEARCH_FETCH_LIMIT = 1500; // Extended list for search — not displayed in market list
 
@@ -4668,7 +4668,12 @@ async function fetchFearGreed() {
           return result;
         }
       } else {
-        console.warn('CMC F&G API returned HTTP', res.status);
+        // ROOT-CAUSE FIX: Log the actual reason — if 429, it's rate limiting, not "no API key"
+        if (res.status === 429) {
+          console.warn('CMC F&G API rate limited (HTTP 429) — falling back to cache');
+        } else {
+          console.warn('CMC F&G API returned HTTP', res.status);
+        }
       }
     } catch (e) {
       console.warn('CMC F&G fetch failed:', e?.message || e);
@@ -4687,7 +4692,10 @@ async function fetchFearGreed() {
   }
 
   // ── Step 3: No cache, no API — return null (frontend shows 'Unknown') ──
-  console.warn('F&G: no API key, no cache — returning null');
+  // ROOT-CAUSE FIX: This message was misleading — it says "no API key" but
+  // the real cause is usually CMC returning 429 (rate limited) AND cache being
+  // empty (because KV writes were failing due to quota exhaustion).
+  console.warn('F&G: API unavailable and cache empty — returning null');
   return null;
 }
 
