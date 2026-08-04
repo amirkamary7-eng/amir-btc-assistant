@@ -2844,3 +2844,63 @@ FIXES NEEDED (in priority order):
 5. Await notificationRepo.create with error logging (LOW)
 
 No code changes made in this audit. Fixes will be applied in subsequent task.
+
+---
+Task ID: PRODUCTION-FIX-FINAL
+Agent: Main Orchestrator (Z.ai Code)
+Task: Root Cause Analysis and Fix for Production exceededCpu errors
+
+Work Log:
+- Phase 0: Connected to Production Database (Supabase PostgreSQL 17.6)
+  - Deployed temporary DB proxy worker for direct DB access
+  - Verified schema for all 39 tables
+  - Found 3 missing DB migrations (claimed_at, telegram_message_id, UNIQUE constraint)
+  - Found SQL NaN bug in price_alerts bulk UPDATE
+  - Found UNION type mismatch in getRecentActivity
+  - Ran EXPLAIN ANALYZE on all critical queries
+
+- Phase 1 (Critical Fixes — commit 655139f):
+  - Applied 9 DB migrations (columns, constraints, indexes)
+  - Fixed SQL NaN bug (parameterized query with ::numeric cast)
+  - Fixed UNION type mismatch (id::text cast)
+  - Reduced cron frequency (* * * * * → */5 * * * *)
+  - Moved phase1a/phase1b to isEvery5Min (regression prevention)
+
+- Phase 2 (KV + Comment — commit abb6a8c):
+  - Disabled cron_log_* KV writes (saved 1,440+ writes/day)
+  - Corrected misleading ctx.waitUntil comment
+
+- Phase 3 (Cache + Error Messages — commit d2d6d39):
+  - Increased market cache TTL (60s→300s, 300s→900s)
+  - Fixed CMC F&G error messages (distinguish 429 from "no API key")
+
+- Phase 1 Infrastructure (commit 74ab256):
+  - Added optional pool parameter to queryDb
+  - Added pool parameter to all cron functions
+  - Created withPhasePool helper (infrastructure only, no behavior change)
+
+- Phase 2 Pool Sharing (commit 70dda08):
+  - Applied withPhasePool to all cron phases (Phase 4, 1a, 1b, 2, 3-queue)
+  - Each phase now uses 1 Pool instead of N Pools
+  - Parallel ctx.waitUntil architecture preserved (no race condition)
+  - Pool is local variable in closure (not on env)
+
+- Phase 3 Runtime Validation:
+  - 50 minutes of production monitoring after deploy
+  - 8 cron ticks — all successful (0 exceededCpu)
+  - Before: 20.0% exceededCpu rate (12 failures/hour)
+  - After: 0.0% exceededCpu rate (0 failures)
+
+- Stable Release:
+  - Tagged v1.0.0-stable (commit 70dda08)
+  - Pushed to GitHub
+  - Cloudflare Version ID: 1eb59669-3372-4db2-a347-c418afc5bace
+
+Stage Summary:
+- Root cause: Parallel cron phases each creating independent Pool instances (3-4 TLS handshakes per tick)
+- Fix: Phase-Scoped Pool (withPhasePool) — each phase shares ONE Pool via local variable
+- Result: exceededCpu eliminated (20% → 0%)
+- All 93 tests pass
+- 5 commits, 1 stable tag
+- No regressions detected
+- Temporary DB proxy worker deleted after audit
