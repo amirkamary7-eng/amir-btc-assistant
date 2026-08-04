@@ -31,6 +31,7 @@ import { createRewardCenterRepository } from './src/repositories/reward_center.j
 import { createRewardCenterHandlers } from './src/controllers/reward_center.js';
 import { createNotificationPlatformRepository, setEnvSendTelegramMessage } from './src/repositories/notification_platform.js';
 import { createNotificationPlatformHandlers } from './src/controllers/notification_platform.js';
+import { createNotificationService } from './src/services/notification_service.js';
 import { createAlertEconomyRepository } from './src/repositories/alert_economy.js';
 import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
 import { createPublisherRepository } from './src/repositories/publisher.js';
@@ -1644,18 +1645,18 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       [Number(referralId)],
     );
 
-  // Send referral + reward notifications via Notification Platform (single entry point)
+  // Send referral + reward notifications via NotificationService (single entry point)
   // ROOT CAUSE FIX (4.5): Only dispatch notifications if the reward was NOT
   // idempotent (i.e., this is the first time the reward is credited). If
   // creditTokens returned idempotent:true, a concurrent caller already
   // dispatched the notifications — dispatching again would spam the inviter
   // with duplicate notifications.
-  if (notificationPlatformRepo && result && !result.idempotent) {
+  if (notificationService && result && !result.idempotent) {
     try {
       // Referral notification (new referral created) + Reward notification
       // dispatched in parallel for efficiency
       await Promise.all([
-        notificationPlatformRepo.dispatch(env, {
+        notificationService.create(env, {
           userId: inviterId,
           templateKey: 'referral_new_invite',
           category: 'referral',
@@ -1663,7 +1664,7 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
           channel: 'mini_app',
           metadata: { invitee_id: String(inviteeId), referral_id: String(referralId) },
         }).catch(() => {}),
-        notificationPlatformRepo.dispatch(env, {
+        notificationService.create(env, {
           userId: inviterId,
           templateKey: 'referral_reward',
           category: 'referral',
@@ -4224,6 +4225,13 @@ const notificationPlatformRepo = createNotificationPlatformRepository({
   normalizeOptionalString,
 });
 
+// ── NotificationService (Phase 1: single entry point for all producers) ──
+// Thin wrapper around notificationPlatformRepo.dispatch(). Establishes the
+// centralized service layer. Future phases will migrate logic into this service.
+const notificationService = createNotificationService({
+  notificationPlatformRepo,
+});
+
 // alertEconomyRepo is already created above (before alertHandlers).
 const wheelRepo = createWheelRepository({ queryDb, queryDbTransaction });
 const wheelHandlers = createWheelHandlers({
@@ -4236,6 +4244,7 @@ const wheelHandlers = createWheelHandlers({
   economyService,
   rewardCenterRepo,
   notificationPlatformRepo,
+  notificationService,
 });
 const walletHandlers = createWalletHandlers({
   jsonResponse,
@@ -4247,6 +4256,7 @@ const walletHandlers = createWalletHandlers({
   notificationPlatformRepo,
   economyService,
   rewardCenterRepo,
+  notificationService,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({
@@ -4271,6 +4281,7 @@ const ticketHandlers = createTicketHandlers({
   normalizeOptionalString,
   ticketRepo,
   notificationPlatformRepo,
+  notificationService,
 });
 const userRepo = createUserRepository({ queryDb, normalizeOptionalString });
 // adminRepo must be created BEFORE userHandlers because userHandlers (bootstrap)
@@ -4374,6 +4385,7 @@ const adminHandlers = createAdminHandlers({
   adminRepo,
   notificationRepo,
   notificationPlatformRepo,
+  notificationService,
   diagLog,
 });
 
@@ -5658,7 +5670,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
       let sentForThisEvent = 0;
       for (const uid of allUserIds) {
         try {
-          const dispatchResult = await notificationPlatformRepo.dispatch(env, {
+          const dispatchResult = await notificationService.create(env, {
             userId: uid,
             title, message,
             category: 'calendar',
@@ -5723,7 +5735,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}) {
           const message = `${reminder.event_country || ''} ${reminder.event_timestamp ? '— ' + new Date(reminder.event_timestamp).toLocaleString('en-GB') : ''}`;
 
           try {
-            const dispatchResult = await notificationPlatformRepo.dispatch(env, {
+            const dispatchResult = await notificationService.create(env, {
               userId: String(reminder.user_id),
               title, message,
               category: 'calendar',
@@ -6151,10 +6163,10 @@ async function runScheduledAlertsBaseline(controller, env) {
         if (deliverToMiniApp && isDatabaseConfigured(env)) {
           try {
             const tDispatchStart = Date.now();
-            // UNIFIED: Use dispatch() (which calls sendNotification) for in-app
-            // notification. This respects user settings and is idempotent.
-            if (notificationPlatformRepo?.dispatch) {
-              await notificationPlatformRepo.dispatch(env, {
+            // UNIFIED: Use NotificationService.create() for in-app notification.
+            // This respects user settings and is idempotent.
+            if (notificationService) {
+              await notificationService.create(env, {
                 userId: String(userId),
                 title: `🔔 هشدار قیمت ${symbol}`,
                 message: text,

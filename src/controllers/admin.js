@@ -25,6 +25,7 @@ export function createAdminHandlers(deps) {
     adminRepo,
     notificationRepo,
     notificationPlatformRepo,
+    notificationService,
     diagLog,
   } = deps;
 
@@ -538,9 +539,9 @@ export function createAdminHandlers(deps) {
       try {
         const ownerId = String(ticketInfo.user_id);
         const ownerIdNum = Number(ownerId);
-        // Send ticket reply notification via Notification Platform (single entry point)
-        if (notificationPlatformRepo) {
-          await notificationPlatformRepo.dispatch(env, {
+        // Send ticket reply notification via NotificationService (single entry point)
+        if (notificationService) {
+          await notificationService.create(env, {
             userId: ownerId,
             // FIX: was 'system' → now 'tickets' to match UI toggle ch_tickets
             category: 'tickets',
@@ -551,7 +552,7 @@ export function createAdminHandlers(deps) {
             metadata: { ticket_id: String(ticketId), title: ticketInfo.title || '' },
           }).catch(() => {});
         } else if (Number.isFinite(ownerIdNum)) {
-          // Fallback: no notificationPlatformRepo, just send Telegram
+          // Fallback: no notificationService, just send Telegram
           await sendTelegramMessage(env, {
             chat_id: ownerIdNum,
             text: `💬 پاسخ تیکت: ${ticketInfo.title || ''}\n\n${message}`,
@@ -677,11 +678,11 @@ export function createAdminHandlers(deps) {
       let sentCount = 0;
       let failedCount = 0;
 
-      // Send via Notification Platform (single entry point — handles settings, queue, telegram)
+      // Send via NotificationService (single entry point — handles settings, queue, telegram)
       for (const userId of targetUsers) {
         try {
-          if (notificationPlatformRepo) {
-            await notificationPlatformRepo.dispatch(env, {
+          if (notificationService) {
+            await notificationService.create(env, {
               userId: String(userId),
               category: 'announcement',
               priority: 'high',
@@ -692,7 +693,7 @@ export function createAdminHandlers(deps) {
             });
             sentCount++;
           } else {
-            // Fallback: direct Telegram if platform unavailable
+            // Fallback: direct Telegram if service unavailable
             const chatId = Number(userId);
             if (Number.isFinite(chatId)) {
               await sendTelegramMessage(env, { chat_id: chatId, text: content, disable_web_page_preview: true });

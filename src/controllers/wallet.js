@@ -17,6 +17,7 @@ export function createWalletHandlers(deps) {
     notificationPlatformRepo,
     economyService,
     rewardCenterRepo,
+    notificationService,
   } = deps;
 
   /**
@@ -159,9 +160,9 @@ export function createWalletHandlers(deps) {
       const clientIp = request.headers.get('cf-connecting-ip') || null;
       const result = await walletRepo.claimDailyReward(env, authState.user.id, DAILY_REWARD);
 
-      // Dispatch notification via Notification Platform (single entry point)
-      if (notificationPlatformRepo && result && result.credited !== false) {
-        await notificationPlatformRepo.dispatch(env, {
+      // Dispatch notification via NotificationService (single entry point)
+      if (notificationService && result && result.credited !== false) {
+        await notificationService.create(env, {
           userId: authState.user.id,
           templateKey: 'wallet_received',
           category: 'wallet',
@@ -292,9 +293,9 @@ export function createWalletHandlers(deps) {
           rewardGranted = result.success && !result.idempotent;
           newBalance = result.newBalance;
 
-          // Dispatch notification
-          if (rewardGranted && notificationPlatformRepo) {
-            notificationPlatformRepo.dispatch(env, {
+          // Dispatch notification via NotificationService
+          if (rewardGranted && notificationService) {
+            notificationService.create(env, {
               userId,
               category: 'wallet',
               priority: 'low',

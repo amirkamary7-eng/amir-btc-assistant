@@ -15,6 +15,7 @@ export function createWheelHandlers(deps) {
     economyService,
     rewardCenterRepo,
     notificationPlatformRepo,
+    notificationService,
   } = deps;
 
   /**
@@ -176,8 +177,8 @@ export function createWheelHandlers(deps) {
         // ROOT CAUSE FIX (3.4): Only dispatch notification if reward was
         // actually credited (not idempotent). Previously the notification
         // fired even if grantReward failed — misleading the user.
-        if (notificationPlatformRepo && rewardResult.success && !rewardResult.idempotent) {
-          await notificationPlatformRepo.dispatch(env, {
+        if (notificationService && rewardResult.success && !rewardResult.idempotent) {
+          await notificationService.create(env, {
             userId: authState.user.id,
             templateKey: 'wheel_reward',
             category: 'wheel',

@@ -23,6 +23,7 @@ export function createTicketHandlers(deps) {
     normalizeOptionalString,
     ticketRepo,
     notificationPlatformRepo,
+    notificationService,
   } = deps;
 
   /**
@@ -74,9 +75,9 @@ export function createTicketHandlers(deps) {
         console.warn(safeError('create-ticket-admin-notify', notifyErr));
       }
       try {
-        // Notify user via Notification Platform (single entry point)
-        if (notificationPlatformRepo) {
-          await notificationPlatformRepo.dispatch(env, {
+        // Notify user via NotificationService (single entry point)
+        if (notificationService) {
+          await notificationService.create(env, {
             userId: authState.user.id,
             // FIX: was 'system' — but the UI toggle is ch_tickets.
             // Now matches the settings page so users can opt out.
@@ -197,10 +198,10 @@ export function createTicketHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'ticket not found' }, { status: 404 }, env);
       }
 
-      // Notify ticket owner via Notification Platform (single entry point)
+      // Notify ticket owner via NotificationService (single entry point)
       try {
-        if (notificationPlatformRepo) {
-          await notificationPlatformRepo.dispatch(env, {
+        if (notificationService) {
+          await notificationService.create(env, {
             userId: String(ticket.user_id),
             // FIX: was 'system' → now 'tickets' to match UI toggle ch_tickets
             category: 'tickets',
