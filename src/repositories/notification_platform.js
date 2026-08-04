@@ -30,7 +30,51 @@ export function createNotificationPlatformRepository(deps) {
     if (!isDatabaseConfigured(env)) { _schemaVerified = true; return; }
 
     try {
-      // Extend existing notifications table with new columns (ADD COLUMN IF NOT EXISTS)
+      // ═══════════════════════════════════════════════════════════════════
+      // Phase 6: MERGED FROM LEGACY ensureTable (notifications.js)
+      // Creates base tables so ensureSchema is the SINGLE schema migration path.
+      // This eliminates schema drift — legacy repo can be safely removed in Phase 11.
+      // ═══════════════════════════════════════════════════════════════════
+
+      // ── notifications table ──
+      await queryDb(env, `
+        CREATE TABLE IF NOT EXISTS notifications (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT '',
+          message TEXT NOT NULL DEFAULT '',
+          metadata JSONB,
+          read_status BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `).catch(() => {});
+      // Indexes (from legacy)
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)`).catch(() => {});
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read_status = FALSE`).catch(() => {});
+      // deleted_at column for soft-delete (from legacy)
+      await queryDb(env, `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`).catch(() => {});
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notifications_user_active ON notifications(user_id, created_at DESC) WHERE deleted_at IS NULL`).catch(() => {});
+
+      // ── notification_settings table ──
+      await queryDb(env, `
+        CREATE TABLE IF NOT EXISTS notification_settings (
+          user_id TEXT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+          analysis BOOLEAN NOT NULL DEFAULT TRUE,
+          calendar BOOLEAN NOT NULL DEFAULT FALSE,
+          price_alert BOOLEAN NOT NULL DEFAULT FALSE,
+          market BOOLEAN NOT NULL DEFAULT FALSE,
+          news BOOLEAN NOT NULL DEFAULT FALSE,
+          referral BOOLEAN NOT NULL DEFAULT FALSE,
+          reward BOOLEAN NOT NULL DEFAULT FALSE,
+          ticket BOOLEAN NOT NULL DEFAULT FALSE,
+          system BOOLEAN NOT NULL DEFAULT FALSE,
+          marketing BOOLEAN NOT NULL DEFAULT FALSE,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `).catch(() => {});
+
+      // ── Extend notifications table with platform columns ──
       await queryDb(env, `
         ALTER TABLE notifications
           ADD COLUMN IF NOT EXISTS priority VARCHAR(16) NOT NULL DEFAULT 'medium',
@@ -188,6 +232,14 @@ export function createNotificationPlatformRepository(deps) {
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_broadcasts_status ON notification_broadcasts (status, scheduled_at)`).catch(() => {});
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_category ON notifications (category)`).catch(() => {});
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_priority ON notifications (priority)`).catch(() => {});
+
+      // Phase 6: Additional performance indexes
+      // Index for requeueStaleQueueItems (WHERE status='processing' AND processed_at < ...)
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_queue_processing ON notification_queue (processed_at) WHERE status = 'processing'`).catch(() => {});
+      // Index for requeueStaleBroadcasts (WHERE status='sending' AND created_at < ...)
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_broadcasts_stale ON notification_broadcasts (created_at) WHERE status = 'sending'`).catch(() => {});
+      // Index for unread count queries (user_id, read_status WHERE deleted_at IS NULL)
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_notif_user_unread_active ON notifications (user_id) WHERE read_status = FALSE AND deleted_at IS NULL`).catch(() => {});
 
       // Seed default templates
       const tplCount = await queryDb(env, 'SELECT COUNT(*)::int AS cnt FROM notification_templates').catch(() => ({ rows: [{ cnt: 0 }] }));
