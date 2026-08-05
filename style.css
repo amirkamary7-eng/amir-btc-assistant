@@ -10751,6 +10751,18 @@ body.jl-locked .cd-fullscreen {
 #news-modal.news-modal-pro .news-modal-ai-icon-failed {
     color: #f87171;
 }
+/* Rate-limited state — amber/orange, pulsing */
+#news-modal.news-modal-pro .news-modal-rate-limited {
+    background: rgba(245,158,11,0.04);
+    border: 1px solid rgba(245,158,11,0.15);
+    animation: newsModalPulse 2.4s ease-in-out infinite;
+}
+/* Retry state — amber, slower pulse */
+#news-modal.news-modal-pro .news-modal-retry {
+    background: rgba(245,158,11,0.03);
+    border: 1px solid rgba(245,158,11,0.12);
+    animation: newsModalPulse 3.2s ease-in-out infinite;
+}
 /* Pending text — centered, relaxed */
 #news-modal.news-modal-pro .news-modal-pending-text {
     color: #94a3b8;

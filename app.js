@@ -6251,7 +6251,9 @@ async function loadNews(force = false, append = false) {
             updateNewsBadges();
         }
 
-        Cache.set('news', newsCache, 300);
+        // Phase 10.5: Reduced from 300s (5 min) to 120s (2 min) so stale
+        // ai_status='pending' data clears faster after a summary is generated.
+        Cache.set('news', newsCache, 120);
 
         // ITEM 2 FIX: Re-read the CURRENTLY active tab at render time, not
         // the tab that was active when the fetch started. If the user switched
@@ -7744,26 +7746,9 @@ function openNewsModal(idx) {
             tagsHtml += '</div>';
             bodyEl.innerHTML += tagsHtml;
         } else {
-            // No AI summary — show appropriate message based on ai_status
-            //   pending/unknown → "تحلیل در حال تولید است..." (will be ready soon)
-            //   failed          → "تحلیل در دسترس نیست" (no infinite waiting)
-            const status = n.ai_status || 'unknown';
-            const isFailed = (status === 'failed');
-            const message = isFailed
-                ? 'تحلیل این خبر در حال حاضر در دسترس نیست. می‌توانید منبع اصلی را مطالعه کنید.'
-                : 'تحلیل این خبر در حال تولید است و طی چند دقیقه آینده تکمیل خواهد شد.';
-            const boxClass = isFailed ? 'news-modal-summary-box news-modal-loading news-modal-failed' : 'news-modal-summary-box news-modal-loading';
-            bodyEl.innerHTML =
-                '<div class="' + boxClass + '">' +
-                    '<div class="news-modal-summary-header">' +
-                        '<svg class="news-modal-ai-icon' + (isFailed ? ' news-modal-ai-icon-failed' : '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" stroke-linejoin="round"/><circle cx="12" cy="20" r="1"/></svg>' +
-                        '<span>تحلیل خبر</span>' +
-                    '</div>' +
-                    '<div class="news-modal-summary-text news-modal-pending-text">' +
-                        (isFailed ? '' : '<div class="news-modal-pending-spinner"></div>') +
-                        message +
-                    '</div>' +
-                '</div>';
+            // No AI summary — show differentiated message based on ai_status
+            // Phase 10.5: pending / retry / failed / rate_limited / unknown each have unique message
+            bodyEl.innerHTML = buildNewsPendingBox(n.ai_status);
         }
         bodyEl.style.opacity = '1';
     }
@@ -7788,6 +7773,61 @@ function escapeHtmlForNews(text) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/\n/g, '<br>');
+}
+
+/**
+ * Build the pending/failed/retry/rate_limited HTML for the news modal.
+ * Phase 10.5: Differentiates status messages so users know exactly what's happening.
+ *
+ * Status types:
+ *   completed    → handled by caller (shows summary)
+ *   pending      → in queue, will be processed next tick (spinner + "در حال تولید...")
+ *   retry        → failed once, in backoff, will retry (spinner + "در حال تلاش مجدد...")
+ *   failed       → exhausted 3 retries, won't retry (no spinner + "در دسترس نیست")
+ *   rate_limited → all AI providers circuit-open (spinner + "محدودیت موقت...")
+ *   unknown      → not yet enqueued, will be picked up next batch (spinner + "در حال تولید...")
+ *   processing   → (reserved for future use, currently same as pending)
+ */
+function buildNewsPendingBox(aiStatus) {
+    const status = aiStatus || 'unknown';
+    const isFailed = (status === 'failed');
+    const isRateLimited = (status === 'rate_limited');
+    const isRetry = (status === 'retry');
+
+    let message, boxClass, iconClass, showSpinner;
+    if (isFailed) {
+        message = 'تحلیل این خبر در حال حاضر در دسترس نیست. می‌توانید منبع اصلی را مطالعه کنید.';
+        boxClass = 'news-modal-summary-box news-modal-loading news-modal-failed';
+        iconClass = 'news-modal-ai-icon-failed';
+        showSpinner = false;
+    } else if (isRateLimited) {
+        message = 'سرویس‌های هوش مصنوعی در حال حاضر دارای محدودیت نرخ هستند. تحلیل خبر بزودی تولید خواهد شد.';
+        boxClass = 'news-modal-summary-box news-modal-loading news-modal-rate-limited';
+        iconClass = '';
+        showSpinner = true;
+    } else if (isRetry) {
+        message = 'تولید تحلیل این خبر با خطا مواجه شد و در حال تلاش مجدد است. طی چند دقیقه آینده تکمیل خواهد شد.';
+        boxClass = 'news-modal-summary-box news-modal-loading news-modal-retry';
+        iconClass = '';
+        showSpinner = true;
+    } else {
+        // pending, unknown, processing — all show "in progress" message
+        message = 'تحلیل این خبر در حال تولید است و طی چند دقیقه آینده تکمیل خواهد شد.';
+        boxClass = 'news-modal-summary-box news-modal-loading';
+        iconClass = '';
+        showSpinner = true;
+    }
+
+    return '<div class="' + boxClass + '">' +
+        '<div class="news-modal-summary-header">' +
+            '<svg class="news-modal-ai-icon ' + iconClass + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" stroke-linejoin="round"/><circle cx="12" cy="20" r="1"/></svg>' +
+            '<span>تحلیل خبر</span>' +
+        '</div>' +
+        '<div class="news-modal-summary-text news-modal-pending-text">' +
+            (showSpinner ? '<div class="news-modal-pending-spinner"></div>' : '') +
+            message +
+        '</div>' +
+    '</div>';
 }
 /**
  * اخبار مودال را می‌بندد.
@@ -10778,24 +10818,9 @@ function openNewsModalWith(n) {
             tagsHtml += '</div>';
             bodyEl.innerHTML += tagsHtml;
         } else {
-            // No AI summary — show appropriate message based on ai_status (NEVER show RSS body)
-            const status = n.ai_status || 'unknown';
-            const isFailed = (status === 'failed');
-            const message = isFailed
-                ? 'تحلیل این خبر در حال حاضر در دسترس نیست. می‌توانید منبع اصلی را مطالعه کنید.'
-                : 'تحلیل این خبر در حال تولید است و طی چند دقیقه آینده تکمیل خواهد شد.';
-            const boxClass = isFailed ? 'news-modal-summary-box news-modal-loading news-modal-failed' : 'news-modal-summary-box news-modal-loading';
-            bodyEl.innerHTML =
-                '<div class="' + boxClass + '">' +
-                    '<div class="news-modal-summary-header">' +
-                        '<svg class="news-modal-ai-icon' + (isFailed ? ' news-modal-ai-icon-failed' : '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" stroke-linejoin="round"/><circle cx="12" cy="20" r="1"/></svg>' +
-                        '<span>تحلیل خبر</span>' +
-                    '</div>' +
-                    '<div class="news-modal-summary-text news-modal-pending-text">' +
-                        (isFailed ? '' : '<div class="news-modal-pending-spinner"></div>') +
-                        message +
-                    '</div>' +
-                '</div>';
+            // No AI summary — show differentiated message based on ai_status
+            // Phase 10.5: pending / retry / failed / rate_limited / unknown each have unique message
+            bodyEl.innerHTML = buildNewsPendingBox(n.ai_status);
         }
         bodyEl.style.opacity = '1';
     }
@@ -12094,8 +12119,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const newsCacheStr = localStorage.getItem('news_cache');
         if (newsCacheStr) {
             const parsed = JSON.parse(newsCacheStr);
-            // 5-minute TTL (matches backend KV cache)
-            if (parsed && parsed.ts && (Date.now() - parsed.ts < 5 * 60 * 1000) && Array.isArray(parsed.data)) {
+            // Phase 10.5: Reduced from 5 min to 2 min for faster ai_status refresh
+            if (parsed && parsed.ts && (Date.now() - parsed.ts < 2 * 60 * 1000) && Array.isArray(parsed.data)) {
                 newsCache = parsed.data;
                 // Render important news from cache (non-blocking, instant)
                 renderImportantNewsFromCache();

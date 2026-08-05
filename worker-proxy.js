@@ -4613,15 +4613,54 @@ async function getNewsAIMonitoring(env) {
 async function enrichNewsWithAISummaries(env, articles) {
   if (!env.APP_CACHE || !Array.isArray(articles)) return articles;
 
-  // Read queue ONCE to build a URL → status map (cheap, single KV read)
-  let queueStatusByUrl = new Map();
+  // Read queue ONCE to build a URL → full item map (cheap, single KV read)
+  // We need the full item (not just status) to distinguish pending vs retry
+  let queueItemByUrl = new Map();
   try {
     const queue = await getSummaryQueue(env);
+    const now = Date.now();
     for (const item of queue) {
-      if (item.url) queueStatusByUrl.set(item.url, item.status || 'pending');
+      if (item.url) {
+        // Derive display status from queue item:
+        // - status='failed' → 'failed' (exhausted retries)
+        // - status='pending' + next_retry > now → 'retry' (in backoff, waiting to retry)
+        // - status='pending' + (no next_retry OR next_retry <= now) → 'pending' (eligible for next tick)
+        let displayStatus = item.status || 'pending';
+        if (displayStatus === 'pending' && item.next_retry && item.next_retry > now) {
+          displayStatus = 'retry';
+        }
+        queueItemByUrl.set(item.url, { ...item, displayStatus });
+      }
     }
   } catch (e) {
     console.warn('[NEWS-AI] enrichNews queue read error (non-fatal):', e?.message);
+  }
+
+  // Read circuit breaker states ONCE (3 KV reads, cheap) to detect rate_limited
+  // If ALL enabled providers have OPEN circuits, articles without summaries get
+  // 'rate_limited' status instead of 'pending' — so frontend can show a more
+  // accurate message ("AI providers temporarily rate-limited, retrying soon").
+  let allProvidersCircuitOpen = false;
+  try {
+    const enabledProviders = [];
+    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) enabledProviders.push('gemini');
+    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true)) enabledProviders.push('workers-ai');
+    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) enabledProviders.push('openai');
+
+    if (enabledProviders.length > 0) {
+      const now = Date.now();
+      let openCount = 0;
+      for (const p of enabledProviders) {
+        const cbState = await getCircuitState(env, p);
+        // Circuit is "blocking" if OPEN and retry_after hasn't passed yet
+        if (cbState.state === 'OPEN' && cbState.retry_after && cbState.retry_after > now) {
+          openCount++;
+        }
+      }
+      allProvidersCircuitOpen = (openCount === enabledProviders.length);
+    }
+  } catch (e) {
+    console.warn('[NEWS-AI] enrichNews circuit check error (non-fatal):', e?.message);
   }
 
   // PERF: Parallel KV reads — was sequential (30 reads × 50ms = 1.5s),
@@ -4658,8 +4697,16 @@ async function enrichNewsWithAISummaries(env, articles) {
       if (aiSummary) {
         aiStatus = 'completed';
       } else {
-        const qStatus = article.url ? queueStatusByUrl.get(article.url) : null;
-        aiStatus = qStatus || 'unknown'; // 'pending' | 'failed' | 'unknown'
+        const qItem = article.url ? queueItemByUrl.get(article.url) : null;
+        if (qItem) {
+          // In queue — use displayStatus ('pending' | 'retry' | 'failed')
+          aiStatus = qItem.displayStatus || 'pending';
+        } else {
+          // Not in queue
+          // If ALL providers are rate-limited (circuits OPEN), show 'rate_limited'
+          // so frontend can display a more specific message
+          aiStatus = allProvidersCircuitOpen ? 'rate_limited' : 'unknown';
+        }
       }
       return {
         ...article,
@@ -9902,31 +9949,45 @@ export default {
       }
 
       // ── PHASE 1d: News Summary Queue Processing (every 5 min) ──
-      // Process ONE article summary per tick from the KV queue.
+      // Process up to 2 article summaries per tick from the KV queue.
       // Queue persists across cron ticks — no article is lost.
+      // ROOT-CAUSE FIX (Phase 10.5): increased from 1 to 2 articles per tick
+      // to halve queue drain time. Each article uses ~1 fetch + 1 AI call = 2
+      // subrequests. 2 articles = 4 subrequests + 7 RSS = 11 total — well under
+      // Cloudflare Free's 50 subrequest limit.
+      // If queue is empty, processOneArticleSummary returns immediately (no extra work).
       // Feature flags respected inside processOneArticleSummary (NEWS_SUMMARY_ENABLED).
       if (isEvery5Min) {
-        try {
-          const summaryResult = await processOneArticleSummary(env);
-          if (summaryResult.processed && summaryResult.success) {
-            console.log('[CRON] news summary processed:', summaryResult.url?.substring(0, 60));
-          }
-          // Record monitoring tick (5-min cycle)
+        const MAX_SUMMARIES_PER_TICK = 2;
+        for (let i = 0; i < MAX_SUMMARIES_PER_TICK; i++) {
           try {
-            await recordNewsAITick(env, {
-              type: 'tick_5min',
-              summary_processed: summaryResult.processed || false,
-              summary_success: summaryResult.success || false,
-              summary_reason: summaryResult.reason || null,
-              summary_retry_count: summaryResult.retry_count || 0,
-              summary_duration_ms: summaryResult.duration_ms || 0,
-              queue_length: summaryResult.queueLength || null,
-            });
-          } catch {}
-          _logPhase('phase1d-news-summary', 'ok', summaryResult);
-        } catch (e) {
-          _logPhase('phase1d-news-summary', 'error', { error: e?.message });
-          console.warn('[CRON] news summary failed:', e?.message);
+            const summaryResult = await processOneArticleSummary(env);
+            if (summaryResult.processed && summaryResult.success) {
+              console.log(`[CRON] news summary ${i+1}/${MAX_SUMMARIES_PER_TICK} processed:`, summaryResult.url?.substring(0, 60));
+            }
+            // If queue was empty or no eligible items, stop early (no extra work)
+            if (!summaryResult.processed && (summaryResult.empty || summaryResult.reason === 'no_eligible')) {
+              break;
+            }
+            // Record monitoring tick (5-min cycle)
+            try {
+              await recordNewsAITick(env, {
+                type: 'tick_5min',
+                summary_processed: summaryResult.processed || false,
+                summary_success: summaryResult.success || false,
+                summary_reason: summaryResult.reason || null,
+                summary_retry_count: summaryResult.retry_count || 0,
+                summary_duration_ms: summaryResult.duration_ms || 0,
+                queue_length: summaryResult.queueLength || null,
+                tick_article_index: i + 1,
+              });
+            } catch {}
+            _logPhase('phase1d-news-summary', 'ok', summaryResult);
+          } catch (e) {
+            _logPhase('phase1d-news-summary', 'error', { error: e?.message });
+            console.warn('[CRON] news summary failed:', e?.message);
+            break; // stop on error
+          }
         }
       }
 
@@ -9985,6 +10046,9 @@ export default {
         }
 
         // ── PHASE 3: Heavy jobs (alternating) ──
+        // ROOT-CAUSE FIX (Phase 10.5): processNewsAIBatch now runs on ALL 15-min
+        // ticks (was only :15/:45 = every 30 min). This halves the enqueue delay
+        // for new articles — they now wait max 15 min instead of 30 min.
         const minute = new Date().getUTCMinutes();
         if (minute === 0 || minute === 30) {
           if (notificationPlatformRepo?.processQueue) {
@@ -9999,17 +10063,21 @@ export default {
               console.warn('[CRON] market overview failed:', e?.message);
             }
           }
-        } else {
+        }
+        // Publisher runs on non-0/30 minutes (same as before)
+        if (minute !== 0 && minute !== 30) {
           if (publisherHandlers?.processPublisherQueue) {
             try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); _logPhase('phase3-publisher', 'ok'); } catch (e) {
               _logPhase('phase3-publisher', 'error', { error: e?.message });
               console.warn('[CRON] publisher failed:', e?.message);
             }
           }
-          try { await processNewsAIBatch(env); _logPhase('phase3-newsai', 'ok'); } catch (e) {
-            _logPhase('phase3-newsai', 'error', { error: e?.message });
-            console.warn('[CRON] news AI failed:', e?.message);
-          }
+        }
+        // ROOT-CAUSE FIX: processNewsAIBatch runs on EVERY 15-min tick (not just :15/:45)
+        // This ensures new articles are enqueued within 15 min of appearing in RSS.
+        try { await processNewsAIBatch(env); _logPhase('phase3-newsai', 'ok'); } catch (e) {
+          _logPhase('phase3-newsai', 'error', { error: e?.message });
+          console.warn('[CRON] news AI failed:', e?.message);
         }
       }
 
