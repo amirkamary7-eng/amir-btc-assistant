@@ -4043,6 +4043,11 @@ async function enqueueForSummary(env, articles) {
       next_retry: null, // null = immediately eligible
       status: 'pending',
       enqueued_at: now,
+      // Phase 10.5 E2E timing instrumentation
+      rss_fetched_at: now,        // approx — RSS fetch happened seconds before enqueue
+      summary_started_at: null,   // set when processOneArticleSummary picks this item
+      summary_completed_at: null, // set when summary saved to KV (success)
+      provider_used: null,        // 'gemini' | 'workers-ai' | 'openai'
     });
     existingByUrl.set(a.url, queue[queue.length - 1]);
     enqueued++;
@@ -4111,6 +4116,9 @@ async function processOneArticleSummary(env) {
 
   const article = queue[idx];
   const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
+
+  // Phase 10.5 E2E timing: record when summary processing started
+  article.summary_started_at = now;
 
   // ── SUMMARY CACHE CHECK (Phase 10.5) ──
   // Before running ANY provider, check if a valid summary already exists in KV.
@@ -4184,6 +4192,7 @@ async function processOneArticleSummary(env) {
   // Helper: on success — remove from queue + save summary WITH metadata
   // (Phase 10: store provider + attempts as JSON for monitoring + frontend visibility)
   async function succeedWithSummary(summary, provider, attempts) {
+    const completedAt = Date.now();
     try {
       // Store as JSON with metadata (backward-compatible: enrichNewsWithAISummaries parses both)
       const payload = JSON.stringify({
@@ -4195,9 +4204,38 @@ async function processOneArticleSummary(env) {
           error: a.error || null,
           duration_ms: a.duration_ms || 0,
         })),
-        generated_at: Date.now(),
+        generated_at: completedAt,
+        // E2E timing (for /api/news-ai-timing diagnostics)
+        e2e: {
+          rss_fetched_at: article.rss_fetched_at || null,
+          enqueued_at: article.enqueued_at || null,
+          summary_started_at: article.summary_started_at || null,
+          summary_completed_at: completedAt,
+          total_e2e_ms: (article.rss_fetched_at) ? (completedAt - article.rss_fetched_at) : null,
+          queue_wait_ms: (article.enqueued_at && article.summary_started_at)
+            ? (article.summary_started_at - article.enqueued_at) : null,
+          summary_gen_ms: (article.summary_started_at)
+            ? (completedAt - article.summary_started_at) : null,
+        },
       });
       await writeAppCache(env, aiKey, payload, NEWS_AI_CACHE_TTL);
+
+      // Record E2E timing to a rolling history in KV (for monitoring)
+      try {
+        await recordE2ETiming(env, {
+          url: article.url,
+          provider,
+          rss_fetched_at: article.rss_fetched_at,
+          enqueued_at: article.enqueued_at,
+          summary_started_at: article.summary_started_at,
+          summary_completed_at: completedAt,
+          total_e2e_ms: (article.rss_fetched_at) ? (completedAt - article.rss_fetched_at) : null,
+          queue_wait_ms: (article.enqueued_at && article.summary_started_at)
+            ? (article.summary_started_at - article.enqueued_at) : null,
+          summary_gen_ms: (article.summary_started_at)
+            ? (completedAt - article.summary_started_at) : null,
+        });
+      } catch {}
     } catch (e) {
       // KV write failed — treat as retryable failure
       return requeueWithRetry('kv_write_failed', e?.message);
@@ -4212,6 +4250,7 @@ async function processOneArticleSummary(env) {
       retry_count: article.retry_count || 0,
       duration_ms: Date.now() - t0,
       fallback_used: attempts.length > 1,
+      e2e_total_ms: (article.rss_fetched_at) ? (completedAt - article.rss_fetched_at) : null,
     };
   }
 
@@ -4440,6 +4479,91 @@ async function recordNewsAITick(env, stats) {
   } catch (e) {
     console.warn('[NEWS-AI-MONITOR] recordTick failed:', e?.message);
   }
+}
+
+// ── E2E Timing History (Phase 10.5 final validation) ──
+const NEWS_AI_E2E_TIMING_KEY = 'news:ai_e2e_timing';
+const NEWS_AI_E2E_TIMING_TTL = 24 * 60 * 60; // 24h
+
+/**
+ * Record E2E timing for a completed summary to a rolling history in KV.
+ * Used by /api/news-ai-timing endpoint for final production validation.
+ * Keeps last 50 completed summaries.
+ */
+async function recordE2ETiming(env, timing) {
+  if (!env.APP_CACHE) return;
+  try {
+    const raw = await readAppCache(env, NEWS_AI_E2E_TIMING_KEY).catch(() => null);
+    let history = [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) history = parsed;
+    }
+    history.push({ ts: Date.now(), ...timing });
+    // Keep last 50 completed summaries
+    if (history.length > 50) history = history.slice(-50);
+    await writeAppCache(env, NEWS_AI_E2E_TIMING_KEY, JSON.stringify(history), NEWS_AI_E2E_TIMING_TTL);
+  } catch (e) {
+    console.warn('[NEWS-AI-E2E] recordE2ETiming failed:', e?.message);
+  }
+}
+
+/**
+ * Get E2E timing history + computed stats (avg, max, min) for each phase.
+ * Returns: { history, stats: { avg_total_e2e_ms, max_total_e2e_ms, avg_queue_wait_ms,
+ *           avg_summary_gen_ms, count, by_provider: {} } }
+ */
+async function getE2ETimingStats(env) {
+  let history = [];
+  try {
+    const raw = await readAppCache(env, NEWS_AI_E2E_TIMING_KEY).catch(() => null);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) history = parsed;
+    }
+  } catch {}
+
+  if (history.length === 0) {
+    return { history: [], stats: null, count: 0 };
+  }
+
+  // Compute stats
+  const totals = history.filter(h => h.total_e2e_ms != null).map(h => h.total_e2e_ms);
+  const queueWaits = history.filter(h => h.queue_wait_ms != null).map(h => h.queue_wait_ms);
+  const genTimes = history.filter(h => h.summary_gen_ms != null).map(h => h.summary_gen_ms);
+
+  const avg = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+  const max = (arr) => arr.length ? Math.max(...arr) : 0;
+  const min = (arr) => arr.length ? Math.min(...arr) : 0;
+
+  // By provider breakdown
+  const byProvider = {};
+  for (const h of history) {
+    const p = h.provider || 'unknown';
+    if (!byProvider[p]) byProvider[p] = { count: 0, total_e2e_ms: [], summary_gen_ms: [] };
+    byProvider[p].count++;
+    if (h.total_e2e_ms != null) byProvider[p].total_e2e_ms.push(h.total_e2e_ms);
+    if (h.summary_gen_ms != null) byProvider[p].summary_gen_ms.push(h.summary_gen_ms);
+  }
+  for (const p of Object.keys(byProvider)) {
+    byProvider[p].avg_total_e2e_ms = avg(byProvider[p].total_e2e_ms);
+    byProvider[p].avg_summary_gen_ms = avg(byProvider[p].summary_gen_ms);
+  }
+
+  return {
+    history: history.slice(-20), // last 20 for the response
+    stats: {
+      count: history.length,
+      avg_total_e2e_ms: avg(totals),
+      max_total_e2e_ms: max(totals),
+      min_total_e2e_ms: min(totals),
+      avg_queue_wait_ms: avg(queueWaits),
+      max_queue_wait_ms: max(queueWaits),
+      avg_summary_gen_ms: avg(genTimes),
+      max_summary_gen_ms: max(genTimes),
+    },
+    by_provider: byProvider,
+  };
 }
 
 /**
@@ -8354,6 +8478,128 @@ export default {
         try {
           const monitoring = await getNewsAIMonitoring(env);
           return jsonResponse({ status: 'success', ...monitoring }, {}, env);
+        } catch (e) {
+          return jsonResponse({ status: 'error', error: e?.message }, { status: 500 }, env);
+        }
+      }
+
+      // ── News AI E2E Timing — final production validation ──
+      // Shows end-to-end timing for recent completed summaries:
+      // RSS → Enqueue → Summary Start → Summary Complete
+      // Plus avg/max/min for each phase + per-provider breakdown.
+      if (request.method === 'GET' && url.pathname === '/api/news-ai-timing') {
+        try {
+          const timing = await getE2ETimingStats(env);
+          return jsonResponse({ status: 'success', ...timing }, {}, env);
+        } catch (e) {
+          return jsonResponse({ status: 'error', error: e?.message }, { status: 500 }, env);
+        }
+      }
+
+      // ── News AI Pending Diagnostics — detailed per-article pending info ──
+      // For each pending/unknown article in the current news list, shows:
+      //   url, hash, queue_status, retry_count, provider, circuit_breaker_state,
+      //   last_error, last_attempt, kv_exists, api_serves
+      // Use to instantly identify which layer has the issue if pending persists.
+      if (request.method === 'GET' && url.pathname === '/api/news-ai-pending') {
+        try {
+          // Read current news list from KV
+          let articles = [];
+          try {
+            const raw = await readAppCache(env, FARSI_NEWS_CACHE_KEY);
+            if (raw) articles = JSON.parse(raw) || [];
+          } catch {}
+
+          // Read queue
+          const queue = await getSummaryQueue(env);
+          const queueByUrl = new Map();
+          for (const item of queue) {
+            if (item.url) queueByUrl.set(item.url, item);
+          }
+
+          // Read circuit states
+          const circuitStates = {};
+          for (const p of ['gemini', 'workers-ai', 'openai']) {
+            circuitStates[p] = await getCircuitState(env, p);
+          }
+
+          // For each article, check KV + build diagnostic info
+          const now = Date.now();
+          const diagnostics = await Promise.all(
+            articles.map(async (a) => {
+              const url = a.url || '';
+              const hash = hashUrl(url);
+              const aiKey = `${NEWS_AI_CACHE_PREFIX}${hash}`;
+              let kvExists = false;
+              let kvProvider = null;
+              let kvSummaryLen = 0;
+              try {
+                const raw = await readAppCache(env, aiKey);
+                if (raw) {
+                  kvExists = true;
+                  try {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string') {
+                      kvProvider = parsed.provider || null;
+                      kvSummaryLen = parsed.summary.length;
+                    } else {
+                      kvSummaryLen = raw.length;
+                    }
+                  } catch {
+                    kvSummaryLen = raw.length;
+                  }
+                }
+              } catch {}
+
+              const qItem = queueByUrl.get(url);
+              let queueStatus, retryCount, lastAttempt, lastError, nextRetry, providerUsed;
+              if (qItem) {
+                queueStatus = qItem.status || 'pending';
+                retryCount = qItem.retry_count || 0;
+                lastAttempt = qItem.last_attempt || null;
+                lastError = qItem.fail_reason || qItem.last_error || null;
+                nextRetry = qItem.next_retry || null;
+                providerUsed = qItem.provider_used || null;
+              } else {
+                queueStatus = 'not_in_queue';
+                retryCount = 0;
+                lastAttempt = null;
+                lastError = null;
+                nextRetry = null;
+                providerUsed = null;
+              }
+
+              return {
+                url: url.substring(0, 100),
+                hash,
+                title: (a.title || '').substring(0, 60),
+                queue_status: queueStatus,
+                retry_count: retryCount,
+                provider_used: providerUsed,
+                last_attempt: lastAttempt,
+                last_error: lastError,
+                next_retry: nextRetry,
+                next_retry_in_ms: nextRetry ? Math.max(0, nextRetry - now) : null,
+                kv_exists: kvExists,
+                kv_provider: kvProvider,
+                kv_summary_length: kvSummaryLen,
+                api_serves: kvExists && kvSummaryLen >= 50, // will be served as completed
+                circuit_breaker: {
+                  gemini: circuitStates.gemini?.state || 'CLOSED',
+                  'workers-ai': circuitStates['workers-ai']?.state || 'CLOSED',
+                  openai: circuitStates.openai?.state || 'CLOSED',
+                },
+                pending_age_ms: qItem?.enqueued_at ? (now - qItem.enqueued_at) : null,
+              };
+            })
+          );
+
+          return jsonResponse({
+            status: 'success',
+            ts: now,
+            total_articles: articles.length,
+            diagnostics,
+          }, {}, env);
         } catch (e) {
           return jsonResponse({ status: 'error', error: e?.message }, { status: 500 }, env);
         }
