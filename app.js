@@ -7713,22 +7713,46 @@ function openNewsModal(idx) {
     const bodyEl = el('news-modal-body');
     if (bodyEl) {
         const hasAiSummary = !!(n.ai_summary && n.ai_summary.trim().length > 50);
-        const rssBody = n.body || n.description || t('news_unavailable');
 
         if (hasAiSummary) {
-            // AI summary ready — show in a styled box with AI badge
+            // AI summary ready — show ONLY the analysis (no RSS body)
             bodyEl.innerHTML =
                 '<div class="news-modal-summary-box">' +
                     '<div class="news-modal-summary-header">' +
                         '<svg class="news-modal-ai-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" stroke-linejoin="round"/><circle cx="12" cy="20" r="1"/></svg>' +
-                        '<span>خلاصه هوشمند</span>' +
+                        '<span>تحلیل خبر</span>' +
                     '</div>' +
                     '<div class="news-modal-summary-text">' + escapeHtmlForNews(n.ai_summary) + '</div>' +
-                '</div>' +
-                '<div class="news-modal-fulltext">' + escapeHtmlForNews(rssBody) + '</div>';
+                '</div>';
+            // Add tags row (sentiment + impact + coins) if available
+            let tagsHtml = '<div class="news-modal-tags">';
+            if (n.sentiment) {
+                const sentColors = { bullish: '#22c55e', bearish: '#ef4444', neutral: '#6b7280', breaking: '#f59e0b', macro: '#8b5cf6' };
+                const sentLabels = { bullish: 'صعودی', bearish: 'نزولی', neutral: 'خنثی', breaking: 'فوری', macro: 'کلان' };
+                tagsHtml += '<span class="news-tag" style="background:' + (sentColors[n.sentiment] || '#6b7280') + '20;color:' + (sentColors[n.sentiment] || '#6b7280') + '">' + (sentLabels[n.sentiment] || n.sentiment) + '</span>';
+            }
+            if (n.impact) {
+                const impColors = { high: '#ef4444', medium: '#f59e0b', low: '#6b7280' };
+                const impLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
+                tagsHtml += '<span class="news-tag" style="background:' + (impColors[n.impact] || '#6b7280') + '20;color:' + (impColors[n.impact] || '#6b7280') + '">' + (impLabels[n.impact] || n.impact) + '</span>';
+            }
+            if (n.coins && Array.isArray(n.coins) && n.coins.length > 0) {
+                for (const coin of n.coins.slice(0, 5)) {
+                    tagsHtml += '<span class="news-tag news-tag-coin">' + escapeHtml(coin) + '</span>';
+                }
+            }
+            tagsHtml += '</div>';
+            bodyEl.innerHTML += tagsHtml;
         } else {
-            // No AI summary — show RSS body immediately (no spinner, no waiting)
-            bodyEl.innerHTML = '<div class="news-modal-fulltext">' + escapeHtmlForNews(rssBody) + '</div>';
+            // No AI summary — show loading state (NOT RSS body)
+            bodyEl.innerHTML =
+                '<div class="news-modal-summary-box news-modal-loading">' +
+                    '<div class="news-modal-summary-header">' +
+                        '<svg class="news-modal-ai-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" stroke-linejoin="round"/><circle cx="12" cy="20" r="1"/></svg>' +
+                        '<span>تحلیل خبر</span>' +
+                    '</div>' +
+                    '<div class="news-modal-summary-text" style="color:var(--muted);text-align:center;padding:16px 0;">تحلیل خبر در حال آماده‌سازی است...</div>' +
+                '</div>';
         }
         bodyEl.style.opacity = '1';
     }

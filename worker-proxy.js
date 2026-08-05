@@ -3534,7 +3534,7 @@ async function processNewsAIJobs(env, articles) {
   // Each article = 1 HTML fetch + 1 AI.run() = 2 subrequests.
   // With 3 articles = 6 subrequests for AI summaries.
   // Plus RSS (7) + translations (42) = 55 total. Under 50 limit with batching.
-  for (const article of articles.slice(0, 5)) { // Process max 5 per cycle (was 3, increased for better coverage)
+  for (const article of articles.slice(0, 10)) { // Process all filtered articles (max 10)
     if (!article.url) continue;
 
     const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
@@ -3962,13 +3962,13 @@ async function processNewsAIBatch(env) {
       // Non-fatal — articles already cached with rule-based sentiment
     }
 
-    // ── STEP 8: AI SUMMARY GENERATION (only for high-impact articles) ──
-    // Phase 4: Short summaries (70-100 words) for top 3-5 high-impact articles.
-    const highImpactArticles = trimmed.filter(a => a.impact === 'high').slice(0, 5);
-    stepLog('AI_SUMMARY_start', { toProcess: highImpactArticles.length, totalArticles: trimmed.length });
+    // ── STEP 8: AI SUMMARY GENERATION (for ALL filtered articles) ──
+    // Generate professional 120-180 word summaries for all articles.
+    // Articles with existing summaries (KV cache) are skipped automatically.
+    stepLog('AI_SUMMARY_start', { toProcess: trimmed.length });
     let aiResult;
     try {
-      aiResult = await processNewsAIJobs(env, highImpactArticles.length > 0 ? highImpactArticles : trimmed.slice(0, 3));
+      aiResult = await processNewsAIJobs(env, trimmed);
     } catch (aiErr) {
       stepLog('AI_SUMMARY_FAILED', { error: aiErr?.message, stack: aiErr?.stack?.substring(0, 200) });
       // Non-fatal — summaries are optional
