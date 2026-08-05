@@ -3349,12 +3349,63 @@ async function fetchFarsiNews(env, categoryFilter) {
 const NEWS_AI_CACHE_PREFIX = 'news:ai:';
 const NEWS_AI_CACHE_TTL = 7 * 24 * 60 * 60; // 7 days
 const NEWS_SUMMARY_QUEUE_KEY = 'news:summary_queue';
+const NEWS_AI_MONITOR_KEY = 'news:ai_monitor'; // last tick stats
+const NEWS_AI_MONITOR_TTL = 24 * 60 * 60; // 24h
+
+// ────────────────────────────────────────────────────────────────────────────
+// FEATURE FLAGS — News AI
+// All News AI capabilities can be toggled on/off via env vars without code change.
+// Set env var to 'false' or '0' to disable. Default: all enabled.
+//   NEWS_AI_ENABLED              — master switch (disables everything below)
+//   NEWS_SUMMARY_ENABLED         — per-article AI summary generation
+//   NEWS_BATCH_ANALYSIS_ENABLED  — batch sentiment/impact/coins analysis
+//   NEWS_QUEUE_ENABLED           — persistent queue management
+// ────────────────────────────────────────────────────────────────────────────
+function isNewsFlagEnabled(env, flagName, defaultValue = true) {
+  const v = env?.[flagName];
+  if (v === undefined || v === null || v === '') return defaultValue;
+  if (typeof v === 'boolean') return v;
+  const s = String(v).toLowerCase().trim();
+  if (s === 'false' || s === '0' || s === 'off' || s === 'no') return false;
+  return true;
+}
+function isNewsAIEnabled(env) {
+  return isNewsFlagEnabled(env, 'NEWS_AI_ENABLED', true);
+}
+function isNewsSummaryEnabled(env) {
+  return isNewsAIEnabled(env) && isNewsFlagEnabled(env, 'NEWS_SUMMARY_ENABLED', true);
+}
+function isNewsBatchAnalysisEnabled(env) {
+  return isNewsAIEnabled(env) && isNewsFlagEnabled(env, 'NEWS_BATCH_ANALYSIS_ENABLED', true);
+}
+function isNewsQueueEnabled(env) {
+  return isNewsAIEnabled(env) && isNewsFlagEnabled(env, 'NEWS_QUEUE_ENABLED', true);
+}
+
+// ── Retry config ──
+const NEWS_SUMMARY_MAX_RETRIES = 3;
+const NEWS_SUMMARY_BACKOFF_MINUTES = [5, 15, 30]; // after attempt 1, 2, 3 (failures)
 
 /**
  * Queue Management for News AI Summaries.
- * Queue is stored in KV as a JSON array of { url, title, source, category } objects.
- * Each cron tick processes ONE article from the queue.
+ * Queue is stored in KV as a JSON array of queue-item objects.
+ * Each cron tick processes ONE article from the queue (FIFO).
  * If Worker is killed, queue persists in KV — next tick continues.
+ *
+ * Queue item schema:
+ *   {
+ *     url: string,          — article URL (primary key, dedup)
+ *     title: string,        — translated Farsi title
+ *     title_en: string,     — original English title
+ *     description: string,  — RSS description (fallback for AI input)
+ *     source: string,       — source name
+ *     category: string,     — 'crypto' | 'forex' | 'economy'
+ *     retry_count: number,  — 0..3
+ *     last_attempt: number|null, — epoch ms of last attempt
+ *     next_retry: number|null,   — epoch ms when next retry is allowed
+ *     status: 'pending'|'failed',— pending = needs processing, failed = exhausted retries
+ *     enqueued_at: number,  — epoch ms when first enqueued
+ *   }
  */
 
 /**
@@ -3385,64 +3436,191 @@ async function saveSummaryQueue(env, queue) {
 
 /**
  * Add articles to the summary queue.
- * Skips articles that already have summaries in KV.
- * Deduplicates by URL.
+ * - Skips articles that already have summaries in KV (prevent duplicate work).
+ * - Skips articles already in the queue (dedup by URL).
+ * - Skips articles previously marked as 'failed' (exhausted retries).
+ * - Respects NEWS_QUEUE_ENABLED feature flag (no-op when disabled).
+ *
+ * Each new queue item starts with retry_count=0, status='pending'.
  */
 async function enqueueForSummary(env, articles) {
-  if (!articles || articles.length === 0) return;
+  if (!articles || articles.length === 0) return { enqueued: 0, skipped: 0, total: 0 };
+
+  // Feature flag — when queue is disabled, do nothing (summaries won't be generated)
+  if (!isNewsQueueEnabled(env)) {
+    return { enqueued: 0, skipped: articles.length, total: 0, reason: 'queue_disabled' };
+  }
 
   // Get existing queue
   const queue = await getSummaryQueue(env);
-  const existingUrls = new Set(queue.map(q => q.url));
+  const existingByUrl = new Map(queue.map(q => [q.url, q]));
+  let enqueued = 0;
+  let skipped = 0;
 
-  // Add new articles (not already in queue, not already summarized)
+  const now = Date.now();
+
+  // Add new articles (not already in queue, not already summarized, not failed)
   for (const a of articles) {
-    if (!a.url || existingUrls.has(a.url)) continue;
+    if (!a.url) { skipped++; continue; }
 
-    // Check if summary already exists
+    const existing = existingByUrl.get(a.url);
+    if (existing) {
+      // Already in queue — skip (don't touch its retry state)
+      skipped++;
+      continue;
+    }
+
+    // Skip if already marked 'failed' (exhausted all 3 retries)
+    // (We check the queue itself because failed items remain in the queue
+    //  with status='failed' for monitoring purposes.)
+
+    // Check if summary already exists in KV → skip entirely
     const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(a.url)}`;
-    const existing = await readAppCache(env, aiKey).catch(() => null);
-    if (existing) continue;
+    const cachedSummary = await readAppCache(env, aiKey).catch(() => null);
+    if (cachedSummary) { skipped++; continue; }
 
     queue.push({
       url: a.url,
       title: a.title_en || a.title || '',
+      title_en: a.title_en || '',
+      description: String(a.description || '').slice(0, 2000), // RSS description as fallback
       source: a.source || '',
       category: a.category || 'crypto',
+      retry_count: 0,
+      last_attempt: null,
+      next_retry: null, // null = immediately eligible
+      status: 'pending',
+      enqueued_at: now,
     });
-    existingUrls.add(a.url);
+    existingByUrl.set(a.url, queue[queue.length - 1]);
+    enqueued++;
   }
 
-  // Limit queue size to 50 (prevent unbounded growth)
-  const trimmedQueue = queue.slice(-50);
+  // Limit queue size to 80 (prevent unbounded growth; preserves failed items for monitoring)
+  // Keep newest 80 items, but always keep all 'failed' items (for audit) up to a cap of 20 failed.
+  const failedItems = queue.filter(q => q.status === 'failed').slice(-20);
+  const pendingItems = queue.filter(q => q.status !== 'failed').slice(-60);
+  const trimmedQueue = [...pendingItems, ...failedItems];
   await saveSummaryQueue(env, trimmedQueue);
+
+  return { enqueued, skipped, total: trimmedQueue.length };
 }
 
 /**
- * Process ONE article summary from the queue.
- * Pops the first item, fetches article, generates AI summary, saves to KV.
- * Returns { processed: true, url, success } or { processed: false, empty: true }.
+ * Process ONE eligible article summary from the queue (FIFO with backoff).
+ *
+ * Eligibility:
+ *   - status === 'pending' (not 'failed')
+ *   - next_retry is null OR next_retry <= now (backoff window expired)
+ *
+ * Flow:
+ *   1. Find first eligible item (don't pop yet — we may need to requeue with retry state)
+ *   2. If summary already in KV → mark done (remove from queue)
+ *   3. Fetch article HTML → extract readable text (article → main → <p> tags → RSS description)
+ *   4. Generate AI summary (Gemini → Workers AI fallback)
+ *   5. On success → save to KV (7 days) + remove from queue
+ *   6. On failure → increment retry_count, set last_attempt, set next_retry (backoff)
+ *      - If retry_count >= MAX_RETRIES → status='failed' (kept in queue for monitoring)
+ *      - Else → keep in queue with updated retry state
+ *   7. Update monitoring stats in KV
+ *
+ * Returns { processed: true, success, url, reason, retry_count, duration_ms }
+ *      or { processed: false, empty: true } when no eligible item.
  */
 async function processOneArticleSummary(env) {
+  const t0 = Date.now();
+
+  // Feature flag — when summary is disabled, do nothing
+  if (!isNewsSummaryEnabled(env)) {
+    return { processed: false, empty: true, reason: 'summary_disabled' };
+  }
+
   const queue = await getSummaryQueue(env);
   if (queue.length === 0) return { processed: false, empty: true };
 
-  // Pop first item
-  const article = queue.shift();
-  await saveSummaryQueue(env, queue);
+  const now = Date.now();
 
-  if (!article.url) return { processed: true, success: false, reason: 'no_url' };
+  // Find first eligible item (FIFO among eligible)
+  let idx = -1;
+  for (let i = 0; i < queue.length; i++) {
+    const item = queue[i];
+    if (!item || !item.url) continue;
+    if (item.status === 'failed') continue;
+    // Eligible if next_retry is null or in the past
+    if (item.next_retry && item.next_retry > now) continue;
+    idx = i;
+    break;
+  }
 
+  if (idx === -1) {
+    // No eligible items — all either failed or in backoff
+    return { processed: false, empty: true, reason: 'no_eligible', queueLength: queue.length };
+  }
+
+  const article = queue[idx];
   const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
 
   // Double-check: summary might have been generated by a concurrent tick
   const existing = await readAppCache(env, aiKey).catch(() => null);
-  if (existing) return { processed: true, success: true, reason: 'already_exists' };
+  if (existing) {
+    // Already done — remove from queue
+    queue.splice(idx, 1);
+    await saveSummaryQueue(env, queue);
+    return { processed: true, success: true, reason: 'already_exists', url: article.url, duration_ms: Date.now() - t0 };
+  }
 
+  // Helper: requeue with retry state (mutates queue in place + persists)
+  async function requeueWithRetry(reason, errorDetail) {
+    const newRetryCount = (article.retry_count || 0) + 1;
+    const backoffMin = NEWS_SUMMARY_BACKOFF_MINUTES[Math.min(newRetryCount - 1, NEWS_SUMMARY_BACKOFF_MINUTES.length - 1)] || 30;
+    article.retry_count = newRetryCount;
+    article.last_attempt = now;
+    article.next_retry = now + backoffMin * 60 * 1000;
+    if (newRetryCount >= NEWS_SUMMARY_MAX_RETRIES) {
+      article.status = 'failed';
+      article.fail_reason = reason;
+    }
+    // Move to end of queue (so other eligible items get a chance first)
+    queue.splice(idx, 1);
+    queue.push(article);
+    await saveSummaryQueue(env, queue);
+    return {
+      processed: true,
+      success: false,
+      reason,
+      error: errorDetail,
+      url: article.url,
+      retry_count: newRetryCount,
+      next_retry: article.next_retry,
+      status: article.status,
+      duration_ms: Date.now() - t0,
+    };
+  }
+
+  // Helper: on success — remove from queue + save summary
+  async function succeedWithSummary(summary) {
+    try {
+      await writeAppCache(env, aiKey, summary, NEWS_AI_CACHE_TTL);
+    } catch (e) {
+      // KV write failed — treat as retryable failure
+      return requeueWithRetry('kv_write_failed', e?.message);
+    }
+    queue.splice(idx, 1);
+    await saveSummaryQueue(env, queue);
+    return {
+      processed: true,
+      success: true,
+      url: article.url,
+      retry_count: article.retry_count || 0,
+      duration_ms: Date.now() - t0,
+    };
+  }
+
+  // ── STEP 1: Fetch article HTML ──
+  let html = null;
   try {
-    // Step 1: Fetch full article HTML
     const fetchController = new AbortController();
-    const fetchTimeout = setTimeout(() => fetchController.abort(), 8000); // 8s (was 10s)
+    const fetchTimeout = setTimeout(() => fetchController.abort(), 8000);
     const articleRes = await fetch(article.url, {
       signal: fetchController.signal,
       headers: {
@@ -3452,153 +3630,205 @@ async function processOneArticleSummary(env) {
       },
     });
     clearTimeout(fetchTimeout);
-
     if (!articleRes.ok) {
-      return { processed: true, success: false, reason: 'fetch_' + articleRes.status };
+      return requeueWithRetry('fetch_' + articleRes.status, 'HTTP ' + articleRes.status);
     }
+    html = await articleRes.text();
+  } catch (e) {
+    return requeueWithRetry('fetch_error', e?.message?.substring(0, 120));
+  }
 
-    const html = await articleRes.text();
+  // ── STEP 2: Extract readable article text ──
+  // Fallback chain: <article> → <main> → all <p> tags → RSS description (last resort)
+  // NEVER fall back to raw cleanedHtml (junk), and NEVER show RSS body to user.
+  let cleanedHtml = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+    .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
+    .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
+    .replace(/<form[^>]*>[\s\S]*?<\/form>/gi, '')
+    .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '');
 
-    // Step 2: Extract article text
-    let cleanedHtml = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
-      .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
-      .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
-      .replace(/<form[^>]*>[\s\S]*?<\/form>/gi, '')
-      .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '');
-
-    let articleText = '';
-    let articleMatch = cleanedHtml.match(/<article[^>]*>[\s\S]*?<\/article>/i);
-    if (articleMatch) articleText = articleMatch[0];
-    if (!articleText || articleText.length < 200) {
-      articleMatch = cleanedHtml.match(/<main[^>]*>[\s\S]*?<\/main>/i);
-      if (articleMatch) articleText = articleMatch[0];
-    }
-    if (!articleText || articleText.length < 200) {
-      const paragraphs = cleanedHtml.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || [];
-      articleText = paragraphs.join(' ');
-    }
-    if (!articleText || articleText.length < 200) {
-      articleText = cleanedHtml;
-    }
-
-    articleText = articleText
+  function stripTags(s) {
+    return s
       .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-      .replace(/\s+/g, ' ').trim();
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
 
-    if (articleText.length > 8000) articleText = articleText.substring(0, 8000);
+  let articleText = '';
+  let extractionSource = 'none';
 
-    if (articleText.length < 100) {
-      articleText = (article.title || '') + '\n\n' + (article.description || '');
-      if (articleText.length < 50) {
-        return { processed: true, success: false, reason: 'text_too_short' };
-      }
+  // Stage 1: <article>
+  let m = cleanedHtml.match(/<article[^>]*>[\s\S]*?<\/article>/i);
+  if (m && stripTags(m[0]).length >= 200) {
+    articleText = stripTags(m[0]);
+    extractionSource = 'article';
+  }
+  // Stage 2: <main>
+  if (!articleText) {
+    m = cleanedHtml.match(/<main[^>]*>[\s\S]*?<\/main>/i);
+    if (m && stripTags(m[0]).length >= 200) {
+      articleText = stripTags(m[0]);
+      extractionSource = 'main';
     }
+  }
+  // Stage 3: all <p> tags
+  if (!articleText) {
+    const paragraphs = cleanedHtml.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || [];
+    const joined = stripTags(paragraphs.join(' '));
+    if (joined.length >= 200) {
+      articleText = joined;
+      extractionSource = 'paragraphs';
+    }
+  }
+  // Stage 4: RSS description (LAST RESORT — never raw cleanedHtml)
+  if (!articleText) {
+    const descText = stripTags(article.description || '');
+    const titleText = stripTags(article.title || article.title_en || '');
+    const combined = (titleText + '\n\n' + descText).trim();
+    if (combined.length >= 50) {
+      articleText = combined;
+      extractionSource = 'rss_description';
+    }
+  }
 
-    // Step 3: Generate AI summary
-    let summary = null;
+  // Truncate to keep prompt size reasonable
+  if (articleText.length > 8000) articleText = articleText.substring(0, 8000);
 
-    // Method 1: Gemini 2.0 Flash
-    const GEMINI_API_KEY = env.GEMINI_API_KEY;
-    if (GEMINI_API_KEY) {
-      try {
-        const prompt = `You are a professional Persian crypto and financial journalist.
+  if (articleText.length < 50) {
+    // Truly nothing to summarize — mark as failed (no point retrying)
+    article.retry_count = (article.retry_count || 0) + 1;
+    article.last_attempt = now;
+    article.status = 'failed'; // skip retries — article has no content
+    article.fail_reason = 'text_too_short';
+    queue.splice(idx, 1);
+    queue.push(article);
+    await saveSummaryQueue(env, queue);
+    return {
+      processed: true, success: false, reason: 'text_too_short',
+      url: article.url, retry_count: article.retry_count, status: 'failed',
+      duration_ms: Date.now() - t0,
+    };
+  }
 
-Write a professional analysis of this article in Persian (Farsi), 120-200 words.
+  // ── STEP 3: Generate AI summary ──
+  let summary = null;
+  let aiSource = 'none';
 
-Structure (use \\n\\n between paragraphs):
+  // Professional journalist prompt — emphasizes: read full article, preserve
+  // numbers/names/dates, explain significance, no fabrication, fluent Farsi.
+  const JOURNALIST_SYSTEM = 'تو یک خبرنگار حرفه‌ای مالی و کریپتو هستی. وظیفه تو این است که مقاله زیر را کامل بخوانی و یک تحلیل حرفه‌ای، روان و دقیق به زبان فارسی بنویسی. تو مترجم نیستی، بازنویس نیستی، و تبلیغ‌نویس نیستی. تو یک تحلیل‌گر خبر هستی.';
+  const JOURNALIST_PROMPT = `${JOURNALIST_SYSTEM}
 
-Paragraph 1 — What happened: Describe the key event clearly. What happened, who is involved, when, and important numbers. Be factual and precise.
+متن کامل مقاله زیر را بخوان و یک تحلیل حرفه‌ای به زبان فارسی (فارسی روان) بنویس.
 
-Paragraph 2 — Why it matters: Explain the significance of this news for the crypto/financial market. What could change? Who is affected?
+محدوده طول: ۱۲۰ تا ۲۰۰ کلمه.
 
-Paragraph 3 — Market impact: Which coins, projects, or companies are affected? If related to BTC, ETH, ETF, FED, or other major entities, explain the connection.
+ساختار (بر اساس حجم خبر تصمیم بگیر — مقاله کوتاه: ۲ پاراگراف، متوسط: ۳ پاراگراف، مهم: ۴ پاراگراف):
 
-Paragraph 4 — What to watch: One practical note for traders or investors. What should they pay attention to going forward?
+پاراگراف ۱ — چه اتفاقی افتاد: رویداد کلیدی را روشن توضیح بده. چه کسی، چه چیزی، کِی، کجا. تمام اعداد مهم (قیمت، درصد، مبلغ، تعداد) را حفظ کن. تمام نام افراد، شرکت‌ها و نهادها را دقیق بیاور.
 
-Rules:
-- Write in fluent, natural Persian (Farsi).
-- Do NOT translate the title or description — write an original analysis.
-- Do NOT add opinions or predictions not supported by the article.
-- Do NOT invent any facts, numbers, or quotes.
-- 120-200 words total (fewer paragraphs OK for short articles, but minimum 120 words).
-- Preserve all key numbers, names, and dates from the article.
+پاراگراف ۲ — جزئیات مهم: زمینه و جزئیات کلیدی که بدون آن‌ها خبر ناقص است. دلایل، شرایط، یا اعداد تکمیلی.
 
-Article:
+پاراگراف ۳ — چرا اهمیت دارد: اهمیت این خبر برای بازار کریپتو/مالی را توضیح بده. چه چیزی می‌تواند تغییر کند؟ چه کسانی تحت تأثیر قرار می‌گیرند؟
+
+پاراگراف ۴ — اثر روی بازار و نکته معامله‌گر: کدام ارزها، پروژه‌ها یا شرکت‌ها تأثیر می‌گیرند؟ یک نکته عملی که معامله‌گر یا سرمایه‌گذار باید بداند.
+
+قوانین:
+- فارسی کاملاً روان و طبیعی بنویس.
+- عنوان یا توضیح را ترجمه نکن — یک تحلیل اصلی بنویس.
+- هیچ‌گونه نظر یا پیش‌بینی که در مقاله نیست را اضافه نکن.
+- هیچ واقع، عدد یا نقل‌قولی را نسازید.
+- تمام اعداد، نام‌ها و تاریخ‌های مهم مقاله را حفظ کن.
+- فقط بر اساس محتوای مقاله تحلیل کن.
+- بین پاراگراف‌ها از خط خالی (\\n\\n) استفاده کن.
+
+متن مقاله:
 
 ${articleText}`;
 
-        const geminiController = new AbortController();
-        const geminiTimeout = setTimeout(() => geminiController.abort(), 15000); // 15s (was 25s)
-        const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: { temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 },
-            }),
-            signal: geminiController.signal,
-          }
-        );
-        clearTimeout(geminiTimeout);
-
-        if (geminiRes.ok) {
-          const geminiData = await geminiRes.json();
-          summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (summary && summary.trim().length >= 50) {
-            // Clean up: remove any leading/trailing whitespace
-            summary = summary.trim();
-          } else {
-            summary = null;
-          }
+  // Method 1: Gemini 2.0 Flash (primary)
+  const GEMINI_API_KEY = env.GEMINI_API_KEY;
+  if (GEMINI_API_KEY) {
+    try {
+      const geminiController = new AbortController();
+      const geminiTimeout = setTimeout(() => geminiController.abort(), 15000);
+      const geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: JOURNALIST_PROMPT }] }],
+            generationConfig: { temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 },
+          }),
+          signal: geminiController.signal,
         }
-      } catch (e) {
-        console.warn('[NEWS-AI-QUEUE] Gemini failed:', e?.message);
-      }
-    }
+      );
+      clearTimeout(geminiTimeout);
 
-    // Method 2: Workers AI (fallback)
-    if (!summary && env.AI) {
-      try {
-        const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-          messages: [
-            { role: 'system', content: 'You are a professional Persian crypto and financial journalist. Write a 120-200 word analysis in Farsi with 3-4 paragraphs: (1) What happened — key facts, numbers, names. (2) Why it matters — market significance. (3) Market impact — which coins/projects affected. (4) What to watch — practical note for traders. Write original analysis, not translation. No invented facts. Minimum 120 words.' },
-            { role: 'user', content: articleText.substring(0, 8000) },
-          ],
-          max_tokens: 1024,
-          temperature: 0.4,
-        });
-
-        if (aiResponse?.response && aiResponse.response.trim().length >= 50) {
-          summary = aiResponse.response.trim();
+      if (geminiRes.ok) {
+        const geminiData = await geminiRes.json();
+        const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text && text.trim().length >= 50) {
+          summary = text.trim();
+          aiSource = 'gemini-2.0-flash';
         }
-      } catch (e) {
-        console.warn('[NEWS-AI-QUEUE] Workers AI failed:', e?.message);
+      } else if (geminiRes.status === 429 || geminiRes.status >= 500) {
+        // Retryable — 429 rate limit or 5xx server error
+        return requeueWithRetry('gemini_' + geminiRes.status, 'HTTP ' + geminiRes.status);
+      } else {
+        // Non-retryable client error (4xx) — try fallback
+        console.warn('[NEWS-AI-QUEUE] Gemini non-retryable HTTP ' + geminiRes.status);
       }
+    } catch (e) {
+      // Abort/timeout/network — retryable
+      return requeueWithRetry('gemini_error', e?.message?.substring(0, 120));
     }
-
-    // Step 4: Save to KV (7 days)
-    if (summary && summary.trim().length >= 50) {
-      try {
-        await writeAppCache(env, aiKey, summary, NEWS_AI_CACHE_TTL);
-        return { processed: true, success: true, url: article.url };
-      } catch (e) {
-        return { processed: true, success: false, reason: 'kv_write_failed' };
-      }
-    } else {
-      return { processed: true, success: false, reason: 'ai_no_summary' };
-    }
-  } catch (e) {
-    return { processed: true, success: false, reason: 'error', error: e?.message };
   }
+
+  // Method 2: Workers AI (fallback)
+  if (!summary && env.AI) {
+    try {
+      const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+        messages: [
+          { role: 'system', content: 'You are a professional Persian crypto and financial journalist. Read the full article and write a 120-200 word analysis in fluent Farsi. Preserve all key numbers, names, and dates. Explain what happened, important details, why it matters, and market impact. Write original analysis, not translation. Do NOT invent any facts. Use blank lines between paragraphs.' },
+          { role: 'user', content: JOURNALIST_PROMPT.substring(0, 12000) },
+        ],
+        max_tokens: 1024,
+        temperature: 0.4,
+      });
+
+      if (aiResponse?.response && aiResponse.response.trim().length >= 50) {
+        summary = aiResponse.response.trim();
+        aiSource = 'cloudflare-workers-ai';
+      }
+    } catch (e) {
+      console.warn('[NEWS-AI-QUEUE] Workers AI failed:', e?.message);
+      // If Gemini also didn't produce anything, this is a failure → retry
+      if (!summary) {
+        return requeueWithRetry('workers_ai_error', e?.message?.substring(0, 120));
+      }
+    }
+  }
+
+  // ── STEP 4: Save to KV (7 days) ──
+  if (summary && summary.trim().length >= 50) {
+    return succeedWithSummary(summary);
+  }
+
+  // All methods failed without a retryable error (e.g., AI returned empty)
+  return requeueWithRetry('ai_no_summary', 'all methods returned empty/short');
 }
 
 /**
@@ -3615,12 +3845,121 @@ function hashUrl(url) {
 }
 
 /**
+ * Record News AI tick stats to KV for monitoring.
+ * Called after each processNewsAIBatch / processOneArticleSummary tick.
+ * Stores the last 20 ticks (rolling window) at NEWS_AI_MONITOR_KEY.
+ */
+async function recordNewsAITick(env, stats) {
+  if (!env.APP_CACHE) return;
+  try {
+    const raw = await readAppCache(env, NEWS_AI_MONITOR_KEY).catch(() => null);
+    let history = [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) history = parsed;
+    }
+    history.push({ ts: Date.now(), ...stats });
+    // Keep last 20 ticks
+    if (history.length > 20) history = history.slice(-20);
+    await writeAppCache(env, NEWS_AI_MONITOR_KEY, JSON.stringify(history), NEWS_AI_MONITOR_TTL);
+  } catch (e) {
+    console.warn('[NEWS-AI-MONITOR] recordTick failed:', e?.message);
+  }
+}
+
+/**
+ * Get News AI monitoring snapshot.
+ * Returns: { queue_length, pending_count, failed_count, in_backoff_count,
+ *            oldest_enqueued_age_ms, last_tick, history, flags }
+ */
+async function getNewsAIMonitoring(env) {
+  const queue = await getSummaryQueue(env);
+  const now = Date.now();
+
+  let pending = 0, failed = 0, inBackoff = 0;
+  let oldestEnqueued = null;
+  let totalRetries = 0;
+  for (const item of queue) {
+    if (item.status === 'failed') {
+      failed++;
+    } else {
+      pending++;
+      if (item.next_retry && item.next_retry > now) inBackoff++;
+      totalRetries += (item.retry_count || 0);
+    }
+    if (item.enqueued_at && (!oldestEnqueued || item.enqueued_at < oldestEnqueued)) {
+      oldestEnqueued = item.enqueued_at;
+    }
+  }
+
+  // Read tick history
+  let history = [];
+  try {
+    const raw = await readAppCache(env, NEWS_AI_MONITOR_KEY).catch(() => null);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) history = parsed;
+    }
+  } catch {}
+
+  const lastTick = history.length > 0 ? history[history.length - 1] : null;
+
+  return {
+    ts: now,
+    queue_length: queue.length,
+    pending_count: pending,
+    failed_count: failed,
+    in_backoff_count: inBackoff,
+    total_retries: totalRetries,
+    oldest_enqueued_age_ms: oldestEnqueued ? (now - oldestEnqueued) : null,
+    last_tick: lastTick,
+    history: history.slice(-10), // last 10 ticks
+    flags: {
+      NEWS_AI_ENABLED: isNewsAIEnabled(env),
+      NEWS_SUMMARY_ENABLED: isNewsSummaryEnabled(env),
+      NEWS_BATCH_ANALYSIS_ENABLED: isNewsBatchAnalysisEnabled(env),
+      NEWS_QUEUE_ENABLED: isNewsQueueEnabled(env),
+    },
+    config: {
+      max_retries: NEWS_SUMMARY_MAX_RETRIES,
+      backoff_minutes: NEWS_SUMMARY_BACKOFF_MINUTES,
+      summary_ttl_days: NEWS_AI_CACHE_TTL / (24 * 3600),
+      news_list_ttl_minutes: 30,
+    },
+    failed_items: queue.filter(q => q.status === 'failed').slice(-5).map(q => ({
+      url: q.url, title: q.title, retry_count: q.retry_count,
+      fail_reason: q.fail_reason, last_attempt: q.last_attempt,
+    })),
+  };
+}
+
+
+/**
  * Enrich news articles with AI summaries from KV cache.
  * If summary exists → add ai_summary + ai_status='completed'
- * If not → add ai_status='pending' (frontend shows skeleton)
+ * If not → check queue to distinguish 'pending' (in queue, will be processed)
+ *                                    from 'failed' (exhausted retries — won't be retried)
+ *                                    from 'unknown' (not yet enqueued, will be picked up next cron)
+ *
+ * Frontend uses ai_status to decide message:
+ *   completed → show summary
+ *   pending   → "تحلیل این خبر در حال تولید است..."
+ *   failed    → "تحلیل این خبر در دسترس نیست." (no infinite waiting)
+ *   unknown   → same as pending (will be enqueued next cron)
  */
 async function enrichNewsWithAISummaries(env, articles) {
   if (!env.APP_CACHE || !Array.isArray(articles)) return articles;
+
+  // Read queue ONCE to build a URL → status map (cheap, single KV read)
+  let queueStatusByUrl = new Map();
+  try {
+    const queue = await getSummaryQueue(env);
+    for (const item of queue) {
+      if (item.url) queueStatusByUrl.set(item.url, item.status || 'pending');
+    }
+  } catch (e) {
+    console.warn('[NEWS-AI] enrichNews queue read error (non-fatal):', e?.message);
+  }
 
   // PERF: Parallel KV reads — was sequential (30 reads × 50ms = 1.5s),
   // now parallel (30 reads in ~100ms total = 15x faster)
@@ -3631,10 +3970,17 @@ async function enrichNewsWithAISummaries(env, articles) {
       try {
         aiSummary = await readAppCache(env, aiKey);
       } catch (e) { console.warn('[NEWS-AI] enrichNews KV read error:', e?.message); }
+      let aiStatus;
+      if (aiSummary) {
+        aiStatus = 'completed';
+      } else {
+        const qStatus = article.url ? queueStatusByUrl.get(article.url) : null;
+        aiStatus = qStatus || 'unknown'; // 'pending' | 'failed' | 'unknown'
+      }
       return {
         ...article,
         ai_summary: aiSummary || null,
-        ai_status: aiSummary ? 'completed' : 'pending',
+        ai_status: aiStatus,
       };
     })
   );
@@ -4051,7 +4397,20 @@ async function processNewsAIBatch(env) {
       return { ok: false, reason: 'APP_CACHE_not_bound' };
     }
 
-    stepLog('START');
+    // Feature flag — master switch. When NEWS_AI_ENABLED=false, skip the entire
+    // batch (RSS, filter, translate, analyze, enqueue). Frontend will still
+    // show cached news from KV (if any) but no new processing happens.
+    if (!isNewsAIEnabled(env)) {
+      stepLog('ABORT', { reason: 'news_ai_disabled' });
+      return { ok: true, reason: 'news_ai_disabled', elapsed: Date.now() - t0, flags: { NEWS_AI_ENABLED: false } };
+    }
+
+    stepLog('START', { flags: {
+      AI: isNewsAIEnabled(env),
+      summary: isNewsSummaryEnabled(env),
+      batch: isNewsBatchAnalysisEnabled(env),
+      queue: isNewsQueueEnabled(env),
+    } });
 
     // ── STEP 1: RSS FETCH ──
     stepLog('RSS_FETCH_start');
@@ -4186,58 +4545,97 @@ async function processNewsAIBatch(env) {
     // ── STEP 7: BATCH AI ANALYSIS (1 AI call for all articles) ──
     // Phase 3: Replaces individual sentiment with AI-powered batch analysis.
     // Returns: sentiment, impact, impact_reason, coins for each article.
-    stepLog('BATCH_ANALYZE_start', { articles: trimmed.length });
+    // Feature flag: NEWS_BATCH_ANALYSIS_ENABLED — when off, skip (rule-based sentiment stays).
     let batchAnalysis = {};
-    try {
-      batchAnalysis = await batchAnalyzeNews(env, trimmed);
-      // Enrich articles with AI analysis results
-      for (let i = 0; i < trimmed.length; i++) {
-        const analysis = batchAnalysis[i];
-        if (analysis) {
-          trimmed[i].sentiment = analysis.sentiment;
-          trimmed[i].impact = analysis.impact;
-          trimmed[i].impact_reason = analysis.impact_reason;
-          trimmed[i].coins = analysis.coins;
-        } else {
-          trimmed[i].impact = trimmed[i].impact || 'low';
-          trimmed[i].impact_reason = trimmed[i].impact_reason || '';
-          trimmed[i].coins = trimmed[i].coins || [];
-        }
-      }
-      // Re-cache with enriched data
+    if (isNewsBatchAnalysisEnabled(env)) {
+      stepLog('BATCH_ANALYZE_start', { articles: trimmed.length });
       try {
-        await writeAppCache(env, FARSI_NEWS_CACHE_KEY, JSON.stringify(trimmed), getNumericEnv(env, 'NEWS_CACHE_TTL', 1800));
-      } catch {}
-      stepLog('BATCH_ANALYZE_done', { analyzed: Object.keys(batchAnalysis).length });
-    } catch (batchErr) {
-      stepLog('BATCH_ANALYZE_FAILED', { error: batchErr?.message });
-      // Non-fatal — articles already cached with rule-based sentiment
+        batchAnalysis = await batchAnalyzeNews(env, trimmed);
+        // Enrich articles with AI analysis results
+        for (let i = 0; i < trimmed.length; i++) {
+          const analysis = batchAnalysis[i];
+          if (analysis) {
+            trimmed[i].sentiment = analysis.sentiment;
+            trimmed[i].impact = analysis.impact;
+            trimmed[i].impact_reason = analysis.impact_reason;
+            trimmed[i].coins = analysis.coins;
+          } else {
+            trimmed[i].impact = trimmed[i].impact || 'low';
+            trimmed[i].impact_reason = trimmed[i].impact_reason || '';
+            trimmed[i].coins = trimmed[i].coins || [];
+          }
+        }
+        // Re-cache with enriched data
+        try {
+          await writeAppCache(env, FARSI_NEWS_CACHE_KEY, JSON.stringify(trimmed), getNumericEnv(env, 'NEWS_CACHE_TTL', 1800));
+        } catch {}
+        stepLog('BATCH_ANALYZE_done', { analyzed: Object.keys(batchAnalysis).length });
+      } catch (batchErr) {
+        stepLog('BATCH_ANALYZE_FAILED', { error: batchErr?.message });
+        // Non-fatal — articles already cached with rule-based sentiment
+      }
+    } else {
+      stepLog('BATCH_ANALYZE_skipped', { reason: 'flag_disabled' });
     }
 
     // ── STEP 8: ENQUEUE ARTICLES FOR SUMMARY GENERATION ──
     // Queue-based: articles are added to KV queue, processed 1 per cron tick.
     // This prevents Worker timeout from killing summary generation.
-    stepLog('SUMMARY_ENQUEUE_start', { articles: trimmed.length });
-    try {
-      await enqueueForSummary(env, trimmed);
-      stepLog('SUMMARY_ENQUEUE_done', { articles: trimmed.length });
-    } catch (e) {
-      stepLog('SUMMARY_ENQUEUE_FAILED', { error: e?.message });
+    // Feature flag: NEWS_QUEUE_ENABLED — when off, skip enqueue (queue stays as-is).
+    let enqueueResult = { enqueued: 0, skipped: 0, total: 0 };
+    if (isNewsQueueEnabled(env)) {
+      stepLog('SUMMARY_ENQUEUE_start', { articles: trimmed.length });
+      try {
+        enqueueResult = await enqueueForSummary(env, trimmed);
+        stepLog('SUMMARY_ENQUEUE_done', enqueueResult);
+      } catch (e) {
+        stepLog('SUMMARY_ENQUEUE_FAILED', { error: e?.message });
+      }
+    } else {
+      stepLog('SUMMARY_ENQUEUE_skipped', { reason: 'flag_disabled' });
     }
 
     // ── STEP 9: PROCESS ONE ARTICLE FROM QUEUE ──
     // Each cron tick processes ONE article summary (not 10 sequential).
     // Queue persists in KV — if Worker is killed, next tick continues.
+    // Feature flag: NEWS_SUMMARY_ENABLED — when off, skip processing.
     stepLog('SUMMARY_PROCESS_start');
     let summaryResult = { processed: false, empty: true };
-    try {
-      summaryResult = await processOneArticleSummary(env);
-      stepLog('SUMMARY_PROCESS_done', summaryResult);
-    } catch (e) {
-      stepLog('SUMMARY_PROCESS_FAILED', { error: e?.message });
+    if (isNewsSummaryEnabled(env)) {
+      try {
+        summaryResult = await processOneArticleSummary(env);
+        stepLog('SUMMARY_PROCESS_done', summaryResult);
+      } catch (e) {
+        stepLog('SUMMARY_PROCESS_FAILED', { error: e?.message });
+      }
+    } else {
+      stepLog('SUMMARY_PROCESS_skipped', { reason: 'flag_disabled' });
     }
 
-    // ── STEP 6: FINISH ──
+    // ── STEP 10: RECORD MONITORING TICK ──
+    // Persists stats to KV so /api/news-ai-monitor can show rolling history.
+    try {
+      await recordNewsAITick(env, {
+        type: 'batch',
+        elapsed_ms: Date.now() - t0,
+        rss_sources: sources.length,
+        raw_items: allRawItems.length,
+        filtered: filtered.length,
+        cached: trimmed.length,
+        enqueued: enqueueResult.enqueued || 0,
+        enqueue_skipped: enqueueResult.skipped || 0,
+        queue_total: enqueueResult.total || 0,
+        summary_processed: summaryResult.processed || false,
+        summary_success: summaryResult.success || false,
+        summary_reason: summaryResult.reason || null,
+        summary_retry_count: summaryResult.retry_count || 0,
+        summary_duration_ms: summaryResult.duration_ms || 0,
+      });
+    } catch (e) {
+      console.warn('[NEWS-AI-CRON] recordTick failed:', e?.message);
+    }
+
+    // ── FINISH ──
     const result = {
       ok: true,
       articlesCached: trimmed.length,
@@ -4248,6 +4646,7 @@ async function processNewsAIBatch(env) {
       inMemoryCached: inMemoryCached,
       inMemoryMatches: inMemoryMatches,
       newsJsonLength: newsJson.length,
+      enqueue: enqueueResult,
       ai: summaryResult,
       elapsed: Date.now() - t0,
       kvWriteStats: {
@@ -4257,7 +4656,8 @@ async function processNewsAIBatch(env) {
         byKey: Object.entries(_kvWriteStats.byKey).sort((a,b) => b[1]-a[1]).slice(0, 15).map(([k,v]) => ({key:k, writes:v})),
       },
     };
-    stepLog('FINISH', { articlesCached: result.articlesCached, aiSuccess: aiResult?.success, aiFailed: aiResult?.failed });
+    // FIX: was `aiResult?.success` (undefined variable) → use `summaryResult`
+    stepLog('FINISH', { articlesCached: result.articlesCached, aiSuccess: summaryResult?.success, aiFailed: !summaryResult?.success && summaryResult?.processed ? 1 : 0 });
     return result;
   } catch (fatalErr) {
     // ── ROOT-CAUSE FIX: Surface the REAL error, not a bare "error" string ──
@@ -7214,6 +7614,18 @@ export default {
         }, {}, env);
       }
 
+      // ── News AI Monitor — queue stats, retry stats, flag status, tick history ──
+      // Public (no auth) — same policy as /api/cron-monitor.
+      // Use to verify: queue is draining, no permanent 'pending', retries working.
+      if (request.method === 'GET' && url.pathname === '/api/news-ai-monitor') {
+        try {
+          const monitoring = await getNewsAIMonitoring(env);
+          return jsonResponse({ status: 'success', ...monitoring }, {}, env);
+        } catch (e) {
+          return jsonResponse({ status: 'error', error: e?.message }, { status: 500 }, env);
+        }
+      }
+
       // ── Calendar Reminders (per-user, stored in PostgreSQL) ──
       // POST   /api/calendar/reminders      — create/update
       // GET    /api/calendar/reminders      — list user's reminders
@@ -8806,12 +9218,25 @@ export default {
       // ── PHASE 1d: News Summary Queue Processing (every 5 min) ──
       // Process ONE article summary per tick from the KV queue.
       // Queue persists across cron ticks — no article is lost.
+      // Feature flags respected inside processOneArticleSummary (NEWS_SUMMARY_ENABLED).
       if (isEvery5Min) {
         try {
           const summaryResult = await processOneArticleSummary(env);
           if (summaryResult.processed && summaryResult.success) {
             console.log('[CRON] news summary processed:', summaryResult.url?.substring(0, 60));
           }
+          // Record monitoring tick (5-min cycle)
+          try {
+            await recordNewsAITick(env, {
+              type: 'tick_5min',
+              summary_processed: summaryResult.processed || false,
+              summary_success: summaryResult.success || false,
+              summary_reason: summaryResult.reason || null,
+              summary_retry_count: summaryResult.retry_count || 0,
+              summary_duration_ms: summaryResult.duration_ms || 0,
+              queue_length: summaryResult.queueLength || null,
+            });
+          } catch {}
           _logPhase('phase1d-news-summary', 'ok', summaryResult);
         } catch (e) {
           _logPhase('phase1d-news-summary', 'error', { error: e?.message });
