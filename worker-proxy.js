@@ -3394,6 +3394,129 @@ async function enrichNewsWithAISummaries(env, articles) {
  * Called via ctx.waitUntil when news are fetched.
  * For each article without an AI summary, generates one using Workers AI.
  */
+
+/**
+ * Phase 3: Batch AI Analysis — analyzes ALL filtered articles in 1 AI call.
+ * Returns sentiment, impact, reason, and related coins for each article.
+ *
+ * Uses Gemini 2.0 Flash (primary) or Workers AI (fallback).
+ * 1 AI call replaces 10 individual calls.
+ */
+async function batchAnalyzeNews(env, articles) {
+  if (!articles || articles.length === 0) return {};
+
+  const GEMINI_API_KEY = env.GEMINI_API_KEY;
+  const hasWorkersAI = !!env.AI;
+
+  // Build prompt with all article titles
+  const headlines = articles.map((a, i) => `${i + 1}. "${a.title_en || a.title}"`).join('\n');
+
+  const prompt = `You are a professional crypto market analyst. Analyze these ${articles.length} news headlines.
+For EACH headline, return a JSON array where each element has:
+- "index": number (1-based)
+- "sentiment": "bullish" | "bearish" | "neutral"
+- "impact": "high" | "medium" | "low"
+- "reason": one short sentence in Persian (Farsi) explaining the analysis
+- "coins": array of related coin symbols (e.g., ["BTC", "ETH"])
+
+Return ONLY the JSON array, no other text.
+
+Headlines:
+${headlines}`;
+
+  // Method 1: Gemini 2.0 Flash (primary)
+  if (GEMINI_API_KEY) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 2048, topP: 0.8 },
+          }),
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        // Extract JSON array from response
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const results = {};
+          for (const item of parsed) {
+            if (item.index && item.index >= 1 && item.index <= articles.length) {
+              results[item.index - 1] = {
+                sentiment: item.sentiment || 'neutral',
+                impact: item.impact || 'low',
+                impact_reason: item.reason || '',
+                coins: Array.isArray(item.coins) ? item.coins : [],
+              };
+            }
+          }
+          return results;
+        }
+      }
+    } catch (e) {
+      console.warn('[NEWS-AI-BATCH] Gemini failed:', e?.message);
+    }
+  }
+
+  // Method 2: Workers AI (fallback)
+  if (hasWorkersAI) {
+    try {
+      const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+        messages: [
+          { role: 'system', content: 'You are a crypto market analyst. Return ONLY a JSON array with sentiment, impact, reason (in Farsi), and coins for each headline.' },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: 2048,
+        temperature: 0.2,
+      });
+
+      if (aiResponse?.response) {
+        const jsonMatch = aiResponse.response.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const results = {};
+          for (const item of parsed) {
+            if (item.index && item.index >= 1 && item.index <= articles.length) {
+              results[item.index - 1] = {
+                sentiment: item.sentiment || 'neutral',
+                impact: item.impact || 'low',
+                impact_reason: item.reason || '',
+                coins: Array.isArray(item.coins) ? item.coins : [],
+              };
+            }
+          }
+          return results;
+        }
+      }
+    } catch (e) {
+      console.warn('[NEWS-AI-BATCH] Workers AI failed:', e?.message);
+    }
+  }
+
+  // Fallback: use existing rule-based sentiment, no impact/reason/coins
+  const fallback = {};
+  for (let i = 0; i < articles.length; i++) {
+    fallback[i] = {
+      sentiment: articles[i].sentiment || 'neutral',
+      impact: 'low',
+      impact_reason: '',
+      coins: [],
+    };
+  }
+  return fallback;
+}
+
 async function processNewsAIJobs(env, articles) {
   if (!env.APP_CACHE || !articles.length) return { processed: 0, success: 0, failed: 0, errors: [], stats: { scanned: 0, alreadyCompleted: 0, skippedBeforeAI: 0, aiRequestsExecuted: 0, kvWrites: 0 } };
 
@@ -3510,31 +3633,21 @@ async function processNewsAIJobs(env, articles) {
         try {
           const prompt = `You are a professional Persian crypto journalist.
 
-Read the entire article.
-
-Rewrite it completely in Persian.
+Summarize this article in 2-3 sentences (70-100 words) in Persian (Farsi).
 
 Rules:
-- Keep every important detail.
-- Do not shorten aggressively.
-- Preserve numbers.
-- Preserve names.
-- Preserve timeline.
-- Preserve technical details.
-- Maximum 800 words.
-- Use headings when appropriate.
-- Do not add opinions.
-- Do not invent anything.
-
-At the end write:
-برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.
+- Focus on: what happened, why it matters, market impact.
+- Keep it short and clear.
+- Preserve key numbers and names.
+- No opinions. No invented facts.
+- Maximum 100 words.
 
 Article:
 
 ${articleText}`;
 
           const geminiController = new AbortController();
-          const geminiTimeout = setTimeout(() => geminiController.abort(), 45000);
+          const geminiTimeout = setTimeout(() => geminiController.abort(), 15000); // 15s (was 45s)
           aiRequestsExecuted++;
           const geminiRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -3543,7 +3656,7 @@ ${articleText}`;
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { temperature: 0.3, maxOutputTokens: 4096, topP: 0.8 },
+                generationConfig: { temperature: 0.3, maxOutputTokens: 512, topP: 0.8 }, // ~100 words
               }),
               signal: geminiController.signal,
             }
@@ -3574,10 +3687,10 @@ ${articleText}`;
           aiRequestsExecuted++;
           const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
             messages: [
-              { role: 'system', content: 'You are a professional Persian crypto journalist. Rewrite the article in Persian. Keep all details, numbers, and names. Maximum 800 words. End with: برای مطالعه نسخه کامل می‌توانید از لینک منبع استفاده کنید.' },
+              { role: 'system', content: 'You are a professional Persian crypto journalist. Summarize the article in 2-3 sentences (70-100 words) in Farsi. Focus on: what happened, why it matters, market impact. No opinions. Max 100 words.' },
               { role: 'user', content: articleText.substring(0, 8000) },
             ],
-            max_tokens: 4096,
+            max_tokens: 512, // ~100 words Farsi
             temperature: 0.3,
           });
           
@@ -3809,14 +3922,47 @@ async function processNewsAIBatch(env) {
     const newsWriteActuallyWritten = _kvWriteStats.totalWrites > newsWriteBefore;
     const newsWriteWasSkipped = _kvWriteStats.totalSkipped > newsSkippedBefore;
 
-    // ── STEP 5: AI SUMMARY GENERATION ──
-    stepLog('AI_SUMMARY_start', { toProcess: Math.min(deduped.length, 3) });
+    // ── STEP 7: BATCH AI ANALYSIS (1 AI call for all articles) ──
+    // Phase 3: Replaces individual sentiment with AI-powered batch analysis.
+    // Returns: sentiment, impact, impact_reason, coins for each article.
+    stepLog('BATCH_ANALYZE_start', { articles: trimmed.length });
+    let batchAnalysis = {};
+    try {
+      batchAnalysis = await batchAnalyzeNews(env, trimmed);
+      // Enrich articles with AI analysis results
+      for (let i = 0; i < trimmed.length; i++) {
+        const analysis = batchAnalysis[i];
+        if (analysis) {
+          trimmed[i].sentiment = analysis.sentiment;
+          trimmed[i].impact = analysis.impact;
+          trimmed[i].impact_reason = analysis.impact_reason;
+          trimmed[i].coins = analysis.coins;
+        } else {
+          trimmed[i].impact = trimmed[i].impact || 'low';
+          trimmed[i].impact_reason = trimmed[i].impact_reason || '';
+          trimmed[i].coins = trimmed[i].coins || [];
+        }
+      }
+      // Re-cache with enriched data
+      try {
+        await writeAppCache(env, FARSI_NEWS_CACHE_KEY, JSON.stringify(trimmed), getNumericEnv(env, 'NEWS_CACHE_TTL', 1800));
+      } catch {}
+      stepLog('BATCH_ANALYZE_done', { analyzed: Object.keys(batchAnalysis).length });
+    } catch (batchErr) {
+      stepLog('BATCH_ANALYZE_FAILED', { error: batchErr?.message });
+      // Non-fatal — articles already cached with rule-based sentiment
+    }
+
+    // ── STEP 8: AI SUMMARY GENERATION (only for high-impact articles) ──
+    // Phase 4: Short summaries (70-100 words) for top 3-5 high-impact articles.
+    const highImpactArticles = trimmed.filter(a => a.impact === 'high').slice(0, 5);
+    stepLog('AI_SUMMARY_start', { toProcess: highImpactArticles.length, totalArticles: trimmed.length });
     let aiResult;
     try {
-      aiResult = await processNewsAIJobs(env, deduped);
+      aiResult = await processNewsAIJobs(env, highImpactArticles.length > 0 ? highImpactArticles : trimmed.slice(0, 3));
     } catch (aiErr) {
       stepLog('AI_SUMMARY_FAILED', { error: aiErr?.message, stack: aiErr?.stack?.substring(0, 200) });
-      throw aiErr;
+      // Non-fatal — summaries are optional
     }
     stepLog('AI_SUMMARY_done', aiResult);
 
