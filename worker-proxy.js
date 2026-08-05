@@ -3534,7 +3534,7 @@ async function processNewsAIJobs(env, articles) {
   // Each article = 1 HTML fetch + 1 AI.run() = 2 subrequests.
   // With 3 articles = 6 subrequests for AI summaries.
   // Plus RSS (7) + translations (42) = 55 total. Under 50 limit with batching.
-  for (const article of articles.slice(0, 3)) { // Process max 3 per cycle
+  for (const article of articles.slice(0, 5)) { // Process max 5 per cycle (was 3, increased for better coverage)
     if (!article.url) continue;
 
     const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
@@ -3631,23 +3631,32 @@ async function processNewsAIJobs(env, articles) {
       // Method 1: Gemini 2.0 Flash (if quota available)
       if (GEMINI_API_KEY) {
         try {
-          const prompt = `You are a professional Persian crypto journalist.
+          const prompt = `You are a professional Persian crypto and financial journalist.
 
-Summarize this article in 2-3 sentences (70-100 words) in Persian (Farsi).
+Write a professional summary of this article in Persian (Farsi), 120-180 words.
+
+Structure (use \\n\\n between paragraphs):
+
+Paragraph 1 — What happened: Describe the key event clearly. Include important numbers, names, dates, and amounts. Be factual and precise.
+
+Paragraph 2 — Why it matters: Explain the significance of this news for the crypto/financial market. What could change? Who is affected?
+
+Paragraph 3 — What to watch: One practical note for traders or investors. What should they pay attention to going forward?
 
 Rules:
-- Focus on: what happened, why it matters, market impact.
-- Keep it short and clear.
-- Preserve key numbers and names.
-- No opinions. No invented facts.
-- Maximum 100 words.
+- Write in fluent, natural Persian (Farsi).
+- Do NOT translate the title or description — write an original analysis.
+- Do NOT add opinions or predictions not supported by the article.
+- Do NOT invent any facts, numbers, or quotes.
+- 120-180 words total.
+- Preserve all key numbers, names, and dates from the article.
 
 Article:
 
 ${articleText}`;
 
           const geminiController = new AbortController();
-          const geminiTimeout = setTimeout(() => geminiController.abort(), 15000); // 15s (was 45s)
+          const geminiTimeout = setTimeout(() => geminiController.abort(), 25000); // 25s for deeper analysis
           aiRequestsExecuted++;
           const geminiRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -3656,7 +3665,7 @@ ${articleText}`;
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { temperature: 0.3, maxOutputTokens: 512, topP: 0.8 }, // ~100 words
+                generationConfig: { temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 }, // ~180 words Farsi
               }),
               signal: geminiController.signal,
             }
@@ -3687,10 +3696,10 @@ ${articleText}`;
           aiRequestsExecuted++;
           const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
             messages: [
-              { role: 'system', content: 'You are a professional Persian crypto journalist. Summarize the article in 2-3 sentences (70-100 words) in Farsi. Focus on: what happened, why it matters, market impact. No opinions. Max 100 words.' },
+              { role: 'system', content: 'You are a professional Persian crypto and financial journalist. Write a 120-180 word summary in Farsi with 3 paragraphs: (1) What happened — key facts, numbers, names. (2) Why it matters — market significance. (3) What to watch — practical note for traders. Write original analysis, not translation. No invented facts.' },
               { role: 'user', content: articleText.substring(0, 8000) },
             ],
-            max_tokens: 512, // ~100 words Farsi
+            max_tokens: 1024, // ~180 words Farsi
             temperature: 0.3,
           });
           
