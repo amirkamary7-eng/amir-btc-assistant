@@ -3587,11 +3587,197 @@ async function tryOpenAI(env, prompt) {
   }
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// CIRCUIT BREAKER (Phase 10.5)
+// Protects against wasteful repeated calls to a failing provider.
+// State machine (per provider):
+//   CLOSED  ──(3 consecutive retryable failures)──▶ OPEN (10 min)
+//   OPEN    ──(10 min elapsed)─────────────────────▶ HALF_OPEN (1 probe attempt)
+//   HALF_OPEN ──(probe success)───────────────────▶ CLOSED
+//   HALF_OPEN ──(probe failure)───────────────────▶ OPEN (another 10 min)
+//
+// Only RETRYABLE errors (429, 5xx, timeout, network) count toward the circuit.
+// Non-retryable errors (400/401/403/404 — config issues) do NOT trip the circuit
+// because they won't resolve by waiting.
+//
+// State persists in KV (key: news:circuit:{provider}) so it survives across
+// cron tick invocations and isolates.
+// ────────────────────────────────────────────────────────────────────────────
+const CIRCUIT_BREAKER_KEY_PREFIX = 'news:circuit:';
+const CIRCUIT_BREAKER_TTL = 30 * 60; // 30 min (longer than OPEN window so state persists)
+const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3; // 3 consecutive failures → OPEN
+const CIRCUIT_BREAKER_OPEN_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Read circuit breaker state for a provider from KV.
+ * Returns { state, consecutive_failures, opened_at, retry_after, last_failure_reason }.
+ * Defaults to CLOSED with 0 failures if no state stored.
+ */
+async function getCircuitState(env, provider) {
+  if (!env.APP_CACHE) return { state: 'CLOSED', consecutive_failures: 0, opened_at: null, retry_after: null, last_failure_reason: null };
+  try {
+    const raw = await readAppCache(env, `${CIRCUIT_BREAKER_KEY_PREFIX}${provider}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.state) return parsed;
+    }
+  } catch (e) {
+    console.warn(`[CIRCUIT] getState(${provider}) failed:`, e?.message);
+  }
+  return { state: 'CLOSED', consecutive_failures: 0, opened_at: null, retry_after: null, last_failure_reason: null };
+}
+
+/**
+ * Save circuit breaker state to KV.
+ */
+async function saveCircuitState(env, provider, state) {
+  if (!env.APP_CACHE) return;
+  try {
+    await writeAppCache(env, `${CIRCUIT_BREAKER_KEY_PREFIX}${provider}`, JSON.stringify(state), CIRCUIT_BREAKER_TTL);
+  } catch (e) {
+    console.warn(`[CIRCUIT] saveState(${provider}) failed:`, e?.message);
+  }
+}
+
+/**
+ * Check if a provider should be attempted, considering circuit breaker state.
+ * Returns { attempt: boolean, state, retry_after, reason }.
+ *
+ * Logic:
+ *   - CLOSED → attempt (normal)
+ *   - OPEN + now < retry_after → skip (circuit open, wait)
+ *   - OPEN + now >= retry_after → transition to HALF_OPEN, attempt (probe)
+ *   - HALF_OPEN → attempt (probe in progress)
+ *
+ * If the circuit transitions OPEN → HALF_OPEN here, the new state is persisted
+ * so concurrent ticks don't all probe at once.
+ */
+async function shouldAttemptProvider(env, provider) {
+  const state = await getCircuitState(env, provider);
+  const now = Date.now();
+
+  if (state.state === 'CLOSED') {
+    return { attempt: true, state: 'CLOSED', retry_after: null, reason: 'closed' };
+  }
+
+  if (state.state === 'OPEN') {
+    if (state.retry_after && now < state.retry_after) {
+      // Still in OPEN window — skip
+      return { attempt: false, state: 'OPEN', retry_after: state.retry_after, reason: 'circuit_open' };
+    }
+    // OPEN window expired → transition to HALF_OPEN (probe)
+    const newState = { ...state, state: 'HALF_OPEN' };
+    await saveCircuitState(env, provider, newState);
+    return { attempt: true, state: 'HALF_OPEN', retry_after: state.retry_after, reason: 'half_open_probe' };
+  }
+
+  if (state.state === 'HALF_OPEN') {
+    // Probe in progress — allow attempt
+    return { attempt: true, state: 'HALF_OPEN', retry_after: state.retry_after, reason: 'half_open' };
+  }
+
+  // Unknown state — default to allow
+  return { attempt: true, state: state.state || 'CLOSED', retry_after: null, reason: 'unknown_state' };
+}
+
+/**
+ * Record a provider attempt result and update circuit breaker state.
+ * Called after every provider attempt (success or failure).
+ *
+ * - Success (any) → reset to CLOSED (consecutive_failures=0, opened_at=null)
+ * - Retryable failure → increment consecutive_failures; if >= threshold → OPEN
+ * - Non-retryable failure → do NOT count (config issue, not transient)
+ * - HALF_OPEN + success → CLOSED
+ * - HALF_OPEN + retryable failure → OPEN (another 10 min)
+ */
+async function recordCircuitResult(env, provider, success, errorType, errorMessage) {
+  const state = await getCircuitState(env, provider);
+  const now = Date.now();
+
+  if (success) {
+    // Success → always close the circuit
+    if (state.state !== 'CLOSED' || state.consecutive_failures > 0) {
+      await saveCircuitState(env, provider, {
+        state: 'CLOSED',
+        consecutive_failures: 0,
+        opened_at: null,
+        retry_after: null,
+        last_failure_reason: null,
+      });
+    }
+    return;
+  }
+
+  // Failure
+  if (errorType !== 'retryable') {
+    // Non-retryable failure → don't trip circuit (config issue)
+    return;
+  }
+
+  // Retryable failure
+  if (state.state === 'HALF_OPEN') {
+    // Probe failed → back to OPEN for another 10 min
+    await saveCircuitState(env, provider, {
+      state: 'OPEN',
+      consecutive_failures: state.consecutive_failures + 1,
+      opened_at: now,
+      retry_after: now + CIRCUIT_BREAKER_OPEN_MS,
+      last_failure_reason: errorMessage || 'half_open_probe_failed',
+    });
+    return;
+  }
+
+  // CLOSED (or already OPEN) → increment consecutive failures
+  const newFailures = (state.consecutive_failures || 0) + 1;
+  if (newFailures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
+    // Trip the circuit → OPEN for 10 min
+    await saveCircuitState(env, provider, {
+      state: 'OPEN',
+      consecutive_failures: newFailures,
+      opened_at: now,
+      retry_after: now + CIRCUIT_BREAKER_OPEN_MS,
+      last_failure_reason: errorMessage || 'threshold_reached',
+    });
+  } else {
+    // Below threshold — just update the counter
+    await saveCircuitState(env, provider, {
+      ...state,
+      state: 'CLOSED',
+      consecutive_failures: newFailures,
+      last_failure_reason: errorMessage || null,
+    });
+  }
+}
+
+// ── Cache stats (Phase 10.5) ──
+const NEWS_AI_CACHE_STATS_KEY = 'news:ai_cache_stats';
+
+async function recordCacheStat(env, hit) {
+  if (!env.APP_CACHE) return;
+  try {
+    const raw = await readAppCache(env, NEWS_AI_CACHE_STATS_KEY).catch(() => null);
+    let stats = { hits: 0, misses: 0, updated_at: null };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') stats = { ...stats, ...parsed };
+    }
+    if (hit) stats.hits++; else stats.misses++;
+    stats.updated_at = Date.now();
+    await writeAppCache(env, NEWS_AI_CACHE_STATS_KEY, JSON.stringify(stats), NEWS_AI_MONITOR_TTL);
+  } catch (e) {
+    console.warn('[CACHE-STATS] recordCacheStat failed:', e?.message);
+  }
+}
+
 /**
  * Multi-provider fallback coordinator.
  * Tries providers in priority order (Gemini → Workers AI → OpenAI).
  * Each provider is tried ONLY if the previous one failed.
  * All attempts happen in the SAME invocation (no queue wait between providers).
+ *
+ * Circuit Breaker (Phase 10.5): Before calling each provider, checks if its
+ * circuit is OPEN. If OPEN, skips that provider entirely and records a
+ * 'circuit_open' attempt (counts as retryable for fallback decisions).
  *
  * Returns:
  *   { summary, usedProvider, attempts, totalDuration, anyRetryable, allNonRetryable, fallbackUsed }
@@ -3607,11 +3793,45 @@ async function generateSummaryWithFallback(env, prompt) {
   let usedProvider = null;
   let totalDuration = 0;
 
-  // Provider 1: Gemini (primary)
-  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
-    const r = await tryGemini(env, prompt);
+  // Helper: attempt a provider with circuit breaker protection.
+  // Returns the attempt result (with 'circuit_skipped' flag if skipped).
+  async function attemptProvider(providerName, tryFn) {
+    // Check circuit breaker first
+    const circuitCheck = await shouldAttemptProvider(env, providerName);
+    if (!circuitCheck.attempt) {
+      // Circuit OPEN — skip this provider entirely
+      const skippedAttempt = {
+        provider: providerName,
+        success: false,
+        error: 'circuit_open',
+        errorType: 'retryable', // counts as retryable so fallback continues to next provider
+        error_detail: `circuit open until ${new Date(circuitCheck.retry_after).toISOString()}`,
+        duration_ms: 0,
+        circuit_skipped: true,
+        circuit_state: circuitCheck.state,
+      };
+      attempts.push(skippedAttempt);
+      return skippedAttempt;
+    }
+
+    // Circuit CLOSED or HALF_OPEN → attempt the provider
+    const r = await tryFn();
     attempts.push(r);
     totalDuration += r.duration_ms || 0;
+
+    // Record result in circuit breaker (updates state: CLOSED↔OPEN↔HALF_OPEN)
+    try {
+      await recordCircuitResult(env, providerName, r.success, r.errorType, r.error || r.error_detail);
+    } catch (e) {
+      console.warn(`[CIRCUIT] recordResult(${providerName}) failed:`, e?.message);
+    }
+
+    return r;
+  }
+
+  // Provider 1: Gemini (primary)
+  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
+    const r = await attemptProvider('gemini', () => tryGemini(env, prompt));
     if (r.success) {
       summary = r.summary;
       usedProvider = 'gemini';
@@ -3620,9 +3840,7 @@ async function generateSummaryWithFallback(env, prompt) {
 
   // Provider 2: Workers AI (fallback 1) — only if Gemini didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true)) {
-    const r = await tryWorkersAI(env, prompt);
-    attempts.push(r);
-    totalDuration += r.duration_ms || 0;
+    const r = await attemptProvider('workers-ai', () => tryWorkersAI(env, prompt));
     if (r.success) {
       summary = r.summary;
       usedProvider = 'workers-ai';
@@ -3631,9 +3849,7 @@ async function generateSummaryWithFallback(env, prompt) {
 
   // Provider 3: OpenAI (fallback 2) — only if both Gemini + Workers AI didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) {
-    const r = await tryOpenAI(env, prompt);
-    attempts.push(r);
-    totalDuration += r.duration_ms || 0;
+    const r = await attemptProvider('openai', () => tryOpenAI(env, prompt));
     if (r.success) {
       summary = r.summary;
       usedProvider = 'openai';
@@ -3644,6 +3860,7 @@ async function generateSummaryWithFallback(env, prompt) {
   const allNonRetryable = attempts.length > 0 && attempts.every(a => a.errorType === 'non_retryable');
   // Fallback = success on a non-primary provider (i.e., at least one attempt failed before success)
   const fallbackUsed = attempts.length > 1 && !!summary;
+  const circuitSkippedAny = attempts.some(a => a.circuit_skipped);
 
   return {
     summary,
@@ -3653,6 +3870,7 @@ async function generateSummaryWithFallback(env, prompt) {
     anyRetryable,
     allNonRetryable,
     fallbackUsed,
+    circuitSkippedAny,
   };
 }
 
@@ -3894,14 +4112,46 @@ async function processOneArticleSummary(env) {
   const article = queue[idx];
   const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
 
-  // Double-check: summary might have been generated by a concurrent tick
-  const existing = await readAppCache(env, aiKey).catch(() => null);
-  if (existing) {
-    // Already done — remove from queue
+  // ── SUMMARY CACHE CHECK (Phase 10.5) ──
+  // Before running ANY provider, check if a valid summary already exists in KV.
+  // Cache is valid ONLY if:
+  //   1. KV entry exists
+  //   2. Parsed summary text length >= 50 chars (meaningful content)
+  //   3. TTL is valid (KV readAppCache already enforces TTL — if expired, returns null)
+  // If valid → skip AI entirely, remove from queue, record cache HIT.
+  // If not → record cache MISS, proceed to AI generation.
+  const existingRaw = await readAppCache(env, aiKey).catch(() => null);
+  let existingSummary = null;
+  let existingProvider = null;
+  if (existingRaw) {
+    // Parse JSON format (Phase 10+) or plain string (legacy)
+    try {
+      const parsed = JSON.parse(existingRaw);
+      if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string' && parsed.summary.trim().length >= 50) {
+        existingSummary = parsed.summary;
+        existingProvider = parsed.provider || null;
+      }
+    } catch {
+      // Plain string (legacy format)
+      if (typeof existingRaw === 'string' && existingRaw.trim().length >= 50) {
+        existingSummary = existingRaw;
+      }
+    }
+  }
+
+  if (existingSummary) {
+    // CACHE HIT — valid summary exists, skip AI entirely
+    try { await recordCacheStat(env, true); } catch {}
     queue.splice(idx, 1);
     await saveSummaryQueue(env, queue);
-    return { processed: true, success: true, reason: 'already_exists', url: article.url, duration_ms: Date.now() - t0 };
+    return {
+      processed: true, success: true, reason: 'cache_hit',
+      url: article.url, provider: existingProvider, cache_hit: true,
+      duration_ms: Date.now() - t0,
+    };
   }
+  // CACHE MISS — no valid summary, proceed to AI generation
+  try { await recordCacheStat(env, false); } catch {}
 
   // Helper: requeue with retry state (mutates queue in place + persists)
   async function requeueWithRetry(reason, errorDetail) {
@@ -4253,6 +4503,41 @@ async function getNewsAIMonitoring(env) {
     }
   }
 
+  // ── Phase 10.5: Circuit Breaker state per provider ──
+  const providerNames = ['gemini', 'workers-ai', 'openai'];
+  const providerStatus = {};
+  let circuitOpenCount = 0;
+  for (const p of providerNames) {
+    const cbState = await getCircuitState(env, p);
+    // Auto-transition: if OPEN and retry_after passed, show as 'HALF_OPEN' (probe due)
+    let displayState = cbState.state;
+    if (cbState.state === 'OPEN' && cbState.retry_after && now >= cbState.retry_after) {
+      displayState = 'HALF_OPEN'; // probe is due
+    }
+    providerStatus[p] = {
+      state: displayState,
+      consecutive_failures: cbState.consecutive_failures || 0,
+      opened_at: cbState.opened_at || null,
+      retry_after: cbState.retry_after || null,
+      retry_after_in_ms: cbState.retry_after ? Math.max(0, cbState.retry_after - now) : null,
+      last_failure_reason: cbState.last_failure_reason || null,
+    };
+    if (displayState === 'OPEN') circuitOpenCount++;
+  }
+
+  // ── Phase 10.5: Summary Cache stats ──
+  let cacheHits = 0, cacheMisses = 0, cacheHitRate = 0;
+  try {
+    const raw = await readAppCache(env, NEWS_AI_CACHE_STATS_KEY).catch(() => null);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      cacheHits = parsed.hits || 0;
+      cacheMisses = parsed.misses || 0;
+      const total = cacheHits + cacheMisses;
+      cacheHitRate = total > 0 ? Math.round((cacheHits / total) * 1000) / 10 : 0; // % with 1 decimal
+    }
+  } catch {}
+
   return {
     ts: now,
     queue_length: queue.length,
@@ -4281,6 +4566,9 @@ async function getNewsAIMonitoring(env) {
       // Phase 10: provider config
       openai_model: OPENAI_MODEL,
       providers_priority: ['gemini', 'workers-ai', 'openai'],
+      // Phase 10.5: circuit breaker config
+      circuit_breaker_threshold: CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+      circuit_breaker_open_ms: CIRCUIT_BREAKER_OPEN_MS,
     },
     // Phase 10: per-provider stats
     providers: {
@@ -4294,6 +4582,13 @@ async function getNewsAIMonitoring(env) {
     average_summary_time_ms: avgSummaryTimeMs,
     total_summaries_generated: providerStats?.total_summaries || 0,
     provider_stats_updated_at: providerStats?.updated_at || null,
+    // Phase 10.5: Circuit Breaker status
+    provider_status: providerStatus,
+    circuit_breaker_open_count: circuitOpenCount,
+    // Phase 10.5: Summary Cache stats
+    summary_cache_hits: cacheHits,
+    summary_cache_misses: cacheMisses,
+    cache_hit_rate: cacheHitRate, // percentage (0-100, 1 decimal)
     failed_items: queue.filter(q => q.status === 'failed').slice(-5).map(q => ({
       url: q.url, title: q.title, retry_count: q.retry_count,
       fail_reason: q.fail_reason, last_attempt: q.last_attempt,
