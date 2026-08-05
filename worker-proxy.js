@@ -3386,6 +3386,340 @@ function isNewsQueueEnabled(env) {
 const NEWS_SUMMARY_MAX_RETRIES = 3;
 const NEWS_SUMMARY_BACKOFF_MINUTES = [5, 15, 30]; // after attempt 1, 2, 3 (failures)
 
+// ────────────────────────────────────────────────────────────────────────────
+// MULTI-PROVIDER AI FALLBACK (Phase 10)
+// Provider priority: Gemini (primary) → Workers AI (fallback 1) → OpenAI (fallback 2)
+// Each provider is tried only if the previous one failed.
+// Fallback happens in the SAME invocation (no queue wait).
+// Queue retry only when ALL providers fail.
+//
+// Feature flags (env vars, default values shown):
+//   NEWS_PROVIDER_GEMINI       = true   (primary)
+//   NEWS_PROVIDER_WORKERS_AI   = true   (fallback 1)
+//   NEWS_PROVIDER_OPENAI       = false  (fallback 2 — opt-in, needs OPENAI_API_KEY)
+//
+// Error classification:
+//   retryable     → 429, 5xx, timeout, network, invalid JSON, empty response
+//                   (try next provider; if all fail with retryable → requeue)
+//   non_retryable → 401/403 (key invalid), 404 (model not found), 400 (prompt invalid)
+//                   (try next provider; if all fail with non-retryable → mark failed)
+// ────────────────────────────────────────────────────────────────────────────
+const NEWS_AI_PROVIDER_STATS_KEY = 'news:ai_provider_stats';
+const OPENAI_MODEL = 'gpt-4o-mini'; // cheap, fast, good for summarization
+
+function isNewsProviderEnabled(env, flagName, defaultValue) {
+  return isNewsFlagEnabled(env, flagName, defaultValue);
+}
+
+/**
+ * Classify an HTTP status code as retryable or non-retryable.
+ * Retryable: 429 (rate limit), 5xx (server), 408 (timeout)
+ * Non-retryable: 400 (bad prompt), 401/403 (auth), 404 (model not found)
+ * Unknown → retryable (safe default — try next provider, requeue if all fail)
+ */
+function classifyHttpError(status) {
+  if (status === 429 || status === 408 || status >= 500) return 'retryable';
+  if (status === 400 || status === 401 || status === 403 || status === 404) return 'non_retryable';
+  return 'retryable';
+}
+
+/**
+ * Provider 1: Gemini 2.0 Flash (primary).
+ * Returns { provider, success, summary?, error?, errorType, error_detail?, duration_ms }.
+ */
+async function tryGemini(env, prompt) {
+  const t0 = Date.now();
+  const GEMINI_API_KEY = env.GEMINI_API_KEY;
+  if (!GEMINI_API_KEY) {
+    return { provider: 'gemini', success: false, error: 'no_api_key', errorType: 'non_retryable', duration_ms: 0 };
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 },
+        }),
+        signal: controller.signal,
+      }
+    );
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const errorType = classifyHttpError(res.status);
+      let errorBody = '';
+      try { errorBody = (await res.text()).substring(0, 200); } catch {}
+      return { provider: 'gemini', success: false, error: `http_${res.status}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0 };
+    }
+
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      return { provider: 'gemini', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0 };
+    }
+
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (text && text.trim().length >= 50) {
+      return { provider: 'gemini', success: true, summary: text.trim(), duration_ms: Date.now() - t0 };
+    }
+    return { provider: 'gemini', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
+  } catch (e) {
+    const isAbort = e?.name === 'AbortError';
+    return {
+      provider: 'gemini',
+      success: false,
+      error: isAbort ? 'timeout' : 'network_error',
+      errorType: 'retryable',
+      error_detail: e?.message?.substring(0, 120),
+      duration_ms: Date.now() - t0,
+    };
+  }
+}
+
+/**
+ * Provider 2: Cloudflare Workers AI (fallback 1).
+ * Uses the @cf/meta/llama-3.3-70b-instruct-fp8-fast model via env.AI binding.
+ */
+async function tryWorkersAI(env, prompt) {
+  const t0 = Date.now();
+  if (!env.AI) {
+    return { provider: 'workers-ai', success: false, error: 'no_binding', errorType: 'non_retryable', duration_ms: 0 };
+  }
+  try {
+    const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+      messages: [
+        { role: 'system', content: 'You are a professional Persian crypto and financial journalist. Read the full article and write a 120-200 word analysis in fluent Farsi. Preserve all key numbers, names, and dates. Explain what happened, important details, why it matters, and market impact. Write original analysis, not translation. Do NOT invent any facts. Use blank lines between paragraphs.' },
+        { role: 'user', content: prompt.substring(0, 12000) },
+      ],
+      max_tokens: 1024,
+      temperature: 0.4,
+    });
+
+    if (aiResponse?.response && aiResponse.response.trim().length >= 50) {
+      return { provider: 'workers-ai', success: true, summary: aiResponse.response.trim(), duration_ms: Date.now() - t0 };
+    }
+    return { provider: 'workers-ai', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
+  } catch (e) {
+    const msg = e?.message || String(e) || '';
+    // Workers AI throws JS errors. Classify by message content.
+    // Non-retryable: model not found, auth/binding issues
+    // Retryable: timeout, rate limit, capacity, network
+    const isNonRetryable = /not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
+      && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg);
+    return {
+      provider: 'workers-ai',
+      success: false,
+      error: 'runtime_error',
+      errorType: isNonRetryable ? 'non_retryable' : 'retryable',
+      error_detail: msg.substring(0, 120),
+      duration_ms: Date.now() - t0,
+    };
+  }
+}
+
+/**
+ * Provider 3: OpenAI (fallback 2 — opt-in via NEWS_PROVIDER_OPENAI=true + OPENAI_API_KEY).
+ * Uses gpt-4o-mini (cheap, fast, good for summarization).
+ */
+async function tryOpenAI(env, prompt) {
+  const t0 = Date.now();
+  const OPENAI_API_KEY = env.OPENAI_API_KEY;
+  if (!OPENAI_API_KEY) {
+    return { provider: 'openai', success: false, error: 'no_api_key', errorType: 'non_retryable', duration_ms: 0 };
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        messages: [
+          { role: 'system', content: 'You are a professional Persian crypto and financial journalist. Read the full article and write a 120-200 word analysis in fluent Farsi. Preserve all key numbers, names, and dates. Explain what happened, important details, why it matters, and market impact. Write original analysis, not translation. Do NOT invent any facts. Use blank lines between paragraphs.' },
+          { role: 'user', content: prompt.substring(0, 12000) },
+        ],
+        max_tokens: 1024,
+        temperature: 0.4,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const errorType = classifyHttpError(res.status);
+      let errorBody = '';
+      try { errorBody = (await res.text()).substring(0, 200); } catch {}
+      return { provider: 'openai', success: false, error: `http_${res.status}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0 };
+    }
+
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      return { provider: 'openai', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0 };
+    }
+
+    const text = data?.choices?.[0]?.message?.content;
+    if (text && text.trim().length >= 50) {
+      return { provider: 'openai', success: true, summary: text.trim(), duration_ms: Date.now() - t0 };
+    }
+    return { provider: 'openai', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
+  } catch (e) {
+    const isAbort = e?.name === 'AbortError';
+    return {
+      provider: 'openai',
+      success: false,
+      error: isAbort ? 'timeout' : 'network_error',
+      errorType: 'retryable',
+      error_detail: e?.message?.substring(0, 120),
+      duration_ms: Date.now() - t0,
+    };
+  }
+}
+
+/**
+ * Multi-provider fallback coordinator.
+ * Tries providers in priority order (Gemini → Workers AI → OpenAI).
+ * Each provider is tried ONLY if the previous one failed.
+ * All attempts happen in the SAME invocation (no queue wait between providers).
+ *
+ * Returns:
+ *   { summary, usedProvider, attempts, totalDuration, anyRetryable, allNonRetryable, fallbackUsed }
+ *
+ * - summary: string | null (null = all providers failed)
+ * - usedProvider: 'gemini' | 'workers-ai' | 'openai' | null
+ * - attempts: array of per-provider results (for metadata + monitoring)
+ * - fallbackUsed: true if success came from a non-primary provider
+ */
+async function generateSummaryWithFallback(env, prompt) {
+  const attempts = [];
+  let summary = null;
+  let usedProvider = null;
+  let totalDuration = 0;
+
+  // Provider 1: Gemini (primary)
+  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
+    const r = await tryGemini(env, prompt);
+    attempts.push(r);
+    totalDuration += r.duration_ms || 0;
+    if (r.success) {
+      summary = r.summary;
+      usedProvider = 'gemini';
+    }
+  }
+
+  // Provider 2: Workers AI (fallback 1) — only if Gemini didn't succeed
+  if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true)) {
+    const r = await tryWorkersAI(env, prompt);
+    attempts.push(r);
+    totalDuration += r.duration_ms || 0;
+    if (r.success) {
+      summary = r.summary;
+      usedProvider = 'workers-ai';
+    }
+  }
+
+  // Provider 3: OpenAI (fallback 2) — only if both Gemini + Workers AI didn't succeed
+  if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) {
+    const r = await tryOpenAI(env, prompt);
+    attempts.push(r);
+    totalDuration += r.duration_ms || 0;
+    if (r.success) {
+      summary = r.summary;
+      usedProvider = 'openai';
+    }
+  }
+
+  const anyRetryable = attempts.some(a => a.errorType === 'retryable');
+  const allNonRetryable = attempts.length > 0 && attempts.every(a => a.errorType === 'non_retryable');
+  // Fallback = success on a non-primary provider (i.e., at least one attempt failed before success)
+  const fallbackUsed = attempts.length > 1 && !!summary;
+
+  return {
+    summary,
+    usedProvider,
+    attempts,
+    totalDuration,
+    anyRetryable,
+    allNonRetryable,
+    fallbackUsed,
+  };
+}
+
+/**
+ * Record a per-provider attempt to the aggregate stats in KV.
+ * Used by /api/news-ai-monitor for provider success/failure counts.
+ */
+async function recordProviderAttempt(env, provider, success, durationMs) {
+  if (!env.APP_CACHE) return;
+  try {
+    const raw = await readAppCache(env, NEWS_AI_PROVIDER_STATS_KEY).catch(() => null);
+    let stats = {
+      gemini: { success: 0, failed: 0, total_ms: 0 },
+      'workers-ai': { success: 0, failed: 0, total_ms: 0 },
+      'openai': { success: 0, failed: 0, total_ms: 0 },
+      fallback_count: 0,
+      fallback_to: {},
+      total_summaries: 0,
+      total_duration_ms: 0,
+      updated_at: null,
+    };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        stats = { ...stats, ...parsed };
+        // Ensure nested provider objects exist
+        for (const k of ['gemini', 'workers-ai', 'openai']) {
+          if (!stats[k]) stats[k] = { success: 0, failed: 0, total_ms: 0 };
+        }
+        if (!stats.fallback_to) stats.fallback_to = {};
+      }
+    }
+    if (success) {
+      stats[provider].success++;
+      stats[provider].total_ms += durationMs || 0;
+      stats.total_summaries++;
+      stats.total_duration_ms += durationMs || 0;
+    } else {
+      stats[provider].failed++;
+    }
+    stats.updated_at = Date.now();
+    await writeAppCache(env, NEWS_AI_PROVIDER_STATS_KEY, JSON.stringify(stats), NEWS_AI_MONITOR_TTL);
+  } catch (e) {
+    console.warn('[NEWS-AI-STATS] recordProviderAttempt failed:', e?.message);
+  }
+}
+
+/**
+ * Record a fallback event (success on a non-primary provider).
+ * Increments fallback_count + fallback_to.{provider}.
+ */
+async function recordFallbackEvent(env, finalProvider) {
+  if (!env.APP_CACHE) return;
+  try {
+    const raw = await readAppCache(env, NEWS_AI_PROVIDER_STATS_KEY).catch(() => null);
+    let stats = {};
+    if (raw) stats = JSON.parse(raw) || {};
+    stats.fallback_count = (stats.fallback_count || 0) + 1;
+    stats.fallback_to = stats.fallback_to || {};
+    stats.fallback_to[finalProvider] = (stats.fallback_to[finalProvider] || 0) + 1;
+    stats.updated_at = Date.now();
+    await writeAppCache(env, NEWS_AI_PROVIDER_STATS_KEY, JSON.stringify(stats), NEWS_AI_MONITOR_TTL);
+  } catch (e) {
+    console.warn('[NEWS-AI-STATS] recordFallbackEvent failed:', e?.message);
+  }
+}
+
 /**
  * Queue Management for News AI Summaries.
  * Queue is stored in KV as a JSON array of queue-item objects.
@@ -3597,10 +3931,23 @@ async function processOneArticleSummary(env) {
     };
   }
 
-  // Helper: on success — remove from queue + save summary
-  async function succeedWithSummary(summary) {
+  // Helper: on success — remove from queue + save summary WITH metadata
+  // (Phase 10: store provider + attempts as JSON for monitoring + frontend visibility)
+  async function succeedWithSummary(summary, provider, attempts) {
     try {
-      await writeAppCache(env, aiKey, summary, NEWS_AI_CACHE_TTL);
+      // Store as JSON with metadata (backward-compatible: enrichNewsWithAISummaries parses both)
+      const payload = JSON.stringify({
+        summary,
+        provider, // 'gemini' | 'workers-ai' | 'openai'
+        attempts: attempts.map(a => ({
+          provider: a.provider,
+          success: a.success,
+          error: a.error || null,
+          duration_ms: a.duration_ms || 0,
+        })),
+        generated_at: Date.now(),
+      });
+      await writeAppCache(env, aiKey, payload, NEWS_AI_CACHE_TTL);
     } catch (e) {
       // KV write failed — treat as retryable failure
       return requeueWithRetry('kv_write_failed', e?.message);
@@ -3611,8 +3958,10 @@ async function processOneArticleSummary(env) {
       processed: true,
       success: true,
       url: article.url,
+      provider,
       retry_count: article.retry_count || 0,
       duration_ms: Date.now() - t0,
+      fallback_used: attempts.length > 1,
     };
   }
 
@@ -3721,12 +4070,14 @@ async function processOneArticleSummary(env) {
     };
   }
 
-  // ── STEP 3: Generate AI summary ──
-  let summary = null;
-  let aiSource = 'none';
+  // ── STEP 3: Generate AI summary via MULTI-PROVIDER FALLBACK (Phase 10) ──
+  // Providers tried in order: Gemini → Workers AI → OpenAI
+  // Each provider only tried if the previous FAILED (same invocation, no queue wait).
+  // Queue retry only when ALL providers fail.
 
   // Professional journalist prompt — emphasizes: read full article, preserve
   // numbers/names/dates, explain significance, no fabrication, fluent Farsi.
+  // (Same prompt used by all 3 providers for consistent quality.)
   const JOURNALIST_SYSTEM = 'تو یک خبرنگار حرفه‌ای مالی و کریپتو هستی. وظیفه تو این است که مقاله زیر را کامل بخوانی و یک تحلیل حرفه‌ای، روان و دقیق به زبان فارسی بنویسی. تو مترجم نیستی، بازنویس نیستی، و تبلیغ‌نویس نیستی. تو یک تحلیل‌گر خبر هستی.';
   const JOURNALIST_PROMPT = `${JOURNALIST_SYSTEM}
 
@@ -3757,78 +4108,52 @@ async function processOneArticleSummary(env) {
 
 ${articleText}`;
 
-  // Method 1: Gemini 2.0 Flash (primary)
-  const GEMINI_API_KEY = env.GEMINI_API_KEY;
-  if (GEMINI_API_KEY) {
+  // Run multi-provider fallback (Gemini → Workers AI → OpenAI)
+  const fallbackResult = await generateSummaryWithFallback(env, JOURNALIST_PROMPT);
+
+  // Record per-provider stats for monitoring (non-blocking, best-effort)
+  for (const attempt of fallbackResult.attempts) {
     try {
-      const geminiController = new AbortController();
-      const geminiTimeout = setTimeout(() => geminiController.abort(), 15000);
-      const geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: JOURNALIST_PROMPT }] }],
-            generationConfig: { temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 },
-          }),
-          signal: geminiController.signal,
-        }
-      );
-      clearTimeout(geminiTimeout);
-
-      if (geminiRes.ok) {
-        const geminiData = await geminiRes.json();
-        const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text && text.trim().length >= 50) {
-          summary = text.trim();
-          aiSource = 'gemini-2.0-flash';
-        }
-      } else if (geminiRes.status === 429 || geminiRes.status >= 500) {
-        // Retryable — 429 rate limit or 5xx server error
-        return requeueWithRetry('gemini_' + geminiRes.status, 'HTTP ' + geminiRes.status);
-      } else {
-        // Non-retryable client error (4xx) — try fallback
-        console.warn('[NEWS-AI-QUEUE] Gemini non-retryable HTTP ' + geminiRes.status);
-      }
-    } catch (e) {
-      // Abort/timeout/network — retryable
-      return requeueWithRetry('gemini_error', e?.message?.substring(0, 120));
-    }
+      await recordProviderAttempt(env, attempt.provider, attempt.success, attempt.duration_ms || 0);
+    } catch {}
+  }
+  // Record fallback event if success came from a non-primary provider
+  if (fallbackResult.fallbackUsed && fallbackResult.usedProvider) {
+    try { await recordFallbackEvent(env, fallbackResult.usedProvider); } catch {}
   }
 
-  // Method 2: Workers AI (fallback)
-  if (!summary && env.AI) {
-    try {
-      const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-        messages: [
-          { role: 'system', content: 'You are a professional Persian crypto and financial journalist. Read the full article and write a 120-200 word analysis in fluent Farsi. Preserve all key numbers, names, and dates. Explain what happened, important details, why it matters, and market impact. Write original analysis, not translation. Do NOT invent any facts. Use blank lines between paragraphs.' },
-          { role: 'user', content: JOURNALIST_PROMPT.substring(0, 12000) },
-        ],
-        max_tokens: 1024,
-        temperature: 0.4,
-      });
-
-      if (aiResponse?.response && aiResponse.response.trim().length >= 50) {
-        summary = aiResponse.response.trim();
-        aiSource = 'cloudflare-workers-ai';
-      }
-    } catch (e) {
-      console.warn('[NEWS-AI-QUEUE] Workers AI failed:', e?.message);
-      // If Gemini also didn't produce anything, this is a failure → retry
-      if (!summary) {
-        return requeueWithRetry('workers_ai_error', e?.message?.substring(0, 120));
-      }
-    }
+  // ── STEP 4: Save to KV (7 days) or requeue ──
+  if (fallbackResult.summary && fallbackResult.summary.trim().length >= 50) {
+    // SUCCESS — save summary + provider metadata, remove from queue
+    return succeedWithSummary(fallbackResult.summary, fallbackResult.usedProvider, fallbackResult.attempts);
   }
 
-  // ── STEP 4: Save to KV (7 days) ──
-  if (summary && summary.trim().length >= 50) {
-    return succeedWithSummary(summary);
+  // ALL PROVIDERS FAILED
+  // Decision: requeue (retryable) vs mark failed (all non-retryable)
+  if (fallbackResult.allNonRetryable && !fallbackResult.anyRetryable && fallbackResult.attempts.length > 0) {
+    // All errors were non-retryable (invalid key, model not found, bad prompt)
+    // → No point retrying — config won't change. Mark as failed immediately.
+    article.retry_count = (article.retry_count || 0) + 1;
+    article.last_attempt = now;
+    article.status = 'failed';
+    article.fail_reason = 'all_providers_non_retryable';
+    article.fail_attempts = fallbackResult.attempts.map(a => ({ provider: a.provider, error: a.error, errorType: a.errorType }));
+    queue.splice(idx, 1);
+    queue.push(article);
+    await saveSummaryQueue(env, queue);
+    return {
+      processed: true, success: false, reason: 'all_providers_non_retryable',
+      url: article.url, retry_count: article.retry_count, status: 'failed',
+      attempts: fallbackResult.attempts, duration_ms: Date.now() - t0,
+    };
   }
 
-  // All methods failed without a retryable error (e.g., AI returned empty)
-  return requeueWithRetry('ai_no_summary', 'all methods returned empty/short');
+  // At least one retryable error → requeue with backoff
+  // (Queue retry ONLY when all providers fail — per Phase 10 spec)
+  const failSummary = fallbackResult.attempts
+    .map(a => `${a.provider}:${a.success ? 'ok' : a.error}`)
+    .join(', ');
+  return requeueWithRetry('all_providers_failed', failSummary);
 }
 
 /**
@@ -3904,6 +4229,30 @@ async function getNewsAIMonitoring(env) {
 
   const lastTick = history.length > 0 ? history[history.length - 1] : null;
 
+  // ── Phase 10: Provider stats (per-provider success/failed, fallback count, avg time) ──
+  let providerStats = null;
+  try {
+    const raw = await readAppCache(env, NEWS_AI_PROVIDER_STATS_KEY).catch(() => null);
+    if (raw) providerStats = JSON.parse(raw);
+  } catch {}
+
+  // Calculate "Average Provider" = the provider used most often for SUCCESSFUL summaries
+  let avgProvider = null;
+  let avgSummaryTimeMs = 0;
+  if (providerStats) {
+    const providers = ['gemini', 'workers-ai', 'openai'];
+    let maxSuccess = 0;
+    for (const p of providers) {
+      if (providerStats[p] && providerStats[p].success > maxSuccess) {
+        maxSuccess = providerStats[p].success;
+        avgProvider = p;
+      }
+    }
+    if (providerStats.total_summaries > 0) {
+      avgSummaryTimeMs = Math.round(providerStats.total_duration_ms / providerStats.total_summaries);
+    }
+  }
+
   return {
     ts: now,
     queue_length: queue.length,
@@ -3919,13 +4268,32 @@ async function getNewsAIMonitoring(env) {
       NEWS_SUMMARY_ENABLED: isNewsSummaryEnabled(env),
       NEWS_BATCH_ANALYSIS_ENABLED: isNewsBatchAnalysisEnabled(env),
       NEWS_QUEUE_ENABLED: isNewsQueueEnabled(env),
+      // Phase 10: provider flags
+      NEWS_PROVIDER_GEMINI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true),
+      NEWS_PROVIDER_WORKERS_AI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true),
+      NEWS_PROVIDER_OPENAI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false),
     },
     config: {
       max_retries: NEWS_SUMMARY_MAX_RETRIES,
       backoff_minutes: NEWS_SUMMARY_BACKOFF_MINUTES,
       summary_ttl_days: NEWS_AI_CACHE_TTL / (24 * 3600),
       news_list_ttl_minutes: 30,
+      // Phase 10: provider config
+      openai_model: OPENAI_MODEL,
+      providers_priority: ['gemini', 'workers-ai', 'openai'],
     },
+    // Phase 10: per-provider stats
+    providers: {
+      gemini: providerStats?.gemini || { success: 0, failed: 0, total_ms: 0 },
+      'workers-ai': providerStats?.['workers-ai'] || { success: 0, failed: 0, total_ms: 0 },
+      'openai': providerStats?.openai || { success: 0, failed: 0, total_ms: 0 },
+    },
+    fallback_count: providerStats?.fallback_count || 0,
+    fallback_to: providerStats?.fallback_to || {},
+    average_provider: avgProvider,
+    average_summary_time_ms: avgSummaryTimeMs,
+    total_summaries_generated: providerStats?.total_summaries || 0,
+    provider_stats_updated_at: providerStats?.updated_at || null,
     failed_items: queue.filter(q => q.status === 'failed').slice(-5).map(q => ({
       url: q.url, title: q.title, retry_count: q.retry_count,
       fail_reason: q.fail_reason, last_attempt: q.last_attempt,
@@ -3967,8 +4335,29 @@ async function enrichNewsWithAISummaries(env, articles) {
     articles.map(async (article) => {
       const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url || '')}`;
       let aiSummary = null;
+      let aiProvider = null;
+      let aiGeneratedAt = null;
       try {
-        aiSummary = await readAppCache(env, aiKey);
+        const raw = await readAppCache(env, aiKey);
+        if (raw) {
+          // Phase 10: KV now stores JSON { summary, provider, attempts, generated_at }
+          // Backward compat: old entries are plain strings (just the summary text).
+          // Try JSON parse first; if it fails or shape is wrong, treat as plain string.
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string') {
+              aiSummary = parsed.summary;
+              aiProvider = parsed.provider || null;
+              aiGeneratedAt = parsed.generated_at || null;
+            } else {
+              // JSON but not the expected shape — treat as plain string
+              aiSummary = raw;
+            }
+          } catch {
+            // Not JSON — plain string (old format from before Phase 10)
+            aiSummary = raw;
+          }
+        }
       } catch (e) { console.warn('[NEWS-AI] enrichNews KV read error:', e?.message); }
       let aiStatus;
       if (aiSummary) {
@@ -3981,6 +4370,8 @@ async function enrichNewsWithAISummaries(env, articles) {
         ...article,
         ai_summary: aiSummary || null,
         ai_status: aiStatus,
+        ai_provider: aiProvider,     // Phase 10: which provider generated this ('gemini'|'workers-ai'|'openai'|null)
+        ai_generated_at: aiGeneratedAt, // Phase 10: timestamp of generation
       };
     })
   );
