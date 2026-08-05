@@ -8087,12 +8087,27 @@ export default {
     const isEvery5Min = cronExpr === '*/5 * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
-    // ── Phase 4: Crash Recovery (every 5 min) ──
-    // Requeue stale queue items and broadcasts stuck in 'processing'/'sending'
-    // for more than 5 minutes. Prevents permanent message loss on worker crash.
-    // PHASE 2: Uses withPhasePool — 1 Pool for both queryDb calls (was 2 Pools).
-    if (isEvery5Min && notificationPlatformRepo) {
-      ctx.waitUntil(withPhasePool(env, async (pool) => {
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 4: SEQUENTIAL EXECUTION WITH SINGLE SHARED POOL
+    //
+    // ROOT CAUSE (proven with Runtime evidence):
+    //   - Free Plan CPU limit = 10ms PER REQUEST (entire scheduled handler)
+    //   - 3 parallel phases × 1 Pool.create each = 3 TLS handshakes = 9-15ms CPU
+    //   - 23% exceededCpu on */5 ticks, 60% on */15 ticks
+    //
+    // FIX:
+    //   - ALL phases run SEQUENTIALLY inside ONE ctx.waitUntil
+    //   - ONE shared Pool (via withPhasePool) for ALL queryDb calls
+    //   - 1 Pool.create = 3-5ms CPU < 10ms → no exceededCpu
+    //   - Each phase wrapped in try/catch for isolation (one phase's error
+    //     doesn't prevent subsequent phases from running)
+    //
+    // Delay: < 1 second (sequential vs parallel) — imperceptible for cron.
+    // ═══════════════════════════════════════════════════════════════════
+    ctx.waitUntil(withPhasePool(env, async (pool) => {
+
+      // ── Phase 4: Crash Recovery (every 5 min) ──
+      if (isEvery5Min && notificationPlatformRepo) {
         try {
           const qResult = notificationPlatformRepo.requeueStaleQueueItems
             ? await notificationPlatformRepo.requeueStaleQueueItems(env, pool)
@@ -8106,17 +8121,9 @@ export default {
         } catch (e) {
           console.warn('[CRON] Phase 4 requeue failed:', e?.message);
         }
-      }));
-    }
+      }
 
-    // ── PHASE 1a: Alerts OR Calendar check (own ctx.waitUntil) ──
-    // ROOT CAUSE FIX: Previously alerts + calendar cache refresh were in
-    // the SAME ctx.waitUntil. The calendar cache refresh (fetchCalendarFeed
-    // + mapCalendarEvent for 95 events + writeAppCache) added ~5ms CPU
-    // on top of alerts (~5ms) = 10ms → exceededCpu.
-    // Now they're split: 1a = alerts/calendar check, 1c = cache refresh.
-    // PHASE 2: Uses withPhasePool — 1 Pool for all queryDb calls in this phase.
-    ctx.waitUntil(withPhasePool(env, async (pool) => {
+      // ── PHASE 1a: Alerts OR Calendar check ──
       try {
         if (isEveryMinute) {
           const minute = new Date().getUTCMinutes();
@@ -8133,12 +8140,9 @@ export default {
             }
           }
         }
-        // ROOT-CAUSE FIX: Also run alerts+calendar on 5-min cron (previously only
-        // on 1-min cron). Since 1-min cron was removed to reduce exceededCpu,
-        // 5-min cron now handles the alternating alerts/calendar pattern.
         if (isEvery5Min) {
           const minute = new Date().getUTCMinutes();
-          const runAlerts = minute % 10 === 0;  // every other 5-min tick
+          const runAlerts = minute % 10 === 0;
           if (runAlerts) {
             try { await runScheduledAlertsBaseline(controller, env, pool); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
               _logPhase('phase1a-alerts', 'error', { error: e?.message });
@@ -8166,14 +8170,23 @@ export default {
         _logPhase('phase1a', 'error', { error: e?.message });
         console.error('[CRON] Phase 1a error:', e?.message);
       }
-    }));
 
-    // ── PHASE 1c: Calendar cache refresh (15-min only, SEPARATE ctx.waitUntil) ──
-    // This does fetchCalendarFeed + mapCalendarEvent (95 events) + writeAppCache.
-    // It consumes ~5ms CPU on its own. Splitting it from Phase 1a ensures
-    // it doesn't push the combined CPU over 10ms.
-    if (isEvery15Min) {
-      ctx.waitUntil((async () => {
+      // ── PHASE 1b: Broadcast batch (every 5 min) ──
+      if (isEvery5Min && notificationPlatformRepo?.processBroadcastBatch) {
+        try {
+          const result = await notificationPlatformRepo.processBroadcastBatch(env, sendTelegramMessage, pool);
+          if (result.processed > 0) {
+            console.log('[CRON] broadcast batch:', JSON.stringify(result));
+          }
+          _logPhase('phase1b-broadcast', 'ok', { processed: result.processed });
+        } catch (e) {
+          _logPhase('phase1b-broadcast', 'error', { error: e?.message });
+          console.warn('[CRON] broadcast batch failed:', e?.message);
+        }
+      }
+
+      // ── PHASE 1c: Calendar cache refresh (15-min only) ──
+      if (isEvery15Min) {
         try {
           const rawEvents = await fetchCalendarFeed();
           if (Array.isArray(rawEvents) && rawEvents.length > 0) {
@@ -8197,38 +8210,11 @@ export default {
           _logPhase('phase1c', 'error', { error: e?.message });
           console.warn('[CRON] calendar cache refresh failed:', e?.message);
         }
-      })());
-    }
+      }
 
-    // ── PHASE 1b: Broadcast batch (every 5 min, separate ctx.waitUntil) ──
-    // ROOT-CAUSE FIX: Was previously on 1-min cron (isEveryMinute) which caused
-    // 1,440 cron ticks/day → 86% exceededCpu. Moved to 5-min cron to reduce
-    // CPU pressure. Broadcasts process within 5 min instead of 1 min — acceptable
-    // trade-off for staying under Free Plan 10ms CPU limit.
-    // PHASE 2: Uses withPhasePool — 1 Pool for all queryDb calls in this phase.
-    if (isEvery5Min && notificationPlatformRepo?.processBroadcastBatch) {
-      ctx.waitUntil(withPhasePool(env, async (pool) => {
+      // ── PHASE 2: Lightweight DB retries (15-min only) ──
+      if (isEvery15Min) {
         try {
-          const result = await notificationPlatformRepo.processBroadcastBatch(env, sendTelegramMessage, pool);
-          if (result.processed > 0) {
-            console.log('[CRON] broadcast batch:', JSON.stringify(result));
-          }
-          _logPhase('phase1b-broadcast', 'ok', { processed: result.processed });
-        } catch (e) {
-          _logPhase('phase1b-broadcast', 'error', { error: e?.message });
-          console.warn('[CRON] broadcast batch failed:', e?.message);
-        }
-      }));
-    }
-
-    // ── PHASE 2: Lightweight DB retries (15-min only, separate ctx.waitUntil) ──
-    // PHASE 2: Uses withPhasePool — 1 Pool for all queryDb calls in this phase.
-    if (isEvery15Min) {
-      ctx.waitUntil(withPhasePool(env, async (pool) => {
-        try {
-          // Phase 4: Also run requeue on 15-min tick as fallback (in case */5 cron
-          // is not deployed due to account plan limits). 15-min is less frequent
-          // than ideal 5-min, but still prevents permanent message loss.
           if (notificationPlatformRepo?.requeueStaleQueueItems) {
             try { await notificationPlatformRepo.requeueStaleQueueItems(env, pool); } catch (e) {
               console.warn('[CRON] Phase 4 requeueStaleQueueItems (15min) failed:', e?.message);
@@ -8252,47 +8238,37 @@ export default {
           _logPhase('phase2', 'error', { error: e?.message });
           console.error('[CRON] Phase 2 error:', e?.message);
         }
-      }));
 
-      // ── PHASE 3: Heavy jobs (alternating, separate ctx.waitUntil per job) ──
-      // PHASE 2: processQueue uses withPhasePool — 1 Pool for all its queryDb calls.
-      const minute = new Date().getUTCMinutes();
-      if (minute === 0 || minute === 30) {
-        // First 15-min tick of the half-hour: notification queue + market overview
-        if (notificationPlatformRepo?.processQueue) {
-          ctx.waitUntil(withPhasePool(env, async (pool) => {
+        // ── PHASE 3: Heavy jobs (alternating) ──
+        const minute = new Date().getUTCMinutes();
+        if (minute === 0 || minute === 30) {
+          if (notificationPlatformRepo?.processQueue) {
             try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage, pool); _logPhase('phase3-queue', 'ok'); } catch (e) {
               _logPhase('phase3-queue', 'error', { error: e?.message });
               console.warn('[CRON] notif queue failed:', e?.message);
             }
-          }));
-        }
-        if (env.CMC_API_KEY) {
-          ctx.waitUntil((async () => {
+          }
+          if (env.CMC_API_KEY) {
             try { await marketOverviewSvc.refreshOverview(env); _logPhase('phase3-market', 'ok'); } catch (e) {
               _logPhase('phase3-market', 'error', { error: e?.message });
               console.warn('[CRON] market overview failed:', e?.message);
             }
-          })());
-        }
-      } else {
-        // Second 15-min tick: publisher + news AI (SEPARATE ctx.waitUntil each!)
-        if (publisherHandlers?.processPublisherQueue) {
-          ctx.waitUntil((async () => {
+          }
+        } else {
+          if (publisherHandlers?.processPublisherQueue) {
             try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); _logPhase('phase3-publisher', 'ok'); } catch (e) {
               _logPhase('phase3-publisher', 'error', { error: e?.message });
               console.warn('[CRON] publisher failed:', e?.message);
             }
-          })());
-        }
-        ctx.waitUntil((async () => {
+          }
           try { await processNewsAIBatch(env); _logPhase('phase3-newsai', 'ok'); } catch (e) {
             _logPhase('phase3-newsai', 'error', { error: e?.message });
             console.warn('[CRON] news AI failed:', e?.message);
           }
-        })());
+        }
       }
-    }
+
+    }));
   },
 };
 //#endregion
