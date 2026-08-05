@@ -2790,6 +2790,152 @@ function extractImageUrl(descriptionHtml, itemBlock) {
   return 'https://images.cryptocompare.com/news/default/bitcoin.png';
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 1: PRE-FILTER ENGINE — Rule-based, 0 AI calls
+// Filters out low-importance news before any translation or AI processing.
+// Reduces ~48 raw RSS items to ~8-12 high-importance articles.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const IMPORTANCE_KEYWORDS = [
+  // Breaking (+3)
+  { words: ['breaking', 'urgent', 'flash', 'just in', 'فوری', 'breaking:'], score: 3, tag: 'breaking' },
+  // Bitcoin (+2)
+  { words: ['bitcoin', 'btc', 'بیت‌کوین', 'بیت کوین'], score: 2, tag: 'bitcoin' },
+  // Ethereum (+2)
+  { words: ['ethereum', 'eth', 'اتریوم'], score: 2, tag: 'ethereum' },
+  // ETF (+2)
+  { words: ['etf', 'spot etf', 'bitcoin etf', 'ethereum etf'], score: 2, tag: 'etf' },
+  // Federal Reserve / FOMC (+2)
+  { words: ['fed', 'fomc', 'federal reserve', 'powell', 'rate cut', 'rate hike', 'interest rate', 'fed chair'], score: 2, tag: 'fed' },
+  // SEC / Regulation (+2)
+  { words: ['sec', 'securities and exchange', 'regulation', 'lawsuit', 'sanction', 'approve', 'ban', 'delist', 'delisting'], score: 2, tag: 'regulation' },
+  // Hack / Security (+2)
+  { words: ['hack', 'exploit', 'breach', 'stolen', 'vulnerability', 'security', 'scam', 'fraud', 'rug pull'], score: 2, tag: 'security' },
+  // Exchange (+1)
+  { words: ['binance', 'coinbase', 'kraken', 'okx', 'bybit', 'listing', 'listed', 'exchange', 'trading'], score: 1, tag: 'exchange' },
+  // Institutional (+1)
+  { words: ['microstrategy', 'tesla', 'blackrock', 'institutional', 'adoption', 'treasury', 'saylor'], score: 1, tag: 'institutional' },
+  // Macro (+1)
+  { words: ['cpi', 'ppi', 'nfp', 'gdp', 'inflation', 'unemployment', 'recession', 'consumer price', 'producer price'], score: 1, tag: 'macro' },
+  // Partnership (+1)
+  { words: ['partnership', 'integration', 'collaboration', 'merger', 'acquisition'], score: 1, tag: 'partnership' },
+];
+
+/**
+ * Score a single RSS item by importance.
+ * Returns { score, tags } or null if item has 0 importance matches.
+ */
+function scoreNewsItem(item) {
+  const title = String(item.title || '').toLowerCase();
+  const description = String(item.description || '').toLowerCase();
+  const text = `${title} ${description}`;
+
+  // Reject items with title too short or too long (spam)
+  const titleLen = String(item.title || '').trim().length;
+  if (titleLen < 20 || titleLen > 200) return null;
+
+  let score = 0;
+  const tags = [];
+
+  for (const group of IMPORTANCE_KEYWORDS) {
+    for (const word of group.words) {
+      if (text.includes(word)) {
+        score += group.score;
+        if (!tags.includes(group.tag)) tags.push(group.tag);
+        break; // One match per group is enough
+      }
+    }
+  }
+
+  // No important keywords found — filter out
+  if (score === 0) return null;
+
+  // Bonus: freshness (published < 2 hours ago)
+  if (item.pubDate) {
+    try {
+      const pubTs = new Date(item.pubDate).getTime();
+      const ageHours = (Date.now() - pubTs) / (1000 * 60 * 60);
+      if (ageHours < 2) score += 1;
+      else if (ageHours < 6) score += 0.5;
+    } catch {}
+  }
+
+  // Bonus: authoritative sources
+  const sourceName = String(item._sourceName || '').toLowerCase();
+  if (sourceName.includes('coindesk') || sourceName.includes('cointelegraph')) {
+    score += 1;
+  }
+
+  return { score, tags, item };
+}
+
+/**
+ * Fuzzy deduplication using Jaccard similarity on normalized titles.
+ * Removes near-duplicate articles from different sources.
+ */
+function fuzzyDedupNews(scoredItems, threshold = 0.7) {
+  const normalized = scoredItems.map(s => ({
+    ...s,
+    normTitle: String(s.item.title || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\u0600-\u06FF\s]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(w => w.length > 2),
+  }));
+
+  const result = [];
+  const used = new Set();
+
+  for (let i = 0; i < normalized.length; i++) {
+    if (used.has(i)) continue;
+    result.push(normalized[i]);
+    used.add(i);
+
+    for (let j = i + 1; j < normalized.length; j++) {
+      if (used.has(j)) continue;
+      // Jaccard similarity
+      const setA = new Set(normalized[i].normTitle);
+      const setB = new Set(normalized[j].normTitle);
+      const intersection = [...setA].filter(w => setB.has(w)).length;
+      const union = new Set([...setA, ...setB]).size;
+      const similarity = union > 0 ? intersection / union : 0;
+
+      if (similarity >= threshold) {
+        used.add(j); // Mark as duplicate
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Pre-Filter Engine: filters, scores, dedupes, and selects top-N news items.
+ * Called BEFORE any AI/translation processing.
+ *
+ * Input: array of { title, url, description, pubDate, image, _sourceName, _category }
+ * Output: array of top-N scored items { score, tags, item }
+ */
+function filterAndScoreNews(allItems, maxResults = 10) {
+  // Stage 1: Score and filter (removes items with 0 importance)
+  const scored = [];
+  for (const item of allItems) {
+    const result = scoreNewsItem(item);
+    if (result) scored.push(result);
+  }
+
+  // Stage 2: Sort by score descending
+  scored.sort((a, b) => b.score - a.score);
+
+  // Stage 3: Fuzzy dedup (remove near-duplicates)
+  const deduped = fuzzyDedupNews(scored);
+
+  // Stage 4: Top-N selection
+  return deduped.slice(0, maxResults);
+}
+
 function parseRssItems(rssText) {
   return [...String(rssText || '').matchAll(/<item\b[\s\S]*?<\/item>/gi)].slice(0, 6).map((match) => {
     const block = match[0];
@@ -3149,7 +3295,7 @@ async function fetchFarsiNews(env, categoryFilter) {
 
     if (deduped.length > 0) {
       // Limit total cached articles to reduce payload size and KV storage
-      const MAX_NEWS_ARTICLES = 30;
+      const MAX_NEWS_ARTICLES = 12;
       const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
 
       // Cache the full (unfiltered) trimmed list
@@ -3157,7 +3303,7 @@ async function fetchFarsiNews(env, categoryFilter) {
         env,
         FARSI_NEWS_CACHE_KEY,
         JSON.stringify(trimmed),
-        getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
+        getNumericEnv(env, 'NEWS_CACHE_TTL', 1800), // 30 minutes
       );
 
       // ── AI NEWS: Background AI summarization is handled by CRON, not here ──
@@ -3548,30 +3694,84 @@ async function processNewsAIBatch(env) {
     }
     stepLog('RSS_FETCH_done', { sourceCount: sources.length, names: sources.map(s => s.sourceName) });
 
-    // ── STEP 2: TRANSLATION (buildFarsiNewsArticles translates title+description) ──
-    stepLog('TRANSLATION_start', { sources: sources.length });
+    // ── STEP 2: PARSE ALL RSS ITEMS (no AI, no translation yet) ──
+    stepLog('PARSE_start', { sources: sources.length });
+    const allRawItems = [];
+    for (const s of sources) {
+      try {
+        const items = parseRssItems(s.rssText);
+        for (const item of items) {
+          item._sourceName = s.sourceName;
+          item._category = s.category;
+          item._skipTranslate = s.skipTranslate;
+          allRawItems.push(item);
+        }
+      } catch (parseErr) {
+        console.warn(`[NEWS-AI-CRON] parseRssItems failed for "${s.sourceName}":`, parseErr?.message);
+      }
+    }
+    stepLog('PARSE_done', { totalRawItems: allRawItems.length });
+
+    // ── STEP 3: PRE-FILTER ENGINE (0 AI calls, rule-based) ──
+    // Filters out low-importance news, scores by keywords, fuzzy dedup.
+    // Reduces ~48 raw items to ~8-12 important articles BEFORE any AI.
+    stepLog('PRE_FILTER_start', { input: allRawItems.length });
+    const filtered = filterAndScoreNews(allRawItems, 10);
+    stepLog('PRE_FILTER_done', {
+      input: allRawItems.length,
+      output: filtered.length,
+      scores: filtered.map(f => ({ title: String(f.item.title).slice(0, 50), score: f.score, tags: f.tags })),
+    });
+
+    if (filtered.length === 0) {
+      stepLog('PRE_FILTER_empty', { reason: 'no_important_articles' });
+      return { ok: true, reason: 'no_important_articles', elapsed: Date.now() - t0 };
+    }
+
+    // ── STEP 4: TRANSLATION (only for filtered articles, title only) ──
+    // Phase 2 optimization: only translate title, skip description translation.
+    // Description is kept in original language for AI analysis context.
+    stepLog('TRANSLATION_start', { articles: filtered.length });
     let allArticles;
     try {
-      allArticles = (
-        await Promise.all(
-          sources.map(async (s) => {
+      allArticles = await Promise.all(
+        filtered.map(async (f) => {
+          const item = f.item;
+          let translatedTitle = item.title || 'بدون عنوان';
+
+          // Only translate if not already Farsi
+          if (!item._skipTranslate) {
             try {
-              return await buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env, s.skipTranslate);
-            } catch (srcErr) {
-              // Per-source isolation — one bad feed must not kill the whole batch
-              console.warn(`[NEWS-AI-CRON] buildFarsiNewsArticles failed for "${s.sourceName}":`, srcErr?.message);
-              return [];
+              translatedTitle = await translateToFarsi(item.title || 'بدون عنوان', env);
+            } catch (e) {
+              console.warn('[NEWS-AI-CRON] translateToFarsi failed:', e?.message);
             }
-          })
-        )
-      ).flat();
+          }
+
+          const rawTitle = String(translatedTitle).replace(/\n/g, ' ').trim();
+          return {
+            title: sanitizeNewsTitle(rawTitle),
+            title_en: item.title || '',
+            description: String(item.description || '').replace(/\n/g, ' ').trim(),
+            time_ago: parseRelativeTime(item.pubDate),
+            pub_date: item.pubDate ? new Date(item.pubDate).toISOString() : null,
+            source: item._sourceName,
+            category: item._category || 'crypto',
+            image: item.image,
+            url: item.url,
+            sentiment: classifySentiment(item.title, item.description),
+            importance_tags: f.tags,
+            importance_score: f.score,
+          };
+        })
+      );
     } catch (transErr) {
       stepLog('TRANSLATION_FAILED', { error: transErr?.message, stack: transErr?.stack?.substring(0, 200) });
       throw transErr;
     }
     stepLog('TRANSLATION_done', { totalArticles: allArticles.length });
 
-    // ── STEP 3: DEDUP / QUEUE ──
+    // ── STEP 5: DEDUP by URL (safety net — filterAndScoreNews already deduped by title) ──
     const seen = new Set();
     const deduped = allArticles.filter((a) => {
       if (!a.url || seen.has(a.url)) return false;
@@ -3584,8 +3784,9 @@ async function processNewsAIBatch(env) {
     }
     stepLog('QUEUE_done', { deduped: deduped.length });
 
-    // ── STEP 4: CACHE ARTICLES in KV (so users get instant response) ──
-    const MAX_NEWS_ARTICLES = 30;
+    // ── STEP 6: CACHE ARTICLES in KV (TTL=30min, max=12 articles) ──
+    // Phase 5 optimization: TTL 5min → 30min, max 30 → 12 articles.
+    const MAX_NEWS_ARTICLES = 12;
     const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
     const newsJson = JSON.stringify(trimmed);
     const newsWriteBefore = _kvWriteStats.totalWrites;
@@ -3598,7 +3799,7 @@ async function processNewsAIBatch(env) {
         env,
         FARSI_NEWS_CACHE_KEY,
         newsJson,
-        getNumericEnv(env, 'NEWS_CACHE_TTL', 300),
+        getNumericEnv(env, 'NEWS_CACHE_TTL', 1800), // 30 minutes (was 300 = 5 min)
       );
       stepLog('KV_ARTICLES_cached', { count: trimmed.length });
     } catch (cacheErr) {
