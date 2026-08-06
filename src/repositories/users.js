@@ -10,6 +10,12 @@ export function createUserRepository(deps) {
   const { queryDb, normalizeOptionalString } = deps;
 
   let _tableEnsured = false;
+  // PHASE 1 SAFE OPTIMIZATION: Module-level flag for deleted_users table.
+  // Previously checkReferralCooldown ran CREATE TABLE IF NOT EXISTS on EVERY
+  // bootstrap with a valid referrer. Now it runs only once per isolate (matching
+  // the pattern of _tableEnsured above). The DDL is idempotent so there's no
+  // correctness issue — just a wasted DB round-trip eliminated.
+  let _deletedUsersTableEnsured = false;
 
   /**
    * Ensure the users table has all required columns (idempotent).
@@ -375,16 +381,21 @@ export function createUserRepository(deps) {
   async function checkReferralCooldown(env, userId) {
     const uid = String(userId);
     try {
-      // Ensure table exists
-      await queryDb(env, `
-        CREATE TABLE IF NOT EXISTS deleted_users (
-          id SERIAL PRIMARY KEY,
-          telegram_id VARCHAR(64) NOT NULL UNIQUE,
-          previous_inviter_id VARCHAR(64),
-          deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
-        )
-      `);
+      // PHASE 1 SAFE OPTIMIZATION: Gate the DDL behind a module-level flag.
+      // The CREATE TABLE IF NOT EXISTS is idempotent, but running it on every
+      // call wastes a DB round-trip. Now it only runs once per isolate.
+      if (!_deletedUsersTableEnsured) {
+        await queryDb(env, `
+          CREATE TABLE IF NOT EXISTS deleted_users (
+            id SERIAL PRIMARY KEY,
+            telegram_id VARCHAR(64) NOT NULL UNIQUE,
+            previous_inviter_id VARCHAR(64),
+            deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
+          )
+        `);
+        _deletedUsersTableEnsured = true;
+      }
       const result = await queryDb(env,
         `SELECT telegram_id, deleted_at, cooldown_until
          FROM deleted_users

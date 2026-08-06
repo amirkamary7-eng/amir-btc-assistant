@@ -9,11 +9,45 @@
 export function createWatchlistRepository(deps) {
   const { queryDb, ensureUserRow } = deps;
 
+  // PHASE 2 SAFE OPTIMIZATION: Per-user watchlist cache with 30s TTL.
+  // getSymbols is called on every bootstrap + /api/users/me + /api/watchlist GET.
+  // Watchlist changes rarely (only on PUT /api/watchlist). Cache invalidated in replace().
+  // FIFO eviction (max 500 users) to bound memory.
+  const _WATCHLIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+  const _WATCHLIST_CACHE_MAX = 500;
+  const _watchlistCache = new Map(); // userId -> { value, expiresAt }
+
+  function _invalidateWatchlistCache(userId) {
+    if (userId) {
+      _watchlistCache.delete(String(userId));
+    } else {
+      _watchlistCache.clear();
+    }
+  }
+
+  function _setWatchlistCache(userId, value) {
+    const key = String(userId);
+    if (_watchlistCache.size >= _WATCHLIST_CACHE_MAX) {
+      // FIFO eviction — delete the oldest entry
+      const firstKey = _watchlistCache.keys().next().value;
+      if (firstKey) _watchlistCache.delete(firstKey);
+    }
+    _watchlistCache.set(key, { value, expiresAt: Date.now() + _WATCHLIST_CACHE_TTL_MS });
+  }
+
   /**
    * Retrieve all watchlist symbols for a user, ordered by position.
    * Returns an array of uppercase symbol strings.
    */
   async function getSymbols(env, userId) {
+    // PHASE 2 SAFE OPTIMIZATION: Check per-user cache first (30s TTL).
+    const tid = String(userId);
+    const now = Date.now();
+    const cached = _watchlistCache.get(tid);
+    if (cached !== undefined && now < cached.expiresAt) {
+      return cached.value;
+    }
+
     const result = await queryDb(
       env,
       `
@@ -22,9 +56,11 @@ export function createWatchlistRepository(deps) {
         WHERE user_id = $1
         ORDER BY position ASC, id ASC
       `,
-      [String(userId)],
+      [tid],
     );
-    return result.rows.map((row) => String(row.symbol).toUpperCase());
+    const symbols = result.rows.map((row) => String(row.symbol).toUpperCase());
+    _setWatchlistCache(tid, symbols);
+    return symbols;
   }
 
   /**
@@ -47,6 +83,9 @@ export function createWatchlistRepository(deps) {
       );
     }
     await queryDb(env, 'UPDATE users SET updated_at = NOW() WHERE telegram_id = $1', [String(userId)]);
+    // PHASE 2 SAFE OPTIMIZATION: Invalidate cache for this user, then populate
+    // with the fresh data from getSymbols (avoids 1 extra DB read on next access).
+    _invalidateWatchlistCache(userId);
     return getSymbols(env, userId);
   }
 

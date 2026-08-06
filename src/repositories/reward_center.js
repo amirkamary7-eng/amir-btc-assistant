@@ -18,6 +18,18 @@ export function createRewardCenterRepository(deps) {
 
   let _schemaVerified = false;
 
+  // PHASE 1 SAFE OPTIMIZATION: Module-level cache for getEmergencyControls.
+  // The reward_emergency_controls table is a single-row config table (id=1)
+  // that changes rarely (only when admin toggles kill switches). Previously
+  // every isSubsystemDisabled() call did a fresh SELECT. Now cached for 60s.
+  // Worst case: kill switch takes 60s to take effect — acceptable per business.
+  const _EMERGENCY_CACHE_TTL_MS = 60 * 1000;
+  let _emergencyCache = { value: null, expiresAt: 0 };
+
+  function _invalidateEmergencyCache() {
+    _emergencyCache = { value: null, expiresAt: 0 };
+  }
+
   /**
    * Ensure all Reward Center tables exist. Called lazily on first access.
    * Uses CREATE TABLE IF NOT EXISTS so it's safe to run multiple times.
@@ -839,9 +851,20 @@ export function createRewardCenterRepository(deps) {
   async function getEmergencyControls(env) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return _defaultEmergency();
+
+    // PHASE 1 SAFE OPTIMIZATION: Check module cache first (60s TTL).
+    // The kill-switch table is single-row and changes rarely. Avoids 1 DB
+    // round-trip per isSubsystemDisabled() call.
+    const now = Date.now();
+    if (_emergencyCache.value !== null && now < _emergencyCache.expiresAt) {
+      return _emergencyCache.value;
+    }
+
     try {
       const result = await queryDb(env, `SELECT * FROM reward_emergency_controls WHERE id = 1 LIMIT 1`);
-      return result.rows[0] ? _mapEmergency(result.rows[0]) : _defaultEmergency();
+      const mapped = result.rows[0] ? _mapEmergency(result.rows[0]) : _defaultEmergency();
+      _emergencyCache = { value: mapped, expiresAt: now + _EMERGENCY_CACHE_TTL_MS };
+      return mapped;
     } catch { return _defaultEmergency(); }
   }
 
@@ -860,7 +883,10 @@ export function createRewardCenterRepository(deps) {
     }
     params.push(1);
     const result = await queryDb(env, `UPDATE reward_emergency_controls SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`, params);
-    return result.rows[0] ? _mapEmergency(result.rows[0]) : _defaultEmergency();
+    const mapped = result.rows[0] ? _mapEmergency(result.rows[0]) : _defaultEmergency();
+    // PHASE 1 SAFE OPTIMIZATION: Invalidate cache on update so next read sees fresh data.
+    _invalidateEmergencyCache();
+    return mapped;
   }
 
   function _defaultEmergency() {

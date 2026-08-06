@@ -25,6 +25,51 @@ export function createNotificationPlatformRepository(deps) {
 
   let _schemaVerified = false;
 
+  // PHASE 1 SAFE OPTIMIZATION: Module-level cache for notification templates.
+  // Templates are admin-managed and change rarely. Previously every sendNotification
+  // call did a fresh SELECT on notification_templates. Now cached for 5 minutes.
+  // Cache is invalidated on create/update/delete template operations.
+  const _TEMPLATE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  const _templateCache = new Map(); // key -> { value, expiresAt }
+
+  function _invalidateTemplateCache(key) {
+    if (key) {
+      _templateCache.delete(key);
+    } else {
+      _templateCache.clear();
+    }
+  }
+
+  // PHASE 1 SAFE OPTIMIZATION: Per-user channel preference cache.
+  // getUserChannelPreference is called on every notification dispatch. Previously
+  // each call did a fresh SELECT on notification_settings. Now cached per-user
+  // for 60s. Cache is invalidated when updateSettings is called for that user.
+  // Uses FIFO eviction (max 500 users) to bound memory.
+  const _PREF_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+  const _PREF_CACHE_MAX = 500;
+  const _prefCache = new Map(); // `${userId}:${category}` -> { value, expiresAt }
+
+  function _invalidatePrefCache(userId) {
+    if (userId) {
+      const prefix = String(userId) + ':';
+      for (const key of _prefCache.keys()) {
+        if (key.startsWith(prefix)) _prefCache.delete(key);
+      }
+    } else {
+      _prefCache.clear();
+    }
+  }
+
+  function _setPrefCache(userId, category, value) {
+    const key = `${String(userId)}:${category}`;
+    if (_prefCache.size >= _PREF_CACHE_MAX) {
+      // FIFO eviction — delete the oldest entry
+      const firstKey = _prefCache.keys().next().value;
+      if (firstKey) _prefCache.delete(firstKey);
+    }
+    _prefCache.set(key, { value, expiresAt: Date.now() + _PREF_CACHE_TTL_MS });
+  }
+
   async function ensureSchema(env) {
     if (_schemaVerified) return;
     if (!isDatabaseConfigured(env)) { _schemaVerified = true; return; }
@@ -418,6 +463,8 @@ export function createNotificationPlatformRepository(deps) {
 
     params.push(String(userId));
     const result = await queryDb(env, `UPDATE notification_settings SET ${setClauses.join(', ')} WHERE user_id = $${idx} RETURNING *`, params);
+    // PHASE 1 SAFE OPTIMIZATION: Invalidate per-user channel preference cache.
+    _invalidatePrefCache(userId);
     return result.rows[0] ? _mapSettings(result.rows[0]) : _defaultSettings();
   }
 
@@ -430,6 +477,17 @@ export function createNotificationPlatformRepository(deps) {
     // PERF: Do NOT call ensureSchema here — it adds 3+ seconds of latency.
     // Schema is already verified in production.
     if (!isDatabaseConfigured(env)) return 'mini_app'; // default
+
+    // PHASE 1 SAFE OPTIMIZATION: Check per-user cache first (60s TTL).
+    // getUserChannelPreference is called on every notification dispatch.
+    // Avoids 1 DB round-trip per call. Cache invalidated on updateSettings.
+    const cacheKey = `${String(userId)}:${category}`;
+    const now = Date.now();
+    const cached = _prefCache.get(cacheKey);
+    if (cached !== undefined && now < cached.expiresAt) {
+      return cached.value;
+    }
+
     try {
       // Map dispatch category to ch_* column
       const catMap = {
@@ -443,18 +501,22 @@ export function createNotificationPlatformRepository(deps) {
       };
       const col = catMap[category] || 'ch_system';
       const result = await queryDb(env, `SELECT ${col} AS pref FROM notification_settings WHERE user_id = $1`, [String(userId)]);
+      let pref;
       if (result.rows[0] && result.rows[0].pref) {
-        return String(result.rows[0].pref);
+        pref = String(result.rows[0].pref);
+      } else {
+        // Return default based on category
+        const defaults = {
+          referral: 'mini_app', wallet: 'mini_app', price_alert: 'both',
+          analysis: 'both', breaking_news: 'both', announcements: 'mini_app',
+          promotions: 'none', challenges: 'mini_app', tickets: 'both',
+          calendar: 'both', news: 'both', market: 'both',
+          wheel: 'mini_app', mission: 'mini_app', security: 'both', system: 'mini_app',
+        };
+        pref = defaults[category] || 'mini_app';
       }
-      // Return default based on category
-      const defaults = {
-        referral: 'mini_app', wallet: 'mini_app', price_alert: 'both',
-        analysis: 'both', breaking_news: 'both', announcements: 'mini_app',
-        promotions: 'none', challenges: 'mini_app', tickets: 'both',
-        calendar: 'both', news: 'both', market: 'both',
-        wheel: 'mini_app', mission: 'mini_app', security: 'both', system: 'mini_app',
-      };
-      return defaults[category] || 'mini_app';
+      _setPrefCache(userId, category, pref);
+      return pref;
     } catch { return 'mini_app'; }
   }
 
@@ -476,8 +538,21 @@ export function createNotificationPlatformRepository(deps) {
   async function getTemplate(env, key) {
     // PERF: Do NOT call ensureSchema here — it adds 3+ seconds of latency.
     if (!isDatabaseConfigured(env)) return null;
-    const result = await queryDb(env, `SELECT * FROM notification_templates WHERE key = $1 LIMIT 1`, [String(key)]);
-    return result.rows[0] ? _mapTemplate(result.rows[0]) : null;
+
+    // PHASE 1 SAFE OPTIMIZATION: Check module cache first (5min TTL).
+    // Templates are admin-managed, change rarely. Avoids 1 DB round-trip per
+    // sendNotification call. Cache is invalidated on create/update/delete.
+    const cacheKey = String(key);
+    const now = Date.now();
+    const cached = _templateCache.get(cacheKey);
+    if (cached !== undefined && now < cached.expiresAt) {
+      return cached.value;
+    }
+
+    const result = await queryDb(env, `SELECT * FROM notification_templates WHERE key = $1 LIMIT 1`, [cacheKey]);
+    const mapped = result.rows[0] ? _mapTemplate(result.rows[0]) : null;
+    _templateCache.set(cacheKey, { value: mapped, expiresAt: now + _TEMPLATE_CACHE_TTL_MS });
+    return mapped;
   }
 
   async function createTemplate(env, data) {
@@ -488,7 +563,10 @@ export function createNotificationPlatformRepository(deps) {
       ON CONFLICT (key) DO UPDATE SET title_fa = EXCLUDED.title_fa, title_en = EXCLUDED.title_en, body_fa = EXCLUDED.body_fa, body_en = EXCLUDED.body_en, updated_at = NOW()
       RETURNING *
     `, [data.key, data.category || 'system', data.title_fa || '', data.title_en || '', data.body_fa || '', data.body_en || '', data.icon || null, data.action_url || null, data.priority || 'medium', data.channel || 'mini_app', JSON.stringify(data.variables || []), data.is_active !== false]);
-    return result.rows[0] ? _mapTemplate(result.rows[0]) : null;
+    const mapped = result.rows[0] ? _mapTemplate(result.rows[0]) : null;
+    // PHASE 1 SAFE OPTIMIZATION: Invalidate cache for this key.
+    _invalidateTemplateCache(data.key);
+    return mapped;
   }
 
   async function updateTemplate(env, id, updates) {
@@ -502,12 +580,17 @@ export function createNotificationPlatformRepository(deps) {
     }
     params.push(Number(id));
     const result = await queryDb(env, `UPDATE notification_templates SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`, params);
-    return result.rows[0] ? _mapTemplate(result.rows[0]) : null;
+    const mapped = result.rows[0] ? _mapTemplate(result.rows[0]) : null;
+    // PHASE 1 SAFE OPTIMIZATION: Invalidate all template cache (key may have changed).
+    _invalidateTemplateCache();
+    return mapped;
   }
 
   async function deleteTemplate(env, id) {
     if (!isDatabaseConfigured(env)) return false;
     const result = await queryDb(env, `DELETE FROM notification_templates WHERE id = $1 RETURNING id`, [Number(id)]);
+    // PHASE 1 SAFE OPTIMIZATION: Invalidate all template cache.
+    _invalidateTemplateCache();
     return result.rows.length > 0;
   }
 

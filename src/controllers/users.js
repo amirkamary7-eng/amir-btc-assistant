@@ -102,7 +102,13 @@ export function createUserHandlers(deps) {
 
       await processReferralOnBootstrap(env, userId, signedReferrerId, Boolean(userRow?.channel_joined), isNewUser);
 
-      const freshUserRow = await userRepo.getById(env, userId);
+      // PHASE 1 SAFE OPTIMIZATION: Removed redundant getById call (was line 105).
+      // bootstrap() returns the full 13-column row via RETURNING clause — identical
+      // to what getById returns. No mutation of the users table happens between
+      // bootstrap() and the old getById #3 (processReferralOnBootstrap only touches
+      // referrals + token_transactions + token_balances, not users). Using userRow
+      // directly saves 1 DB round-trip per bootstrap with zero behavior change.
+      const freshUserRow = userRow;
       const watchlist = await watchlistRepo.getSymbols(env, userId);
 
       let channelJoined = false;
@@ -112,8 +118,25 @@ export function createUserHandlers(deps) {
           if (membership?.joined) {
             channelJoined = true;
           } else {
-            membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: true });
-            channelJoined = Boolean(membership?.joined);
+            // PHASE 2 SAFE OPTIMIZATION: Only call resolveChannelMembership(forceRefresh:true)
+            // if the DB row doesn't already say channel_joined=true. If the user already
+            // joined (per bootstrap() RETURNING), there's no need to re-check Telegram API
+            // — the user is joined, we just have a stale KV/DB cache.
+            //
+            // Side effects of 2nd call that we SKIP when freshUserRow.channel_joined=true:
+            //   - Telegram API fetch (unnecessary — we know user joined)
+            //   - persistDbUserJoinState (unnecessary — already set)
+            //   - processPendingReferralReward (already handled by processReferralOnBootstrap
+            //     at line 103, OR will be caught by retryFailedReferralRewards cron)
+            //
+            // When freshUserRow.channel_joined=false, we MUST do the 2nd call — the user
+            // may have just joined the channel and the DB hasn't been updated yet.
+            if (freshUserRow?.channel_joined) {
+              channelJoined = true;
+            } else {
+              membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: true });
+              channelJoined = Boolean(membership?.joined);
+            }
           }
         } catch (e) {
           channelJoined = Boolean(freshUserRow?.channel_joined);

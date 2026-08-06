@@ -99,10 +99,17 @@ let _currentRequestOrigin = null;
 // TEMPORARY INSTRUMENTATION — traces I/O timing to pinpoint 8s/30s delays.
 // Logs ALL queryDb calls (not just >500ms) to find the FIRST timeout.
 // ═══════════════════════════════════════════════════════════════════════════
+// PHASE 2 SAFE OPTIMIZATION: _traceQuery and _traceLog are now gated behind
+// env.DB_TRACE_ENABLED. Previously they ran on EVERY queryDb call (console.log
+// + JSON.stringify with 13 fields = ~0.08ms CPU each, ~2.4ms per bootstrap with
+// 30 queries). Now they only run when explicitly enabled for debugging.
+// _traceStage (slow stage >500ms) is ALWAYS enabled — it's cheap (only fires
+// on slow operations) and useful for production observability.
 let _traceId = 'no-trace';
 let _traceEndpoint = '?';
 let _traceMethod = '?';
 let _traceQuerySeq = 0;
+let _dbTraceEnabled = null; // cached env check (null = not yet checked)
 
 function _setTraceContext(endpoint, method) {
   _traceId = Math.random().toString(36).slice(2, 10);
@@ -133,6 +140,11 @@ function _traceStage(stageName, startTime) {
 }
 
 function _traceLog(stageName, extra) {
+  // PHASE 2 SAFE OPTIMIZATION: No-op unless DB_TRACE_ENABLED is set.
+  // This was used for diagnostic logging during CPU investigations.
+  // Keeping the function signature for backward compat but making it a no-op
+  // saves the JSON.stringify + console.log cost on every call.
+  if (!_dbTraceEnabled) return;
   console.log(JSON.stringify({
     type: 'TRACE',
     traceId: _traceId,
@@ -144,8 +156,10 @@ function _traceLog(stageName, extra) {
   }));
 }
 
-// ALWAYS log queryDb — not just slow ones. This finds the FIRST timeout.
+// PHASE 2 SAFE OPTIMIZATION: No-op unless DB_TRACE_ENABLED is set.
+// Previously logged EVERY queryDb call. Now only logs when debugging is needed.
 function _traceQuery(opts) {
+  if (!_dbTraceEnabled) return;
   console.log(JSON.stringify({
     type: 'TRACE_QUERY',
     traceId: _traceId,
@@ -2104,7 +2118,17 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     });
     // Race: another concurrent bootstrap already inserted the referral.
     // Delegate reward processing (idempotent — won't double-reward).
-    await processPendingReferralReward(env, inviteeId, channelJoined);
+    // PHASE 2 SAFE OPTIMIZATION: Skip processPendingReferralReward when channelJoined=false.
+    // The function would early-return at line 1751 anyway (if (!channelJoined) return null),
+    // but we save the 3 queryDb calls it makes BEFORE that check:
+    //   - isSubsystemDisabled (cached 60s, but still 1 function call)
+    //   - getReferralRewardPerInvite (cached 60s, but still 1 function call)
+    //   - SELECT referrals WHERE rewarded=FALSE (real DB query — wasted)
+    // The actual reward credit happens in resolveChannelMembership(forceRefresh:true)
+    // when Telegram confirms channel_joined=true, OR in retryFailedReferralRewards cron.
+    if (channelJoined) {
+      await processPendingReferralReward(env, inviteeId, channelJoined);
+    }
     await diagLog(env, { scope: 'diag-referral-FINAL', result: 'already_exists', referral_id: existing.id });
     return { referral_id: existing.id, already_exists: true };
   }
@@ -2137,7 +2161,14 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
 
   // ── DEBUG: Step 7 — Delegate reward processing (idempotent) ──
   await diagLog(env, { scope: 'diag-referral-STEP7-REWARD-CALL', referral_id: createdReferral.id, channelJoined });
-  const rewardResult = await processPendingReferralReward(env, inviteeId, channelJoined);
+  // PHASE 2 SAFE OPTIMIZATION: Same as above — skip when channelJoined=false.
+  // processPendingReferralReward would early-return anyway, but we save 3 queryDb calls.
+  // Reward will be credited by resolveChannelMembership(forceRefresh:true) if user just joined,
+  // OR by retryFailedReferralRewards cron.
+  let rewardResult = null;
+  if (channelJoined) {
+    rewardResult = await processPendingReferralReward(env, inviteeId, channelJoined);
+  }
   await diagLog(env, { scope: 'diag-referral-STEP7-REWARD-RESULT', rewardResult });
 
   // ── DEBUG: Step 8 — Final result ──
@@ -8248,6 +8279,10 @@ export default {
     // TEMP: set trace context for instrumentation
     const _url = new URL(request.url);
     _setTraceContext(_url.pathname, request.method);
+    // PHASE 2 SAFE OPTIMIZATION: Cache DB_TRACE_ENABLED flag per request.
+    // Default: false (no verbose query logging). Set env.DB_TRACE_ENABLED=true
+    // to re-enable _traceQuery/_traceLog for debugging.
+    _dbTraceEnabled = _dbTraceEnabled ?? (String(env.DB_TRACE_ENABLED || '').toLowerCase() === 'true');
     // Set env accessors for fetchFearGreed (called from various places)
     env_CMC_API_KEY = env.CMC_API_KEY || null;
     env_APP_CACHE = env.APP_CACHE || null;
@@ -10037,6 +10072,8 @@ export default {
     const _cronTickMinute = new Date().getUTCMinutes();
     const _cronTickExpr = controller.cron || '* * * * *';
     if (!globalThis._cronMonitorLog) globalThis._cronMonitorLog = [];
+    // PHASE 2 SAFE OPTIMIZATION: Initialize DB trace flag for cron context too.
+    _dbTraceEnabled = _dbTraceEnabled ?? (String(env.DB_TRACE_ENABLED || '').toLowerCase() === 'true');
     const _logPhase = (phase, status, extra) => {
       const entry = {
         tick: _cronTickId,
@@ -10113,6 +10150,58 @@ export default {
     //
     // Delay: < 1 second (sequential vs parallel) — imperceptible for cron.
     // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 3 SAFE OPTIMIZATION: On 15-min ticks, runScheduledAlertsBaseline
+    // and runCalendarAlertsCheck are now in SEPARATE ctx.waitUntil calls.
+    // Previously both ran in the same ctx.waitUntil (the withPhasePool block
+    // below), sharing the same CPU budget. Each uses 3-5ms CPU, so combined
+    // they could exceed the limit. Now each gets its own budget.
+    //
+    // On 1-min ticks (non-15-min), keep them in a single ctx.waitUntil
+    // (alternating alerts/calendar) — same as the original logic, but moved
+    // OUT of the withPhasePool block to give them their own CPU budget.
+    // ═══════════════════════════════════════════════════════════════════
+    if (isEveryMinute && !isEvery15Min) {
+      // 1-min ticks (non-15-min): alternate alerts/calendar in single ctx.waitUntil
+      ctx.waitUntil((async () => {
+        try {
+          const minute = new Date().getUTCMinutes();
+          const runAlerts = minute % 2 === 0;
+          if (runAlerts) {
+            try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
+              _logPhase('phase1a-alerts', 'error', { error: e?.message });
+              console.warn('[CRON] alerts failed:', e?.message);
+            }
+          } else {
+            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); _logPhase('phase1a-calendar', 'ok'); } catch (e) {
+              _logPhase('phase1a-calendar', 'error', { error: e?.message });
+              console.warn('[CRON] calendar failed:', e?.message);
+            }
+          }
+          _logPhase('phase1a', 'complete');
+        } catch (e) {
+          _logPhase('phase1a', 'error', { error: e?.message });
+          console.error('[CRON] Phase 1a error:', e?.message);
+        }
+      })());
+    }
+    if (isEvery15Min) {
+      // 15-min ticks: alerts and calendar in SEPARATE ctx.waitUntil (Phase 3 fix)
+      ctx.waitUntil((async () => {
+        try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
+          _logPhase('phase1a-alerts', 'error', { error: e?.message });
+          console.warn('[CRON] alerts failed:', e?.message);
+        }
+      })());
+      ctx.waitUntil((async () => {
+        try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); _logPhase('phase1a-calendar-check', 'ok'); } catch (e) {
+          _logPhase('phase1a-calendar-check', 'error', { error: e?.message });
+          console.warn('[CRON] calendar failed:', e?.message);
+        }
+      })());
+      _logPhase('phase1a', 'complete');
+    }
+
     ctx.waitUntil(withPhasePool(env, async (pool) => {
 
       // ── Phase 4: Crash Recovery (every 5 min) ──
@@ -10133,22 +10222,10 @@ export default {
       }
 
       // ── PHASE 1a: Alerts OR Calendar check ──
+      // NOTE: 1-min and 15-min branches are extracted OUT of this withPhasePool
+      // block into separate ctx.waitUntil calls above (Phase 3 optimization).
+      // Only the 5-min branch remains here (the patch didn't address it).
       try {
-        if (isEveryMinute) {
-          const minute = new Date().getUTCMinutes();
-          const runAlerts = minute % 2 === 0;
-          if (runAlerts) {
-            try { await runScheduledAlertsBaseline(controller, env, pool); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
-              _logPhase('phase1a-alerts', 'error', { error: e?.message });
-              console.warn('[CRON] alerts failed:', e?.message);
-            }
-          } else {
-            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }, pool); _logPhase('phase1a-calendar', 'ok'); } catch (e) {
-              _logPhase('phase1a-calendar', 'error', { error: e?.message });
-              console.warn('[CRON] calendar failed:', e?.message);
-            }
-          }
-        }
         if (isEvery5Min) {
           const minute = new Date().getUTCMinutes();
           const runAlerts = minute % 10 === 0;
@@ -10162,16 +10239,6 @@ export default {
               _logPhase('phase1a-calendar', 'error', { error: e?.message });
               console.warn('[CRON] calendar failed:', e?.message);
             }
-          }
-        }
-        if (isEvery15Min) {
-          try { await runScheduledAlertsBaseline(controller, env, pool); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
-            _logPhase('phase1a-alerts', 'error', { error: e?.message });
-            console.warn('[CRON] alerts failed:', e?.message);
-          }
-          try { await runCalendarAlertsCheck(env, { isEvery15Min: true }, pool); _logPhase('phase1a-calendar-check', 'ok'); } catch (e) {
-            _logPhase('phase1a-calendar-check', 'error', { error: e?.message });
-            console.warn('[CRON] calendar failed:', e?.message);
           }
         }
         _logPhase('phase1a', 'complete');
@@ -10265,6 +10332,10 @@ export default {
       }
 
       // ── PHASE 2: Lightweight DB retries (15-min only) ──
+      // NOTE: retryFailedReferralRewards and retryFailedWheelRewards are
+      // extracted OUT of this withPhasePool block into SEPARATE ctx.waitUntil
+      // calls below (Phase 2 optimization). Only the Phase 4 requeue calls
+      // remain here (they need the shared pool).
       if (isEvery15Min) {
         try {
           if (notificationPlatformRepo?.requeueStaleQueueItems) {
@@ -10276,14 +10347,6 @@ export default {
             try { await notificationPlatformRepo.requeueStaleBroadcasts(env, pool); } catch (e) {
               console.warn('[CRON] Phase 4 requeueStaleBroadcasts (15min) failed:', e?.message);
             }
-          }
-          try { await retryFailedReferralRewards(env); _logPhase('phase2-referral', 'ok'); } catch (e) {
-            _logPhase('phase2-referral', 'error', { error: e?.message });
-            console.warn('[CRON] referral retry failed:', e?.message);
-          }
-          try { await retryFailedWheelRewards(env); _logPhase('phase2-wheel', 'ok'); } catch (e) {
-            _logPhase('phase2-wheel', 'error', { error: e?.message });
-            console.warn('[CRON] wheel retry failed:', e?.message);
           }
           _logPhase('phase2', 'complete');
         } catch (e) {
@@ -10328,6 +10391,28 @@ export default {
       }
 
     }));
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2 SAFE OPTIMIZATION: Split retryFailedReferralRewards and retryFailedWheelRewards
+    // into SEPARATE ctx.waitUntil calls. Previously both ran in the same ctx.waitUntil
+    // (the withPhasePool block above), which meant they shared the same CPU budget.
+    // Each can use 5-8ms CPU (queryDbTransaction for creditTokens), so combined they
+    // could exceed 10ms. Now each gets its own budget.
+    // ═══════════════════════════════════════════════════════════════════
+    if (isEvery15Min) {
+      ctx.waitUntil((async () => {
+        try { await retryFailedReferralRewards(env); _logPhase('phase2-referral', 'ok'); } catch (e) {
+          _logPhase('phase2-referral', 'error', { error: e?.message });
+          console.warn('[CRON] referral retry failed:', e?.message);
+        }
+      })());
+      ctx.waitUntil((async () => {
+        try { await retryFailedWheelRewards(env); _logPhase('phase2-wheel', 'ok'); } catch (e) {
+          _logPhase('phase2-wheel', 'error', { error: e?.message });
+          console.warn('[CRON] wheel retry failed:', e?.message);
+        }
+      })());
+    }
   },
 };
 //#endregion

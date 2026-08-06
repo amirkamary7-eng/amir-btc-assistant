@@ -13,9 +13,17 @@ export function createMembershipRepository(deps) {
   // ─── Schema ──────────────────────────────────────────────────────────────
 
   let _welcomeColumnEnsured = false;
+  // PHASE 1 SAFE OPTIMIZATION: Module-level flag to skip the existence check
+  // (SELECT 1) after the first successful call per isolate. Previously this
+  // ran on every ensureSchema() call. Now matches the pattern used by other
+  // repositories (admin.js, wallet.js, reward_center.js, etc.).
+  let _schemaVerified = false;
 
   /** Idempotent schema check (tables created via membership-schema.sql). */
   async function ensureSchema(env) {
+    // PHASE 1 SAFE OPTIMIZATION: Skip entirely after first successful verification.
+    if (_schemaVerified) return;
+
     // Lightweight existence check — if the tables don't exist, the queries
     // will error with a clear message telling the operator to run the SQL migration.
     try {
@@ -26,6 +34,7 @@ export function createMembershipRepository(deps) {
         await queryDb(env, `ALTER TABLE membership_users ADD COLUMN IF NOT EXISTS welcome_shown BOOLEAN NOT NULL DEFAULT FALSE`);
         _welcomeColumnEnsured = true;
       }
+      _schemaVerified = true;
     } catch (e) {
       console.warn('[membership] schema check failed — run scripts/membership-schema.sql:', e.message || e);
     }

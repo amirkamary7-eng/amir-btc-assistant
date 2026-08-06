@@ -11,6 +11,21 @@ export function createAdminRepository(deps) {
 
   let _schemaVerified = false;
 
+  // PHASE 1 SAFE OPTIMIZATION: Module-level cache for getAdminByTelegramId.
+  // Admin list changes rarely (only when admin is added/removed/toggled).
+  // Previously every bootstrap did a fresh SELECT. Now cached for 60s per user.
+  // Cache is invalidated on addAdmin/updateAdmin/removeAdmin operations.
+  const _ADMIN_CACHE_TTL_MS = 60 * 1000;
+  const _adminCache = new Map(); // telegramId -> { value, expiresAt }
+
+  function _invalidateAdminCache(telegramId) {
+    if (telegramId) {
+      _adminCache.delete(String(telegramId));
+    } else {
+      _adminCache.clear();
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Schema — ensure the admins table exists with all required columns
   // ROOT CAUSE FIX (item 3): The admins table was never created in code.
@@ -90,6 +105,17 @@ export function createAdminRepository(deps) {
   // ---------------------------------------------------------------------------
 
   async function getAdminByTelegramId(env, telegramId) {
+    const tid = String(telegramId);
+
+    // PHASE 1 SAFE OPTIMIZATION: Check module cache first (60s TTL per user).
+    // Admin list changes rarely. Avoids 1 DB round-trip per bootstrap for
+    // non-admin users. Cache is invalidated on add/update/remove admin.
+    const now = Date.now();
+    const cached = _adminCache.get(tid);
+    if (cached !== undefined && now < cached.expiresAt) {
+      return cached.value;
+    }
+
     const result = await queryDb(
       env,
       `
@@ -98,19 +124,23 @@ export function createAdminRepository(deps) {
         WHERE telegram_id = $1
         LIMIT 1
       `,
-      [String(telegramId)],
+      [tid],
     );
-    if (!result.rows[0]) return null;
-    const row = result.rows[0];
-    return {
-      id: row.id,
-      telegram_id: String(row.telegram_id),
-      role: normalizeOptionalString(row.role) || 'admin',
-      permissions: normalizePermissions(row.permissions),
-      active: Boolean(row.active),
-      created_at: isoDate(row.created_at),
-      created_by: normalizeOptionalString(row.created_by),
-    };
+    let mapped = null;
+    if (result.rows[0]) {
+      const row = result.rows[0];
+      mapped = {
+        id: row.id,
+        telegram_id: String(row.telegram_id),
+        role: normalizeOptionalString(row.role) || 'admin',
+        permissions: normalizePermissions(row.permissions),
+        active: Boolean(row.active),
+        created_at: isoDate(row.created_at),
+        created_by: normalizeOptionalString(row.created_by),
+      };
+    }
+    _adminCache.set(tid, { value: mapped, expiresAt: now + _ADMIN_CACHE_TTL_MS });
+    return mapped;
   }
 
   // ---------------------------------------------------------------------------
@@ -166,6 +196,8 @@ export function createAdminRepository(deps) {
     );
     if (!result.rows[0]) return null;
     const row = result.rows[0];
+    // PHASE 1 SAFE OPTIMIZATION: Invalidate cache for this telegram_id.
+    _invalidateAdminCache(telegram_id);
     return {
       id: row.id,
       telegram_id: String(row.telegram_id),
@@ -216,6 +248,8 @@ export function createAdminRepository(deps) {
     );
     if (!result.rows[0]) return null;
     const row = result.rows[0];
+    // PHASE 1 SAFE OPTIMIZATION: Invalidate cache for this telegram_id (key may have changed).
+    _invalidateAdminCache(row.telegram_id);
     return {
       id: row.id,
       telegram_id: String(row.telegram_id),
@@ -234,9 +268,13 @@ export function createAdminRepository(deps) {
   async function deleteAdmin(env, id) {
     const result = await queryDb(
       env,
-      'DELETE FROM admins WHERE id = $1 RETURNING id',
+      'DELETE FROM admins WHERE id = $1 RETURNING id, telegram_id',
       [Number(id)],
     );
+    if (result.rows[0]) {
+      // PHASE 1 SAFE OPTIMIZATION: Invalidate cache for this telegram_id.
+      _invalidateAdminCache(result.rows[0].telegram_id);
+    }
     return result.rows.length > 0;
   }
 
