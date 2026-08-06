@@ -793,7 +793,7 @@ export function createNotificationPlatformRepository(deps) {
           WHERE status = 'pending' AND attempts < max_attempts
           AND (next_retry_at IS NULL OR next_retry_at <= NOW())
           ORDER BY priority DESC, created_at ASC
-          LIMIT 50
+          LIMIT 10
           FOR UPDATE SKIP LOCKED
         )
         RETURNING *

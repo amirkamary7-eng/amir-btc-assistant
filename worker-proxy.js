@@ -7957,11 +7957,14 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
     const fetchWithTimeout = async (symbol) => {
       const tFetch = Date.now();
       try {
-        // OPTIMIZATION: Use noCache=true to always get the FRESHEST price from
-        // the exchange. The cache (1h TTL) could serve a price that's up to 1h
-        // old, causing the trigger to fire with a stale price that doesn't match
-        // the current market. For alert accuracy, we always fetch live.
-        const priceInfo = await fetchSpotPriceUsd(env, symbol, { noCache: true });
+        // PHASE 2 FIX (ALERT-01): Removed noCache=true. The fast-path cache
+        // stores ONLY the exchange name (e.g. 'bybit'), NOT the price.
+        // fetchSpotTickerPrice always returns a LIVE price from that exchange.
+        // So bypassing the cache doesn't improve price freshness — it just
+        // forces 3× subrequests per symbol (all exchanges fallback) instead
+        // of 1 subrequest (cached exchange fast-path). This was the primary
+        // cause of subrequest exhaustion (90 > 50 limit) and CPU waste.
+        const priceInfo = await fetchSpotPriceUsd(env, symbol);
         return {
           symbol,
           price: priceInfo?.price || null,
@@ -7974,8 +7977,12 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       }
     };
 
-    // Fetch all unique symbols in parallel (max 30 concurrent to avoid rate limits)
-    const FETCH_BATCH = 30;
+    // Fetch all unique symbols in parallel
+    // PHASE 2 FIX (ALERT-02): Reduced from 30 to 15 to stay under Cloudflare's
+    // 50-subrequest limit even on cache miss. With cache hit (ALERT-01 fix):
+    // 15 × 1 = 15 subrequests. With cache miss: 15 × 3 = 45 < 50. Plus 2 DB
+    // queries (listActiveForCron + bulk UPDATE) = 47 total — under 50 limit.
+    const FETCH_BATCH = 15;
     _tPriceStart = Date.now(); // Phase 2 start: price fetch
     for (let i = 0; i < uniqueSymbols.length; i += FETCH_BATCH) {
       const batch = uniqueSymbols.slice(i, i + FETCH_BATCH);
