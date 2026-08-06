@@ -233,7 +233,7 @@ export function createAlertRepository(deps) {
    * Returns true if the row was actually updated (i.e. it was still active),
    * false if another cron run already triggered it (race-condition safe).
    */
-  async function markTriggered(env, alertId, triggerPrice) {
+  async function markTriggered(env, alertId, triggerPrice, pool = null) {
     const result = await queryDb(env, `
       UPDATE price_alerts
       SET status = 'triggered',
@@ -242,7 +242,7 @@ export function createAlertRepository(deps) {
           last_price = $2
       WHERE id = $1 AND status = 'active'
       RETURNING id
-    `, [String(alertId), Number(triggerPrice)]);
+    `, [String(alertId), Number(triggerPrice)], 1, pool);
     return result.rows.length > 0;
   }
 

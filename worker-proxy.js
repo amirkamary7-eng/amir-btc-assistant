@@ -7865,6 +7865,17 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
   let _tPriceStart = null;  // start of price fetch phase
   let _tPriceEnd = null;    // end of price fetch phase
   let _tEvalStart = null;   // start of evaluation phase
+
+  // PHASE 5 FIX (ALERT-14): Set env._reqPool so ALL queryDb calls inside this
+  // function (including nested calls in markTriggered, sendNotification, enqueue)
+  // share ONE Pool — no per-call createPool = no per-call TLS handshake.
+  // Previously, only calls that explicitly passed `pool` used the shared Pool.
+  // Calls in sendNotification/enqueue (which don't accept pool param) created
+  // per-call Pools → 3-5ms CPU each → exceededCpu with 5+ triggers.
+  // This is safe: env is per-invocation (not shared across requests/cron ticks).
+  const _prevReqPool = env._reqPool;
+  if (pool) env._reqPool = pool;
+
   const payload = {
     status: 'ok',
     task: 'scheduled-alerts-execution',
@@ -8113,7 +8124,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       let triggered = false;
       if (typeof alertRepo?.markTriggered === 'function') {
         try {
-          triggered = await alertRepo.markTriggered(env, alertId, currentPrice);
+          triggered = await alertRepo.markTriggered(env, alertId, currentPrice, pool);
         } catch (e) {
           console.warn('markTriggered failed:', { alert_id: alertId, error: e?.message });
         }
@@ -8123,7 +8134,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
           UPDATE price_alerts
           SET status = 'triggered', triggered_at = NOW(), last_trigger_price = $2
           WHERE id = $1
-        `, [alertId, currentPrice]);
+        `, [alertId, currentPrice], 1, pool);
         triggered = true;
       }
 
@@ -8317,6 +8328,9 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       pendingUpdates: typeof _pendingUpdates !== 'undefined' ? _pendingUpdates.length : 0,
     }));
   }
+  // PHASE 5 FIX (ALERT-14): Restore env._reqPool to its previous value.
+  // This prevents pool leakage if the caller had a different pool set.
+  env._reqPool = _prevReqPool;
 }
 //#endregion
 
@@ -10274,12 +10288,17 @@ export default {
     }
     if (isEvery15Min) {
       // 15-min ticks: alerts and calendar in SEPARATE ctx.waitUntil (Phase 3 fix)
-      ctx.waitUntil((async () => {
-        try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
+      // PHASE 5 FIX (ALERT-14): Wrap alerts in withPhasePool so pool is passed
+      // to runScheduledAlertsBaseline. Previously, */15 path called runScheduledAlertsBaseline
+      // WITHOUT pool → markTriggered and sendNotification each created per-call Pool
+      // (3-5ms CPU per TLS handshake) → exceededCpu with 5+ triggers.
+      // Now withPhasePool creates ONE shared pool and passes it through.
+      ctx.waitUntil(withPhasePool(env, async (pool) => {
+        try { await runScheduledAlertsBaseline(controller, env, pool); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
           _logPhase('phase1a-alerts', 'error', { error: e?.message });
           console.warn('[CRON] alerts failed:', e?.message);
         }
-      })());
+      }));
       ctx.waitUntil((async () => {
         try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); _logPhase('phase1a-calendar-check', 'ok'); } catch (e) {
           _logPhase('phase1a-calendar-check', 'error', { error: e?.message });
