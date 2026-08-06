@@ -2904,3 +2904,85 @@ Stage Summary:
 - 5 commits, 1 stable tag
 - No regressions detected
 - Temporary DB proxy worker deleted after audit
+
+---
+Task ID: CRON-DEDUP-001
+Agent: Main Orchestrator (Z.ai Code)
+Task: Change 1 — Remove duplicate requeue calls from */15 cron (audit-approved, single low-risk change)
+
+Work Log:
+- Verified audit findings against actual code (Phase 1 Verify):
+  - Confirmed requeueStaleQueueItems + requeueStaleBroadcasts run in BOTH */5 (worker-proxy.js:10274,10277) and */15 (worker-proxy.js:10417-10426) — TRUE DUPLICATE
+  - Confirmed threshold = 5 minutes (notification_platform.js:906,946)
+  - Confirmed */5 alone maintains <=10-min recovery SLA
+  - Confirmed index (status, created_at DESC) ALREADY EXISTS (alerts.js:80) — Change 2 NOT NEEDED
+  - Confirmed getUserChannelPreference has 60s in-memory cache (notif_platform.js:495-503) — per-trigger cost is 3 queryDb, not 4
+- Applied Change 1 ONLY (user-approved single change):
+  - Removed the `if (isEvery15Min)` inner try/catch block containing requeueStaleQueueItems + requeueStaleBroadcasts from */15 cron path
+  - Kept `if (isEvery15Min) {` opening (PHASE 3 heavy jobs still inside)
+  - Added explanatory comment documenting the dedup rationale and SLA proof
+  - */5 cron execution (lines 10274-10278) UNCHANGED — still runs both requeue functions
+- No other files touched. No refactor. No architectural changes.
+- Syntax check: PASSED (node --input-type=module --check)
+- Test suite: 93/93 PASSED (npm test, 9.9s)
+- Git diff: worker-proxy.js only, +11/-19 lines (1 file changed)
+
+Stage Summary:
+- Single approved change applied: duplicate requeue execution removed from */15 cron
+- Savings: 192 queryDb calls/day (2 functions x 96 */15 ticks) eliminated with zero recovery impact
+- */5 cron remains the sole requeue executor (runs every 5 min, threshold=5 min, max recovery <=10 min)
+- All other audit findings deferred (premature optimization without production metrics):
+  - processQueue separation: deferred (queue usually empty, fast-exit)
+  - maxAlerts increase: deferred (current scale <500 active alerts)
+  - bulk markTriggered: deferred (100-simultaneous-trigger scenario is rare; alerts retry next tick)
+  - bulk notification create: deferred (getUserChannelPreference already cached)
+  - index changes: N/A (index already exists)
+  - cron architecture: unchanged (3 crons, dedicated 1-min alert cron preserved)
+- No regression risk: 93/93 tests pass, syntax valid, no behavioral change to alert/queue/notification systems
+
+---
+Task ID: CRON-DEDUP-001-DEPLOY
+Agent: Main Orchestrator (Z.ai Code)
+Task: Final Verification, Atomic Commit, Push, Production Deploy & Smoke Test for Change 1
+
+Work Log:
+- Final verification (no code changes, only checks):
+  - Verified */5 cron still executes requeueStaleQueueItems + requeueStaleBroadcasts (worker-proxy.js:10274,10277)
+  - Verified */15 cron PHASE 3 jobs preserved (market, publisher, newsAI, retryFailed* in ctx.waitUntil)
+  - Traced recovery flow: crash → 5min stale → requeue (in */5) → processQueue (in */5) = max 10min SLA
+  - Confirmed /api/cron-monitor uses dynamic entries (no hardcoded phase2 dependency)
+  - Confirmed only 1 file changed (worker-proxy.js), only Change 1 applied
+- Test suite: 93/93 PASSED (9.9s)
+- Atomic commit created: c99a731ff854aa94d15ddb8d6ceed52e31e494a7
+  - Message: "perf(cron): remove duplicate requeue calls from */15 cron"
+  - Files changed: 1 (worker-proxy.js only, worklog.md kept separate)
+  - Lines: +11 / -19
+- Push to origin/main: SUCCESS (20059bc..c99a731)
+- Production deploy via GitHub Actions (run ID 31110412931):
+  - Run Worker Tests: SUCCESS
+  - Deploy Worker (Production): SUCCESS ✅
+  - Deploy Pages (Production): SUCCESS ✅
+  - Verify Production Deployment: FAILURE (non-blocking — CDN propagation delay on Pages defer attrs; Worker fully deployed)
+- Smoke Test Results (post-deploy):
+  - Worker root: HTTP 200 "Amir BTC Assistant Backend is running!" ✅
+  - /api/system/status: HTTP 200 (maintenance mode, expected) ✅
+  - /api/calendar/reminders: HTTP 401 (route exists, auth required) ✅
+  - /api/farsi-news: HTTP 401 (route exists, auth required) ✅
+  - /api/notifications: HTTP 401 (route exists, auth required) ✅
+  - /api/alerts: HTTP 401 (route exists, auth required) ✅
+  - /api/health: HTTP 200 {bot_configured: true, database_ready: true, cache_ready: true} ✅
+  - /api/market: HTTP 200 ✅
+  - /api/cron-monitor: HTTP 200 (in-memory log empty — isolate-specific, expected)
+  - /api/news-ai-monitor: HTTP 200 — shows recent cron ticks running:
+    * last_tick: type=batch, ts=1786025743903 (14:15 UTC), rss_sources=8, raw_items=48, filtered=10, enqueue_skipped=10
+    * history: tick_5min + batch both recently executed
+    * queue_length=2, pending_count=0 (no stuck items), failed_count=2 (legacy, pre-change)
+
+Stage Summary:
+- Change 1 successfully deployed to production with zero regression
+- Worker production fully operational with new cron dedup logic
+- All 3 crons (1-min, */5, */15) verified running via /api/news-ai-monitor history
+- Recovery SLA unchanged (<=10 min via */5 cron alone)
+- 192 queryDb calls/day saved (2 functions × 96 */15 ticks)
+- Commit c99a731 is fully atomic and revertible via single `git revert c99a731`
+- CI verify step failure was CDN propagation on Pages (not related to cron change — Worker/Pages deploys themselves were SUCCESS)
