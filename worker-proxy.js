@@ -9290,6 +9290,9 @@ export default {
         request._cpuTrace.push({ step: 'global_auth', wall_ms: Math.round((performance.now() - _authT0) * 100) / 100 });
         if (_authState.error) return _authState.error;
         _protectedUser = _authState.user;
+        // PHASE 3 FIX: Set _protectedUser on the request object so notification
+        // handlers can use it without calling authenticateTelegramRequest again.
+        request._protectedUser = _protectedUser;
 
         const _joinT0 = performance.now();
         _joinBlocked = await requireChannelJoin(_protectedUser, env);
@@ -10253,6 +10256,27 @@ export default {
         } catch (e) {
           console.warn('[CRON] Phase 4 requeue failed:', e?.message);
         }
+
+        // PHASE 3 FIX: Move processQueue from 30-min to 5-min cadence.
+        // Previously processQueue ran only at :00 and :30 (every 30 min), causing
+        // Telegram notifications to be delayed by up to 30 min.
+        // Now runs on every 5-min tick. Safety:
+        // - FOR UPDATE SKIP LOCKED prevents concurrent ticks from claiming same items
+        // - telegram_message_id check prevents duplicate sends (Phase 7 idempotency)
+        // - Fast exit when queue empty (1 queryDb, ~0.5ms CPU)
+        // - Items capped at LIMIT 50 per tick
+        if (notificationPlatformRepo?.processQueue) {
+          try {
+            const queueResult = await notificationPlatformRepo.processQueue(env, sendTelegramMessage, pool);
+            if (queueResult.processed > 0) {
+              console.log('[CRON] processQueue (5min):', JSON.stringify(queueResult));
+            }
+            _logPhase('phase4-processQueue', 'ok', queueResult);
+          } catch (e) {
+            _logPhase('phase4-processQueue', 'error', { error: e?.message });
+            console.warn('[CRON] processQueue (5min) failed:', e?.message);
+          }
+        }
       }
 
       // ── PHASE 1a: Alerts OR Calendar check ──
@@ -10392,14 +10416,10 @@ export default {
         // ROOT-CAUSE FIX (Phase 10.5): processNewsAIBatch now runs on ALL 15-min
         // ticks (was only :15/:45 = every 30 min). This halves the enqueue delay
         // for new articles — they now wait max 15 min instead of 30 min.
+        // PHASE 3 FIX: processQueue moved to 5-min cron (phase4-processQueue above).
+        // It no longer runs here — 30-min delay eliminated.
         const minute = new Date().getUTCMinutes();
         if (minute === 0 || minute === 30) {
-          if (notificationPlatformRepo?.processQueue) {
-            try { await notificationPlatformRepo.processQueue(env, sendTelegramMessage, pool); _logPhase('phase3-queue', 'ok'); } catch (e) {
-              _logPhase('phase3-queue', 'error', { error: e?.message });
-              console.warn('[CRON] notif queue failed:', e?.message);
-            }
-          }
           if (env.CMC_API_KEY) {
             try { await marketOverviewSvc.refreshOverview(env); _logPhase('phase3-market', 'ok'); } catch (e) {
               _logPhase('phase3-market', 'error', { error: e?.message });

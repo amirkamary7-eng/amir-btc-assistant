@@ -540,6 +540,9 @@ export function createAdminHandlers(deps) {
       try {
         const ownerId = String(ticketInfo.user_id);
         if (notificationService) {
+          // PHASE 3 FIX: Use deterministic dedupKey (ticketId + message hash)
+          // instead of Date.now() to prevent duplicate notifications on retry.
+          const _msgHash = require('node:crypto').createHash('sha256').update(message).digest('hex').slice(0, 12);
           await notificationService.create(env, {
             userId: ownerId,
             category: 'tickets',
@@ -548,7 +551,7 @@ export function createAdminHandlers(deps) {
             title: `💬 پاسخ تیکت: ${ticketInfo.title || ''}`,
             message,
             metadata: { ticket_id: String(ticketId), title: ticketInfo.title || '' },
-            dedupKey: `admin_reply_${ticketId}_${Date.now()}`,
+            dedupKey: `admin_reply_${ticketId}_${_msgHash}`,
           }).catch(() => {});
         }
       } catch (notifyErr) {

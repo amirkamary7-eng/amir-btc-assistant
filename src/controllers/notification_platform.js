@@ -20,13 +20,27 @@ export function createNotificationPlatformHandlers(deps) {
     adminRepo,
   } = deps;
 
+  // PHASE 3 FIX: Helper to get user ID from _protectedUser (set by global middleware
+  // in production) or fallback to authenticateTelegramRequest (non-production).
+  // Eliminates redundant 2x HMAC on all notification platform user endpoints.
+  async function _getUserId(request, env) {
+    if (request._protectedUser && request._protectedUser.id) {
+      return { userId: String(request._protectedUser.id), error: null };
+    }
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) {
+      return { userId: null, error: authState.error };
+    }
+    return { userId: String(authState.user.id), error: null };
+  }
+
   // ═══════════════════════════════════════════════════════════
   // USER ENDPOINTS
   // ═══════════════════════════════════════════════════════════
 
   async function handleList(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState.error;
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
     try {
       const url = new URL(request.url);
       const limit = Math.min(parseInt(url.searchParams.get('limit') || '20', 10), 50);
@@ -34,72 +48,72 @@ export function createNotificationPlatformHandlers(deps) {
       const category = url.searchParams.get('category') || null;
       const unreadOnly = url.searchParams.get('unread') === 'true';
       const archived = url.searchParams.get('archived') === 'true';
-      const result = await notificationPlatformRepo.listForUser(env, authState.user.id, { limit, offset, category, unreadOnly, archived });
+      const result = await notificationPlatformRepo.listForUser(env, userId, { limit, offset, category, unreadOnly, archived });
       return jsonResponse({ status: 'success', ...result }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
   async function handleUnreadCount(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState.error;
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
     try {
-      const count = await notificationPlatformRepo.getUnreadCount(env, authState.user.id);
+      const count = await notificationPlatformRepo.getUnreadCount(env, userId);
       return jsonResponse({ status: 'success', count }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
   async function handleMarkRead(request, env, notificationId) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState.error;
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
     try {
-      const ok = await notificationPlatformRepo.markRead(env, authState.user.id, notificationId);
+      const ok = await notificationPlatformRepo.markRead(env, userId, notificationId);
       return jsonResponse({ status: ok ? 'success' : 'error' }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
   async function handleMarkAllRead(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState.error;
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
     try {
-      const count = await notificationPlatformRepo.markAllRead(env, authState.user.id);
+      const count = await notificationPlatformRepo.markAllRead(env, userId);
       return jsonResponse({ status: 'success', count }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
   async function handleArchive(request, env, notificationId) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState.error;
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
     try {
-      const ok = await notificationPlatformRepo.archive(env, authState.user.id, notificationId);
+      const ok = await notificationPlatformRepo.archive(env, userId, notificationId);
       return jsonResponse({ status: ok ? 'success' : 'error' }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
   async function handleDelete(request, env, notificationId) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState.error;
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
     try {
-      const ok = await notificationPlatformRepo.deleteNotification(env, authState.user.id, notificationId);
+      const ok = await notificationPlatformRepo.deleteNotification(env, userId, notificationId);
       return jsonResponse({ status: ok ? 'success' : 'error' }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
   async function handleGetSettings(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState.error;
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
     try {
-      const settings = await notificationPlatformRepo.getSettings(env, authState.user.id);
+      const settings = await notificationPlatformRepo.getSettings(env, userId);
       return jsonResponse({ status: 'success', settings }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
   async function handleUpdateSettings(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState.error;
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
-      const settings = await notificationPlatformRepo.updateSettings(env, authState.user.id, bodyResult.payload);
+      const settings = await notificationPlatformRepo.updateSettings(env, userId, bodyResult.payload);
       return jsonResponse({ status: 'success', settings }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }

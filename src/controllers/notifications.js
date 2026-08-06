@@ -5,6 +5,12 @@
  * Database operations are fully delegated to the repository.
  *
  * Dependencies are injected via the factory function to avoid circular imports.
+ *
+ * PHASE 3 FIX: All handlers now use _protectedUser from global middleware
+ * (set at worker-proxy.js:9292) instead of calling authenticateTelegramRequest
+ * again. This eliminates the redundant 2x HMAC authentication that was costing
+ * 2-3ms CPU per request. Fallback auth only runs when _protectedUser is not set
+ * (non-production environments where global middleware doesn't run).
  */
 export function createNotificationHandlers(deps) {
   const {
@@ -17,14 +23,31 @@ export function createNotificationHandlers(deps) {
   } = deps;
 
   /**
+   * Helper: Get authenticated user ID from request._protectedUser (set by global
+   * middleware in production) or fallback to authenticateTelegramRequest (for
+   * non-production where global middleware doesn't run).
+   * Returns { userId, error } — if error is set, return it as the HTTP response.
+   */
+  async function _getUserId(request, env) {
+    // PHASE 3 FIX: Use _protectedUser from global middleware — NO redundant HMAC!
+    if (request._protectedUser && request._protectedUser.id) {
+      return { userId: String(request._protectedUser.id), error: null };
+    }
+    // Fallback for non-production (global middleware doesn't run)
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) {
+      return { userId: null, error: authState.error };
+    }
+    return { userId: String(authState.user.id), error: null };
+  }
+
+  /**
    * GET /api/notifications — List notifications for the authenticated user.
    * Query params: ?limit=N (default 50, max 100)
    */
   async function handleList(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
-    }
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -32,7 +55,6 @@ export function createNotificationHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const userId = String(authState.user.id);
     const url = new URL(request.url);
     const limit = parseInt(url.searchParams.get('limit') || '50', 10) || 50;
 
@@ -56,10 +78,8 @@ export function createNotificationHandlers(deps) {
    * POST /api/notifications/read-all — Mark all notifications as read.
    */
   async function handleMarkAllRead(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
-    }
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -67,7 +87,6 @@ export function createNotificationHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const userId = String(authState.user.id);
     try {
       const updated = await notificationRepo.markAllRead(env, userId);
       return jsonResponse({ status: 'success', marked_read: updated }, {}, env);
@@ -81,10 +100,8 @@ export function createNotificationHandlers(deps) {
    * POST /api/notifications/:id/read — Mark a single notification as read.
    */
   async function handleMarkRead(request, env, notificationId) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
-    }
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -92,7 +109,6 @@ export function createNotificationHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const userId = String(authState.user.id);
     try {
       const updated = await notificationRepo.markRead(env, notificationId, userId);
       if (!updated) {
@@ -111,10 +127,8 @@ export function createNotificationHandlers(deps) {
    * cleared local state → notifications reappeared on next poll.
    */
   async function handleDelete(request, env, notificationId) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
-    }
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -122,7 +136,6 @@ export function createNotificationHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const userId = String(authState.user.id);
     try {
       const deleted = await notificationRepo.deleteNotification(env, notificationId, userId);
       if (!deleted) {
@@ -141,10 +154,8 @@ export function createNotificationHandlers(deps) {
    * the local array. No API call → notifications reappeared on next poll.
    */
   async function handleDeleteAll(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
-    }
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
@@ -152,7 +163,6 @@ export function createNotificationHandlers(deps) {
         { status: 503 }, env);
     }
 
-    const userId = String(authState.user.id);
     try {
       const deleted = await notificationRepo.deleteAll(env, userId);
       return jsonResponse({ status: 'success', deleted_count: deleted }, {}, env);

@@ -319,7 +319,13 @@ export function createNotificationPlatformRepository(deps) {
             ('announcement', 'system', 'اطلاعیه', 'Announcement', '{message}', '{message}', 'megaphone', 'high', 'both')
           ON CONFLICT (key) DO UPDATE SET
             category = EXCLUDED.category,
-            default_channel = EXCLUDED.default_channel
+            channel = EXCLUDED.channel,
+            title_fa = EXCLUDED.title_fa,
+            title_en = EXCLUDED.title_en,
+            body_fa = EXCLUDED.body_fa,
+            body_en = EXCLUDED.body_en,
+            icon = EXCLUDED.icon,
+            priority = EXCLUDED.priority
         `);
       }
 
@@ -631,10 +637,42 @@ export function createNotificationPlatformRepository(deps) {
     if (!b) return { sent: 0, failed: 0 };
 
     // Get target users
+    // PHASE 3 FIX: Parameterized query to prevent SQL injection + proper JSONB handling.
+    // target_value is a JSONB column — when read by neon driver, it becomes a JS object.
+    // Previously: `AND telegram_id = '${b.target_value}'` → '[object Object]' → broken + SQL injection.
+    // Now: Extract telegram_id(s) from target_value and use parameterized query.
     let userQuery = `SELECT telegram_id FROM users WHERE 1=1`;
-    if (b.target_type === 'active') { userQuery += ` AND channel_joined = TRUE`; }
-    else if (b.target_type === 'specific' && b.target_value) { userQuery += ` AND telegram_id = '${b.target_value}'`; }
-    const users = await queryDb(env, userQuery);
+    let userParams = [];
+    if (b.target_type === 'active') {
+      userQuery += ` AND channel_joined = TRUE`;
+    } else if (b.target_type === 'specific' && b.target_value) {
+      // target_value is a parsed JS object from JSONB.
+      // Expected formats: { telegram_id: "123456" } or { user_ids: ["123", "456"] } or just "123456" (string)
+      let targetIds = [];
+      if (typeof b.target_value === 'string') {
+        targetIds = [b.target_value];
+      } else if (Array.isArray(b.target_value)) {
+        targetIds = b.target_value.map(String);
+      } else if (typeof b.target_value === 'object') {
+        if (b.target_value.telegram_id) {
+          targetIds = [String(b.target_value.telegram_id)];
+        } else if (Array.isArray(b.target_value.user_ids)) {
+          targetIds = b.target_value.user_ids.map(String);
+        } else if (Array.isArray(b.target_value.telegram_ids)) {
+          targetIds = b.target_value.telegram_ids.map(String);
+        }
+      }
+      if (targetIds.length > 0) {
+        // Build parameterized IN clause: AND telegram_id IN ($1, $2, ...)
+        const placeholders = targetIds.map((_, i) => `$${i + 1}`).join(', ');
+        userQuery += ` AND telegram_id IN (${placeholders})`;
+        userParams = targetIds;
+      } else {
+        // No valid target IDs — return empty result
+        return { sent: 0, failed: 0 };
+      }
+    }
+    const users = await queryDb(env, userQuery, userParams);
     let sent = 0;
     let failed = 0;
 

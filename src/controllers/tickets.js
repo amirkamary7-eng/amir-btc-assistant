@@ -208,6 +208,12 @@ export function createTicketHandlers(deps) {
       // Notify ticket owner via NotificationService (single entry point)
       try {
         if (notificationService) {
+          // PHASE 3 FIX: Use deterministic dedupKey based on ticketId + message hash
+          // instead of Date.now(). This prevents duplicate notifications on retry:
+          // if the request is retried (network timeout), the same dedupKey is generated
+          // → same notificationId → ON CONFLICT DO NOTHING prevents duplicate.
+          // The hash also prevents duplicates if the user sends the exact same message twice.
+          const _msgHash = require('node:crypto').createHash('sha256').update(message).digest('hex').slice(0, 12);
           await notificationService.create(env, {
             userId: String(ticket.user_id),
             // FIX: was 'system' → now 'tickets' to match UI toggle ch_tickets
@@ -217,7 +223,7 @@ export function createTicketHandlers(deps) {
             title: `💬 پاسخ تیکت: ${ticket.title}`,
             message,
             metadata: { ticket_id: String(ticketId), title: ticket.title },
-            dedupKey: `ticket_reply_${ticketId}_${Date.now()}`,
+            dedupKey: `ticket_reply_${ticketId}_${_msgHash}`,
           }).catch(() => {});
         }
       } catch (notifyErr) {
