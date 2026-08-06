@@ -9140,6 +9140,12 @@ export default {
       //   5. DB query: notificationRepo.unreadCount
       //   6. JSON serialize
       if (request.method === 'GET' && url.pathname === '/api/notif-cpu-trace') {
+        // P1-11 FIX: Gate debug endpoints behind non-production to prevent
+        // information disclosure and CPU amplification in production.
+        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
+        if (_isProd) {
+          return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
+        }
         const trace = [];
         const t0 = performance.now();
         const stepAsync = async (name, fn) => {
@@ -9224,6 +9230,11 @@ export default {
       // Lists all notif_trace_* keys from KV and returns their contents.
       // No auth required (the traces themselves are keyed by random ID).
       if (request.method === 'GET' && url.pathname === '/api/notif-trace-results') {
+        // P1-11 FIX: Gate debug endpoints behind non-production
+        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
+        if (_isProd) {
+          return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
+        }
         let traces = [];
         try {
           if (env.APP_CACHE?.list) {
@@ -9291,6 +9302,11 @@ export default {
       // Proves whether notifications reappear after delete, and WHY.
       // Placed AFTER PROTECTED_PATHS gate so _protectedUser is set.
       if (request.method === 'GET' && url.pathname === '/api/notif-delete-diag') {
+        // P1-11 FIX: Gate debug endpoints behind non-production
+        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
+        if (_isProd) {
+          return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
+        }
         const result = { server_time: new Date().toISOString(), steps: [] };
 
         // Step 1: Check broadcasts in 'pending' or 'sending' status
@@ -9722,9 +9738,15 @@ export default {
             const totalWall = trace.reduce((sum, t) => sum + (t.wall_ms || 0), 0);
             trace.push({ step: 'TOTAL', wall_ms: Math.round(totalWall * 100) / 100 });
 
-            // Write trace to KV (best-effort, non-blocking)
-            const traceId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-            if (env.APP_CACHE) {
+            // P0-6 FIX: Write trace to KV ONLY in non-production (or 1% sampling in production)
+            // Previously this ran on EVERY /api/notifications GET, consuming KV write quota
+            // (free tier: 1,000/day; 100 users polling every 30s = 288k/day = 288× over limit).
+            // The X-Notif-Trace response header (below) still provides per-request tracing
+            // without KV persistence — use that for debugging instead.
+            const _isProdForTrace = String(env.APP_ENV || '').toLowerCase() === 'production';
+            const _shouldWriteTrace = !_isProdForTrace || Math.random() < 0.01; // 1% sample in prod
+            if (_shouldWriteTrace && env.APP_CACHE) {
+              const traceId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
               env.APP_CACHE.put('notif_trace_' + traceId, JSON.stringify({
                 traceId, ts: new Date().toISOString(), userId, trace, total_wall_ms: Math.round(totalWall * 100) / 100,
                 auth_calls: 1, // only global, no redundant handler call
@@ -9835,21 +9857,33 @@ export default {
       // User: mark single notification as read
       if (request.method === 'POST' && /^\/api\/notifications\/platform\/[^/]+\/read$/.test(url.pathname)) {
         const notifId = url.pathname.split('/').pop();
-        return await notificationPlatformHandlers.handleMarkRead(request, env, notifId);
+        const res = await notificationPlatformHandlers.handleMarkRead(request, env, notifId);
+        // P0-2 FIX: Invalidate notif cache so badge updates immediately
+        if (_protectedUser?.id && env.APP_CACHE) { env.APP_CACHE.delete('notif_cache_' + _protectedUser.id).catch(() => {}); }
+        return res;
       }
       // User: mark all as read
       if (request.method === 'POST' && url.pathname === '/api/notifications/platform/read-all') {
-        return await notificationPlatformHandlers.handleMarkAllRead(request, env);
+        const res = await notificationPlatformHandlers.handleMarkAllRead(request, env);
+        // P0-2 FIX: Invalidate notif cache
+        if (_protectedUser?.id && env.APP_CACHE) { env.APP_CACHE.delete('notif_cache_' + _protectedUser.id).catch(() => {}); }
+        return res;
       }
       // User: archive notification
       if (request.method === 'POST' && /^\/api\/notifications\/platform\/[^/]+\/archive$/.test(url.pathname)) {
         const notifId = url.pathname.split('/')[4];
-        return await notificationPlatformHandlers.handleArchive(request, env, notifId);
+        const res = await notificationPlatformHandlers.handleArchive(request, env, notifId);
+        // P0-2 FIX: Invalidate notif cache
+        if (_protectedUser?.id && env.APP_CACHE) { env.APP_CACHE.delete('notif_cache_' + _protectedUser.id).catch(() => {}); }
+        return res;
       }
       // User: delete notification
       if (request.method === 'DELETE' && /^\/api\/notifications\/platform\/[^/]+$/.test(url.pathname)) {
         const notifId = url.pathname.split('/').pop();
-        return await notificationPlatformHandlers.handleDelete(request, env, notifId);
+        const res = await notificationPlatformHandlers.handleDelete(request, env, notifId);
+        // P0-2 FIX: Invalidate notif cache
+        if (_protectedUser?.id && env.APP_CACHE) { env.APP_CACHE.delete('notif_cache_' + _protectedUser.id).catch(() => {}); }
+        return res;
       }
       // User: get notification settings
       if (request.method === 'GET' && url.pathname === '/api/notifications/platform/settings') {

@@ -356,7 +356,8 @@ export function createNotificationPlatformRepository(deps) {
   async function listForUser(env, userId, { limit = 20, offset = 0, category = null, unreadOnly = false, archived = false } = {}) {
     if (!isDatabaseConfigured(env)) return { notifications: [], total: 0, hasMore: false };
 
-    const conditions = ['user_id = $1'];
+    // P0-1 FIX: Always filter deleted_at IS NULL — unify soft-delete semantics with legacy repo
+    const conditions = ['user_id = $1', 'deleted_at IS NULL'];
     const params = [String(userId)];
     let idx = 2;
 
@@ -384,31 +385,38 @@ export function createNotificationPlatformRepository(deps) {
 
   async function getUnreadCount(env, userId) {
     if (!isDatabaseConfigured(env)) return 0;
-    const result = await queryDb(env, `SELECT COUNT(*)::int AS cnt FROM notifications WHERE user_id = $1 AND read_status = FALSE AND archived = FALSE`, [String(userId)]);
+    // P0-1 FIX: filter deleted_at IS NULL
+    const result = await queryDb(env, `SELECT COUNT(*)::int AS cnt FROM notifications WHERE user_id = $1 AND read_status = FALSE AND archived = FALSE AND deleted_at IS NULL`, [String(userId)]);
     return Number(result.rows[0]?.cnt || 0);
   }
 
   async function markRead(env, userId, notificationId) {
     if (!isDatabaseConfigured(env)) return false;
-    const result = await queryDb(env, `UPDATE notifications SET read_status = TRUE, read_at = NOW() WHERE id = $1 AND user_id = $2 RETURNING id`, [notificationId, String(userId)]);
+    // P0-1 FIX: filter deleted_at IS NULL (don't mark soft-deleted as read)
+    const result = await queryDb(env, `UPDATE notifications SET read_status = TRUE, read_at = NOW() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL RETURNING id`, [notificationId, String(userId)]);
     return result.rows.length > 0;
   }
 
   async function markAllRead(env, userId) {
     if (!isDatabaseConfigured(env)) return 0;
-    const result = await queryDb(env, `UPDATE notifications SET read_status = TRUE, read_at = NOW() WHERE user_id = $1 AND read_status = FALSE RETURNING id`, [String(userId)]);
+    // P0-1 FIX: filter deleted_at IS NULL
+    const result = await queryDb(env, `UPDATE notifications SET read_status = TRUE, read_at = NOW() WHERE user_id = $1 AND read_status = FALSE AND deleted_at IS NULL RETURNING id`, [String(userId)]);
     return result.rows.length;
   }
 
   async function archive(env, userId, notificationId) {
     if (!isDatabaseConfigured(env)) return false;
-    const result = await queryDb(env, `UPDATE notifications SET archived = TRUE WHERE id = $1 AND user_id = $2 RETURNING id`, [notificationId, String(userId)]);
+    // P0-1 FIX: filter deleted_at IS NULL
+    const result = await queryDb(env, `UPDATE notifications SET archived = TRUE WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL RETURNING id`, [notificationId, String(userId)]);
     return result.rows.length > 0;
   }
 
   async function deleteNotification(env, userId, notificationId) {
     if (!isDatabaseConfigured(env)) return false;
-    const result = await queryDb(env, `DELETE FROM notifications WHERE id = $1 AND user_id = $2 RETURNING id`, [notificationId, String(userId)]);
+    // P0-1 FIX: Changed from HARD DELETE to SOFT DELETE (UPDATE deleted_at = NOW())
+    // This unifies delete semantics with legacy repo and prevents broadcast cron
+    // from re-creating deleted notifications (ON CONFLICT DO NOTHING respects the existing row).
+    const result = await queryDb(env, `UPDATE notifications SET deleted_at = NOW() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL RETURNING id`, [notificationId, String(userId)]);
     return result.rows.length > 0;
   }
 

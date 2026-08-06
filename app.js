@@ -3244,8 +3244,9 @@ async function sendSessionHeartbeat() {
             _alertsLoaded = true;
             loadAlertsFromServer().catch(() => { _alertsLoaded = false; });
         }
-        // Load notifications from DB (replaces localStorage)
-        loadNotificationsFromServer().catch(() => {});
+        // P0-5 FIX: Removed redundant loadNotificationsFromServer() from heartbeat.
+        // The dedicated 60s notification poller already handles this. Running it
+        // here too caused 2× API calls every 180s (heartbeat interval).
     } catch (e) { console.warn('heartbeat:', e); }
 }
 
@@ -9208,15 +9209,25 @@ function addNotification(title, body, options = true) {
         ? { sendToTelegram: options, playSound: true }
         : { sendToTelegram: true, playSound: true, ...options };
 
-    if (window.NotificationCenter) {
-        const notif = NotificationCenter.add(title, body, opts);
-        return;
-    }
-
-    const notif = { id: Date.now().toString(), title, body, read: false, date: new Date().toISOString() };
+    // P0-7 FIX: Previously, if window.NotificationCenter existed (it always does),
+    // we called NotificationCenter.add() and returned — but NotificationCenter.add
+    // writes to localStorage, NOT to the in-memory `notifications` array that
+    // renderNotifications() and _updateBadgeFromLocal() read from. This meant
+    // guest notifications were written but never displayed (badge always 0,
+    // panel always empty). Now we ALWAYS populate the in-memory array, and
+    // still call NotificationCenter for the sound + dedup + localStorage backup.
+    const notif = { id: Date.now().toString() + Math.random().toString(36).slice(2, 6), title, body, read: false, date: new Date().toISOString() };
     notifications.unshift(notif);
     if (notifications.length > 50) notifications = notifications.slice(0, 50);
-    updateNotifBadge();
+
+    // Still call NotificationCenter for dedup, sound, and localStorage backup
+    if (window.NotificationCenter) {
+        try { NotificationCenter.add(title, body, { ...opts, playSound: false }); } catch (e) {}
+    }
+
+    // P0-4 FIX: compute badge locally
+    _updateBadgeFromLocal();
+
     if (opts.sendToTelegram) {
         const userId = getUserId();
         if (!String(userId).startsWith('guest_')) {
@@ -9237,15 +9248,27 @@ async function updateNotifBadge() {
             const data = await apiFetch('/api/notifications');
             if (data && typeof data.unread_count === 'number') {
                 const unread = data.unread_count;
-                if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread; }
+                // P0-4 FIX: cap badge at 99+ to prevent layout overflow
+                if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread > 99 ? '99+' : unread; }
                 else { badge.style.display = 'none'; }
                 return;
             }
         }
     } catch (e) { /* fall through to localStorage fallback */ }
     // Fallback: use in-memory notifications array (for guests)
+    _updateBadgeFromLocal();
+}
+
+/**
+ * P0-4 FIX: Compute badge from local `notifications` array without making
+ * a redundant API call. Used after mutations (markRead, markAllRead, delete,
+ * clearAll) where we already know the new state — no need to re-fetch.
+ */
+function _updateBadgeFromLocal() {
+    const badge = $('notif-badge');
+    if (!badge) return;
     const unread = notifications.filter(n => !n.read).length;
-    if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread; }
+    if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread > 99 ? '99+' : unread; }
     else { badge.style.display = 'none'; }
 }
 /**
@@ -9253,8 +9276,10 @@ async function updateNotifBadge() {
  */
 function toggleNotificationPanel() {
     const modal = document.getElementById('notif-modal');
-    modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
-    loadNotificationsFromServer();
+    const willOpen = modal.style.display !== 'flex';
+    modal.style.display = willOpen ? 'flex' : 'none';
+    // P1-10 FIX: Only fetch when opening, not when closing (was wasting API call on close)
+    if (willOpen) loadNotificationsFromServer();
 }
 /**
  * اعلان مودال را می‌بندد.
@@ -9278,7 +9303,8 @@ async function markAllRead() {
             // Only update local state if API succeeded
             if (res && res.status === 'success') {
                 notifications.forEach(n => n.read = true);
-                updateNotifBadge();
+                // P0-4 FIX: compute badge locally — no redundant GET
+                _updateBadgeFromLocal();
                 renderNotifications();
                 showMiniToast(t('done') || 'Done');
                 // Bump sequence so any in-flight poll (with stale unread data)
@@ -9299,7 +9325,7 @@ async function markAllRead() {
     }
     // Fallback for guests: update local state only
     notifications.forEach(n => n.read = true);
-    updateNotifBadge();
+    _updateBadgeFromLocal();
     renderNotifications();
 }
 /**
@@ -9317,7 +9343,8 @@ async function clearAllNotifications() {
             const res = await apiFetch('/api/notifications', { method: 'DELETE' });
             if (res && res.status === 'success') {
                 notifications = [];
-                updateNotifBadge();
+                // P0-4 FIX: compute badge locally — no redundant GET
+                _updateBadgeFromLocal();
                 renderNotifications();
                 closeNotifModal();
                 showMiniToast(t('done') || 'Cleared');
@@ -9341,7 +9368,7 @@ async function clearAllNotifications() {
     }
     // Fallback for guests: clear local state only
     notifications = [];
-    updateNotifBadge();
+    _updateBadgeFromLocal();
     renderNotifications();
     closeNotifModal();
 }
@@ -9358,7 +9385,8 @@ async function deleteNotification(id) {
             const res = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' });
             if (res && res.status === 'success') {
                 notifications = notifications.filter(n => n.id !== id);
-                updateNotifBadge();
+                // P0-4 FIX: compute badge locally — no redundant GET
+                _updateBadgeFromLocal();
                 renderNotifications();
                 // Bump sequence so in-flight poll doesn't overwrite
                 _notifReqSeq++;
@@ -9372,7 +9400,7 @@ async function deleteNotification(id) {
     }
     // Fallback for guests
     notifications = notifications.filter(n => n.id !== id);
-    updateNotifBadge();
+    _updateBadgeFromLocal();
     renderNotifications();
 }
 /**
@@ -9422,6 +9450,10 @@ window.clearNotifEventLog = function() {
     console.log('[NOTIF-EVENT] Log cleared');
 };
 
+// P1-9 FIX: Exponential backoff for notification polling on consecutive errors
+let _notifConsecutiveErrors = 0;
+let _notifBackoffMs = 60000; // start at 60s, double on error, cap at 600s (10 min)
+
 async function loadNotificationsFromServer() {
     const mySeq = ++_notifReqSeq;
     const reqId = 'GET_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
@@ -9438,6 +9470,11 @@ async function loadNotificationsFromServer() {
                 return;
             }
             if (data && Array.isArray(data.notifications)) {
+                // P1-9 FIX: Reset backoff on success
+                _notifConsecutiveErrors = 0;
+                _notifBackoffMs = 60000;
+                // P1-8 FIX: Clear error state
+                _notifFetchError = false;
                 const oldCount = notifications.length;
                 notifications = data.notifications.map(n => ({
                     id: n.id,
@@ -9447,11 +9484,11 @@ async function loadNotificationsFromServer() {
                     date: n.created_at || new Date().toISOString(),
                 }));
                 _logNotifEvent('GET_APPLIED', { reqId, mySeq, oldCount, newCount: notifications.length, serverUnread: data.unread_count });
-                // Update badge with server-provided unread count
+                // Update badge with server-provided unread count (P0-4: cap at 99+)
                 const badge = $('notif-badge');
                 if (badge) {
                     const unread = data.unread_count || notifications.filter(n => !n.read).length;
-                    if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread; }
+                    if (unread > 0) { badge.style.display = 'flex'; badge.innerText = unread > 99 ? '99+' : unread; }
                     else { badge.style.display = 'none'; }
                 }
                 renderNotifications();
@@ -9461,6 +9498,11 @@ async function loadNotificationsFromServer() {
     } catch (e) {
         _logNotifEvent('GET_ERROR', { reqId, mySeq, error: e?.message });
         console.warn('loadNotificationsFromServer:', e);
+        // P1-8 FIX: Set error state for UI
+        _notifFetchError = true;
+        // P1-9 FIX: Exponential backoff — double the poll interval on each consecutive error
+        _notifConsecutiveErrors++;
+        _notifBackoffMs = Math.min(_notifBackoffMs * 2, 600000); // cap at 10 min
     }
     // Fallback: render from in-memory array
     if (mySeq === _notifReqSeq) {
@@ -9468,20 +9510,46 @@ async function loadNotificationsFromServer() {
         renderNotifications();
     }
 }
+// P1-8 FIX: Error state flag for notification fetch
+let _notifFetchError = false;
+// P1-10 FIX: Hash of last rendered notifications to skip unnecessary DOM rebuilds
+let _lastNotifRenderHash = '';
+
 /**
  * notifications را در رابط کاربری رندر می‌کند.
  * FIX: added a delete button per notification so users can permanently delete
  * (not just mark as read). Previously there was no way to delete a single
  * notification — only "clear all" which didn't actually call the API.
+ * P1-8 FIX: Added error state with retry button.
+ * P1-10 FIX: Skip DOM rebuild if notification content hasn't changed (hash check).
  */
 function renderNotifications() {
     const container = document.getElementById('notif-list');
     if (!container) return;
-    if (!notifications.length) {
-        container.innerHTML = `<div class="empty-state">${t('no_notif')}</div>`;
+
+    // P1-8 FIX: Show error state if fetch failed and no notifications
+    if (_notifFetchError && !notifications.length) {
+        container.innerHTML = `<div class="empty-state" style="cursor:pointer;color:var(--accent);" onclick="loadNotificationsFromServer()">${t('error_generic') || 'Error'} — ${t('retry') || 'Retry'}</div>`;
         return;
     }
-    container.innerHTML = notifications.slice(0, 20).map(n => `
+
+    if (!notifications.length) {
+        // P1-10 FIX: Only update if hash changed
+        if (_lastNotifRenderHash !== 'empty') {
+            container.innerHTML = `<div class="empty-state">${t('no_notif')}</div>`;
+            _lastNotifRenderHash = 'empty';
+        }
+        return;
+    }
+
+    // P1-10 FIX: Compute hash of visible notifications. If unchanged, skip DOM rebuild
+    // to prevent flicker, scroll reset, and hover state loss on every 60s poll.
+    const visibleSlice = notifications.slice(0, 20);
+    const newHash = visibleSlice.map(n => `${n.id}:${n.read}`).join('|');
+    if (newHash === _lastNotifRenderHash) return; // No changes — skip DOM rebuild
+
+    _lastNotifRenderHash = newHash;
+    container.innerHTML = visibleSlice.map(n => `
         <div class="notif-item ${n.read ? 'read' : 'unread'}" onclick="markNotifRead('${escapeHtml(n.id)}')">
             <div class="notif-title">${escapeHtml(n.title)}</div>
             <div class="notif-body">${escapeHtml(n.body)}</div>
@@ -9503,7 +9571,13 @@ async function markNotifRead(id) {
             if (res && res.status === 'success') {
                 const n = notifications.find(x => x.id === id);
                 if (n) n.read = true;
-                updateNotifBadge();
+                // P0-3 FIX: Bump _notifReqSeq so any in-flight poll (with stale
+                // unread state from BEFORE the mark-read) is discarded and doesn't
+                // revert the just-read notification back to unread.
+                // P0-4 FIX: Compute badge locally instead of calling updateNotifBadge()
+                // which would fire a redundant GET /api/notifications.
+                _notifReqSeq++;
+                _updateBadgeFromLocal();
                 renderNotifications();
             }
             return;
@@ -9512,7 +9586,7 @@ async function markNotifRead(id) {
     // Fallback for guests: update local state only
     const n = notifications.find(x => x.id === id);
     if (n) n.read = true;
-    updateNotifBadge();
+    _updateBadgeFromLocal();
     renderNotifications();
 }
 
