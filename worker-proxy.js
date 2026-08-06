@@ -10235,78 +10235,36 @@ export default {
     const isEvery15Min = cronExpr === '*/15 * * * *';
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 4: SEQUENTIAL EXECUTION WITH SINGLE SHARED POOL
-    //
-    // ROOT CAUSE (proven with Runtime evidence):
-    //   - Free Plan CPU limit = 10ms PER REQUEST (entire scheduled handler)
-    //   - 3 parallel phases × 1 Pool.create each = 3 TLS handshakes = 9-15ms CPU
-    //   - 23% exceededCpu on */5 ticks, 60% on */15 ticks
-    //
-    // FIX:
-    //   - ALL phases run SEQUENTIALLY inside ONE ctx.waitUntil
-    //   - ONE shared Pool (via withPhasePool) for ALL queryDb calls
-    //   - 1 Pool.create = 3-5ms CPU < 10ms → no exceededCpu
-    //   - Each phase wrapped in try/catch for isolation (one phase's error
-    //     doesn't prevent subsequent phases from running)
-    //
-    // Delay: < 1 second (sequential vs parallel) — imperceptible for cron.
+    // DEDICATED PRICE ALERT CRON (every 1 minute)
+    // PHASE 2 FIX: Price Alert has its own dedicated cron (* * * * *).
+    // This cron ONLY runs runScheduledAlertsBaseline — nothing else.
+    // No news AI, no queue processing, no cleanup, no broadcast.
+    // This ensures:
+    //   1. Alert detection latency = 0-60 seconds (was 5-10 minutes)
+    //   2. No CPU competition from other jobs
+    //   3. No subrequest competition
+    //   4. Shared pool via withPhasePool (no per-call createPool)
+    //   5. CAS (markTriggered WHERE status='active') prevents duplicates
+    //      even if */5 or */15 ticks overlap
     // ═══════════════════════════════════════════════════════════════════
-    // ═══════════════════════════════════════════════════════════════════
-    // PHASE 3 SAFE OPTIMIZATION: On 15-min ticks, runScheduledAlertsBaseline
-    // and runCalendarAlertsCheck are now in SEPARATE ctx.waitUntil calls.
-    // Previously both ran in the same ctx.waitUntil (the withPhasePool block
-    // below), sharing the same CPU budget. Each uses 3-5ms CPU, so combined
-    // they could exceed the limit. Now each gets its own budget.
-    //
-    // On 1-min ticks (non-15-min), keep them in a single ctx.waitUntil
-    // (alternating alerts/calendar) — same as the original logic, but moved
-    // OUT of the withPhasePool block to give them their own CPU budget.
-    // ═══════════════════════════════════════════════════════════════════
-    if (isEveryMinute && !isEvery15Min) {
-      // 1-min ticks (non-15-min): alternate alerts/calendar in single ctx.waitUntil
-      ctx.waitUntil((async () => {
-        try {
-          const minute = new Date().getUTCMinutes();
-          const runAlerts = minute % 2 === 0;
-          if (runAlerts) {
-            try { await runScheduledAlertsBaseline(controller, env); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
-              _logPhase('phase1a-alerts', 'error', { error: e?.message });
-              console.warn('[CRON] alerts failed:', e?.message);
-            }
-          } else {
-            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }); _logPhase('phase1a-calendar', 'ok'); } catch (e) {
-              _logPhase('phase1a-calendar', 'error', { error: e?.message });
-              console.warn('[CRON] calendar failed:', e?.message);
-            }
-          }
-          _logPhase('phase1a', 'complete');
-        } catch (e) {
-          _logPhase('phase1a', 'error', { error: e?.message });
-          console.error('[CRON] Phase 1a error:', e?.message);
-        }
-      })());
-    }
-    if (isEvery15Min) {
-      // 15-min ticks: alerts and calendar in SEPARATE ctx.waitUntil (Phase 3 fix)
-      // PHASE 5 FIX (ALERT-14): Wrap alerts in withPhasePool so pool is passed
-      // to runScheduledAlertsBaseline. Previously, */15 path called runScheduledAlertsBaseline
-      // WITHOUT pool → markTriggered and sendNotification each created per-call Pool
-      // (3-5ms CPU per TLS handshake) → exceededCpu with 5+ triggers.
-      // Now withPhasePool creates ONE shared pool and passes it through.
+    if (isEveryMinute) {
       ctx.waitUntil(withPhasePool(env, async (pool) => {
-        try { await runScheduledAlertsBaseline(controller, env, pool); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
-          _logPhase('phase1a-alerts', 'error', { error: e?.message });
-          console.warn('[CRON] alerts failed:', e?.message);
+        try {
+          await runScheduledAlertsBaseline(controller, env, pool);
+          _logPhase('alerts-1min', 'ok');
+        } catch (e) {
+          _logPhase('alerts-1min', 'error', { error: e?.message });
+          console.warn('[CRON] 1-min alerts failed:', e?.message);
         }
       }));
-      ctx.waitUntil((async () => {
-        try { await runCalendarAlertsCheck(env, { isEvery15Min: true }); _logPhase('phase1a-calendar-check', 'ok'); } catch (e) {
-          _logPhase('phase1a-calendar-check', 'error', { error: e?.message });
-          console.warn('[CRON] calendar failed:', e?.message);
-        }
-      })());
-      _logPhase('phase1a', 'complete');
+      // Return early — 1-min cron does NOTHING else
+      return;
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 4: SEQUENTIAL EXECUTION WITH SINGLE SHARED POOL
+    // (Only */5 and */15 crons reach here — 1-min cron returns above)
+    // ═══════════════════════════════════════════════════════════════════
 
     ctx.waitUntil(withPhasePool(env, async (pool) => {
 
@@ -10348,24 +10306,15 @@ export default {
         }
       }
 
-      // ── PHASE 1a: Alerts OR Calendar check ──
-      // NOTE: 1-min and 15-min branches are extracted OUT of this withPhasePool
-      // block into separate ctx.waitUntil calls above (Phase 3 optimization).
-      // Only the 5-min branch remains here (the patch didn't address it).
+      // ── PHASE 1a: Calendar check (*/5 only) ──
+      // PHASE 2 FIX: Price Alert execution removed from */5 path.
+      // Alerts now run on dedicated * * * * * cron (line 10250).
+      // Only calendar check remains here on */5 ticks.
       try {
         if (isEvery5Min) {
-          const minute = new Date().getUTCMinutes();
-          const runAlerts = minute % 10 === 0;
-          if (runAlerts) {
-            try { await runScheduledAlertsBaseline(controller, env, pool); _logPhase('phase1a-alerts', 'ok'); } catch (e) {
-              _logPhase('phase1a-alerts', 'error', { error: e?.message });
-              console.warn('[CRON] alerts failed:', e?.message);
-            }
-          } else {
-            try { await runCalendarAlertsCheck(env, { isEvery15Min: false }, pool); _logPhase('phase1a-calendar', 'ok'); } catch (e) {
-              _logPhase('phase1a-calendar', 'error', { error: e?.message });
-              console.warn('[CRON] calendar failed:', e?.message);
-            }
+          try { await runCalendarAlertsCheck(env, { isEvery15Min: false }, pool); _logPhase('phase1a-calendar', 'ok'); } catch (e) {
+            _logPhase('phase1a-calendar', 'error', { error: e?.message });
+            console.warn('[CRON] calendar failed:', e?.message);
           }
         }
         _logPhase('phase1a', 'complete');
