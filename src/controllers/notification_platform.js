@@ -196,9 +196,13 @@ export function createNotificationPlatformHandlers(deps) {
       const payload = { ...bodyResult.payload, admin_id: admin.telegram_id };
       const broadcast = await notificationPlatformRepo.createBroadcast(env, payload);
       // If not scheduled, send immediately
+      // PHASE B FIX (DB-5): Route through processBroadcastFull instead of processBroadcast.
+      // processBroadcastFull has CAS claim (prevents concurrent double-processing),
+      // batching (25 users per batch), and deterministic dedupKey (prevents duplicates).
+      // processBroadcast (legacy) had N+1 queries, no CAS, and non-deterministic IDs.
       if (broadcast && !broadcast.scheduled_at) {
-        const result = await notificationPlatformRepo.processBroadcast(env, broadcast.id);
-        return jsonResponse({ status: 'success', broadcast, sent: result.sent }, {}, env);
+        const result = await notificationPlatformRepo.processBroadcastFull(env, sendTelegramMessage, broadcast.id);
+        return jsonResponse({ status: 'success', broadcast, sent: result.delivered || 0, ...result }, {}, env);
       }
       return jsonResponse({ status: 'success', broadcast }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
@@ -208,7 +212,8 @@ export function createNotificationPlatformHandlers(deps) {
     const { error: authErr } = await requireAdmin(request, env, 'broadcast');
     if (authErr) return authErr;
     try {
-      const result = await notificationPlatformRepo.processBroadcast(env, broadcastId);
+      // PHASE B FIX (DB-5): Use processBroadcastFull (CAS + batched + dedupKey)
+      const result = await notificationPlatformRepo.processBroadcastFull(env, sendTelegramMessage, broadcastId);
       return jsonResponse({ status: 'success', ...result }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }

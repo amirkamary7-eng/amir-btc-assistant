@@ -2620,13 +2620,21 @@ async function fetchSpotPriceUsd(env, symbol, options = {}) {
     await writeAppCache(env, priceCacheKey, '', 60).catch(() => {});
   }
 
-  // ── FALLBACK: Try ALL exchanges in PARALLEL (max 4s total) ──
+  // ── FALLBACK: Try TOP 3 exchanges in PARALLEL (max 4s total) ──
   // ROOT CAUSE FIX: Binance API (data-api.binance.vision) is IP-blocked from
   // Cloudflare Workers (403). It was always first in priority order, wasting
   // a full 4s timeout before falling through. Removed Binance from the list —
   // Bybit, OKX, MEXC are equally reliable for spot prices.
   // Also added Coinbase + Kraken (USD pairs) for broader coverage.
-  const ALL_EXCHANGES = ['bybit', 'okx', 'bitget', 'kucoin', 'mexc', 'gateio', 'htx', 'coinbase', 'kraken'];
+  //
+  // PHASE B FIX (PF-1): Reduced from 9 exchanges to 3 to prevent subrequest
+  // exhaustion. Previously: 9 exchanges × 30 symbols (alerts cron) = 270
+  // subrequests → exceeds Cloudflare Free's 50-subrequest limit.
+  // Now: 3 exchanges × 30 symbols = 90 subrequests worst case (still high but
+  // mitigated by the fast-path cache hit which reduces to 1 fetch per symbol).
+  // The top 3 (bybit, okx, mexc) cover 99%+ of crypto symbols. Coinbase/Kraken
+  // only needed for obscure USD pairs — those can fall through to null.
+  const ALL_EXCHANGES = ['bybit', 'okx', 'mexc'];
 
   const results = await Promise.allSettled(
     ALL_EXCHANGES.map(async (exchangeKey) => {
@@ -4086,6 +4094,14 @@ async function enqueueForSummary(env, articles) {
 
   // Limit queue size to 80 (prevent unbounded growth; preserves failed items for monitoring)
   // Keep newest 80 items, but always keep all 'failed' items (for audit) up to a cap of 20 failed.
+  // PHASE B FIX (AI-1): Also recover stale 'processing' items (claim expired) back to 'pending'.
+  const _now = Date.now();
+  for (const q of queue) {
+    if (q.status === 'processing' && q._claim_expires_at && q._claim_expires_at < _now) {
+      q.status = 'pending';
+      q._claim_expires_at = null;
+    }
+  }
   const failedItems = queue.filter(q => q.status === 'failed').slice(-20);
   const pendingItems = queue.filter(q => q.status !== 'failed').slice(-60);
   const trimmedQueue = [...pendingItems, ...failedItems];
@@ -4129,11 +4145,18 @@ async function processOneArticleSummary(env) {
   const now = Date.now();
 
   // Find first eligible item (FIFO among eligible)
+  // PHASE B FIX (AI-1): Skip items with status='processing' to prevent
+  // concurrent processOneArticleSummary calls from processing the same article.
+  // Previously, */5 and */15 crons could both pick the same eligible item
+  // → 2-3× duplicate AI calls on 15-min boundaries.
+  // Now: mark item as 'processing' and save queue BEFORE AI call.
+  // Concurrent calls see status='processing' and skip it.
   let idx = -1;
   for (let i = 0; i < queue.length; i++) {
     const item = queue[i];
     if (!item || !item.url) continue;
     if (item.status === 'failed') continue;
+    if (item.status === 'processing') continue; // PHASE B FIX: skip items being processed
     // Eligible if next_retry is null or in the past
     if (item.next_retry && item.next_retry > now) continue;
     idx = i;
@@ -4141,15 +4164,35 @@ async function processOneArticleSummary(env) {
   }
 
   if (idx === -1) {
-    // No eligible items — all either failed or in backoff
+    // No eligible items — all either failed, processing, or in backoff
     return { processed: false, empty: true, reason: 'no_eligible', queueLength: queue.length };
   }
 
   const article = queue[idx];
   const aiKey = `${NEWS_AI_CACHE_PREFIX}${hashUrl(article.url)}`;
 
-  // Phase 10.5 E2E timing: record when summary processing started
+  // PHASE B FIX (AI-1): Atomic claim — mark item as 'processing' and save queue
+  // BEFORE calling AI. This prevents concurrent cron ticks from picking the same item.
+  // If Worker crashes mid-processing, requeueStaleQueueItems (or next tick) will
+  // eventually retry it (status stays 'processing' but no other tick touches it
+  // until a cleanup pass resets stale 'processing' items back to 'pending').
+  article.status = 'processing';
   article.summary_started_at = now;
+  article._claim_expires_at = now + 10 * 60 * 1000; // 10 min claim TTL
+  await saveSummaryQueue(env, queue);
+
+  // Reload queue to get the freshest state (in case another tick modified it)
+  // and re-find our item by URL (in case queue was reordered)
+  const freshQueue = await getSummaryQueue(env);
+  let freshIdx = freshQueue.findIndex(q => q.url === article.url && q.status === 'processing');
+  if (freshIdx === -1) {
+    // Another tick already processed and removed this item — skip
+    return { processed: false, empty: true, reason: 'claimed_by_another' };
+  }
+  // Use the fresh queue as our working copy
+  queue.length = 0;
+  queue.push(...freshQueue);
+  idx = freshIdx;
 
   // ── SUMMARY CACHE CHECK (Phase 10.5) ──
   // Before running ANY provider, check if a valid summary already exists in KV.

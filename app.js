@@ -11674,12 +11674,15 @@ function _startAllPolling() {
         }
     }, 180000));
 
-    // ── Alert checking — 15s ──
-    // PERFORMANCE: Pauses when app not visible — backend cron handles alerts when app is closed
+    // ── Alert checking — 30s ──
+    // PHASE B FIX (FE-1): Increased from 15s to 30s to halve API load.
+    // 15s polling × 20 symbols = 240 req/hour → now 120 req/hour.
+    // Alert price checks don't need 15s granularity — 30s is sufficient
+    // for price alert triggers (backend cron runs every 5 min anyway).
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return; // PERFORMANCE: skip when tab hidden
         checkAlerts();
-    }, 15000));
+    }, 30000));
 
     // ── Notification polling — 60s ──
     _pollingIntervals.push(setInterval(() => {
