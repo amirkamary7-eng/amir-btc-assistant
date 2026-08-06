@@ -3563,7 +3563,7 @@ async function tryWorkersAI(env, prompt) {
 }
 
 /**
- * Provider 3: OpenAI (fallback 2 — opt-in via NEWS_PROVIDER_OPENAI=true + OPENAI_API_KEY).
+ * Provider 2: OpenAI (fallback 2 — opt-in via NEWS_PROVIDER_OPENAI=true + OPENAI_API_KEY).
  * Uses gpt-4o-mini (cheap, fast, good for summarization).
  */
 async function tryOpenAI(env, prompt) {
@@ -3868,25 +3868,42 @@ async function generateSummaryWithFallback(env, prompt) {
     return r;
   }
 
-  // Provider 1: Gemini (primary)
+  // ────────────────────────────────────────────────────────────────────────────
+  // FALLBACK CHAIN (Provider Activation Phase — DeepSeek removed per user request)
+  //   1) Gemini       (primary)      — NEWS_PROVIDER_GEMINI=true (default)
+  //   2) Workers AI   (fallback 1)   — NEWS_PROVIDER_WORKERS_AI=true (default)
+  //   3) OpenAI       (fallback 2)   — NEWS_PROVIDER_OPENAI=false (opt-in, paid)
+  //
+  // Gemini is ALWAYS tried first. Workers AI is ONLY used as fallback when
+  // Gemini fails (timeout, quota, invalid response, network error, etc.).
+  // Each provider is tried ONLY if the previous one failed.
+  // Circuit breaker protects each provider independently.
+  // No parallel calls — sequential fallback to minimize cost + latency.
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // Provider 1: Gemini (primary) — always tried first
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
     const r = await attemptProvider('gemini', () => tryGemini(env, prompt));
     if (r.success) {
       summary = r.summary;
       usedProvider = 'gemini';
+      console.log('[NEWS-AI-FALLBACK] ✅ Gemini PRIMARY succeeded — no fallback needed');
+    } else {
+      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Gemini failed (error=${r.error}, type=${r.errorType}, detail=${(r.error_detail || '').slice(0, 100)}) — falling back to Workers AI`);
     }
   }
 
-  // Provider 2: Workers AI (fallback 1) — only if Gemini didn't succeed
+  // Provider 2: Workers AI (fallback 1) — ONLY if Gemini didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true)) {
     const r = await attemptProvider('workers-ai', () => tryWorkersAI(env, prompt));
     if (r.success) {
       summary = r.summary;
       usedProvider = 'workers-ai';
+      console.log('[NEWS-AI-FALLBACK] ⚠️ Workers AI fallback succeeded (Gemini was unavailable)');
     }
   }
 
-  // Provider 3: OpenAI (fallback 2) — only if both Gemini + Workers AI didn't succeed
+  // Provider 3: OpenAI (fallback 2, opt-in) — only if Gemini + Workers AI didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) {
     const r = await attemptProvider('openai', () => tryOpenAI(env, prompt));
     if (r.success) {
@@ -4928,7 +4945,12 @@ async function enrichNewsWithAISummaries(env, articles) {
  * Phase 3: Batch AI Analysis — analyzes ALL filtered articles in 1 AI call.
  * Returns sentiment, impact, reason, and related coins for each article.
  *
- * Uses Gemini 2.0 Flash (primary) or Workers AI (fallback).
+ * FALLBACK CHAIN (Provider Activation Phase — DeepSeek removed per user request):
+ *   1) Gemini       (primary)    — NEWS_PROVIDER_GEMINI=true
+ *   2) Workers AI   (fallback 1) — NEWS_PROVIDER_WORKERS_AI=true
+ *   3) Rule-based   (fallback 2) — no AI, uses existing sentiment
+ *
+ * Gemini is ALWAYS tried first. Workers AI is ONLY used as fallback.
  * 1 AI call replaces 10 individual calls.
  */
 async function batchAnalyzeNews(env, articles) {
@@ -4953,8 +4975,30 @@ Return ONLY the JSON array, no other text.
 Headlines:
 ${headlines}`;
 
-  // Method 1: Gemini 2.0 Flash (primary)
-  if (GEMINI_API_KEY) {
+  // Helper: parse JSON array from AI response
+  function parseBatchResult(text) {
+    if (!text) return null;
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return null;
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const results = {};
+      for (const item of parsed) {
+        if (item && item.index && item.index >= 1 && item.index <= articles.length) {
+          results[item.index - 1] = {
+            sentiment: item.sentiment || 'neutral',
+            impact: item.impact || 'low',
+            impact_reason: item.reason || '',
+            coins: Array.isArray(item.coins) ? item.coins : [],
+          };
+        }
+      }
+      return results;
+    } catch { return null; }
+  }
+
+  // Method 1: Gemini 2.0 Flash (primary) — always tried first
+  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) && GEMINI_API_KEY) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
@@ -4975,31 +5019,23 @@ ${headlines}`;
       if (res.ok) {
         const data = await res.json();
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        // Extract JSON array from response
-        const jsonMatch = text.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          const results = {};
-          for (const item of parsed) {
-            if (item.index && item.index >= 1 && item.index <= articles.length) {
-              results[item.index - 1] = {
-                sentiment: item.sentiment || 'neutral',
-                impact: item.impact || 'low',
-                impact_reason: item.reason || '',
-                coins: Array.isArray(item.coins) ? item.coins : [],
-              };
-            }
-          }
-          return results;
+        const parsed = parseBatchResult(text);
+        if (parsed && Object.keys(parsed).length > 0) {
+          console.log('[NEWS-AI-BATCH] ✅ Gemini PRIMARY succeeded — no fallback needed');
+          return parsed;
         }
+      } else {
+        let errBody = '';
+        try { errBody = (await res.text()).substring(0, 200); } catch {}
+        console.warn(`[NEWS-AI-BATCH] ⚠️ Gemini failed (HTTP ${res.status}): ${errBody} — falling back to Workers AI`);
       }
     } catch (e) {
-      console.warn('[NEWS-AI-BATCH] Gemini failed:', e?.message);
+      console.warn('[NEWS-AI-BATCH] ⚠️ Gemini failed:', e?.message, '— falling back to Workers AI');
     }
   }
 
-  // Method 2: Workers AI (fallback)
-  if (hasWorkersAI) {
+  // Method 2: Workers AI (fallback 1) — ONLY if Gemini didn't succeed
+  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true) && hasWorkersAI) {
     try {
       const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
         messages: [
@@ -5011,21 +5047,10 @@ ${headlines}`;
       });
 
       if (aiResponse?.response) {
-        const jsonMatch = aiResponse.response.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          const results = {};
-          for (const item of parsed) {
-            if (item.index && item.index >= 1 && item.index <= articles.length) {
-              results[item.index - 1] = {
-                sentiment: item.sentiment || 'neutral',
-                impact: item.impact || 'low',
-                impact_reason: item.reason || '',
-                coins: Array.isArray(item.coins) ? item.coins : [],
-              };
-            }
-          }
-          return results;
+        const parsed = parseBatchResult(aiResponse.response);
+        if (parsed && Object.keys(parsed).length > 0) {
+          console.log('[NEWS-AI-BATCH] ⚠️ Workers AI fallback succeeded (Gemini was unavailable)');
+          return parsed;
         }
       }
     } catch (e) {
@@ -5033,7 +5058,8 @@ ${headlines}`;
     }
   }
 
-  // Fallback: use existing rule-based sentiment, no impact/reason/coins
+  // Method 3: Rule-based fallback (no AI)
+  console.log('[NEWS-AI-BATCH] ⚠️ Using rule-based fallback (all AI providers failed)');
   const fallback = {};
   for (let i = 0; i < articles.length; i++) {
     fallback[i] = {
