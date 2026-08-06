@@ -10410,26 +10410,18 @@ export default {
       // ── PHASE 2: Lightweight DB retries (15-min only) ──
       // NOTE: retryFailedReferralRewards and retryFailedWheelRewards are
       // extracted OUT of this withPhasePool block into SEPARATE ctx.waitUntil
-      // calls below (Phase 2 optimization). Only the Phase 4 requeue calls
-      // remain here (they need the shared pool).
+      // calls below (Phase 2 optimization).
+      //
+      // CHANGE 1 (cron dedup): requeueStaleQueueItems and requeueStaleBroadcasts
+      // were previously executed here on */15 ticks AND on */5 ticks (see
+      // worker-proxy.js lines 10274/10277). Since both functions use a 5-minute
+      // staleness threshold (notification_platform.js lines 906/946), the */5
+      // cron alone is sufficient to maintain the <=10-minute recovery SLA. The
+      // duplicate execution on */15 was removed to save 192 queryDb calls/day
+      // (2 x 96 ticks) with zero impact on recovery: */5 still requeues every
+      // 5 minutes, and processQueue (also on */5) picks up requeued items on
+      // the next tick.
       if (isEvery15Min) {
-        try {
-          if (notificationPlatformRepo?.requeueStaleQueueItems) {
-            try { await notificationPlatformRepo.requeueStaleQueueItems(env, pool); } catch (e) {
-              console.warn('[CRON] Phase 4 requeueStaleQueueItems (15min) failed:', e?.message);
-            }
-          }
-          if (notificationPlatformRepo?.requeueStaleBroadcasts) {
-            try { await notificationPlatformRepo.requeueStaleBroadcasts(env, pool); } catch (e) {
-              console.warn('[CRON] Phase 4 requeueStaleBroadcasts (15min) failed:', e?.message);
-            }
-          }
-          _logPhase('phase2', 'complete');
-        } catch (e) {
-          _logPhase('phase2', 'error', { error: e?.message });
-          console.error('[CRON] Phase 2 error:', e?.message);
-        }
-
         // ── PHASE 3: Heavy jobs (alternating) ──
         // ROOT-CAUSE FIX (Phase 10.5): processNewsAIBatch now runs on ALL 15-min
         // ticks (was only :15/:45 = every 30 min). This halves the enqueue delay
