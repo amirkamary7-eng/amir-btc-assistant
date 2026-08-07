@@ -8580,14 +8580,17 @@ export default {
         }
         try {
           const body = await request.json();
+          console.log('[CONTENT SAVE] type:', contentType, 'title:', body.title, 'version:', body.version, 'sections_count:', Array.isArray(body.sections) ? body.sections.length : 'N/A');
           const updated = await appContentRepo.updateContent(env, contentType, {
             title: body.title,
             sections: body.sections,
             version: body.version,
             updated_by: String(authState.user.id),
           });
+          console.log('[CONTENT SAVE] success:', JSON.stringify(updated).substring(0, 200));
           return jsonResponse({ status: 'success', data: updated }, {}, env);
         } catch (e) {
+          console.error('[CONTENT SAVE] error:', e?.message);
           return jsonResponse({ status: 'error', message: 'Failed to update content: ' + (e?.message || '') }, { status: 500 }, env);
         }
       }

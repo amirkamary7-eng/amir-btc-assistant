@@ -211,7 +211,8 @@ export function createAppContentRepository(deps) {
     await ensureTable(env);
     const { title, sections, version } = data;
 
-    await queryDb(env, `
+    console.log('[APP_CONTENT] UPDATE START — type:', type, 'title:', title, 'version:', version);
+    const result = await queryDb(env, `
       INSERT INTO app_content (id, title, sections, version, updated_at, updated_by)
       VALUES ($1, $2, $3, $4, NOW(), $5)
       ON CONFLICT (id) DO UPDATE SET
@@ -227,11 +228,18 @@ export function createAppContentRepository(deps) {
       String(version || '1.0.0'),
       String(data.updated_by || 'admin'),
     ], 1);
+    console.log('[APP_CONTENT] UPDATE DB RESULT — rowCount:', result.rowCount);
 
-    // Refresh KV cache
+    // Refresh KV cache — delete old + write new to avoid stale reads
     const cacheKey = CACHE_PREFIX + type;
     const cacheData = { type, title, sections, version, updated_at: new Date().toISOString() };
-    await writeAppCache(env, cacheKey, JSON.stringify(cacheData), CACHE_TTL).catch(() => {});
+    try {
+      await env.APP_CACHE?.delete?.(cacheKey).catch(() => {});
+      await writeAppCache(env, cacheKey, JSON.stringify(cacheData), CACHE_TTL);
+      console.log('[APP_CONTENT] KV CACHE REFRESHED — key:', cacheKey);
+    } catch (e) {
+      console.warn('[APP_CONTENT] KV cache refresh failed:', e?.message);
+    }
 
     return cacheData;
   }
