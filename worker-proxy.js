@@ -4290,6 +4290,13 @@ async function processOneArticleSummary(env) {
   //   1. KV cache (news:ai:{hash}) — fast, TTL 7 days
   //   2. DB (news_articles table) — permanent, no TTL
   // If either has a valid summary → skip AI entirely.
+
+  // Ensure news_articles table exists (idempotent, cached per-isolate).
+  // Called here (not from cron) to avoid DDL on hot cron paths.
+  if (newsArticleRepo) {
+    try { await newsArticleRepo.ensureTable(env); } catch {}
+  }
+
   const existingRaw = await readAppCache(env, aiKey).catch(() => null);
   let existingSummary = null;
   let existingProvider = null;
