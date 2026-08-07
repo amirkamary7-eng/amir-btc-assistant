@@ -39,6 +39,7 @@ import { createPublisherHandlers } from './src/controllers/publisher.js';
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 import { createMembershipRepository } from './src/repositories/membership.js';
 import { createMembershipHandlers } from './src/controllers/membership.js';
+import { createNewsArticleRepository } from './src/repositories/news_articles.js';
 
 /**
  * Cloudflare Worker Shell
@@ -4128,6 +4129,29 @@ async function enqueueForSummary(env, articles) {
     const cachedSummary = await readAppCache(env, aiKey).catch(() => null);
     if (cachedSummary) { skipped++; continue; }
 
+    // ── DB CHECK (permanent storage) ──
+    // Also check the news_articles table — if the article was analyzed before
+    // and KV has expired (7-day TTL), the DB still has the summary.
+    // This prevents re-enqueuing and re-processing old articles.
+    if (newsArticleRepo) {
+      const dbArticle = await newsArticleRepo.findByUrl(env, a.url).catch(() => null);
+      if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 50) {
+        // Summary exists in DB — refresh KV cache and skip
+        try {
+          const payload = JSON.stringify({
+            summary: dbArticle.summary,
+            provider: dbArticle.provider,
+            attempts: [],
+            generated_at: new Date(dbArticle.analyzed_at).getTime() || Date.now(),
+            e2e: {},
+          });
+          await writeAppCache(env, aiKey, payload, NEWS_AI_CACHE_TTL);
+        } catch {}
+        skipped++;
+        continue;
+      }
+    }
+
     queue.push({
       url: a.url,
       title: a.title_en || a.title || '',
@@ -4153,15 +4177,23 @@ async function enqueueForSummary(env, articles) {
   // Limit queue size to 80 (prevent unbounded growth; preserves failed items for monitoring)
   // Keep newest 80 items, but always keep all 'failed' items (for audit) up to a cap of 20 failed.
   // PHASE B FIX (AI-1): Also recover stale 'processing' items (claim expired) back to 'pending'.
+  // CLEANUP: Remove failed items older than 24 hours (they've been monitored long enough).
   const _now = Date.now();
+  const STALE_FAILED_MS = 24 * 60 * 60 * 1000; // 24 hours
   for (const q of queue) {
     if (q.status === 'processing' && q._claim_expires_at && q._claim_expires_at < _now) {
       q.status = 'pending';
       q._claim_expires_at = null;
     }
+    // Remove stale failed items (older than 24h) — they're no longer useful for monitoring
+    if (q.status === 'failed' && q.last_attempt && (_now - q.last_attempt) > STALE_FAILED_MS) {
+      q._remove = true;
+    }
   }
-  const failedItems = queue.filter(q => q.status === 'failed').slice(-20);
-  const pendingItems = queue.filter(q => q.status !== 'failed').slice(-60);
+  // Filter out items marked for removal
+  const cleanQueue = queue.filter(q => !q._remove);
+  const failedItems = cleanQueue.filter(q => q.status === 'failed').slice(-20);
+  const pendingItems = cleanQueue.filter(q => q.status !== 'failed').slice(-60);
   const trimmedQueue = [...pendingItems, ...failedItems];
   await saveSummaryQueue(env, trimmedQueue);
 
@@ -4253,13 +4285,11 @@ async function processOneArticleSummary(env) {
   idx = freshIdx;
 
   // ── SUMMARY CACHE CHECK (Phase 10.5) ──
-  // Before running ANY provider, check if a valid summary already exists in KV.
-  // Cache is valid ONLY if:
-  //   1. KV entry exists
-  //   2. Parsed summary text length >= 50 chars (meaningful content)
-  //   3. TTL is valid (KV readAppCache already enforces TTL — if expired, returns null)
-  // If valid → skip AI entirely, remove from queue, record cache HIT.
-  // If not → record cache MISS, proceed to AI generation.
+  // Before running ANY provider, check if a valid summary already exists.
+  // Two-layer check:
+  //   1. KV cache (news:ai:{hash}) — fast, TTL 7 days
+  //   2. DB (news_articles table) — permanent, no TTL
+  // If either has a valid summary → skip AI entirely.
   const existingRaw = await readAppCache(env, aiKey).catch(() => null);
   let existingSummary = null;
   let existingProvider = null;
@@ -4279,8 +4309,30 @@ async function processOneArticleSummary(env) {
     }
   }
 
+  // ── DB CHECK (permanent storage) ──
+  // If KV cache missed, check the DB before calling AI.
+  // The DB stores summaries permanently — no TTL expiry.
+  if (!existingSummary && newsArticleRepo) {
+    const dbArticle = await newsArticleRepo.findByUrl(env, article.url).catch(() => null);
+    if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 50) {
+      existingSummary = dbArticle.summary;
+      existingProvider = dbArticle.provider || 'db';
+      // Also refresh KV cache so next check is faster
+      try {
+        const payload = JSON.stringify({
+          summary: dbArticle.summary,
+          provider: dbArticle.provider,
+          attempts: [],
+          generated_at: new Date(dbArticle.analyzed_at).getTime() || Date.now(),
+          e2e: {},
+        });
+        await writeAppCache(env, aiKey, payload, NEWS_AI_CACHE_TTL);
+      } catch {}
+    }
+  }
+
   if (existingSummary) {
-    // CACHE HIT — valid summary exists, skip AI entirely
+    // CACHE HIT — valid summary exists (KV or DB), skip AI entirely
     try { await recordCacheStat(env, true); } catch {}
     queue.splice(idx, 1);
     await saveSummaryQueue(env, queue);
@@ -4290,7 +4342,7 @@ async function processOneArticleSummary(env) {
       duration_ms: Date.now() - t0,
     };
   }
-  // CACHE MISS — no valid summary, proceed to AI generation
+  // CACHE MISS — no valid summary in KV or DB, proceed to AI generation
   try { await recordCacheStat(env, false); } catch {}
 
   // Helper: requeue with retry state (mutates queue in place + persists)
@@ -4351,6 +4403,33 @@ async function processOneArticleSummary(env) {
         },
       });
       await writeAppCache(env, aiKey, payload, NEWS_AI_CACHE_TTL);
+
+      // ── PERMANENT DB STORAGE ──
+      // Save summary to news_articles table (permanent — no TTL).
+      // This prevents re-processing the same article after KV expires (7 days).
+      // Uses ON CONFLICT DO UPDATE so re-analysis overwrites stale data.
+      if (newsArticleRepo) {
+        try {
+          const fp = newsArticleRepo.fingerprint(article.url, article.title_en || article.title || '', article.source || '');
+          await newsArticleRepo.saveAnalysis(env, {
+            id: fp,
+            url: article.url,
+            title: article.title || article.title_en || '',
+            title_en: article.title_en || '',
+            source: article.source || '',
+            category: article.category || 'crypto',
+            summary: summary,
+            sentiment: 'neutral',  // Will be enriched by batchAnalyzeNews
+            impact: 'low',
+            impact_reason: '',
+            coins: [],
+            provider: provider,
+          });
+        } catch (e) {
+          // DB save is best-effort — KV cache is the primary read path
+          console.warn('[NEWS-ARTICLES] DB save failed (non-fatal):', e?.message);
+        }
+      }
 
       // Record E2E timing to a rolling history in KV (for monitoring)
       try {
@@ -6561,6 +6640,9 @@ const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCa
 
 // ── Membership Module — factory wiring ──────────────────────────────────────
 const membershipRepo = createMembershipRepository({ queryDb, queryDbTransaction });
+
+// ── News Articles Module — permanent storage for AI summaries ───────────────
+const newsArticleRepo = createNewsArticleRepository({ queryDb });
 const membershipHandlers = createMembershipHandlers({
   jsonResponse,
   authenticateTelegramRequest,
