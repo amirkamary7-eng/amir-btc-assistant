@@ -8615,7 +8615,7 @@ export default {
       // Auth method 1: ALERTS_CRON_SHARED_SECRET in X-Cron-Secret header
       // Auth method 2: Telegram admin auth (ADMIN_TELEGRAM_ID) via X-Telegram-Init-Data
       if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/trigger-alerts') {
-        return (async () => {
+        return await (async () => {
           const providedSecret = request.headers.get('X-Cron-Secret') || '';
           const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
           let authorized = false;
@@ -9931,7 +9931,7 @@ export default {
         //      Returns both notifications AND unread count in one DB round-trip.
         //
         // The trace instrumentation is KEPT to verify the fix works.
-        return (async () => {
+        return await (async () => {
           const trace = request._cpuTrace || [];
 
           // ROOT CAUSE FIX: ensure deleted_at column exists (soft-delete fix).
@@ -10031,8 +10031,9 @@ export default {
             // without KV persistence — use that for debugging instead.
             const _isProdForTrace = String(env.APP_ENV || '').toLowerCase() === 'production';
             const _shouldWriteTrace = !_isProdForTrace || Math.random() < 0.01; // 1% sample in prod
+            let traceId = null;
             if (_shouldWriteTrace && env.APP_CACHE) {
-              const traceId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+              traceId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
               env.APP_CACHE.put('notif_trace_' + traceId, JSON.stringify({
                 traceId, ts: new Date().toISOString(), userId, trace, total_wall_ms: Math.round(totalWall * 100) / 100,
                 auth_calls: 1, // only global, no redundant handler call
@@ -10047,7 +10048,7 @@ export default {
             try {
               const traceB64 = btoa(JSON.stringify(trace));
               response.headers.set('X-Notif-Trace', traceB64.slice(0, 8000));
-              response.headers.set('X-Notif-Trace-Id', traceId);
+              response.headers.set('X-Notif-Trace-Id', traceId || '');
               response.headers.set('X-Notif-Cache', trace.some(t => t.step === 'kv_cache_hit') ? 'HIT' : 'MISS');
             } catch {}
             return response;
