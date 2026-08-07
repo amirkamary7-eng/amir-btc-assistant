@@ -10142,7 +10142,7 @@ async function saveContentFromEditor() {
     saveBtn.textContent = 'در حال ذخیره...';
 
     try {
-        const resp = await apiFetch('/api/admin/content/' + _editingContentType, {
+        const data = await apiFetch('/api/admin/content/' + _editingContentType, {
             method: 'PUT',
             body: JSON.stringify({
                 title: titleInput.value,
@@ -10151,7 +10151,7 @@ async function saveContentFromEditor() {
             }),
         });
 
-        if (resp.ok) {
+        if (data.status === 'success') {
             statusEl.textContent = '✓ با موفقیت ذخیره شد';
             statusEl.className = 'editor-status success';
             // Reload content in the background
@@ -10160,8 +10160,7 @@ async function saveContentFromEditor() {
                 loadContent(_editingContentType);
             }, 1000);
         } else {
-            const err = await resp.json().catch(() => ({}));
-            statusEl.textContent = 'خطا: ' + (err.message || resp.status);
+            statusEl.textContent = 'خطا: ' + (data.message || 'نامشخص');
             statusEl.className = 'editor-status error';
         }
     } catch (e) {
