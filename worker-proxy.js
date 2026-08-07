@@ -1280,6 +1280,12 @@ const _moduleNeonCache = new Map();
 function getSharedNeon(env) {
   const url = resolveNeonDatabaseUrl(env);
   if (!url) return null;
+  // Only use neon() HTTP for real Neon connection strings (contain neon.tech
+  // or neon.ws in hostname). Mock/test URLs (e.g., postgres://mock) would
+  // cause neon() HTTP to fail with DNS errors, changing error behavior
+  // compared to Pool fallback. This check ensures tests using mock URLs
+  // fall through to Pool (same behavior as before this fix).
+  if (!url.includes('neon.tech') && !url.includes('neon.ws')) return null;
   if (_moduleNeonCache.has(url)) return _moduleNeonCache.get(url);
   let sql;
   try {
@@ -1560,6 +1566,41 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
     }
   }
 
+  // ── neon() HTTP path: stateless, no WebSocket, no TLS handshake ──
+  // PROVEN: getSharedNeon() was defined (line 1280) but NEVER called.
+  // All cron queries are non-transactional (SELECT/INSERT/UPDATE/DELETE).
+  // neon() HTTP is safe for these — each query is a separate fetch() to
+  // Neon's HTTP SQL API. No persistent connection = no TLS handshake CPU.
+  // queryDbTransaction (BEGIN/COMMIT) still uses Pool — it's never called
+  // from cron.
+  const _sql = getSharedNeon(env);
+  if (_sql) {
+    try {
+      const _result = await _sql(sqlText, params);
+      const _t1 = Date.now();
+      _traceStage('queryDb.neon:' + _sqlPreview.slice(0, 60), _t0);
+      _traceQuery({
+        seq: _seq, poolType: 'neon', sql: _sqlPreview,
+        startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+        status: _t1 - _t0 >= 7900 ? 'timeout' : 'ok', attempt: 1
+      });
+      return _result;
+    } catch (error) {
+      const _t1 = Date.now();
+      const _errMsg = String(error?.message || '').slice(0, 200);
+      const _isTimeout = _t1 - _t0 >= 7900 || _errMsg.includes('timeout') || _errMsg.includes('Timed out');
+      _traceStage('queryDb.neon.ERROR:' + _sqlPreview.slice(0, 60), _t0);
+      _traceQuery({
+        seq: _seq, poolType: 'neon', sql: _sqlPreview,
+        startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+        status: _isTimeout ? 'timeout' : 'error', error: _errMsg, attempt: 1
+      });
+      // Fall through to Pool fallback (below) — neon() HTTP may fail if
+      // Neon HTTP endpoint is unavailable; Pool uses WebSocket which may work.
+    }
+  }
+
+  // ── Pool fallback: create a per-call WebSocket Pool (original path 3) ──
   const _tPoolCreate = Date.now();
   const _callPool = createPool(env);
   if (!_callPool) throw new Error('Database not configured');
@@ -4978,6 +5019,10 @@ ${headlines}`;
   // Helper: parse JSON array from AI response
   function parseBatchResult(text) {
     if (!text) return null;
+    // PROVEN FIX: Workers AI (llama-3.3-70b) can return a non-string response
+    // (object or undefined). Without this guard, .match() throws:
+    // "aiResponse.response.match is not a function"
+    if (typeof text !== 'string') return null;
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return null;
     try {
@@ -7950,11 +7995,16 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
             return resultPayload;
     }
 
-    // AUDIT-002 FIX: Ensure table + indexes exist before querying (idempotent).
-    // PERFORMANCE: Only run ensureTable on the 15-min cron (not every 2 min).
-    if (controller.cron === '*/15 * * * *' && typeof alertRepo?.ensureTable === 'function') {
-      try { await alertRepo.ensureTable(env); } catch {}
-    }
+    // PROVEN FIX: ensureTable removed from cron — DDL (CREATE TABLE, CREATE INDEX)
+    // must NOT run on hot cron paths. In production, a CREATE INDEX took 64.5s
+    // wall time and caused "Connection terminated unexpectedly" → exception.
+    // ensureTable is idempotent (IF NOT EXISTS) and cached per-isolate, but
+    // new isolates still trigger it. Tables/indexes should be created via
+    // one-time migration, not on every cron tick.
+    // Original call (removed):
+    // if (controller.cron === '*/15 * * * *' && typeof alertRepo?.ensureTable === 'function') {
+    //   try { await alertRepo.ensureTable(env); } catch {}
+    // }
 
     // Use the bulk cron query (only fetches active alerts, ordered by created_at DESC)
     const alerts = (typeof alertRepo?.listActiveForCron === 'function')
@@ -8353,10 +8403,15 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       triggered_count: resultPayload.triggered_count,
       pendingUpdates: typeof _pendingUpdates !== 'undefined' ? _pendingUpdates.length : 0,
     }));
+  } finally {
+    // PROVEN FIX: env._reqPool must be restored in finally, NOT after try/catch.
+    // Previously, 'return resultPayload' inside try exited before reaching
+    // the restore line, leaving env._reqPool pointing to withPhasePool's Pool.
+    // When withPhasePool.finally() closed the Pool, separate ctx.waitUntil
+    // calls (retryFailed*) that read env._reqPool found a closed Pool →
+    // "Cannot perform I/O on behalf of a different request" error.
+    env._reqPool = _prevReqPool;
   }
-  // PHASE 5 FIX (ALERT-14): Restore env._reqPool to its previous value.
-  // This prevents pool leakage if the caller had a different pool set.
-  env._reqPool = _prevReqPool;
 }
 //#endregion
 
