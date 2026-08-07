@@ -754,7 +754,7 @@ export function createNotificationPlatformRepository(deps) {
   // QUEUE
   // ═══════════════════════════════════════════════════════════
 
-  async function enqueue(env, { notificationId, userId, channel, priority, payload }) {
+  async function enqueue(env, { notificationId, userId, channel, priority, payload }, pool = null) {
     // PERF: Do NOT call ensureSchema here — it adds 3+ seconds of latency.
     if (!isDatabaseConfigured(env)) return;
     if (!notificationId) {
@@ -769,7 +769,7 @@ export function createNotificationPlatformRepository(deps) {
         INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload, created_at)
         VALUES ($1, $2, $3, $4, 'pending', $5, NOW())
         ON CONFLICT (notification_id, user_id) DO NOTHING
-      `, [String(notificationId), String(userId), channel, priority, JSON.stringify(payload || {})]);
+      `, [String(notificationId), String(userId), channel, priority, JSON.stringify(payload || {})], 1, pool);
     } catch (e) { console.warn('Notification enqueue error:', e.message); }
   }
 
@@ -820,7 +820,7 @@ export function createNotificationPlatformRepository(deps) {
           if (item.telegram_message_id) {
             await queryDb(env,
               `UPDATE notification_queue SET status = 'processed', processed_at = NOW() WHERE id = $1`,
-              [item.id]
+              [item.id], 1, pool
             );
             processed++;
             continue;
@@ -849,12 +849,12 @@ export function createNotificationPlatformRepository(deps) {
             `UPDATE notification_queue
              SET status = 'processed', processed_at = NOW(), telegram_message_id = $2
              WHERE id = $1`,
-            [item.id, tgMsgId]
+            [item.id, tgMsgId], 1, pool
           );
           processed++;
         } else {
           // Non-telegram channel — just mark as processed
-          await queryDb(env, `UPDATE notification_queue SET status = 'processed', processed_at = NOW() WHERE id = $1`, [item.id]);
+          await queryDb(env, `UPDATE notification_queue SET status = 'processed', processed_at = NOW() WHERE id = $1`, [item.id], 1, pool);
           processed++;
         }
       } catch (e) {
@@ -867,7 +867,7 @@ export function createNotificationPlatformRepository(deps) {
               error = $2,
               next_retry_at = NOW() + INTERVAL '60 seconds'
           WHERE id = $1
-        `, [item.id, String(e.message || '').substring(0, 200)]).catch(() => {});
+        `, [item.id, String(e.message || '').substring(0, 200)], 1, pool).catch(() => {});
         failed++;
       }
     }
@@ -1258,7 +1258,7 @@ export function createNotificationPlatformRepository(deps) {
         ${checkpoint ? "AND telegram_id > $2" : ""}
         ORDER BY telegram_id ASC
         LIMIT $1
-      `, checkpoint ? [BATCH_SIZE, checkpoint] : [BATCH_SIZE]);
+      `, checkpoint ? [BATCH_SIZE, checkpoint] : [BATCH_SIZE], 1, pool);
 
       if (!userResult.rows.length) break; // All users processed
 
@@ -1275,7 +1275,7 @@ export function createNotificationPlatformRepository(deps) {
         const placeholders = userIds.map((_, i) => `$${i + 1}`).join(',');
         const prefResult = await queryDb(env,
           `SELECT user_id, ${channelPrefCol} AS pref FROM notification_settings WHERE user_id IN (${placeholders})`,
-          userIds
+          userIds, 1, pool
         ).catch(() => ({ rows: [] }));
         for (const row of prefResult.rows || []) {
           prefMap.set(String(row.user_id), String(row.pref));
@@ -1304,7 +1304,7 @@ export function createNotificationPlatformRepository(deps) {
               JSON.stringify({ broadcastId, ...(broadcast.metadata || {}) }),
               broadcast.priority, broadcast.category,
               deliverToTelegram ? 'both' : 'mini_app',
-            ]).catch(() => {});
+            ], 1, pool).catch(() => {});
           }
 
           // Phase 2: Enqueue Telegram delivery (NO direct sendTelegramMessage)
@@ -1321,7 +1321,7 @@ export function createNotificationPlatformRepository(deps) {
                 title: broadcast.title,
                 message: broadcast.message,
               },
-            });
+            }, pool);
           }
 
           batchDelivered++;
@@ -1343,11 +1343,11 @@ export function createNotificationPlatformRepository(deps) {
             total_delivered = total_delivered + $3,
             last_processed_user_id = $4
         WHERE id = $1
-      `, [broadcastId, userIds.length, batchDelivered, checkpoint]);
+      `, [broadcastId, userIds.length, batchDelivered, checkpoint], 1, pool);
     }
 
     // Mark broadcast as completed
-    await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW(), claimed_at = NULL WHERE id = $1`, [broadcastId]);
+    await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW(), claimed_at = NULL WHERE id = $1`, [broadcastId], 1, pool);
 
     console.log(`[broadcast] Completed broadcast ${broadcastId}: processed=${totalProcessed}, delivered=${totalDelivered}, failed=${totalFailed}`);
     return { processed: totalProcessed, delivered: totalDelivered, failed: totalFailed, broadcastId, status: 'completed' };
