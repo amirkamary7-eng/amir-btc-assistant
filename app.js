@@ -9982,8 +9982,7 @@ async function loadContent(type) {
     body.innerHTML = '<div class="content-loading"><div class="spinner"></div>در حال بارگذاری...</div>';
 
     try {
-        const resp = await apiFetch('/api/content/' + type);
-        const data = await resp.json();
+        const data = await apiFetch('/api/content/' + type);
         if (data.status === 'success' && data.data) {
             const content = data.data;
             const titleEl = document.getElementById(titleId);
@@ -10092,7 +10091,6 @@ function openContentEditor(type) {
 
     // Load current content into editor
     apiFetch('/api/content/' + type)
-        .then(r => r.json())
         .then(data => {
             if (data.status === 'success' && data.data) {
                 const content = data.data;
