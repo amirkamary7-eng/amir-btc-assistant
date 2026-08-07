@@ -8575,7 +8575,7 @@ export default {
         if (authState.error) {
           return jsonResponse({ status: 'error', message: 'Authentication required' }, { status: 401 }, env);
         }
-        if (!isAdminTelegramId(authState.user.id)) {
+        if (!isAdminTelegramId(env, authState.user.id)) {
           return jsonResponse({ status: 'error', message: 'Admin access required' }, { status: 403 }, env);
         }
         try {
