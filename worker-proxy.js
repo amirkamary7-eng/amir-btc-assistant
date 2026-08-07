@@ -4222,7 +4222,7 @@ async function enqueueForSummary(env, articles) {
  * Returns { processed: true, success, url, reason, retry_count, duration_ms }
  *      or { processed: false, empty: true } when no eligible item.
  */
-async function processOneArticleSummary(env) {
+async function processOneArticleSummary(env, pool = null) {
   const t0 = Date.now();
 
   // Feature flag — when summary is disabled, do nothing
@@ -4321,7 +4321,7 @@ async function processOneArticleSummary(env) {
   // If KV cache missed, check the DB before calling AI.
   // The DB stores summaries permanently — no TTL expiry.
   if (!existingSummary && newsArticleRepo) {
-    const dbArticle = await newsArticleRepo.findByUrl(env, article.url).catch(() => null);
+    const dbArticle = await newsArticleRepo.findByUrl(env, article.url, pool).catch(() => null);
     if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 50) {
       existingSummary = dbArticle.summary;
       existingProvider = dbArticle.provider || 'db';
@@ -4432,7 +4432,7 @@ async function processOneArticleSummary(env) {
             impact_reason: '',
             coins: [],
             provider: provider,
-          });
+          }, pool);
         } catch (e) {
           // DB save is best-effort — KV cache is the primary read path
           console.warn('[NEWS-ARTICLES] DB save failed (non-fatal):', e?.message);
@@ -4498,16 +4498,11 @@ async function processOneArticleSummary(env) {
   // ── STEP 2: Extract readable article text ──
   // Fallback chain: <article> → <main> → all <p> tags → RSS description (last resort)
   // NEVER fall back to raw cleanedHtml (junk), and NEVER show RSS body to user.
+  // PERF FIX: Combined 9 separate regex .replace() calls into a single pass
+  // using regex alternation. This reduces regex compilation and string
+  // scanning from 9 passes to 1 pass — significant CPU savings on large HTML.
   let cleanedHtml = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
-    .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
-    .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
-    .replace(/<form[^>]*>[\s\S]*?<\/form>/gi, '')
-    .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '');
+    .replace(/<(script|style|nav|footer|header|aside|noscript|form|iframe)[^>]*>[\s\S]*?<\/\1>/gi, '');
 
   function stripTags(s) {
     return s
@@ -5468,7 +5463,7 @@ ${articleText}`;
  * 2. Cron runs every 1 minute — articles get processed within 60s of appearing
  * 3. User HTTP requests only read from KV — instant response, no AI calls
  */
-async function processNewsAIBatch(env) {
+async function processNewsAIBatch(env, pool = null) {
   // ── ROOT-CAUSE FIX: Full try/catch with step-by-step logging ──
   // Previously this function had NO top-level try/catch, AND the caller at
   // line 6611 had no .catch(), so any rejection became an unhandled promise
@@ -5692,7 +5687,7 @@ async function processNewsAIBatch(env) {
     let summaryResult = { processed: false, empty: true };
     if (isNewsSummaryEnabled(env)) {
       try {
-        summaryResult = await processOneArticleSummary(env);
+        summaryResult = await processOneArticleSummary(env, pool);
         stepLog('SUMMARY_PROCESS_done', summaryResult);
       } catch (e) {
         stepLog('SUMMARY_PROCESS_FAILED', { error: e?.message });
@@ -7879,7 +7874,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
             channel: 'both',
             metadata: { event_title: event.title, event_date: event.date, event_time: event.time, event_country: event.country },
             dedupKey: `cal_event_${event.id}_${uid}`,
-          });
+          }, pool);
           // dispatch returns {status: 'filtered'} if user opted out
           if (dispatchResult && dispatchResult.status !== 'filtered') {
             sentForThisEvent++;
@@ -7951,7 +7946,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
                 reminder_id: reminder.id,
               },
               dedupKey: `cal_reminder_${reminder.id}_${reminder.user_id}`,
-            });
+            }, pool);
             if (dispatchResult && dispatchResult.status !== 'filtered') {
               reminderStats.dispatched++;
             } else {
@@ -8410,7 +8405,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
               },
               dedupKey: `price_alert_${alertId}_${userId}`,
               telegramExtra,
-            });
+            }, pool);
             if (result.status === 'delivered') {
               inAppDelivered = deliverToMiniApp;
               telegramDelivered = deliverToTelegram;
@@ -10470,7 +10465,7 @@ export default {
         const MAX_SUMMARIES_PER_TICK = 2;
         for (let i = 0; i < MAX_SUMMARIES_PER_TICK; i++) {
           try {
-            const summaryResult = await processOneArticleSummary(env);
+            const summaryResult = await processOneArticleSummary(env, pool);
             if (summaryResult.processed && summaryResult.success) {
               console.log(`[CRON] news summary ${i+1}/${MAX_SUMMARIES_PER_TICK} processed:`, summaryResult.url?.substring(0, 60));
             }
@@ -10568,7 +10563,7 @@ export default {
         }
         // ROOT-CAUSE FIX: processNewsAIBatch runs on EVERY 15-min tick (not just :15/:45)
         // This ensures new articles are enqueued within 15 min of appearing in RSS.
-        try { await processNewsAIBatch(env); _logPhase('phase3-newsai', 'ok'); } catch (e) {
+        try { await processNewsAIBatch(env, pool); _logPhase('phase3-newsai', 'ok'); } catch (e) {
           _logPhase('phase3-newsai', 'error', { error: e?.message });
           console.warn('[CRON] news AI failed:', e?.message);
         }

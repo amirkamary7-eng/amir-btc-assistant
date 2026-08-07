@@ -95,14 +95,14 @@ export function createNewsArticleRepository(deps) {
    * @param {string} id - fingerprint
    * @returns {Promise<object|null>} - { summary, provider, sentiment, impact, impact_reason, coins } or null
    */
-  async function findById(env, id) {
+  async function findById(env, id, pool = null) {
     try {
       const result = await queryDb(env, `
         SELECT id, url, title, summary, sentiment, impact, impact_reason, coins, provider, analyzed_at
         FROM news_articles
         WHERE id = $1
         LIMIT 1
-      `, [String(id)], 1);
+      `, [String(id)], 1, pool);
       return result.rows[0] || null;
     } catch (e) {
       // Table might not exist yet — return null (will be created on first write)
@@ -118,14 +118,14 @@ export function createNewsArticleRepository(deps) {
    * @param {string} url - article URL
    * @returns {Promise<object|null>}
    */
-  async function findByUrl(env, url) {
+  async function findByUrl(env, url, pool = null) {
     try {
       const result = await queryDb(env, `
         SELECT id, url, title, summary, sentiment, impact, impact_reason, coins, provider, analyzed_at
         FROM news_articles
         WHERE url = $1
         LIMIT 1
-      `, [String(url)], 1);
+      `, [String(url)], 1, pool);
       return result.rows[0] || null;
     } catch (e) {
       return null;
@@ -139,7 +139,7 @@ export function createNewsArticleRepository(deps) {
    * @param {object} env - Worker env
    * @param {object} data - { id, url, title, title_en, source, category, summary, sentiment, impact, impact_reason, coins, provider }
    */
-  async function saveAnalysis(env, data) {
+  async function saveAnalysis(env, data, pool = null) {
     const {
       id, url, title, title_en, source, category,
       summary, sentiment, impact, impact_reason, coins, provider
@@ -170,7 +170,7 @@ export function createNewsArticleRepository(deps) {
         String(impact_reason || ''),
         Array.isArray(coins) ? JSON.stringify(coins) : String(coins || '[]'),
         String(provider || 'unknown'),
-      ], 1);
+      ], 1, pool);
       return true;
     } catch (e) {
       console.warn('[NEWS-ARTICLES] saveAnalysis failed:', e?.message);

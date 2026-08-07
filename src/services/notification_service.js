@@ -49,8 +49,8 @@ export function createNotificationService(deps) {
    * @returns {Promise<{id: string|null, status: string}>}
    *   status: 'delivered' | 'filtered' | 'skipped' | 'error'
    */
-  async function create(env, opts) {
-    return notificationPlatformRepo.dispatch(env, opts);
+  async function create(env, opts, pool = null) {
+    return notificationPlatformRepo.dispatch(env, opts, pool);
   }
 
   return Object.freeze({

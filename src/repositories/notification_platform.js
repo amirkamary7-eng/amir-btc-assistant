@@ -348,11 +348,11 @@ export function createNotificationPlatformRepository(deps) {
    * @param {object} env - Worker env
    * @returns {Promise<object>} - { id, status }
    */
-  async function dispatch(env, params) {
+  async function dispatch(env, params, pool = null) {
     // UNIFIED: dispatch() is now a thin wrapper around sendNotification().
     // All callers (wallet, wheel, tickets, admin, alerts, referral) go through
     // the same path: sendNotification → check settings → INSERT notif → enqueue TG.
-    return sendNotification(env, params);
+    return sendNotification(env, params, pool);
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -1086,7 +1086,7 @@ export function createNotificationPlatformRepository(deps) {
    * @param {object} opts - { userId, title, message, category, priority, channel, metadata, templateKey }
    * @returns {Promise<{id, status}>}
    */
-  async function sendNotification(env, opts) {
+  async function sendNotification(env, opts, pool = null) {
     if (!isDatabaseConfigured(env)) return { id: null, status: 'skipped' };
     const {
       userId, templateKey, category, title, message,
@@ -1130,7 +1130,7 @@ export function createNotificationPlatformRepository(deps) {
       const channelPrefCol = _getChannelColumn(finalCategory);
       const prefResult = await queryDb(env,
         `SELECT ${channelPrefCol} AS pref FROM notification_settings WHERE user_id = $1`,
-        [String(userId)]
+        [String(userId)], 1, pool
       ).catch(() => ({ rows: [] }));
       if (prefResult.rows[0]?.pref) {
         userChannel = String(prefResult.rows[0].pref);
@@ -1158,7 +1158,7 @@ export function createNotificationPlatformRepository(deps) {
           finalTitle, finalMessage, JSON.stringify(metadata),
           finalPriority, finalCategory,
           deliverToTelegram ? 'both' : 'mini_app',
-        ]);
+        ], 1, pool);
       } catch (e) {
         console.warn('sendNotification INSERT error:', e.message);
       }
@@ -1174,7 +1174,7 @@ export function createNotificationPlatformRepository(deps) {
         channel: 'telegram',
         priority: finalPriority,
         payload: { title: finalTitle, message: finalMessage, telegramExtra },
-      });
+      }, pool);
     }
 
     return { id: notificationId, status: 'delivered' };
