@@ -463,6 +463,7 @@ const i18n = {
         cal_cpi: 'نرخ تورم (CPI)', cal_fed: 'سخنرانی رئیس فدرال رزرو', cal_pmi: 'شاخص مدیران خرید (PMI)',
         cal_loading: 'در حال بارگذاری تقویم...', cal_empty: 'رویدادی موجود نیست',
         about_version: 'نسخه 1.0.0', about_desc: 'دستیار هوشمند معاملاتی متصل به API صرافی‌های معتبر.',
+        terms: 'قوانین و شرایط', privacy: 'حریم خصوصی',
         official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
         summary_mcap: 'مارکت‌کپ کل', summary_volume: 'حجم ۲۴h', summary_btc_dom: 'BTC.D',
         market_subtitle: 'داده‌های لحظه‌ای بازار ارزهای دیجیتال',
@@ -601,6 +602,7 @@ const i18n = {
         cal_loading: 'Loading calendar...', cal_empty: 'No events available',
         about_version: 'Version 1.0.0',
         about_desc: 'Smart trading assistant connected to global exchange APIs.',
+        terms: 'Terms & Rules', privacy: 'Privacy Policy',
         official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
         summary_mcap: 'Total Market Cap', summary_volume: '24h Volume', summary_btc_dom: 'BTC.D',
         market_subtitle: 'Live Cryptocurrency Market Data',
@@ -9927,13 +9929,251 @@ function closeTicketsModal() { document.getElementById('tickets-modal').style.di
 function openAboutModal() {
     closeSettingsModal();
     document.getElementById('about-modal').style.display = 'flex';
+    loadContent('about');
+    // Show edit button for admins
+    if (isAdmin()) {
+        document.getElementById('about-edit-btn').style.display = 'flex';
+    } else {
+        document.getElementById('about-edit-btn').style.display = 'none';
+    }
 }
-/**
- * درباره مودال را می‌بندد.
- * ورودی: بدون ورودی.
- * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
- */
 function closeAboutModal() { document.getElementById('about-modal').style.display = 'none'; }
+
+/**
+ * Terms modal
+ */
+function openTermsModal() {
+    closeSettingsModal();
+    document.getElementById('terms-modal').style.display = 'flex';
+    loadContent('terms');
+    if (isAdmin()) {
+        document.getElementById('terms-edit-btn').style.display = 'flex';
+    } else {
+        document.getElementById('terms-edit-btn').style.display = 'none';
+    }
+}
+function closeTermsModal() { document.getElementById('terms-modal').style.display = 'none'; }
+
+/**
+ * Privacy modal
+ */
+function openPrivacyModal() {
+    closeSettingsModal();
+    document.getElementById('privacy-modal').style.display = 'flex';
+    loadContent('privacy');
+    if (isAdmin()) {
+        document.getElementById('privacy-edit-btn').style.display = 'flex';
+    } else {
+        document.getElementById('privacy-edit-btn').style.display = 'none';
+    }
+}
+function closePrivacyModal() { document.getElementById('privacy-modal').style.display = 'none'; }
+
+/**
+ * Load content from API and render into modal body.
+ * @param {string} type - 'about' | 'terms' | 'privacy'
+ */
+async function loadContent(type) {
+    const bodyId = type + '-content-body';
+    const titleId = type + '-modal-title';
+    const body = document.getElementById(bodyId);
+    if (!body) return;
+
+    body.innerHTML = '<div class="content-loading"><div class="spinner"></div>در حال بارگذاری...</div>';
+
+    try {
+        const resp = await fetch('/api/content/' + type);
+        const data = await resp.json();
+        if (data.status === 'success' && data.data) {
+            const content = data.data;
+            const titleEl = document.getElementById(titleId);
+            if (titleEl && content.title) titleEl.textContent = content.title;
+
+            if (type === 'about') {
+                body.innerHTML = renderAboutContent(content);
+            } else {
+                body.innerHTML = renderAccordionContent(content);
+            }
+        } else {
+            body.innerHTML = '<div class="content-loading">محتوایی موجود نیست.</div>';
+        }
+    } catch (e) {
+        body.innerHTML = '<div class="content-loading">خطا در بارگذاری محتوا.</div>';
+    }
+}
+
+/**
+ * Render About content as premium cards.
+ */
+function renderAboutContent(content) {
+    let html = '';
+
+    // Version badge
+    if (content.version) {
+        html += '<div class="content-version-badge"> نسخه ' + content.version + '</div>';
+    }
+
+    // Sections as cards
+    if (Array.isArray(content.sections)) {
+        for (const section of content.sections) {
+            html += '<div class="content-section">';
+            html += '<div class="content-section-heading">' + escapeHtml(section.heading || '') + '</div>';
+            html += '<div class="content-section-body">' + escapeHtml(section.body || '') + '</div>';
+            html += '</div>';
+        }
+    }
+
+    // Channel link
+    html += '<a class="content-channel-link" href="https://t.me/amir_btc_2024" target="_blank" rel="noopener">';
+    html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 4.5L2.5 12.5l6 2 2 6 4-4 5 4 2-16z"/></svg>';
+    html += '<span>کانال رسمی: amir_btc_2024</span>';
+    html += '</a>';
+
+    return html;
+}
+
+/**
+ * Render Terms/Privacy as accordion.
+ */
+function renderAccordionContent(content) {
+    let html = '';
+
+    if (!Array.isArray(content.sections) || content.sections.length === 0) {
+        return '<div class="content-loading">محتوایی موجود نیست.</div>';
+    }
+
+    for (let i = 0; i < content.sections.length; i++) {
+        const section = content.sections[i];
+        const isFirst = i === 0;
+        html += '<div class="accordion-item' + (isFirst ? ' open' : '') + '">';
+        html += '<div class="accordion-header" onclick="toggleAccordion(this)">';
+        html += '<span class="accordion-header-text">' + escapeHtml(section.heading || '') + '</span>';
+        html += '<svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>';
+        html += '</div>';
+        html += '<div class="accordion-body"><div class="accordion-body-inner">' + escapeHtml(section.body || '') + '</div></div>';
+        html += '</div>';
+    }
+
+    return html;
+}
+
+/**
+ * Toggle accordion item.
+ */
+function toggleAccordion(headerEl) {
+    const item = headerEl.parentElement;
+    item.classList.toggle('open');
+}
+
+/**
+ * HTML escape helper.
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = String(text || '');
+    return div.innerHTML;
+}
+
+/**
+ * Content Editor (Admin)
+ */
+let _editingContentType = null;
+
+function openContentEditor(type) {
+    _editingContentType = type;
+    const editorTitle = document.getElementById('content-editor-title');
+    const titleInput = document.getElementById('editor-title');
+    const versionInput = document.getElementById('editor-version');
+    const sectionsTextarea = document.getElementById('editor-sections');
+    const statusEl = document.getElementById('editor-status');
+
+    statusEl.textContent = '';
+    statusEl.className = 'editor-status';
+
+    // Load current content into editor
+    fetch('/api/content/' + type)
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success' && data.data) {
+                const content = data.data;
+                const titles = { about: 'ویرایش: درباره ما', terms: 'ویرایش: قوانین', privacy: 'ویرایش: حریم خصوصی' };
+                editorTitle.textContent = titles[type] || 'ویرایش محتوا';
+                titleInput.value = content.title || '';
+                versionInput.value = content.version || '1.0.0';
+                sectionsTextarea.value = JSON.stringify(content.sections || [], null, 2);
+                document.getElementById('content-editor-modal').style.display = 'flex';
+            } else {
+                statusEl.textContent = 'خطا در بارگذاری محتوا';
+                statusEl.className = 'editor-status error';
+            }
+        })
+        .catch(e => {
+            statusEl.textContent = 'خطا: ' + e.message;
+            statusEl.className = 'editor-status error';
+        });
+}
+
+function closeContentEditor() {
+    document.getElementById('content-editor-modal').style.display = 'none';
+    _editingContentType = null;
+}
+
+async function saveContentFromEditor() {
+    if (!_editingContentType) return;
+
+    const statusEl = document.getElementById('editor-status');
+    const saveBtn = document.querySelector('.editor-save-btn');
+    const titleInput = document.getElementById('editor-title');
+    const versionInput = document.getElementById('editor-version');
+    const sectionsTextarea = document.getElementById('editor-sections');
+
+    statusEl.textContent = '';
+    statusEl.className = 'editor-status';
+
+    let sections;
+    try {
+        sections = JSON.parse(sectionsTextarea.value);
+        if (!Array.isArray(sections)) throw new Error('بخش‌ها باید یک آرایه باشند');
+    } catch (e) {
+        statusEl.textContent = 'خطا در JSON: ' + e.message;
+        statusEl.className = 'editor-status error';
+        return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'در حال ذخیره...';
+
+    try {
+        const resp = await apiFetch('/api/admin/content/' + _editingContentType, {
+            method: 'PUT',
+            body: JSON.stringify({
+                title: titleInput.value,
+                sections: sections,
+                version: versionInput.value || '1.0.0',
+            }),
+        });
+
+        if (resp.ok) {
+            statusEl.textContent = '✓ با موفقیت ذخیره شد';
+            statusEl.className = 'editor-status success';
+            // Reload content in the background
+            setTimeout(() => {
+                closeContentEditor();
+                loadContent(_editingContentType);
+            }, 1000);
+        } else {
+            const err = await resp.json().catch(() => ({}));
+            statusEl.textContent = 'خطا: ' + (err.message || resp.status);
+            statusEl.className = 'editor-status error';
+        }
+    } catch (e) {
+        statusEl.textContent = 'خطا: ' + e.message;
+        statusEl.className = 'editor-status error';
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'ذخیره';
+    }
+}
 
 // ============================================================================
 //#region Notification Settings
@@ -10612,6 +10852,7 @@ function closeAllOverlays() {
         'add-coin-modal', 'add-analysis-modal', 'news-modal',
         'notif-modal', 'settings-modal', 'notif-settings-modal',
         'lang-modal', 'tickets-modal', 'admin-tickets-modal', 'about-modal',
+        'terms-modal', 'privacy-modal', 'content-editor-modal',
     ];
     for (const id of standardModalIds) {
         const m = document.getElementById(id);
@@ -12654,6 +12895,14 @@ window.openTicketsModal = openTicketsModal;
 window.closeTicketsModal = closeTicketsModal;
 window.openAboutModal = openAboutModal;
 window.closeAboutModal = closeAboutModal;
+window.openTermsModal = openTermsModal;
+window.closeTermsModal = closeTermsModal;
+window.openPrivacyModal = openPrivacyModal;
+window.closePrivacyModal = closePrivacyModal;
+window.toggleAccordion = toggleAccordion;
+window.openContentEditor = openContentEditor;
+window.closeContentEditor = closeContentEditor;
+window.saveContentFromEditor = saveContentFromEditor;
 window.openNotifSettingsModal = openNotifSettingsModal;
 window.closeNotifSettingsModal = closeNotifSettingsModal;
 window.handleNotifPrefChange = handleNotifPrefChange;

@@ -40,6 +40,7 @@ import { createMarketOverviewService } from './src/services/market_overview_serv
 import { createMembershipRepository } from './src/repositories/membership.js';
 import { createMembershipHandlers } from './src/controllers/membership.js';
 import { createNewsArticleRepository } from './src/repositories/news_articles.js';
+import { createAppContentRepository } from './src/repositories/app_content.js';
 
 /**
  * Cloudflare Worker Shell
@@ -6650,6 +6651,9 @@ const membershipRepo = createMembershipRepository({ queryDb, queryDbTransaction 
 
 // ── News Articles Module — permanent storage for AI summaries ───────────────
 const newsArticleRepo = createNewsArticleRepository({ queryDb });
+
+// ── App Content Module — CMS for About / Terms / Privacy ───────────────────
+const appContentRepo = createAppContentRepository({ queryDb, readAppCache, writeAppCache });
 const membershipHandlers = createMembershipHandlers({
   jsonResponse,
   authenticateTelegramRequest,
@@ -8544,6 +8548,48 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         return handleHealth(env);
+      }
+
+      // ── App Content: About / Terms / Privacy (public read) ──
+      if (request.method === 'GET' && url.pathname.startsWith('/api/content/')) {
+        const contentType = url.pathname.split('/api/content/')[1]?.split('/')[0];
+        if (!['about', 'terms', 'privacy'].includes(contentType)) {
+          return jsonResponse({ status: 'error', message: 'Invalid content type' }, { status: 400 }, env);
+        }
+        try {
+          const content = await appContentRepo.getContent(env, contentType);
+          return jsonResponse({ status: 'success', data: content }, {}, env);
+        } catch (e) {
+          return jsonResponse({ status: 'error', message: 'Failed to load content' }, { status: 500 }, env);
+        }
+      }
+
+      // ── App Content: Admin update (admin-only) ──
+      if (request.method === 'PUT' && url.pathname.startsWith('/api/admin/content/')) {
+        const contentType = url.pathname.split('/api/admin/content/')[1]?.split('/')[0];
+        if (!['about', 'terms', 'privacy'].includes(contentType)) {
+          return jsonResponse({ status: 'error', message: 'Invalid content type' }, { status: 400 }, env);
+        }
+        // Admin auth check
+        const authState = await authenticateTelegramRequest(request, env);
+        if (authState.error) {
+          return jsonResponse({ status: 'error', message: 'Authentication required' }, { status: 401 }, env);
+        }
+        if (!isAdminTelegramId(authState.user.id)) {
+          return jsonResponse({ status: 'error', message: 'Admin access required' }, { status: 403 }, env);
+        }
+        try {
+          const body = await request.json();
+          const updated = await appContentRepo.updateContent(env, contentType, {
+            title: body.title,
+            sections: body.sections,
+            version: body.version,
+            updated_by: String(authState.user.id),
+          });
+          return jsonResponse({ status: 'success', data: updated }, {}, env);
+        } catch (e) {
+          return jsonResponse({ status: 'error', message: 'Failed to update content: ' + (e?.message || '') }, { status: 500 }, env);
+        }
       }
 
       // ── DIAGNOSTIC: CPU Profile for admin endpoints ──
