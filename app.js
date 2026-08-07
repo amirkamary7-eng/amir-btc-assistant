@@ -10155,9 +10155,11 @@ async function saveContentFromEditor() {
             statusEl.textContent = '✓ با موفقیت ذخیره شد';
             statusEl.className = 'editor-status success';
             // Reload content in the background
+            // Save type BEFORE closeContentEditor sets _editingContentType = null
+            const savedType = _editingContentType;
             setTimeout(() => {
                 closeContentEditor();
-                loadContent(_editingContentType);
+                loadContent(savedType);
             }, 1000);
         } else {
             statusEl.textContent = 'خطا: ' + (data.message || 'نامشخص');
