@@ -25,6 +25,35 @@ export function createAlertHandlers(deps) {
   } = deps;
 
   /**
+   * Helper: Get authenticated user ID from request._protectedUser (set by the
+   * global PROTECTED_PATHS gate in worker-proxy.js) or fall back to
+   * authenticateTelegramRequest for non-production environments where the
+   * global gate does not run.
+   *
+   * CPU ROOT-CAUSE FIX: Previously, `handleList` called
+   * authenticateTelegramRequest AGAIN even though the PROTECTED_PATHS gate
+   * (worker-proxy.js:9570-9584) had already authenticated the user and set
+   * request._protectedUser. This redundant HMAC verification cost ~2-3ms CPU
+   * per request. With frontend polling /api/alerts every 15s, this was a
+   * significant contributor to the exceededCpu errors.
+   *
+   * Same pattern as src/controllers/notifications.js.
+   *
+   * Returns { userId, error } — if error is set, return it as the HTTP response.
+   */
+  async function _getUserId(request, env) {
+    if (request._protectedUser && request._protectedUser.id) {
+      return { userId: String(request._protectedUser.id), error: null };
+    }
+    // Fallback for non-production (global middleware doesn't run)
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) {
+      return { userId: null, error: authState.error };
+    }
+    return { userId: String(authState.user.id), error: null };
+  }
+
+  /**
    * POST /api/alerts — Create or reactivate a price alert.
    */
   async function handleCreate(request, env) {
@@ -131,12 +160,16 @@ export function createAlertHandlers(deps) {
 
   /**
    * GET /api/alerts — List active price alerts for the authenticated user.
+   *
+   * CPU ROOT-CAUSE FIX: Uses _getUserId() which reads request._protectedUser
+   * (set by the PROTECTED_PATHS gate) instead of calling
+   * authenticateTelegramRequest again. Eliminates redundant HMAC verification
+   * (~2-3ms CPU) on every poll.
    */
   async function handleList(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) {
-      return authState.error;
-    }
+    const { userId, error } = await _getUserId(request, env);
+    if (error) return error;
+
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
         {
@@ -145,7 +178,6 @@ export function createAlertHandlers(deps) {
         },
         { status: 503 }, env);
     }
-    const userId = String(authState.user.id);
     try {
       const alerts = await alertRepo.list(env, userId);
       return jsonResponse({ status: 'success', alerts }, {}, env);

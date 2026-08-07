@@ -168,9 +168,25 @@ export function createAlertRepository(deps) {
 
   /**
    * List all active price alerts for a user.
+   *
+   * CPU ROOT-CAUSE FIX: ensureTable(env) removed from this hot path.
+   * Previously, on a cold isolate, this fired 7 DDL queries
+   * (CREATE TABLE + 3 ALTER + 4 CREATE INDEX) costing ~140-245ms CPU,
+   * which directly caused `exceededCpu` errors on GET /api/alerts
+   * (frontend polls this every 15s).
+   *
+   * Safety: the price_alerts table is guaranteed to exist in production
+   * because:
+   *   1. `create()` still calls ensureTable() — first alert creation
+   *      ensures schema (idempotent + cached per-isolate via _tableEnsured).
+   *   2. Cron's `listActiveForCron()` already runs WITHOUT ensureTable
+   *      (see worker-proxy.js:8091-8100) and has been working in production.
+   *   3. One-time migration creates the table/indexes.
+   *
+   * If the table somehow does not exist, the SELECT throws and is caught
+   * by safeDbErrorResponse() — graceful 500, no crash.
    */
   async function list(env, userId) {
-    await ensureTable(env);
     const result = await queryDb(
       env,
       `
