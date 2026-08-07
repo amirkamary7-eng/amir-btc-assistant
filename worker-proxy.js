@@ -1370,7 +1370,7 @@ async function withPhasePool(env, fn) {
  * handler makes multiple queryDb calls.
  *
  * Usage:
- *   return withSharedPool(env, () => handler.handleFoo(request, env, ctx));
+ *   return handler.handleFoo(request, env, ctx);
  *
  * The Pool is closed in `finally` so its WebSocket is released before the
  * response is returned. Safe for Cloudflare Workers — the Pool never
@@ -8612,7 +8612,7 @@ export default {
       // Auth method 1: ALERTS_CRON_SHARED_SECRET in X-Cron-Secret header
       // Auth method 2: Telegram admin auth (ADMIN_TELEGRAM_ID) via X-Telegram-Init-Data
       if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/trigger-alerts') {
-        return withSharedPool(env, async () => {
+        return (async () => {
           const providedSecret = request.headers.get('X-Cron-Secret') || '';
           const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
           let authorized = false;
@@ -8659,7 +8659,7 @@ export default {
           }
 
           return jsonResponse({ status: 'success', message: 'Alert check triggered', result, dbState }, {}, env);
-        });
+        })();
       }
 
 
@@ -8925,14 +8925,14 @@ export default {
       // GET    /api/calendar/reminders      — list user's reminders
       // DELETE /api/calendar/reminders/:key — delete by event_key
       if (url.pathname === '/api/calendar/reminders' && request.method === 'POST') {
-        return withSharedPool(env, () => calendarReminderHandlers.handleCreate(request, env));
+        return calendarReminderHandlers.handleCreate(request, env);
       }
       if (url.pathname === '/api/calendar/reminders' && request.method === 'GET') {
-        return withSharedPool(env, () => calendarReminderHandlers.handleList(request, env));
+        return calendarReminderHandlers.handleList(request, env);
       }
       if (url.pathname.startsWith('/api/calendar/reminders/') && request.method === 'DELETE') {
         const eventKey = decodeURIComponent(url.pathname.slice('/api/calendar/reminders/'.length));
-        return withSharedPool(env, () => calendarReminderHandlers.handleDelete(request, env, eventKey));
+        return calendarReminderHandlers.handleDelete(request, env, eventKey);
       }
 
       // ── Market Overview (CMC-powered, no auth required) ──
@@ -8977,77 +8977,77 @@ export default {
 
       // ── Admin Panel API Routes (R4) ──
       if (url.pathname === '/api/admin/is-admin' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleIsAdmin(request, env));
+        return adminHandlers.handleIsAdmin(request, env);
       }
       if (url.pathname === '/api/admin/dashboard' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleDashboard(request, env));
+        return adminHandlers.handleDashboard(request, env);
       }
       if (url.pathname === '/api/admin/admins' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleListAdmins(request, env));
+        return adminHandlers.handleListAdmins(request, env);
       }
       if (url.pathname === '/api/admin/admins' && request.method === 'POST') {
-        return withSharedPool(env, () => adminHandlers.handleAddAdmin(request, env));
+        return adminHandlers.handleAddAdmin(request, env);
       }
       if (/^\/api\/admin\/admins\/\d+$/.test(url.pathname) && request.method === 'PUT') {
         const adminId = url.pathname.split('/').pop();
-        return withSharedPool(env, () => adminHandlers.handleUpdateAdmin(request, env, adminId));
+        return adminHandlers.handleUpdateAdmin(request, env, adminId);
       }
       if (/^\/api\/admin\/admins\/\d+$/.test(url.pathname) && request.method === 'DELETE') {
         const adminId = url.pathname.split('/').pop();
-        return withSharedPool(env, () => adminHandlers.handleDeleteAdmin(request, env, adminId));
+        return adminHandlers.handleDeleteAdmin(request, env, adminId);
       }
       if (url.pathname === '/api/admin/users' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleListUsers(request, env));
+        return adminHandlers.handleListUsers(request, env);
       }
       if (/^\/api\/admin\/users\/[^/]+\/stats$/.test(url.pathname) && request.method === 'GET') {
         const userId = decodeURIComponent(url.pathname.split('/')[4]);
-        return withSharedPool(env, () => adminHandlers.handleUserDetail(request, env, userId));
+        return adminHandlers.handleUserDetail(request, env, userId);
       }
       if (url.pathname === '/api/admin/tickets' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleListTickets(request, env));
+        return adminHandlers.handleListTickets(request, env);
       }
       if (/^\/api\/admin\/tickets\/[^/]+\/reply$/.test(url.pathname) && request.method === 'POST') {
         const ticketId = url.pathname.split('/')[4];
-        return withSharedPool(env, () => adminHandlers.handleReplyTicket(request, env, ticketId));
+        return adminHandlers.handleReplyTicket(request, env, ticketId);
       }
       if (/^\/api\/admin\/tickets\/[^/]+\/status$/.test(url.pathname) && request.method === 'PUT') {
         const ticketId = url.pathname.split('/')[4];
-        return withSharedPool(env, () => adminHandlers.handleUpdateTicketStatus(request, env, ticketId));
+        return adminHandlers.handleUpdateTicketStatus(request, env, ticketId);
       }
       // PHASE 3 FIX (Bug 5): Admin DELETE ticket — previously didn't exist
       if (/^\/api\/admin\/tickets\/[^/]+$/.test(url.pathname) && request.method === 'DELETE') {
         const ticketId = url.pathname.split('/')[4];
-        return withSharedPool(env, () => adminHandlers.handleDeleteTicket(request, env, ticketId));
+        return adminHandlers.handleDeleteTicket(request, env, ticketId);
       }
       // PHASE 3 FIX (Bug 6): Admin GET ticket replies — for conversation thread
       if (/^\/api\/admin\/tickets\/[^/]+\/replies$/.test(url.pathname) && request.method === 'GET') {
         const ticketId = url.pathname.split('/')[4];
-        return withSharedPool(env, () => adminHandlers.handleListTicketReplies(request, env, ticketId));
+        return adminHandlers.handleListTicketReplies(request, env, ticketId);
       }
       if (url.pathname === '/api/admin/broadcasts' && request.method === 'POST') {
-        return withSharedPool(env, () => adminHandlers.handleCreateBroadcast(request, env));
+        return adminHandlers.handleCreateBroadcast(request, env);
       }
       if (url.pathname === '/api/admin/broadcasts' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleListBroadcasts(request, env));
+        return adminHandlers.handleListBroadcasts(request, env);
       }
       if (url.pathname === '/api/admin/rewards' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleListRewards(request, env));
+        return adminHandlers.handleListRewards(request, env);
       }
       if (/^\/api\/admin\/rewards\/\d+\/status$/.test(url.pathname) && request.method === 'PUT') {
         const rewardId = url.pathname.split('/')[4];
-        return withSharedPool(env, () => adminHandlers.handleUpdateReward(request, env, rewardId));
+        return adminHandlers.handleUpdateReward(request, env, rewardId);
       }
       if (url.pathname === '/api/admin/transactions' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleListTransactions(request, env));
+        return adminHandlers.handleListTransactions(request, env);
       }
       if (url.pathname === '/api/admin/referrals' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleListReferrals(request, env));
+        return adminHandlers.handleListReferrals(request, env);
       }
       if (url.pathname === '/api/admin/system-health' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleSystemHealth(request, env));
+        return adminHandlers.handleSystemHealth(request, env);
       }
       if (url.pathname === '/api/admin/logs' && request.method === 'GET') {
-        return withSharedPool(env, () => adminHandlers.handleLogs(request, env));
+        return adminHandlers.handleLogs(request, env);
       }
 
       // ─────────────────────────────────────────────────────────────
@@ -9056,91 +9056,91 @@ export default {
 
       // Overview & Analytics
       if (url.pathname === '/api/admin/reward-center/overview' && request.method === 'GET') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleOverview(request, env));
+        return rewardCenterHandlers.handleOverview(request, env);
       }
       if (url.pathname === '/api/admin/reward-center/analytics' && request.method === 'GET') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleAnalytics(request, env));
+        return rewardCenterHandlers.handleAnalytics(request, env);
       }
 
       // Wheel Config
       if (url.pathname === '/api/admin/reward-center/wheel/config' && request.method === 'GET') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleGetWheelConfig(request, env));
+        return rewardCenterHandlers.handleGetWheelConfig(request, env);
       }
       if (url.pathname === '/api/admin/reward-center/wheel/config' && (request.method === 'PUT' || request.method === 'POST')) {
-        return withSharedPool(env, () => rewardCenterHandlers.handleUpdateWheelConfig(request, env));
+        return rewardCenterHandlers.handleUpdateWheelConfig(request, env);
       }
 
       // Wheel Rewards CRUD
       if (url.pathname === '/api/admin/reward-center/wheel/rewards' && request.method === 'GET') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleListWheelRewards(request, env));
+        return rewardCenterHandlers.handleListWheelRewards(request, env);
       }
       if (url.pathname === '/api/admin/reward-center/wheel/rewards' && request.method === 'POST') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleCreateWheelReward(request, env));
+        return rewardCenterHandlers.handleCreateWheelReward(request, env);
       }
       if (/^\/api\/admin\/reward-center\/wheel\/rewards\/\d+$/.test(url.pathname)) {
         const rewardId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateWheelReward(request, env, rewardId));
-        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteWheelReward(request, env, rewardId));
+        if (request.method === 'PUT' || request.method === 'PATCH') return rewardCenterHandlers.handleUpdateWheelReward(request, env, rewardId);
+        if (request.method === 'DELETE') return rewardCenterHandlers.handleDeleteWheelReward(request, env, rewardId);
       }
 
       // Reward Library CRUD
       if (url.pathname === '/api/admin/reward-center/library' && request.method === 'GET') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleListLibrary(request, env));
+        return rewardCenterHandlers.handleListLibrary(request, env);
       }
       if (url.pathname === '/api/admin/reward-center/library' && request.method === 'POST') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleCreateLibraryItem(request, env));
+        return rewardCenterHandlers.handleCreateLibraryItem(request, env);
       }
       if (/^\/api\/admin\/reward-center\/library\/\d+$/.test(url.pathname)) {
         const itemId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateLibraryItem(request, env, itemId));
-        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteLibraryItem(request, env, itemId));
+        if (request.method === 'PUT' || request.method === 'PATCH') return rewardCenterHandlers.handleUpdateLibraryItem(request, env, itemId);
+        if (request.method === 'DELETE') return rewardCenterHandlers.handleDeleteLibraryItem(request, env, itemId);
       }
 
       // Referral Reward Tiers CRUD
       if (url.pathname === '/api/admin/reward-center/referral-tiers' && request.method === 'GET') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleListReferralTiers(request, env));
+        return rewardCenterHandlers.handleListReferralTiers(request, env);
       }
       if (url.pathname === '/api/admin/reward-center/referral-tiers' && request.method === 'POST') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleCreateReferralTier(request, env));
+        return rewardCenterHandlers.handleCreateReferralTier(request, env);
       }
       if (/^\/api\/admin\/reward-center\/referral-tiers\/\d+$/.test(url.pathname)) {
         const tierId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateReferralTier(request, env, tierId));
-        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteReferralTier(request, env, tierId));
+        if (request.method === 'PUT' || request.method === 'PATCH') return rewardCenterHandlers.handleUpdateReferralTier(request, env, tierId);
+        if (request.method === 'DELETE') return rewardCenterHandlers.handleDeleteReferralTier(request, env, tierId);
       }
 
       // Mission Rewards CRUD
       if (url.pathname === '/api/admin/reward-center/mission-rewards' && request.method === 'GET') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleListMissionRewards(request, env));
+        return rewardCenterHandlers.handleListMissionRewards(request, env);
       }
       if (url.pathname === '/api/admin/reward-center/mission-rewards' && request.method === 'POST') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleCreateMissionReward(request, env));
+        return rewardCenterHandlers.handleCreateMissionReward(request, env);
       }
       if (/^\/api\/admin\/reward-center\/mission-rewards\/\d+$/.test(url.pathname)) {
         const missionId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateMissionReward(request, env, missionId));
-        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteMissionReward(request, env, missionId));
+        if (request.method === 'PUT' || request.method === 'PATCH') return rewardCenterHandlers.handleUpdateMissionReward(request, env, missionId);
+        if (request.method === 'DELETE') return rewardCenterHandlers.handleDeleteMissionReward(request, env, missionId);
       }
 
       // Campaigns CRUD
       if (url.pathname === '/api/admin/reward-center/campaigns' && request.method === 'GET') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleListCampaigns(request, env));
+        return rewardCenterHandlers.handleListCampaigns(request, env);
       }
       if (url.pathname === '/api/admin/reward-center/campaigns' && request.method === 'POST') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleCreateCampaign(request, env));
+        return rewardCenterHandlers.handleCreateCampaign(request, env);
       }
       if (/^\/api\/admin\/reward-center\/campaigns\/[^/]+$/.test(url.pathname)) {
         const campaignId = decodeURIComponent(url.pathname.split('/').pop());
-        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => rewardCenterHandlers.handleUpdateCampaign(request, env, campaignId));
-        if (request.method === 'DELETE') return withSharedPool(env, () => rewardCenterHandlers.handleDeleteCampaign(request, env, campaignId));
+        if (request.method === 'PUT' || request.method === 'PATCH') return rewardCenterHandlers.handleUpdateCampaign(request, env, campaignId);
+        if (request.method === 'DELETE') return rewardCenterHandlers.handleDeleteCampaign(request, env, campaignId);
       }
 
       // Emergency Controls
       if (url.pathname === '/api/admin/reward-center/emergency' && request.method === 'GET') {
-        return withSharedPool(env, () => rewardCenterHandlers.handleGetEmergencyControls(request, env));
+        return rewardCenterHandlers.handleGetEmergencyControls(request, env);
       }
       if (url.pathname === '/api/admin/reward-center/emergency' && (request.method === 'PUT' || request.method === 'POST')) {
-        return withSharedPool(env, () => rewardCenterHandlers.handleUpdateEmergencyControls(request, env));
+        return rewardCenterHandlers.handleUpdateEmergencyControls(request, env);
       }
 
       // ── Maintenance Mode Controls (admin only) ──
@@ -9451,7 +9451,7 @@ export default {
 
         try {
           // STEP 1: Auth (1st — global middleware equivalent)
-          const authState = await stepAsync('1_auth_telegram_1st', () => authenticateTelegramRequest(request, env));
+          const authState = await stepAsync('1_auth_telegram_1st', () => authenticateTelegramRequest(request, env))
           if (authState.error) {
             return jsonResponse({ status: 'auth_error', trace, total_wall_ms: Math.round((performance.now() - t0) * 100) / 100 }, { status: 401 }, env);
           }
@@ -9464,7 +9464,7 @@ export default {
           }
 
           // STEP 3: Auth (2nd — inside handleList — REDUNDANT?)
-          await stepAsync('3_auth_telegram_2nd_redundant', () => authenticateTelegramRequest(request, env));
+          await stepAsync('3_auth_telegram_2nd_redundant', () => authenticateTelegramRequest(request, env))
 
           // STEP 4: Parse query params
           const parsedUrl = stepSync('4_parse_url', () => new URL(request.url));
@@ -9673,7 +9673,7 @@ export default {
 
       // ── Analyses: Public endpoints ──
       if (request.method === 'GET' && url.pathname === '/api/analyses') {
-        return withSharedPool(env, () => analysisHandlers.handleList(request, env));
+        return analysisHandlers.handleList(request, env);
       }
 
       // GET /api/analyses/:id (detail) — must be before PUT/DELETE pattern
@@ -9690,86 +9690,86 @@ export default {
 
       // ── Analyses: Admin endpoints (new paths) ──
       if (request.method === 'POST' && url.pathname === '/api/admin/analyses') {
-        return withSharedPool(env, () => analysisHandlers.handleCreate(request, env, ctx));
+        return analysisHandlers.handleCreate(request, env, ctx);
       }
 
       if (request.method === 'PUT' && /^\/api\/admin\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[4] || '';
-        return withSharedPool(env, () => analysisHandlers.handleUpdate(request, env, analysisId));
+        return analysisHandlers.handleUpdate(request, env, analysisId);
       }
 
       if (request.method === 'DELETE' && /^\/api\/admin\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[4] || '';
-        return withSharedPool(env, () => analysisHandlers.handleDelete(request, env, analysisId));
+        return analysisHandlers.handleDelete(request, env, analysisId);
       }
 
       // ── Analyses: Legacy admin paths (backward compat) ──
       if (request.method === 'POST' && url.pathname === '/api/analyses') {
-        return withSharedPool(env, () => analysisHandlers.handleCreateLegacy(request, env, ctx));
+        return analysisHandlers.handleCreateLegacy(request, env, ctx);
       }
 
       if (request.method === 'PUT' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
-        return withSharedPool(env, () => analysisHandlers.handleUpdateLegacy(request, env, analysisId));
+        return analysisHandlers.handleUpdateLegacy(request, env, analysisId);
       }
 
       if (request.method === 'DELETE' && /^\/api\/analyses\/[^/]+$/u.test(url.pathname)) {
         const analysisId = url.pathname.split('/')[3] || '';
-        return withSharedPool(env, () => analysisHandlers.handleDeleteLegacy(request, env, analysisId));
+        return analysisHandlers.handleDeleteLegacy(request, env, analysisId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/tickets') {
-        return withSharedPool(env, () => ticketHandlers.handleCreate(request, env));
+        return ticketHandlers.handleCreate(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/tickets') {
-        return withSharedPool(env, () => ticketHandlers.handleList(request, env));
+        return ticketHandlers.handleList(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/tickets/all') {
-        return withSharedPool(env, () => ticketHandlers.handleListAll(request, env));
+        return ticketHandlers.handleListAll(request, env);
       }
 
       if (request.method === 'POST' && /^\/api\/tickets\/[^/]+\/reply$/u.test(url.pathname)) {
         const ticketId = url.pathname.split('/')[3] || '';
-        return withSharedPool(env, () => ticketHandlers.handleReply(request, env, ticketId));
+        return ticketHandlers.handleReply(request, env, ticketId);
       }
 
       if (request.method === 'DELETE' && /^\/api\/tickets\/[^/]+$/u.test(url.pathname) && url.pathname !== '/api/tickets/all') {
         const ticketId = url.pathname.split('/')[3] || '';
-        return withSharedPool(env, () => ticketHandlers.handleDelete(request, env, ticketId));
+        return ticketHandlers.handleDelete(request, env, ticketId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/alerts') {
-        return withSharedPool(env, () => alertHandlers.handleCreate(request, env));
+        return alertHandlers.handleCreate(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/alerts') {
-        return withSharedPool(env, () => alertHandlers.handleList(request, env));
+        return alertHandlers.handleList(request, env);
       }
 
       if (request.method === 'DELETE' && /^\/api\/alerts\/[^/]+$/u.test(url.pathname)) {
         const alertId = url.pathname.split('/')[3] || '';
-        return withSharedPool(env, () => alertHandlers.handleDelete(request, env, alertId));
+        return alertHandlers.handleDelete(request, env, alertId);
       }
 
       // ── Calendar Reminders routes are registered earlier (near /api/calendar/events) ──
 
       // ── Alert Economy: User quota status ──
       if (request.method === 'GET' && url.pathname === '/api/alerts/quota') {
-        return withSharedPool(env, () => alertEconomyHandlers.handleQuotaStatus(request, env));
+        return alertEconomyHandlers.handleQuotaStatus(request, env);
       }
 
       // ── Alert Economy: Admin config + dashboard ──
       if (request.method === 'GET' && url.pathname === '/api/admin/alert-economy/configs') {
-        return withSharedPool(env, () => alertEconomyHandlers.handleListConfigs(request, env));
+        return alertEconomyHandlers.handleListConfigs(request, env);
       }
       if (request.method === 'PUT' && /^\/api\/admin\/alert-economy\/configs\/[^/]+$/.test(url.pathname)) {
         const alertType = decodeURIComponent(url.pathname.split('/').pop());
-        return withSharedPool(env, () => alertEconomyHandlers.handleUpdateConfig(request, env, alertType));
+        return alertEconomyHandlers.handleUpdateConfig(request, env, alertType);
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/alert-economy/dashboard') {
-        return withSharedPool(env, () => alertEconomyHandlers.handleDashboard(request, env));
+        return alertEconomyHandlers.handleDashboard(request, env);
       }
 
       // ─────────────────────────────────────────────────────────────
@@ -9780,125 +9780,125 @@ export default {
         return await publisherHandlers.handleUpdateSettings(request, env);
       }
       if (url.pathname === '/api/admin/publisher/preview' && request.method === 'POST') {
-        return withSharedPool(env, () => publisherHandlers.handlePreview(request, env));
+        return publisherHandlers.handlePreview(request, env);
       }
       if (url.pathname === '/api/admin/publisher/queue' && request.method === 'POST') {
-        return withSharedPool(env, () => publisherHandlers.handleEnqueue(request, env));
+        return publisherHandlers.handleEnqueue(request, env);
       }
       if (url.pathname === '/api/admin/publisher/send-now' && request.method === 'POST') {
-        return withSharedPool(env, () => publisherHandlers.handleSendNow(request, env));
+        return publisherHandlers.handleSendNow(request, env);
       }
       if (url.pathname === '/api/admin/publisher/queue' && request.method === 'GET') {
-        return withSharedPool(env, () => publisherHandlers.handleListQueue(request, env, 'pending'));
+        return publisherHandlers.handleListQueue(request, env, 'pending');
       }
       if (url.pathname === '/api/admin/publisher/sent' && request.method === 'GET') {
-        return withSharedPool(env, () => publisherHandlers.handleListQueue(request, env, 'sent'));
+        return publisherHandlers.handleListQueue(request, env, 'sent');
       }
       if (url.pathname === '/api/admin/publisher/failed' && request.method === 'GET') {
-        return withSharedPool(env, () => publisherHandlers.handleListQueue(request, env, 'failed'));
+        return publisherHandlers.handleListQueue(request, env, 'failed');
       }
       if (url.pathname === '/api/admin/publisher/logs' && request.method === 'GET') {
-        return withSharedPool(env, () => publisherHandlers.handleListLogs(request, env));
+        return publisherHandlers.handleListLogs(request, env);
       }
       if (url.pathname === '/api/admin/publisher/stats' && request.method === 'GET') {
-        return withSharedPool(env, () => publisherHandlers.handleStats(request, env));
+        return publisherHandlers.handleStats(request, env);
       }
       if (url.pathname === '/api/admin/publisher/process' && request.method === 'POST') {
-        return withSharedPool(env, () => publisherHandlers.handleProcessNow(request, env));
+        return publisherHandlers.handleProcessNow(request, env);
       }
       if (url.pathname === '/api/admin/publisher/test-connection' && request.method === 'POST') {
         return await publisherHandlers.handleTestConnection(request, env);
       }
       if (/^\/api\/admin\/publisher\/retry\/\d+$/.test(url.pathname) && request.method === 'POST') {
         const id = url.pathname.split('/').pop();
-        return withSharedPool(env, () => publisherHandlers.handleRetry(request, env, id));
+        return publisherHandlers.handleRetry(request, env, id);
       }
       if (/^\/api\/admin\/publisher\/cancel\/\d+$/.test(url.pathname) && request.method === 'POST') {
         const id = url.pathname.split('/').pop();
-        return withSharedPool(env, () => publisherHandlers.handleCancel(request, env, id));
+        return publisherHandlers.handleCancel(request, env, id);
       }
       if (/^\/api\/admin\/publisher\/sent\/\d+$/.test(url.pathname) && request.method === 'DELETE') {
         const id = url.pathname.split('/').pop();
-        return withSharedPool(env, () => publisherHandlers.handleDeleteSent(request, env, id));
+        return publisherHandlers.handleDeleteSent(request, env, id);
       }
       if (/^\/api\/admin\/publisher\/dedup\/[^/]+\/[^/]+$/.test(url.pathname) && request.method === 'GET') {
         const parts = url.pathname.split('/');
         const type = decodeURIComponent(parts[parts.length - 2]);
         const refId = decodeURIComponent(parts[parts.length - 1]);
-        return withSharedPool(env, () => publisherHandlers.handleCheckDedup(request, env, type, refId));
+        return publisherHandlers.handleCheckDedup(request, env, type, refId);
       }
 
       // ── Membership Module — User Routes ───────────────────────────────────
       if (request.method === 'GET' && url.pathname === '/api/membership/status') {
-        return withSharedPool(env, () => membershipHandlers.handleGetStatus(request, env));
+        return membershipHandlers.handleGetStatus(request, env);
       }
       if (request.method === 'GET' && url.pathname === '/api/membership/request') {
-        return withSharedPool(env, () => membershipHandlers.handleGetMyRequests(request, env));
+        return membershipHandlers.handleGetMyRequests(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/membership/request') {
-        return withSharedPool(env, () => membershipHandlers.handleSubmitRequest(request, env));
+        return membershipHandlers.handleSubmitRequest(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/membership/welcome-shown') {
-        return withSharedPool(env, () => membershipHandlers.handleMarkWelcomeShown(request, env));
+        return membershipHandlers.handleMarkWelcomeShown(request, env);
       }
 
       // ── Membership Module — Admin Routes ──────────────────────────────────
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/stats') {
-        return withSharedPool(env, () => membershipHandlers.handleGetStats(request, env));
+        return membershipHandlers.handleGetStats(request, env);
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/requests') {
-        return withSharedPool(env, () => membershipHandlers.handleListRequests(request, env));
+        return membershipHandlers.handleListRequests(request, env);
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/requests/export') {
-        return withSharedPool(env, () => membershipHandlers.handleExportRequests(request, env));
+        return membershipHandlers.handleExportRequests(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/requests/bulk-approve') {
-        return withSharedPool(env, () => membershipHandlers.handleBulkApprove(request, env));
+        return membershipHandlers.handleBulkApprove(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/requests/bulk-reject') {
-        return withSharedPool(env, () => membershipHandlers.handleBulkReject(request, env));
+        return membershipHandlers.handleBulkReject(request, env);
       }
       if (/^\/api\/admin\/membership\/request\/[^/]+$/.test(url.pathname) && request.method === 'GET') {
-        return withSharedPool(env, () => membershipHandlers.handleGetRequest(request, env));
+        return membershipHandlers.handleGetRequest(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/approve') {
-        return withSharedPool(env, () => membershipHandlers.handleApprove(request, env));
+        return membershipHandlers.handleApprove(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/reject') {
-        return withSharedPool(env, () => membershipHandlers.handleReject(request, env));
+        return membershipHandlers.handleReject(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/suspend') {
-        return withSharedPool(env, () => membershipHandlers.handleSuspend(request, env));
+        return membershipHandlers.handleSuspend(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/reactivate') {
-        return withSharedPool(env, () => membershipHandlers.handleReactivate(request, env));
+        return membershipHandlers.handleReactivate(request, env);
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/users') {
-        return withSharedPool(env, () => membershipHandlers.handleListUsers(request, env));
+        return membershipHandlers.handleListUsers(request, env);
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/users/export') {
-        return withSharedPool(env, () => membershipHandlers.handleExportUsers(request, env));
+        return membershipHandlers.handleExportUsers(request, env);
       }
       if (/^\/api\/admin\/membership\/users\/[^/]+$/.test(url.pathname) && request.method === 'GET') {
-        return withSharedPool(env, () => membershipHandlers.handleGetUserDetail(request, env));
+        return membershipHandlers.handleGetUserDetail(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/users/suspend') {
-        return withSharedPool(env, () => membershipHandlers.handleManualSuspend(request, env));
+        return membershipHandlers.handleManualSuspend(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/users/reactivate') {
-        return withSharedPool(env, () => membershipHandlers.handleManualReactivate(request, env));
+        return membershipHandlers.handleManualReactivate(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/users/expire') {
-        return withSharedPool(env, () => membershipHandlers.handleManualExpire(request, env));
+        return membershipHandlers.handleManualExpire(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/membership/users/set-level') {
-        return withSharedPool(env, () => membershipHandlers.handleSetLevel(request, env));
+        return membershipHandlers.handleSetLevel(request, env);
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/logs') {
-        return withSharedPool(env, () => membershipHandlers.handleListLogs(request, env));
+        return membershipHandlers.handleListLogs(request, env);
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/logs/export') {
-        return withSharedPool(env, () => membershipHandlers.handleExportLogs(request, env));
+        return membershipHandlers.handleExportLogs(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/notifications') {
@@ -9928,7 +9928,7 @@ export default {
         //      Returns both notifications AND unread count in one DB round-trip.
         //
         // The trace instrumentation is KEPT to verify the fix works.
-        return withSharedPool(env, async () => {
+        return (async () => {
           const trace = request._cpuTrace || [];
 
           // ROOT CAUSE FIX: ensure deleted_at column exists (soft-delete fix).
@@ -10131,7 +10131,7 @@ export default {
 
       // User: list notifications (with filter/search/pagination)
       if (request.method === 'GET' && url.pathname === '/api/notifications/platform/list') {
-        return withSharedPool(env, () => notificationPlatformHandlers.handleList(request, env));
+        return notificationPlatformHandlers.handleList(request, env);
       }
       // User: unread count
       if (request.method === 'GET' && url.pathname === '/api/notifications/platform/unread-count') {
@@ -10179,30 +10179,30 @@ export default {
 
       // Admin: notification analytics
       if (request.method === 'GET' && url.pathname === '/api/admin/notifications/analytics') {
-        return withSharedPool(env, () => notificationPlatformHandlers.handleAdminAnalytics(request, env));
+        return notificationPlatformHandlers.handleAdminAnalytics(request, env);
       }
       // Admin: templates CRUD
       if (request.method === 'GET' && url.pathname === '/api/admin/notifications/templates') {
-        return withSharedPool(env, () => notificationPlatformHandlers.handleListTemplates(request, env));
+        return notificationPlatformHandlers.handleListTemplates(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/notifications/templates') {
-        return withSharedPool(env, () => notificationPlatformHandlers.handleCreateTemplate(request, env));
+        return notificationPlatformHandlers.handleCreateTemplate(request, env);
       }
       if (/^\/api\/admin\/notifications\/templates\/\d+$/.test(url.pathname)) {
         const tplId = url.pathname.split('/').pop();
-        if (request.method === 'PUT' || request.method === 'PATCH') return withSharedPool(env, () => notificationPlatformHandlers.handleUpdateTemplate(request, env, tplId));
-        if (request.method === 'DELETE') return withSharedPool(env, () => notificationPlatformHandlers.handleDeleteTemplate(request, env, tplId));
+        if (request.method === 'PUT' || request.method === 'PATCH') return notificationPlatformHandlers.handleUpdateTemplate(request, env, tplId);
+        if (request.method === 'DELETE') return notificationPlatformHandlers.handleDeleteTemplate(request, env, tplId);
       }
       // Admin: broadcasts
       if (request.method === 'GET' && url.pathname === '/api/admin/notifications/broadcasts') {
-        return withSharedPool(env, () => notificationPlatformHandlers.handleListBroadcasts(request, env));
+        return notificationPlatformHandlers.handleListBroadcasts(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/notifications/broadcasts') {
-        return withSharedPool(env, () => notificationPlatformHandlers.handleCreateBroadcast(request, env));
+        return notificationPlatformHandlers.handleCreateBroadcast(request, env);
       }
       if (request.method === 'POST' && /^\/api\/admin\/notifications\/broadcasts\/\d+\/send$/.test(url.pathname)) {
         const bId = url.pathname.split('/')[5];
-        return withSharedPool(env, () => notificationPlatformHandlers.handleProcessBroadcast(request, env, bId));
+        return notificationPlatformHandlers.handleProcessBroadcast(request, env, bId);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
@@ -10226,7 +10226,7 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/users/me') {
-        return withSharedPool(env, () => userHandlers.handleMe(request, env));
+        return userHandlers.handleMe(request, env);
       }
 
       if (request.method === 'PUT' && url.pathname === '/api/users/me/settings') {
@@ -10237,11 +10237,11 @@ export default {
       // Permanently deletes the user and ALL their data. After this, the user
       // can re-register via a referral link and the referral will register.
       if (request.method === 'DELETE' && url.pathname === '/api/users/me') {
-        return withSharedPool(env, () => userHandlers.handleDeleteAccount(request, env));
+        return userHandlers.handleDeleteAccount(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
-        return withSharedPool(env, () => userHandlers.handleBootstrap(request, env));
+        return userHandlers.handleBootstrap(request, env);
       }
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
@@ -10273,7 +10273,7 @@ export default {
       }
 
       if (request.method === 'PUT' && url.pathname === '/api/watchlist') {
-        return withSharedPool(env, () => watchlistHandlers.handlePut(request, env));
+        return watchlistHandlers.handlePut(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/notify') {
@@ -10285,7 +10285,7 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/history') {
-        return withSharedPool(env, () => referralHandlers.handleHistory(request, env));
+        return referralHandlers.handleHistory(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/referrals/leaderboard') {
@@ -10311,7 +10311,7 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/history') {
-        return withSharedPool(env, () => walletHandlers.handleGetHistory(request, env));
+        return walletHandlers.handleGetHistory(request, env);
       }
 
       if (request.method === 'GET' && /^\/api\/wallet\/transaction\/[^/]+$/.test(url.pathname)) {
@@ -10324,7 +10324,7 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/wallet/claim') {
-        return withSharedPool(env, () => walletHandlers.handleClaimDaily(request, env));
+        return walletHandlers.handleClaimDaily(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/referral-stats') {
@@ -10333,24 +10333,24 @@ export default {
 
       // ── Daily Missions API Routes ──
       if (request.method === 'POST' && url.pathname === '/api/wallet/mission/complete') {
-        return withSharedPool(env, () => walletHandlers.handleMissionComplete(request, env));
+        return walletHandlers.handleMissionComplete(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wallet/missions') {
-        return withSharedPool(env, () => walletHandlers.handleGetMissions(request, env));
+        return walletHandlers.handleGetMissions(request, env);
       }
 
       // ── Lucky Wheel API Routes ──
       if (request.method === 'GET' && url.pathname === '/api/wheel/status') {
-        return withSharedPool(env, () => wheelHandlers.handleStatus(request, env));
+        return wheelHandlers.handleStatus(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/wheel/spin') {
-        return withSharedPool(env, () => wheelHandlers.handleSpin(request, env));
+        return wheelHandlers.handleSpin(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wheel/history') {
-        return withSharedPool(env, () => wheelHandlers.handleHistory(request, env));
+        return wheelHandlers.handleHistory(request, env);
       }
 
       if (request.method === 'POST' && (url.pathname === '/telegram' || url.pathname === '/')) {
