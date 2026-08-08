@@ -822,9 +822,6 @@ const ReferralApp = (() => {
           }).join('')}
         </div>` : ''}
 
-        <button class="rc-view-full-btn" onclick="ReferralApp.viewFullLeaderboard()">
-          ${esc(RT('view_all'))} ${ICONS.arrowRight}
-        </button>
       </div>
     `;
   }
@@ -1057,10 +1054,6 @@ const ReferralApp = (() => {
             ? history.slice(0, 3).map((r, i) => buildHistoryItem(r, i)).join('')
             : buildEmptyState('history', ICONS.userPlus, RT('no_history_title'), RT('no_history_desc'))}
         </div>
-        ${history && history.length > 0 ? `
-          <button class="rc-view-full-btn" onclick="ReferralApp.viewFullHistory()">
-            ${esc(RT('view_all'))} ${ICONS.arrowRight}
-          </button>` : ''}
       </div>
 
       <!-- Footer Spacer for safe area -->
@@ -1672,16 +1665,6 @@ const ReferralApp = (() => {
     historyLoading = false;
   }
 
-  function viewFullLeaderboard() {
-    const tg = window.getTg?.();
-    tg?.showPopup?.({ title: RT('leaderboard'), message: RT('loading'), buttons: [{ type: 'ok' }] });
-  }
-
-  function viewFullHistory() {
-    const tg = window.getTg?.();
-    tg?.showPopup?.({ title: RT('referral_history'), message: RT('loading'), buttons: [{ type: 'ok' }] });
-  }
-
   return {
     openReferral,
     closeReferral,
@@ -1692,8 +1675,6 @@ const ReferralApp = (() => {
     closeWheelModal,
     doSpin,
     loadMoreHistory,
-    viewFullLeaderboard,
-    viewFullHistory,
   };
 })();
 
