@@ -8017,6 +8017,15 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
  * LOGGING: Every alert logs {alert_id, user_id, symbol, target_price, prev_price,
  *   current_price, direction, triggered, reason, latency_ms} for full audit trail.
  */
+// Module-level in-memory cache for active alerts list.
+// Same pattern as _calendarIsolateCache (line 6003).
+// Persists across invocations in the SAME isolate (no I/O, no CPU to read).
+// Different isolates do NOT share this — falls through to KV cache.
+// TTL: 60s (same as KV cache).
+let _alertsIsolateCache = null;
+let _alertsIsolateCacheAt = 0;
+const _ALERTS_ISOLATE_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
 async function runScheduledAlertsBaseline(controller, env, pool = null) {
   const t0 = Date.now();
   // Stage-by-stage latency tracking for performance monitoring
@@ -8106,21 +8115,51 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
     const ALERTS_LIST_CACHE_KEY = 'alerts:active-list';
     const ALERTS_LIST_TTL = 60; // seconds — same as alerts:active-exists
 
-    // Step 1: Try to read the cached alert list from KV
+    // ═══════════════════════════════════════════════════════════════════
+    // TWO-LAYER CACHE: Module-level (instant) → KV (shared) → DB (fallback)
+    //
+    // Layer 1: Module-level Map (_alertsIsolateCache)
+    //   - 0 I/O, 0 CPU, 0 subrequests
+    //   - Same isolate only (persists across * * * * * ticks)
+    //   - TTL: 60s
+    //
+    // Layer 2: KV cache (alerts:active-list)
+    //   - 1 subrequest (KV read), 0 CPU
+    //   - Shared across isolates (but 60s propagation delay)
+    //   - TTL: 60s
+    //
+    // Layer 3: DB query (listActiveForCron)
+    //   - 1 subrequest (WebSocket), 3-5ms CPU (TLS handshake)
+    //   - Only on cache miss
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Step 1: Check module-level in-memory cache (instant, 0 I/O)
     let alerts = null;
     let alertsFromCache = false;
-    const cachedListRaw = await readAppCache(env, ALERTS_LIST_CACHE_KEY);
-    if (cachedListRaw) {
-      try {
-        const parsed = JSON.parse(cachedListRaw);
-        if (Array.isArray(parsed)) {
-          alerts = parsed;
-          alertsFromCache = true;
-        }
-      } catch {}
+    const isolateCacheAge = _alertsIsolateCacheAt ? Date.now() - _alertsIsolateCacheAt : Infinity;
+    if (_alertsIsolateCache && _alertsIsolateCache.length > 0 && isolateCacheAge < _ALERTS_ISOLATE_CACHE_TTL_MS) {
+      alerts = _alertsIsolateCache;
+      alertsFromCache = true;
     }
 
-    // Step 2: If cache miss, query DB (this is the path that causes exceededCpu)
+    // Step 2: If module-level miss, try KV cache
+    if (!alerts) {
+      const cachedListRaw = await readAppCache(env, ALERTS_LIST_CACHE_KEY);
+      if (cachedListRaw) {
+        try {
+          const parsed = JSON.parse(cachedListRaw);
+          if (Array.isArray(parsed)) {
+            alerts = parsed;
+            alertsFromCache = true;
+            // Populate module-level cache from KV (so next tick is instant)
+            _alertsIsolateCache = parsed;
+            _alertsIsolateCacheAt = Date.now();
+          }
+        } catch {}
+      }
+    }
+
+    // Step 3: If both caches miss, query DB (this is the path that causes exceededCpu)
     if (!alerts) {
       alerts = (typeof alertRepo?.listActiveForCron === 'function')
         ? await alertRepo.listActiveForCron(env, maxAlerts, pool)
@@ -8132,13 +8171,17 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
             LIMIT $1
           `, [maxAlerts], 1, pool)).rows;
 
-      // Cache the result for next tick (avoids DB query on subsequent ticks)
+      // Cache the result in BOTH module-level and KV for next tick
       if (alerts.length > 0) {
+        _alertsIsolateCache = alerts;
+        _alertsIsolateCacheAt = Date.now();
         try {
           await writeAppCache(env, ALERTS_LIST_CACHE_KEY, JSON.stringify(alerts), ALERTS_LIST_TTL);
           await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '1', ALERTS_LIST_TTL);
         } catch {}
       } else {
+        _alertsIsolateCache = [];
+        _alertsIsolateCacheAt = Date.now();
         try { await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '0', ALERTS_LIST_TTL); } catch {}
       }
     }
