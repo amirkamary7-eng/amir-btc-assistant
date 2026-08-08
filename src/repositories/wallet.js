@@ -213,16 +213,31 @@ export function createWalletRepository(deps) {
   /**
    * Check if user has already claimed daily reward today.
    */
+  // WALLET-002 FIX: Use Tehran date for daily claim boundary, matching
+  // the wheel system (wheel.js:getTehranDateString). Previously used
+  // CURRENT_DATE which is UTC on Supabase — daily claim reset at 03:30
+  // Tehran instead of 00:00 Tehran.
+  function _getTehranDateString() {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tehran',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return fmt.format(new Date());
+  }
+
   async function getDailyClaimStatus(env, userId) {
+    const tehranToday = _getTehranDateString();
     const result = await queryDb(
       env,
       `
         SELECT id FROM token_transactions
         WHERE user_id = $1 AND tx_type = 'daily_claim'
-        AND created_at >= CURRENT_DATE
+        AND ref_id = $2
         LIMIT 1
       `,
-      [String(userId)],
+      [String(userId), `daily_${tehranToday}`],
     );
     return result.rows.length > 0;
   }
@@ -253,12 +268,14 @@ export function createWalletRepository(deps) {
     await ensureSchema(env).catch(() => {});
 
     const uid = String(userId);
-    const refId = `daily_${new Date().toISOString().slice(0, 10)}`;
+    // WALLET-002 FIX: Use Tehran date for refId, not UTC date
+    const tehranToday = _getTehranDateString();
+    const refId = `daily_${tehranToday}`;
 
-    // Compute a stable 64-bit advisory lock key from user_id + today's date.
+    // Compute a stable 64-bit advisory lock key from user_id + Tehran date.
     const lockKeyResult = await queryDb(env,
-      `SELECT (('x' || SUBSTRING(MD5($1 || CURRENT_DATE::text), 1, 16))::bit(64)::bigint) AS lock_key`,
-      [uid],
+      `SELECT (('x' || SUBSTRING(MD5($1 || $2), 1, 16))::bit(64)::bigint) AS lock_key`,
+      [uid, tehranToday],
     );
     const lockKey = lockKeyResult.rows[0]?.lock_key;
     if (lockKey == null) {
@@ -266,13 +283,14 @@ export function createWalletRepository(deps) {
     }
 
     // Step 1: Acquire advisory lock + check if already claimed (atomic)
+    // WALLET-002 FIX: Check by refId (Tehran date) instead of CURRENT_DATE
     const lockResults = await queryDbTransaction(env, [
       { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
       {
         sql: `SELECT id FROM token_transactions
               WHERE user_id = $1 AND tx_type = 'daily_claim'
-              AND created_at >= CURRENT_DATE LIMIT 1`,
-        params: [uid],
+              AND ref_id = $2 LIMIT 1`,
+        params: [uid, refId],
       },
     ]);
 
@@ -282,7 +300,7 @@ export function createWalletRepository(deps) {
 
     // Step 2: Use centralized creditTokens for the actual balance + transaction write.
     // This ensures the daily claim goes through the same path as all other credits.
-    const result = await creditTokens(env, uid, amount, 'daily_claim', 'Daily check-in reward', refId, { daily_date: new Date().toISOString().slice(0, 10) });
+    const result = await creditTokens(env, uid, amount, 'daily_claim', 'Daily check-in reward', refId, { daily_date: tehranToday });
     return { claimed: true, amount, newBalance: result.newBalance, txId: result.txId };
   }
 
@@ -364,52 +382,45 @@ export function createWalletRepository(deps) {
       }
     }
 
+    // WALLET-001 FIX: Use a single CTE-based transaction that atomically
+    // inserts the transaction record AND increments the balance ONLY if
+    // the transaction INSERT succeeds. This eliminates the need for a
+    // compensating reversal UPDATE outside the transaction.
+    //
+    // Previous approach (replaced):
+    //   1. UPSERT balance += amt (always succeeds)
+    //   2. INSERT tx ON CONFLICT DO NOTHING (may return 0 rows)
+    //   3. If tx conflict: UPDATE balance -= amt (OUTSIDE transaction — crash risk)
+    //
+    // New approach:
+    //   1. INSERT tx ON CONFLICT DO NOTHING RETURNING id (may return 0 rows)
+    //   2. UPDATE balance += amt ONLY WHERE the tx INSERT returned a row
+    // Both steps in a single transaction — no compensating reversal needed.
     const results = await queryDbTransaction(env, [
       {
-        sql: `INSERT INTO token_balances (user_id, balance, updated_at)
-              VALUES ($1, $2, NOW())
-              ON CONFLICT (user_id) DO UPDATE
-              SET balance = token_balances.balance + EXCLUDED.balance, updated_at = NOW()
-              RETURNING balance`,
-        params: [uid, amt],
-      },
-      {
-        // ROOT CAUSE FIX (R-2.1): ON CONFLICT DO NOTHING — if a concurrent
-        // caller already inserted a transaction with the same (user_id,
-        // tx_type, ref_id), this INSERT returns 0 rows. We detect this and
-        // return idempotent success instead of creating a duplicate credit.
-        // The UNIQUE index idx_token_tx_user_type_ref (added in ensureSchema)
-        // enforces this at the DB level.
-        sql: `INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at)
-              VALUES ($1, $2, $3, $4, 'completed', $5, $6, $7, NOW(), NOW())
-              ON CONFLICT DO NOTHING
-              RETURNING id`,
+        sql: `WITH tx_insert AS (
+                INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, 'completed', $5, $6, $7, NOW(), NOW())
+                ON CONFLICT DO NOTHING
+                RETURNING id
+              )
+              UPDATE token_balances
+              SET balance = token_balances.balance + $2, updated_at = NOW()
+              FROM tx_insert
+              WHERE token_balances.user_id = $1
+              RETURNING token_balances.balance, tx_insert.id AS tx_id`,
         params: [uid, amt, txType, source, description || txType, refId || null, metadataJson],
       },
     ]);
 
-    const newBalance = Number(results[0].rows[0]?.balance || 0);
-    const txId = results[1].rows[0]?.id;
+    const row = results[0].rows[0];
+    const newBalance = Number(row?.balance || 0);
+    const txId = row?.tx_id;
 
-    // ROOT CAUSE FIX (R-2.1): If the INSERT returned no rows, a concurrent
-    // caller already credited this transaction. The balance was already
-    // incremented by the other caller's INSERT INTO token_balances (our
-    // INSERT above added it again — but ON CONFLICT DO UPDATE means our
-    // balance increment was applied on top of the other caller's). We need
-    // to UNDO our balance increment to avoid double-credit.
-    // However, since both callers are in a transaction and the UNIQUE
-    // constraint prevents the second INSERT, the transaction will ROLLBACK
-    // the balance increment if the INSERT fails. Wait — queryDbTransaction
-    // runs both queries in one transaction, so if the INSERT fails (ON
-    // CONFLICT DO NOTHING returns 0 rows, but the query itself "succeeds"),
-    // the balance increment is NOT rolled back. We need to handle this.
-    if (!txId && refId) {
-      // Our transaction INSERT was a no-op (conflict). But our balance
-      // INSERT succeeded (added `amt` to the balance). We need to undo it.
-      await queryDb(env,
-        `UPDATE token_balances SET balance = balance - $2, updated_at = NOW() WHERE user_id = $1`,
-        [uid, amt],
-      );
+    // If txId is null, the ON CONFLICT triggered — a concurrent caller
+    // already inserted this transaction. Balance was NOT incremented
+    // (because the CTE's UPDATE only runs when tx_insert returns a row).
+    if (!txId) {
       // Read the existing transaction for the return value
       const existing = await queryDb(env,
         `SELECT id, amount FROM token_transactions WHERE user_id = $1 AND tx_type = $2 AND ref_id = $3 AND status = 'completed' LIMIT 1`,
