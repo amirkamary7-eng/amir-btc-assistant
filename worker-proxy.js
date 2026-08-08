@@ -1730,13 +1730,23 @@ async function ensureUserRow(env, userId) {
 }
 
 /**
- * Credit referral reward tokens AND mark referral as rewarded — all in a
- * single database transaction so they are guaranteed to be consistent.
+ * Credit referral reward tokens AND mark referral as rewarded.
+ *
+ * NOTE: These are TWO SEPARATE database operations, NOT a single transaction:
+ *   1. economyService.grantReward → creditTokens (uses queryDbTransaction
+ *      with BEGIN/COMMIT for balance + transaction INSERT)
+ *   2. UPDATE referrals SET rewarded=TRUE (separate queryDb call)
+ *
+ * If the Worker crashes between steps 1 and 2:
+ *   - Token balance is credited (step 1 committed)
+ *   - referral.rewarded stays FALSE
+ *   - retryFailedReferralRewards cron will retry
+ *   - On retry, creditTokens' UNIQUE constraint on (user_id, tx_type, ref_id)
+ *     prevents double-credit — returns {idempotent: true}
+ *   - UPDATE referrals SET rewarded=TRUE then succeeds
  *
  * If alsoVerifyChannel is true, also sets channel_verified = TRUE (used when
  * an existing referral gets its channel verification + reward in one go).
- *
- * Solves H-R1 + H-R2: no possibility of double-reward or balance/rewarded drift.
  */
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
   await diagLog(env, { scope: 'diag-creditReferralWithReward', inviterId, referralId, inviteeId, amount, alsoVerifyChannel });
