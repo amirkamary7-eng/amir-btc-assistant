@@ -178,28 +178,9 @@ export function createNewsArticleRepository(deps) {
     }
   }
 
-  /**
-   * Get recent analyzed articles (for frontend display).
-   *
-   * @param {object} env - Worker env
-   * @param {number} limit - max articles to return
-   */
-  async function listRecent(env, limit = 12) {
-    try {
-      const result = await queryDb(env, `
-        SELECT id, url, title, title_en, source, category, summary, sentiment, impact, impact_reason, coins, provider, analyzed_at
-        FROM news_articles
-        ORDER BY analyzed_at DESC
-        LIMIT $1
-      `, [Number(limit)], 1);
-      return result.rows.map(row => ({
-        ...row,
-        coins: (() => { try { return JSON.parse(row.coins || '[]'); } catch { return []; } })(),
-      }));
-    } catch (e) {
-      return [];
-    }
-  }
+  // NEWSBE-007 FIX (DEAD CODE REMOVED): listRecent was exported but had 0
+  // callers. Only fingerprint, findById, findByUrl, saveAnalysis, ensureTable
+  // are used. Removed the ~16-line function + export.
 
   return Object.freeze({
     ensureTable,
@@ -207,6 +188,5 @@ export function createNewsArticleRepository(deps) {
     findById,
     findByUrl,
     saveAnalysis,
-    listRecent,
   });
 }

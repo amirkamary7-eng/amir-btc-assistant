@@ -65,41 +65,10 @@ export function createMarketOverviewService(deps) {
     }
   }
 
-  /**
-   * Fetch Fear & Greed Index from CMC.
-   * Returns { fearGreedValue, fearGreedClassification, timestamp } or null.
-   */
-  async function fetchCMCFearAndGreed(apiKey) {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 10000);
-    try {
-      const res = await fetch('https://pro-api.coinmarketcap.com/v2/cryptocurrency/fear-and-greed/latest', {
-        headers: {
-          Accept: 'application/json',
-          'X-CMC_PRO_API_KEY': apiKey,
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(tid);
-      if (!res.ok) {
-        console.warn('[CMC] Fear & Greed failed — HTTP', res.status);
-        return null;
-      }
-      const body = await res.json();
-      const d = body?.data;
-      if (!d) return null;
-      return {
-        fearGreedValue: d.value || 0,
-        fearGreedClassification: d.value_classification || 'Neutral',
-        fearGreedTimestamp: d.timestamp || null,
-        source: 'coinmarketcap',
-      };
-    } catch (e) {
-      clearTimeout(tid);
-      console.warn('[CMC] Fear & Greed error:', e.message || e);
-      return null;
-    }
-  }
+  // NEWSBE-009 FIX (DEAD CODE REMOVED): fetchCMCFearAndGreed was defined but
+  // never called. refreshOverview (line ~194) only calls fetchCMCGlobalMetrics.
+  // A competing F&G implementation exists in worker-proxy.js (fetchFearGreed
+  // calling CMC v3/historical). Removed the ~31-line function. Not exported.
 
   /**
    * Fetch CMC Key Info for usage monitoring (0 credits).

@@ -842,101 +842,12 @@ export function createPublisherHandlers(deps) {
     return { processed: claimed.length, sent, failed, skipped };
   }
 
-  // ── Auto-publish hook (called when new content arrives) ─────────────────
-  // Returns nothing; safe to call fire-and-forget from cron contexts.
-
-  async function autoPublishCheck(env, type, items) {
-    if (!items || !items.length) return;
-    const settings = await readSettings(env).catch(() => null);
-    if (!settings || !settings.enabled) return;
-
-    if (type === 'news' && settings.auto_publish_news) {
-      const filters = settings.news_filters || {};
-      for (const article of items) {
-        const priority = String(article.priority || article.ai_priority || '').toLowerCase();
-        const isBreaking = article.is_breaking || priority === 'breaking';
-        const isImportant = priority === 'important' || article.important;
-        const isHigh = priority === 'high';
-        const isFeatured = article.featured;
-        const isNormal = !priority || priority === 'normal' || priority === 'low';
-        const isLow = priority === 'low';
-
-        const shouldPublish =
-          (isBreaking && filters.breaking) ||
-          (isImportant && filters.important) ||
-          (isHigh && filters.high) ||
-          (isFeatured && filters.featured) ||
-          (isNormal && filters.normal) ||
-          (isLow && filters.low);
-
-        if (!shouldPublish) continue;
-
-        const refId = article.url_hash || hashUrl(article.url);
-        if (!refId) continue;
-        // Dedup — don't enqueue if already sent/queued today
-        const dedup = await publisherRepo.checkDedup(env, 'news', refId).catch(() => ({ published: false }));
-        if (dedup.published) continue;
-        try {
-          await publisherRepo.enqueue(env, {
-            type: 'news',
-            ref_id: refId,
-            payload: { item_snapshot: article, overrides: {}, built: buildNewsMessage(env, article, {}) },
-            priority: isBreaking ? 10 : isImportant ? 20 : 50,
-            created_by: 'auto-publish',
-          });
-        } catch (e) {
-          console.warn('[publisher] autoPublish news enqueue failed:', e?.message || e);
-        }
-      }
-    }
-
-    if (type === 'calendar' && settings.auto_publish_calendar) {
-      const impacts = settings.calendar_impacts || {};
-      for (const event of items) {
-        const impact = String(event.impact || '').toLowerCase();
-        const shouldPublish =
-          (impact === 'high' && impacts.high) ||
-          (impact === 'medium' && impacts.medium) ||
-          (impact === 'low' && impacts.low);
-        if (!shouldPublish) continue;
-        const refId = String(event.id || event.event_id || '').slice(0, 64);
-        if (!refId) continue;
-        const dedup = await publisherRepo.checkDedup(env, 'calendar', refId).catch(() => ({ published: false }));
-        if (dedup.published) continue;
-        try {
-          await publisherRepo.enqueue(env, {
-            type: 'calendar',
-            ref_id: refId,
-            payload: { item_snapshot: event, overrides: {}, built: buildCalendarMessage(env, event, {}) },
-            priority: impact === 'high' ? 10 : 50,
-            created_by: 'auto-publish',
-          });
-        } catch (e) {
-          console.warn('[publisher] autoPublish calendar enqueue failed:', e?.message || e);
-        }
-      }
-    }
-
-    if (type === 'analysis' && settings.auto_publish_analysis) {
-      for (const analysis of items) {
-        const refId = String(analysis.id || '').slice(0, 64);
-        if (!refId) continue;
-        const dedup = await publisherRepo.checkDedup(env, 'analysis', refId).catch(() => ({ published: false }));
-        if (dedup.published) continue;
-        try {
-          await publisherRepo.enqueue(env, {
-            type: 'analysis',
-            ref_id: refId,
-            payload: { item_snapshot: analysis, overrides: {}, built: buildAnalysisMessage(env, analysis, {}) },
-            priority: 50,
-            created_by: 'auto-publish',
-          });
-        } catch (e) {
-          console.warn('[publisher] autoPublish analysis enqueue failed:', e?.message || e);
-        }
-      }
-    }
-  }
+  // NEWSBE-008 FIX (DEAD CODE REMOVED): autoPublishCheck was exported but had
+  // 0 callers in worker-proxy.js (grep confirmed). The auto_publish_news /
+  // auto_publish_calendar / auto_publish_analysis settings are dead toggles —
+  // no code reads them to trigger auto-publishing. Removed the ~92-line
+  // function + export. If auto-publish is needed in the future, it must be
+  // explicitly wired into the cron handler.
 
   return {
     handleGetSettings,
@@ -954,7 +865,6 @@ export function createPublisherHandlers(deps) {
     handleTestConnection,
     handleSendNow,
     processPublisherQueue,
-    autoPublishCheck,
     readSettings,
     buildMessageForType,
     validateMessage,

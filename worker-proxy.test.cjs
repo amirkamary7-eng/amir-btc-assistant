@@ -1916,3 +1916,78 @@ test('NEWSFE-009 (source): market-search input has 250ms debounce', () => {
   assert.ok(/setTimeout\(\(\) => \{/.test(block), 'must use setTimeout for debounce');
   assert.ok(/250/.test(block), 'must use 250ms debounce delay');
 });
+
+// ============================================================================
+// Batch F — Dead Code removal verification
+// ============================================================================
+
+// ── NEWSFE-023: renderTopMovers + renderCalendar + toggleCalReminder removed ──
+
+test('NEWSFE-023 (source): renderTopMovers function REMOVED', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  assert.ok(!/function renderTopMowers\s*\(/.test(src), 'renderTopMovers must be removed');
+  assert.ok(!/function renderTopMovers\s*\(/.test(src), 'renderTopMovers must be removed');
+  // Verify the removal comment is present
+  assert.ok(/NEWSFE-023 FIX \(DEAD CODE REMOVED\): renderTopMovers/.test(src), 'must have removal comment');
+});
+
+test('NEWSFE-023 (source): renderCalendar function REMOVED (renderCalendarV2 still present)', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // renderCalendar (exact) must be removed, but renderCalendarV2 must remain
+  assert.ok(!/^function renderCalendar\s*\(/m.test(src), 'renderCalendar (legacy) must be removed');
+  assert.ok(/function renderCalendarV2\s*\(/.test(src), 'renderCalendarV2 must still exist');
+  assert.ok(/NEWSFE-023 FIX \(DEAD CODE REMOVED\): renderCalendar/.test(src), 'must have removal comment');
+});
+
+test('NEWSFE-023 (source): toggleCalReminder function REMOVED', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  assert.ok(!/^function toggleCalReminder\s*\(/m.test(src), 'toggleCalReminder must be removed');
+});
+
+// ── NEWSBE-006: processNewsAIJobs removed ──
+
+test('NEWSBE-006 (source): processNewsAIJobs function REMOVED (processNewsAIBatch + processOneArticleSummary still present)', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  assert.ok(!/^async function processNewsAIJobs\s*\(/m.test(src), 'processNewsAIJobs must be removed');
+  assert.ok(/async function processNewsAIBatch\s*\(/.test(src), 'processNewsAIBatch must still exist');
+  assert.ok(/async function processOneArticleSummary\s*\(/.test(src), 'processOneArticleSummary must still exist');
+  assert.ok(/NEWSBE-006 FIX \(DEAD CODE REMOVED\)/.test(src), 'must have removal comment');
+  // The stale comments referencing processNewsAIJobs must be updated
+  assert.ok(!/cron handler \(scheduled\) calls processNewsAIJobs/.test(src), 'stale comment must be updated to processNewsAIBatch');
+});
+
+// ── NEWSBE-007: listRecent removed from news_articles repo ──
+
+test('NEWSBE-007 (source): listRecent REMOVED from news_articles repo', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'repositories', 'news_articles.js'), 'utf8');
+  assert.ok(!/async function listRecent\s*\(/.test(src), 'listRecent function must be removed');
+  assert.ok(!/listRecent,/.test(src), 'listRecent export must be removed');
+  assert.ok(/NEWSBE-007 FIX \(DEAD CODE REMOVED\)/.test(src), 'must have removal comment');
+  // Other functions must still be exported
+  assert.ok(/ensureTable,/.test(src), 'ensureTable must still be exported');
+  assert.ok(/fingerprint,/.test(src), 'fingerprint must still be exported');
+  assert.ok(/findByUrl,/.test(src), 'findByUrl must still be exported');
+  assert.ok(/saveAnalysis,/.test(src), 'saveAnalysis must still be exported');
+});
+
+// ── NEWSBE-008: autoPublishCheck removed from publisher controller ──
+
+test('NEWSBE-008 (source): autoPublishCheck REMOVED from publisher controller', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'controllers', 'publisher.js'), 'utf8');
+  assert.ok(!/async function autoPublishCheck\s*\(/.test(src), 'autoPublishCheck function must be removed');
+  assert.ok(!/autoPublishCheck,/.test(src), 'autoPublishCheck export must be removed');
+  assert.ok(/NEWSBE-008 FIX \(DEAD CODE REMOVED\)/.test(src), 'must have removal comment');
+  // processPublisherQueue must still be exported
+  assert.ok(/processPublisherQueue,/.test(src), 'processPublisherQueue must still be exported');
+});
+
+// ── NEWSBE-009: fetchCMCFearAndGreed removed from market_overview_service ──
+
+test('NEWSBE-009 (source): fetchCMCFearAndGreed REMOVED from market_overview_service', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'services', 'market_overview_service.js'), 'utf8');
+  assert.ok(!/async function fetchCMCFearAndGreed\s*\(/.test(src), 'fetchCMCFearAndGreed function must be removed');
+  assert.ok(/NEWSBE-009 FIX \(DEAD CODE REMOVED\)/.test(src), 'must have removal comment');
+  // refreshOverview + fetchCMCKeyInfo must still be exported
+  assert.ok(/refreshOverview,/.test(src), 'refreshOverview must still be exported');
+  assert.ok(/fetchCMCKeyInfo,/.test(src), 'fetchCMCKeyInfo must still be exported');
+});
