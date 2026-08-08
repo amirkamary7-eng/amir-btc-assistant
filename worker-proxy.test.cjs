@@ -1765,3 +1765,113 @@ test('NEWSFE-032 (source): closeNewsFilterSheet updates filter dot indicator and
   assert.ok(/dot\.style\.display = hasFilters \? 'block' : 'none'/.test(fnSrc), 'must set dot display based on hasFilters');
   assert.ok(/renderNews\(activeTab\)/.test(fnSrc), 'must re-render news after closing filter sheet');
 });
+
+// ============================================================================
+// Batch C — Backend/Cache/API regression tests
+// ============================================================================
+
+// ── NEWSBE-004: URL canonicalization ──
+
+test('NEWSBE-004 (source): canonicalizeUrl function exists and strips utm_* params', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  const fnStart = src.indexOf('function canonicalizeUrl');
+  assert.ok(fnStart > -1, 'canonicalizeUrl function must exist');
+  // canonicalizeUrl is defined AFTER hashUrl (which calls it). Find the end
+  // of canonicalizeUrl by the next function declaration.
+  const fnEnd = src.indexOf('\n}\n\n', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd > fnStart ? fnEnd + 3 : fnStart + 1500);
+  assert.ok(/utm_source/.test(fnSrc), 'must strip utm_source');
+  assert.ok(/utm_medium/.test(fnSrc), 'must strip utm_medium');
+  assert.ok(/fbclid/.test(fnSrc), 'must strip fbclid');
+  assert.ok(/TRACKING_PARAMS/.test(fnSrc), 'must have TRACKING_PARAMS list');
+  // Must normalize http → https
+  assert.ok(/u\.protocol === 'http:' \? 'https:'/.test(fnSrc), 'must normalize http to https');
+  // Must lowercase hostname
+  assert.ok(/u\.hostname\.toLowerCase\(\)/.test(fnSrc), 'must lowercase hostname');
+});
+
+test('NEWSBE-004 (source): hashUrl uses canonicalizeUrl', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  const fnStart = src.indexOf('function hashUrl');
+  assert.ok(fnStart > -1, 'hashUrl must exist');
+  const fnEnd = src.indexOf('function canonicalizeUrl');
+  // hashUrl is now BEFORE canonicalizeUrl (canonicalizeUrl defined after)
+  // So find the end of hashUrl by the next function declaration
+  const fnSrc = src.slice(fnStart, src.indexOf('\n}\n', fnStart) + 3);
+  assert.ok(/const canonical = canonicalizeUrl\(url\)/.test(fnSrc), 'hashUrl must call canonicalizeUrl');
+  assert.ok(/for \(let i = 0; i < canonical\.length/.test(fnSrc), 'hashUrl must iterate over canonical URL');
+});
+
+test('NEWSBE-004 (source): fetchFarsiNews dedup uses canonicalizeUrl', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  const fnStart = src.indexOf('async function fetchFarsiNews');
+  assert.ok(fnStart > -1, 'fetchFarsiNews must exist');
+  // Search a wider window for the dedup block (it's after the cache-read path)
+  const fnSrc = src.slice(fnStart, fnStart + 3500);
+  assert.ok(/const canonical = canonicalizeUrl\(a\.url\)/.test(fnSrc), 'fetchFarsiNews dedup must use canonicalizeUrl. Window: ' + fnSrc.slice(fnSrc.indexOf('Deduplicate'), fnSrc.indexOf('Deduplicate') + 300));
+  assert.ok(/seen\.has\(canonical\)/.test(fnSrc), 'fetchFarsiNews dedup must check canonical against seen set');
+});
+
+test('NEWSBE-004 (source): processNewsAIBatch dedup uses canonicalizeUrl', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // Find STEP 5 DEDUP in processNewsAIBatch
+  const idx = src.indexOf('STEP 5: DEDUP by URL');
+  assert.ok(idx > -1, 'STEP 5 DEDUP must exist in processNewsAIBatch');
+  const dedupBlock = src.slice(idx, idx + 500);
+  assert.ok(/canonicalizeUrl\(a\.url\)/.test(dedupBlock), 'processNewsAIBatch dedup must use canonicalizeUrl');
+  assert.ok(/NEWSBE-004 FIX/.test(dedupBlock), 'must have NEWSBE-004 FIX comment');
+});
+
+// ── NEWSBE-014: cron-monitor documents data source ──
+
+test('NEWSBE-014 (source): /api/cron-monitor response documents data_source + kv_writes_disabled', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // The cron-monitor endpoint handler is large; search the whole file for
+  // the response fields (they're in the jsonResponse return block).
+  assert.ok(/data_source: 'in_memory_current_isolate_only'/.test(src), 'must document data_source in cron-monitor response');
+  assert.ok(/kv_writes_disabled: true/.test(src), 'must document kv_writes_disabled in cron-monitor response');
+  assert.ok(/reliable_alternative/.test(src), 'must document reliable alternative (GraphQL Analytics)');
+  assert.ok(/NEWSBE-014 FIX/.test(src), 'must have NEWSBE-014 FIX comment');
+  // Verify it's within the cron-monitor endpoint (not somewhere else)
+  const cmIdx = src.indexOf("url.pathname === '/api/cron-monitor'");
+  const dsIdx = src.indexOf("data_source: 'in_memory_current_isolate_only'");
+  assert.ok(cmIdx > -1 && dsIdx > cmIdx, 'data_source must be inside cron-monitor handler');
+});
+
+// ── NEWSSEC-014: safeReadText body size limit ──
+
+test('NEWSSEC-014 (source): safeReadText function exists with size limit', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  const fnStart = src.indexOf('async function safeReadText');
+  assert.ok(fnStart > -1, 'safeReadText function must exist');
+  const fnEnd = src.indexOf('function hashUrl');
+  assert.ok(fnEnd > fnStart, 'safeReadText must be before hashUrl');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/maxBytes = 2 \* 1024 \* 1024/.test(fnSrc), 'must default to 2MB limit');
+  assert.ok(/content-length/.test(fnSrc), 'must check Content-Length header');
+  assert.ok(/contentLength > maxBytes/.test(fnSrc), 'must reject oversized Content-Length');
+  assert.ok(/text\.slice\(0, maxBytes\)/.test(fnSrc), 'must truncate if body exceeds maxBytes');
+});
+
+test('NEWSSEC-014 (source): RSS fetch uses safeReadText', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  assert.ok(/const rssText = await safeReadText\(response\)/.test(src), 'RSS fetch must use safeReadText');
+  assert.ok(/NEWSSEC-014 FIX/.test(src), 'must have NEWSSEC-014 FIX comment for RSS');
+});
+
+test('NEWSSEC-014 (source): article fetch uses safeReadText with 5MB limit', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  assert.ok(/html = await safeReadText\(articleRes, 5 \* 1024 \* 1024\)/.test(src), 'article fetch must use safeReadText with 5MB limit');
+});
+
+// ── NEWSSEC-011: article URL scheme validation ──
+
+test('NEWSSEC-011 (source): processOneArticleSummary validates article URL scheme before fetch', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  const idx = src.indexOf('STEP 1: Fetch article HTML');
+  assert.ok(idx > -1, 'STEP 1 fetch must exist');
+  const block = src.slice(idx, idx + 800);
+  assert.ok(/NEWSSEC-011 FIX/.test(block), 'must have NEWSSEC-011 FIX comment');
+  assert.ok(/\/\^https\?:\\\//i.test(block), 'must validate ^https?:// scheme');
+  assert.ok(/invalid_url_scheme/.test(block), 'must requeue with invalid_url_scheme on failure');
+});

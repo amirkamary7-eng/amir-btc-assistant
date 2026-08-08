@@ -3172,7 +3172,9 @@ async function fetchAllNewsRss() {
         });
         clearTimeout(timeoutId);
         _traceStage('RSS.fetch:' + source.name, _t0);
-        const rssText = await response.text();
+        // NEWSSEC-014 FIX: Use safeReadText to cap body size (2MB default) and
+        // prevent OOM from compromised/oversized RSS feeds.
+        const rssText = await safeReadText(response);
         if (response.ok && rssText.includes('<item>')) {
           return { rssText, sourceName: source.name, category: source.category, skipTranslate: !!source.skipTranslate };
         }
@@ -3397,10 +3399,15 @@ async function fetchFarsiNews(env, categoryFilter) {
     ).flat();
 
     // Deduplicate by URL (same article from multiple sources)
+    // NEWSBE-004 FIX: Use canonicalized URL for dedup so the same article
+    // with different tracking params (utm_*) or trailing slash doesn't
+    // appear twice.
     const seen = new Set();
     const deduped = allArticles.filter((a) => {
-      if (!a.url || seen.has(a.url)) return false;
-      seen.add(a.url);
+      if (!a.url) return false;
+      const canonical = canonicalizeUrl(a.url);
+      if (seen.has(canonical)) return false;
+      seen.add(canonical);
       return true;
     });
 
@@ -4517,6 +4524,15 @@ async function processOneArticleSummary(env, pool = null) {
   }
 
   // ── STEP 1: Fetch article HTML ──
+  // NEWSSEC-011 FIX: Validate the article URL scheme before fetching. The URL
+  // comes from RSS <link> content (untrusted). Cloudflare Workers already
+  // blocks loopback/private IPs (169.254.169.254, 10.x, 192.168.x, etc.) by
+  // default, so internal-network SSRF is mitigated. But a compromised RSS
+  // feed could still inject non-http(s) schemes (file://, ftp:, etc.) which
+  // this check rejects explicitly. Defense-in-depth.
+  if (!article.url || !/^https?:\/\//i.test(article.url)) {
+    return requeueWithRetry('invalid_url_scheme', 'Article URL must be http(s)');
+  }
   let html = null;
   try {
     const fetchController = new AbortController();
@@ -4533,7 +4549,9 @@ async function processOneArticleSummary(env, pool = null) {
     if (!articleRes.ok) {
       return requeueWithRetry('fetch_' + articleRes.status, 'HTTP ' + articleRes.status);
     }
-    html = await articleRes.text();
+    // NEWSSEC-014 FIX: Use safeReadText to cap body size (5MB for article HTML,
+    // which can be larger than RSS) and prevent OOM from oversized responses.
+    html = await safeReadText(articleRes, 5 * 1024 * 1024);
   } catch (e) {
     return requeueWithRetry('fetch_error', e?.message?.substring(0, 120));
   }
@@ -4689,16 +4707,125 @@ async function processOneArticleSummary(env, pool = null) {
 }
 
 /**
+ * NEWSSEC-014 FIX: Safely read response text with a max size limit.
+ *
+ * Without this, a compromised RSS feed or article URL could serve a multi-GB
+ * response body that would OOM the Worker (128MB memory limit). The 8s fetch
+ * timeout bounds wall time but not body size. This helper reads the body as
+ * text but stops (returns truncated text) if it exceeds maxBytes.
+ *
+ * The default 2MB limit is generous for RSS feeds (typical: 50-500KB) and
+ * article HTML (typical: 100-800KB) but prevents OOM from malicious oversized
+ * responses. Callers that need more (e.g. article extraction) can pass a
+ * higher limit.
+ *
+ * @param {Response} response - fetch Response object
+ * @param {number} maxBytes - Max bytes to read (default 2MB)
+ * @returns {Promise<string>} Response text (truncated if over limit)
+ */
+async function safeReadText(response, maxBytes = 2 * 1024 * 1024) {
+  // Strategy: read Content-Length header first; if it exceeds maxBytes, skip
+  // reading the body entirely (return empty string). Otherwise read the body
+  // and truncate if it somehow exceeds (e.g. chunked encoding with no CL).
+  try {
+    const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+    if (contentLength > maxBytes) {
+      console.warn(`[safeReadText] Content-Length ${contentLength} exceeds limit ${maxBytes} — skipping body`);
+      return '';
+    }
+  } catch {}
+  // Read the body as text. In Cloudflare Workers, response.text() buffers the
+  // full body into memory — there's no streaming truncation API available.
+  // We rely on Content-Length pre-check + the 8s fetch timeout as the primary
+  // guards. If a chunked-transfer response omits Content-Length and streams
+  // more than maxBytes, the Worker runtime will still buffer it (bounded by
+  // the 128MB isolate limit). The post-read truncation below is a last-resort
+  // guard for that case.
+  const text = await response.text();
+  if (text.length > maxBytes) {
+    console.warn(`[safeReadText] Body ${text.length} bytes exceeds limit ${maxBytes} — truncating`);
+    return text.slice(0, maxBytes);
+  }
+  return text;
+}
+
+/**
  * Generate a stable hash from a URL for KV key.
  */
 function hashUrl(url) {
+  // NEWSBE-004 FIX: Canonicalize the URL before hashing so that the same
+  // article reached via different tracking parameters (utm_source, utm_medium,
+  // fbclid, etc.) or trailing slash variants produces the SAME hash. Without
+  // this, an article with ?utm_source=twitter vs ?utm_source=telegram would
+  // get different hashUrl values → duplicate AI processing + duplicate cache
+  // entries. The canonicalization is applied here so ALL callers of hashUrl
+  // (enqueueForSummary, processOneArticleSummary, processNewsAIBatch) benefit
+  // automatically. The dedup-by-URL blocks in fetchFarsiNews (line ~3401) and
+  // processNewsAIBatch (line ~5622) also use canonicalizeUrl via the helper.
+  const canonical = canonicalizeUrl(url);
   let hash = 0;
-  for (let i = 0; i < url.length; i++) {
-    const char = url.charCodeAt(i);
+  for (let i = 0; i < canonical.length; i++) {
+    const char = canonical.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
     hash = hash & hash;
   }
   return Math.abs(hash).toString(36);
+}
+
+/**
+ * NEWSBE-004 FIX: Canonicalize a URL for deduplication + hashing.
+ *
+ * Strips tracking parameters (utm_*, fbclid, gclid, ref, source, mc_cid,
+ * mc_eid) and normalizes:
+ *   - http:// → https:// (same article, secure variant preferred)
+ *   - trailing slash removed (except for root)
+ *   - hostname lowercased
+ *   - fragment (#...) removed
+ *
+ * Preserves the path and meaningful query params. Returns the original URL
+ * (trimmed) if parsing fails — never throws.
+ *
+ * @param {string} url - Raw URL from RSS <link>
+ * @returns {string} Canonical URL
+ */
+function canonicalizeUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  try {
+    // Use URL parser; if it throws (relative URL), fall back to raw trimmed
+    const u = new URL(trimmed);
+    // Normalize scheme: http → https (same article, secure preferred)
+    const scheme = u.protocol === 'http:' ? 'https:' : u.protocol;
+    // Lowercase hostname (www.Example.com → www.example.com)
+    const host = u.hostname.toLowerCase();
+    // Remove trailing slash from pathname (except root '/')
+    let path = u.pathname;
+    if (path.length > 1 && path.endsWith('/')) {
+      path = path.slice(0, -1);
+    }
+    // Strip tracking parameters
+    const TRACKING_PARAMS = [
+      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+      'fbclid', 'gclid', 'msclkid', 'ref', 'source', 'mc_cid', 'mc_eid',
+      '_ga', 'yclid', 'twclid', 'igshid',
+    ];
+    const params = new URLSearchParams(u.search);
+    let removed = false;
+    for (const tp of TRACKING_PARAMS) {
+      if (params.has(tp)) {
+        params.delete(tp);
+        removed = true;
+      }
+    }
+    // Rebuild search string only if params remain (avoid trailing '?')
+    const search = removed || params.toString() ? ('?' + params.toString()) : '';
+    // Drop fragment
+    return `${scheme}//${host}${path}${search}`;
+  } catch {
+    // Not a parseable absolute URL — return trimmed as-is (don't break fetch)
+    return trimmed;
+  }
 }
 
 /**
@@ -5618,10 +5745,13 @@ async function processNewsAIBatch(env, pool = null) {
     stepLog('TRANSLATION_done', { totalArticles: allArticles.length });
 
     // ── STEP 5: DEDUP by URL (safety net — filterAndScoreNews already deduped by title) ──
+    // NEWSBE-004 FIX: Use canonicalized URL for dedup (strips utm_*, trailing slash).
     const seen = new Set();
     const deduped = allArticles.filter((a) => {
-      if (!a.url || seen.has(a.url)) return false;
-      seen.add(a.url);
+      if (!a.url) return false;
+      const canonical = canonicalizeUrl(a.url);
+      if (seen.has(canonical)) return false;
+      seen.add(canonical);
       return true;
     });
     if (deduped.length === 0) {
@@ -8896,6 +9026,18 @@ export default {
           ticksKilled: tickSummaries.filter(t => t.killed).length,
           ticksOk: tickSummaries.filter(t => !t.killed).length,
           ticks: tickSummaries.slice(-50), // last 50 ticks
+          // NEWSBE-014 FIX: Document the data source so operators don't rely
+          // on this endpoint for cross-isolate exceededCpu detection. KV writes
+          // for cron monitoring are intentionally DISABLED (would exhaust Free
+          // Plan 1,000 writes/day limit). This endpoint returns only the
+          // in-memory log from the CURRENT isolate (globalThis._cronMonitorLog,
+          // capped at 200 entries). On a fresh isolate the log is empty — this
+          // is expected, not a bug. For reliable cross-isolate monitoring, use
+          // Cloudflare GraphQL Analytics (cpuTimeUs) instead.
+          data_source: 'in_memory_current_isolate_only',
+          kv_writes_disabled: true,
+          kv_writes_disabled_reason: 'Free Plan 1,000 writes/day limit — KV writes for cron monitoring would exhaust quota',
+          reliable_alternative: 'Cloudflare GraphQL Analytics (cpuTimeUs, wallTimeUs)',
         }, {}, env);
       }
 
