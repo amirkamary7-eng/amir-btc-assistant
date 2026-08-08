@@ -184,24 +184,6 @@ export function createWalletHandlers(deps) {
   }
 
   /**
-   * GET /api/wallet/referral-stats — Referral stats for wallet page.
-   */
-  async function handleReferralStats(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState.error;
-    if (!isDatabaseConfigured(env)) {
-      return jsonResponse({ status: 'success', invited: 0, active: 0, earned: 0, total_rewards: 0 }, {}, env);
-    }
-    try {
-      const stats = await walletRepo.getReferralStats(env, authState.user.id);
-      return jsonResponse({ status: 'success', ...stats }, {}, env);
-    } catch (error) {
-      console.warn(safeError('wallet-referral-stats', error));
-      return safeDbErrorResponse(error, {}, env);
-    }
-  }
-
-  /**
    * POST /api/wallet/mission/complete — Increment progress and grant reward when complete.
    *
    * Body: { mission_id: string }
@@ -393,7 +375,6 @@ export function createWalletHandlers(deps) {
     handleGetTransaction,
     handleGetClaimStatus,
     handleClaimDaily,
-    handleReferralStats,
     handleMissionComplete,
     handleGetMissions,
   });

@@ -579,21 +579,6 @@ export function createRewardCenterRepository(deps) {
    * Returns the highest tier where invite_count >= tier.invite_count.
    * Used by Economy Layer when processing referral rewards.
    */
-  async function getReferralRewardForInvites(env, totalInvites) {
-    await ensureSchema(env);
-    if (!isDatabaseConfigured(env)) return { token_amount: 3, bonus_spins: 0 };
-    try {
-      const result = await queryDb(env, `
-        SELECT token_amount, bonus_spins FROM referral_reward_tiers
-        WHERE is_enabled = TRUE AND invite_count <= $1
-        ORDER BY invite_count DESC LIMIT 1
-      `, [Number(totalInvites)]);
-      if (result.rows[0]) {
-        return { token_amount: Number(result.rows[0].token_amount), bonus_spins: Number(result.rows[0].bonus_spins) };
-      }
-      return { token_amount: 3, bonus_spins: 0 }; // fallback default
-    } catch { return { token_amount: 3, bonus_spins: 0 }; }
-  }
 
   function _mapReferralTier(r) {
     return {
@@ -933,7 +918,6 @@ export function createRewardCenterRepository(deps) {
     createReferralTier,
     updateReferralTier,
     deleteReferralTier,
-    getReferralRewardForInvites,
     listMissionRewards,
     createMissionReward,
     updateMissionReward,

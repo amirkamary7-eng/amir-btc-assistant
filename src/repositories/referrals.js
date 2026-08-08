@@ -209,23 +209,11 @@ export function createReferralRepository(deps) {
   /**
    * Flag a referral as suspicious (for anti-abuse).
    */
-  async function flagReferral(env, referralId, reason) {
-    await ensureSchema(env).catch(() => {});
-    await queryDb(
-      env,
-      `UPDATE referrals SET status = 'flagged', updated_at = NOW(),
-       metadata = metadata || $3::jsonb
-       WHERE id = $1 AND status = 'active'`,
-      [Number(referralId), null, JSON.stringify({ flag_reason: reason, flagged_at: new Date().toISOString() })],
-    );
-    return { success: true };
-  }
 
   return Object.freeze({
     ensureSchema,
     getStats,
     getHistory,
     getLeaderboard,
-    flagReferral,
   });
 }

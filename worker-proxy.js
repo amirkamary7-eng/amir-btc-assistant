@@ -10322,10 +10322,6 @@ export default {
         return walletHandlers.handleClaimDaily(request, env);
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/wallet/referral-stats') {
-        return await walletHandlers.handleReferralStats(request, env);
-      }
-
       // ── Daily Missions API Routes ──
       if (request.method === 'POST' && url.pathname === '/api/wallet/mission/complete') {
         return walletHandlers.handleMissionComplete(request, env);
