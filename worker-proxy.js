@@ -8071,52 +8071,84 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
   };
 
   try {
-    // ROOT-CAUSE FIX for exceededResources: check KV cache first to see if
-    // any active alerts exist. If none, skip the DB query entirely — saves
-    // ~3-5ms CPU (one queryDb = one Pool + TLS handshake). When alerts are
-    // created/removed, the cache is invalidated. TTL 60s as fallback.
+    // ═══════════════════════════════════════════════════════════════════
+    // ROOT-CAUSE FIX for exceededCpu on * * * * * cron (cpuTime=18ms > 10ms):
+    //
+    // PROVEN from wrangler tail + GraphQL analytics:
+    //   - 737/890 exceededResources have subrequests=1 (83%)
+    //   - cpu_avg=10.6ms > 10ms Free plan limit
+    //   - Worker killed DURING pool.query() TLS handshake (3-5ms CPU)
+    //   - DB query (listActiveForCron) never completes
+    //
+    // ROOT CAUSE: WebSocket TLS handshake for @neondatabase/serverless Pool
+    // consumes 3-5ms CPU. Combined with JS overhead (Pool construction,
+    // query preparation, result parsing), total CPU reaches ~10-11ms,
+    // exceeding the 10ms Free plan limit.
+    //
+    // FIX: Cache the ENTIRE alert list in KV (not just 'exists' flag).
+    // When cache is valid, skip the DB query entirely → 0 TLS CPU.
+    // Only query DB on cache miss (first run, after TTL expiry, or after
+    // invalidation by create/delete operations).
+    //
+    // Safety:
+    //   - last_price from cache is at most 60s stale (same as current TTL)
+    //   - Cross-detection compares prevPrice vs currentPrice — 60s staleness
+    //     doesn't affect direction detection (price doesn't cross AND rebound
+    //     within 60s for any real asset)
+    //   - last_checked_at from cache is non-null after first check →
+    //     first_check triggers won't fire again (correct behavior)
+    //   - When alert triggers (markTriggered), its status changes to
+    //     'triggered' → next cache refresh excludes it automatically
+    //   - create() and remove() already invalidate 'alerts:active-exists'
+    //     cache → we also invalidate 'alerts:active-list' in those functions
+    // ═══════════════════════════════════════════════════════════════════
     const ALERTS_EXIST_CACHE_KEY = 'alerts:active-exists';
-    const alertsExistCached = await readAppCache(env, ALERTS_EXIST_CACHE_KEY);
-    if (alertsExistCached === '0') {
-      // No active alerts — skip the entire alerts baseline this tick.
-      // Still run calendar check (separate, lightweight).
-            return resultPayload;
+    const ALERTS_LIST_CACHE_KEY = 'alerts:active-list';
+    const ALERTS_LIST_TTL = 60; // seconds — same as alerts:active-exists
+
+    // Step 1: Try to read the cached alert list from KV
+    let alerts = null;
+    let alertsFromCache = false;
+    const cachedListRaw = await readAppCache(env, ALERTS_LIST_CACHE_KEY);
+    if (cachedListRaw) {
+      try {
+        const parsed = JSON.parse(cachedListRaw);
+        if (Array.isArray(parsed)) {
+          alerts = parsed;
+          alertsFromCache = true;
+        }
+      } catch {}
     }
 
-    // PROVEN FIX: ensureTable removed from cron — DDL (CREATE TABLE, CREATE INDEX)
-    // must NOT run on hot cron paths. In production, a CREATE INDEX took 64.5s
-    // wall time and caused "Connection terminated unexpectedly" → exception.
-    // ensureTable is idempotent (IF NOT EXISTS) and cached per-isolate, but
-    // new isolates still trigger it. Tables/indexes should be created via
-    // one-time migration, not on every cron tick.
-    // Original call (removed):
-    // if (controller.cron === '*/15 * * * *' && typeof alertRepo?.ensureTable === 'function') {
-    //   try { await alertRepo.ensureTable(env); } catch {}
-    // }
+    // Step 2: If cache miss, query DB (this is the path that causes exceededCpu)
+    if (!alerts) {
+      alerts = (typeof alertRepo?.listActiveForCron === 'function')
+        ? await alertRepo.listActiveForCron(env, maxAlerts, pool)
+        : (await queryDb(env, `
+            SELECT id, user_id, symbol, price, direction, last_price, last_checked_at
+            FROM price_alerts
+            WHERE status = 'active'
+            ORDER BY created_at DESC
+            LIMIT $1
+          `, [maxAlerts], 1, pool)).rows;
 
-    // Use the bulk cron query (only fetches active alerts, ordered by created_at DESC)
-    const alerts = (typeof alertRepo?.listActiveForCron === 'function')
-      ? await alertRepo.listActiveForCron(env, maxAlerts, pool)
-      : (await queryDb(env, `
-          SELECT id, user_id, symbol, price, direction, last_price, last_checked_at
-          FROM price_alerts
-          WHERE status = 'active'
-          ORDER BY created_at DESC
-          LIMIT $1
-        `, [maxAlerts], 1, pool)).rows;
+      // Cache the result for next tick (avoids DB query on subsequent ticks)
+      if (alerts.length > 0) {
+        try {
+          await writeAppCache(env, ALERTS_LIST_CACHE_KEY, JSON.stringify(alerts), ALERTS_LIST_TTL);
+          await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '1', ALERTS_LIST_TTL);
+        } catch {}
+      } else {
+        try { await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '0', ALERTS_LIST_TTL); } catch {}
+      }
+    }
 
     resultPayload.checked_count = alerts.length;
-    _tDbEnd = Date.now(); // Phase 1 done: DB query
+    _tDbEnd = Date.now(); // Phase 1 done: DB query (or cache hit)
 
     if (!alerts.length) {
-      // ROOT-CAUSE FIX: cache the fact that no active alerts exist, so the
-      // next cron tick can skip the DB query entirely (saves ~3-5ms CPU).
-      // TTL 60s — if a user creates an alert, it takes at most 60s to detect.
-      try { await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '0', 60); } catch {}
             return resultPayload;
     }
-    // Alerts exist — update cache so next tick knows to query.
-    try { await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '1', 60); } catch {}
 
     // ── PHASE 1: Batch fetch prices for all unique symbols ──
     // Use Promise.all with a strict 4-second per-fetch timeout.

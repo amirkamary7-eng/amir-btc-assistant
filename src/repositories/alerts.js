@@ -96,7 +96,10 @@ export function createAlertRepository(deps) {
     await ensureUserRow(env, normalizedUserId);
     // ROOT-CAUSE FIX: invalidate the 'active alerts exist' cache so the next
     // cron tick knows to query the DB (instead of skipping via cache='0').
-    try { env.APP_CACHE?.delete?.('alerts:active-exists'); } catch {}
+    try {
+      env.APP_CACHE?.delete?.('alerts:active-exists');
+      env.APP_CACHE?.delete?.('alerts:active-list');
+    } catch {}
 
     const existingResult = await queryDb(
       env,
@@ -224,7 +227,10 @@ export function createAlertRepository(deps) {
   async function remove(env, alertId, userId) {
     await queryDb(env, 'DELETE FROM price_alerts WHERE id = $1 AND user_id = $2', [String(alertId), String(userId)]);
     // ROOT-CAUSE FIX: invalidate the 'active alerts exist' cache.
-    try { env.APP_CACHE?.delete?.('alerts:active-exists'); } catch {}
+    try {
+      env.APP_CACHE?.delete?.('alerts:active-exists');
+      env.APP_CACHE?.delete?.('alerts:active-list');
+    } catch {}
   }
 
   /**
@@ -259,6 +265,14 @@ export function createAlertRepository(deps) {
       WHERE id = $1 AND status = 'active'
       RETURNING id
     `, [String(alertId), Number(triggerPrice)], 1, pool);
+    // Invalidate alert list cache so next cron tick gets fresh data
+    // (triggered alert is no longer 'active' → should be excluded)
+    if (result.rows.length > 0) {
+      try {
+        env.APP_CACHE?.delete?.('alerts:active-exists');
+        env.APP_CACHE?.delete?.('alerts:active-list');
+      } catch {}
+    }
     return result.rows.length > 0;
   }
 
