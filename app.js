@@ -398,6 +398,9 @@ let _previousPrices = {}; // Symbol → price tracking for cross-check alerts
 const MARKET_DEFAULT_LIMIT = 100;
 const MARKET_LOAD_MORE_BATCH = 50;
 let marketVisibleCount = MARKET_DEFAULT_LIMIT;
+// NEWSFE-026 FIX: Per-sub-tab visible count map. Preserves the user's "Load
+// More" progress when switching between crypto sub-tabs (top/gainers/losers).
+let _subTabVisibleCounts = {};
 let lastMarketFetchTime = 0;
 // R3-4: App visibility tracking — polling pauses when Mini App is hidden
 let _appVisible = true;
@@ -925,9 +928,26 @@ function saveLangToStorage() {
  * ورودی: بدون ورودی.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
+// NEWSFE-014 FIX: In-flight lock for persistWatchlist. Without this, rapid
+// double-clicks on the watchlist toggle would fire two concurrent PUT
+// requests with different state (e.g. add BTC → remove BTC), and the final
+// backend state depended on which response arrived last (race condition).
+// Now, if a PUT is in-flight, we set a "pending re-sync" flag. When the
+// in-flight PUT completes, if the flag is set, we re-send the LATEST state.
+// This guarantees the backend always ends up with the user's final intent.
+let _persistWatchlistInFlight = false;
+let _persistWatchlistPending = false;
+
 async function persistWatchlist() {
     localStorage.setItem(userStorageKey('watchlist'), JSON.stringify(watchlist));
     if (!API_BASE || isGuestUserId(getUserId())) return;
+    // NEWSFE-014 FIX: If a PUT is already in-flight, mark "pending" and return.
+    // The in-flight PUT will re-sync the latest state when it completes.
+    if (_persistWatchlistInFlight) {
+        _persistWatchlistPending = true;
+        return;
+    }
+    _persistWatchlistInFlight = true;
     try {
         await apiFetch('/api/watchlist', {
             method: 'PUT',
@@ -935,6 +955,15 @@ async function persistWatchlist() {
         });
     } catch (e) {
         console.warn('persistWatchlist:', e);
+    } finally {
+        _persistWatchlistInFlight = false;
+        // NEWSFE-014 FIX: If another toggle happened while we were in-flight,
+        // re-send the latest state. Loop in case of repeated rapid toggles.
+        if (_persistWatchlistPending) {
+            _persistWatchlistPending = false;
+            // Re-capture the latest watchlist state (may have changed during await)
+            persistWatchlist();
+        }
     }
 }
 
@@ -5048,6 +5077,10 @@ function renderMarket() {
  */
 function loadMoreCoins() {
     marketVisibleCount += MARKET_LOAD_MORE_BATCH;
+    // NEWSFE-026 FIX: Persist the new visible count for the current sub-tab
+    // so switching away and back preserves the Load More progress.
+    if (!_subTabVisibleCounts) _subTabVisibleCounts = {};
+    _subTabVisibleCounts[currentSubTab || 'top'] = marketVisibleCount;
     renderMarket();
     // Remove the load-more-btn after re-render (renderMarket recreates it)
 }
@@ -5380,8 +5413,17 @@ function switchSubTab(tab, btn) {
     currentSubTab = tab;
     // Sync legacy currentMarketTab
     currentMarketTab = tab === 'top' ? 'overview' : tab;
-    // Reset visible count when switching tabs
-    marketVisibleCount = MARKET_DEFAULT_LIMIT;
+    // NEWSFE-026 FIX: Preserve the user's "Load More" progress per sub-tab.
+    // Previously switchSubTab unconditionally reset marketVisibleCount to
+    // MARKET_DEFAULT_LIMIT (100), so a user who loaded 200+ coins in 'crypto'
+    // and switched to 'gainers' then back to 'crypto' would lose their loaded
+    // coins and see only 100 again. Now we persist the visible count per
+    // sub-tab in a map, so switching back restores the previous count.
+    if (!_subTabVisibleCounts) _subTabVisibleCounts = {};
+    if (!_subTabVisibleCounts[tab]) {
+        _subTabVisibleCounts[tab] = MARKET_DEFAULT_LIMIT;
+    }
+    marketVisibleCount = _subTabVisibleCounts[tab];
 
     // Update sub-tab active states
     document.querySelectorAll('.mkt-filter-chip').forEach(b => {
@@ -6373,6 +6415,40 @@ async function loadNews(force = false, append = false) {
             // Append: just re-render, scroll stays naturally
             renderNews(currentTabAtRender);
         }
+
+        // NEWSFE-006 + NEWSFE-007 FIX: Refresh dashboard important-news and
+        // the open news modal so AI summaries (which become ready via cron
+        // between polls) are reflected without requiring a page reload.
+        // Previously: dashboard important-news rendered once at bootstrap and
+        // never updated; news modal showed "در حال تولید..." forever even
+        // after the AI summary was generated. Now, after each successful
+        // loadNews (including the 180s poll), we re-render the dashboard
+        // important-news section (if it exists) and refresh the open news
+        // modal (if one is showing an article whose ai_status changed).
+        try {
+            // NEWSFE-007: Refresh dashboard important-news section
+            if (typeof renderImportantNewsFromCache === 'function') {
+                renderImportantNewsFromCache();
+            }
+            // NEWSFE-006: Refresh open news modal if showing an article that
+            // now has an AI summary ready (ai_status !== 'pending')
+            const modalEl = document.getElementById('news-modal');
+            if (modalEl && modalEl.style.display !== 'none') {
+                // Find the article currently shown in the modal by matching
+                // the title (set via innerText in openNewsModal/openNewsModalWith)
+                const titleEl = document.getElementById('news-modal-title');
+                const modalTitle = titleEl ? titleEl.innerText : null;
+                if (modalTitle) {
+                    const refreshed = newsCache.find(n => n.title === modalTitle);
+                    if (refreshed && refreshed.ai_status && refreshed.ai_status !== 'pending') {
+                        // Re-open the modal with the refreshed article data
+                        if (typeof openNewsModalWith === 'function') {
+                            openNewsModalWith(refreshed);
+                        }
+                    }
+                }
+            }
+        } catch (_) { /* non-fatal — UI refresh best-effort */ }
     } catch (e) {
         console.error('News error:', e);
         // ITEM 1 FIX: Don't overwrite with error state if we still have data
@@ -6757,6 +6833,18 @@ function openNewsFilterSheet() {
 function closeNewsFilterSheet() {
     const sheet = document.getElementById('ni-filter-sheet');
     if (sheet) sheet.style.display = 'none';
+    // NEWSFE-032 FIX: Update the filter dot indicator and re-render so the
+    // user sees the effect of any chip toggles they made before closing the
+    // sheet (e.g. via click-outside). Previously closeNewsFilterSheet only
+    // hid the sheet — the dot stayed invisible even when filters were active,
+    // and the news list didn't reflect the toggled filters until the user
+    // explicitly clicked "Apply". Now closing the sheet applies the filters.
+    const hasFilters = _niActiveFilters.sentiment.length || _niActiveFilters.priority.length ||
+                       _niActiveFilters.category.length || _niActiveFilters.time;
+    const dot = document.getElementById('ni-filter-dot');
+    if (dot) dot.style.display = hasFilters ? 'block' : 'none';
+    const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
+    renderNews(activeTab);
 }
 
 function applyNewsFilters() {
@@ -6887,8 +6975,26 @@ function shareNewsTo(platform) {
             break;
         case 'copy':
             if (navigator.clipboard) {
+                // NEWSFE-028 FIX: Add .catch() so clipboard rejection (permission
+                // denied, unsupported WebView, private mode) doesn't produce an
+                // unhandled promise rejection. Previously writeText() rejecting
+                // would silently fail with no user feedback. Now we show a toast
+                // on failure too, and fall back to the execCommand path.
                 navigator.clipboard.writeText(url).then(() => {
                     if (typeof showToast === 'function') showToast('لینک کپی شد');
+                }).catch(() => {
+                    // Clipboard API rejected — try execCommand fallback
+                    const input = document.createElement('input');
+                    input.value = url;
+                    document.body.appendChild(input);
+                    input.select();
+                    try {
+                        document.execCommand('copy');
+                        if (typeof showToast === 'function') showToast('لینک کپی شد');
+                    } catch (e) {
+                        if (typeof showToast === 'function') showToast('کپی لینک ناموفق بود');
+                    }
+                    document.body.removeChild(input);
                 });
             } else {
                 // Fallback
@@ -7574,7 +7680,7 @@ function renderCalendarV2() {
                     <div class="ni-cal-stat"><div class="ni-cal-stat-label">تأثیر</div><div class="ni-cal-stat-value">${impactLabels[impact] || impactLabels.medium}</div></div>
                 </div>
                 <div class="ni-cal-event-footer">
-                    <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}', '${escapeHtml(e.timestamp || '')}')"">
+                    <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}', '${escapeHtml(e.timestamp || '')}')">
                         ${hasReminder ? NI_ICONS.bell : NI_ICONS.bellOff}
                         <span>${hasReminder ? 'یادآور فعال' : 'یادآوری'}</span>
                     </button>
@@ -11094,8 +11200,15 @@ function switchTab(pageId, btn) {
         const aes = document.getElementById('analysis-empty-state');
         if (aes) aes.style.display = 'none';
         if (!tabLoaded.news) {
+            // NEWSFE-005 FIX: Don't set tabLoaded.news=true here synchronously.
+            // loadNews() is async and catches its own errors — if the fetch
+            // fails, newsCache stays empty and setting tabLoaded.news=true
+            // would prevent retry on the next News tab visit. loadImportantNews
+            // (called at bootstrap) and loadNews itself manage tabLoaded.news
+            // only on success (when newsCache.length > 0). Here we just kick
+            // off the load; the user sees the skeleton, and if it succeeds,
+            // the next visit will hit the cache path.
             loadNews();
-            tabLoaded.news = true;
         } else {
             // ROOT CAUSE FIX (F-7): Returning to News page should re-render
             // the active sub-tab, in case calendarEvents was updated in the
@@ -11131,7 +11244,19 @@ async function loadImportantNews() {
         // newsCache. Set tabLoaded.news=true so the first News tab click
         // doesn't re-call loadNews() (which would show skeleton + re-fetch).
         // The News tab will re-render from the already-populated newsCache.
-        tabLoaded.news = true;
+        //
+        // NEWSFE-005 FIX: Only set tabLoaded.news=true if loadNews actually
+        // populated newsCache. loadNews() catches its own errors internally
+        // and never throws — so on API failure (401, network error, empty
+        // response), newsCache stays empty. Previously tabLoaded.news was set
+        // unconditionally, which meant the user could never retry the News
+        // tab (switchTab saw tabLoaded.news=true → rendered from empty cache
+        // → "no news found" with no retry). Now, if newsCache is empty, we
+        // leave tabLoaded.news=false so the next News tab visit re-attempts
+        // the fetch.
+        if (newsCache.length > 0) {
+            tabLoaded.news = true;
+        }
         if (!newsCache.length) {
             container.innerHTML = `<div class="dc-empty">${t('dashboard_no_news')}</div>`;
             return;

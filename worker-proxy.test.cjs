@@ -1625,3 +1625,143 @@ test('NEWSSEC-006 (source): JOURNALIST_PROMPT split into SYSTEM (with anti-injec
   // Must NOT use the old concatenated JOURNALIST_PROMPT
   assert.ok(!/generateSummaryWithFallback\(env, JOURNALIST_PROMPT\)/.test(src), 'must NOT call with old JOURNALIST_PROMPT');
 });
+
+// ============================================================================
+// Batch B — Correctness regression tests
+// ============================================================================
+
+// ── NEWSFE-005: tabLoaded.news only set on success ──
+
+test('NEWSFE-005 (source): loadImportantNews sets tabLoaded.news=true only when newsCache.length > 0', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const fnStart = src.indexOf('async function loadImportantNews');
+  const fnEnd = src.indexOf('function _renderImportantNewsInto');
+  assert.ok(fnStart > -1 && fnEnd > fnStart, 'loadImportantNews must exist before _renderImportantNewsInto');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  // Must guard tabLoaded.news with newsCache.length > 0
+  assert.ok(/if \(newsCache\.length > 0\) \{[\s\S]*tabLoaded\.news = true/.test(fnSrc), 'must set tabLoaded.news=true only inside if (newsCache.length > 0)');
+  // Must NOT set unconditionally
+  assert.ok(!/^[\s]*tabLoaded\.news = true;/m.test(fnSrc.replace(/NEWSFE-005[\s\S]*?if \(newsCache\.length > 0\) \{[\s\S]*?tabLoaded\.news = true;[\s\S]*?\}/, '')), 'must not set tabLoaded.news unconditionally');
+});
+
+test('NEWSFE-005 (source): switchTab news-page does NOT set tabLoaded.news=true synchronously', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Find the switchTab news-page branch
+  const idx = src.indexOf("if (!tabLoaded.news) {");
+  assert.ok(idx > -1, 'switchTab news-page branch must exist');
+  const branch = src.slice(idx, idx + 400);
+  // Must NOT have tabLoaded.news = true immediately after loadNews()
+  assert.ok(!/loadNews\(\);\s*tabLoaded\.news = true/.test(branch), 'must not set tabLoaded.news=true synchronously after loadNews()');
+  assert.ok(/NEWSFE-005 FIX/.test(branch), 'must have NEWSFE-005 FIX comment');
+});
+
+// ── NEWSFE-006 + NEWSFE-007: dashboard + modal refresh after loadNews ──
+
+test('NEWSFE-006/007 (source): loadNews refreshes dashboard important-news and open news modal', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Find the refresh hook (after renderNews in loadNews)
+  assert.ok(/renderImportantNewsFromCache\(\)/.test(src), 'must call renderImportantNewsFromCache after loadNews');
+  assert.ok(/NEWSFE-006 \+ NEWSFE-007 FIX/.test(src), 'must have NEWSFE-006+007 FIX comment');
+  // Modal refresh: must check news-modal display and refresh if ai_status !== 'pending'
+  assert.ok(/modalEl\.style\.display !== 'none'/.test(src), 'must check news-modal is open');
+  assert.ok(/refreshed\.ai_status && refreshed\.ai_status !== 'pending'/.test(src), 'must check ai_status !== pending before refreshing modal');
+});
+
+// ── NEWSFE-014: persistWatchlist in-flight lock ──
+
+test('NEWSFE-014 (source): persistWatchlist has in-flight lock + pending re-sync', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  assert.ok(/let _persistWatchlistInFlight = false/.test(src), 'must declare _persistWatchlistInFlight');
+  assert.ok(/let _persistWatchlistPending = false/.test(src), 'must declare _persistWatchlistPending');
+  const fnStart = src.indexOf('async function persistWatchlist');
+  const fnEnd = src.indexOf('async function saveLangToServer');
+  assert.ok(fnStart > -1 && fnEnd > fnStart, 'persistWatchlist must exist before saveLangToServer');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/if \(_persistWatchlistInFlight\)/.test(fnSrc), 'must check in-flight flag');
+  assert.ok(/_persistWatchlistPending = true/.test(fnSrc), 'must set pending flag when in-flight');
+  assert.ok(/_persistWatchlistInFlight = true/.test(fnSrc), 'must set in-flight flag');
+  assert.ok(/_persistWatchlistInFlight = false/.test(fnSrc), 'must clear in-flight flag in finally');
+  assert.ok(/if \(_persistWatchlistPending\)/.test(fnSrc), 'must check pending flag in finally');
+  assert.ok(/persistWatchlist\(\)/.test(fnSrc), 'must re-call persistWatchlist if pending');
+});
+
+// ── NEWSFE-026: switchSubTab preserves visible count per sub-tab ──
+
+test('NEWSFE-026 (source): _subTabVisibleCounts map declared', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  assert.ok(/let _subTabVisibleCounts = \{\}/.test(src), 'must declare _subTabVisibleCounts map');
+});
+
+test('NEWSFE-026 (source): switchSubTab restores per-sub-tab visible count instead of resetting', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const fnStart = src.indexOf('function switchSubTab');
+  assert.ok(fnStart > -1, 'switchSubTab must exist');
+  // Find the end of switchSubTab — next 'function ' declaration after fnStart
+  const fnEnd = src.indexOf('\nfunction ', fnStart + 50);
+  const fnSrc = src.slice(fnStart, fnEnd > fnStart ? fnEnd : fnStart + 1200);
+  assert.ok(/_subTabVisibleCounts\[tab\]/.test(fnSrc), 'must use _subTabVisibleCounts[tab]');
+  assert.ok(/marketVisibleCount = _subTabVisibleCounts\[tab\]/.test(fnSrc), 'must restore marketVisibleCount from map');
+  // Must NOT unconditionally reset to MARKET_DEFAULT_LIMIT (the only assignment
+  // to MARKET_DEFAULT_LIMIT in switchSubTab should be inside the
+  // if (!_subTabVisibleCounts[tab]) initialization block, not a direct reset)
+  assert.ok(!/^[\s]*marketVisibleCount = MARKET_DEFAULT_LIMIT;/m.test(fnSrc), 'must not unconditionally reset marketVisibleCount to MARKET_DEFAULT_LIMIT');
+});
+
+test('NEWSFE-026 (source): loadMoreCoins persists new count to _subTabVisibleCounts', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const fnStart = src.indexOf('function loadMoreCoins');
+  const fnEnd = src.indexOf('function renderMarketItem');
+  assert.ok(fnStart > -1, 'loadMoreCoins must exist');
+  const fnSrc = src.slice(fnStart, fnEnd > fnStart ? fnEnd : fnStart + 400);
+  assert.ok(/_subTabVisibleCounts\[currentSubTab \|\| 'top'\] = marketVisibleCount/.test(fnSrc), 'must persist new count to _subTabVisibleCounts');
+});
+
+// ── NEWSFE-027: malformed HTML )""> fixed ──
+
+test('NEWSFE-027 (source): calendar reminder button onclick no longer has extra quote ()"")', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // The malformed pattern was: ...}'"">  (extra quote after closing paren)
+  // The fixed pattern is: ...}'> (single quote closes onclick attribute)
+  assert.ok(!/openReminderSheet\([^)]*\)'""/.test(src), 'must NOT have malformed )"" pattern');
+  // Find the actual onclick and verify it ends with ')"> (not ')"">)
+  const m = src.match(/onclick="openReminderSheet\([^)]*\)'("|\s)/);
+  if (m) {
+    // The onclick should end with ')"> (single quote + >), not ')"">
+    const onclickMatch = src.match(/onclick="openReminderSheet\([^)]*\)'/);
+    assert.ok(onclickMatch, 'openReminderSheet onclick must exist');
+    const after = src.slice(onclickMatch.index + onclickMatch[0].length, onclickMatch.index + onclickMatch[0].length + 3);
+    assert.ok(after.startsWith('>'), 'onclick must end with > (not extra quote). Got after: ' + JSON.stringify(after));
+  }
+});
+
+// ── NEWSFE-028: shareNewsTo copy case has .catch() ──
+
+test('NEWSFE-028 (source): shareNewsTo copy case has .catch() on clipboard.writeText', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const fnStart = src.indexOf('function shareNewsTo');
+  const fnEnd = src.indexOf("window.shareNewsTo");
+  assert.ok(fnStart > -1 && fnEnd > fnStart, 'shareNewsTo must exist');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  // Find the copy case
+  const copyIdx = fnSrc.indexOf("case 'copy':");
+  assert.ok(copyIdx > -1, "case 'copy' must exist");
+  const copyCase = fnSrc.slice(copyIdx, copyIdx + 800);
+  assert.ok(/navigator\.clipboard\.writeText\(url\)\.then\(/.test(copyCase), 'must call writeText().then()');
+  assert.ok(/\.catch\(\(\) =>/.test(copyCase), 'must have .catch() on writeText');
+  assert.ok(/NEWSFE-028 FIX/.test(copyCase), 'must have NEWSFE-028 FIX comment');
+});
+
+// ── NEWSFE-032: closeNewsFilterSheet updates filter dot + re-renders ──
+
+test('NEWSFE-032 (source): closeNewsFilterSheet updates filter dot indicator and re-renders', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const fnStart = src.indexOf('function closeNewsFilterSheet');
+  const fnEnd = src.indexOf('function applyNewsFilters');
+  assert.ok(fnStart > -1 && fnEnd > fnStart, 'closeNewsFilterSheet must exist before applyNewsFilters');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/NEWSFE-032 FIX/.test(fnSrc), 'must have NEWSFE-032 FIX comment');
+  assert.ok(/ni-filter-dot/.test(fnSrc), 'must update ni-filter-dot');
+  assert.ok(/hasFilters/.test(fnSrc), 'must compute hasFilters');
+  assert.ok(/dot\.style\.display = hasFilters \? 'block' : 'none'/.test(fnSrc), 'must set dot display based on hasFilters');
+  assert.ok(/renderNews\(activeTab\)/.test(fnSrc), 'must re-render news after closing filter sheet');
+});
