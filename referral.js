@@ -1345,6 +1345,7 @@ const ReferralApp = (() => {
   // The actual reward is determined by the backend POST /api/wheel/spin;
   // the frontend just animates to a segment and shows the result.
   // 8 segments, alternating colors, 45° each.
+  // WHEEL-005 FIX: Segments now match backend reward pool (1,2,3,5,10,20,50,jackpot)
   const WHEEL_SEGMENTS = [
     { label: '+1 AB',   color: '#F5A623', alt: '#FFCC4D' },
     { label: '+3 AB',   color: '#16C784', alt: '#22D39A' },
@@ -1352,8 +1353,8 @@ const ReferralApp = (() => {
     { label: 'JACKPOT', color: '#FF4D4D', alt: '#FF6B6B' },
     { label: '+2 AB',   color: '#F97316', alt: '#FB923C' },
     { label: '+10 AB',  color: '#A78BFA', alt: '#BFA0FB' },
-    { label: '+1 AB',   color: '#22D3EE', alt: '#67E8F9' },
-    { label: '+25 AB',  color: '#FBBF24', alt: '#FCD34D' },
+    { label: '+20 AB',  color: '#22D3EE', alt: '#67E8F9' },
+    { label: '+50 AB',  color: '#FBBF24', alt: '#FCD34D' },
   ];
 
   function getWheelSvg(rotationDeg = 0) {
@@ -1523,8 +1524,10 @@ const ReferralApp = (() => {
     // Map reward to a segment index for animation
     // Find best matching segment by label content
     let targetSegIdx = 0;
-    if (rewardType === 'jackpot' || amount >= 25) {
-      targetSegIdx = 3; // JACKPOT segment
+    if (rewardType === 'jackpot' || amount >= 50) {
+      targetSegIdx = 7; // +50 (or JACKPOT visual)
+    } else if (amount >= 20) {
+      targetSegIdx = 6; // +20
     } else if (amount >= 10) {
       targetSegIdx = 5; // +10
     } else if (amount >= 5) {

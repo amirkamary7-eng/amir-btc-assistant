@@ -2015,7 +2015,6 @@ async function retryFailedWheelRewards(env) {
               to_char(wh.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS spin_date_str
        FROM wheel_history wh
        WHERE wh.reward_amount > 0
-       AND wh.created_at > NOW() - INTERVAL '24 hours'
        AND NOT EXISTS (
          SELECT 1 FROM token_transactions tt
          WHERE tt.user_id = wh.user_id
@@ -2023,6 +2022,7 @@ async function retryFailedWheelRewards(env) {
          AND tt.ref_id = 'wheel_' || wh.user_id || '_' || to_char(wh.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') || '_' || wh.spin_id
          AND tt.status = 'completed'
        )
+       ORDER BY wh.created_at ASC
        LIMIT 20`,
     );
     if (result.rows.length === 0) return;

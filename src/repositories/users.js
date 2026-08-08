@@ -350,7 +350,10 @@ export function createUserRepository(deps) {
     await cascadeDelete('calendar_reminders',
       'DELETE FROM calendar_reminders WHERE user_id = $1', [uid]);
 
-    // 10. wheel_spins
+    // 10. wheel_history (must be before wheel_spins due to FK)
+    await cascadeDelete('wheel_history',
+      'DELETE FROM wheel_history WHERE user_id = $1', [uid]);
+    // 11. wheel_spins
     await cascadeDelete('wheel_spins',
       'DELETE FROM wheel_spins WHERE user_id = $1', [uid]);
 

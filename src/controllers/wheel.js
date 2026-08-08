@@ -158,16 +158,24 @@ export function createWheelHandlers(deps) {
       let rewardResult = { success: false, newBalance: null, txId: null, idempotent: false };
       if (spinResult.reward.amount > 0) {
         try {
-          rewardResult = await economyService.grantReward({
-            userId: authState.user.id,
-            amount: spinResult.reward.amount,
-            rewardType: spinResult.reward.type,
-            description: `Wheel reward: ${spinResult.reward.label || spinResult.reward.type}`,
-            refId: rewardRefId,
-            metadata: { spin_id: spinResult.spin_id, spin_type: spinResult.spin_type, reward_label: spinResult.reward.label },
-            auditInfo: { actor: 'system', ip: request.headers.get('cf-connecting-ip') || null },
-            env,
-          });
+          // WHEEL-003 FIX: Handle 'spin' type rewards by granting an actual
+          // extra spin, not calling grantReward (which rejects 'spin' type).
+          if (spinResult.reward.type === 'spin') {
+            // Grant a premium spin as the "extra spin" reward
+            await wheelRepo.grantPremiumSpin(env, authState.user.id, 'wheel_reward');
+            rewardResult = { success: true, newBalance: null, txId: null, idempotent: false };
+          } else {
+            rewardResult = await economyService.grantReward({
+              userId: authState.user.id,
+              amount: spinResult.reward.amount,
+              rewardType: spinResult.reward.type,
+              description: `Wheel reward: ${spinResult.reward.label || spinResult.reward.type}`,
+              refId: rewardRefId,
+              metadata: { spin_id: spinResult.spin_id, spin_type: spinResult.spin_type, reward_label: spinResult.reward.label },
+              auditInfo: { actor: 'system', ip: request.headers.get('cf-connecting-ip') || null },
+              env,
+            });
+          }
         } catch (e) {
           // ROOT CAUSE FIX (3.2): If reward fails, log clearly. The spin is
           // already consumed — a cron retry will credit the reward later.

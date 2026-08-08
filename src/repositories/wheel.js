@@ -168,65 +168,45 @@ export function createWheelRepository(deps) {
    */
   async function getOrCreateDailySpins(env, userId, maxSpins = 3) {
     const uid = String(userId);
-    // ROOT-CAUSE FIX: Use Tehran date, NOT UTC date.
-    // This ensures spins reset at 00:00 Asia/Tehran (calendar reset),
-    // not at 00:00 UTC (which is 03:30 Tehran).
     const tehranToday = getTehranDateString();
     const lockKey = _hashLockKey(uid + '_' + tehranToday);
-    // expires_at = next Tehran midnight (so spins expire at 00:00 Tehran tomorrow)
     const expiresAtISO = getNextTehranMidnightISO();
 
-    if (!queryDbTransaction) {
-      // Fallback: no transaction support — use simple queries
-      const availResult = await queryDb(env,
-        `SELECT id, status FROM wheel_spins
-         WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-         AND spin_date = $2::date AND status = 'available'`,
-        [uid, tehranToday]);
-      const availableCount = availResult.rows.length;
-      const needed = Math.max(0, maxSpins - availableCount);
-      for (let i = 0; i < needed; i++) {
-        await queryDb(env,
-          `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
-           VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), $2, $3::date)`,
-          [uid, expiresAtISO, tehranToday]);
-      }
-      const finalResult = await queryDb(env,
-        `SELECT id, status FROM wheel_spins
-         WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-         AND spin_date = $2::date AND status = 'available'`,
-        [uid, tehranToday]);
-      return { spins: finalResult.rows, total_available: finalResult.rows.length, total_allowed: maxSpins };
-    }
+    // WHEEL-001 + WHEEL-002 FIX: Count ALL spins (available + used) and
+    // do INSERTs inside the SAME transaction as the advisory lock.
+    // Previously: only status='available' was counted (bypassable) and
+    // INSERTs ran outside the transaction (race condition).
 
-    // Use advisory lock + COUNT + INSERT in one atomic transaction
-    const results = await queryDbTransaction(env, [
+    const txnQueries = [
+      { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
       {
-        sql: `SELECT pg_advisory_xact_lock($1)`,
-        params: [lockKey],
-      },
-      {
-        // Count today's available spins (Tehran date)
         sql: `SELECT COUNT(*)::int AS cnt FROM wheel_spins
               WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-              AND spin_date = $2::date AND status = 'available'`,
+              AND spin_date = $2::date AND status IN ('available', 'used')`,
         params: [uid, tehranToday],
       },
-    ]);
+    ];
 
-    const availableCount = results[1].rows[0]?.cnt || 0;
-    const needed = Math.max(0, maxSpins - availableCount);
+    const results = await queryDbTransaction(env, txnQueries);
+    const totalCount = results[1].rows[0]?.cnt || 0;
+    const needed = Math.max(0, maxSpins - totalCount);
 
-    // Create needed spin rows (each in its own query — they're inside the
-    // advisory lock so no race condition)
-    for (let i = 0; i < needed; i++) {
-      await queryDb(env,
-        `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
-         VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), $2, $3::date)`,
-        [uid, expiresAtISO, tehranToday]);
+    if (needed > 0) {
+      // Insert needed spins INSIDE a new transaction (with lock held)
+      const insertQueries = [
+        { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
+      ];
+      for (let i = 0; i < needed; i++) {
+        insertQueries.push({
+          sql: `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
+                VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), $2, $3::date)`,
+          params: [uid, expiresAtISO, tehranToday],
+        });
+      }
+      await queryDbTransaction(env, insertQueries);
     }
 
-    // Return all available spins for today (Tehran date)
+    // Return all available spins for today
     const finalResult = await queryDb(env,
       `SELECT id, status FROM wheel_spins
        WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
@@ -316,7 +296,10 @@ export function createWheelRepository(deps) {
     if (totalWeight <= 0) {
       return rewardPool[0]; // All weights are 0 — return first reward
     }
-    let random = Math.random() * totalWeight;
+    // WHEEL-006 FIX: Use crypto-secure random instead of Math.random()
+    const randBuf = new Uint32Array(1);
+    crypto.getRandomValues(randBuf);
+    let random = (randBuf[0] / 0x100000000) * totalWeight;
     for (const reward of rewardPool) {
       random -= reward.weight;
       if (random <= 0) return reward;
