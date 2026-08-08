@@ -4317,6 +4317,21 @@ async function processOneArticleSummary(env, pool = null) {
   // If Worker crashes mid-processing, requeueStaleQueueItems (or next tick) will
   // eventually retry it (status stays 'processing' but no other tick touches it
   // until a cleanup pass resets stale 'processing' items back to 'pending').
+  //
+  // NEWSBE-002 NOTE (UNPROVEN — best-effort claim): Cloudflare KV is eventually
+  // consistent, so two concurrent cron ticks (e.g. */5 and */15 overlapping at
+  // :00/:15/:30/:45) could BOTH read the queue, BOTH see the item as eligible,
+  // BOTH set status='processing', and BOTH save — with the last write winning.
+  // The reload-and-refind-by-URL below (line ~4327) catches this IF the KV
+  // write has propagated by the time the second tick reloads, but there's a
+  // small window (1-3s) where it may not have. The _claim_expires_at cleanup
+  // (10 min) provides eventual recovery but not duplicate-AI prevention in
+  // that window. A complete fix requires a DB advisory lock (SELECT FOR UPDATE
+  // SKIP LOCKED) or Durable Objects, which is an architecture change beyond
+  // the scope of this surgical fix phase. The current claim mechanism is
+  // best-effort and reduces (but does not eliminate) duplicate AI calls.
+  // Runtime test needed: instrument url+provider+attempt_id, trigger cron at
+  // :15, check /api/news-ai-pending for duplicate processing entries.
   article.status = 'processing';
   article.summary_started_at = now;
   article._claim_expires_at = now + 10 * 60 * 1000; // 10 min claim TTL

@@ -1875,3 +1875,44 @@ test('NEWSSEC-011 (source): processOneArticleSummary validates article URL schem
   assert.ok(/\/\^https\?:\\\//i.test(block), 'must validate ^https?:// scheme');
   assert.ok(/invalid_url_scheme/.test(block), 'must requeue with invalid_url_scheme on failure');
 });
+
+// ============================================================================
+// Batch D — Cron/AI documentation + Batch E — Performance
+// ============================================================================
+
+// ── NEWSBE-002: KV atomic claim documented as best-effort ──
+
+test('NEWSBE-002 (source): processOneArticleSummary claim documents KV eventual-consistency limitation', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // Find the claim block in processOneArticleSummary — the NEWSBE-002 NOTE
+  // comment is large, so search a wide window.
+  const idx = src.indexOf('PHASE B FIX (AI-1): Atomic claim');
+  assert.ok(idx > -1, 'atomic claim block must exist');
+  const block = src.slice(idx, idx + 2500);
+  assert.ok(/NEWSBE-002 NOTE/.test(block), 'must have NEWSBE-002 NOTE documenting the limitation');
+  assert.ok(/UNPROVEN/.test(block), 'must mark as UNPROVEN');
+  assert.ok(/best-effort/.test(block), 'must document as best-effort');
+  // "eventually consistent" spans a line break in the comment ("eventually\n  // consistent")
+  // and there's an earlier "eventually retry" that would match a naive /eventually\s+consistent/.
+  // Use [\s\S]*? to match across the line break to the "consistent" word.
+  assert.ok(/eventually[\s\S]*?consistent/.test(block), 'must document KV eventual consistency');
+  assert.ok(/Durable Objects|DB advisory lock/.test(block), 'must mention the proper fix (Durable Objects / DB advisory lock)');
+  assert.ok(/Runtime test needed/.test(block), 'must document the runtime test needed');
+});
+
+// ── NEWSFE-009: market search debounce ──
+
+test('NEWSFE-009 (source): market-search input has 250ms debounce', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Find the market-search event listener — the NEWSFE-009 FIX comment is
+  // BEFORE the addEventListener call (3 lines up), so include enough context.
+  const idx = src.indexOf("getElementById('market-search')?.addEventListener('input'");
+  assert.ok(idx > -1, 'market-search input listener must exist');
+  // Include 500 chars before (for the comment) and 600 after (for the body)
+  const block = src.slice(Math.max(0, idx - 500), idx + 600);
+  assert.ok(/NEWSFE-009 FIX/.test(block), 'must have NEWSFE-009 FIX comment');
+  assert.ok(/_marketSearchTimer/.test(block), 'must use _marketSearchTimer variable');
+  assert.ok(/clearTimeout\(_marketSearchTimer\)/.test(block), 'must clearTimeout on new input');
+  assert.ok(/setTimeout\(\(\) => \{/.test(block), 'must use setTimeout for debounce');
+  assert.ok(/250/.test(block), 'must use 250ms debounce delay');
+});

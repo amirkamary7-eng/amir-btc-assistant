@@ -5465,10 +5465,19 @@ function renderBtcPairsSection() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // NEWSFE-009 FIX: Debounce the market-search input so we don't call
+    // renderMarket() on every keystroke. renderMarket re-renders the full
+    // coin list DOM (~100 rows), which causes visible jank on fast typing.
+    // 250ms debounce means we only re-render after the user pauses typing.
+    let _marketSearchTimer = null;
     document.getElementById('market-search')?.addEventListener('input', (e) => {
         searchTerm = e.target.value.toLowerCase().trim();
         _lastSearchTerm = searchTerm;
-        renderMarket();
+        if (_marketSearchTimer) clearTimeout(_marketSearchTimer);
+        _marketSearchTimer = setTimeout(() => {
+            renderMarket();
+            _marketSearchTimer = null;
+        }, 250);
     });
     // Initialize analysis toolbar (search, sort, timeframe chips)
     initAnalysisToolbar();
