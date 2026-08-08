@@ -333,12 +333,38 @@ const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
 
 
+/**
+ * P1-06 FIX (NEWSFE-001): Safely parse a JSON string from localStorage.
+ * If the stored value is missing, empty, or malformed (corrupted by a partial
+ * write during a crash, browser quota cutoff, or manual editing), return the
+ * fallback instead of throwing. Previously, module-level JSON.parse(localStorage
+ * .getItem(...)) calls would throw a SyntaxError that propagated to the script
+ * parser and ABORTED the entire app.js load — causing a blank page.
+ *
+ * @param {string} key - localStorage key
+ * @param {*} fallback - Value to return on missing/corrupt JSON (default [])
+ * @returns {*} Parsed value or fallback
+ */
+function safeJsonParseLocalStorage(key, fallback = []) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return fallback;
+        const parsed = JSON.parse(raw);
+        return parsed ?? fallback;
+    } catch (e) {
+        // Corrupted JSON — remove the bad key so future writes succeed cleanly.
+        try { localStorage.removeItem(key); } catch {}
+        return fallback;
+    }
+}
+
+
 let currentLang = 'fa';
 let watchlist = [];
-let analyses = JSON.parse(localStorage.getItem('analyses') || '[]');
+let analyses = safeJsonParseLocalStorage('analyses', []);
 let tickets = [];
 let notifications = []; // DB-backed — loaded from /api/notifications
-let alerts = JSON.parse(localStorage.getItem('price_alerts') || '[]');
+let alerts = safeJsonParseLocalStorage('price_alerts', []);
 let currentAlertDirection = 'above';
 let _previousPrices = {}; // Symbol → price tracking for cross-check alerts
 const MARKET_DEFAULT_LIMIT = 100;
@@ -379,7 +405,8 @@ let analysisTimeframeFilter = 'all';
 let analysisCategoryFilter = 'all'; // all, crypto, forex
 let analysisShowSavedOnly = false;
 // ── Bookmarked analysis IDs (persisted in localStorage) ──
-let analysisBookmarks = JSON.parse(localStorage.getItem('analysisBookmarks') || '[]');
+// P1-06 FIX (NEWSFE-001): guarded via safeJsonParseLocalStorage
+let analysisBookmarks = safeJsonParseLocalStorage('analysisBookmarks', []);
 let sessionId = localStorage.getItem('app_session_id') || null;
 const tabLoaded = { dashboard: false, market: false, analysis: false, news: false, profile: false };
 let calendarEvents = [];
@@ -3929,7 +3956,20 @@ const Cache = {
  */
 function escapeHtml(str) {
     if (!str) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    // P1-01 FIX (NEWSSEC-001): Canonical escapeHtml — escapes ALL 5 HTML-special
+    // characters (& < > " ') so it is safe in HTML text, double-quoted attributes
+    // (src="..."), single-quoted attributes (onclick='...'), and single-quoted
+    // JS string contexts (onclick="fn('...')"). The previous DOM-based duplicate
+    // definition at the bottom of this file (which only escaped & < >) was
+    // shadowing this one — removed. Callers that interpolate into JS string
+    // contexts (onclick="openReminderSheet('...')") rely on ' being escaped to
+    // &#39; so a value containing ' cannot break out of the string.
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 /**
@@ -6007,6 +6047,14 @@ let newsPage = 1;
 let newsHasMore = false;
 let newsTotalCount = 0;
 let categoryCounts = { all: 0, crypto: 0, forex: 0 };
+// P1-07 FIX (NEWSFE-004): Request generation counter for loadNews.
+// Each loadNews() call increments _newsLoadGen and captures its token at start.
+// Before applying the fetched result to newsCache, the handler checks if its
+// token is still the latest. This prevents a stale response (e.g. from a
+// 180s poll returning page-1 non-append) from overwriting a newer append
+// (e.g. user's "Load More" page 4). Mirrors the _detailLoadToken pattern used
+// by openCoinDetail and _notifReqSeq used by loadNotificationsFromServer.
+let _newsLoadGen = 0;
 // M1 FIX: track whether the last news fetch failed due to auth (401).
 // When true, renderNews shows "Open in Telegram" instead of misleading "no news".
 let _newsAuthFailed = false;
@@ -6018,7 +6066,9 @@ let currentCalCountry = 'all';
 
 // News Intelligence — new state for filters, saved, hero slider, search
 let _niActiveFilters = { sentiment: [], priority: [], category: [], time: null };
-let _niSavedNews = JSON.parse(localStorage.getItem('ni_saved_news') || '[]');
+// P1-06 FIX (NEWSFE-001): guarded via safeJsonParseLocalStorage — corrupted
+// localStorage no longer aborts app.js load.
+let _niSavedNews = safeJsonParseLocalStorage('ni_saved_news', []);
 let _niHeroSlides = [];
 let _niHeroIndex = 0;
 let _niHeroTimer = null;
@@ -6027,7 +6077,7 @@ let _niHeroDragActive = false;
 let _niCurrentSearchQuery = '';
 let _niCurrentReminderEvent = null;
 let _niCurrentShareNews = null;
-let _niCalendarReminders = JSON.parse(localStorage.getItem('ni_cal_reminders') || '{}');
+let _niCalendarReminders = safeJsonParseLocalStorage('ni_cal_reminders', {});
 
 // SVG icon constants for news (Lucide-style, consistent stroke weight)
 const NI_ICONS = {
@@ -6141,6 +6191,16 @@ function setupInfiniteScroll() {
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
 async function loadNews(force = false, append = false) {
+    // P1-07 FIX (NEWSFE-004): Assign a generation token to this call. Before
+    // applying the fetched result to newsCache, we check if this token is still
+    // the latest. If a newer loadNews() call started while we were fetching
+    // (e.g. user clicked "Load More" page 4 while a 180s poll for page 1 was
+    // in-flight), the older response is discarded so it cannot overwrite the
+    // newer state. This also prevents the poll from destroying pages 2,3,...
+    // that the user loaded via "Load More": the poll (non-append, page 1) and
+    // the append (page N) both capture their own token; whichever started LAST
+    // wins, and the older one's result is ignored.
+    const myToken = ++_newsLoadGen;
     try {
         if (!force && !append) {
             const cached = Cache.get('news');
@@ -6234,6 +6294,19 @@ async function loadNews(force = false, append = false) {
                 const currentTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
                 renderNews(currentTab);
             }
+            return;
+        }
+
+        // P1-07 FIX (NEWSFE-004): Stale-response guard. If a NEWER loadNews()
+        // call started while we were awaiting the fetch (e.g. the 180s poll
+        // started AFTER the user's "Load More" append), discard this result so
+        // it cannot overwrite the newer state. This specifically prevents:
+        //   1. A non-append poll (page 1) overwriting an append (page N) that
+        //      started later — which would destroy the user's loaded pages 2,3,...
+        //   2. An older append (page 2) overwriting a newer non-append (page 1)
+        //      that started after — which would corrupt pagination state.
+        // The token check is AFTER the await, so it catches in-flight races.
+        if (myToken !== _newsLoadGen) {
             return;
         }
 
@@ -7758,7 +7831,9 @@ function openNewsModal(idx) {
 
     const linkEl = el('news-modal-link');
     if (linkEl) {
-        linkEl.href = n.url || '#';
+        // P1-04 FIX (NEWSSEC-004): Sanitize URL scheme — only http/https allowed.
+        // Prevents javascript:/data:/vbscript: URLs from executing on click.
+        linkEl.href = sanitizeNewsUrl(n.url);
         // Keep the icon + text, just update text
         const spanEl = linkEl.querySelector('span');
         if (spanEl) spanEl.innerText = t('view_source');
@@ -7776,6 +7851,32 @@ function escapeHtmlForNews(text) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/\n/g, '<br>');
+}
+
+/**
+ * P1-04 FIX (NEWSSEC-004): Sanitize a news article URL before assigning it to
+ * an anchor's href. Only http: and https: schemes are allowed — all others
+ * (javascript:, data:, vbscript:, file:, etc.) are replaced with '#' so they
+ * cannot execute when the user clicks the link.
+ *
+ * The URL comes from RSS <link> content (external/untrusted). Without this
+ * check, a compromised RSS feed could inject `javascript:alert(...)` as an
+ * article URL, and clicking "view source" would execute the payload.
+ *
+ * @param {string} url - Raw URL from news article
+ * @returns {string} Safe URL (http/https) or '#' if unsafe/empty
+ */
+function sanitizeNewsUrl(url) {
+    if (!url || typeof url !== 'string') return '#';
+    const trimmed = url.trim();
+    if (!trimmed) return '#';
+    // Use a case-insensitive scheme check. Allow only http(s).
+    // Relative URLs (starting with / or ./) are also safe — but news article
+    // links are always absolute, so we reject relatives too for defense-in-depth.
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    return '#';
 }
 
 /**
@@ -9135,8 +9236,13 @@ async function checkAlerts() {
     const alertSymbols = [...new Set(userAlerts.map(a => a.symbol))];
 
     if (API_BASE && !isGuestUserId(userId) && !isPendingTelegramUserId(userId) && alertSymbols.length > 0) {
-        // Fetch fresh prices for up to 20 alert symbols in ONE request
-        const symbolsToRefresh = alertSymbols.slice(0, 20);
+        // Fetch fresh prices for up to 15 alert symbols in ONE request.
+        // P1-09 FIX (NEWSBE-020): Reduced from 20 to 15 to match the backend
+        // /api/market/prices slice(0, 15). The backend enforces 15 to stay
+        // under Cloudflare Free plan's 50-subrequest limit (15 × 3 exchanges
+        // = 45 worst case). Any alert symbol beyond the 15th still displays
+        // via the in-memory priceMap built from allCoins/allForexPairs above.
+        const symbolsToRefresh = alertSymbols.slice(0, 15);
         try {
             const data = await apiFetch(`/api/market/prices?symbols=${encodeURIComponent(symbolsToRefresh.join(','))}`);
             if (data && data.status === 'success' && data.prices) {
@@ -10064,14 +10170,12 @@ function toggleAccordion(headerEl) {
     item.classList.toggle('open');
 }
 
-/**
- * HTML escape helper.
- */
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = String(text || '');
-    return div.innerHTML;
-}
+// P1-01 FIX (NEWSSEC-001): Removed the duplicate DOM-based escapeHtml definition
+// that was here. It only escaped & < > (via textContent→innerHTML) and SHADOWED
+// the canonical regex-based escapeHtml defined at the top of this file (which
+// escapes & < > " '). The shadowing made every escapeHtml call site vulnerable
+// to attribute-injection XSS because " and ' were left unescaped. All callers
+// now use the canonical definition above.
 
 /**
  * Content Editor (Admin)
@@ -11140,7 +11244,8 @@ function openNewsModalWith(n) {
     }
     const linkEl = el('news-modal-link');
     if (linkEl) {
-        linkEl.href = n.url || '#';
+        // P1-04 FIX (NEWSSEC-004): Sanitize URL scheme — only http/https allowed.
+        linkEl.href = sanitizeNewsUrl(n.url);
         const spanEl = linkEl.querySelector('span');
         if (spanEl) spanEl.innerText = t('view_source');
     }
@@ -11522,9 +11627,15 @@ function renderDashboardHeatmap() {
         }
 
         const changeStr = (change >= 0 ? '+' : '') + change.toFixed(2) + '%';
-        const safeSymbol = String(coin.symbol).replace(/</g, '&lt;').substring(0, 6);
+        // P1-02 FIX (NEWSSEC-002): safeSymbol now escapes ALL HTML-special chars
+        // (& < > " ') via escapeHtml and is used BOTH for display AND for the
+        // onclick JS string context. Previously coin.symbol was interpolated RAW
+        // into onclick="openCoinDetail('${coin.symbol}')" — a symbol containing
+        // ');alert(1);// would break out of the JS string and execute. Now the
+        // escaped value cannot break out because ' is escaped to &#39;.
+        const safeSymbol = escapeHtml(String(coin.symbol).substring(0, 20));
 
-        return `<div class="hm-cell ${sizeClass}" style="background:${bgColor};border-color:${borderColor};color:${textColor};" onclick="openCoinDetail('${coin.symbol}')" role="button" tabindex="0">
+        return `<div class="hm-cell ${sizeClass}" style="background:${bgColor};border-color:${borderColor};color:${textColor};" onclick="openCoinDetail('${safeSymbol}')" role="button" tabindex="0">
             <span class="hm-symbol">${safeSymbol}</span>
             <span class="hm-change">${changeStr}</span>
         </div>`;

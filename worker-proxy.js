@@ -3337,12 +3337,20 @@ function classifySentiment(title, description) {
 }
 
 async function fetchFarsiNews(env, categoryFilter) {
-  // Cache key includes category filter for per-category caching
-  const cacheKey = categoryFilter
-    ? `${FARSI_NEWS_CACHE_KEY}:${categoryFilter}`
-    : FARSI_NEWS_CACHE_KEY;
-
-  const cachedNews = await readAppCache(env, cacheKey);
+  // P1-08 FIX (NEWSBE-001): Read from the BASE cache key (FARSI_NEWS_CACHE_KEY),
+  // NOT a category-specific key. The write path (fetchFarsiNews line ~3407 and
+  // processNewsAIBatch lines ~5636/5675) ALWAYS writes to the base key with the
+  // FULL unfiltered article list. Category filtering is done IN MEMORY after
+  // the cache hit (line 3363: enriched.filter(a => a.category === categoryFilter)).
+  //
+  // Previously this read from `news:farsi:${categoryFilter}` (a category-specific
+  // key) which was NEVER written to — so every category-filtered request
+  // (/api/farsi-news?category=crypto|forex|economy) ALWAYS missed the cache and
+  // triggered the full RSS fetch (7 subrequests) + translation pipeline (up to
+  // 21 m2m100 calls). Now all requests share the single base cache entry,
+  // matching the write path. The categoryFilter is still applied in-memory on
+  // the returned data, so the response is correct.
+  const cachedNews = await readAppCache(env, FARSI_NEWS_CACHE_KEY);
   if (cachedNews) {
     try {
       const parsed = JSON.parse(cachedNews);
@@ -9385,7 +9393,16 @@ export default {
           return jsonResponse({ status: 'success', prices: {} }, {}, env);
         }
 
-        const symbols = symbolsParam.split(',').map(s => s.trim()).filter(Boolean).slice(0, 20);
+        // P1-09 FIX (NEWSBE-020): Reduced from 20 to 15 symbols to stay under
+        // Cloudflare Free plan's 50-subrequest limit. fetchSpotPriceUsd does
+        // Promise.allSettled on 3 exchanges (bybit, okx, mexc) per symbol on
+        // cache miss — worst case 15 × 3 = 45 subrequests < 50. (Previously
+        // 20 × 3 = 60 > 50 → "Too many subrequests" 500 error.) This matches
+        // the FETCH_BATCH=15 already used by the alerts cron path, and the
+        // frontend (app.js) has been updated to slice(0, 15) accordingly.
+        // Users rarely have >15 active alerts, and the in-memory price map
+        // (built from allCoins/allForexPairs) covers any symbol not sent here.
+        const symbols = symbolsParam.split(',').map(s => s.trim()).filter(Boolean).slice(0, 15);
         const results = await Promise.allSettled(
           symbols.map(async (sym) => {
             try {

@@ -1134,3 +1134,331 @@ test('SETTINGS-003 (behavioral): POST /api/notifications/read-all issues UPDATE 
   assert.ok(/read_status = false/i.test(update), 'UPDATE must still filter AND read_status = FALSE');
 });
 
+
+// ============================================================================
+// P1 Fix & Verification — NEWSSEC-001..005, NEWSFE-001/004, NEWSBE-001/020
+// ============================================================================
+//
+// These tests verify the 9 P1 fixes are present and wired correctly. They use
+// source-level assertions (for frontend app.js) and behavioral tests (for
+// backend worker-proxy.js). The frontend app.js cannot be loaded in Node
+// (it references browser globals), so source-level regex assertions are used
+// for frontend fixes. Backend fixes are tested via the loadWorker harness.
+
+const APP_JS_PATH = path.join(__dirname, 'app.js');
+
+// ── P1-01 (NEWSSEC-001): canonical escapeHtml escapes & < > " ' ──
+
+test('P1-01 (source): exactly ONE escapeHtml definition in app.js', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const matches = [...src.matchAll(/function\s+escapeHtml\s*\(/g)];
+  assert.equal(matches.length, 1, 'There must be exactly ONE escapeHtml definition. Found: ' + matches.length);
+});
+
+test('P1-01 (source): escapeHtml escapes all 5 chars (& < > " \')', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Find the escapeHtml function body
+  const m = src.match(/function\s+escapeHtml\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(m, 'escapeHtml function must exist');
+  const body = m[1];
+  assert.ok(/\.replace\([^)]*&[^)]*&amp;/m.test(body), 'must escape & to &amp;');
+  assert.ok(/\.replace\([^)]*<[^)]*&lt;/m.test(body), 'must escape < to &lt;');
+  assert.ok(/\.replace\([^)]*>[^]*?&gt;/m.test(body), 'must escape > to &gt;');
+  assert.ok(/"/.test(body) && /&quot;/.test(body), 'must escape " to &quot;');
+  assert.ok(/'/.test(body) && /&#39;/.test(body), "must escape ' to &#39;");
+});
+
+test('P1-01 (source): DOM-based escapeHtml duplicate is REMOVED', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // The DOM-based version used: const div = document.createElement('div')
+  // inside an escapeHtml function. That pattern must NOT exist.
+  assert.ok(
+    !/function\s+escapeHtml[^}]*document\.createElement\('div'\)/.test(src),
+    'DOM-based escapeHtml (document.createElement) must be removed'
+  );
+});
+
+// ── P1-02 (NEWSSEC-002): heatmap onclick uses escaped symbol ──
+
+test('P1-02 (source): renderMarketHeatmap uses escapeHtml for onclick symbol (no raw interpolation)', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Find the heatmap cell return statement
+  const m = src.match(/onclick="openCoinDetail\('\$\{[^}]+\}'\)"/);
+  assert.ok(m, 'heatmap onclick must exist');
+  // The interpolated value must be safeSymbol (escaped), NOT coin.symbol (raw)
+  assert.ok(
+    /onclick="openCoinDetail\('\$\{safeSymbol\}'\)"/.test(src),
+    'heatmap onclick must use ${safeSymbol}, not raw ${coin.symbol}. Got: ' + m[0]
+  );
+  // safeSymbol must be built via escapeHtml
+  const safeSymMatch = src.match(/const safeSymbol = escapeHtml\([^)]+\)/);
+  assert.ok(safeSymMatch, 'safeSymbol must be built via escapeHtml(). Got: ' + (src.match(/const safeSymbol = [^;]+/)?.[0] || 'NOT FOUND'));
+});
+
+// ── P1-03 (NEWSSEC-003): calendar onclick uses escapeHtml (auto-fixed by P1-01) ──
+
+test('P1-03 (source): calendar openReminderSheet onclick uses escapeHtml for all interpolated values', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const m = src.match(/onclick="openReminderSheet\([^)]*\)"/);
+  assert.ok(m, 'calendar openReminderSheet onclick must exist');
+  // The onclick must use escapeHtml(...) for eventKey, title, country, timestamp
+  // (timeText is a formatted string, not raw external data)
+  assert.ok(
+    /escapeHtml\(eventKey\)/.test(src),
+    'calendar onclick must wrap eventKey in escapeHtml()'
+  );
+  assert.ok(
+    /escapeHtml\(e\.title \|\| ''\)/.test(src),
+    "calendar onclick must wrap e.title in escapeHtml()"
+  );
+  // P1-01 ensures escapeHtml now escapes ', so the single-quote JS string context is safe
+});
+
+// ── P1-04 (NEWSSEC-004): news modal URL scheme validation ──
+
+test('P1-04 (source): sanitizeNewsUrl function exists and only allows http/https', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const m = src.match(/function\s+sanitizeNewsUrl\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(m, 'sanitizeNewsUrl function must exist');
+  const body = m[1];
+  // Must reject non-http(s) schemes
+  assert.ok(/\^https\?:\\\//i.test(body), 'must check for ^https?:// scheme');
+  // Must return "#" for unsafe URLs
+  assert.ok(/return '#'/.test(body), 'must return "#" for unsafe URLs');
+});
+
+test('P1-04 (source): openNewsModal and openNewsModalWith use sanitizeNewsUrl for href', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Both linkEl.href assignments must use sanitizeNewsUrl
+  const hrefAssignments = [...src.matchAll(/linkEl\.href\s*=\s*[^;]+;/g)];
+  assert.ok(hrefAssignments.length >= 2, 'must find at least 2 linkEl.href assignments (openNewsModal + openNewsModalWith)');
+  for (const ha of hrefAssignments) {
+    const stmt = ha[0];
+    // Skip if it's in a comment line
+    const lineStart = src.lastIndexOf('\n', ha.index) + 1;
+    const linePrefix = src.slice(lineStart, ha.index).trim();
+    if (linePrefix.startsWith('//')) continue;
+    assert.ok(
+      /sanitizeNewsUrl/.test(stmt),
+      'linkEl.href must use sanitizeNewsUrl. Got: ' + stmt
+    );
+    // Must NOT use raw n.url || '#'
+    assert.ok(
+      !/n\.url\s*\|\|\s*'#'/.test(stmt),
+      'linkEl.href must NOT use raw "n.url || \'#\'". Got: ' + stmt
+    );
+  }
+});
+
+// ── P1-05 (NEWSSEC-005): dashboard news image uses escapeHtml (auto-fixed by P1-01) ──
+
+test('P1-05 (source): dashboard important-news-img uses escapeHtml for src and alt', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Find the important-news-img rendering
+  const m = src.match(/<img[^>]*class="important-news-img"[^>]*>/);
+  assert.ok(m, 'important-news-img must exist');
+  const imgTag = m[0];
+  // src and alt must use safeImg/safeTitle which are built via escapeHtml
+  assert.ok(/src="\$\{safeImg\}"/.test(imgTag), 'img src must use ${safeImg}. Got: ' + imgTag);
+  assert.ok(/alt="\$\{safeTitle\}"/.test(imgTag), 'img alt must use ${safeTitle}. Got: ' + imgTag);
+  // Verify safeImg and safeTitle are built via escapeHtml
+  assert.ok(/const safeImg = escapeHtml\(/.test(src), 'safeImg must be built via escapeHtml()');
+  assert.ok(/const safeTitle = escapeHtml\(/.test(src), 'safeTitle must be built via escapeHtml()');
+  // P1-01 ensures escapeHtml now escapes ", so the double-quote attribute context is safe
+});
+
+// ── P1-06 (NEWSFE-001): all module-level JSON.parse(localStorage) are guarded ──
+
+test('P1-06 (source): no unguarded module-level JSON.parse(localStorage.getItem) in app.js', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Module-level declarations start at column 0 (no leading whitespace) —
+  // they execute during script parse and a throw aborts the entire app.js load.
+  // In-function calls are indented (inside function bodies) and only throw
+  // at call time, so they cannot cause a blank page on load (P2/P3, not P1).
+  // This test checks ONLY column-0 let/const/var declarations that call
+  // JSON.parse(localStorage.getItem(...)) WITHOUT a preceding try on the same line.
+  const lines = src.split('\n');
+  const unguardedModuleLevel = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Column-0 module-level declaration: starts with let/const/var (no indent)
+    const isModuleLevelDecl = /^(let|const|var)\s+\w+\s*=\s*JSON\.parse\(localStorage\.getItem/.test(line);
+    if (!isModuleLevelDecl) continue;
+    // Check it's NOT inside safeJsonParseLocalStorage (which has its own try/catch)
+    // and NOT already wrapped in a try on a preceding line.
+    // For module-level declarations, there's no preceding try (they're top-level).
+    // The fix converts them to safeJsonParseLocalStorage(...) calls, so a
+    // module-level JSON.parse(localStorage.getItem(...)) is by definition a bug.
+    // Exception: the safeJsonParseLocalStorage function body itself contains
+    // JSON.parse(localStorage.getItem(key)) — but that's inside a try AND indented.
+    // Since we only match column-0 (non-indented) lines, the helper is excluded.
+    unguardedModuleLevel.push(`line ${i + 1}: ${line.trim()}`);
+  }
+  assert.equal(
+    unguardedModuleLevel.length,
+    0,
+    'All module-level (column-0) JSON.parse(localStorage) must be converted to safeJsonParseLocalStorage. ' +
+    'Unguarded module-level declarations (which abort app.js load on corrupt localStorage): ' +
+    JSON.stringify(unguardedModuleLevel, null, 2)
+  );
+});
+
+test('P1-06 (source): safeJsonParseLocalStorage helper exists and wraps JSON.parse in try/catch', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const m = src.match(/function\s+safeJsonParseLocalStorage\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(m, 'safeJsonParseLocalStorage function must exist');
+  const body = m[1];
+  assert.ok(/try\s*\{/.test(body), 'must have try block');
+  assert.ok(/catch/.test(body), 'must have catch block');
+  assert.ok(/return fallback/.test(body), 'must return fallback on error');
+});
+
+test('P1-06 (source): _niSavedNews and _niCalendarReminders use safeJsonParseLocalStorage', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  assert.ok(
+    /let _niSavedNews = safeJsonParseLocalStorage\('ni_saved_news'/.test(src),
+    '_niSavedNews must use safeJsonParseLocalStorage'
+  );
+  assert.ok(
+    /let _niCalendarReminders = safeJsonParseLocalStorage\('ni_cal_reminders'/.test(src),
+    '_niCalendarReminders must use safeJsonParseLocalStorage'
+  );
+});
+
+// ── P1-07 (NEWSFE-004): loadNews request generation guard ──
+
+test('P1-07 (source): _newsLoadGen generation counter exists', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  assert.ok(/let _newsLoadGen = 0/.test(src), '_newsLoadGen counter must be declared');
+});
+
+test('P1-07 (source): loadNews captures token at start and checks before applying newsCache', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Find loadNews function
+  const fnStart = src.indexOf('async function loadNews(');
+  const fnEnd = src.indexOf('\n}', fnStart + 200);
+  assert.ok(fnStart > -1, 'loadNews must exist');
+  const loadNewsSrc = src.slice(fnStart, fnEnd > fnStart ? fnEnd + 2 : src.indexOf('function ', fnStart + 100));
+  // Must capture token at start
+  assert.ok(/const myToken = \+\+_newsLoadGen/.test(loadNewsSrc), 'must capture myToken = ++_newsLoadGen at start');
+  // Must check token before applying to newsCache
+  assert.ok(/if \(myToken !== _newsLoadGen\)/.test(loadNewsSrc), 'must check myToken !== _newsLoadGen before applying');
+  assert.ok(/return;/.test(loadNewsSrc), 'must return early if token is stale');
+});
+
+// ── P1-08 (NEWSBE-001): fetchFarsiNews reads from base cache key (not category-specific) ──
+
+test('P1-08 (source): fetchFarsiNews reads from FARSI_NEWS_CACHE_KEY (base), not category key', () => {
+  const src = fs.readFileSync(fs.existsSync(path.join(__dirname, 'worker-proxy.js')) ? path.join(__dirname, 'worker-proxy.js') : APP_JS_PATH, 'utf8');
+  // Find fetchFarsiNews function
+  const fnStart = src.indexOf('async function fetchFarsiNews(');
+  assert.ok(fnStart > -1, 'fetchFarsiNews must exist in worker-proxy.js');
+  // Find the readAppCache call within the first 40 lines of the function
+  const fnBody = src.slice(fnStart, fnStart + 2000);
+  const readCall = fnBody.match(/readAppCache\(env,\s*([^)]+)\)/);
+  assert.ok(readCall, 'fetchFarsiNews must call readAppCache');
+  const readKey = readCall[1].trim();
+  // Must read from FARSI_NEWS_CACHE_KEY (the constant), NOT a template literal
+  // that constructs a category-specific key
+  assert.ok(
+    readKey === 'FARSI_NEWS_CACHE_KEY',
+    'fetchFarsiNews must read from FARSI_NEWS_CACHE_KEY (base key). Got: ' + readKey
+  );
+  // Must NOT read from `${FARSI_NEWS_CACHE_KEY}:${categoryFilter}` (the old mismatched key)
+  assert.ok(
+    !/readAppCache\(env,\s*`\$\{FARSI_NEWS_CACHE_KEY\}:\$\{/.test(fnBody),
+    'fetchFarsiNews must NOT read from category-specific template key (old bug)'
+  );
+});
+
+test('P1-08 (behavioral): category-filtered farsi-news request hits base cache (no RSS fetch)', async () => {
+  // Mock: KV cache returns a list with mixed categories.
+  // Expected: /api/farsi-news?category=crypto reads from 'news:farsi' (base),
+  // returns only crypto articles, source='cache'. No RSS fetch attempted.
+  const kvStore = new Map();
+  const cachedArticles = [
+    { url: 'https://a.com/1', title: 'BTC up', category: 'crypto', source: 'test' },
+    { url: 'https://b.com/2', title: 'EUR up', category: 'forex', source: 'test' },
+    { url: 'https://c.com/3', title: 'ETH up', category: 'crypto', source: 'test' },
+  ];
+  kvStore.set('news:farsi', JSON.stringify(cachedArticles));
+  let rssFetchCalled = false;
+
+  const pgOverride = {
+    Pool: class Pool {
+      async query(sql, params) {
+        const l = (sql || '').toLowerCase();
+        if (l.includes('select') && l.includes('from users') && l.includes('where telegram_id')) {
+          return { rows: [{ telegram_id: '123', channel_joined: true }] };
+        }
+        return { rows: [], rowCount: 0 };
+      }
+      async connect() { const s = this; return { async query(sql, p) { return s.query(sql, p); }, release() {} }; }
+      end() { return Promise.resolve(); }
+    },
+    neon: function() { const fn = async () => []; fn.query = async () => ({ rows: [] }); fn.transaction = async (cb) => cb({ query: fn.query }); return fn; },
+  };
+
+  const worker = loadWorker(pgOverride);
+  const env = createEnv({
+    APP_CACHE: {
+      async get(key) { return kvStore.has(key) ? kvStore.get(key) : null; },
+      async put(key, val) { kvStore.set(key, val); },
+      async delete(key) { kvStore.delete(key); },
+    },
+  });
+  const user = { id: 123, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'GET', '/api/farsi-news?category=crypto', { initData });
+  assert.equal(res.status, 200, 'farsi-news category request should succeed. Body: ' + JSON.stringify(res.body));
+  assert.equal(res.body.source, 'cache', 'source must be "cache" (base key hit). Got: ' + res.body.source);
+  assert.ok(Array.isArray(res.body.data), 'data must be an array');
+  // All returned articles must be crypto (category filter applied in-memory)
+  for (const a of res.body.data) {
+    assert.equal(a.category, 'crypto', 'all returned articles must be crypto. Got: ' + a.category);
+  }
+  assert.equal(res.body.data.length, 2, 'must return exactly 2 crypto articles. Got: ' + res.body.data.length);
+});
+
+// ── P1-09 (NEWSBE-020): /api/market/prices slice(0, 15) not slice(0, 20) ──
+
+test('P1-09 (source): /api/market/prices uses slice(0, 15) not slice(0, 20)', () => {
+  const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  // Find the /api/market/prices handler
+  const m = workerSrc.match(/url\.pathname === '\/api\/market\/prices'[\s\S]*?slice\(0,\s*(\d+)\)/);
+  assert.ok(m, '/api/market/prices handler must exist with slice()');
+  const sliceNum = parseInt(m[1], 10);
+  assert.ok(sliceNum <= 15, 'slice must be <= 15 to stay under 50-subrequest limit (15×3=45). Got: ' + sliceNum);
+  assert.ok(sliceNum >= 10, 'slice must be >= 10 to be useful. Got: ' + sliceNum);
+});
+
+test('P1-09 (behavioral): /api/market/prices with 20 symbols only fetches 15', async () => {
+  // Mock fetchSpotPriceUsd to count how many symbols are processed
+  let symbolsRequested = [];
+  const pgOverride = {
+    Pool: class Pool {
+      async query(sql, params) {
+        const l = (sql || '').toLowerCase();
+        if (l.includes('select') && l.includes('from users') && l.includes('where telegram_id')) {
+          return { rows: [{ telegram_id: '123', channel_joined: true }] };
+        }
+        return { rows: [], rowCount: 0 };
+      }
+      async connect() { const s = this; return { async query(sql, p) { return s.query(sql, p); }, release() {} }; }
+      end() { return Promise.resolve(); }
+    },
+    neon: function() { const fn = async () => []; fn.query = async () => ({ rows: [] }); fn.transaction = async (cb) => cb({ query: fn.query }); return fn; },
+  };
+
+  const worker = loadWorker(pgOverride);
+  const env = createEnv();
+  const user = { id: 123, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  // Send 20 symbols — backend should only process 15
+  const symbols = Array.from({ length: 20 }, (_, i) => 'SYM' + i).join(',');
+  const res = await sendRequest(worker, env, 'GET', '/api/market/prices?symbols=' + symbols, { initData });
+  assert.equal(res.status, 200, 'market/prices should succeed (HTTP 200). Body: ' + JSON.stringify(res.body));
+  // The response should contain at most 15 symbol entries (slice applied)
+  const priceKeys = res.body.prices ? Object.keys(res.body.prices) : [];
+  assert.ok(priceKeys.length <= 15, 'must process at most 15 symbols. Got: ' + priceKeys.length);
+});
