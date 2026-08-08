@@ -358,6 +358,34 @@ function safeJsonParseLocalStorage(key, fallback = []) {
     }
 }
 
+/**
+ * P1-06 / NEWSFE-011 FIX: Safely write a string value to localStorage.
+ * If the write fails (QuotaExceededError, SecurityError, or browser
+ * private mode where localStorage is disabled), the error is swallowed
+ * and the bad key is removed so future writes to OTHER keys still succeed.
+ * Without this, a QuotaExceededError on 'ni_saved_news' would propagate
+ * up and leave the save button in a stuck state (the toggle already
+ * mutated _niSavedNews in memory, but the persistence failed silently
+ * with no user feedback). Callers should still update in-memory state
+ * optimistically — this helper just prevents the uncaught exception.
+ *
+ * @param {string} key - localStorage key
+ * @param {string} value - String value to write (caller JSON.stringify if needed)
+ * @returns {boolean} true if write succeeded, false otherwise
+ */
+function safeLocalStorageSetItem(key, value) {
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (e) {
+        // QuotaExceededError or SecurityError — remove the key we tried
+        // to write so it doesn't block future writes to other keys.
+        try { localStorage.removeItem(key); } catch {}
+        console.warn('localStorage.setItem failed for key:', key, e?.name || e?.message);
+        return false;
+    }
+}
+
 
 let currentLang = 'fa';
 let watchlist = [];
@@ -6762,7 +6790,11 @@ function toggleSaveNews(idx) {
     } else {
         _niSavedNews.unshift({ url: n.url, title: n.title, image: n.image, source: n.source, time: n.time, pub_date: n.pub_date, sentiment: n.sentiment, summary: n.summary, body: n.body, category: n.category, savedAt: Date.now() });
     }
-    localStorage.setItem('ni_saved_news', JSON.stringify(_niSavedNews));
+    // NEWSFE-011 FIX: Use safeLocalStorageSetItem to prevent QuotaExceededError
+    // from propagating up and leaving the save button in a stuck state. The
+    // in-memory _niSavedNews is already updated, so the UI reflects the toggle
+    // regardless of whether persistence succeeded.
+    safeLocalStorageSetItem('ni_saved_news', JSON.stringify(_niSavedNews));
     // Re-render to update button state
     const activeTab = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
     renderNews(activeTab);
@@ -10962,6 +10994,23 @@ function closeAllOverlays() {
         if (m && m.style.display !== 'none') {
             m.style.display = 'none';
             // Some modals toggle a `body` lock class; remove it for safety.
+            document.body.classList.remove('modal-open', 'jl-locked', 'body-locked');
+        }
+    }
+
+    // NEWSFE-022 FIX: Dismiss ni-* bottom sheets and overlays too. Previously
+    // these persisted across tab switches because closeAllOverlays only
+    // handled coin-detail-modal and standard .modal overlays. The filter
+    // sheet, reminder sheet, share sheet, and search overlay would stay
+    // visible on top of the newly-switched tab, intercepting clicks.
+    const niOverlayIds = [
+        'ni-filter-sheet', 'ni-reminder-sheet', 'ni-share-sheet',
+        'ni-search-overlay',
+    ];
+    for (const id of niOverlayIds) {
+        const m = document.getElementById(id);
+        if (m && m.style.display !== 'none') {
+            m.style.display = 'none';
             document.body.classList.remove('modal-open', 'jl-locked', 'body-locked');
         }
     }

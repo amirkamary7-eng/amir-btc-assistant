@@ -57,6 +57,12 @@ export function createPublisherRepository(deps) {
     `;
     try {
       await queryDb(env, batchSql, []);
+      // NEWSBE-018 FIX: Add claimed_at column (idempotent) to track when an
+      // item was claimed for processing. Used by requeueStalePublisherQueue
+      // to detect items stuck in 'processing' after a Worker crash mid-send.
+      // Mirrors the claimed_at pattern used by notification_queue.
+      await queryDb(env, `ALTER TABLE tg_publisher_queue ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`).catch(() => {});
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_tgpq_processing_claimed ON tg_publisher_queue (claimed_at) WHERE status = 'processing'`).catch(() => {});
       _schemaVerified = true;
     } catch (e) {
       console.warn('[publisher] ensureSchema failed:', e?.message || e);
@@ -190,12 +196,21 @@ export function createPublisherRepository(deps) {
 
   async function markFailed(env, id, errorMessage, { finalAttempts = null } = {}) {
     await ensureSchema(env);
+    // NEWSBE-003 FIX: Postgres SET RHS uses the OLD row value, so the CASE
+    // expression evaluated `attempts >= max_attempts` using the PRE-increment
+    // value. With max_attempts=3, an item reached 'failed' only after attempt
+    // 4 (attempts went 0→1→2→3, and CASE on the 3rd failure saw attempts=2
+    // which is < 3 → stayed 'pending', then 4th attempt saw attempts=3 →
+    // 'failed'). This wasted one extra Telegram send + retry cycle.
+    // Fix: use `attempts + 1 >= max_attempts` so the CASE accounts for the
+    // increment happening in the same statement. Same fix for scheduled_at
+    // (so the retry is only scheduled when there will BE a retry).
     const sql = `
       UPDATE tg_publisher_queue
-      SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END,
+      SET status = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'pending' END,
           attempts = attempts + 1,
           error = $2,
-          scheduled_at = CASE WHEN attempts < max_attempts THEN NOW() + INTERVAL '30 seconds' ELSE scheduled_at END
+          scheduled_at = CASE WHEN attempts + 1 < max_attempts THEN NOW() + INTERVAL '30 seconds' ELSE scheduled_at END
       WHERE id = $1
       RETURNING *;
     `;
@@ -255,6 +270,8 @@ export function createPublisherRepository(deps) {
   async function claimPendingBatch(env, batchSize = 10) {
     // Atomically claim pending items ready to send.
     // Uses SKIP LOCKED so multiple cron ticks never grab the same items.
+    // NEWSBE-018 FIX: Also sets claimed_at = NOW() so requeueStalePublisherQueue
+    // can detect items stuck in 'processing' after a Worker crash mid-send.
     await ensureSchema(env);
     const sql = `
       WITH claimed AS (
@@ -265,13 +282,51 @@ export function createPublisherRepository(deps) {
         FOR UPDATE SKIP LOCKED
       )
       UPDATE tg_publisher_queue
-      SET status = 'processing'
+      SET status = 'processing', claimed_at = NOW()
       FROM claimed
       WHERE tg_publisher_queue.id = claimed.id
       RETURNING tg_publisher_queue.*;
     `;
     const res = await queryDb(env, sql, [Number(batchSize)]);
     return res.rows.map(serializeQueueRow);
+  }
+
+  /**
+   * NEWSBE-018 FIX: Requeue items stuck in 'processing' status.
+   *
+   * When the Worker crashes mid-send (after claimPendingBatch sets status=
+   * 'processing' but before markSent/markFailed), the item is stuck forever
+   * because claimPendingBatch only selects status='pending'. This mirrors
+   * the requeueStaleQueueItems pattern used by notification_queue.
+   *
+   * Resets items that have been in 'processing' for more than 5 minutes back
+   * to 'pending' so the next cron tick can resume them. Idempotent — safe to
+   * call every cron tick. The checkDedup function prevents duplicate Telegram
+   * sends if the original send actually succeeded but the Worker crashed
+   * before marking the item 'sent'.
+   *
+   * @returns {Promise<{requeued: number}>}
+   */
+  async function requeueStalePublisherQueue(env, pool = null) {
+    if (!isDatabaseConfigured(env)) return { requeued: 0 };
+    await ensureSchema(env);
+    try {
+      const result = await queryDb(env, `
+        UPDATE tg_publisher_queue
+        SET status = 'pending', claimed_at = NULL
+        WHERE status = 'processing'
+          AND claimed_at IS NOT NULL
+          AND claimed_at < NOW() - INTERVAL '5 minutes'
+      `, [], 1, pool);
+      const requeued = result.rowCount || 0;
+      if (requeued > 0) {
+        console.log(`[publisher] Requeued ${requeued} stale processing items`);
+      }
+      return { requeued };
+    } catch (e) {
+      console.warn('[publisher] requeueStalePublisherQueue error:', e?.message);
+      return { requeued: 0 };
+    }
   }
 
   async function checkDedup(env, type, refId) {
@@ -330,6 +385,7 @@ export function createPublisherRepository(deps) {
     deleteLogEntry,
     insertLog,
     claimPendingBatch,
+    requeueStalePublisherQueue,
     checkDedup,
     getStats,
   };
