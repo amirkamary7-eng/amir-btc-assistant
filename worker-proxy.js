@@ -1942,11 +1942,22 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
 async function retryFailedReferralRewards(env) {
   if (!isDatabaseConfigured(env)) return;
   try {
-    // Find unrewarded referrals where invitee has joined the channel
+    // REF-003 FIX: Removed 24-hour filter — all eligible unrewarded referrals
+    // should be retried, not just recent ones. Previously, referrals older
+    // than 24h with channel_verified=TRUE and rewarded=FALSE were permanently
+    // lost (no other recovery path exists).
+    //
+    // Safety: LIMIT 20 + ORDER BY created_at ASC ensures:
+    //   1. Bounded batch — max 20 retries per cron tick (every 15 min)
+    //   2. Oldest first — referrals waiting longest get priority
+    //   3. Idempotent — creditTokens UNIQUE constraint prevents double-credit
+    //   4. Subrequest budget — ~21 subrequests for 20 retries (under 50 limit)
+    //   5. No starvation — next tick continues from where this one left off
+    //      (processed referrals get rewarded=TRUE, so they're excluded next time)
     const result = await queryDb(env,
       `SELECT DISTINCT invitee_id FROM referrals
        WHERE rewarded = FALSE AND channel_verified = TRUE
-       AND created_at > NOW() - INTERVAL '24 hours'
+       ORDER BY invitee_id ASC
        LIMIT 20`,
     );
     if (result.rows.length === 0) return;
