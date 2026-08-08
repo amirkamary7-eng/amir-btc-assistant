@@ -251,6 +251,7 @@ export function createUserRepository(deps) {
    *   4. watchlist_items
    *   5. alerts
    *   6. notifications
+   *  6b. notification_queue (no FK to users — manual cleanup, SETTINGS-002)
    *   7. tickets
    *   8. mission_progress
    *   9. calendar_reminders (if table exists)
@@ -275,16 +276,30 @@ export function createUserRepository(deps) {
         [uid]);
       const previousInviterId = existingRef.rows[0]?.inviter_id || null;
 
-      // Create the deleted_users table if it doesn't exist (idempotent)
+      // Create the deleted_users table if it doesn't exist (idempotent).
+      // SETTINGS-001 FIX: telegram_id MUST be UNIQUE so that the
+      // INSERT ... ON CONFLICT (telegram_id) below works. Previously this DDL
+      // omitted UNIQUE (while checkReferralCooldown's DDL included it), so if
+      // deleteAccount ran first the ON CONFLICT would error with
+      // "there is no unique or exclusion constraint matching the ON CONFLICT
+      // specification". The two DDLs are now identical.
       await queryDb(env, `
         CREATE TABLE IF NOT EXISTS deleted_users (
           id SERIAL PRIMARY KEY,
-          telegram_id VARCHAR(64) NOT NULL,
+          telegram_id VARCHAR(64) NOT NULL UNIQUE,
           previous_inviter_id VARCHAR(64),
           deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
         )
       `);
+      // Defensive idempotent migration: if the table was created by an older
+      // version of deleteAccount (without UNIQUE), add the unique index now.
+      // CREATE UNIQUE INDEX IF NOT EXISTS is a no-op if the index already
+      // exists (either from the UNIQUE column constraint above or a prior run).
+      // Safe because telegram_id logically identifies one cooldown record.
+      await queryDb(env,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_users_telegram_id_uniq ON deleted_users (telegram_id)`
+      ).catch(() => {});
       // Insert the cooldown record (ON CONFLICT updates cooldown if already exists)
       await queryDb(env, `
         INSERT INTO deleted_users (telegram_id, previous_inviter_id, deleted_at, cooldown_until)
@@ -337,6 +352,18 @@ export function createUserRepository(deps) {
     // 6. notifications
     await cascadeDelete('notifications',
       'DELETE FROM notifications WHERE user_id = $1', [uid]);
+
+    // 6b. notification_queue — SETTINGS-002 FIX
+    // The notification_queue table has NO foreign key to users(telegram_id)
+    // (verified in production), so ON DELETE CASCADE does NOT clean it up.
+    // Without this explicit DELETE, pending queue rows for a deleted user
+    // would remain, and the queue processor cron (processQueue) would later
+    // try to dispatch them — including attempting Telegram sends to a user
+    // who no longer exists. This deletion runs inside the same cascade and
+    // only touches rows WHERE user_id = $1, so other users' queue items are
+    // never affected.
+    await cascadeDelete('notification_queue',
+      'DELETE FROM notification_queue WHERE user_id = $1', [uid]);
 
     // 7. tickets
     await cascadeDelete('tickets',

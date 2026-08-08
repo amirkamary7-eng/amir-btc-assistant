@@ -291,6 +291,12 @@ export function createNotificationRepository(deps) {
   /**
    * Mark all notifications for a user as read.
    * Returns the number of rows updated.
+   *
+   * SETTINGS-003 FIX: filters WHERE deleted_at IS NULL so soft-deleted
+   * notifications are never touched. Soft-deleted rows are invisible to the
+   * user (list/unreadCount filter them out), so updating their read_status
+   * would be a wasted write and could confuse future logic that inspects
+   * read_status of deleted rows.
    */
   async function markAllRead(env, userId) {
     const result = await queryDb(
@@ -298,7 +304,7 @@ export function createNotificationRepository(deps) {
       `
         UPDATE notifications
         SET read_status = TRUE
-        WHERE user_id = $1 AND read_status = FALSE
+        WHERE user_id = $1 AND read_status = FALSE AND deleted_at IS NULL
       `,
       [String(userId)],
     );

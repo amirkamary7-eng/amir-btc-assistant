@@ -933,3 +933,204 @@ test('Market: production env still requires auth for /api/forex (control)', asyn
   // Forex is user-specific gated data — auth still required.
   assert.equal(res.status, 401);
 });
+
+// ============================================================================
+// SETTINGS Audit — SETTINGS-001 / 002 / 003 dedicated tests
+// ============================================================================
+//
+// These tests verify the three SETTINGS fixes are present and wired through
+// the HTTP layer. They use two strategies:
+//   1. SOURCE-LEVEL assertions — read the repository source files and assert
+//      the fixed SQL strings are present (deterministic, no mock complexity).
+//   2. BEHAVIORAL tests — inject a query-capturing mock Pool, hit the real
+//      endpoint, and assert the expected SQL was issued with the fix applied.
+
+const USERS_REPO_PATH = path.join(__dirname, 'src', 'repositories', 'users.js');
+const NOTIF_REPO_PATH = path.join(__dirname, 'src', 'repositories', 'notifications.js');
+
+// ── SETTINGS-001: deleted_users.telegram_id must be UNIQUE in deleteAccount DDL ──
+
+test('SETTINGS-001 (source): deleteAccount CREATE TABLE DDL includes UNIQUE on telegram_id', () => {
+  const src = fs.readFileSync(USERS_REPO_PATH, 'utf8');
+  // Isolate the deleteAccount function body so we don't accidentally match
+  // checkReferralCooldown's DDL (which already had UNIQUE).
+  const fnStart = src.indexOf('async function deleteAccount');
+  const fnEnd = src.indexOf('async function checkReferralCooldown');
+  assert.ok(fnStart > -1 && fnEnd > fnStart, 'deleteAccount function must exist before checkReferralCooldown');
+  const deleteAccountSrc = src.slice(fnStart, fnEnd);
+  // The CREATE TABLE inside deleteAccount must declare telegram_id UNIQUE.
+  // NOTE: The DDL body contains nested parens (VARCHAR(64), INTERVAL '15 days'),
+  // so we match up to the closing paren on its own line (\n\s*\)).
+  const createTableMatch = deleteAccountSrc.match(/CREATE TABLE IF NOT EXISTS deleted_users \(([\s\S]*?)\n\s*\)/);
+  assert.ok(createTableMatch, 'deleteAccount must contain CREATE TABLE IF NOT EXISTS deleted_users');
+  const ddlBody = createTableMatch[1];
+  assert.ok(
+    /telegram_id\s+VARCHAR\(64\)\s+NOT NULL\s+UNIQUE/i.test(ddlBody),
+    'deleteAccount DDL must declare telegram_id ... NOT NULL UNIQUE. Got: ' + ddlBody
+  );
+  // ON CONFLICT (telegram_id) must be present in the INSERT.
+  assert.ok(/ON CONFLICT \(telegram_id\)/i.test(deleteAccountSrc), 'INSERT must use ON CONFLICT (telegram_id)');
+});
+
+test('SETTINGS-001 (source): deleteAccount runs defensive CREATE UNIQUE INDEX IF NOT EXISTS', () => {
+  const src = fs.readFileSync(USERS_REPO_PATH, 'utf8');
+  const fnStart = src.indexOf('async function deleteAccount');
+  const fnEnd = src.indexOf('async function checkReferralCooldown');
+  const deleteAccountSrc = src.slice(fnStart, fnEnd);
+  assert.ok(
+    /CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_users_telegram_id_uniq ON deleted_users \(telegram_id\)/i.test(deleteAccountSrc),
+    'deleteAccount must run defensive CREATE UNIQUE INDEX IF NOT EXISTS for idempotent migration'
+  );
+});
+
+test('SETTINGS-001 (source): deleteAccount DDL matches checkReferralCooldown DDL (telegram_id UNIQUE in both)', () => {
+  const src = fs.readFileSync(USERS_REPO_PATH, 'utf8');
+  // Extract both DDLs and compare the telegram_id column declaration.
+  // NOTE: DDL body contains nested parens, so match up to closing paren on its own line.
+  const allDdls = [...src.matchAll(/CREATE TABLE IF NOT EXISTS deleted_users \(([\s\S]*?)\n\s*\)/g)];
+  assert.ok(allDdls.length >= 2, 'must find at least 2 deleted_users CREATE TABLE statements');
+  for (const m of allDdls) {
+    const body = m[1];
+    assert.ok(
+      /telegram_id\s+VARCHAR\(64\)\s+NOT NULL\s+UNIQUE/i.test(body),
+      'Every deleted_users DDL must declare telegram_id NOT NULL UNIQUE. Got: ' + body
+    );
+  }
+});
+
+// ── SETTINGS-002: deleteAccount cascade must DELETE from notification_queue ──
+
+test('SETTINGS-002 (source): deleteAccount cascade includes DELETE FROM notification_queue WHERE user_id = $1', () => {
+  const src = fs.readFileSync(USERS_REPO_PATH, 'utf8');
+  const fnStart = src.indexOf('async function deleteAccount');
+  const fnEnd = src.indexOf('async function checkReferralCooldown');
+  const deleteAccountSrc = src.slice(fnStart, fnEnd);
+  assert.ok(
+    /DELETE FROM notification_queue WHERE user_id = \$1/i.test(deleteAccountSrc),
+    'deleteAccount cascade must include DELETE FROM notification_queue WHERE user_id = $1'
+  );
+  // The notification_queue deletion must come AFTER notifications deletion
+  // (logical grouping) and BEFORE the final users deletion.
+  const notifIdx = deleteAccountSrc.indexOf("DELETE FROM notifications WHERE user_id = $1");
+  const queueIdx = deleteAccountSrc.indexOf("DELETE FROM notification_queue WHERE user_id = $1");
+  const usersIdx = deleteAccountSrc.indexOf("DELETE FROM users WHERE telegram_id = $1");
+  assert.ok(notifIdx > -1 && queueIdx > -1 && usersIdx > -1, 'all three DELETEs must be present');
+  assert.ok(notifIdx < queueIdx, 'notification_queue DELETE must come after notifications DELETE');
+  assert.ok(queueIdx < usersIdx, 'notification_queue DELETE must come before users DELETE');
+});
+
+test('SETTINGS-002 (behavioral): DELETE /api/users/me issues DELETE FROM notification_queue', async () => {
+  // Query-capturing mock: records every SQL statement issued.
+  const executedSql = [];
+  const pgOverride = {
+    Pool: class Pool {
+      async query(sql, params) {
+        executedSql.push((sql || '').replace(/\s+/g, ' ').trim());
+        const sqlLower = (sql || '').toLowerCase();
+        // handleDeleteAccount calls getById to verify user exists — return a row.
+        if (sqlLower.includes('select') && sqlLower.includes('from users') && sqlLower.includes('where telegram_id')) {
+          return { rows: [{ telegram_id: '777888', username: null, first_name: 'ToDelete', last_name: null, lang: 'fa', channel_joined: true, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
+        }
+        // deleteAccount: SELECT inviter_id FROM referrals
+        if (sqlLower.includes('select inviter_id from referrals')) return { rows: [] };
+        // deleteAccount: INSERT INTO deleted_users ... ON CONFLICT (telegram_id)
+        if (sqlLower.includes('on conflict (telegram_id)')) return { rows: [{ telegram_id: '777888' }] };
+        return { rows: [], rowCount: 0 };
+      }
+      async connect() {
+        const self = this;
+        return { async query(sql, p) { return self.query(sql, p); }, release() {} };
+      }
+      end() { return Promise.resolve(); }
+    },
+    neon: function() {
+      const fn = async () => [];
+      fn.query = async () => ({ rows: [] });
+      fn.transaction = async (cb) => cb({ query: fn.query });
+      return fn;
+    },
+  };
+
+  const worker = loadWorker(pgOverride);
+  const env = createEnv();
+  const user = { id: 777888, first_name: 'ToDelete' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'DELETE', '/api/users/me', {
+    body: { confirm: 'DELETE' },
+    initData,
+  });
+  assert.equal(res.status, 200, 'delete account should succeed (HTTP 200). Body: ' + JSON.stringify(res.body));
+
+  // Verify the notification_queue DELETE was issued with the correct WHERE clause.
+  const queueDelete = executedSql.find(s => /delete from notification_queue where user_id = \$1/i.test(s));
+  assert.ok(queueDelete, 'DELETE FROM notification_queue WHERE user_id = $1 must be executed. Executed SQL: ' + JSON.stringify(executedSql, null, 2));
+  // Also verify the cooldown INSERT with ON CONFLICT (telegram_id) was issued (SETTINGS-001 path).
+  const conflictInsert = executedSql.find(s => /on conflict \(telegram_id\)/i.test(s) && /insert into deleted_users/i.test(s));
+  assert.ok(conflictInsert, 'INSERT INTO deleted_users ... ON CONFLICT (telegram_id) must be executed');
+  // And the defensive unique index creation.
+  const uniqueIdx = executedSql.find(s => /create unique index if not exists idx_deleted_users_telegram_id_uniq/i.test(s));
+  assert.ok(uniqueIdx, 'Defensive CREATE UNIQUE INDEX IF NOT EXISTS must be executed');
+});
+
+// ── SETTINGS-003: markAllRead must filter WHERE deleted_at IS NULL ──
+
+test('SETTINGS-003 (source): markAllRead UPDATE includes AND deleted_at IS NULL', () => {
+  const src = fs.readFileSync(NOTIF_REPO_PATH, 'utf8');
+  const fnStart = src.indexOf('async function markAllRead');
+  const fnEnd = src.indexOf('async function deleteNotification');
+  assert.ok(fnStart > -1 && fnEnd > fnStart, 'markAllRead function must exist before deleteNotification');
+  const markAllReadSrc = src.slice(fnStart, fnEnd);
+  assert.ok(
+    /UPDATE notifications\s+SET read_status = TRUE\s+WHERE user_id = \$1 AND read_status = FALSE AND deleted_at IS NULL/i.test(markAllReadSrc),
+    'markAllRead must include AND deleted_at IS NULL in the WHERE clause. Got: ' + markAllReadSrc
+  );
+});
+
+test('SETTINGS-003 (behavioral): POST /api/notifications/read-all issues UPDATE with deleted_at IS NULL', async () => {
+  const executedSql = [];
+  const pgOverride = {
+    Pool: class Pool {
+      async query(sql, params) {
+        executedSql.push((sql || '').replace(/\s+/g, ' ').trim());
+        const sqlLower = (sql || '').toLowerCase();
+        if (sqlLower.includes('select') && sqlLower.includes('from users') && sqlLower.includes('where telegram_id')) {
+          return { rows: [{ telegram_id: '555666', channel_joined: true }] };
+        }
+        if (sqlLower.includes('from watchlist_items')) return { rows: [] };
+        if (sqlLower.includes('update notifications') && sqlLower.includes('set read_status')) {
+          return { rows: [], rowCount: 3 };
+        }
+        return { rows: [], rowCount: 0 };
+      }
+      async connect() {
+        const self = this;
+        return { async query(sql, p) { return self.query(sql, p); }, release() {} };
+      }
+      end() { return Promise.resolve(); }
+    },
+    neon: function() {
+      const fn = async () => [];
+      fn.query = async () => ({ rows: [] });
+      fn.transaction = async (cb) => cb({ query: fn.query });
+      return fn;
+    },
+  };
+
+  const worker = loadWorker(pgOverride);
+  const env = createEnv();
+  const user = { id: 555666, first_name: 'Reader' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/notifications/read-all', {
+    body: {},
+    initData,
+  });
+  assert.equal(res.status, 200, 'mark-all-read should succeed (HTTP 200)');
+
+  const update = executedSql.find(s => /update notifications set read_status = true/i.test(s));
+  assert.ok(update, 'UPDATE notifications SET read_status = TRUE must be executed. SQL: ' + JSON.stringify(executedSql, null, 2));
+  assert.ok(/deleted_at is null/i.test(update), 'UPDATE must include AND deleted_at IS NULL. Got: ' + update);
+  // Ensure it still filters by user_id and read_status = FALSE.
+  assert.ok(/where user_id = \$1/i.test(update), 'UPDATE must still filter WHERE user_id = $1');
+  assert.ok(/read_status = false/i.test(update), 'UPDATE must still filter AND read_status = FALSE');
+});
+
