@@ -3289,7 +3289,7 @@ async function loadReferralStats() {
         const data = await apiFetch('/api/referrals/stats');
         const rt = $('ref-total'); if (rt) rt.innerText = data.total ?? 0;
         const ra = $('ref-active'); if (ra) ra.innerText = data.active ?? 0;
-        const rr = $('ref-reward'); if (rr) rr.innerText = data.tokens ?? 0;
+        const rr = $('ref-reward'); if (rr) rr.innerText = data.rewarded ?? 0;
     } catch (e) { console.warn('loadReferralStats:', e); }
 }
 
