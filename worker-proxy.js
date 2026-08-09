@@ -2609,6 +2609,153 @@ async function fetchSpotTickerPrice(exchangeKey, symbol) {
   return parseSpotTickerPrice(exchangeKey, body);
 }
 
+// ── OHLC 1m fetch for alert crossing detection ──
+// Fetches 1-minute klines (high/low/close) from the specified exchange.
+// Returns { high, low, close, openTime, closeTime } or null.
+// Uses the SAME exchange cache as fetchSpotPriceUsd (price:exchange:{symbol})
+// to avoid trying a non-working exchange first.
+const KLINE_CHECKERS = {
+  bybit: {
+    buildUrl(symbol) {
+      return `https://api.bybit.com/v5/market/kline?category=spot&symbol=${encodeURIComponent(`${symbol}USDT`)}&interval=1&limit=1`;
+    },
+    parse(body) {
+      const list = body?.result?.list;
+      if (!Array.isArray(list) || list.length === 0) return null;
+      const kline = list[0]; // [start, open, high, low, close, volume, turnover]
+      return {
+        openTime: Number(kline[0]),
+        high: Number(kline[2]),
+        low: Number(kline[3]),
+        close: Number(kline[4]),
+        closeTime: Number(kline[0]) + 60000, // 1m interval
+      };
+    },
+  },
+  okx: {
+    buildUrl(symbol) {
+      return `https://www.okx.com/api/v5/market/candles?instId=${encodeURIComponent(`${symbol}-USDT`)}&bar=1m&limit=1`;
+    },
+    parse(body) {
+      const data = body?.data;
+      if (!Array.isArray(data) || data.length === 0) return null;
+      const kline = data[0]; // [ts, o, h, l, c, vol, volCcy, volCcyConfirm, confirm]
+      return {
+        openTime: Number(kline[0]),
+        high: Number(kline[2]),
+        low: Number(kline[3]),
+        close: Number(kline[4]),
+        closeTime: Number(kline[0]) + 60000,
+      };
+    },
+  },
+  mexc: {
+    buildUrl(symbol) {
+      return `https://api.mexc.com/api/v3/klines?symbol=${encodeURIComponent(`${symbol}USDT`)}&interval=1m&limit=1`;
+    },
+    parse(body) {
+      if (!Array.isArray(body) || body.length === 0) return null;
+      const kline = body[0]; // [openTime, open, high, low, close, volume, closeTime, quoteVolume]
+      return {
+        openTime: Number(kline[0]),
+        high: Number(kline[2]),
+        low: Number(kline[3]),
+        close: Number(kline[4]),
+        closeTime: Number(kline[6]),
+      };
+    },
+  },
+};
+
+const KLINE_EXCHANGES = ['bybit', 'okx', 'mexc'];
+
+/**
+ * Fetch 1-minute OHLC kline for a symbol from the specified exchange.
+ * Returns { high, low, close, openTime, closeTime } or null.
+ */
+async function fetchKlines1m(exchangeKey, symbol) {
+  const checker = KLINE_CHECKERS[exchangeKey];
+  if (!checker) return null;
+  try {
+    const { ok, body } = await fetchJsonWithTimeout(checker.buildUrl(symbol), PRICE_FETCH_TIMEOUT_MS);
+    if (!ok || !body) return null;
+    return checker.parse(body);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch OHLC 1m for a symbol using the same exchange cache pattern as fetchSpotPriceUsd.
+ * Tries cached exchange first, falls back to all 3 exchanges in parallel.
+ * Returns { high, low, close, exchange } or null.
+ */
+async function fetchOhlc1m(env, symbol) {
+  const normalizedSymbol = String(symbol || '').trim().toUpperCase();
+  if (!normalizedSymbol) return null;
+
+  // Forex symbols don't have crypto klines — fall back to spot price
+  const FOREX_YAHOO_MAP = {
+    'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
+    'AAPL': 'AAPL', 'MSFT': 'MSFT', 'NVDA': 'NVDA', 'AMZN': 'AMZN',
+    'GOOGL': 'GOOGL', 'META': 'META', 'TSLA': 'TSLA', 'NFLX': 'NFLX',
+    'AMD': 'AMD', 'INTC': 'INTC', 'COIN': 'COIN', 'MSTR': 'MSTR',
+    'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
+    'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
+    'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
+    'EURGBP': 'EURGBP=X', 'AUDJPY': 'AUDJPY=X', 'EURCHF': 'EURCHF=X',
+    'GBPCAD': 'GBPCAD=X', 'AUDNZD': 'AUDNZD=X', 'EURCAD': 'EURCAD=X',
+  };
+  if (FOREX_YAHOO_MAP[normalizedSymbol]) {
+    // For forex, use spot price as high=low=close (no kline available)
+    const spot = await fetchSpotPriceUsd(env, normalizedSymbol);
+    if (spot && spot.price) {
+      return { high: spot.price, low: spot.price, close: spot.price, exchange: spot.exchange };
+    }
+    return null;
+  }
+
+  const priceCacheKey = `price:exchange:${normalizedSymbol}`;
+
+  // Fast path: try cached exchange
+  let cachedExchange = null;
+  try {
+    const raw = await readAppCache(env, priceCacheKey);
+    if (raw && typeof raw === 'string' && raw.length > 0 && raw.length < 30) {
+      cachedExchange = raw.trim();
+    }
+  } catch {}
+
+  if (cachedExchange && KLINE_EXCHANGES.includes(cachedExchange)) {
+    const kline = await fetchKlines1m(cachedExchange, normalizedSymbol);
+    if (kline && Number.isFinite(kline.high) && Number.isFinite(kline.low)) {
+      return { ...kline, exchange: cachedExchange };
+    }
+    // Cached exchange failed — invalidate
+    await writeAppCache(env, priceCacheKey, '', 60).catch(() => {});
+  }
+
+  // Fallback: try all kline exchanges in parallel
+  const results = await Promise.allSettled(
+    KLINE_EXCHANGES.map(async (exchangeKey) => {
+      const kline = await fetchKlines1m(exchangeKey, normalizedSymbol);
+      return { exchangeKey, kline };
+    })
+  );
+
+  for (const exchangeKey of KLINE_EXCHANGES) {
+    const idx = KLINE_EXCHANGES.indexOf(exchangeKey);
+    const r = results[idx];
+    if (r && r.status === 'fulfilled' && r.value.kline && Number.isFinite(r.value.kline.high)) {
+      // Cache the working exchange
+      await writeAppCache(env, priceCacheKey, exchangeKey, getNumericEnv(env, 'CHART_EXCHANGE_CACHE_TTL', 3600));
+      return { ...r.value.kline, exchange: exchangeKey };
+    }
+  }
+
+  return null;
+}
+
 async function fetchSpotPriceUsd(env, symbol, options = {}) {
   const normalizedSymbol = String(symbol || '').trim().toUpperCase();
   if (!normalizedSymbol) {
@@ -8166,58 +8313,50 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
             return resultPayload;
     }
 
-    // ── PHASE 1: Batch fetch prices for all unique symbols ──
-    // Use Promise.all with a strict 4-second per-fetch timeout.
-    // We try Binance first (fastest, most reliable); if it fails, fall back to Bybit, then OKX.
-    // The old code tried 8 exchanges sequentially with 8s timeout each = 64s worst case.
-    // New: try top 3 exchanges in parallel, take first valid response.
-    const symbolPriceMap = new Map();
+    // ── PHASE 1: Batch fetch OHLC 1m for all unique symbols ──
+    // OHLC FIX: Use fetchOhlc1m instead of fetchSpotPriceUsd.
+    // fetchOhlc1m returns { high, low, close, exchange } — the high/low
+    // of the current 1-minute candle. Even if price has crossed the target
+    // and returned within the same minute, high/low will capture the crossing.
+    // This dramatically reduces missed alerts.
+    //
+    // CPU/subrequest cost: SAME as fetchSpotPriceUsd — 1 HTTP per symbol
+    // (klines endpoint instead of ticker/price endpoint). Same exchange cache.
+    const symbolOhlcMap = new Map(); // symbol → { high, low, close, exchange }
     const symbolSourceMap = new Map();
     const uniqueSymbols = [...new Set(
       alerts.map(a => String(a?.symbol || '').trim().toUpperCase()).filter(Boolean)
     )];
 
-    const fetchWithTimeout = async (symbol) => {
+    const fetchOhlcWithTimeout = async (symbol) => {
       const tFetch = Date.now();
       try {
-        // PHASE 2 FIX (ALERT-01): Removed noCache=true. The fast-path cache
-        // stores ONLY the exchange name (e.g. 'bybit'), NOT the price.
-        // fetchSpotTickerPrice always returns a LIVE price from that exchange.
-        // So bypassing the cache doesn't improve price freshness — it just
-        // forces 3× subrequests per symbol (all exchanges fallback) instead
-        // of 1 subrequest (cached exchange fast-path). This was the primary
-        // cause of subrequest exhaustion (90 > 50 limit) and CPU waste.
-        const priceInfo = await fetchSpotPriceUsd(env, symbol);
+        const ohlc = await fetchOhlc1m(env, symbol);
         return {
           symbol,
-          price: priceInfo?.price || null,
-          source: priceInfo?.exchange || (priceInfo?.cached ? 'cache' : null),
-          cached: Boolean(priceInfo?.cached),
+          ohlc,
+          source: ohlc?.exchange || null,
           latency_ms: Date.now() - tFetch,
         };
       } catch (e) {
-        return { symbol, price: null, source: null, latency_ms: Date.now() - tFetch, error: e?.message };
+        return { symbol, ohlc: null, source: null, latency_ms: Date.now() - tFetch, error: e?.message };
       }
     };
 
     // Fetch all unique symbols in parallel
-    // PHASE 2 FIX (ALERT-02): Reduced from 30 to 15 to stay under Cloudflare's
-    // 50-subrequest limit even on cache miss. With cache hit (ALERT-01 fix):
-    // 15 × 1 = 15 subrequests. With cache miss: 15 × 3 = 45 < 50. Plus 2 DB
-    // queries (listActiveForCron + bulk UPDATE) = 47 total — under 50 limit.
     const FETCH_BATCH = 15;
     _tPriceStart = Date.now(); // Phase 2 start: price fetch
     for (let i = 0; i < uniqueSymbols.length; i += FETCH_BATCH) {
       const batch = uniqueSymbols.slice(i, i + FETCH_BATCH);
-      const results = await Promise.allSettled(batch.map(fetchWithTimeout));
+      const results = await Promise.allSettled(batch.map(fetchOhlcWithTimeout));
       for (const r of results) {
         if (r.status === 'fulfilled') {
-          if (r.value.price && Number.isFinite(r.value.price)) {
-            symbolPriceMap.set(r.value.symbol, r.value.price);
+          if (r.value.ohlc && Number.isFinite(r.value.ohlc.high) && Number.isFinite(r.value.ohlc.low)) {
+            symbolOhlcMap.set(r.value.symbol, r.value.ohlc);
             symbolSourceMap.set(r.value.symbol, r.value.source);
           } else {
             resultPayload.price_fetch_failures += 1;
-            symbolPriceMap.set(r.value.symbol, null);
+            symbolOhlcMap.set(r.value.symbol, null);
           }
         } else {
           resultPayload.price_fetch_failures += 1;
@@ -8252,38 +8391,43 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
         continue;
       }
 
-      const currentPrice = symbolPriceMap.get(symbol);
-      if (!Number.isFinite(currentPrice)) {
+      const ohlc = symbolOhlcMap.get(symbol);
+      if (!ohlc || !Number.isFinite(ohlc.high) || !Number.isFinite(ohlc.low) || !Number.isFinite(ohlc.close)) {
         // Queue update with price=0 (price not available)
         _pendingUpdates.push({ alertId, currentPrice: 0 });
         continue;
       }
 
-      // ── CROSS-DETECTION LOGIC ──
+      const candleHigh = ohlc.high;
+      const candleLow = ohlc.low;
+      const candleClose = ohlc.close;
+
+      // ── OHLC CROSS-DETECTION LOGIC ──
+      // Uses candle high/low to detect crossings that occurred within the
+      // 1-minute candle — even if price has since returned below/above target.
+      //
       // direction='above': trigger if price crossed up through target
-      //   - First check (no prevPrice): trigger if currentPrice >= targetPrice (immediate)
-      //   - Subsequent checks: trigger only if prevPrice < targetPrice AND currentPrice >= targetPrice
-      //     (i.e. price was below and now is at or above)
-      // direction='below': mirror logic
+      //   - First check (no prevPrice): trigger if candleHigh >= targetPrice
+      //     (price reached target at some point during this minute)
+      //   - Subsequent checks: trigger if prevPrice < targetPrice AND candleHigh >= targetPrice
+      //     (price was below and reached target during this minute)
+      // direction='below': mirror logic with candleLow
+      //
+      // last_price is set to candleClose (price at end of candle) for next tick's prevPrice.
       let shouldTrigger = false;
       let triggerReason = 'no_cross';
 
       if (direction === 'below') {
         if (prevPrice == null || !Number.isFinite(prevPrice)) {
-          // First-ever check — trigger if already below target
-          shouldTrigger = currentPrice <= targetPrice;
+          // First-ever check — trigger if already below target (using low)
+          shouldTrigger = candleLow <= targetPrice;
           triggerReason = shouldTrigger ? 'immediate_below' : 'above_target_no_cross';
-        } else if (prevPrice > targetPrice && currentPrice <= targetPrice) {
-          // Crossed DOWN through target
+        } else if (prevPrice > targetPrice && candleLow <= targetPrice) {
+          // Crossed DOWN through target during this candle
           shouldTrigger = true;
           triggerReason = 'cross_down';
-        } else if (prevPrice <= targetPrice && currentPrice <= targetPrice) {
-          // Was below, still below — do NOT re-trigger (already fired or never fired)
-          // If alert is still active and was below before, this is a fresh alert that
-          // was created when price was already below — fire once to notify user
-          // (this is the "immediate trigger on creation" case)
-          // We rely on last_checked_at to detect this: if last_checked_at is NULL,
-          // alert was never checked → fire immediately. Otherwise, skip.
+        } else if (prevPrice <= targetPrice && candleLow <= targetPrice) {
+          // Was below, still below — do NOT re-trigger
           if (alert?.last_checked_at == null) {
             shouldTrigger = true;
             triggerReason = 'first_check_below';
@@ -8291,18 +8435,18 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
             triggerReason = 'still_below_no_retrigger';
           }
         } else {
-          // prevPrice <= target, currentPrice > target — price moved back up
           triggerReason = 'moved_back_up';
         }
       } else {
         // direction = 'above' (default)
         if (prevPrice == null || !Number.isFinite(prevPrice)) {
-          shouldTrigger = currentPrice >= targetPrice;
+          shouldTrigger = candleHigh >= targetPrice;
           triggerReason = shouldTrigger ? 'immediate_above' : 'below_target_no_cross';
-        } else if (prevPrice < targetPrice && currentPrice >= targetPrice) {
+        } else if (prevPrice < targetPrice && candleHigh >= targetPrice) {
+          // Crossed UP through target during this candle
           shouldTrigger = true;
           triggerReason = 'cross_up';
-        } else if (prevPrice >= targetPrice && currentPrice >= targetPrice) {
+        } else if (prevPrice >= targetPrice && candleHigh >= targetPrice) {
           if (alert?.last_checked_at == null) {
             shouldTrigger = true;
             triggerReason = 'first_check_above';
@@ -8316,7 +8460,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
 
       // ARCHITECTURAL FIX: Queue the update instead of executing it immediately.
       // All updates will be batched into a single bulk UPDATE at the end.
-      _pendingUpdates.push({ alertId, currentPrice });
+      _pendingUpdates.push({ alertId, currentPrice: candleClose });
 
       if (!shouldTrigger) {
         // Log the no-trigger decision for audit trail
@@ -8333,10 +8477,11 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       // ── ATOMIC TRIGGER MARK (prevents duplicate triggers) ──
       // markTriggered only succeeds if status is still 'active'. If another cron
       // run already triggered this alert, this returns false and we skip.
+      // OHLC FIX: Use candleClose as the trigger price (price at end of candle).
       let triggered = false;
       if (typeof alertRepo?.markTriggered === 'function') {
         try {
-          triggered = await alertRepo.markTriggered(env, alertId, currentPrice, pool);
+          triggered = await alertRepo.markTriggered(env, alertId, candleClose, pool);
         } catch (e) {
           console.warn('markTriggered failed:', { alert_id: alertId, error: e?.message });
         }
@@ -8346,7 +8491,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
           UPDATE price_alerts
           SET status = 'triggered', triggered_at = NOW(), last_trigger_price = $2
           WHERE id = $1
-        `, [alertId, currentPrice], 1, pool);
+        `, [alertId, candleClose], 1, pool);
         triggered = true;
       }
 
@@ -8360,9 +8505,9 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
         // Clean, short, professional notification text.
         // Only shows: alert fired + symbol + current price.
         // No target price, no direction, no extra text.
-        const priceFmt = currentPrice >= 1
-          ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-          : Number(currentPrice).toFixed(6);
+        const priceFmt = candleClose >= 1
+          ? Number(candleClose).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : Number(candleClose).toFixed(6);
 
         const text = `🔔 هشدار قیمت فعال شد\nقیمت ${symbol} به ${priceFmt} USDT رسید.`;
         const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
@@ -8371,7 +8516,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
         const timing = {
           trigger_at: new Date().toISOString(),
           price_received_ms: Date.now() - t0,
-          // t0 is the cron start time; currentPrice was fetched in Phase 1
+          // t0 is the cron start time; candleClose was fetched in Phase 1
         };
 
         // ── PREFERENCE CHECK (corrected) ──
@@ -8445,7 +8590,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
               forceChannel: true,   // we already checked — don't re-query
               metadata: {
                 symbol,
-                price: String(currentPrice),
+                price: String(candleClose),
                 alert_id: alertId,
                 target_price: String(targetPrice),
                 direction,

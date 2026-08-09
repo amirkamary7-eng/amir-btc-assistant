@@ -1363,15 +1363,35 @@ export function createNotificationPlatformRepository(deps) {
     // Broadcasts stuck in 'sending' are handled by requeueStaleBroadcasts()
     // (Phase 4), which resets them to 'pending' after 5 min timeout.
     // This prevents concurrent processBroadcastFull calls on the same broadcast.
+    //
+    // FIX: Increased LIMIT from 1 to 3. Previously, only 1 broadcast was
+    // processed per 5-min cron tick. If multiple broadcasts accumulated
+    // (e.g., admin created several analyses), they would trickle out one
+    // every 5 minutes — users would receive "new analysis" notifications
+    // for long-deleted test analyses hours later. With LIMIT 3, up to 3
+    // broadcasts are processed per tick. Each processBroadcastFull call
+    // uses CAS (WHERE status='pending') so concurrent calls on the same
+    // broadcast are safe — only one wins the claim.
+    //
+    // CPU impact: each processBroadcastFull processes 25 users/batch with
+    // 1 DB query per batch + 1 HTTP (Telegram) per user. For 3 broadcasts
+    // × 11 users = 33 Telegram sends = ~33 subrequests. Well under the
+    // 50-subrequest Free plan limit. CPU is I/O-bound (HTTP), not compute.
+    // If a broadcast has many users, it processes in batches with checkpoint
+    // — subsequent ticks resume from checkpoint.
     const broadcastResult = await queryDb(env, `
       SELECT * FROM notification_broadcasts
       WHERE status = 'pending'
       ORDER BY created_at ASC
-      LIMIT 1
+      LIMIT 3
     `, [], 1, pool);
     if (!broadcastResult.rows.length) return { processed: 0, remaining: 0 };
-    const broadcast = broadcastResult.rows[0];
-    return processBroadcastFull(env, sendTelegramMessageFn, broadcast.id, pool);
+    let totalProcessed = 0;
+    for (const broadcast of broadcastResult.rows) {
+      const result = await processBroadcastFull(env, sendTelegramMessageFn, broadcast.id, pool);
+      totalProcessed += result.processed || 0;
+    }
+    return { processed: totalProcessed, remaining: 0 };
   }
 
 
