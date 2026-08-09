@@ -6469,7 +6469,7 @@ const assistantHandlers = createAssistantHandlers({
   getTodayIsoDate,
   getNumericEnv,
 });
-const analysisRepo = createAnalysisRepository({ queryDb, normalizeOptionalString });
+const analysisRepo = createAnalysisRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 const analysisHandlers = createAnalysisHandlers({
   jsonResponse,
   authenticateTelegramRequest,

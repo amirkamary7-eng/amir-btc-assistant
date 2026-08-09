@@ -348,20 +348,20 @@ export function createAnalysisHandlers(deps) {
     try {
       await analysisRepo.ensureSchema(env);
 
-      // Featured limit check (max 5)
-      if (parsed.payload.featured && !parsed.payload.force_featured) {
-        const featuredCount = await analysisRepo.countFeatured(env);
-        if (featuredCount >= 5) {
-          return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: featuredCount, max: 5 }, {}, env);
-        }
-      }
-      // If force_featured, un-feature the oldest first
-      if (parsed.payload.featured && parsed.payload.force_featured) {
-        await analysisRepo.unsetOldestFeatured(env);
+      // ANFEAT-RACE FIX: Use atomic createWithFeaturedLimit instead of
+      // separate countFeatured + create. The old code had a TOCTOU race:
+      // concurrent requests all read count=4 (under limit) then all INSERT,
+      // exceeding the max-5 business rule. The new atomic function uses
+      // pg_advisory_xact_lock + a single CTE that counts, conditionally
+      // un-features oldest (if force_featured), and inserts — all in one
+      // statement under the lock. No concurrent request can sneak in.
+      const result = await analysisRepo.createWithFeaturedLimit(env, authResult.user.id, parsed.payload);
+
+      if (result.limitReached) {
+        return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: result.featuredCountBefore, max: result.max }, {}, env);
       }
 
-      const analysis = await analysisRepo.create(env, authResult.user.id, parsed.payload);
-
+      const analysis = result.analysis;
       const version = await invalidateAnalysesCache(env);
 
       // PRODUCTION-GRADE BROADCAST NOTIFICATION SYSTEM
@@ -443,27 +443,19 @@ export function createAnalysisHandlers(deps) {
     if (parsed.error) return parsed.error;
 
     try {
-      // Featured limit check (max 5)
-      if (parsed.payload.featured && !parsed.payload.force_featured) {
-        const featuredCount = await analysisRepo.countFeatured(env);
-        // If this analysis is NOT already featured, check the limit
-        const existing = await analysisRepo.getById(env, analysisId);
-        if (!existing?.featured && featuredCount >= 5) {
-          return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: featuredCount, max: 5 }, {}, env);
-        }
-      }
-      // If force_featured, un-feature the oldest first
-      if (parsed.payload.featured && parsed.payload.force_featured) {
-        const existing = await analysisRepo.getById(env, analysisId);
-        if (!existing?.featured) {
-          await analysisRepo.unsetOldestFeatured(env);
-        }
-      }
+      // ANFEAT-RACE FIX: Use atomic updateWithFeaturedLimit instead of
+      // separate countFeatured + getById + unsetOldestFeatured + update.
+      // Same TOCTOU race as create — fixed with advisory lock + CTE.
+      const result = await analysisRepo.updateWithFeaturedLimit(env, analysisId, parsed.payload);
 
-      const analysis = await analysisRepo.update(env, analysisId, parsed.payload);
-      if (!analysis) {
+      if (result.notFound) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
+      if (result.limitReached) {
+        return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: result.featuredCountBefore, max: result.max }, {}, env);
+      }
+
+      const analysis = result.analysis;
       // FIX 1: pass analysisId so the detail cache for this analysis is purged too
       const version = await invalidateAnalysesCache(env, analysisId);
 

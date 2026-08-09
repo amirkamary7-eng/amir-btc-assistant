@@ -7,7 +7,7 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createAnalysisRepository(deps) {
-  const { queryDb, normalizeOptionalString } = deps;
+  const { queryDb, queryDbTransaction, normalizeOptionalString } = deps;
 
   /**
    * Serialize a raw DB row into the API response shape.
@@ -409,6 +409,99 @@ export function createAnalysisRepository(deps) {
     );
     return serializeAnalysisRow(result.rows[0]);
   }
+
+  /**
+   * ANFEAT-RACE FIX: Atomic create with featured limit enforcement.
+   *
+   * Uses queryDbTransaction (BEGIN → queries → COMMIT) with:
+   *   1. pg_advisory_xact_lock — serializes concurrent featured operations
+   *      so only one create-with-featured can run at a time. The lock is
+   *      transaction-scoped, released on COMMIT.
+   *   2. COUNT featured rows UNDER the lock (accurate count).
+   *   3. Conditional INSERT — only fires if:
+   *        - featured = false (no limit applies), OR
+   *        - featured = true AND count < 5 (under limit), OR
+   *        - force_featured = true (un-feature oldest first via UPDATE,
+   *          then insert — count goes 5→4→5, never exceeds 5).
+   *
+   * Using separate queries in a transaction (instead of a single CTE)
+   * guarantees execution order: lock → count → (optional un-feature) → insert.
+   * CTEs don't guarantee execution order for non-referenced CTEs, and
+   * pg_advisory_xact_lock in a non-referenced CTE may never execute.
+   *
+   * @returns {Promise<{inserted: boolean, analysis: object|null, featuredCountBefore: number, limitReached: boolean}>}
+   */
+  async function createWithFeaturedLimit(env, adminUserId, payload) {
+    const newId = String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 12);
+    const isFeatured = Boolean(payload.featured);
+    const forceFeatured = Boolean(payload.force_featured);
+    const MAX_FEATURED = 5;
+
+    // Query 1: Acquire advisory lock (transaction-scoped, released on COMMIT)
+    const lockQuery = {
+      sql: `SELECT pg_advisory_xact_lock(hashtext('analyses_featured_limit')) AS locked`,
+      params: [],
+    };
+
+    // Query 2: Count featured rows under the lock
+    const countQuery = {
+      sql: `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured = TRUE`,
+      params: [],
+    };
+
+    // Query 3 (conditional): If force_featured AND at limit, un-feature oldest.
+    // This is a no-op if force_featured=false or count < 5 (WHERE clause filters it out).
+    const unfeatureQuery = {
+      sql: `UPDATE analyses SET featured = FALSE, updated_at = NOW()
+            WHERE id = (SELECT id FROM analyses WHERE featured = TRUE ORDER BY created_at ASC LIMIT 1)
+            AND $1 = TRUE AND (SELECT COUNT(*) FROM analyses WHERE featured = TRUE) >= $2
+            RETURNING id`,
+      params: [forceFeatured, MAX_FEATURED],
+    };
+
+    // Query 4: Conditional INSERT. Only inserts if:
+    //   - not featured (no limit), OR
+    //   - featured but count < 5, OR
+    //   - force_featured (already un-featured oldest above if needed)
+    const insertQuery = {
+      sql: `INSERT INTO analyses (id, title, coin, timeframe, image, text, support_level, current_price, resistance_level, featured, category, author, author_id, created_at, updated_at)
+            SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()
+            WHERE
+              $10 = FALSE
+              OR (SELECT COUNT(*) FROM analyses WHERE featured = TRUE) < $14
+              OR $15 = TRUE
+            RETURNING id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at`,
+      params: [
+        newId,
+        normalizeOptionalString(payload.title) || '',
+        (normalizeOptionalString(payload.coin) || '').toUpperCase(),
+        normalizeOptionalString(payload.timeframe) || '1d',
+        normalizeOptionalString(payload.image) || '',
+        String(payload.text || ''),
+        normalizeOptionalString(payload.support_level) || '',
+        normalizeOptionalString(payload.current_price) || '',
+        normalizeOptionalString(payload.resistance_level) || '',
+        isFeatured,
+        normalizeOptionalString(payload.category) || 'crypto',
+        normalizeOptionalString(payload.author) || '',
+        String(adminUserId),
+        MAX_FEATURED,
+        forceFeatured,
+      ],
+    };
+
+    const results = await queryDbTransaction(env, [lockQuery, countQuery, unfeatureQuery, insertQuery]);
+    const countResult = results[1];
+    const insertResult = results[3];
+
+    const featuredCountBefore = Number(countResult.rows[0]?.cnt || 0);
+    const inserted = insertResult.rows.length > 0;
+    const analysis = inserted ? serializeAnalysisRow(insertResult.rows[0]) : null;
+    const limitReached = isFeatured && !forceFeatured && !inserted;
+
+    return { inserted, analysis, featuredCountBefore, limitReached, max: MAX_FEATURED };
+  }
+
   async function update(env, analysisId, payload) {
     // NOTE: Featured limit (max 5) is enforced by the controller.
     const result = await queryDb(
@@ -435,6 +528,114 @@ export function createAnalysisRepository(deps) {
     );
     if (!result.rows[0]) return null;
     return serializeAnalysisRow(result.rows[0]);
+  }
+
+  /**
+   * ANFEAT-RACE FIX: Atomic update with featured limit enforcement.
+   *
+   * Same queryDbTransaction pattern as createWithFeaturedLimit, but for UPDATE.
+   * Uses advisory lock + separate queries in a transaction to guarantee
+   * execution order: lock → check existing → count → (optional un-feature) → update.
+   *
+   * The featured limit check only applies when:
+   *   - The analysis is NOT already featured, AND
+   *   - The update is setting featured = true, AND
+   *   - featured count is already at 5, AND
+   *   - force_featured is false.
+   *
+   * @returns {Promise<{updated: boolean, analysis: object|null, featuredCountBefore: number, limitReached: boolean, notFound: boolean}>}
+   */
+  async function updateWithFeaturedLimit(env, analysisId, payload) {
+    const wantFeatured = payload.featured === true;
+    const forceFeatured = Boolean(payload.force_featured);
+    const MAX_FEATURED = 5;
+    const featuredParam = payload.featured === true ? true : payload.featured === false ? false : null;
+
+    // Query 1: Acquire advisory lock
+    const lockQuery = {
+      sql: `SELECT pg_advisory_xact_lock(hashtext('analyses_featured_limit')) AS locked`,
+      params: [],
+    };
+
+    // Query 2: Check if analysis exists + is already featured
+    const existingQuery = {
+      sql: `SELECT id, featured FROM analyses WHERE id = $1`,
+      params: [String(analysisId)],
+    };
+
+    // Query 3: Count featured rows under the lock
+    const countQuery = {
+      sql: `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured = TRUE`,
+      params: [],
+    };
+
+    // Query 4 (conditional): If force_featured AND not already featured AND at limit,
+    // un-feature oldest. No-op otherwise (WHERE clause filters it out).
+    const unfeatureQuery = {
+      sql: `UPDATE analyses SET featured = FALSE, updated_at = NOW()
+            WHERE id = (SELECT id FROM analyses WHERE featured = TRUE ORDER BY created_at ASC LIMIT 1)
+            AND $1 = TRUE
+            AND $2 = FALSE
+            AND (SELECT COUNT(*) FROM analyses WHERE featured = TRUE) >= $3
+            RETURNING id`,
+      params: [forceFeatured, wantFeatured, MAX_FEATURED],
+    };
+
+    // Query 5: Conditional UPDATE. Only updates if:
+    //   - not setting featured=true, OR
+    //   - already featured (count doesn't increase), OR
+    //   - count < limit, OR
+    //   - force_featured (already un-featured oldest above if needed)
+    const updateQuery = {
+      sql: `UPDATE analyses
+            SET title = $2, coin = $3, timeframe = $4, image = $5, text = $6,
+                support_level = $7, current_price = $8, resistance_level = $9,
+                featured = COALESCE($10, featured), category = COALESCE($11, category), updated_at = NOW()
+            WHERE id = $1
+            AND (
+              $10 IS NOT TRUE
+              OR (SELECT featured FROM analyses WHERE id = $1) IS TRUE
+              OR (SELECT COUNT(*) FROM analyses WHERE featured = TRUE) < $12
+              OR $13 = TRUE
+            )
+            RETURNING id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at`,
+      params: [
+        String(analysisId),
+        normalizeOptionalString(payload.title) || '',
+        (normalizeOptionalString(payload.coin) || '').toUpperCase(),
+        normalizeOptionalString(payload.timeframe) || '1d',
+        normalizeOptionalString(payload.image) || '',
+        String(payload.text || ''),
+        normalizeOptionalString(payload.support_level) || '',
+        normalizeOptionalString(payload.current_price) || '',
+        normalizeOptionalString(payload.resistance_level) || '',
+        featuredParam,
+        normalizeOptionalString(payload.category) || null,
+        MAX_FEATURED,
+        forceFeatured,
+      ],
+    };
+
+    const results = await queryDbTransaction(env, [lockQuery, existingQuery, countQuery, unfeatureQuery, updateQuery]);
+    const existingResult = results[1];
+    const countResult = results[2];
+    const updateResult = results[4];
+
+    const exists = existingResult.rows.length > 0;
+    const wasFeatured = Boolean(existingResult.rows[0]?.featured);
+    const featuredCountBefore = Number(countResult.rows[0]?.cnt || 0);
+    const updated = updateResult.rows.length > 0;
+    const analysis = updated ? serializeAnalysisRow(updateResult.rows[0]) : null;
+    const limitReached = wantFeatured && !forceFeatured && !wasFeatured && !updated && exists;
+
+    return {
+      updated,
+      analysis,
+      featuredCountBefore,
+      limitReached,
+      notFound: !exists,
+      max: MAX_FEATURED,
+    };
   }
 
   /**
@@ -485,7 +686,9 @@ export function createAnalysisRepository(deps) {
     countFeatured,
     unsetOldestFeatured,
     create,
+    createWithFeaturedLimit,
     update,
+    updateWithFeaturedLimit,
     remove,
     serializeAnalysisRow,
   });
