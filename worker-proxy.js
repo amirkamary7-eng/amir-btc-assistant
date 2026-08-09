@@ -9243,6 +9243,13 @@ export default {
         if (_dataAuth.error) return _dataAuth.error;
         const _dataJoinBlocked = await requireChannelJoin(_dataAuth.user, env);
         if (_dataJoinBlocked) return _dataJoinBlocked;
+        // ANVIEW-SPAM FIX: Set _protectedUser on the request so analysis
+        // handlers (especially handleIncrementView) can access the
+        // authenticated user ID for per-user rate limiting. Previously
+        // only PROTECTED_PATHS gate set this — _DATA_PATHS gate (which
+        // covers /api/analyses/*) did not, so handleIncrementView couldn't
+        // identify the user.
+        request._protectedUser = _dataAuth.user;
       }
 
       if (request.method === 'GET' && url.pathname === '/api/market') {

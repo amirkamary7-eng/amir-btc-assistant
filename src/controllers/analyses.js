@@ -376,27 +376,55 @@ export function createAnalysisHandlers(deps) {
    * ANVIEW-CACHE FIX: After incrementing views_count in DB, update the
    * analysis:detail:<id> cache so the next GET /:id returns the fresh
    * count immediately (instead of waiting 60s for the cache TTL to expire).
-   * This reads the cached analysis, updates views_count, and writes it back
-   * — 2 KV operations (read + write) but avoids a full DB query on the next
-   * GET. If the cache is empty (miss), no update needed (next GET will fetch
-   * fresh from DB). Only touches THIS analysis's cache — no global
-   * invalidation, no impact on other analyses.
+   *
+   * ANVIEW-SPAM FIX: Per-user rate limit — one increment per user per
+   * analysis per 24h. Uses KV key analysis_viewed:<userId>:<analysisId>
+   * with 24h TTL. If the key exists, the user already viewed this analysis
+   * today → return current count WITHOUT incrementing. Different users
+   * can still increment independently. This prevents artificial view
+   * count inflation via rapid repeated requests.
    */
   async function handleIncrementView(request, env, analysisId) {
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database unavailable' }, { status: 503 }, env);
     }
     try {
+      // ANVIEW-SPAM FIX: Extract userId from the auth state (set by
+      // _DATA_PATHS gate in production). In dev mode, _protectedUser may
+      // be null — skip rate limiting (dev mode is trusted).
+      const userId = request._protectedUser?.id ? String(request._protectedUser.id) : null;
+      const viewedKey = userId ? `analysis_viewed:${userId}:${analysisId}` : null;
+
+      // Check if this user already viewed this analysis today
+      if (viewedKey) {
+        const alreadyViewed = await readAppCache(env, viewedKey);
+        if (alreadyViewed) {
+          // User already viewed — return current count WITHOUT incrementing.
+          // Still return success so the frontend doesn't show an error.
+          const analysis = await analysisRepo.getById(env, analysisId);
+          if (!analysis) {
+            return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
+          }
+          return jsonResponse({ status: 'success', views_count: analysis.views_count, already_viewed: true }, {}, env);
+        }
+      }
+
       const views = await analysisRepo.incrementViews(env, analysisId);
       if (views === null) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
 
+      // Mark this user as having viewed this analysis (24h TTL)
+      if (viewedKey) {
+        try {
+          await writeAppCache(env, viewedKey, '1', 86400); // 24 hours
+        } catch {
+          // Non-fatal — if KV write fails, the user might increment again,
+          // but that's acceptable (worst case: 1 extra view).
+        }
+      }
+
       // ANVIEW-CACHE FIX: Update the detail cache for THIS analysis only.
-      // Read the cached entry, update views_count, write it back with the
-      // remaining TTL (approximated as 60s — the original TTL). This is
-      // cheaper than delete + re-fetch-from-DB on next GET, and prevents
-      // users from seeing stale view counts for up to 60s.
       const cacheKey = `${DETAIL_CACHE_PREFIX}${analysisId}`;
       try {
         const cached = await readAppCache(env, cacheKey);
@@ -407,7 +435,6 @@ export function createAnalysisHandlers(deps) {
         }
       } catch {
         // Non-fatal — cache update failed, but DB increment succeeded.
-        // Next GET will miss cache and fetch fresh from DB.
       }
 
       return jsonResponse({ status: 'success', views_count: views }, {}, env);
