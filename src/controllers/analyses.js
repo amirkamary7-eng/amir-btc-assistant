@@ -536,7 +536,18 @@ export function createAnalysisHandlers(deps) {
         env._poolReqId = _savedReqId;
       }
 
-      return jsonResponse({ status: 'success', analysis, version }, {}, env);
+      // ANRESP-ASYM FIX: Return stats + featured (same shape as PUT) so the
+      // frontend can update all sections without a background refetch.
+      // Previously POST returned only {analysis, version} while PUT returned
+      // {analysis, version, stats, featured}. The frontend already handles
+      // both shapes via conditional checks (if result.stats, if Array.isArray
+      // (result.featured)), so this is a safe additive change.
+      const [createStats, createFeatured] = await Promise.all([
+        analysisRepo.getStats(env),
+        analysisRepo.getFeatured(env),
+      ]);
+
+      return jsonResponse({ status: 'success', analysis, version, stats: createStats, featured: createFeatured }, {}, env);
     } catch (error) {
       console.warn(safeError('create-analysis', error));
       return safeDbErrorResponse(error, {}, env);
@@ -609,7 +620,19 @@ export function createAnalysisHandlers(deps) {
       }
 
       const version = await invalidateAnalysesCache(env, analysisId);
-      return jsonResponse({ status: 'success', version }, {}, env);
+
+      // ANRESP-ASYM FIX: Return stats + featured (same shape as PUT) so the
+      // frontend can update all sections without a background refetch.
+      // Previously DELETE returned only {version} (no analysis/stats/featured).
+      // The frontend's executeDeleteAnalysis already checks for result.stats
+      // and result.featured via conditionals, so this is a safe additive change.
+      // analysis is null (the analysis was deleted).
+      const [deleteStats, deleteFeatured] = await Promise.all([
+        analysisRepo.getStats(env),
+        analysisRepo.getFeatured(env),
+      ]);
+
+      return jsonResponse({ status: 'success', analysis: null, version, stats: deleteStats, featured: deleteFeatured }, {}, env);
     } catch (error) {
       console.warn(safeError('delete-analysis', error));
       return safeDbErrorResponse(error, {}, env);
