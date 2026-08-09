@@ -247,55 +247,11 @@ export function createAnalysisRepository(deps) {
   /**
    * Get stats + featured analyses in a SINGLE queryDb call.
    * Used by handleDelete to halve CPU cost.
+   *
+   * ANPOST-005 FIX (DEAD CODE REMOVED): getStatsAndFeatured was exported but
+   * had 0 callers. Replaced by listWithStatsAndFeatured (which also returns
+   * the paginated list in a single CTE). Removed ~47 lines.
    */
-  async function getStatsAndFeatured(env) {
-    const result = await queryDb(env, `
-      WITH stats AS (
-        SELECT
-          COUNT(*)::int AS total,
-          COUNT(*) FILTER (WHERE featured = TRUE)::int AS featured,
-          COUNT(*) FILTER (WHERE featured IS NOT TRUE OR featured = FALSE)::int AS active,
-          COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)::int AS today
-        FROM analyses
-      )
-      SELECT
-        (SELECT total FROM stats) AS total,
-        (SELECT featured FROM stats) AS featured,
-        (SELECT active FROM stats) AS active,
-        (SELECT today FROM stats) AS today,
-        COALESCE(
-          (SELECT json_agg(json_build_object(
-            'id', f.id, 'coin', f.coin, 'timeframe', f.timeframe,
-            'image', f.image, 'text', f.text, 'title', f.title,
-            'support_level', f.support_level, 'current_price', f.current_price,
-            'resistance_level', f.resistance_level, 'views_count', f.views_count,
-            'featured', f.featured, 'category', f.category,
-            'author', f.author, 'author_id', f.author_id,
-            'created_at', f.created_at, 'updated_at', f.updated_at
-          )) FROM (
-            SELECT * FROM analyses WHERE featured = TRUE
-            ORDER BY created_at DESC LIMIT 5
-          ) f),
-          '[]'
-        ) AS featured_rows
-    `);
-    const row = result.rows[0] || {};
-    let featured = [];
-    try {
-      const raw = row.featured_rows;
-      featured = (typeof raw === 'string' ? JSON.parse(raw) : raw) || [];
-      featured = featured.map(serializeAnalysisRow);
-    } catch {}
-    return {
-      stats: {
-        total: Number(row.total || 0),
-        featured: Number(row.featured || 0),
-        active: Number(row.active || 0),
-        today: Number(row.today || 0),
-      },
-      featured,
-    };
-  }
 
   /**
    * List analyses with pagination. Excludes the featured analysis from the list
@@ -351,41 +307,11 @@ export function createAnalysisRepository(deps) {
     return result.rows.length ? Number(result.rows[0].views_count) : null;
   }
 
-  /**
-   * Set an analysis as featured (up to 5 allowed — controller enforces the limit).
-   */
-  async function setFeatured(env, analysisId) {
-    const result = await queryDb(
-      env,
-      `UPDATE analyses SET featured = TRUE, updated_at = NOW() WHERE id = $1 RETURNING id`,
-      [String(analysisId)],
-    );
-    return Boolean(result.rows.length);
-  }
-
-  /**
-   * Unset featured from an analysis.
-   */
-  async function unsetFeatured(env, analysisId) {
-    const result = await queryDb(
-      env,
-      `UPDATE analyses SET featured = FALSE, updated_at = NOW() WHERE id = $1 AND featured = TRUE RETURNING id`,
-      [String(analysisId)],
-    );
-    return Boolean(result.rows.length);
-  }
-
-  /**
-   * List ALL analyses (for cache / dashboard slider). No pagination.
-   */
-  async function listAll(env) {
-    const result = await queryDb(
-      env,
-      `SELECT id, coin, timeframe, image, text, title, support_level, current_price, resistance_level, views_count, featured, category, author, author_id, created_at, updated_at
-       FROM analyses ORDER BY created_at DESC`,
-    );
-    return result.rows.map((row) => serializeAnalysisRow(row));
-  }
+  // ANPOST-005 FIX (DEAD CODE REMOVED): setFeatured, unsetFeatured, and
+  // listAll were exported but had 0 callers. Featured changes now go through
+  // createWithFeaturedLimit/updateWithFeaturedLimit (which handle the
+  // advisory lock + count + conditional unfeature atomically). listAll was
+  // replaced by listWithStatsAndFeatured. Removed ~23 lines total.
 
   /**
    * Insert a new analysis and return the serialized row.
@@ -666,41 +592,20 @@ export function createAnalysisRepository(deps) {
     return Boolean(result.rows[0]);
   }
 
-  /**
-   * Count currently featured analyses.
-   */
-  async function countFeatured(env) {
-    const result = await queryDb(env, `SELECT COUNT(*)::int AS cnt FROM analyses WHERE featured = TRUE`);
-    return Number(result.rows[0]?.cnt || 0);
-  }
-
-  /**
-   * Un-feature the oldest featured analysis. Returns the un-featured row or null.
-   */
-  async function unsetOldestFeatured(env) {
-    const result = await queryDb(
-      env,
-      `UPDATE analyses SET featured = FALSE, updated_at = NOW() WHERE id = (
-          SELECT id FROM analyses WHERE featured = TRUE ORDER BY created_at ASC LIMIT 1
-        ) AND featured = TRUE RETURNING id`,
-    );
-    return result.rows.length > 0;
-  }
+  // ANPOST-005 FIX (DEAD CODE REMOVED): countFeatured and unsetOldestFeatured
+  // were the old non-atomic featured management functions. They had 0 callers
+  // after FIX 1 (ANFEAT-RACE) replaced them with createWithFeaturedLimit/
+  // updateWithFeaturedLimit (which do the count + unfeature atomically inside
+  // a transaction with advisory lock). Removed ~18 lines.
 
   return Object.freeze({
     ensureSchema,
     getFeatured,
     getStats,
-    getStatsAndFeatured,
     listWithStatsAndFeatured,
     list,
-    listAll,
     getById,
     incrementViews,
-    setFeatured,
-    unsetFeatured,
-    countFeatured,
-    unsetOldestFeatured,
     create,
     createWithFeaturedLimit,
     update,
