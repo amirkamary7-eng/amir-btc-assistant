@@ -602,16 +602,11 @@ export function createAnalysisHandlers(deps) {
 
       // ANRESP-ASYM FIX: Return stats + featured (same shape as PUT) so the
       // frontend can update all sections without a background refetch.
-      // Previously POST returned only {analysis, version} while PUT returned
-      // {analysis, version, stats, featured}. The frontend already handles
-      // both shapes via conditional checks (if result.stats, if Array.isArray
-      // (result.featured)), so this is a safe additive change.
-      const [createStats, createFeatured] = await Promise.all([
-        analysisRepo.getStats(env),
-        analysisRepo.getFeatured(env),
-      ]);
+      // ANPOST-003 FIX: Use listWithStatsAndFeatured (1 CTE query) instead of
+      // separate getStats + getFeatured (2 queries). Same data, 1 DB round-trip.
+      const createPageData = await analysisRepo.listWithStatsAndFeatured(env, 1, 20);
 
-      return jsonResponse({ status: 'success', analysis, version, stats: createStats, featured: createFeatured }, {}, env);
+      return jsonResponse({ status: 'success', analysis, version, stats: createPageData.stats, featured: createPageData.featured }, {}, env);
     } catch (error) {
       console.warn(safeError('create-analysis', error));
       return safeDbErrorResponse(error, {}, env);
@@ -652,12 +647,11 @@ export function createAnalysisHandlers(deps) {
       const version = await invalidateAnalysesCache(env, analysisId);
 
       // Fetch fresh stats + featured (KV may be stale on other instances)
-      const [stats, featured] = await Promise.all([
-        analysisRepo.getStats(env),
-        analysisRepo.getFeatured(env),
-      ]);
+      // ANPOST-003 FIX: Use listWithStatsAndFeatured (1 CTE query) instead of
+      // separate getStats + getFeatured (2 queries). Same data, 1 DB round-trip.
+      const updatePageData = await analysisRepo.listWithStatsAndFeatured(env, 1, 20);
 
-      return jsonResponse({ status: 'success', analysis, version, stats, featured }, {}, env);
+      return jsonResponse({ status: 'success', analysis, version, stats: updatePageData.stats, featured: updatePageData.featured }, {}, env);
     } catch (error) {
       console.warn(safeError('update-analysis', error));
       return safeDbErrorResponse(error, {}, env);
@@ -687,16 +681,11 @@ export function createAnalysisHandlers(deps) {
 
       // ANRESP-ASYM FIX: Return stats + featured (same shape as PUT) so the
       // frontend can update all sections without a background refetch.
-      // Previously DELETE returned only {version} (no analysis/stats/featured).
-      // The frontend's executeDeleteAnalysis already checks for result.stats
-      // and result.featured via conditionals, so this is a safe additive change.
-      // analysis is null (the analysis was deleted).
-      const [deleteStats, deleteFeatured] = await Promise.all([
-        analysisRepo.getStats(env),
-        analysisRepo.getFeatured(env),
-      ]);
+      // ANPOST-003 FIX: Use listWithStatsAndFeatured (1 CTE query) instead of
+      // separate getStats + getFeatured (2 queries). Same data, 1 DB round-trip.
+      const deletePageData = await analysisRepo.listWithStatsAndFeatured(env, 1, 20);
 
-      return jsonResponse({ status: 'success', analysis: null, version, stats: deleteStats, featured: deleteFeatured }, {}, env);
+      return jsonResponse({ status: 'success', analysis: null, version, stats: deletePageData.stats, featured: deletePageData.featured }, {}, env);
     } catch (error) {
       console.warn(safeError('delete-analysis', error));
       return safeDbErrorResponse(error, {}, env);
