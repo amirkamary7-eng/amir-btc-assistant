@@ -583,11 +583,7 @@ const i18n = {
         delete_account_error: 'خطا در حذف حساب',
         delete_account_progress: 'در حال حذف...',
         // ── Price Alert Quick Presets ──
-        alert_quick_presets: 'تنظیم سریع',
-        alert_preset_5_up: '۵٪ +',
-        alert_preset_10_up: '۱۰٪ +',
-        alert_preset_5_down: '۵٪ -',
-        alert_preset_10_down: '۱۰٪ -',
+        alert_crossing_hint: 'قیمت عبور از سطح',
         alert_preset_ath: 'قله تاریخی',
         // ── Market Heatmap ──
         heatmap_title: 'نقشه حرارتی بازار',
@@ -717,11 +713,7 @@ const i18n = {
         delete_account_error: 'Error deleting account',
         delete_account_progress: 'Deleting...',
         // ── Price Alert Quick Presets ──
-        alert_quick_presets: 'Quick Set',
-        alert_preset_5_up: '+5%',
-        alert_preset_10_up: '+10%',
-        alert_preset_5_down: '-5%',
-        alert_preset_10_down: '-10%',
+        alert_crossing_hint: 'Price crossing level',
         alert_preset_ath: 'All-Time High',
         // ── Market Heatmap ──
         heatmap_title: 'Market Heatmap',
@@ -8627,64 +8619,11 @@ function selectCdAlertDirection(dir, btn) {
 }
 
 // ============================================================================
-// ── NEW FEATURE: Price Alert Quick Presets ──
-// ============================================================================
-// One-tap buttons that auto-calculate the target price based on the current
-// coin price and a percentage delta (+5%, +10%, -5%, -10%).
-// This eliminates manual price calculation for the most common alert scenarios.
-function applyAlertPreset(preset) {
-    if (!_currentDetailSymbol) {
-        showMiniToast(currentLang === 'fa' ? 'ابتدا یک ارز انتخاب کنید' : 'Select a coin first');
-        return;
-    }
-    // Find current coin price
-    const btcPairBase = parseBtcPairSymbol(_currentDetailSymbol);
-    const baseSymbol = btcPairBase || _currentDetailSymbol;
-    const coin = allCoins.find(c => c.symbol === baseSymbol);
-    if (!coin || !coin.priceUsd || coin.priceUsd <= 0) {
-        showMiniToast(currentLang === 'fa' ? 'قیمت در دسترس نیست' : 'Price unavailable');
-        return;
-    }
-    const currentPrice = coin.priceUsd;
-    let targetPrice, direction;
-    switch (preset) {
-        case '5up':   targetPrice = currentPrice * 1.05; direction = 'above'; break;
-        case '10up':  targetPrice = currentPrice * 1.10; direction = 'above'; break;
-        case '5down': targetPrice = currentPrice * 0.95; direction = 'below'; break;
-        case '10down':targetPrice = currentPrice * 0.90; direction = 'below'; break;
-        default: return;
-    }
-    // Fill the price input
-    const input = document.getElementById('alert-price');
-    if (input) {
-        // Format: 6 decimals for small prices, 2 for large
-        input.value = targetPrice > 1
-            ? targetPrice.toFixed(2)
-            : targetPrice.toFixed(6);
-    }
-    // Set the direction
-    const dirBtn = document.querySelector(`.cd-alert-dir-btn[data-direction="${direction}"]`);
-    if (dirBtn) selectCdAlertDirection(direction, dirBtn);
-    // Visual feedback — flash the preset button
-    const presetBtn = document.querySelector(`.cd-preset-btn[data-preset="${preset}"]`);
-    if (presetBtn) {
-        presetBtn.classList.add('flash');
-        setTimeout(() => presetBtn.classList.remove('flash'), 600);
-    }
-    // Haptic feedback
-    if (window.tg?.HapticFeedback) {
-        try { window.tg.HapticFeedback.impactOccurred('light'); } catch {}
-    }
-    // Show a mini toast confirming the preset
-    const pctLabel = preset.includes('5') ? '5%' : '10%';
-    const dirLabel = direction === 'above'
-        ? (currentLang === 'fa' ? 'بالا' : 'up')
-        : (currentLang === 'fa' ? 'پایین' : 'down');
-    showMiniToast(currentLang === 'fa'
-        ? `هدف: $${input?.value} (${pctLabel} ${dirLabel})`
-        : `Target: $${input?.value} (${pctLabel} ${dirLabel})`);
-}
-window.applyAlertPreset = applyAlertPreset;
+// ── REMOVED: Quick Preset Buttons (+5%, -5%, +10%, -10%) ──
+// Replaced with simple Crossing alert. User enters a specific price and
+// selects direction (above/below). The system triggers when price crosses
+// that level. No percentage-based presets needed.
+// window.applyAlertPreset removed.
 
 /**
  * Update the alert status badge (active count + status icon/text)

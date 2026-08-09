@@ -9135,76 +9135,20 @@ html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
 }
 .cd-alert-btn:active { transform: scale(0.97); }
 
-/* ── NEW: Quick Preset Buttons ── */
-.cd-alert-presets {
-    margin-top: 12px;
-    padding: 10px;
+/* ── Crossing Alert Label (replaces Quick Preset buttons) ── */
+.cd-alert-crossing-label {
+    margin-top: 10px;
+    padding: 8px 12px;
     background: rgba(255,255,255,0.02);
     border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 12px;
-}
-.cd-alert-presets-label {
-    display: block;
+    border-radius: 10px;
     font-size: 11px;
     color: rgba(255,255,255,0.4);
-    margin-bottom: 8px;
+    text-align: center;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     font-weight: 600;
 }
-.cd-alert-presets-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-}
-.cd-preset-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    padding: 8px 4px;
-    border-radius: 9px;
-    border: 1px solid rgba(255,255,255,0.08);
-    background: rgba(255,255,255,0.03);
-    color: rgba(255,255,255,0.7);
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-family: inherit;
-}
-.cd-preset-btn:hover {
-    background: rgba(255,255,255,0.06);
-    border-color: rgba(255,255,255,0.15);
-}
-.cd-preset-btn:active { transform: scale(0.94); }
-.cd-preset-btn.cd-preset-up {
-    color: #22C55E;
-    border-color: rgba(34,197,94,0.2);
-    background: rgba(34,197,94,0.05);
-}
-.cd-preset-btn.cd-preset-up:hover {
-    background: rgba(34,197,94,0.12);
-    border-color: rgba(34,197,94,0.4);
-}
-.cd-preset-btn.cd-preset-down {
-    color: #EF4444;
-    border-color: rgba(239,68,68,0.2);
-    background: rgba(239,68,68,0.05);
-}
-.cd-preset-btn.cd-preset-down:hover {
-    background: rgba(239,68,68,0.12);
-    border-color: rgba(239,68,68,0.4);
-}
-.cd-preset-btn.flash {
-    animation: presetFlash 0.6s ease;
-}
-@keyframes presetFlash {
-    0% { transform: scale(1); }
-    40% { transform: scale(1.15); filter: brightness(1.4); }
-    100% { transform: scale(1); }
-}
-.cd-preset-btn svg { flex-shrink: 0; }
 
 .cd-alert-list {
     display: flex; flex-direction: column; gap: 8px;
