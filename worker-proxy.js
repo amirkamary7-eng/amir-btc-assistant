@@ -10812,16 +10812,52 @@ export default {
     // could exceed 10ms. Now each gets its own budget.
     // ═══════════════════════════════════════════════════════════════════
     if (isEvery15Min) {
+      // CROSS-REQUEST I/O FIX: Null env._reqPool before retryFailed* so
+      // queryDb falls through to per-call Pool (or neon() HTTP) instead of
+      // using a stale Pool from the 1-min cron's runScheduledAlertsBaseline.
+      //
+      // Root cause: 1-min cron sets env._reqPool = pool1. If the 1-min cron
+      // and */15 cron overlap in the same isolate, retryFailed* (which run
+      // in separate ctx.waitUntil without pool param) read env._reqPool =
+      // pool1. When the 1-min cron finishes, pool1.end() closes the Pool.
+      // retryFailed* then tries to use the closed pool1 → "Cannot perform
+      // I/O on behalf of a different request" error.
+      //
+      // Fix: Save env._reqPool, null it, run retryFailed*, restore in finally.
+      // retryFailed* queryDb calls now skip env._reqPool (it's null) and use
+      // per-call Pool — each creates its own Pool, uses it, closes it. Safe.
+      //
+      // This is safe because:
+      // - retryFailed* run AFTER withPhasePool block completes (pool already closed)
+      // - No other code reads env._reqPool during retryFailed*
+      // - env._reqPool is restored in finally, even on exception
+      // - Neon() HTTP returns null for Supabase URLs → per-call Pool is used
+      const _savedReqPoolForRetry = env._reqPool;
+      env._reqPool = null;
       ctx.waitUntil((async () => {
-        try { await retryFailedReferralRewards(env); _logPhase('phase2-referral', 'ok'); } catch (e) {
+        try {
+          await retryFailedReferralRewards(env);
+          _logPhase('phase2-referral', 'ok');
+        } catch (e) {
           _logPhase('phase2-referral', 'error', { error: e?.message });
           console.warn('[CRON] referral retry failed:', e?.message);
+        } finally {
+          // Restore env._reqPool even if retryFailed threw
+          env._reqPool = _savedReqPoolForRetry;
         }
       })());
+      // For wheel retry, also null env._reqPool (in case referral retry restored it)
+      const _savedReqPoolForWheel = env._reqPool;
+      env._reqPool = null;
       ctx.waitUntil((async () => {
-        try { await retryFailedWheelRewards(env); _logPhase('phase2-wheel', 'ok'); } catch (e) {
+        try {
+          await retryFailedWheelRewards(env);
+          _logPhase('phase2-wheel', 'ok');
+        } catch (e) {
           _logPhase('phase2-wheel', 'error', { error: e?.message });
           console.warn('[CRON] wheel retry failed:', e?.message);
+        } finally {
+          env._reqPool = _savedReqPoolForWheel;
         }
       })());
     }
