@@ -11,6 +11,15 @@ export function createAnalysisRepository(deps) {
 
   /**
    * Serialize a raw DB row into the API response shape.
+   *
+   * ANSEC-AUTHOR-ID FIX: author_id is NOT included in the API response.
+   * It's the Telegram user ID of the admin who created the analysis —
+   * exposing it to authenticated users is a minor PII leak. The field is
+   * still stored in the DB (set on INSERT, never updated) for internal
+   * auditing, but never returned to the API caller. The frontend (app.js,
+   * admin.js) does not use author_id at all (grep confirmed 0 references).
+   * The `author` field (display name) is still returned — it's the admin's
+   * first_name, not their Telegram ID.
    */
   function serializeAnalysisRow(row) {
     const createdAt = row?.created_at ? new Date(row.created_at) : null;
@@ -29,7 +38,6 @@ export function createAnalysisRepository(deps) {
       featured: Boolean(row?.featured),
       category: normalizeOptionalString(row?.category) || 'crypto',
       author: normalizeOptionalString(row?.author) || '',
-      author_id: normalizeOptionalString(row?.author_id),
       date: createdAt ? createdAt.toISOString().slice(0, 10) : '',
       created_at: createdAt ? createdAt.toISOString() : null,
       updated_at: updatedAt ? updatedAt.toISOString() : null,
