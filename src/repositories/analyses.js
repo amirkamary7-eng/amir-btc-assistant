@@ -577,16 +577,24 @@ export function createAnalysisRepository(deps) {
       params: [],
     };
 
-    // Query 4 (conditional): If force_featured AND not already featured AND at limit,
-    // un-feature oldest. No-op otherwise (WHERE clause filters it out).
+    // Query 4 (conditional): If force_featured AND at limit, un-feature oldest.
+    // ANPOST-001 FIX: Removed the buggy `AND $2 = FALSE` condition (where $2 =
+    // wantFeatured). This was inverted — when admin sends force_featured=true
+    // with wantFeatured=true (the retry path after FEATURED_LIMIT_REACHED),
+    // the condition `AND TRUE = FALSE` evaluated to FALSE, making the unfeature
+    // a no-op. The updateQuery then set featured=true anyway → count exceeded 5.
+    // Now matches createWithFeaturedLimit's logic exactly: unfeature fires when
+    // forceFeatured=true AND count>=5, regardless of wantFeatured. If the
+    // analysis is already featured, the unfeature creates a slot (count 5→4),
+    // then the update sets featured=true (count 4→5) — correct. If not already
+    // featured, unfeature makes room (5→4), then update adds (4→5) — correct.
     const unfeatureQuery = {
       sql: `UPDATE analyses SET featured = FALSE, updated_at = NOW()
             WHERE id = (SELECT id FROM analyses WHERE featured = TRUE ORDER BY created_at ASC LIMIT 1)
             AND $1 = TRUE
-            AND $2 = FALSE
-            AND (SELECT COUNT(*) FROM analyses WHERE featured = TRUE) >= $3
+            AND (SELECT COUNT(*) FROM analyses WHERE featured = TRUE) >= $2
             RETURNING id`,
-      params: [forceFeatured, wantFeatured, MAX_FEATURED],
+      params: [forceFeatured, MAX_FEATURED],
     };
 
     // Query 5: Conditional UPDATE. Only updates if:
