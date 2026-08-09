@@ -1583,9 +1583,15 @@ function renderFeaturedSlideHTML(a) {
     const sentimentHTML = sentiment ? `<span class="fs-sentiment-badge ${sentiment}">${SENTIMENT_CONFIG[sentiment].icon} ${SENTIMENT_CONFIG[sentiment].label}</span>` : '';
     const featuredHTML = a.featured ? `<span class="fs-featured-badge">⭐ ویژه</span>` : '';
 
-    const imageSection = a.image
+    // ANPOST-002 FIX: Validate URL scheme via sanitizeNewsUrl before escapeHtml.
+    // This is the 4th analysis image render site (the other 3 were fixed in
+    // FIX 3). Without this, a malicious admin could set image:"javascript:..."
+    // and it would render in this featured slide. Backend validation (FIX 3)
+    // prevents new bad URLs, but this is defense-in-depth for legacy data.
+    const safeSlideImg = sanitizeNewsUrl(a.image);
+    const imageSection = (safeSlideImg && safeSlideImg !== '#')
         ? `<div class="fs-card-image-wrap">
-                <img src="${escapeHtml(a.image)}" loading="eager" alt="${escapeHtml(a.coin)}" onerror="this.parentElement.parentElement.innerHTML='<div class=\'fs-card-no-image\'><div class=\'fs-card-no-image-text\'>${escapeHtml(a.coin)}</div></div>'">
+                <img src="${escapeHtml(safeSlideImg)}" loading="eager" alt="${escapeHtml(a.coin)}" onerror="this.parentElement.parentElement.innerHTML='<div class=\'fs-card-no-image\'><div class=\'fs-card-no-image-text\'>${escapeHtml(a.coin)}</div></div>'">
                 <div class="fs-card-image-overlay"></div>
                 ${sentimentHTML}
                 ${featuredHTML}
