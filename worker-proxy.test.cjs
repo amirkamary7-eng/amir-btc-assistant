@@ -1180,16 +1180,16 @@ test('P1-01 (source): DOM-based escapeHtml duplicate is REMOVED', () => {
 
 // ── P1-02 (NEWSSEC-002): heatmap onclick uses escaped symbol ──
 
-test('P1-02 (source): renderMarketHeatmap uses escapeHtml for onclick symbol (no raw interpolation)', () => {
+test('P1-02/MKT-005 (source): renderMarketHeatmap uses data-coin-symbol (no inline onclick XSS)', () => {
   const src = fs.readFileSync(APP_JS_PATH, 'utf8');
-  // Find the heatmap cell return statement
-  const m = src.match(/onclick="openCoinDetail\('\$\{[^}]+\}'\)"/);
-  assert.ok(m, 'heatmap onclick must exist');
-  // The interpolated value must be safeSymbol (escaped), NOT coin.symbol (raw)
-  assert.ok(
-    /onclick="openCoinDetail\('\$\{safeSymbol\}'\)"/.test(src),
-    'heatmap onclick must use ${safeSymbol}, not raw ${coin.symbol}. Got: ' + m[0]
-  );
+  // MKT-005 FIX: heatmap no longer uses inline onclick — uses data-coin-symbol + event delegation
+  // Must NOT have onclick="openCoinDetail in heatmap cells
+  const heatmapSection = src.slice(src.indexOf('function renderDashboardHeatmap'), src.indexOf('function renderDashboardFeaturedAnalysis'));
+  assert.ok(!/onclick="openCoinDetail/.test(heatmapSection), 'heatmap must NOT use inline onclick (XSS risk via HTML entity decoding)');
+  // Must use data-coin-symbol attribute
+  assert.ok(/data-coin-symbol="\$\{safeSymbol\}"/.test(heatmapSection) || /data-coin-symbol=.safeSymbol/.test(heatmapSection), 'heatmap must use data-coin-symbol attribute with safeSymbol');
+  // Must have event delegation (addEventListener)
+  assert.ok(/addEventListener.*click.*data-coin-symbol/.test(heatmapSection) || /querySelectorAll.*hm-cell.*data-coin-symbol/.test(heatmapSection), 'heatmap must attach click handlers via event delegation');
   // safeSymbol must be built via escapeHtml
   const safeSymMatch = src.match(/const safeSymbol = escapeHtml\([^)]+\)/);
   assert.ok(safeSymMatch, 'safeSymbol must be built via escapeHtml(). Got: ' + (src.match(/const safeSymbol = [^;]+/)?.[0] || 'NOT FOUND'));

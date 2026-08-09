@@ -11509,21 +11509,29 @@ function renderDashboardHeatmap() {
         }
 
         const changeStr = (change >= 0 ? '+' : '') + change.toFixed(2) + '%';
-        // P1-02 FIX (NEWSSEC-002): safeSymbol now escapes ALL HTML-special chars
-        // (& < > " ') via escapeHtml and is used BOTH for display AND for the
-        // onclick JS string context. Previously coin.symbol was interpolated RAW
-        // into onclick="openCoinDetail('${coin.symbol}')" — a symbol containing
-        // ');alert(1);// would break out of the JS string and execute. Now the
-        // escaped value cannot break out because ' is escaped to &#39;.
+        // MKT-005 FIX: Use data-symbol attribute + event delegation instead of
+        // inline onclick. The previous approach (escapeHtml in onclick attribute)
+        // was vulnerable to XSS because browsers decode HTML entities in attribute
+        // values BEFORE JS evaluation — so &#39; becomes ' in the JS context,
+        // allowing breakout from the string. Using data-symbol + addEventListener
+        // avoids the HTML-attribute-to-JS-context transition entirely.
         const safeSymbol = escapeHtml(String(coin.symbol).substring(0, 20));
 
-        return `<div class="hm-cell ${sizeClass}" style="background:${bgColor};border-color:${borderColor};color:${textColor};" onclick="openCoinDetail('${safeSymbol}')" role="button" tabindex="0">
+        return `<div class="hm-cell ${sizeClass}" style="background:${bgColor};border-color:${borderColor};color:${textColor};" data-coin-symbol="${safeSymbol}" role="button" tabindex="0">
             <span class="hm-symbol">${safeSymbol}</span>
             <span class="hm-change">${changeStr}</span>
         </div>`;
     }).join('');
 
     container.innerHTML = `<div class="heatmap-grid">${cells}</div>`;
+
+    // MKT-005 FIX: Attach click handlers via event delegation instead of inline onclick.
+    container.querySelectorAll('.hm-cell[data-coin-symbol]').forEach(cell => {
+        cell.addEventListener('click', function() {
+            const sym = this.getAttribute('data-coin-symbol');
+            if (sym) openCoinDetail(sym);
+        });
+    });
 }
 
 /**

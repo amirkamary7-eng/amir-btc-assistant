@@ -6758,7 +6758,12 @@ function singleFlight(key, fn) {
  * Returns { value: number, classification: string, timestamp: string } or null.
  */
 const FG_CACHE_KEY = 'fear-greed:cmc';
-const FG_CACHE_TTL = 300; // 5 minutes
+// MKT-002 FIX: Increased from 300s (5min) to 900s (15min). F&G changes slowly
+// during the day — 15min staleness is acceptable. This reduces CMC F&G API
+// calls from ~288/day (every 5min) to ~96/day (every 15min), saving ~5,760
+// CMC credits/day. The cron refreshOverview runs every 30min (at :00/:30),
+// so the 15min TTL ensures F&G is re-fetched at most 2x between cron ticks.
+const FG_CACHE_TTL = 900; // 15 minutes (was 5 minutes)
 
 async function fetchFearGreed() {
   // ── Step 1: Try CMC API ──
@@ -7325,9 +7330,15 @@ const FOREX_CACHE_TTL = 120; // 2 minutes
 async function handleForexData(env, options = {}) {
   const skipCache = options.skipCache === true;
 
+  // MKT-001 FIX: Hoist cachedRaw to function scope so it's accessible in the
+  // fallback path (line ~7522) even when skipCache=true. Previously it was
+  // declared inside `if (!skipCache)` block → ReferenceError when skipCache=true
+  // and all upstream APIs fail.
+  let cachedRaw = null;
+
   // Check KV cache (unless skipCache is set)
   if (!skipCache) {
-    const cachedRaw = await readAppCache(env, 'forex:data');
+    cachedRaw = await readAppCache(env, 'forex:data');
     if (cachedRaw) {
       try {
         const parsed = JSON.parse(cachedRaw);
