@@ -24,6 +24,7 @@ export function createAnalysisHandlers(deps) {
     readAppCache,
     writeAppCache,
     analysisRepo,
+    adminRepo,
     notificationRepo,
     notificationPlatformRepo,
     sendTelegramMessage,
@@ -205,6 +206,67 @@ export function createAnalysisHandlers(deps) {
   function requireAdmin(request, env) {
     // Must await the auth result
     return authenticateTelegramRequest(request, env);
+  }
+
+  /**
+   * ANSEC-PERM FIX: Check if the authenticated admin has a specific permission.
+   *
+   * Permission hierarchy:
+   *   1. Super admin (env ADMIN_TELEGRAM_ID/IDS) → ALL permissions granted
+   *   2. DB-registered admin (admins table) → check role.permissions array
+   *   3. Not an admin at all → deny
+   *
+   * This connects the backend to the EXISTING permission model in the admins
+   * table (role + permissions JSONB column). The frontend (admin.js) already
+   * has ADMIN_ROLES/ADMIN_PERMISSIONS for UI visibility — this makes the
+   * backend enforce the same permissions at the API level.
+   *
+   * @param {object} env - Worker env
+   * @param {string} userId - Telegram user ID
+   * @param {string} permission - Permission key (e.g. 'analysis.publish')
+   * @returns {Promise<{allowed: boolean, error: object|null}>}
+   */
+  async function checkAnalysisPermission(env, userId, permission) {
+    // Super admins (env-configured) have ALL permissions
+    if (isAdminTelegramId(env, userId)) {
+      return { allowed: true, error: null };
+    }
+
+    // Not a super admin — check the admins table for role + permissions
+    if (!adminRepo?.getAdminByTelegramId) {
+      // adminRepo not available — deny (fail closed)
+      return {
+        allowed: false,
+        error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env),
+      };
+    }
+
+    try {
+      const admin = await adminRepo.getAdminByTelegramId(env, String(userId));
+      if (!admin || !admin.active) {
+        return {
+          allowed: false,
+          error: jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env),
+        };
+      }
+      // Check if the admin has the required permission
+      const perms = Array.isArray(admin.permissions) ? admin.permissions : [];
+      const hasPermission = perms.includes('*') || perms.includes(permission);
+      if (!hasPermission) {
+        return {
+          allowed: false,
+          error: jsonResponse({ detail: `Permission denied: ${permission} required` }, { status: 403 }, env),
+        };
+      }
+      return { allowed: true, error: null };
+    } catch (e) {
+      // DB error — fail closed (deny)
+      console.warn('[analysis-perm] Permission check failed:', e?.message);
+      return {
+        allowed: false,
+        error: jsonResponse({ detail: 'Permission verification failed' }, { status: 403 }, env),
+      };
+    }
   }
 
   // ── Public HTTP Handlers ───────────────────────────────────────────────
@@ -452,9 +514,11 @@ export function createAnalysisHandlers(deps) {
   async function handleCreate(request, env, ctx) {
     const authResult = await requireAdmin(request, env);
     if (authResult.error) return authResult.error;
-    if (!isAdminTelegramId(env, authResult.user.id)) {
-      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
-    }
+    // ANSEC-PERM FIX: Check granular permission instead of just isAdminTelegramId.
+    // Super admins (env) pass automatically. DB-registered admins need
+    // 'analysis.publish' permission.
+    const permCheck = await checkAnalysisPermission(env, authResult.user.id, 'analysis.publish');
+    if (!permCheck.allowed) return permCheck.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
@@ -560,9 +624,9 @@ export function createAnalysisHandlers(deps) {
   async function handleUpdate(request, env, analysisId) {
     const authResult = await requireAdmin(request, env);
     if (authResult.error) return authResult.error;
-    if (!isAdminTelegramId(env, authResult.user.id)) {
-      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
-    }
+    // ANSEC-PERM FIX: Check 'analysis.edit' permission
+    const permCheck = await checkAnalysisPermission(env, authResult.user.id, 'analysis.edit');
+    if (!permCheck.allowed) return permCheck.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
@@ -606,9 +670,9 @@ export function createAnalysisHandlers(deps) {
   async function handleDelete(request, env, analysisId) {
     const authResult = await requireAdmin(request, env);
     if (authResult.error) return authResult.error;
-    if (!isAdminTelegramId(env, authResult.user.id)) {
-      return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
-    }
+    // ANSEC-PERM FIX: Check 'analysis.delete' permission
+    const permCheck = await checkAnalysisPermission(env, authResult.user.id, 'analysis.delete');
+    if (!permCheck.allowed) return permCheck.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }

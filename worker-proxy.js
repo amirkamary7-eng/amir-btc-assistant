@@ -6482,6 +6482,7 @@ const analysisHandlers = createAnalysisHandlers({
   readAppCache,
   writeAppCache,
   analysisRepo,
+  adminRepo,
   notificationRepo,
   notificationPlatformRepo,
   sendTelegramMessage,
