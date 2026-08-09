@@ -45,15 +45,48 @@ export function createAnalysisHandlers(deps) {
     return Date.now();
   }
 
+  /**
+   * ANVERSION-FLIP FIX: Compute a content signature for the analyses list.
+   *
+   * The signature is a hash of (id + updated_at + featured) for each analysis.
+   * It changes ONLY when data actually changes (create/update/delete/featured
+   * toggle). Unlike Date.now()-based version, it does NOT change just because
+   * time passed.
+   *
+   * Used by handleList to decide whether to keep the cached version (data
+   * unchanged) or generate a new one (data changed). This makes the
+   * ?version= cache-check mechanism actually work: a client that sends the
+   * correct version gets unchanged:true even after the cache TTL expires,
+   * as long as no CRUD has occurred.
+   */
+  function computeContentSignature(analyses) {
+    if (!Array.isArray(analyses) || analyses.length === 0) return 'empty';
+    // Build a compact string: id|updated_at|featured for each analysis
+    const parts = analyses.map(a =>
+      `${a.id}|${a.updated_at || ''}|${a.featured ? '1' : '0'}`
+    );
+    const combined = parts.join(';;');
+    // Simple hash (djb2) — fast, no crypto needed, collision risk negligible
+    // for ~50 items
+    let hash = 5381;
+    for (let i = 0; i < combined.length; i++) {
+      hash = ((hash << 5) + hash) + combined.charCodeAt(i);
+      hash = hash & hash; // Convert to 32-bit int
+    }
+    return Math.abs(hash).toString(36);
+  }
+
   // ── Cache helpers ──────────────────────────────────────────────────────
 
   async function readCachedAnalysesState(env) {
-    const [cachedVersion, cachedList] = await Promise.all([
+    const [cachedVersion, cachedList, cachedSignature] = await Promise.all([
       readAppCache(env, ANALYSES_VERSION_KEY),
       readAppCache(env, ANALYSES_LIST_KEY),
+      readAppCache(env, 'analyses:signature'),
     ]);
     let version = null;
     let analyses = null;
+    let signature = null;
     if (cachedVersion !== null) {
       const n = Number(cachedVersion);
       if (Number.isFinite(n)) version = n;
@@ -64,14 +97,18 @@ export function createAnalysisHandlers(deps) {
         if (Array.isArray(parsed)) analyses = parsed;
       } catch { analyses = null; }
     }
-    return { version, analyses };
+    if (cachedSignature !== null) {
+      signature = cachedSignature;
+    }
+    return { version, analyses, signature };
   }
 
-  async function updateAnalysesCache(env, analyses, version) {
+  async function updateAnalysesCache(env, analyses, version, signature) {
     const ttl = 86400 * 7;
     await Promise.all([
       writeAppCache(env, ANALYSES_VERSION_KEY, String(version), ttl),
       writeAppCache(env, ANALYSES_LIST_KEY, JSON.stringify(analyses), ttl),
+      writeAppCache(env, 'analyses:signature', signature, ttl),
     ]);
   }
 
@@ -91,6 +128,9 @@ export function createAnalysisHandlers(deps) {
     try { await env.APP_CACHE?.delete?.(ANALYSES_FEATURED_KEY); } catch {}
     // Delete stats cache
     try { await env.APP_CACHE?.delete?.(ANALYSES_STATS_KEY); } catch {}
+    // ANVERSION-FLIP FIX: Delete the content signature so the next fresh
+    // fetch generates a new signature (matching the new data).
+    try { await env.APP_CACHE?.delete?.('analyses:signature'); } catch {}
     // FIX 1: delete the per-analysis detail cache so stale data doesn't linger
     if (analysisId) {
       try { await env.APP_CACHE?.delete?.(`${DETAIL_CACHE_PREFIX}${analysisId}`); } catch {}
@@ -249,10 +289,21 @@ export function createAnalysisHandlers(deps) {
         // Cache stats (short TTL — invalidated on CRUD)
         await writeAppCache(env, ANALYSES_STATS_KEY, JSON.stringify(pageData.stats), 60);
 
-        // Generate version — avoids expensive listAll() + JSON.stringify comparison
-        const version = generateVersion();
-        // Cache the paginated list (used for version checking, not listAll)
-        await updateAnalysesCache(env, pageData.analyses, version);
+        // ANVERSION-FLIP FIX: Compute content signature and compare with cached.
+        // If the signature matches (data unchanged), keep the cached version so
+        // clients sending ?version=<cached> get unchanged:true. If the signature
+        // differs (data changed), generate a new version.
+        const newSignature = computeContentSignature(pageData.analyses);
+        let version;
+        if (cachedState.signature && cachedState.signature === newSignature && cachedState.version) {
+          // Data unchanged — keep the existing version
+          version = cachedState.version;
+        } else {
+          // Data changed (or first load) — generate new version
+          version = generateVersion();
+        }
+        // Cache the paginated list with version + signature
+        await updateAnalysesCache(env, pageData.analyses, version, newSignature);
 
         console.log('[ANALYSES] total: ' + (Date.now() - _t0) + 'ms (success)');
         return jsonResponse({
