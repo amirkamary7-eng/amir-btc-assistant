@@ -310,6 +310,15 @@ export function createAnalysisHandlers(deps) {
 
   /**
    * POST /api/analyses/:id/view — Increment view count.
+   *
+   * ANVIEW-CACHE FIX: After incrementing views_count in DB, update the
+   * analysis:detail:<id> cache so the next GET /:id returns the fresh
+   * count immediately (instead of waiting 60s for the cache TTL to expire).
+   * This reads the cached analysis, updates views_count, and writes it back
+   * — 2 KV operations (read + write) but avoids a full DB query on the next
+   * GET. If the cache is empty (miss), no update needed (next GET will fetch
+   * fresh from DB). Only touches THIS analysis's cache — no global
+   * invalidation, no impact on other analyses.
    */
   async function handleIncrementView(request, env, analysisId) {
     if (!isDatabaseConfigured(env)) {
@@ -320,6 +329,25 @@ export function createAnalysisHandlers(deps) {
       if (views === null) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
       }
+
+      // ANVIEW-CACHE FIX: Update the detail cache for THIS analysis only.
+      // Read the cached entry, update views_count, write it back with the
+      // remaining TTL (approximated as 60s — the original TTL). This is
+      // cheaper than delete + re-fetch-from-DB on next GET, and prevents
+      // users from seeing stale view counts for up to 60s.
+      const cacheKey = `${DETAIL_CACHE_PREFIX}${analysisId}`;
+      try {
+        const cached = await readAppCache(env, cacheKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          parsed.views_count = views;
+          await writeAppCache(env, cacheKey, JSON.stringify(parsed), 60);
+        }
+      } catch {
+        // Non-fatal — cache update failed, but DB increment succeeded.
+        // Next GET will miss cache and fetch fresh from DB.
+      }
+
       return jsonResponse({ status: 'success', views_count: views }, {}, env);
     } catch (error) {
       console.warn(safeError('increment-view', error));
