@@ -140,6 +140,17 @@ export function createAnalysisHandlers(deps) {
       validated[spec.name] = rawValue;
     }
 
+    // ANSEC-XSS-IMG FIX: Validate image URL scheme at storage time.
+    // Reject non-http(s) schemes (javascript:, data:, vbscript:, file:, etc.)
+    // to prevent stored XSS via admin-created analysis images. Empty string
+    // is allowed (means no image). Defense-in-depth: frontend also validates
+    // via sanitizeNewsUrl before rendering, but this catches it at the source.
+    if (validated.image && validated.image.trim()) {
+      if (!/^https?:\/\//i.test(validated.image.trim())) {
+        return { error: jsonResponse(buildBodyFieldValidationError('image', 'url_scheme', 'Image URL must use http: or https: scheme', validated.image, null), { status: 422 }, env) };
+      }
+    }
+
     // Handle boolean featured field
     validated.featured = Boolean(payload.featured);
 

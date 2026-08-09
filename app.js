@@ -1923,9 +1923,13 @@ function renderAnalysisList() {
 
         // Image section — FIXED: use eager loading (not lazy) for visible cards,
         // and a proper placeholder background that shows while loading.
-        const imageSection = a.image
+        // ANSEC-XSS-IMG FIX: Validate URL scheme via sanitizeNewsUrl before
+        // using in img src attribute. escapeHtml alone doesn't prevent
+        // javascript:/data: URL schemes.
+        const safeCardImg = sanitizeNewsUrl(a.image);
+        const imageSection = (safeCardImg && safeCardImg !== '#')
             ? `<div class="acv-image-section">
-                    <img src="${escapeHtml(a.image)}" class="acv-hero-image" alt="${escapeHtml(a.coin)}" decoding="async" onload="this.style.opacity=1" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                    <img src="${escapeHtml(safeCardImg)}" class="acv-hero-image" alt="${escapeHtml(a.coin)}" decoding="async" onload="this.style.opacity=1" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                     <div class="acv-no-image-placeholder" style="display:none;position:absolute;inset:0;">${escapeHtml(a.coin)}</div>
                     <div class="acv-image-overlay">
                         <div class="acv-coin-badge">${escapeHtml(a.coin)}</div>
@@ -2394,11 +2398,15 @@ function renderAnalysisDetailPage() {
     if (adminActions) adminActions.style.display = isAdmin() ? '' : 'none';
 
     // Image (shown first, prominent)
+    // ANSEC-XSS-IMG FIX: Validate URL scheme via sanitizeNewsUrl before
+    // assigning to img.src. Without this, a malicious admin could set
+    // image:"javascript:alert(1)" and execute JS when the image loads.
     const imgWrap = $('adp-image-wrap');
     const img = $('adp-image');
-    if (a.image) {
+    const safeDetailImg = sanitizeNewsUrl(a.image);
+    if (safeDetailImg && safeDetailImg !== '#') {
         if (imgWrap) imgWrap.style.display = '';
-        if (img) { img.src = a.image; img.style.display = ''; img.onerror = function() { newsImageFallback(this); }; }
+        if (img) { img.src = safeDetailImg; img.style.display = ''; img.onerror = function() { newsImageFallback(this); }; }
     } else {
         if (imgWrap) imgWrap.style.display = 'none';
     }
@@ -11546,7 +11554,10 @@ function renderDashboardFeaturedAnalysis() {
         const safeCoin = escapeHtml(a.coin || '');
         const safeTitle = escapeHtml(a.title || '');
         const safeTimeframe = escapeHtml(a.timeframe || '1D');
-        const safeImage = a.image ? escapeHtml(a.image) : getAmirbtcFallbackSvg(400, 240, 'AMIRBTC');
+        // ANSEC-XSS-IMG FIX: Validate URL scheme via sanitizeNewsUrl before
+        // escapeHtml. escapeHtml alone doesn't prevent javascript:/data: schemes.
+        const sanitizedDashImg = sanitizeNewsUrl(a.image);
+        const safeImage = (sanitizedDashImg && sanitizedDashImg !== '#') ? escapeHtml(sanitizedDashImg) : getAmirbtcFallbackSvg(400, 240, 'AMIRBTC');
         const isFeatured = !!a.featured;
         const views = a.views_count || 0;
         const timeAgoStr = a.created_at ? timeAgo(a.created_at) : '';
