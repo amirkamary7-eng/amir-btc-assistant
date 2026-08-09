@@ -4763,7 +4763,7 @@ function renderMarketInsights() {
  * ورودی: بدون ورودی.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
-let _renderIdx = 0;
+// MKT-011 FIX (DEAD CODE REMOVED): _renderIdx was declared but never used.
 
 function renderMarket() {
     const list = document.getElementById('coin-list-rows');
@@ -5462,18 +5462,8 @@ function switchSubTab(tab, btn) {
     }
 }
 
-/**
- * Render the BTC Pairs section — DEPRECATED.
- * The dedicated Bullish/Bearish groups section was removed from HTML.
- * BTC pairs are now rendered as a flat list inside #coin-list when the
- * 'btcpairs' sub-tab is active (see renderMarket's btcpairs case).
- * This function is kept as a no-op for backward compatibility with any
- * callers that still reference it.
- */
-function renderBtcPairsSection() {
-    // No-op — BTC pairs now render inline in the main coin list.
-    return;
-}
+// MKT-011 FIX (DEAD CODE REMOVED): renderBtcPairsSection was a no-op with
+// 0 callers (only definition + window export). BTC pairs now render inline.
 
 document.addEventListener('DOMContentLoaded', () => {
     // NEWSFE-009 FIX: Debounce the market-search input so we don't call
@@ -12829,7 +12819,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 window.switchTab = switchTab;
 window.switchMainTab = switchMainTab;
 window.switchSubTab = switchSubTab;
-window.renderBtcPairsSection = renderBtcPairsSection;
+// MKT-011: renderBtcPairsSection removed (was no-op, 0 callers)
 window.switchNewsTab = switchNewsTab;
 window.switchCalendarTab = switchCalendarTab;
 window.filterCalCountry = filterCalCountry;

@@ -301,19 +301,24 @@ async function writeAppCache(env, key, value, expirationTtl) {
     return;
   }
 
-  // SKIP-WRITTEN: If the value hasn't changed since last write, skip the KV put.
-  const cachedValue = _kvWriteCache.get(key);
-  if (cachedValue === value) {
-    _trackKvSkip();
-    return; // Value unchanged — skip write
+  // MKT-006 FIX: Track TTL expiry alongside the cached value. Previously,
+  // _kvWriteCache stored only the value — after KV entry expired, if the
+  // same value was re-fetched, the write was skipped → KV stayed empty →
+  // every subsequent request hit upstream APIs. Now we store {value, expiresAt}
+  // and only skip the write if the value matches AND the KV entry hasn't
+  // expired yet. If expirationTtl is not provided (0/undefined), treat as
+  // no-expiry (always skip if value matches, same as before).
+  const cachedEntry = _kvWriteCache.get(key);
+  if (cachedEntry && cachedEntry.value === value) {
+    // Value matches — check if KV entry is still alive
+    if (!cachedEntry.expiresAt || Date.now() < cachedEntry.expiresAt) {
+      _trackKvSkip();
+      return; // Value unchanged AND KV entry still alive — skip write
+    }
+    // KV entry has expired — fall through to re-write even though value matches
   }
 
   try {
-    // CRITICAL: Cloudflare KV requires expirationTtl >= 60 seconds.
-    // Values below 60 cause "Invalid expiration_ttl" errors and the write
-    // silently fails (caught below), meaning the cache is NEVER populated.
-    // This was the root cause of the Market cache not working (was TTL=30).
-    // FIX: Clamp any TTL < 60 up to 60. For TTL=0/undefined, omit (no expiry).
     const putOpts = {};
     if (expirationTtl && expirationTtl > 0) {
       putOpts.expirationTtl = Math.max(60, Math.floor(expirationTtl));
@@ -326,7 +331,9 @@ async function writeAppCache(env, key, value, expirationTtl) {
       const firstKey = _kvWriteCache.keys().next().value;
       _kvWriteCache.delete(firstKey);
     }
-    _kvWriteCache.set(key, value);
+    // MKT-006 FIX: Store expiry time alongside value
+    const ttlMs = (expirationTtl && expirationTtl > 0) ? Math.max(60, Math.floor(expirationTtl)) * 1000 : 0;
+    _kvWriteCache.set(key, { value, expiresAt: ttlMs > 0 ? Date.now() + ttlMs : 0 });
   } catch (e) {
     _traceStage('KV.write.ERROR:' + key.slice(0, 40), Date.now());
     console.warn('[writeAppCache] KV.put FAILED for key:', key, '| error:', e.message || e);
@@ -5549,8 +5556,11 @@ async function processNewsAIBatch(env, pool = null) {
     const newsWriteBefore = _kvWriteStats.totalWrites;
     const newsSkippedBefore = _kvWriteStats.totalSkipped;
     const kvAvailable = !!(env.APP_CACHE && typeof env.APP_CACHE.put === 'function');
-    const inMemoryCached = _kvWriteCache.has(FARSI_NEWS_CACHE_KEY);
-    const inMemoryMatches = _kvWriteCache.get(FARSI_NEWS_CACHE_KEY) === newsJson;
+    // MKT-006 FIX: _kvWriteCache now stores {value, expiresAt} objects.
+    // Adapt the comparison to read .value from the entry.
+    const _newsCacheEntry = _kvWriteCache.get(FARSI_NEWS_CACHE_KEY);
+    const inMemoryCached = !!_newsCacheEntry;
+    const inMemoryMatches = _newsCacheEntry?.value === newsJson;
     try {
       await writeAppCache(
         env,
@@ -9383,6 +9393,16 @@ export default {
       // Verified: MEXC returns 1740 USDT pairs including FLOKI, BONK, WIF, SUNDOG, BRETT.
       // Cached for 5 minutes.
       if (request.method === 'GET' && url.pathname === '/api/market/search') {
+        // MKT-010 FIX: Add rate limiting (same as /api/market and /api/forex).
+        // Without this, anonymous users could spam the endpoint, each cache-miss
+        // triggering a MEXC API call (1 subrequest per miss, every 5min).
+        const _searchIp = request.headers.get('cf-connecting-ip') || 'unknown';
+        const _searchAuth = await authenticateTelegramRequest(request, env);
+        const _searchUid = _searchAuth.user?.id || null;
+        if (await isMarketRateLimited(env, _searchIp, _searchUid)) {
+          return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
+        }
+
         const query = (url.searchParams.get('q') || '').toLowerCase().trim();
         if (!query || query.length < 1) {
           return jsonResponse({ status: 'success', results: [], total_index: 0 }, {}, env);
