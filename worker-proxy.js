@@ -254,13 +254,19 @@ function isAlertsCronEnabled(env) {
 }
 
 /**
- * Returns true when the Worker is NOT running in production.
+ * Returns true ONLY when the Worker is running in local development mode.
  * Used to gate development-only auth fallbacks (e.g. ?user_id=) that must
- * never be active in production to prevent user impersonation.
+ * never be active in staging or production to prevent user impersonation.
+ *
+ * SECURITY FIX (S-01): Previously included 'staging', which meant the
+ * ?user_id= fallback was active on the publicly-accessible staging URL.
+ * While staging currently has no DATABASE_URL (so the bypass was not
+ * exploitable), this is a defense-in-depth fix: if a DB is ever added
+ * to staging, the fallback must NOT be active.
  */
 function isDevMode(env) {
   const v = String(env.APP_ENV || '').trim().toLowerCase();
-  return v === 'development' || v === 'staging';
+  return v === 'development';
 }
 
 async function readAppCache(env, key) {
