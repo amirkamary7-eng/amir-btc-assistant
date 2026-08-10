@@ -6445,6 +6445,24 @@ async function loadNews(force = false, append = false) {
         // tabs during the fetch, we must render the tab they're NOW looking at,
         // not the stale one. This prevents wrong-content-after-tab-switch bug.
         const currentTabAtRender = document.querySelector('.ni-tab.active')?.dataset?.news || 'all';
+
+        // ROOT CAUSE FIX for news "پرش" (flash/jump):
+        // When the cache-hit path renders immediately, then the background
+        // force=true fetch completes, it calls renderNews again — replacing
+        // the entire innerHTML even if the data is nearly identical. This
+        // causes a visible flash where content disappears and reappears.
+        // FIX: Only re-render if the news data actually changed. Build a
+        // simple signature from article titles+times+summaries and compare
+        // with the last render. If identical, skip the re-render.
+        if (!append && newsCache.length > 0) {
+            const newsSig = newsCache.map(n => `${n.title}|${n.time}|${n.ai_summary || ''}|${n.ai_status || ''}`).join(';;');
+            if (container.dataset.newsSig === newsSig) {
+                // Data unchanged — skip re-render to avoid flash
+                return;
+            }
+            container.dataset.newsSig = newsSig;
+        }
+
         if (!append) {
             const savedScroll = window.scrollY;
             renderNews(currentTabAtRender);
@@ -7218,6 +7236,25 @@ function renderCalendarV2() {
             <div class="ni-skeleton-card"></div>
             <div class="ni-skeleton-card"></div>`;
         return;
+    }
+
+    // ROOT CAUSE FIX: If calendarEvents is empty (first load or previous failure),
+    // show skeleton BEFORE calling loadCalendarEvents. Previously, the skeleton
+    // was only shown when calendarLoading was ALREADY true — but on the first
+    // call, calendarLoading is false (it's set inside loadCalendarEvents).
+    // This left the container blank for ~1 second until the API responded.
+    if (!calendarEvents.length) {
+        const skelSig = '__loading__';
+        if (container.dataset.calSignature !== skelSig) {
+            container.dataset.calSignature = skelSig;
+            if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+            const segmentsHtml = buildCalendarSegmentsHtml({ today: '—', tomorrow: '—', week: '—', all: '—' });
+            container.innerHTML = segmentsHtml + `
+                <div class="ni-skeleton-card"></div>
+                <div class="ni-skeleton-card"></div>
+                <div class="ni-skeleton-card"></div>
+                <div class="ni-skeleton-card"></div>`;
+        }
     }
 
     loadCalendarEvents().then(events => {
