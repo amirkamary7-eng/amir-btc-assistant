@@ -6671,7 +6671,7 @@ const ticketHandlers = createTicketHandlers({
   notificationPlatformRepo,
   notificationService,
 });
-const userRepo = createUserRepository({ queryDb, normalizeOptionalString });
+const userRepo = createUserRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 // adminRepo must be created BEFORE userHandlers because userHandlers (bootstrap)
 // checks the DB admins table to detect DB-added admins (not just env super admin).
 const adminRepo = createAdminRepository({ queryDb, normalizeOptionalString });

@@ -7,7 +7,7 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createUserRepository(deps) {
-  const { queryDb, normalizeOptionalString } = deps;
+  const { queryDb, queryDbTransaction, normalizeOptionalString } = deps;
 
   let _tableEnsured = false;
   // PHASE 1 SAFE OPTIMIZATION: Module-level flag for deleted_users table.
@@ -315,88 +315,49 @@ export function createUserRepository(deps) {
       console.warn('[DELETE-ACCOUNT] Failed to record cooldown (non-fatal):', e?.message);
     }
 
-    // Helper: run a DELETE and record rowCount
-    const cascadeDelete = async (tableName, sql, params) => {
-      try {
-        const result = await queryDb(env, sql, params);
-        summary.tables[tableName] = result.rowCount || 0;
-      } catch (e) {
-        summary.tables[tableName] = -1;
-        summary.errors.push({ table: tableName, error: e?.message });
-      }
-    };
+    // DB-001 FIX: Wrap ALL cascade DELETEs in a single transaction.
+    // Previously, each DELETE was a separate queryDb call with its own
+    // try/catch. If any middle DELETE failed, the remaining DELETEs still
+    // ran, potentially leaving orphan rows (user deleted but child rows remain).
+    // Now: ALL DELETEs run in one queryDbTransaction. If any fails, the
+    // entire transaction ROLLBACKs — no partial deletion.
+    //
+    // Note: The deleted_users cooldown INSERT (above) is intentionally
+    // OUTSIDE this transaction — it must persist even if the cascade fails,
+    // so the user is blocked from re-registering during cooldown regardless.
+    //
+    // Order matters: wheel_history before wheel_spins (FK), users last.
+    const cascadeQueries = [
+      { sql: 'DELETE FROM referrals WHERE invitee_id = $1', params: [uid] },
+      { sql: 'DELETE FROM referrals WHERE inviter_id = $1', params: [uid] },
+      { sql: 'DELETE FROM token_transactions WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM token_balances WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM watchlist_items WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM alerts WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM notifications WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM notification_queue WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM tickets WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM mission_progress WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM calendar_reminders WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM wheel_history WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM wheel_spins WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM support_messages WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM admins WHERE telegram_id = $1', params: [uid] },
+      { sql: 'DELETE FROM users WHERE telegram_id = $1', params: [uid] },
+    ];
 
-    // 1. referrals (as invitee)
-    await cascadeDelete('referrals_as_invitee',
-      'DELETE FROM referrals WHERE invitee_id = $1', [uid]);
-    // 1b. referrals (as inviter)
-    await cascadeDelete('referrals_as_inviter',
-      'DELETE FROM referrals WHERE inviter_id = $1', [uid]);
+    const results = await queryDbTransaction(env, cascadeQueries);
+    const tableNames = [
+      'referrals_as_invitee', 'referrals_as_inviter', 'token_transactions',
+      'token_balances', 'watchlist_items', 'alerts', 'notifications',
+      'notification_queue', 'tickets', 'mission_progress', 'calendar_reminders',
+      'wheel_history', 'wheel_spins', 'support_messages', 'admins', 'users',
+    ];
+    for (let i = 0; i < tableNames.length; i++) {
+      summary.tables[tableNames[i]] = results[i]?.rowCount || 0;
+    }
 
-    // 2. token_transactions
-    await cascadeDelete('token_transactions',
-      'DELETE FROM token_transactions WHERE user_id = $1', [uid]);
-
-    // 3. token_balances
-    await cascadeDelete('token_balances',
-      'DELETE FROM token_balances WHERE user_id = $1', [uid]);
-
-    // 4. watchlist_items
-    await cascadeDelete('watchlist_items',
-      'DELETE FROM watchlist_items WHERE user_id = $1', [uid]);
-
-    // 5. alerts
-    await cascadeDelete('alerts',
-      'DELETE FROM alerts WHERE user_id = $1', [uid]);
-
-    // 6. notifications
-    await cascadeDelete('notifications',
-      'DELETE FROM notifications WHERE user_id = $1', [uid]);
-
-    // 6b. notification_queue — SETTINGS-002 FIX
-    // The notification_queue table has NO foreign key to users(telegram_id)
-    // (verified in production), so ON DELETE CASCADE does NOT clean it up.
-    // Without this explicit DELETE, pending queue rows for a deleted user
-    // would remain, and the queue processor cron (processQueue) would later
-    // try to dispatch them — including attempting Telegram sends to a user
-    // who no longer exists. This deletion runs inside the same cascade and
-    // only touches rows WHERE user_id = $1, so other users' queue items are
-    // never affected.
-    await cascadeDelete('notification_queue',
-      'DELETE FROM notification_queue WHERE user_id = $1', [uid]);
-
-    // 7. tickets
-    await cascadeDelete('tickets',
-      'DELETE FROM tickets WHERE user_id = $1', [uid]);
-
-    // 8. mission_progress
-    await cascadeDelete('mission_progress',
-      'DELETE FROM mission_progress WHERE user_id = $1', [uid]);
-
-    // 9. calendar_reminders
-    await cascadeDelete('calendar_reminders',
-      'DELETE FROM calendar_reminders WHERE user_id = $1', [uid]);
-
-    // 10. wheel_history (must be before wheel_spins due to FK)
-    await cascadeDelete('wheel_history',
-      'DELETE FROM wheel_history WHERE user_id = $1', [uid]);
-    // 11. wheel_spins
-    await cascadeDelete('wheel_spins',
-      'DELETE FROM wheel_spins WHERE user_id = $1', [uid]);
-
-    // 11. support_messages
-    await cascadeDelete('support_messages',
-      'DELETE FROM support_messages WHERE user_id = $1', [uid]);
-
-    // 12. admin records
-    await cascadeDelete('admins',
-      'DELETE FROM admins WHERE telegram_id = $1', [uid]);
-
-    // 13. FINALLY — delete the user row itself
-    await cascadeDelete('users',
-      'DELETE FROM users WHERE telegram_id = $1', [uid]);
-
-    console.log('[DELETE-ACCOUNT] Cascade complete:', JSON.stringify(summary));
+    console.log('[DELETE-ACCOUNT] Cascade complete (transactional):', JSON.stringify(summary));
     return summary;
   }
 
