@@ -7,7 +7,7 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createWatchlistRepository(deps) {
-  const { queryDb, ensureUserRow } = deps;
+  const { queryDb, queryDbTransaction, ensureUserRow } = deps;
 
   // PHASE 2 SAFE OPTIMIZATION: Per-user watchlist cache with 30s TTL.
   // getSymbols is called on every bootstrap + /api/users/me + /api/watchlist GET.
@@ -70,19 +70,33 @@ export function createWatchlistRepository(deps) {
    */
   async function replace(env, userId, symbols) {
     await ensureUserRow(env, userId);
-    await queryDb(env, 'DELETE FROM watchlist_items WHERE user_id = $1', [String(userId)]);
+
+    // DB-005 FIX: Wrap DELETE + INSERT + UPDATE in a single transaction.
+    // Previously: DELETE committed first, then INSERT ran separately.
+    // If INSERT failed (constraint, DB error), the user's watchlist was
+    // permanently empty (DELETE already committed). Now: all-or-nothing.
+    const queries = [
+      { sql: 'DELETE FROM watchlist_items WHERE user_id = $1', params: [String(userId)] },
+    ];
+
     if (symbols.length > 0) {
       const params = [String(userId)];
       const values = symbols.map((_, i) => `($1, $${i + 2}, $${i + 2 + symbols.length}, NOW())`);
       for (const sym of symbols) params.push(sym);
       for (let i = 0; i < symbols.length; i++) params.push(i);
-      await queryDb(
-        env,
-        `INSERT INTO watchlist_items (user_id, symbol, position, created_at) VALUES ${values.join(', ')}`,
+      queries.push({
+        sql: `INSERT INTO watchlist_items (user_id, symbol, position, created_at) VALUES ${values.join(', ')}`,
         params,
-      );
+      });
     }
-    await queryDb(env, 'UPDATE users SET updated_at = NOW() WHERE telegram_id = $1', [String(userId)]);
+
+    queries.push({
+      sql: 'UPDATE users SET updated_at = NOW() WHERE telegram_id = $1',
+      params: [String(userId)],
+    });
+
+    await queryDbTransaction(env, queries);
+
     // PHASE 2 SAFE OPTIMIZATION: Invalidate cache for this user, then populate
     // with the fresh data from getSymbols (avoids 1 extra DB read on next access).
     _invalidateWatchlistCache(userId);

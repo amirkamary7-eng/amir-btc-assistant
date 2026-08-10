@@ -6570,7 +6570,7 @@ const alertHandlers = createAlertHandlers({
   alertEconomyRepo,
   economyService,
 });
-const watchlistRepo = createWatchlistRepository({ queryDb, ensureUserRow });
+const watchlistRepo = createWatchlistRepository({ queryDb, queryDbTransaction, ensureUserRow });
 const watchlistHandlers = createWatchlistHandlers({
   jsonResponse,
   optionalTelegramAuth,
