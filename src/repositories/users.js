@@ -53,6 +53,7 @@ export function createUserRepository(deps) {
       await queryDb(env, `ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_joined_at TIMESTAMPTZ`).catch(() => {});
       await queryDb(env, `ALTER TABLE users ADD COLUMN IF NOT EXISTS mini_app_opened_at TIMESTAMPTZ`).catch(() => {});
       await queryDb(env, `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE`).catch(() => {});
+      await queryDb(env, `ALTER TABLE users ADD COLUMN IF NOT EXISTS beta_popup_seen BOOLEAN NOT NULL DEFAULT FALSE`).catch(() => {});
       // Indexes for the new columns (for dashboard query performance)
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_users_last_active ON users (last_active_at DESC)`).catch(() => {});
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_users_created_at ON users (created_at DESC)`).catch(() => {});
@@ -93,6 +94,7 @@ export function createUserRepository(deps) {
       bot_joined_at: row.bot_joined_at ? new Date(row.bot_joined_at).toISOString() : null,
       mini_app_opened_at: row.mini_app_opened_at ? new Date(row.mini_app_opened_at).toISOString() : null,
       is_premium: Boolean(row.is_premium),
+      beta_popup_seen: Boolean(row.beta_popup_seen),
       watchlist,
     };
   }
@@ -179,7 +181,8 @@ export function createUserRepository(deps) {
           last_active_at,
           bot_joined_at,
           mini_app_opened_at,
-          is_premium
+          is_premium,
+          beta_popup_seen
       `,
       [
         String(userId),
@@ -196,16 +199,18 @@ export function createUserRepository(deps) {
   }
 
   /**
-   * Update user language setting.
+   * Update user settings (language and beta_popup_seen).
    */
   async function updateSettings(env, userId, payload) {
     const lang = normalizeLanguage(payload.lang);
+    const betaPopupSeen = payload.beta_popup_seen === true || payload.beta_popup_seen === 'true';
     const result = await queryDb(
       env,
       `
         UPDATE users
         SET
           lang = $2,
+          beta_popup_seen = CASE WHEN $3 THEN TRUE ELSE beta_popup_seen END,
           updated_at = NOW()
         WHERE telegram_id = $1
         RETURNING
@@ -221,9 +226,10 @@ export function createUserRepository(deps) {
           last_active_at,
           bot_joined_at,
           mini_app_opened_at,
-          is_premium
+          is_premium,
+          beta_popup_seen
       `,
-      [String(userId), lang],
+      [String(userId), lang, betaPopupSeen],
     );
     return result.rows[0] || null;
   }

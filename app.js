@@ -21,6 +21,7 @@ let telegramInitDone = false;
 let telegramAuthWaitPromise = null;
 let _authWaitAttempted = false;
 let bootstrapComplete = false;
+let _betaPopupShown = false; // session guard — prevents double-show within same tab
 let _bootstrapPromise = null;
 let _bootstrapLongTimer = null; // Long-term bootstrap retry — survives visibility changes (NOT in _pollingIntervals)
 let _adminPanelInitialized = false;
@@ -589,7 +590,16 @@ const i18n = {
         heatmap_title: 'نقشه حرارتی بازار',
         heatmap_subtitle: 'نمایش بصری تغییرات ۲۴ ساعته',
         heatmap_top: 'برترین بازار',
-        heatmap_show_more: 'نمایش بیشتر'
+        heatmap_show_more: 'نمایش بیشتر',
+        // ── Beta Launch Popup ──
+        beta_popup_title: 'نسخه بتا منتشر شد',
+        beta_popup_desc: 'AmirBTC Assistant اکنون در مرحله بتا قرار دارد.',
+        beta_popup_detail: 'ممکن است در این مرحله با برخی خطاها، ناهماهنگی‌ها یا رفتارهای غیرمنتظره مواجه شوید. بازخورد شما به ما کمک می‌کند تجربه‌ای پایدارتر و بهتر بسازیم.',
+        beta_popup_report_title: 'مشکلی پیدا کردی؟',
+        beta_popup_report_desc: 'هر باگ، خطا یا رفتار غیرعادی را از طریق تیکت و بخش پشتیبانی گزارش کن تا بررسی و پیگیری شود. حتی اگر مشکل کوچک به نظر می‌رسد، گزارش آن برای ما ارزشمند است.',
+        beta_popup_cta_continue: 'ادامه به نسخه بتا',
+        beta_popup_cta_support: 'گزارش مشکل / پشتیبانی',
+        beta_popup_beta_badge: 'BETA'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -719,7 +729,16 @@ const i18n = {
         heatmap_title: 'Market Heatmap',
         heatmap_subtitle: 'Visual 24h changes',
         heatmap_top: 'Top Market',
-        heatmap_show_more: 'Show More'
+        heatmap_show_more: 'Show More',
+        // ── Beta Launch Popup ──
+        beta_popup_title: 'Beta Version Released',
+        beta_popup_desc: 'AmirBTC Assistant is currently in beta.',
+        beta_popup_detail: 'You may encounter some errors, inconsistencies, or unexpected behavior during this phase. Your feedback helps us build a more stable and better experience.',
+        beta_popup_report_title: 'Found a Bug?',
+        beta_popup_report_desc: 'Report any bug, error, or unusual behavior via the support and ticket section so we can investigate. Even small issues are valuable to us.',
+        beta_popup_cta_continue: 'Continue to Beta',
+        beta_popup_cta_support: 'Report Issue / Support',
+        beta_popup_beta_badge: 'BETA'
     }
 };
 /**
@@ -1149,6 +1168,15 @@ async function bootstrapUser() {
         // devices. Non-blocking — runs in background after bootstrap.
         if (typeof syncRemindersFromBackend === 'function') {
             syncRemindersFromBackend().catch(() => {});
+        }
+
+        // ── Beta Launch Popup ──
+        // Show one-time beta popup for users who haven't seen it yet.
+        // Uses server-side `beta_popup_seen` flag (persisted in DB) so it
+        // only shows once per user across all devices/sessions.
+        if (data.user && data.user.beta_popup_seen === false && !_betaPopupShown) {
+            _betaPopupShown = true; // session guard — prevents double-show
+            setTimeout(function() { openBetaPopup(); }, 800);
         }
     } catch (e) {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);
@@ -13357,6 +13385,120 @@ if (window.location.hash === '#debugcal' || window.location.search.includes('deb
 
 // Also add a long-press on the calendar section header to open debug
 let _calHeaderPressTimer = null;
+
+// ============================================================================
+// BETA LAUNCH POPUP — One-time per-user beta announcement
+// ============================================================================
+// Shows a premium-styled popup ONCE per user (server-side `beta_popup_seen`
+// flag). After the user dismisses it, it never shows again — across devices,
+// sessions, and cache clears. The flag is persisted via PUT /api/users/me/settings.
+
+function openBetaPopup() {
+    // Dedupe — remove any existing popup
+    const existing = document.getElementById('beta-popup-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'beta-popup-overlay';
+    overlay.className = 'beta-popup-overlay';
+
+    // Backdrop click closes popup
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) closeBetaPopup();
+    });
+
+    // Escape key closes popup
+    overlay.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeBetaPopup();
+    });
+
+    overlay.innerHTML = `
+        <div class="beta-popup-card" role="dialog" aria-labelledby="beta-popup-title-el" aria-modal="true" tabindex="-1">
+            <div class="beta-popup-header">
+                <div class="beta-popup-glow"></div>
+                <div class="beta-popup-badge">${t('beta_popup_beta_badge')}</div>
+                <div class="beta-popup-orbit">
+                    <svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="28" cy="28" r="24" stroke="rgba(245,166,35,0.15)" stroke-width="1.5"/>
+                        <circle cx="28" cy="28" r="16" stroke="rgba(245,166,35,0.25)" stroke-width="1"/>
+                        <circle cx="28" cy="28" r="3.5" fill="#F5A623"/>
+                        <circle cx="48" cy="28" r="2" fill="rgba(245,166,35,0.6)"/>
+                        <circle cx="28" cy="8" r="1.5" fill="rgba(245,166,35,0.4)"/>
+                    </svg>
+                </div>
+            </div>
+            <div class="beta-popup-body">
+                <h2 class="beta-popup-title" id="beta-popup-title-el">${t('beta_popup_title')}</h2>
+                <p class="beta-popup-desc">${t('beta_popup_desc')}</p>
+                <p class="beta-popup-detail">${t('beta_popup_detail')}</p>
+                <div class="beta-popup-report">
+                    <div class="beta-popup-report-icon">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                            <path d="M10 1.5C5.86 1.5 2.5 4.86 2.5 9v4.17c0 .73.6 1.33 1.33 1.33H5v-5H4.17V9c0-3.22 2.61-5.83 5.83-5.83s5.83 2.61 5.83 5.83v.5H15v5h1.17c.73 0 1.33-.6 1.33-1.33V9c0-4.14-3.36-7.5-7.5-7.5z" fill="rgba(245,166,35,0.8)"/>
+                        </svg>
+                    </div>
+                    <div class="beta-popup-report-text">
+                        <div class="beta-popup-report-title">${t('beta_popup_report_title')}</div>
+                        <div class="beta-popup-report-desc">${t('beta_popup_report_desc')}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="beta-popup-actions">
+                <button class="beta-popup-btn-primary" onclick="closeBetaPopup()" type="button">
+                    ${t('beta_popup_cta_continue')}
+                </button>
+                <button class="beta-popup-btn-secondary" onclick="closeBetaPopupAndOpenTickets()" type="button">
+                    ${t('beta_popup_cta_support')}
+                </button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Focus the card for accessibility
+    setTimeout(function() {
+        const card = overlay.querySelector('.beta-popup-card');
+        if (card) card.focus();
+    }, 100);
+}
+
+function closeBetaPopup() {
+    const overlay = document.getElementById('beta-popup-overlay');
+    if (!overlay) return;
+
+    // Add closing class for reverse animation
+    overlay.classList.add('beta-popup-closing');
+    setTimeout(function() {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }, 300);
+
+    // Fire-and-forget: persist `beta_popup_seen = true` on server
+    // Only set `seen` AFTER user actually dismisses the popup
+    if (API_BASE) {
+        try {
+            apiFetch('/api/users/me/settings', {
+                method: 'PUT',
+                body: JSON.stringify({ beta_popup_seen: true })
+            }).catch(function(e) {
+                console.warn('[BETA-POPUP] Failed to persist beta_popup_seen:', e?.message || e);
+            });
+        } catch (e) {
+            console.warn('[BETA-POPUP] Failed to send beta_popup_seen request:', e?.message || e);
+        }
+    }
+}
+
+function closeBetaPopupAndOpenTickets() {
+    closeBetaPopup();
+    // Navigate to ticket/support system (existing function in app.js)
+    setTimeout(function() {
+        if (typeof openTicketsModal === 'function') {
+            openTicketsModal();
+        }
+    }, 350); // wait for popup close animation
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
         const header = document.querySelector('#dashboard-calendar').previousElementSibling;
