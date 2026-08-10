@@ -66,7 +66,7 @@ export function createCalendarReminderHandlers(deps) {
       return jsonResponse({ status: 'success', reminder }, {}, env);
     } catch (error) {
       console.warn(safeError('create-calendar-reminder', error));
-      return jsonResponse({ status: 'error', message: error.message || 'Failed to create reminder' }, { status: 500 }, env);
+      return jsonResponse({ status: 'error', message: 'Failed to create reminder' }, { status: 500 }, env);
     }
   }
 
@@ -86,7 +86,7 @@ export function createCalendarReminderHandlers(deps) {
       return jsonResponse({ status: 'success', reminders }, {}, env);
     } catch (error) {
       console.warn(safeError('list-calendar-reminders', error));
-      return jsonResponse({ status: 'error', message: error.message || 'Failed to list reminders' }, { status: 500 }, env);
+      return jsonResponse({ status: 'error', message: 'Failed to list reminders' }, { status: 500 }, env);
     }
   }
 
@@ -111,7 +111,7 @@ export function createCalendarReminderHandlers(deps) {
       return jsonResponse({ status: 'success' }, {}, env);
     } catch (error) {
       console.warn(safeError('delete-calendar-reminder', error));
-      return jsonResponse({ status: 'error', message: error.message || 'Failed to delete reminder' }, { status: 500 }, env);
+      return jsonResponse({ status: 'error', message: 'Failed to delete reminder' }, { status: 500 }, env);
     }
   }
 

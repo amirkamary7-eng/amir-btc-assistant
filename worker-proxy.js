@@ -1208,6 +1208,40 @@ async function isMarketRateLimited(env, ip, userId) {
   return false;
 }
 
+// ── Reusable user-based rate limiter for mutation endpoints ──────────────
+// FIX (Finding 4): Previously only market/callback/AI endpoints had rate
+// limits. This reusable function adds rate limiting to high-abuse mutation
+// endpoints (bootstrap, tickets, membership/request, calendar/reminders).
+//
+// Key design:
+//   - Per-userId (not per-IP) — authenticated requests use Telegram user ID
+//   - Sliding window via KV counter (same pattern as isMarketRateLimited)
+//   - KV TTL = max(windowSeconds, 60) — Cloudflare KV requires TTL >= 60s
+//   - Each check = 1 KV read + 1 KV write = 2 subrequests (acceptable)
+//   - Returns true if rate limited, false if allowed
+//
+// Usage:
+//   if (await isUserRateLimited(env, userId, 'bootstrap', 5, 60)) {
+//     return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
+//   }
+const USER_RATE_LIMIT_KEY_PREFIX = 'url:';
+
+async function isUserRateLimited(env, userId, category, maxRequests, windowSeconds) {
+  if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.get !== 'function') return false;
+  const uid = String(userId || 'anon');
+  const ttl = Math.max(windowSeconds, 60); // KV requires TTL >= 60s
+  const key = `${USER_RATE_LIMIT_KEY_PREFIX}${category}:${uid}`;
+  const existing = await readRateLimitCache(env, key);
+  if (existing) {
+    const count = parseInt(existing, 10) || 0;
+    if (count >= maxRequests) return true;
+    await writeRateLimitCache(env, key, String(count + 1), ttl);
+    return false;
+  }
+  await writeRateLimitCache(env, key, '1', ttl);
+  return false;
+}
+
 function getAdminIds(env) {
   const ids = new Set();
   // Include the primary admin ID only if explicitly configured (Task 4.9 — no hardcoded fallback)
@@ -6787,7 +6821,7 @@ const alertEconomyHandlers = createAlertEconomyHandlers({
 //#endregion
 
 // ── Telegram Publisher (admin) — channel publishing with queue + preview ──
-const publisherRepo = createPublisherRepository({ queryDb, normalizeOptionalString });
+const publisherRepo = createPublisherRepository({ queryDb, normalizeOptionalString, isDatabaseConfigured });
 const publisherHandlers = createPublisherHandlers({
   jsonResponse,
   requireAdmin: adminHandlers.requireAdmin,
@@ -8861,7 +8895,7 @@ export default {
           return jsonResponse({ status: 'success', data: updated }, {}, env);
         } catch (e) {
           console.error('[CONTENT SAVE] error:', e?.message);
-          return jsonResponse({ status: 'error', message: 'Failed to update content: ' + (e?.message || '') }, { status: 500 }, env);
+          return jsonResponse({ status: 'error', message: 'Failed to update content' }, { status: 500 }, env);
         }
       }
 
@@ -8928,7 +8962,8 @@ export default {
               recent_queue: recentQueue.rows,
             };
           } catch (e) {
-            dbState = { error: e.message };
+            console.warn('[trigger-alerts] dbState query failed:', e?.message);
+            dbState = { error: 'Failed to load DB state' };
           }
 
           return jsonResponse({ status: 'success', message: 'Alert check triggered', result, dbState }, {}, env);
@@ -9079,7 +9114,8 @@ export default {
           const monitoring = await getNewsAIMonitoring(env);
           return jsonResponse({ status: 'success', ...monitoring }, {}, env);
         } catch (e) {
-          return jsonResponse({ status: 'error', error: e?.message }, { status: 500 }, env);
+          console.warn('[news-ai-monitor] error:', e?.message);
+          return jsonResponse({ status: 'error', message: 'Failed to load monitoring data' }, { status: 500 }, env);
         }
       }
 
@@ -9092,7 +9128,8 @@ export default {
           const timing = await getE2ETimingStats(env);
           return jsonResponse({ status: 'success', ...timing }, {}, env);
         } catch (e) {
-          return jsonResponse({ status: 'error', error: e?.message }, { status: 500 }, env);
+          console.warn('[news-ai-timing] error:', e?.message);
+          return jsonResponse({ status: 'error', message: 'Failed to load timing stats' }, { status: 500 }, env);
         }
       }
 
@@ -9201,7 +9238,8 @@ export default {
             diagnostics,
           }, {}, env);
         } catch (e) {
-          return jsonResponse({ status: 'error', error: e?.message }, { status: 500 }, env);
+          console.warn('[news-ai-pending] error:', e?.message);
+          return jsonResponse({ status: 'error', message: 'Failed to load diagnostics' }, { status: 500 }, env);
         }
       }
 
@@ -9210,6 +9248,15 @@ export default {
       // GET    /api/calendar/reminders      — list user's reminders
       // DELETE /api/calendar/reminders/:key — delete by event_key
       if (url.pathname === '/api/calendar/reminders' && request.method === 'POST') {
+        // FIX (Finding 4): Rate limit reminder creation to 10 req/min per user.
+        // Normal users create 0-5 reminders. 10/min allows bulk creation while
+        // preventing spam.
+        const _remAuth = await authenticateTelegramRequest(request, env);
+        if (_remAuth.error) return _remAuth.error;
+        if (await isUserRateLimited(env, _remAuth.user.id, 'reminders', 10, 60)) {
+          return jsonResponse({ status: 'error', message: 'Too many requests', code: 'RATE_LIMITED' }, { status: 429 }, env);
+        }
+        request._protectedUser = _remAuth.user;
         return calendarReminderHandlers.handleCreate(request, env);
       }
       if (url.pathname === '/api/calendar/reminders' && request.method === 'GET') {
@@ -10030,6 +10077,16 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/tickets') {
+        // FIX (Finding 4): Rate limit ticket creation to 5 req/hour per user.
+        // Normal users create 0-2 tickets per week. 5/hour allows legitimate
+        // use while preventing spam. Auth + rate limit checked in controller.
+        const _ticketAuth = await authenticateTelegramRequest(request, env);
+        if (_ticketAuth.error) return _ticketAuth.error;
+        if (await isUserRateLimited(env, _ticketAuth.user.id, 'tickets', 5, 3600)) {
+          return jsonResponse({ status: 'error', message: 'Too many requests', code: 'RATE_LIMITED' }, { status: 429 }, env);
+        }
+        // Re-set the auth state on the request for the controller to use
+        request._protectedUser = _ticketAuth.user;
         return ticketHandlers.handleCreate(request, env);
       }
 
@@ -10147,6 +10204,15 @@ export default {
         return membershipHandlers.handleGetMyRequests(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/membership/request') {
+        // FIX (Finding 4): Rate limit membership requests to 3 req/hour per user.
+        // Normal users submit 0-1 requests. 3/hour allows resubmission while
+        // preventing spam.
+        const _memAuth = await authenticateTelegramRequest(request, env);
+        if (_memAuth.error) return _memAuth.error;
+        if (await isUserRateLimited(env, _memAuth.user.id, 'membership', 3, 3600)) {
+          return jsonResponse({ status: 'error', message: 'Too many requests', code: 'RATE_LIMITED' }, { status: 429 }, env);
+        }
+        request._protectedUser = _memAuth.user;
         return membershipHandlers.handleSubmitRequest(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/api/membership/welcome-shown') {
@@ -10453,6 +10519,25 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
+        // FIX (Finding 4): Rate limit bootstrap to 10 req/min per user.
+        // Bootstrap is called on every Mini App open — normal users hit it
+        // 1-3 times per session. 10/min allows legitimate reopens while
+        // blocking automated spam. We extract userId from initData WITHOUT
+        // full HMAC validation (the controller does that) — just for rate
+        // limiting. If extraction fails, we skip the rate limit check.
+        try {
+          const _bsInitData = getTelegramInitData(request);
+          if (_bsInitData) {
+            const _bsPairs = parseTelegramInitDataPairs(_bsInitData);
+            const _bsUserPair = _bsPairs.find(([k]) => k === 'user');
+            if (_bsUserPair) {
+              const _bsUser = JSON.parse(decodeTelegramValue(_bsUserPair[1]));
+              if (_bsUser?.id && await isUserRateLimited(env, _bsUser.id, 'bootstrap', 10, 60)) {
+                return jsonResponse({ status: 'error', message: 'Too many requests', code: 'RATE_LIMITED' }, { status: 429 }, env);
+              }
+            }
+          }
+        } catch { /* rate limit check failed — allow request */ }
         return userHandlers.handleBootstrap(request, env);
       }
 

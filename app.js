@@ -4358,6 +4358,12 @@ async function loadMarketData(force = false) {
             if (cached?.length) {
                 console.log('[TICKER] In-memory cache hit — using cached market data (', cached.length, 'coins )');
                 allCoins = cached;
+                // FIX: Set tabLoaded.market = true only when we actually have
+                // data (cache hit or API success). This prevents the bug where
+                // a failed first load leaves tabLoaded.market=true, causing all
+                // subsequent Market tab visits to renderMarket() from empty
+                // allCoins with no retry.
+                tabLoaded.market = true;
                 renderMarket();
                 renderWatchlist();
                 renderSummary();
@@ -4430,6 +4436,9 @@ async function loadMarketData(force = false) {
         }
 
         if (!allCoins.length) throw new Error('No market data');
+        // FIX: Set tabLoaded.market = true only after allCoins is confirmed
+        // populated. If we reach this point, the data load succeeded.
+        tabLoaded.market = true;
         Cache.set('market', allCoins, 120);
         // Phase C: Persist market data to localStorage for instant ticker render on cold start.
         // MARKET_CACHE_VERSION must match the version read in DOMContentLoaded.
@@ -10801,8 +10810,14 @@ function switchTab(pageId, btn) {
         }
     } else if (pageId === 'market-page') {
         if (!tabLoaded.market) {
+            // FIX: tabLoaded.market is set inside loadMarketData() only on
+            // successful data load (when allCoins is populated). Previously
+            // it was set synchronously here, which meant if loadMarketData()
+            // failed (network error, 401, API down), tabLoaded.market stayed
+            // true and subsequent Market tab visits rendered from empty
+            // allCoins with no retry. Now, failed loads leave tabLoaded.market
+            // false so the next visit re-attempts the fetch.
             loadMarketData();
-            tabLoaded.market = true;
         } else {
             renderMarket();
         }

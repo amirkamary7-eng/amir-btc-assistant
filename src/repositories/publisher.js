@@ -8,7 +8,7 @@
  * No HTTP concerns, no Telegram API calls — just SQL + row serialization.
  */
 export function createPublisherRepository(deps) {
-  const { queryDb, normalizeOptionalString } = deps;
+  const { queryDb, normalizeOptionalString, isDatabaseConfigured } = deps;
 
   let _schemaVerified = false;
 
