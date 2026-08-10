@@ -1407,8 +1407,14 @@ export function createNotificationPlatformRepository(deps) {
       `, [broadcastId, userIds.length, batchDelivered, checkpoint], 1, pool);
     }
 
-    // Mark broadcast as completed
-    await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW(), claimed_at = NULL WHERE id = $1`, [broadcastId], 1, pool);
+    // F-02 FIX: Mark broadcast status based on actual delivery outcome.
+    // Previously: always marked 'sent' even if all INSERTs failed (silent data loss).
+    // Now: if totalDelivered === 0 AND totalProcessed > 0, mark as 'failed'
+    // so the admin can see the broadcast didn't reach anyone. If at least
+    // one user was delivered, mark as 'sent' (partial success is acceptable —
+    // the admin can check total_delivered vs total_sent for the real count).
+    const finalStatus = (totalDelivered === 0 && totalProcessed > 0) ? 'failed' : 'sent';
+    await queryDb(env, `UPDATE notification_broadcasts SET status = $2, sent_at = NOW(), claimed_at = NULL WHERE id = $1`, [broadcastId, finalStatus], 1, pool);
 
     console.log(`[broadcast] Completed broadcast ${broadcastId}: processed=${totalProcessed}, delivered=${totalDelivered}, failed=${totalFailed}`);
     return { processed: totalProcessed, delivered: totalDelivered, failed: totalFailed, broadcastId, status: 'completed' };
