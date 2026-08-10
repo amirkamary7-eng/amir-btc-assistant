@@ -7835,19 +7835,28 @@ async function handleFarsiNews(request, env) {
 async function handleTelegramWebhook(request, env) {
   const requestPath = new URL(request.url).pathname || '/';
 
-  // ── Webhook secret validation (Task 2.11) ──────────────────────────────────
-  // Only reject if a secret IS configured AND the header is present but wrong.
-  // If no header is sent (webhook registered without secret_token), allow through.
+  // ── Webhook secret validation (Task 2.11 + S-02 FIX) ───────────────────────
+  // S-02 FIX: If a secret IS configured, the header MUST be present AND match.
+  // Previously, a missing header was allowed through (fail-open), which meant
+  // an attacker could spoof Telegram updates by simply omitting the header.
+  // Now: fail-closed — if secret is configured, header must be present and valid.
   const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET;
   if (webhookSecret) {
     const headerToken = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
-    if (headerToken && !timingSafeEqualSecret(headerToken, webhookSecret)) {
+    if (!headerToken) {
+      // S-02 FIX: Reject if secret is configured but header is absent.
+      // The webhook must be registered with secret_token for this to work.
+      // If the webhook was registered without secret_token, either:
+      //   1. Re-register with secret_token: curl https://api.telegram.org/bot<TOKEN>/setWebhook?url=<URL>&secret_token=<SECRET>
+      //   2. Or unset TELEGRAM_WEBHOOK_SECRET to disable the check (NOT recommended)
+      return jsonResponse(
+        { status: 'error', detail: 'Missing webhook secret token' },
+        { status: 403 }, env);
+    }
+    if (!timingSafeEqualSecret(headerToken, webhookSecret)) {
       return jsonResponse(
         { status: 'error', detail: 'Invalid webhook secret token' },
         { status: 403 }, env);
-    }
-    if (!headerToken) {
-      console.warn('TELEGRAM_WEBHOOK_SECRET is set but request has no secret header — allowing (webhook may lack secret_token)');
     }
   }
   // ── End webhook secret validation ─────────────────────────────────────────
