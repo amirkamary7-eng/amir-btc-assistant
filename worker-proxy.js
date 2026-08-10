@@ -9887,7 +9887,8 @@ export default {
             }
           }
         } catch (e) {
-          return jsonResponse({ error: e?.message }, { status: 500 }, env);
+          console.warn('[notif-trace-results] error:', e?.message);
+          return jsonResponse({ status: 'error', message: 'Failed to load traces' }, { status: 500 }, env);
         }
         // Sort by timestamp descending (newest first)
         traces.sort((a, b) => new Date(b.ts) - new Date(a.ts));
@@ -10519,25 +10520,28 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
-        // FIX (Finding 4): Rate limit bootstrap to 10 req/min per user.
-        // Bootstrap is called on every Mini App open — normal users hit it
-        // 1-3 times per session. 10/min allows legitimate reopens while
-        // blocking automated spam. We extract userId from initData WITHOUT
-        // full HMAC validation (the controller does that) — just for rate
-        // limiting. If extraction fails, we skip the rate limit check.
+        // FIX (Focused Verification — Bootstrap Rate Limit):
+        // Previously, userId was extracted from initData WITHOUT HMAC validation,
+        // allowing an attacker to consume a victim's rate limit quota by sending
+        // fake initData with the victim's userId. Now we authenticate FIRST
+        // (HMAC validation), then rate limit using the validated userId.
+        // If auth fails (invalid HMAC), we return 401 WITHOUT incrementing the
+        // rate limit counter — attacker cannot DoS a victim's bootstrap.
+        // If auth succeeds, we rate limit with the HMAC-validated userId.
+        // Limit: 10 req/60s per user. KV fail-open behavior preserved.
         try {
-          const _bsInitData = getTelegramInitData(request);
-          if (_bsInitData) {
-            const _bsPairs = parseTelegramInitDataPairs(_bsInitData);
-            const _bsUserPair = _bsPairs.find(([k]) => k === 'user');
-            if (_bsUserPair) {
-              const _bsUser = JSON.parse(decodeTelegramValue(_bsUserPair[1]));
-              if (_bsUser?.id && await isUserRateLimited(env, _bsUser.id, 'bootstrap', 10, 60)) {
-                return jsonResponse({ status: 'error', message: 'Too many requests', code: 'RATE_LIMITED' }, { status: 429 }, env);
-              }
+          const _bsAuth = await authenticateTelegramRequest(request, env);
+          if (_bsAuth.user) {
+            // Authenticated user — check rate limit with validated userId
+            if (await isUserRateLimited(env, _bsAuth.user.id, 'bootstrap', 10, 60)) {
+              return jsonResponse({ status: 'error', message: 'Too many requests', code: 'RATE_LIMITED' }, { status: 429 }, env);
             }
           }
-        } catch { /* rate limit check failed — allow request */ }
+          // If _bsAuth.error is set (invalid HMAC), we DON'T rate limit —
+          // just fall through to handleBootstrap which will return 401.
+          // This ensures attacker requests with fake initData don't consume
+          // any victim's rate limit quota.
+        } catch { /* rate limit check failed — allow request (fail-open) */ }
         return userHandlers.handleBootstrap(request, env);
       }
 
