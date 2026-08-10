@@ -109,6 +109,12 @@ export function createAlertHandlers(deps) {
     payload.user_id = String(authState.user.id);
 
     // ── Alert Economy: Quota Check + Token Debit ──
+    // ECON-02 FIX: Use content-based refId (symbol+price+direction+UTC date)
+    // instead of Date.now(). This makes retries/replays idempotent — the
+    // UNIQUE constraint on token_transactions(user_id, tx_type, ref_id)
+    // prevents double-debit for the same logical alert.
+    const alertRefId = `alert_${payload.user_id}_${rawSymbol}_${rawPrice}_${rawDirection}_${new Date().toISOString().slice(0, 10)}`;
+
     if (alertEconomyRepo) {
       const quota = await alertEconomyRepo.checkQuota(env, payload.user_id, 'price_alert');
       if (!quota.allowed) {
@@ -127,7 +133,7 @@ export function createAlertHandlers(deps) {
             amount: quota.costInTokens,
             debitType: 'alert_debit',
             description: `Extra price alert: ${rawSymbol} ${rawDirection} ${rawPrice}`,
-            refId: `alert_${Date.now()}_${payload.user_id}`,
+            refId: alertRefId,
             metadata: { symbol: rawSymbol, price: rawPrice, direction: rawDirection },
             env,
           });
@@ -153,6 +159,29 @@ export function createAlertHandlers(deps) {
 
       return jsonResponse({ status: 'success', alert }, {}, env);
     } catch (error) {
+      // ECON-01 FIX: If alert creation fails after a successful debit,
+      // refund the debited tokens. Uses grantReward with the SAME refId
+      // pattern (suffixed with '_refund') so the refund is idempotent.
+      // The UNIQUE constraint on token_transactions prevents double-refund.
+      if (alertEconomyRepo && economyService) {
+        try {
+          const quota = await alertEconomyRepo.checkQuota(env, payload.user_id, 'price_alert');
+          if (quota.costInTokens > 0) {
+            await economyService.grantReward({
+              userId: payload.user_id,
+              amount: quota.costInTokens,
+              rewardType: 'marketplace_refund',
+              description: `Refund: alert creation failed (${rawSymbol} ${rawDirection} ${rawPrice})`,
+              refId: `${alertRefId}_refund`,
+              metadata: { reason: 'alert_create_failure', symbol: rawSymbol, price: rawPrice, direction: rawDirection },
+              auditInfo: { actor: 'system' },
+              env,
+            });
+          }
+        } catch (refundErr) {
+          console.warn('[alerts] Refund failed after alert creation error:', refundErr?.message);
+        }
+      }
       console.warn(safeError('create-alert', error));
       return safeDbErrorResponse(error, {}, env);
     }
