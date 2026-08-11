@@ -7207,23 +7207,27 @@ function formatCountdown(ms) {
     return `${s}s`;
 }
 
-// CALRESTORE-001: Restore 3 functions that were accidentally removed in
-// commit c9bebdb ("Batch F — Dead Code removal"). That commit removed the
-// legacy renderCalendar() function AND, mistakenly, also removed these 3
-// helper functions which renderCalendarV2() still depends on:
+// CALRESTORE-001: Restore 3 functions (and 1 const) that were accidentally
+// removed in commit c9bebdb ("Batch F — Dead Code removal"). That commit
+// removed the legacy renderCalendar() function AND, mistakenly, also removed
+// these 4 helpers which renderCalendarV2() still depends on:
 //
-//   - getCalendarTabCounts(events)         — called at line 7278 (inside
+//   - const MAJOR_CURRENCIES = [...]     — used at lines 7441-7443 (country
+//     filter chips construction inside renderCalendarV2's .then() callback).
+//   - getCalendarTabCounts(events)       — called at line 7278 (inside
 //     renderCalendarV2's .then() callback). Without it, ReferenceError is
 //     thrown the moment calendar data resolves, aborting the entire render.
-//   - buildCalendarSegmentsHtml(counts)    — called 5 times inside
+//   - buildCalendarSegmentsHtml(counts)  — called 5 times inside
 //     renderCalendarV2 (skeleton + empty + no-match + main render paths).
-//   - startCalCountdown()                  — called twice inside
+//   - startCalCountdown()                — called twice inside
 //     renderCalendarV2 (signature-match path + post-render path).
 //
-// The functions below are restored VERBATIM from commit 5a42595 (the
+// The definitions below are restored VERBATIM from commit 5a42595 (the
 // parent of c9bebdb, i.e. the last commit where they existed). No edits,
 // no refactor, no rewrite — byte-for-byte identical to the historical
 // versions that renderCalendarV2 was originally written against.
+
+const MAJOR_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CAD', 'AUD', 'NZD', 'CHF'];
 
 /**
  * Compute per-tab counts (today / tomorrow / week) for the calendar

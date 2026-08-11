@@ -2227,6 +2227,18 @@ test('CALRESTORE-003 (source): startCalCountdown function is defined in app.js',
     'startCalCountdown function definition must exist in app.js');
 });
 
+test('CALRESTORE-003b (source): MAJOR_CURRENCIES const is defined in app.js', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  assert.ok(/const\s+MAJOR_CURRENCIES\s*=/.test(src),
+    'MAJOR_CURRENCIES const definition must exist in app.js (was accidentally removed in c9bebdb, used at renderCalendarV2 country filter)');
+  // Verify it is a non-empty array of currency codes.
+  // Match only lines that START with "const MAJOR_CURRENCIES =" (skip comment lines)
+  const m = src.match(/^const\s+MAJOR_CURRENCIES\s*=\s*\[([^\]]*)\]/m);
+  assert.ok(m, 'MAJOR_CURRENCIES must be an array literal at start of line (not in a comment)');
+  const codes = m[1].match(/'([A-Z]{3})'/g);
+  assert.ok(codes && codes.length >= 5, 'MAJOR_CURRENCIES must contain at least 5 currency codes, got: ' + (codes ? codes.length : 0));
+});
+
 test('CALRESTORE-004 (source): all 3 functions have NO remaining undefined call-sites', () => {
   // Every call-site of these functions must have a matching definition.
   const src = fs.readFileSync(APP_JS_PATH, 'utf8');
