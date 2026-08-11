@@ -773,11 +773,18 @@ export function createNotificationPlatformRepository(deps) {
     } catch (e) { console.warn('Notification enqueue error:', e.message); }
   }
 
-  async function processQueue(env, sendTelegramMessageFn, pool = null) {
+  async function processQueue(env, sendTelegramMessageFn, pool = null, limit = 10) {
     // PERF: Do NOT call ensureSchema here — it runs 16+ ALTER TABLE queries
     // (one per channel column) which adds 3+ seconds of latency.
     // ensureSchema is called by dispatch() on first use, which is enough.
     if (!isDatabaseConfigured(env)) return { processed: 0 };
+
+    // NOTIF-FIX: limit parameter controls batch size for CPU-safe processing.
+    // 1-min cron passes limit=5 (CPU-safe with alerts running in same invocation).
+    // */5 cron passes limit=10 (default, backwards compatible — drains more per tick).
+    // FOR UPDATE SKIP LOCKED prevents concurrent ticks from claiming same items,
+    // so 1-min and */5 ticks never process the same queue items.
+    const batchLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
 
     // Phase 3: Atomic claim with FOR UPDATE SKIP LOCKED
     // Prevents concurrent processQueue ticks from processing the same items.
@@ -793,7 +800,7 @@ export function createNotificationPlatformRepository(deps) {
           WHERE status = 'pending' AND attempts < max_attempts
           AND (next_retry_at IS NULL OR next_retry_at <= NOW())
           ORDER BY priority DESC, created_at ASC
-          LIMIT 10
+          LIMIT ${batchLimit}
           FOR UPDATE SKIP LOCKED
         )
         RETURNING *

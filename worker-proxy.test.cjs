@@ -3248,3 +3248,167 @@ test('ANPERF-008 (source): simple create() and update() still use queryDb (share
   assert.ok(/queryDb\(/.test(updateMatch[1]), 'update() must use queryDb (shared pool)');
   assert.ok(!/queryDbTransaction/.test(updateMatch[1]), 'update() must NOT use queryDbTransaction');
 });
+
+// ============================================================================
+// NOTIF-FIX: Notification delay, reliability, and crash-recovery fixes
+// ============================================================================
+
+test('NOTIF-001 (source): processQueue accepts limit parameter for CPU-safe batching', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'repositories', 'notification_platform.js'), 'utf8');
+  assert.ok(/async function processQueue\(env, sendTelegramMessageFn, pool = null, limit = 10\)/.test(src),
+    'processQueue must accept a limit parameter (default 10)');
+  assert.ok(/const batchLimit = Math\.max\(1, Math\.min\(Number\(limit\)/.test(src),
+    'processQueue must compute batchLimit from limit parameter');
+  assert.ok(/LIMIT \$\{batchLimit\}/.test(src),
+    'processQueue must use batchLimit in the SQL LIMIT clause');
+});
+
+test('NOTIF-002 (source): 1-min cron runs processQueue with limit=3', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // Verify 1-min cron calls processQueue with limit=3 (CPU-safe: worst case 9.5ms < 10ms)
+  assert.ok(/notificationPlatformRepo\.processQueue\(env, sendTelegramMessage, pool, 3\)/.test(src),
+    '1-min cron must call processQueue with limit=3 (CPU-safe batch, worst case 9.5ms < 10ms)');
+});
+
+test('NOTIF-003 (source): 1-min cron still runs runScheduledAlertsBaseline', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // Verify 1-min cron still runs alerts (unchanged)
+  assert.ok(/await runScheduledAlertsBaseline\(controller, env, pool\)/.test(src),
+    '1-min cron must still run runScheduledAlertsBaseline (unchanged)');
+});
+
+test('NOTIF-004 (source): markFired is called AFTER dispatch, not before', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // Find the calendar reminder dispatch section using brace-counting
+  const loopStart = src.indexOf('for (const reminder of pendingReminders)');
+  assert.ok(loopStart > -1, 'calendar reminder loop must exist');
+
+  // Find the closing brace of the for loop (brace counting)
+  let depth = 0;
+  let loopEnd = src.indexOf('{', loopStart);
+  for (let i = loopEnd; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth--; if (depth === 0) { loopEnd = i; break; } }
+  }
+  const body = src.slice(loopStart, loopEnd);
+
+  // Find positions of dispatch and markFired
+  const dispatchPos = body.indexOf('notificationService.create(env');
+  const markFiredPos = body.indexOf('calendarReminderRepo.markFired(env');
+
+  assert.ok(dispatchPos > -1, 'dispatch (notificationService.create) must exist in reminder loop');
+  assert.ok(markFiredPos > -1, 'markFired must exist in reminder loop');
+  assert.ok(dispatchPos < markFiredPos,
+    'dispatch must come BEFORE markFired (markFired moved to after dispatch)');
+});
+
+test('NOTIF-005 (source): markFired only called on dispatch success', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // Verify dispatchSuccess flag controls markFired
+  assert.ok(/let dispatchSuccess = false/.test(src),
+    'dispatchSuccess flag must exist');
+  assert.ok(/if \(dispatchSuccess\)\s*\{[\s\S]*?markFired/.test(src),
+    'markFired must only be called when dispatchSuccess is true');
+});
+
+test('NOTIF-006 (source): broadcast dedup key written AFTER user loop, not before', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // Find the broadcast event section by searching for the user loop and dedup write
+  // The user loop is: for (const uid of allUserIds) {
+  // The dedup write is: writeAppCache(env, dedupKey, '1', 4 * 3600)
+  // We need to verify the loop comes BEFORE the writeAppCache call.
+
+  // Find the event detection block (first occurrence of dedupKey check)
+  const dedupCheckPos = src.indexOf('const alreadySent = await readAppCache(env, dedupKey)');
+  assert.ok(dedupCheckPos > -1, 'dedup check must exist');
+
+  // Find the user loop AFTER the dedup check
+  const userLoopPos = src.indexOf('for (const uid of allUserIds)', dedupCheckPos);
+  assert.ok(userLoopPos > -1, 'user dispatch loop must exist after dedup check');
+
+  // Find the writeAppCache call AFTER the user loop
+  const dedupWritePos = src.indexOf("writeAppCache(env, dedupKey, '1', 4 * 3600)", userLoopPos);
+  assert.ok(dedupWritePos > -1, 'dedup key write must exist after user loop');
+
+  assert.ok(userLoopPos < dedupWritePos,
+    'user loop must come BEFORE dedup key write (dedup moved to after loop)');
+});
+
+test('NOTIF-007 (source): broadcast dedup only written if sentForThisEvent > 0', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  assert.ok(/if \(sentForThisEvent > 0\)\s*\{[\s\S]*?writeAppCache\(env, dedupKey/.test(src),
+    'dedup key must only be written if sentForThisEvent > 0 (at least 1 user dispatched)');
+});
+
+test('NOTIF-008 (source): calendar_reminders functions accept pool parameter', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'repositories', 'calendar_reminders.js'), 'utf8');
+  // Verify all key functions accept pool parameter
+  assert.ok(/async function listPending\(env, now = new Date\(\), pool = null\)/.test(src),
+    'listPending must accept pool parameter');
+  assert.ok(/async function markFired\(env, reminderId, pool = null\)/.test(src),
+    'markFired must accept pool parameter');
+  assert.ok(/async function cleanupOld\(env, pool = null\)/.test(src),
+    'cleanupOld must accept pool parameter');
+  assert.ok(/async function ensureSchema\(env, pool = null\)/.test(src),
+    'ensureSchema must accept pool parameter');
+});
+
+test('NOTIF-009 (source): calendar_reminders calls in worker-proxy pass pool', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  assert.ok(/calendarReminderRepo\.listPending\(env, new Date\(\), pool\)/.test(src),
+    'listPending must be called with pool');
+  assert.ok(/calendarReminderRepo\.markFired\(env, reminder\.id, pool\)/.test(src),
+    'markFired must be called with pool');
+  assert.ok(/calendarReminderRepo\.cleanupOld\(env, pool\)/.test(src),
+    'cleanupOld must be called with pool');
+});
+
+test('NOTIF-010 (source): FOR UPDATE SKIP LOCKED preserved in processQueue', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'repositories', 'notification_platform.js'), 'utf8');
+  assert.ok(/FOR UPDATE SKIP LOCKED/.test(src),
+    'FOR UPDATE SKIP LOCKED must be preserved (prevents concurrent claim)');
+});
+
+test('NOTIF-011 (source): requeueStaleQueueItems preserved', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'repositories', 'notification_platform.js'), 'utf8');
+  assert.ok(/async function requeueStaleQueueItems/.test(src),
+    'requeueStaleQueueItems must still exist (crash recovery preserved)');
+  assert.ok(/status = 'processing'[\s\S]*?claimed_at < NOW\(\) - INTERVAL '5 minutes'/.test(src),
+    'requeueStaleQueueItems must still check 5-min stale threshold');
+});
+
+test('NOTIF-012 (source): */5 cron processQueue still uses default limit (10)', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // The */5 cron call is in the Phase 4 section, inside isEvery5Min block.
+  // Find it by searching for the processQueue call that does NOT pass limit=3.
+  // The */5 call: processQueue(env, sendTelegramMessage, pool) — no 4th arg
+  // The 1-min call: processQueue(env, sendTelegramMessage, pool, 3) — 4th arg = 3
+
+  // Find the Phase 4 section (after the 1-min early return)
+  const phase4Start = src.indexOf('PHASE 4: SEQUENTIAL EXECUTION');
+  assert.ok(phase4Start > -1, 'Phase 4 section must exist');
+
+  // Find processQueue call in Phase 4 (should NOT have limit=3)
+  const phase4Section = src.slice(phase4Start);
+  const phase4CallMatch = phase4Section.match(/notificationPlatformRepo\?\.processQueue\)\s*\{[\s\S]*?notificationPlatformRepo\.processQueue\(env, sendTelegramMessage, pool\)/);
+  assert.ok(phase4CallMatch, '*/5 cron must call processQueue without limit (default 10)');
+});
+
+test('NOTIF-013 (source): broadcast dedupKey uses eventKey (not undefined event.id)', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // Verify dedupKey uses eventKey (title|date|country) instead of event.id
+  // event.id is always undefined (mapCalendarEvent doesn't add 'id' field)
+  // Using undefined would make ALL events share the same dedupKey per user
+  assert.ok(/dedupKey: `cal_event_\$\{eventKey\}_\$\{uid\}`/.test(src),
+    'dedupKey must use eventKey (deterministic title|date|country) not event.id (undefined)');
+  // Verify event.id is NOT used in dedupKey
+  assert.ok(!/cal_event_\$\{event\.id\}/.test(src),
+    'event.id must NOT be used in dedupKey (it is always undefined — mapCalendarEvent does not add id field)');
+});
+
+test('NOTIF-014 (source): eventKey is unique per event (title|date|country)', () => {
+  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  // Verify eventKey is computed from title+date+country (unique combination)
+  assert.ok(/eventKey = `\$\{String\(event\.title \|\| ''\)\.slice\(0, 60\)\}\|\$\{String\(event\.date \|\| ''\)\}\|\$\{String\(event\.country \|\| ''\)\}`/.test(src),
+    'eventKey must be computed from title|date|country (unique per event)');
+});

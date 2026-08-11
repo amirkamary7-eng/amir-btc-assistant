@@ -24,7 +24,7 @@ export function createCalendarReminderRepository(deps) {
 
   let _schemaVerified = false;
 
-  async function ensureSchema(env) {
+  async function ensureSchema(env, pool = null) {
     if (_schemaVerified) return;
     const sql = `
       CREATE TABLE IF NOT EXISTS calendar_reminders (
@@ -43,7 +43,7 @@ export function createCalendarReminderRepository(deps) {
       CREATE INDEX IF NOT EXISTS idx_cal_reminders_pending ON calendar_reminders (event_timestamp) WHERE fired_at IS NULL;
     `;
     try {
-      await queryDb(env, sql);
+      await queryDb(env, sql, [], 1, pool);
     } catch (e) {
       console.warn('Calendar reminder schema migration warning:', e.message);
     }
@@ -124,7 +124,7 @@ export function createCalendarReminderRepository(deps) {
    *
    * Returns rows with user_id for per-user dispatch.
    */
-  async function listPending(env, now = new Date()) {
+  async function listPending(env, now = new Date(), pool = null) {
     const result = await queryDb(
       env,
       `SELECT id, user_id, event_key, event_title, event_country, event_timestamp, lead_minutes, fired_at, created_at
@@ -135,6 +135,7 @@ export function createCalendarReminderRepository(deps) {
          AND event_timestamp >= NOW() - INTERVAL '1 hour'
        ORDER BY event_timestamp ASC
        LIMIT 200`,
+      [], 1, pool,
     );
     return result.rows.map(serializeRow);
   }
@@ -144,7 +145,7 @@ export function createCalendarReminderRepository(deps) {
    * than 24 hours. This prevents the table from growing indefinitely.
    * Called by the cron on 15-minute ticks.
    */
-  async function cleanupOld(env) {
+  async function cleanupOld(env, pool = null) {
     if (!isDatabaseConfigured(env)) return 0;
     try {
       const result = await queryDb(
@@ -153,6 +154,7 @@ export function createCalendarReminderRepository(deps) {
          WHERE fired_at IS NOT NULL
            AND event_timestamp < NOW() - INTERVAL '24 hours'
          RETURNING id`,
+        [], 1, pool,
       );
       return result.rows.length;
     } catch (e) {
@@ -171,11 +173,11 @@ export function createCalendarReminderRepository(deps) {
   /**
    * Mark a reminder as fired. Prevents duplicate notifications.
    */
-  async function markFired(env, reminderId) {
+  async function markFired(env, reminderId, pool = null) {
     const result = await queryDb(
       env,
       `UPDATE calendar_reminders SET fired_at = NOW() WHERE id = $1 AND fired_at IS NULL RETURNING id`,
-      [Number(reminderId)],
+      [Number(reminderId)], 1, pool,
     );
     return result.rows.length > 0;
   }
