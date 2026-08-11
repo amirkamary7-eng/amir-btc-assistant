@@ -1369,11 +1369,12 @@ function createPool(env) {
 
   // ── Hyperdrive path ──
   if (env.HYPERDRIVE && env.HYPERDRIVE.connectionString) {
+    // Per Cloudflare docs: Hyperdrive manages connection pooling automatically.
+    // Do NOT set max/idleTimeout — let Hyperdrive handle it.
+    // Only set connectionTimeoutMillis for safety.
     const _pool = new PgPool({
       connectionString: env.HYPERDRIVE.connectionString,
-      max: 1,
-      idleTimeoutMillis: 0,
-      connectionTimeoutMillis: 3000,
+      connectionTimeoutMillis: 5000,
     });
     _traceStage('Pool.create.hyperdrive', _t0);
     _traceLog('Pool.create.hyperdrive', { poolId: _poolId, durationMs: Date.now() - _t0 });
