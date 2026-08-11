@@ -3150,5 +3150,101 @@ test('CALREFRESH-010 (behavioral): force=true with empty API response preserves 
   assert.equal(m.getEvents()[0].title, 'STALE');
 });
 
+// ============================================================================
+// ANPERF-001: Non-featured Add/Edit uses simple create/update (shared pool)
+// instead of createWithFeaturedLimit/updateWithFeaturedLimit (Transaction +
+// per-call Pool). Featured path still uses Transaction + advisory lock.
+// ============================================================================
 
+test('ANPERF-001 (source): handleCreate branches on featured/force_featured', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'controllers', 'analyses.js'), 'utf8');
+  // Verify the branching condition exists
+  assert.ok(/wantsFeaturedPath\s*=\s*parsed\.payload\.featured\s*===\s*true\s*\|\|\s*parsed\.payload\.force_featured\s*===\s*true/.test(src),
+    'handleCreate must branch on featured===true || force_featured===true');
+  // Verify both paths are taken
+  assert.ok(/if \(wantsFeaturedPath\)/.test(src), 'must have conditional branch');
+  // Verify non-featured path uses create() (not createWithFeaturedLimit)
+  assert.ok(/analysisRepo\.create\(env, authResult\.user\.id, parsed\.payload\)/.test(src),
+    'non-featured path must call analysisRepo.create()');
+  // Verify featured path still uses createWithFeaturedLimit()
+  assert.ok(/analysisRepo\.createWithFeaturedLimit\(env, authResult\.user\.id, parsed\.payload\)/.test(src),
+    'featured path must still call analysisRepo.createWithFeaturedLimit()');
+});
 
+test('ANPERF-002 (source): handleUpdate branches on featured/force_featured', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'controllers', 'analyses.js'), 'utf8');
+  // Verify the branching exists in handleUpdate
+  assert.ok(/wantsFeaturedPath\s*=\s*parsed\.payload\.featured\s*===\s*true\s*\|\|\s*parsed\.payload\.force_featured\s*===\s*true/.test(src),
+    'handleUpdate must branch on featured===true || force_featured===true');
+  // Verify non-featured path uses update()
+  assert.ok(/analysisRepo\.update\(env, analysisId, parsed\.payload\)/.test(src),
+    'non-featured update path must call analysisRepo.update()');
+  // Verify featured path still uses updateWithFeaturedLimit()
+  assert.ok(/analysisRepo\.updateWithFeaturedLimit\(env, analysisId, parsed\.payload\)/.test(src),
+    'featured update path must still call analysisRepo.updateWithFeaturedLimit()');
+});
+
+test('ANPERF-003 (source): non-featured create adapts result shape correctly', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'controllers', 'analyses.js'), 'utf8');
+  // Verify the result adapter sets limitReached=false (no limit for non-featured)
+  assert.ok(/result\s*=\s*\{\s*inserted:\s*true,\s*analysis,\s*featuredCountBefore:\s*0,\s*limitReached:\s*false,\s*max:\s*5\s*\}/.test(src),
+    'non-featured create must adapt result shape with limitReached=false');
+});
+
+test('ANPERF-004 (source): non-featured update handles notFound correctly', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'controllers', 'analyses.js'), 'utf8');
+  // Verify update() returns null is handled as notFound
+  assert.ok(/if\s*\(analysis\s*===\s*null\)/.test(src),
+    'non-featured update must handle null return as notFound');
+  assert.ok(/notFound:\s*true/.test(src),
+    'non-featured update must set notFound=true when analysis is null');
+});
+
+test('ANPERF-005 (source): invalidateAnalysesCache uses Promise.allSettled', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'controllers', 'analyses.js'), 'utf8');
+  assert.ok(/Promise\.allSettled\(kvOps\)/.test(src),
+    'invalidateAnalysesCache must use Promise.allSettled for parallel KV ops');
+  // Verify version is still returned (not from KV)
+  assert.ok(/const version = generateVersion\(\)/.test(src),
+    'version must still be generated locally (not from KV)');
+});
+
+test('ANPERF-006 (source): all 6 KV ops are independent (different keys)', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'controllers', 'analyses.js'), 'utf8');
+  // Verify all 6 different keys are targeted
+  assert.ok(/ANALYSES_VERSION_KEY/.test(src), 'must write version key');
+  assert.ok(/ANALYSES_LIST_KEY/.test(src), 'must delete list key');
+  assert.ok(/ANALYSES_FEATURED_KEY/.test(src), 'must delete featured key');
+  assert.ok(/ANALYSES_STATS_KEY/.test(src), 'must delete stats key');
+  assert.ok(/'analyses:signature'/.test(src), 'must delete signature key');
+  assert.ok(/DETAIL_CACHE_PREFIX/.test(src), 'must delete detail cache key');
+  // Verify all ops have .catch(() => {}) for error isolation
+  const catchCount = (src.match(/\.catch\(\(\) => \{\}\)/g) || []).length;
+  assert.ok(catchCount >= 6, 'all 6 KV ops must have .catch(() => {}) for error isolation');
+});
+
+test('ANPERF-007 (source): featured limit safety preserved in transactional path', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'repositories', 'analyses.js'), 'utf8');
+  // Verify createWithFeaturedLimit still uses advisory lock
+  assert.ok(/pg_advisory_xact_lock/.test(src),
+    'createWithFeaturedLimit must still use pg_advisory_xact_lock (featured limit safety)');
+  // Verify updateWithFeaturedLimit still uses advisory lock
+  assert.ok(/queryDbTransaction\(env, \[lockQuery, existingQuery, countQuery, unfeatureQuery, updateQuery\]\)/.test(src),
+    'updateWithFeaturedLimit must still use queryDbTransaction with all 5 queries');
+  // Verify featured limit constants unchanged
+  assert.ok(/MAX_FEATURED = 5/.test(src), 'MAX_FEATURED must still be 5');
+});
+
+test('ANPERF-008 (source): simple create() and update() still use queryDb (shared pool)', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'src', 'repositories', 'analyses.js'), 'utf8');
+  // Verify create() uses queryDb (not queryDbTransaction)
+  const createMatch = src.match(/async function create\(env, adminUserId, payload\)\s*\{([\s\S]*?)\n\s{2}\}/);
+  assert.ok(createMatch, 'create() function must exist');
+  assert.ok(/queryDb\(/.test(createMatch[1]), 'create() must use queryDb (shared pool)');
+  assert.ok(!/queryDbTransaction/.test(createMatch[1]), 'create() must NOT use queryDbTransaction');
+  // Verify update() uses queryDb
+  const updateMatch = src.match(/async function update\(env, analysisId, payload\)\s*\{([\s\S]*?)\n\s{2}\}/);
+  assert.ok(updateMatch, 'update() function must exist');
+  assert.ok(/queryDb\(/.test(updateMatch[1]), 'update() must use queryDb (shared pool)');
+  assert.ok(!/queryDbTransaction/.test(updateMatch[1]), 'update() must NOT use queryDbTransaction');
+});

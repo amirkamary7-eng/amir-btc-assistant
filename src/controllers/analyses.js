@@ -121,21 +121,48 @@ export function createAnalysisHandlers(deps) {
    */
   async function invalidateAnalysesCache(env, analysisId = null) {
     const version = generateVersion();
-    // Write a tombstone version so all clients know to refetch
-    await writeAppCache(env, ANALYSES_VERSION_KEY, String(version), 86400 * 7);
-    // Delete list cache so next request hits DB
-    try { await env.APP_CACHE?.delete?.(ANALYSES_LIST_KEY); } catch {}
-    // Delete featured cache
-    try { await env.APP_CACHE?.delete?.(ANALYSES_FEATURED_KEY); } catch {}
-    // Delete stats cache
-    try { await env.APP_CACHE?.delete?.(ANALYSES_STATS_KEY); } catch {}
-    // ANVERSION-FLIP FIX: Delete the content signature so the next fresh
-    // fetch generates a new signature (matching the new data).
-    try { await env.APP_CACHE?.delete?.('analyses:signature'); } catch {}
-    // FIX 1: delete the per-analysis detail cache so stale data doesn't linger
-    if (analysisId) {
-      try { await env.APP_CACHE?.delete?.(`${DETAIL_CACHE_PREFIX}${analysisId}`); } catch {}
-    }
+
+    // PERF-FIX: Parallelize all KV operations with Promise.allSettled.
+    //
+    // Safety analysis:
+    //   - All 6 operations target DIFFERENT keys (no overlap):
+    //     1. writeAppCache(ANALYSES_VERSION_KEY) — version tombstone
+    //     2. delete(ANALYSES_LIST_KEY) — list cache
+    //     3. delete(ANALYSES_FEATURED_KEY) — featured cache
+    //     4. delete(ANALYSES_STATS_KEY) — stats cache
+    //     5. delete('analyses:signature') — content signature
+    //     6. delete(DETAIL_CACHE_PREFIX + analysisId) — per-analysis detail (conditional)
+    //   - No operation depends on the result of another.
+    //   - `version` is generated locally (not from KV), so it's available
+    //     immediately regardless of KV operation completion order.
+    //   - Callers only depend on the returned `version` value, not on KV
+    //     completion order.
+    //   - Promise.allSettled preserves the existing try/catch semantics: each
+    //     operation's failure is isolated (one failure doesn't reject the
+    //     whole batch, same as the per-op try/catch).
+    //   - No logging existed before (try/catch silently swallowed errors),
+    //     so allSettled doesn't reduce observability.
+    //
+    // The operations are wrapped in functions that never throw (catch internally),
+    // matching the original silent-error behavior.
+    const kvOps = [
+      // Op 1: Write version tombstone (was: await writeAppCache)
+      (async () => { await writeAppCache(env, ANALYSES_VERSION_KEY, String(version), 86400 * 7); })().catch(() => {}),
+      // Op 2: Delete list cache
+      (async () => { await env.APP_CACHE?.delete?.(ANALYSES_LIST_KEY); })().catch(() => {}),
+      // Op 3: Delete featured cache
+      (async () => { await env.APP_CACHE?.delete?.(ANALYSES_FEATURED_KEY); })().catch(() => {}),
+      // Op 4: Delete stats cache
+      (async () => { await env.APP_CACHE?.delete?.(ANALYSES_STATS_KEY); })().catch(() => {}),
+      // Op 5: Delete content signature (ANVERSION-FLIP FIX)
+      (async () => { await env.APP_CACHE?.delete?.('analyses:signature'); })().catch(() => {}),
+      // Op 6 (conditional): Delete per-analysis detail cache (FIX 1)
+      ...(analysisId ? [
+        (async () => { await env.APP_CACHE?.delete?.(`${DETAIL_CACHE_PREFIX}${analysisId}`); })().catch(() => {}),
+      ] : []),
+    ];
+
+    await Promise.allSettled(kvOps);
     return version;
   }
 
@@ -529,14 +556,44 @@ export function createAnalysisHandlers(deps) {
     try {
       await analysisRepo.ensureSchema(env);
 
-      // ANFEAT-RACE FIX: Use atomic createWithFeaturedLimit instead of
-      // separate countFeatured + create. The old code had a TOCTOU race:
-      // concurrent requests all read count=4 (under limit) then all INSERT,
-      // exceeding the max-5 business rule. The new atomic function uses
-      // pg_advisory_xact_lock + a single CTE that counts, conditionally
-      // un-features oldest (if force_featured), and inserts — all in one
-      // statement under the lock. No concurrent request can sneak in.
-      const result = await analysisRepo.createWithFeaturedLimit(env, authResult.user.id, parsed.payload);
+      // PERF-FIX: Branch on featured/force_featured to avoid unnecessary
+      // Transaction + per-call Pool for the common non-featured case.
+      //
+      // The non-featured path (featured=false AND force_featured=false) uses
+      // the simple create() function which goes through queryDb (shared pool,
+      // no Transaction, no advisory lock). This is safe because:
+      //   - No featured limit applies when featured=false (INSERT always succeeds)
+      //   - No TOCTOU race possible (no count-then-insert pattern)
+      //   - parseAnalysisPayload normalizes featured/force_featured to boolean
+      //     (controllers/analyses.js:196-199), so the condition is reliable.
+      //
+      // The featured path (featured=true OR force_featured=true) still uses
+      // createWithFeaturedLimit with Transaction + pg_advisory_xact_lock to
+      // prevent the TOCTOU race where concurrent requests exceed the max-5
+      // featured limit. This path is UNCHANGED.
+      //
+      // Response shape is adapted: create() returns the analysis object
+      // directly; we wrap it to match createWithFeaturedLimit's shape
+      // ({inserted, analysis, featuredCountBefore, limitReached, max}) so
+      // the rest of handleCreate works unchanged.
+      const wantsFeaturedPath = parsed.payload.featured === true || parsed.payload.force_featured === true;
+      let result;
+      if (wantsFeaturedPath) {
+        // ANFEAT-RACE FIX: Use atomic createWithFeaturedLimit instead of
+        // separate countFeatured + create. The old code had a TOCTOU race:
+        // concurrent requests all read count=4 (under limit) then all INSERT,
+        // exceeding the max-5 business rule. The new atomic function uses
+        // pg_advisory_xact_lock + a single CTE that counts, conditionally
+        // un-features oldest (if force_featured), and inserts — all in one
+        // statement under the lock. No concurrent request can sneak in.
+        result = await analysisRepo.createWithFeaturedLimit(env, authResult.user.id, parsed.payload);
+      } else {
+        // Non-featured: use simple create() — shared pool, no Transaction.
+        const analysis = await analysisRepo.create(env, authResult.user.id, parsed.payload);
+        // Adapt to the same result shape so the rest of handleCreate works unchanged.
+        // limitReached is always false for non-featured (no limit applies).
+        result = { inserted: true, analysis, featuredCountBefore: 0, limitReached: false, max: 5 };
+      }
 
       if (result.limitReached) {
         return jsonResponse({ status: 'FEATURED_LIMIT_REACHED', count: result.featuredCountBefore, max: result.max }, {}, env);
@@ -630,10 +687,53 @@ export function createAnalysisHandlers(deps) {
     if (parsed.error) return parsed.error;
 
     try {
-      // ANFEAT-RACE FIX: Use atomic updateWithFeaturedLimit instead of
-      // separate countFeatured + getById + unsetOldestFeatured + update.
-      // Same TOCTOU race as create — fixed with advisory lock + CTE.
-      const result = await analysisRepo.updateWithFeaturedLimit(env, analysisId, parsed.payload);
+      // PERF-FIX: Branch on featured/force_featured to avoid unnecessary
+      // Transaction + per-call Pool for the common non-featured update case.
+      //
+      // Safety analysis for all update scenarios:
+      //   1. Analysis WAS featured, user keeps featured=true:
+      //      wantsFeaturedPath=true → transactional path (correct, no count change)
+      //   2. Analysis WAS featured, user changes to featured=false:
+      //      wantsFeaturedPath=false → simple update() path.
+      //      update() sets featured=false via COALESCE(false, featured) → frees a slot.
+      //      No featured limit check needed (we're REMOVING featured, not adding).
+      //      Safe.
+      //   3. Analysis WAS non-featured, user changes to featured=true:
+      //      wantsFeaturedPath=true → transactional path (correct, needs limit check)
+      //   4. Analysis WAS non-featured, user keeps featured=false:
+      //      wantsFeaturedPath=false → simple update() path (correct, no limit involved)
+      //   5. force_featured=true (retry after FEATURED_LIMIT_REACHED):
+      //      wantsFeaturedPath=true → transactional path (correct, un-features oldest)
+      //
+      // The simple update() path uses COALESCE($10, featured) so:
+      //   - featured=true → sets true
+      //   - featured=false → sets false
+      //   - featured=null (not sent) → keeps existing
+      // But parseAnalysisPayload always normalizes featured to boolean (line 196),
+      // so featured is always true or false (never null) in parsed.payload.
+      // This means case "featured not sent" cannot happen via the normal API.
+      //
+      // Response shape is adapted: update() returns the analysis object or null;
+      // we wrap it to match updateWithFeaturedLimit's shape
+      // ({updated, analysis, featuredCountBefore, limitReached, notFound, max}).
+      const wantsFeaturedPath = parsed.payload.featured === true || parsed.payload.force_featured === true;
+      let result;
+      if (wantsFeaturedPath) {
+        // ANFEAT-RACE FIX: Use atomic updateWithFeaturedLimit instead of
+        // separate countFeatured + getById + unsetOldestFeatured + update.
+        // Same TOCTOU race as create — fixed with advisory lock + CTE.
+        result = await analysisRepo.updateWithFeaturedLimit(env, analysisId, parsed.payload);
+      } else {
+        // Non-featured update: use simple update() — shared pool, no Transaction.
+        // Safe because we're either keeping featured=false or removing featured=true
+        // (both DECREASE or maintain the featured count, never increase it).
+        const analysis = await analysisRepo.update(env, analysisId, parsed.payload);
+        if (analysis === null) {
+          result = { updated: false, analysis: null, featuredCountBefore: 0, limitReached: false, notFound: true, max: 5 };
+        } else {
+          result = { updated: true, analysis, featuredCountBefore: 0, limitReached: false, notFound: false, max: 5 };
+        }
+      }
 
       if (result.notFound) {
         return jsonResponse({ status: 'error', message: 'Not found' }, { status: 404 }, env);
