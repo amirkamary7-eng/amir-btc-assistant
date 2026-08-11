@@ -2201,3 +2201,672 @@ test('CALTAB-005 (behavioral): Calendar with sub-tab preserved across Crypto swi
     'Calendar must STILL show "tomorrow" sub-tab after returning from Crypto (sub-tab preserved)');
 });
 
+// ============================================================================
+// CALRESTORE-001: Restore 3 functions that were accidentally removed in
+// commit c9bebdb. These tests verify the REAL functions exist AND execute
+// correctly (not stubbed). The real function bodies are extracted from app.js
+// source and run against a minimal mock DOM + globals.
+// ============================================================================
+
+test('CALRESTORE-001 (source): getCalendarTabCounts function is defined in app.js', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  // Function must be defined (not just called)
+  assert.ok(/function\s+getCalendarTabCounts\s*\(/.test(src),
+    'getCalendarTabCounts function definition must exist in app.js (was accidentally removed in c9bebdb)');
+});
+
+test('CALRESTORE-002 (source): buildCalendarSegmentsHtml function is defined in app.js', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  assert.ok(/function\s+buildCalendarSegmentsHtml\s*\(/.test(src),
+    'buildCalendarSegmentsHtml function definition must exist in app.js');
+});
+
+test('CALRESTORE-003 (source): startCalCountdown function is defined in app.js', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  assert.ok(/function\s+startCalCountdown\s*\(/.test(src),
+    'startCalCountdown function definition must exist in app.js');
+});
+
+test('CALRESTORE-004 (source): all 3 functions have NO remaining undefined call-sites', () => {
+  // Every call-site of these functions must have a matching definition.
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  for (const fn of ['getCalendarTabCounts', 'buildCalendarSegmentsHtml', 'startCalCountdown']) {
+    const defMatches = [...src.matchAll(new RegExp('function\\s+' + fn + '\\s*\\(', 'g'))];
+    const callMatches = [...src.matchAll(new RegExp('\\b' + fn + '\\s*\\(', 'g'))]
+      .filter(m => {
+        // Exclude the "function NAME(" definition itself
+        const before = src.slice(Math.max(0, m.index - 12), m.index);
+        return !/function\s+$/.test(before);
+      });
+    assert.ok(defMatches.length >= 1, fn + ' must have at least 1 definition');
+    assert.ok(callMatches.length >= 1,
+      fn + ' must have call-sites (no call-sites means it would be dead code)');
+  }
+});
+
+// ── REAL execution tests (no stubs for the 3 restored functions) ──────────────
+// These tests extract the REAL function bodies from app.js and execute them.
+
+function extractFnBody(src, fnName) {
+  const re = new RegExp('function\\s+' + fnName + '\\s*\\([^)]*\\)\\s*\\{');
+  const m = src.match(re);
+  if (!m) throw new Error('Function ' + fnName + ' not found');
+  let i = m.index + m[0].length - 1;
+  let depth = 1;
+  let end = i + 1;
+  while (depth > 0 && end < src.length) {
+    if (src[end] === '{') depth++;
+    else if (src[end] === '}') depth--;
+    end++;
+  }
+  return src.slice(m.index, end);
+}
+
+test('CALRESTORE-005 (real exec): getCalendarTabCounts executes and returns correct counts', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const fnSrc = extractFnBody(src, 'getCalendarTabCounts');
+  // Execute the REAL function — NO stub
+  const fn = new Function(fnSrc + '\nreturn getCalendarTabCounts;')();
+  // Test 1: empty array
+  let counts = fn([]);
+  assert.deepEqual(counts, { today: 0, tomorrow: 0, week: 0 },
+    'getCalendarTabCounts([]) must return {today:0, tomorrow:0, week:0}');
+
+  // Test 2: non-array input
+  counts = fn(null);
+  assert.deepEqual(counts, { today: 0, tomorrow: 0, week: 0 },
+    'getCalendarTabCounts(null) must return zero counts');
+
+  // Test 3: events with timestamps — verify week counts ALL events
+  const tz = 'Asia/Tehran';
+  const now = new Date();
+  const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+  const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
+  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+
+  const events = [
+    { timestamp: todayStart.toISOString() },          // today
+    { timestamp: todayStart.toISOString() },          // today (2nd)
+    { timestamp: tomorrowStart.toISOString() },       // tomorrow
+    { timestamp: new Date(todayStart.getTime() + 3 * 86400000).toISOString() }, // later in week
+    { timestamp: 'invalid-date' },                    // invalid (should be skipped)
+    {},                                                // no timestamp (should be skipped)
+  ];
+  counts = fn(events);
+  assert.equal(counts.today, 2, 'today count must be 2');
+  assert.equal(counts.tomorrow, 1, 'tomorrow count must be 1');
+  assert.equal(counts.week, 4, 'week count must be 4 (all valid events, excludes invalid/no-timestamp)');
+});
+
+test('CALRESTORE-006 (real exec): buildCalendarSegmentsHtml executes and produces valid HTML', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const fnSrc = extractFnBody(src, 'buildCalendarSegmentsHtml');
+  // The function uses `currentCalendarTab` — inject as a parameter
+  const wrapper = 'let currentCalendarTab = "week";\n' + fnSrc + '\nreturn { build: buildCalendarSegmentsHtml, setTab: (t) => currentCalendarTab = t };';
+  const mod = new Function(wrapper)();
+  const build = mod.build;
+
+  // Test 1: zero counts
+  let html = build({ today: 0, tomorrow: 0, week: 0 });
+  assert.ok(html.includes('ni-cal-segments'), 'must render segments container');
+  assert.ok(html.includes('data-cal-tab="today"'), 'must include today tab');
+  assert.ok(html.includes('data-cal-tab="tomorrow"'), 'must include tomorrow tab');
+  assert.ok(html.includes('data-cal-tab="week"'), 'must include week tab');
+  assert.ok(html.includes('>0<') || html.includes('>0</span>'), 'must show count 0');
+  assert.ok(html.includes('switchCalendarTab'), 'must wire switchCalendarTab onclick');
+
+  // Test 2: non-zero counts
+  html = build({ today: 3, tomorrow: 1, week: 12 });
+  assert.ok(html.includes('>3<') || html.includes('>3</span>'), 'today count must be 3');
+  assert.ok(html.includes('>1<') || html.includes('>1</span>'), 'tomorrow count must be 1');
+  assert.ok(html.includes('>12<') || html.includes('>12</span>'), 'week count must be 12');
+
+  // Test 3: null counts (fallback to zero)
+  html = build(null);
+  assert.ok(html.includes('ni-cal-segments'), 'null counts must still render (fallback to 0)');
+
+  // Test 4: active class on currentCalendarTab
+  mod.setTab('today');
+  html = build({ today: 1, tomorrow: 0, week: 5 });
+  assert.ok(html.includes('ni-cal-segment active') && html.includes('data-cal-tab="today"'),
+    'active class must be on today tab when currentCalendarTab="today"');
+
+  mod.setTab('week');
+  html = build({ today: 1, tomorrow: 0, week: 5 });
+  assert.ok(html.includes('ni-cal-segment active') && html.includes('data-cal-tab="week"'),
+    'active class must be on week tab when currentCalendarTab="week"');
+});
+
+test('CALRESTORE-007 (real exec): startCalCountdown executes without ReferenceError', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const fnSrc = extractFnBody(src, 'startCalCountdown');
+  // startCalCountdown uses: calCountdownInterval (let), clearInterval, setInterval,
+  // formatCountdown, document.querySelectorAll
+  let calCountdownInterval = null;
+  const cleared = [];
+  const setIntervals = [];
+  function formatCountdown(ms) { return 'Xh Ym Zs'; }
+  const document = {
+    querySelectorAll(sel) { return []; }, // no countdown elements in test
+  };
+  const wrapper = `
+    let calCountdownInterval = null;
+    const cleared = [];
+    const setIntervals = [];
+    function formatCountdown(ms) { return 'Xh Ym Zs'; }
+    const document = { querySelectorAll: () => [] };
+    ${fnSrc}
+    return {
+      run: startCalCountdown,
+      getInterval: () => calCountdownInterval,
+      setCleared: (v) => { cleared.push(v); },
+      getSetIntervals: () => setIntervals,
+      _clearInterval: (id) => { cleared.push(id); calCountdownInterval = null; },
+      _setInterval: (fn, ms) => { const id = Math.random(); setIntervals.push({id, fn, ms}); return id; },
+    };
+  `;
+  // Re-extract with proper globals binding
+  const realWrapper = `
+    let calCountdownInterval = arguments[0];
+    const clearInterval = (id) => { calCountdownInterval = null; };
+    const setInterval = (fn, ms) => { const id = 999; calCountdownInterval = id; return id; };
+    function formatCountdown(ms) { return '1h 2m 3s'; }
+    const document = { querySelectorAll: () => [] };
+    ${fnSrc}
+    return { run: startCalCountdown, getInterval: () => calCountdownInterval };
+  `;
+  const mod = new Function('initialInterval', realWrapper);
+  const m = mod(null);
+  // Must NOT throw ReferenceError
+  assert.doesNotThrow(() => m.run(), 'startCalCountdown must execute without ReferenceError');
+  // After running, calCountdownInterval should be set (interval created)
+  assert.ok(m.getInterval() !== null, 'startCalCountdown must set calCountdownInterval');
+});
+
+// ── REAL DOM integration: renderCalendarV2 with restored functions (NO stubs) ─
+
+test('CALRESTORE-008 (real DOM): renderCalendarV2 with restored functions renders calendar content', async () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const renderCalendarV2Src = extractFnBody(src, 'renderCalendarV2');
+  const renderNewsSrc = extractFnBody(src, 'renderNews');
+
+  // Minimal mock DOM
+  function makeEl(id) {
+    const el = {
+      id, _innerHTML: '', _dataset: {}, _classList: new Set(),
+      classList: { add: (c) => el._classList.add(c), remove: (c) => el._classList.delete(c), contains: (c) => el._classList.has(c) },
+      style: {}, attributes: {}, children: [],
+      get innerHTML() { return el._innerHTML; },
+      set innerHTML(v) { el._innerHTML = String(v); },
+      get dataset() { return el._dataset; },
+      setAttribute(k, v) { el.attributes[k] = v; },
+      getAttribute(k) { return el.attributes[k] != null ? el.attributes[k] : null; },
+      querySelector() { return null; }, querySelectorAll() { return []; },
+      appendChild() {}, addEventListener() {}, removeEventListener() {}, remove() {}, focus() {},
+    };
+    return el;
+  }
+  const elements = {};
+  const document = {
+    getElementById(id) { if (!elements[id]) elements[id] = makeEl(id); return elements[id]; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    createElement() { return makeEl('auto'); },
+  };
+
+  // Pre-populated calendar cache (simulates bootstrap load)
+  const calendarEvents = [
+    { title: 'FOMC', timestamp: '2026-08-11T18:00:00Z', actual: '', forecast: '5.5%', previous: '5.5%', status: 'upcoming', country: 'USD', flag: 'US', impact: 'high' },
+    { title: 'CPI', timestamp: '2026-08-13T12:30:00Z', actual: '', forecast: '0.2%', previous: '0.1%', status: 'upcoming', country: 'USD', flag: 'US', impact: 'high' },
+  ];
+
+  // Globals — IMPORTANT: do NOT stub getCalendarTabCounts/buildCalendarSegmentsHtml/startCalCountdown
+  // They must be the REAL functions extracted from app.js
+  const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+
+  let calCountdownInterval = null;
+  const globals = {
+    document,
+    calendarEvents,
+    calendarLoading: false,
+    currentCalendarTab: 'week',
+    currentCalCountry: 'all',
+    currentLang: 'fa',
+    _niCalendarReminders: {},
+    calCountdownInterval: null,
+    MAJOR_CURRENCIES: ['USD', 'EUR', 'GBP', 'JPY'],
+    NI_ICONS: { clock: '<svg></svg>' },
+    // REAL restored functions — NOT stubs
+    getCalendarTabCounts: realGetCalendarTabCounts,
+    buildCalendarSegmentsHtml: realBuildCalendarSegmentsHtml,
+    startCalCountdown: realStartCalCountdown,
+    // Other helpers (stubs OK — not the subject of this test)
+    loadCalendarEvents: async () => calendarEvents,
+    recomputeEventStatuses: (e) => e,
+    formatCalendarTime: (ts) => ({ time: '12:30' }),
+    escapeHtml: (s) => String(s == null ? '' : s),
+    escapeHtmlForNews: (s) => String(s == null ? '' : s),
+    _niCurrentReminderEvent: null,
+    openReminderSheet: () => {},
+    filterCalCountry: () => {},
+  };
+
+  // Build the runner with REAL renderCalendarV2 + REAL restored functions
+  const wrapper = renderCalendarV2Src + '\nreturn renderCalendarV2;';
+  const paramNames = Object.keys(globals);
+  const paramValues = paramNames.map(k => globals[k]);
+  const renderCalendarV2 = new Function(...paramNames, wrapper)(...paramValues);
+
+  // Execute
+  renderCalendarV2();
+  // Flush microtasks (the .then() callback)
+  await new Promise(r => setTimeout(r, 50));
+
+  const html = document.getElementById('news-list').innerHTML;
+  assert.ok(html.length > 0,
+    'renderCalendarV2 must produce non-empty innerHTML (got length ' + html.length + ')');
+  assert.ok(html.includes('ni-cal-segments') || html.includes('ni-cal-event'),
+    'Calendar content must include segments or event cards (got: ' + html.slice(0, 200) + ')');
+  assert.ok(!html.includes('ReferenceError'),
+    'HTML must NOT contain ReferenceError text');
+});
+
+test('CALRESTORE-009 (real DOM): Crypto → Calendar → Crypto → Calendar renders Calendar (real renderCalendarV2)', async () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const renderCalendarV2Src = extractFnBody(src, 'renderCalendarV2');
+  const renderNewsSrc = extractFnBody(src, 'renderNews');
+
+  function makeEl(id) {
+    const el = {
+      id, _innerHTML: '', _dataset: {}, _classList: new Set(),
+      classList: { add: (c) => el._classList.add(c), remove: (c) => el._classList.delete(c), contains: (c) => el._classList.has(c) },
+      style: {}, attributes: {}, children: [],
+      get innerHTML() { return el._innerHTML; },
+      set innerHTML(v) { el._innerHTML = String(v); },
+      get dataset() { return el._dataset; },
+      setAttribute(k, v) { el.attributes[k] = v; },
+      getAttribute(k) { return el.attributes[k] != null ? el.attributes[k] : null; },
+      querySelector() { return null; }, querySelectorAll() { return []; },
+      appendChild() {}, addEventListener() {}, removeEventListener() {}, remove() {}, focus() {},
+    };
+    return el;
+  }
+  const elements = {};
+  function getElementById(id) { if (!elements[id]) elements[id] = makeEl(id); return elements[id]; }
+  const document = {
+    getElementById,
+    querySelector(sel) {
+      if (sel === '.ni-tab.active') {
+        for (const id of Object.keys(elements)) {
+          const el = elements[id];
+          if (el._classList.has('ni-tab') && el._classList.has('active')) return el;
+        }
+        return null;
+      }
+      return null;
+    },
+    querySelectorAll(sel) {
+      if (sel === '.ni-tab') {
+        return ['all', 'crypto', 'forex', 'calendar', 'saved'].map(t => {
+          const el = getElementById('ni-tab-' + t);
+          el._classList.add('ni-tab');
+          el.dataset.news = t;
+          return el;
+        });
+      }
+      return [];
+    },
+    createElement() { return makeEl('auto'); },
+  };
+
+  const calendarEvents = [
+    { title: 'FOMC', timestamp: '2026-08-11T18:00:00Z', actual: '', forecast: '5.5%', previous: '5.5%', status: 'upcoming', country: 'USD', flag: 'US', impact: 'high' },
+    { title: 'CPI', timestamp: '2026-08-13T12:30:00Z', actual: '', forecast: '0.2%', previous: '0.1%', status: 'upcoming', country: 'USD', flag: 'US', impact: 'high' },
+  ];
+
+  const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+
+  const newsCache = [
+    { title: 'BTC pumps', url: 'https://example.com/btc', source: 'CD', category: 'crypto', time: '2h', pub_date: '2026-08-11T08:00:00Z', sentiment: 'positive', summary: '', ai_summary: null, ai_status: 'pending', image: '', impact: 'medium' },
+  ];
+
+  const globals = {
+    document,
+    calendarEvents,
+    calendarLoading: false,
+    currentCalendarTab: 'week',
+    currentCalCountry: 'all',
+    currentLang: 'fa',
+    newsCache,
+    newsHasMore: false,
+    newsPage: 1,
+    newsTotalCount: 1,
+    displayedNews: [],
+    _newsAuthFailed: false,
+    _niHeroSlides: [],
+    _niHeroIndex: 0,
+    _niHeroTimer: null,
+    _niSavedNews: [],
+    _niCalendarReminders: {},
+    _niScrollPositions: {},
+    calCountdownInterval: null,
+    categoryCounts: { all: 1, crypto: 1 },
+    MAJOR_CURRENCIES: ['USD', 'EUR'],
+    NI_ICONS: { clock: '<svg></svg>', searchEmpty: '<svg></svg>', bookmark: '<svg></svg>', bookmarkFilled: '<svg></svg>', share: '<svg></svg>' },
+    isInTelegram: () => true,
+    renderSavedNews: () => { document.getElementById('news-list').innerHTML = '<div class="saved">saved</div>'; },
+    renderCalendarV2: null,
+    loadCalendarEvents: async () => calendarEvents,
+    recomputeEventStatuses: (e) => e,
+    getCalendarTabCounts: realGetCalendarTabCounts,
+    buildCalendarSegmentsHtml: realBuildCalendarSegmentsHtml,
+    startCalCountdown: realStartCalCountdown,
+    formatCalendarTime: (ts) => ({ time: '12:30' }),
+    escapeHtml: (s) => String(s == null ? '' : s),
+    escapeHtmlForNews: (s) => String(s == null ? '' : s),
+    formatNewsTimeTehran: (d, t) => t || '2h',
+    niApplyFilters: (a) => a,
+    niBadgeHtml: () => '',
+    niImpactHtml: () => '',
+    niAiSummaryHtml: () => '',
+    niIsHeroEligible: () => true,
+    niRenderHeroSlider: (i) => '<div class="hero">' + i.length + '</div>',
+    niInitHeroSlider: () => {},
+    setupInfiniteScroll: () => {},
+    newsImageFallback: () => {},
+    fireMissionEvent: () => {},
+    openReminderSheet: () => {},
+    filterCalCountry: () => {},
+    openNewsModal: () => {},
+    openShareSheet: () => {},
+    toggleSaveNews: () => {},
+    t: (k) => k,
+    _niSaveScrollPosition: () => {},
+    _niRestoreScrollPosition: () => {},
+    Cache: { get: () => null, set: () => {} },
+    setTimeout, setInterval: () => 999, clearInterval: () => {}, clearTimeout: () => {},
+    requestAnimationFrame: (fn) => { try { fn(); } catch(e){} return 0; },
+    console,
+    window: { scrollY: 0, scrollTo: () => {} },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    MISSION_EVENTS: { CALENDAR_OPEN: 'cal' },
+  };
+
+  const wrapperSrc = renderNewsSrc + '\n' + renderCalendarV2Src + '\nreturn { renderNews, renderCalendarV2 };';
+  const paramNames = Object.keys(globals);
+  const paramValues = paramNames.map(k => globals[k]);
+  const fns = new Function(...paramNames, wrapperSrc)(...paramValues);
+  globals.renderCalendarV2 = fns.renderCalendarV2;
+  const renderNews = fns.renderNews;
+
+  function clickTab(cat) {
+    for (const tab of document.querySelectorAll('.ni-tab')) {
+      tab._classList.delete('active');
+      if (tab.dataset.news === cat) tab._classList.add('active');
+    }
+  }
+
+  async function flush() { await new Promise(r => setTimeout(r, 50)); }
+
+  function hasCalendar() {
+    const html = document.getElementById('news-list').innerHTML;
+    return html.includes('ni-cal-segments') || html.includes('ni-cal-event') || html.includes('FOMC') || html.includes('CPI');
+  }
+  function hasCrypto() {
+    const html = document.getElementById('news-list').innerHTML;
+    return html.includes('ni-card') && html.includes('BTC');
+  }
+
+  // Step 1: Crypto
+  clickTab('crypto');
+  renderNews('crypto');
+  await flush();
+  assert.ok(hasCrypto(), 'Step 1: Crypto content must be visible');
+
+  // Step 2: Calendar
+  clickTab('calendar');
+  renderNews('calendar');
+  await flush();
+  assert.ok(hasCalendar() && !hasCrypto(),
+    'Step 2: Calendar content must be visible (not Crypto)');
+
+  // Step 3: Crypto
+  clickTab('crypto');
+  renderNews('crypto');
+  await flush();
+  assert.ok(hasCrypto(), 'Step 3: Crypto content must be visible');
+
+  // Step 4: Calendar (BUG SCENARIO — was failing before fix)
+  clickTab('calendar');
+  renderNews('calendar');
+  await flush();
+  const finalHtml = document.getElementById('news-list').innerHTML;
+  assert.ok(hasCalendar() && !hasCrypto(),
+    'Step 4 (BUG SCENARIO): Calendar content must be visible (not Crypto). Got: ' + finalHtml.slice(0, 200));
+});
+
+test('CALRESTORE-010 (real DOM): Calendar today/tomorrow/week sub-tabs all render', async () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const renderCalendarV2Src = extractFnBody(src, 'renderCalendarV2');
+
+  function makeEl(id) {
+    const el = { id, _innerHTML: '', _dataset: {}, _classList: new Set(),
+      classList: { add: (c) => el._classList.add(c), remove: (c) => el._classList.delete(c), contains: (c) => el._classList.has(c) },
+      style: {}, attributes: {}, children: [],
+      get innerHTML() { return el._innerHTML; }, set innerHTML(v) { el._innerHTML = String(v); },
+      get dataset() { return el._dataset; },
+      setAttribute(k, v) { el.attributes[k] = v; }, getAttribute(k) { return el.attributes[k] != null ? el.attributes[k] : null; },
+      querySelector() { return null; }, querySelectorAll() { return []; },
+      appendChild() {}, addEventListener() {}, removeEventListener() {}, remove() {}, focus() {} };
+    return el;
+  }
+  const elements = {};
+  const document = {
+    getElementById(id) { if (!elements[id]) elements[id] = makeEl(id); return elements[id]; },
+    querySelector() { return null; }, querySelectorAll() { return []; }, createElement() { return makeEl('a'); },
+  };
+
+  // Create events for today, tomorrow, and later in the week
+  const tz = 'Asia/Tehran';
+  const now = new Date();
+  const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+  const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
+  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+  const calendarEvents = [
+    { title: 'TODAY EVT', timestamp: todayStart.toISOString(), actual: '', forecast: '', previous: '', status: 'upcoming', country: 'USD', flag: 'US', impact: 'high' },
+    { title: 'TOMORROW EVT', timestamp: tomorrowStart.toISOString(), actual: '', forecast: '', previous: '', status: 'upcoming', country: 'USD', flag: 'US', impact: 'high' },
+    { title: 'WEEK EVT', timestamp: new Date(todayStart.getTime() + 3 * 86400000).toISOString(), actual: '', forecast: '', previous: '', status: 'upcoming', country: 'USD', flag: 'US', impact: 'medium' },
+  ];
+
+  const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+
+  let currentCalendarTab = 'week';
+  const globals = {
+    document,
+    calendarEvents,
+    calendarLoading: false,
+    get currentCalendarTab() { return currentCalendarTab; },
+    set currentCalendarTab(v) { currentCalendarTab = v; },
+    currentCalCountry: 'all',
+    currentLang: 'fa',
+    _niCalendarReminders: {},
+    calCountdownInterval: null,
+    MAJOR_CURRENCIES: ['USD'],
+    NI_ICONS: { clock: '<svg></svg>' },
+    getCalendarTabCounts: realGetCalendarTabCounts,
+    buildCalendarSegmentsHtml: realBuildCalendarSegmentsHtml,
+    startCalCountdown: realStartCalCountdown,
+    loadCalendarEvents: async () => calendarEvents,
+    recomputeEventStatuses: (e) => e,
+    formatCalendarTime: (ts) => ({ time: '12:30' }),
+    escapeHtml: (s) => String(s == null ? '' : s),
+    _niCurrentReminderEvent: null,
+    openReminderSheet: () => {},
+    filterCalCountry: () => {},
+  };
+
+  const wrapper = renderCalendarV2Src + '\nreturn renderCalendarV2;';
+  const paramNames = Object.keys(globals);
+  const paramValues = paramNames.map(k => globals[k]);
+  const renderCalendarV2 = new Function(...paramNames, wrapper)(...paramValues);
+
+  // Week tab
+  currentCalendarTab = 'week';
+  renderCalendarV2();
+  await new Promise(r => setTimeout(r, 50));
+  let html = document.getElementById('news-list').innerHTML;
+  assert.ok(html.includes('WEEK EVT') || html.includes('TODAY EVT'),
+    'Week tab must show events. Got: ' + html.slice(0, 200));
+
+  // Today tab
+  currentCalendarTab = 'today';
+  renderCalendarV2();
+  await new Promise(r => setTimeout(r, 50));
+  html = document.getElementById('news-list').innerHTML;
+  assert.ok(html.includes('TODAY EVT'),
+    'Today tab must show TODAY EVT. Got: ' + html.slice(0, 200));
+
+  // Tomorrow tab
+  currentCalendarTab = 'tomorrow';
+  renderCalendarV2();
+  await new Promise(r => setTimeout(r, 50));
+  html = document.getElementById('news-list').innerHTML;
+  assert.ok(html.includes('TOMORROW EVT'),
+    'Tomorrow tab must show TOMORROW EVT. Got: ' + html.slice(0, 200));
+});
+
+test('CALRESTORE-011 (real DOM): Calendar with empty events shows empty state (no crash)', async () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const renderCalendarV2Src = extractFnBody(src, 'renderCalendarV2');
+
+  function makeEl(id) {
+    const el = { id, _innerHTML: '', _dataset: {}, _classList: new Set(),
+      classList: { add: (c) => el._classList.add(c), remove: (c) => el._classList.delete(c), contains: (c) => el._classList.has(c) },
+      style: {}, attributes: {}, children: [],
+      get innerHTML() { return el._innerHTML; }, set innerHTML(v) { el._innerHTML = String(v); },
+      get dataset() { return el._dataset; },
+      setAttribute(k, v) { el.attributes[k] = v; }, getAttribute(k) { return el.attributes[k] != null ? el.attributes[k] : null; },
+      querySelector() { return null; }, querySelectorAll() { return []; },
+      appendChild() {}, addEventListener() {}, removeEventListener() {}, remove() {}, focus() {} };
+    return el;
+  }
+  const elements = {};
+  const document = {
+    getElementById(id) { if (!elements[id]) elements[id] = makeEl(id); return elements[id]; },
+    querySelector() { return null; }, querySelectorAll() { return []; }, createElement() { return makeEl('a'); },
+  };
+
+  const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+
+  const globals = {
+    document,
+    calendarEvents: [], // EMPTY — triggers empty state path
+    calendarLoading: false,
+    currentCalendarTab: 'week',
+    currentCalCountry: 'all',
+    currentLang: 'fa',
+    _niCalendarReminders: {},
+    calCountdownInterval: null,
+    MAJOR_CURRENCIES: [],
+    NI_ICONS: { clock: '<svg></svg>' },
+    getCalendarTabCounts: realGetCalendarTabCounts,
+    buildCalendarSegmentsHtml: realBuildCalendarSegmentsHtml,
+    startCalCountdown: realStartCalCountdown,
+    loadCalendarEvents: async () => [],
+    recomputeEventStatuses: (e) => e,
+    formatCalendarTime: (ts) => ({ time: '12:30' }),
+    escapeHtml: (s) => String(s == null ? '' : s),
+    _niCurrentReminderEvent: null,
+    openReminderSheet: () => {},
+    filterCalCountry: () => {},
+  };
+
+  const wrapper = renderCalendarV2Src + '\nreturn renderCalendarV2;';
+  const paramNames = Object.keys(globals);
+  const paramValues = paramNames.map(k => globals[k]);
+  const renderCalendarV2 = new Function(...paramNames, wrapper)(...paramValues);
+
+  // Must not throw
+  assert.doesNotThrow(() => renderCalendarV2());
+  await new Promise(r => setTimeout(r, 50));
+  const html = document.getElementById('news-list').innerHTML;
+  assert.ok(html.length > 0, 'Empty events must still produce HTML (skeleton + empty state)');
+  // Should show skeleton initially (calendarEvents empty → skeleton path) then empty state in .then()
+});
+
+test('CALRESTORE-012 (real DOM): Calendar with country filter no-match shows no-match state', async () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const renderCalendarV2Src = extractFnBody(src, 'renderCalendarV2');
+
+  function makeEl(id) {
+    const el = { id, _innerHTML: '', _dataset: {}, _classList: new Set(),
+      classList: { add: (c) => el._classList.add(c), remove: (c) => el._classList.delete(c), contains: (c) => el._classList.has(c) },
+      style: {}, attributes: {}, children: [],
+      get innerHTML() { return el._innerHTML; }, set innerHTML(v) { el._innerHTML = String(v); },
+      get dataset() { return el._dataset; },
+      setAttribute(k, v) { el.attributes[k] = v; }, getAttribute(k) { return el.attributes[k] != null ? el.attributes[k] : null; },
+      querySelector() { return null; }, querySelectorAll() { return []; },
+      appendChild() {}, addEventListener() {}, removeEventListener() {}, remove() {}, focus() {} };
+    return el;
+  }
+  const elements = {};
+  const document = {
+    getElementById(id) { if (!elements[id]) elements[id] = makeEl(id); return elements[id]; },
+    querySelector() { return null; }, querySelectorAll() { return []; }, createElement() { return makeEl('a'); },
+  };
+
+  // Only EUR events, but filter is JPY
+  const calendarEvents = [
+    { title: 'EUR EVT', timestamp: '2026-08-13T12:30:00Z', actual: '', forecast: '', previous: '', status: 'upcoming', country: 'EUR', flag: 'EU', impact: 'high' },
+  ];
+
+  const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+
+  const globals = {
+    document,
+    calendarEvents,
+    calendarLoading: false,
+    currentCalendarTab: 'week',
+    currentCalCountry: 'JPY', // filter that matches nothing
+    currentLang: 'fa',
+    _niCalendarReminders: {},
+    calCountdownInterval: null,
+    MAJOR_CURRENCIES: ['USD', 'EUR', 'JPY'],
+    NI_ICONS: { clock: '<svg></svg>' },
+    getCalendarTabCounts: realGetCalendarTabCounts,
+    buildCalendarSegmentsHtml: realBuildCalendarSegmentsHtml,
+    startCalCountdown: realStartCalCountdown,
+    loadCalendarEvents: async () => calendarEvents,
+    recomputeEventStatuses: (e) => e,
+    formatCalendarTime: (ts) => ({ time: '12:30' }),
+    escapeHtml: (s) => String(s == null ? '' : s),
+    _niCurrentReminderEvent: null,
+    openReminderSheet: () => {},
+    filterCalCountry: () => {},
+  };
+
+  const wrapper = renderCalendarV2Src + '\nreturn renderCalendarV2;';
+  const paramNames = Object.keys(globals);
+  const paramValues = paramNames.map(k => globals[k]);
+  const renderCalendarV2 = new Function(...paramNames, wrapper)(...paramValues);
+
+  renderCalendarV2();
+  await new Promise(r => setTimeout(r, 50));
+  const html = document.getElementById('news-list').innerHTML;
+  assert.ok(html.length > 0, 'No-match state must produce HTML');
+  // Should show no-match message (رویدادی برای این فیلتر یافت نشد) OR segments
+  assert.ok(html.includes('یافت نشد') || html.includes('ni-cal-countries') || html.includes('ni-cal-segments'),
+    'No-match state must show no-match message or country chips. Got: ' + html.slice(0, 200));
+});
+
+

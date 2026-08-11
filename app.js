@@ -7207,6 +7207,121 @@ function formatCountdown(ms) {
     return `${s}s`;
 }
 
+// CALRESTORE-001: Restore 3 functions that were accidentally removed in
+// commit c9bebdb ("Batch F — Dead Code removal"). That commit removed the
+// legacy renderCalendar() function AND, mistakenly, also removed these 3
+// helper functions which renderCalendarV2() still depends on:
+//
+//   - getCalendarTabCounts(events)         — called at line 7278 (inside
+//     renderCalendarV2's .then() callback). Without it, ReferenceError is
+//     thrown the moment calendar data resolves, aborting the entire render.
+//   - buildCalendarSegmentsHtml(counts)    — called 5 times inside
+//     renderCalendarV2 (skeleton + empty + no-match + main render paths).
+//   - startCalCountdown()                  — called twice inside
+//     renderCalendarV2 (signature-match path + post-render path).
+//
+// The functions below are restored VERBATIM from commit 5a42595 (the
+// parent of c9bebdb, i.e. the last commit where they existed). No edits,
+// no refactor, no rewrite — byte-for-byte identical to the historical
+// versions that renderCalendarV2 was originally written against.
+
+/**
+ * Compute per-tab counts (today / tomorrow / week) for the calendar
+ * segmented control badges.
+ * These CAN be 0 on days with no events — that's correct behavior.
+ */
+function getCalendarTabCounts(events) {
+    const counts = { today: 0, tomorrow: 0, week: 0 };
+    if (!Array.isArray(events) || !events.length) return counts;
+    const tz = 'Asia/Tehran';
+    const now = new Date();
+    const todayParts = now.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+    const todayStart = new Date(Date.UTC(Number(todayParts[0]), Number(todayParts[1]) - 1, Number(todayParts[2])));
+    const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+    for (const e of events) {
+        if (!e || !e.timestamp) continue;
+        const d = new Date(e.timestamp);
+        if (isNaN(d.getTime())) continue;
+        const parts = d.toLocaleDateString('en-CA', { timeZone: tz }).split('-');
+        const day = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+        if (day.getTime() === todayStart.getTime()) counts.today++;
+        if (day.getTime() === tomorrowStart.getTime()) counts.tomorrow++;
+        // "This Week" = ALL events from the API (API already returns
+        // current-week data from the provider — no re-filtering needed).
+        counts.week++;
+    }
+    return counts;
+}
+
+/**
+ * Build the segmented-control HTML for the calendar tabs.
+ * Only 3 tabs: Today / Tomorrow / This Week.
+ * Each tab has equal width (flex:1) and a count badge.
+ */
+function buildCalendarSegmentsHtml(counts) {
+    const c = counts || { today: 0, tomorrow: 0, week: 0 };
+    const tabs = [
+        { key: 'today',    label: 'امروز',     count: c.today },
+        { key: 'tomorrow', label: 'فردا',      count: c.tomorrow },
+        { key: 'week',     label: 'این هفته',  count: c.week }
+    ];
+    return `<div class="ni-cal-segments">` + tabs.map(t => `
+        <button class="ni-cal-segment${currentCalendarTab === t.key ? ' active' : ''}" data-cal-tab="${t.key}" onclick="switchCalendarTab('${t.key}', this)">
+            <span class="ni-cal-segment-label">${t.label}</span>
+            <span class="ni-cal-segment-count">${t.count}</span>
+        </button>`).join('') + `</div>`;
+}
+
+function startCalCountdown() {
+    if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
+    const updateCountdowns = () => {
+        const now = Date.now();
+        // ROOT CAUSE FIX: data-ts contains an ISO timestamp string (e.g.
+        // "2026-07-29T14:30:00.000Z"), NOT a numeric epoch. Previously
+        // parseInt("2026-07-29T14:30:00.000Z") returned 2026 (just the year!),
+        // which when passed to new Date(2026) gave a 1970 date — always in the
+        // past. This caused EVERY countdown to show "پایان یافت" regardless of
+        // the actual event time. Now we use new Date(el.dataset.ts).getTime()
+        // to correctly parse the ISO string.
+        const LIVE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+        document.querySelectorAll('.cal-event-countdown[data-ts]').forEach(el => {
+            const eventTime = new Date(el.dataset.ts).getTime();
+            if (isNaN(eventTime)) return;
+            const diff = eventTime - now;
+            if (diff <= 0) {
+                if (Math.abs(diff) > LIVE_WINDOW_MS) {
+                    el.textContent = '• Past';
+                } else {
+                    el.textContent = '• Live';
+                }
+                el.removeAttribute('data-ts');
+            } else {
+                el.textContent = formatCountdown(diff);
+            }
+        });
+        // Also update new V2 countdowns
+        document.querySelectorAll('.ni-cal-countdown[data-ts]').forEach(el => {
+            const eventTime = new Date(el.dataset.ts).getTime();
+            if (isNaN(eventTime)) return;
+            const diff = eventTime - now;
+            if (diff <= 0) {
+                // Event has started — show "در حال اجرا" (live) for 30 min,
+                // then "پایان یافت" after the live window passes.
+                if (Math.abs(diff) > LIVE_WINDOW_MS) {
+                    el.textContent = 'پایان یافت';
+                } else {
+                    el.textContent = 'در حال اجرا';
+                }
+                el.removeAttribute('data-ts');
+            } else {
+                el.textContent = formatCountdown(diff);
+            }
+        });
+    };
+    updateCountdowns();
+    calCountdownInterval = setInterval(updateCountdowns, 1000);
+}
+
 // NEWSFE-023 FIX (DEAD CODE REMOVED): renderCalendar() had 0 callers. All
 // calendar rendering goes through renderCalendarV2() (line below). Removed
 // the ~310-line legacy function. toggleCalReminder (only called from inside
