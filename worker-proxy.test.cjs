@@ -1993,3 +1993,211 @@ test('NEWSBE-009 (source): fetchCMCFearAndGreed REMOVED from market_overview_ser
   assert.ok(/refreshOverview,/.test(src), 'refreshOverview must still be exported');
   assert.ok(/fetchCMCKeyInfo,/.test(src), 'fetchCMCKeyInfo must still be exported');
 });
+
+// ============================================================================
+// CALTAB-001: Calendar tab navigation regression tests
+// Root cause: renderCalendarV2() signature guard (container.dataset.calSignature)
+// was never invalidated when non-calendar content (Crypto/All/Forex/Saved) was
+// rendered into the same news-list container. This caused the guard to skip
+// re-rendering Calendar when the user returned to the Calendar tab, leaving
+// stale non-calendar content visible.
+// ============================================================================
+
+test('CALTAB-001 (source): renderNews invalidates calSignature for non-calendar tabs', () => {
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+
+  // renderCalendarV2 signature guard must still exist (we don't want to remove it).
+  assert.ok(/if \(container\.dataset\.calSignature === signature\)/.test(src),
+    'renderCalendarV2 signature guard must still be present');
+
+  // The fix: renderNews must delete container.dataset.calSignature for non-calendar paths.
+  // Locate renderNews function body and verify the delete happens after the calendar
+  // early-return but before any non-calendar innerHTML assignment.
+  const fnMatch = src.match(/function renderNews\s*\(category\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(fnMatch, 'renderNews function must exist');
+  const body = fnMatch[1];
+
+  // The calendar early-return must come BEFORE the delete (so calendar path keeps
+  // its own signature management intact).
+  const calendarReturnIdx = body.indexOf("renderCalendarV2();");
+  assert.ok(calendarReturnIdx !== -1, 'must call renderCalendarV2 for calendar tab');
+  const deleteIdx = body.indexOf('delete container.dataset.calSignature;');
+  assert.ok(deleteIdx !== -1, 'must delete container.dataset.calSignature for non-calendar paths');
+  assert.ok(calendarReturnIdx < deleteIdx,
+    'calendar early-return must come BEFORE the calSignature delete (so calendar path is unaffected)');
+
+  // The delete must be unconditional for non-calendar paths (not wrapped in a condition
+  // that could be skipped). Verify it's a top-level statement in renderNews body.
+  // Note: fnMatch[1] captures the body WITHOUT the enclosing braces, so depth 0
+  // means "directly inside the function, not in any nested block".
+  const beforeDelete = body.slice(0, deleteIdx);
+  let depth = 0;
+  for (const ch of beforeDelete) {
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+  }
+  assert.equal(depth, 0,
+    'delete must be a top-level statement in renderNews body (not inside a conditional that could be skipped)');
+});
+
+test('CALTAB-002 (source): calSignature is only managed inside renderCalendarV2', () => {
+  // Ensure no other function accidentally writes to calSignature, which would
+  // re-introduce the staleness bug or bypass the guard.
+  const src = fs.readFileSync(APP_JS_PATH, 'utf8');
+  const allWriteMatches = [...src.matchAll(/\.dataset\.calSignature\s*=\s*[^;]+;/g)];
+  for (const m of allWriteMatches) {
+    // Each write to calSignature must be inside renderCalendarV2.
+    // Find the nearest preceding "function NAME(" before this match.
+    const preceding = src.slice(0, m.index);
+    const fnMatches = [...preceding.matchAll(/function\s+(\w+)\s*\(/g)];
+    assert.ok(fnMatches.length > 0, 'calSignature write must be inside a function');
+    const enclosingFn = fnMatches[fnMatches.length - 1][1];
+    assert.equal(enclosingFn, 'renderCalendarV2',
+      `calSignature must only be written inside renderCalendarV2, but found write inside "${enclosingFn}"`);
+  }
+  // The delete statement (from the fix) must NOT count as a write — verify separately.
+  const deleteMatches = [...src.matchAll(/delete\s+container\.dataset\.calSignature\s*;/g)];
+  assert.ok(deleteMatches.length >= 1, 'fix: must have at least one delete of calSignature in renderNews');
+  for (const m of deleteMatches) {
+    const preceding = src.slice(0, m.index);
+    const fnMatches = [...preceding.matchAll(/function\s+(\w+)\s*\(/g)];
+    assert.ok(fnMatches.length > 0, 'delete must be inside a function');
+    const enclosingFn = fnMatches[fnMatches.length - 1][1];
+    assert.equal(enclosingFn, 'renderNews',
+      `delete must be inside renderNews, but found inside "${enclosingFn}"`);
+  }
+});
+
+test('CALTAB-003 (behavioral): Calendar → Crypto → Calendar renders Calendar content', () => {
+  // Simulate the news-list container state and the signature guard logic
+  // extracted from app.js renderCalendarV2. This proves the fix end-to-end.
+  const container = { innerHTML: '', dataset: { calSignature: undefined } };
+
+  // Simulate calendarEvents preloaded at bootstrap
+  const calendarEvents = [
+    { title: 'FOMC', timestamp: '2026-08-11T15:00:00Z', actual: '', forecast: '', previous: '', status: 'upcoming' },
+  ];
+  const currentCalendarTab = 'week';
+  const currentCalCountry = 'all';
+  const currentLang = 'fa';
+  const _niCalendarReminders = {};
+
+  function computeCalSignature() {
+    const eventsSig = calendarEvents.map(e =>
+      `${e.title}|${e.timestamp}|${e.actual||''}|${e.forecast||''}|${e.previous||''}|${e.status||''}`
+    ).join(';;');
+    const reminderKeys = Object.keys(_niCalendarReminders).sort().join(',');
+    return `${currentCalendarTab}|${currentCalCountry}|${currentLang}|${eventsSig}|${reminderKeys}`;
+  }
+
+  // Mirror renderNews(category) — including the fix
+  function renderNews(category) {
+    if (category === 'calendar') {
+      renderCalendarV2();
+      return;
+    }
+    // FIX: invalidate calendar signature for non-calendar content
+    delete container.dataset.calSignature;
+
+    // Non-calendar content path (simplified)
+    container.innerHTML = `<div class="crypto-card">${category} news</div>`;
+  }
+
+  // Mirror renderCalendarV2() — signature guard included
+  function renderCalendarV2() {
+    const signature = computeCalSignature();
+    if (container.dataset.calSignature === signature) {
+      return; // skip re-render (guard)
+    }
+    container.dataset.calSignature = signature;
+    container.innerHTML = `<div class="calendar-content">${calendarEvents.length} events</div>`;
+  }
+
+  // Step 1: First visit to Calendar (calSignature undefined → mismatch → render)
+  renderNews('calendar');
+  assert.ok(container.innerHTML.includes('calendar-content'),
+    'Step 1: First Calendar visit must render calendar content');
+  assert.equal(container.dataset.calSignature, computeCalSignature(),
+    'Step 1: calSignature must be set after first Calendar render');
+
+  // Step 2: Switch to Crypto
+  renderNews('crypto');
+  assert.ok(container.innerHTML.includes('crypto-card'),
+    'Step 2: Crypto must render crypto content');
+  assert.equal(container.dataset.calSignature, undefined,
+    'Step 2 (FIX): calSignature must be invalidated after rendering Crypto');
+
+  // Step 3: Switch back to Calendar — THE BUG SCENARIO
+  renderNews('calendar');
+  assert.ok(container.innerHTML.includes('calendar-content'),
+    'Step 3 (FIX): Calendar must render calendar content after returning from Crypto');
+  assert.equal(container.dataset.calSignature, computeCalSignature(),
+    'Step 3: calSignature must be set after Calendar re-render');
+});
+
+test('CALTAB-004 (behavioral): Calendar → Crypto → Calendar → Crypto → Calendar (rapid switching)', () => {
+  const container = { innerHTML: '', dataset: { calSignature: undefined } };
+  const calendarEvents = [{ title: 'NFP', timestamp: '2026-08-15T12:30:00Z', actual: '', forecast: '', previous: '', status: 'upcoming' }];
+  const currentCalendarTab = 'today', currentCalCountry = 'USD', currentLang = 'fa';
+  function computeCalSignature() {
+    const eventsSig = calendarEvents.map(e => `${e.title}|${e.timestamp}|${e.actual||''}|${e.forecast||''}|${e.previous||''}|${e.status||''}`).join(';;');
+    return `${currentCalendarTab}|${currentCalCountry}|${currentLang}|${eventsSig}|`;
+  }
+  function renderNews(category) {
+    if (category === 'calendar') { renderCalendarV2(); return; }
+    delete container.dataset.calSignature;
+    container.innerHTML = `<div class="${category}-card">${category}</div>`;
+  }
+  function renderCalendarV2() {
+    const sig = computeCalSignature();
+    if (container.dataset.calSignature === sig) return;
+    container.dataset.calSignature = sig;
+    container.innerHTML = `<div class="calendar-content">${calendarEvents[0].title}</div>`;
+  }
+
+  const sequence = ['calendar', 'crypto', 'calendar', 'crypto', 'calendar', 'all', 'calendar', 'forex', 'calendar'];
+  for (const tab of sequence) {
+    renderNews(tab);
+    if (tab === 'calendar') {
+      assert.ok(container.innerHTML.includes('calendar-content'),
+        `After clicking ${tab}: Calendar content must be visible`);
+    } else {
+      assert.ok(container.innerHTML.includes(`${tab}-card`),
+        `After clicking ${tab}: ${tab} content must be visible`);
+    }
+  }
+});
+
+test('CALTAB-005 (behavioral): Calendar with sub-tab preserved across Crypto switch', () => {
+  // Verify that switching to Crypto and back does not lose the user's selected
+  // calendar sub-tab (today/tomorrow/week). The fix only clears calSignature,
+  // not currentCalendarTab, so the sub-tab selection must survive.
+  const container = { innerHTML: '', dataset: { calSignature: undefined } };
+  let currentCalendarTab = 'tomorrow'; // user selected "tomorrow"
+  const calendarEvents = [{ title: 'CPI', timestamp: '2026-08-12T12:30:00Z', actual: '', forecast: '', previous: '', status: 'upcoming' }];
+  function computeCalSignature() {
+    return `${currentCalendarTab}|all|fa|${calendarEvents.map(e=>e.title+'|'+e.timestamp).join(';;')}|`;
+  }
+  function renderNews(category) {
+    if (category === 'calendar') { renderCalendarV2(); return; }
+    delete container.dataset.calSignature;
+    container.innerHTML = `<div class="crypto-card">BTC</div>`;
+  }
+  function renderCalendarV2() {
+    const sig = computeCalSignature();
+    if (container.dataset.calSignature === sig) return;
+    container.dataset.calSignature = sig;
+    container.innerHTML = `<div class="calendar-content" data-tab="${currentCalendarTab}">events for ${currentCalendarTab}</div>`;
+  }
+
+  // User on Calendar 'tomorrow', switches to Crypto, back to Calendar
+  renderNews('calendar');
+  assert.ok(container.innerHTML.includes('data-tab="tomorrow"'),
+    'Calendar must show "tomorrow" sub-tab initially');
+  renderNews('crypto');
+  assert.ok(container.innerHTML.includes('crypto-card'), 'Crypto must render');
+  renderNews('calendar');
+  assert.ok(container.innerHTML.includes('data-tab="tomorrow"'),
+    'Calendar must STILL show "tomorrow" sub-tab after returning from Crypto (sub-tab preserved)');
+});
+

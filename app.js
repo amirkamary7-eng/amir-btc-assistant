@@ -6540,6 +6540,21 @@ function renderNews(category) {
         return;
     }
 
+    // ROOT CAUSE FIX (calendar tab not switching): The calendar render guard
+    // (container.dataset.calSignature in renderCalendarV2) skips re-render when
+    // the signature matches the previous render. But that signature was never
+    // invalidated when non-calendar content (Crypto/All/Forex/Saved/etc.) was
+    // rendered into the same container. So after viewing Calendar once, then
+    // switching to Crypto and back to Calendar, the guard saw a matching
+    // signature and skipped render — leaving Crypto content visible while the
+    // Calendar tab was marked active.
+    //
+    // FIX: Invalidate the calendar signature whenever non-calendar content is
+    // about to be rendered into news-list. This makes the guard in
+    // renderCalendarV2 strictly correct: a matching signature now genuinely
+    // means "the container currently holds calendar content for this data".
+    delete container.dataset.calSignature;
+
     // Saved tab
     if (category === 'saved') {
         renderSavedNews();
