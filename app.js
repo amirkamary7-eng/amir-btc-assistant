@@ -12727,7 +12727,32 @@ document.addEventListener('DOMContentLoaded', async () => {
             checkAnalysisDeepLink();
         }).finally(() => { _dashboardReady.analyses = true; _checkDashboardReady(); });
         loadImportantNews().finally(() => { _dashboardReady.news = true; _checkDashboardReady(); });
-        loadCalendarEvents().then(() => {
+        // CALREFRESH-001 FIX: Use force=true at bootstrap to bypass the
+        // in-memory cache short-circuit (loadCalendarEvents line 3422).
+        //
+        // ROOT CAUSE: localStorage calendar_cache has NO TTL check (line 12605-12606).
+        // At bootstrap, calendarEvents is hydrated from localStorage (line 12606)
+        // with potentially STALE data (from days ago). Then loadCalendarEvents()
+        // with force=false short-circuits because calendarEvents.length > 0 —
+        // so NO fresh API call ever happens at bootstrap.
+        //
+        // Consequence: Week tab (return true at line 7439) shows ALL cached events
+        // (including stale past events), while Today/Tomorrow correctly filter by
+        // date and show 0 events (because the stale cache has no events for today/
+        // tomorrow). User sees "Week works, Today/Tomorrow empty" even though the
+        // API is healthy and would return fresh data.
+        //
+        // FIX: Pass force=true so the short-circuit is bypassed and a real API
+        // call is made. If the API succeeds, calendarEvents is updated with fresh
+        // data and the .then() re-render shows correct Today/Tomorrow events.
+        // If the API fails, the existing catch handler in loadCalendarEvents
+        // (line 3465) preserves the existing calendarEvents — no data loss.
+        //
+        // This mirrors the pattern already used by market data (line 12656-12665):
+        // initial cache-first load for instant render, then a background force
+        // refresh to get truly fresh data. The calendar polling (180s, line 12037)
+        // already uses force=true, so this just makes bootstrap consistent.
+        loadCalendarEvents(true).then(() => {
             // ROOT CAUSE FIX (F-5, CRITICAL): Previously this only called
             // renderDashboardCalendar(), ignoring the News > Calendar tab.
             // If the user navigated to News > Calendar during the fetch,
