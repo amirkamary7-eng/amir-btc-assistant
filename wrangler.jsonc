@@ -166,7 +166,18 @@
                                 "AI_COOLDOWN_SECONDS": 4,
                                 "REFERRAL_TOKENS_PER_INVITE": 3,
                                 "BOT_USERNAME": "Amir_BTC_AssistantBot"
-                        }
+                        },
+                        // Hyperdrive config — create via Cloudflare Dashboard:
+                        // Workers & Pages → Hyperdrive → Create config
+                        // Name: amir-btc-supabase
+                        // Connection string: use your Supabase direct connection string (port 5432)
+                        // Then replace REPLACE_WITH_HYPERDRIVE_CONFIG_ID below with the returned config ID.
+                        "hyperdrive": [
+                                {
+                                        "binding": "HYPERDRIVE",
+                                        "id": "REPLACE_WITH_HYPERDRIVE_CONFIG_ID"
+                                }
+                        ]
                 }
         }
 }

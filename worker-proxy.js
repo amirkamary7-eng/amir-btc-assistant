@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { Pool, neon } from '@neondatabase/serverless';
+import { Pool as NeonPool, neon } from '@neondatabase/serverless';
+import { Pool as PgPool } from 'pg';
 import { createAlertRepository } from './src/repositories/alerts.js';
 import { createAlertHandlers } from './src/controllers/alerts.js';
 import { createWatchlistRepository } from './src/repositories/watchlist.js';
@@ -1353,19 +1354,45 @@ function getSharedNeon(env) {
 // Create a brand-new Pool for a SINGLE transaction. NOT cached — used and
 // `await pool.end()`-ed within queryDbTransaction so its WebSocket (and the
 // request context it binds to) never escapes that call.
+//
+// HYPERDRIVE DUAL-PATH:
+//   If env.HYPERDRIVE binding exists → use pg.Pool with Hyperdrive's
+//   connection string. Hyperdrive manages connection pooling at Cloudflare's
+//   edge — no per-invocation TLS handshake. pg.Pool can be created
+//   per-request because Hyperdrive handles the actual DB connections.
+//
+//   If env.HYPERDRIVE does NOT exist → fall back to @neondatabase/serverless
+//   Pool (WebSocket+TLS per invocation). This is the legacy path.
 function createPool(env) {
   const _t0 = Date.now();
+  const _poolId = 'p' + Math.random().toString(36).slice(2, 8);
+
+  // ── Hyperdrive path ──
+  if (env.HYPERDRIVE && env.HYPERDRIVE.connectionString) {
+    const _pool = new PgPool({
+      connectionString: env.HYPERDRIVE.connectionString,
+      max: 1,
+      idleTimeoutMillis: 0,
+      connectionTimeoutMillis: 3000,
+    });
+    _traceStage('Pool.create.hyperdrive', _t0);
+    _traceLog('Pool.create.hyperdrive', { poolId: _poolId, durationMs: Date.now() - _t0 });
+    _pool._tracePoolId = _poolId;
+    _pool._isHyperdrive = true;
+    return _pool;
+  }
+
+  // ── Legacy path: @neondatabase/serverless Pool (WebSocket+TLS) ──
   const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) return null;
-  const _poolId = 'p' + Math.random().toString(36).slice(2, 8);
-  const _pool = new Pool({
+  const _pool = new NeonPool({
     connectionString: databaseUrl,
     max: 1,
     idleTimeoutMillis: 0,
     connectionTimeoutMillis: 3000,
   });
-  _traceStage('Pool.create', _t0);
-  _traceLog('Pool.create', { poolId: _poolId, durationMs: Date.now() - _t0 });
+  _traceStage('Pool.create.neon', _t0);
+  _traceLog('Pool.create.neon', { poolId: _poolId, durationMs: Date.now() - _t0 });
   _pool._tracePoolId = _poolId;
   return _pool;
 }

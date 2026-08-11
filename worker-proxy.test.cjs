@@ -26,6 +26,7 @@ function getWorkerSource() {
 function loadWorker(pgOverride) {
   const source = getWorkerSource();
   const defaultMocks = {
+    'pg': { Pool: (pgOverride && pgOverride.Pool) || class { async query() { return { rows: [] }; } async connect() { return { async query() { return { rows: [] }; }, release() {} }; } end() { return Promise.resolve(); } } },
     '@neondatabase/serverless': pgOverride || {
       Pool: class Pool {
         async query(sql, params) {
@@ -175,7 +176,8 @@ function loadWorker(pgOverride) {
       "import { createHmac, timingSafeEqual } from 'node:crypto';",
       "const { createHmac, timingSafeEqual } = require('node:crypto');",
     )
-    .replace("import { Pool, neon } from '@neondatabase/serverless';", "const { Pool, neon } = require('@neondatabase/serverless');")
+    .replace("import { Pool as NeonPool, neon } from '@neondatabase/serverless';", "const { Pool: NeonPool, neon } = require('@neondatabase/serverless');")
+    .replace("import { Pool as PgPool } from 'pg';", "const { Pool: PgPool } = require('pg');")
     .replace(
       /import\s+\{([^}]*)\}\s+from\s+['"](\.\/src\/[^'"]+)['"];?/g,
       (_, named, p) => `const { ${named} } = require('${p}');`,
