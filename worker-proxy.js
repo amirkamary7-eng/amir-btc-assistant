@@ -11160,7 +11160,9 @@ export default {
           // Restore env._reqPool even if retryFailed threw
           env._reqPool = _savedReqPoolForRetry;
         }
-      })());
+      })().catch((e) => {
+        console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedReferral', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
+      }));
       // For wheel retry, also null env._reqPool (in case referral retry restored it)
       const _savedReqPoolForWheel = env._reqPool;
       env._reqPool = null;
@@ -11174,7 +11176,9 @@ export default {
         } finally {
           env._reqPool = _savedReqPoolForWheel;
         }
-      })());
+      })().catch((e) => {
+        console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedWheel', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
+      }));
     }
   },
 };
