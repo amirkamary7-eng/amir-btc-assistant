@@ -35,8 +35,7 @@ import { createNotificationPlatformHandlers } from './src/controllers/notificati
 import { createNotificationService } from './src/services/notification_service.js';
 import { createAlertEconomyRepository } from './src/repositories/alert_economy.js';
 import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
-import { createPublisherRepository } from './src/repositories/publisher.js';
-import { createPublisherHandlers } from './src/controllers/publisher.js';
+
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 import { createMembershipRepository } from './src/repositories/membership.js';
 import { createMembershipHandlers } from './src/controllers/membership.js';
@@ -6854,28 +6853,6 @@ const alertEconomyHandlers = createAlertEconomyHandlers({
 
 //#endregion
 
-// ── Telegram Publisher (admin) — channel publishing with queue + preview ──
-const publisherRepo = createPublisherRepository({ queryDb, normalizeOptionalString, isDatabaseConfigured });
-const publisherHandlers = createPublisherHandlers({
-  jsonResponse,
-  requireAdmin: adminHandlers.requireAdmin,
-  readJsonBody,
-  safeDbErrorResponse,
-  safeError,
-  isDatabaseConfigured,
-  buildBodyFieldValidationError,
-  normalizeOptionalString,
-  publisherRepo,
-  sendTelegramMessage,
-  readAppCache,
-  writeAppCache,
-  resolveWebAppUrl,
-  fetchFarsiNews,
-  fetchCalendarEvents,
-  analysisRepo,
-});
-//#endregion
-
 // ── Market Overview Service (CMC) — all CMC calls centralized here ──
 const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCache, fetchJson });
 
@@ -10243,62 +10220,6 @@ export default {
         return alertEconomyHandlers.handleDashboard(request, env);
       }
 
-      // ─────────────────────────────────────────────────────────────
-      // TELEGRAM PUBLISHER — channel publishing system (admin-only)
-      // ─────────────────────────────────────────────────────────────
-      if (url.pathname === '/api/admin/publisher/settings' && (request.method === 'GET' || request.method === 'PUT' || request.method === 'POST')) {
-        if (request.method === 'GET') return await publisherHandlers.handleGetSettings(request, env);
-        return await publisherHandlers.handleUpdateSettings(request, env);
-      }
-      if (url.pathname === '/api/admin/publisher/preview' && request.method === 'POST') {
-        return publisherHandlers.handlePreview(request, env);
-      }
-      if (url.pathname === '/api/admin/publisher/queue' && request.method === 'POST') {
-        return publisherHandlers.handleEnqueue(request, env);
-      }
-      if (url.pathname === '/api/admin/publisher/send-now' && request.method === 'POST') {
-        return publisherHandlers.handleSendNow(request, env);
-      }
-      if (url.pathname === '/api/admin/publisher/queue' && request.method === 'GET') {
-        return publisherHandlers.handleListQueue(request, env, 'pending');
-      }
-      if (url.pathname === '/api/admin/publisher/sent' && request.method === 'GET') {
-        return publisherHandlers.handleListQueue(request, env, 'sent');
-      }
-      if (url.pathname === '/api/admin/publisher/failed' && request.method === 'GET') {
-        return publisherHandlers.handleListQueue(request, env, 'failed');
-      }
-      if (url.pathname === '/api/admin/publisher/logs' && request.method === 'GET') {
-        return publisherHandlers.handleListLogs(request, env);
-      }
-      if (url.pathname === '/api/admin/publisher/stats' && request.method === 'GET') {
-        return publisherHandlers.handleStats(request, env);
-      }
-      if (url.pathname === '/api/admin/publisher/process' && request.method === 'POST') {
-        return publisherHandlers.handleProcessNow(request, env);
-      }
-      if (url.pathname === '/api/admin/publisher/test-connection' && request.method === 'POST') {
-        return await publisherHandlers.handleTestConnection(request, env);
-      }
-      if (/^\/api\/admin\/publisher\/retry\/\d+$/.test(url.pathname) && request.method === 'POST') {
-        const id = url.pathname.split('/').pop();
-        return publisherHandlers.handleRetry(request, env, id);
-      }
-      if (/^\/api\/admin\/publisher\/cancel\/\d+$/.test(url.pathname) && request.method === 'POST') {
-        const id = url.pathname.split('/').pop();
-        return publisherHandlers.handleCancel(request, env, id);
-      }
-      if (/^\/api\/admin\/publisher\/sent\/\d+$/.test(url.pathname) && request.method === 'DELETE') {
-        const id = url.pathname.split('/').pop();
-        return publisherHandlers.handleDeleteSent(request, env, id);
-      }
-      if (/^\/api\/admin\/publisher\/dedup\/[^/]+\/[^/]+$/.test(url.pathname) && request.method === 'GET') {
-        const parts = url.pathname.split('/');
-        const type = decodeURIComponent(parts[parts.length - 2]);
-        const refId = decodeURIComponent(parts[parts.length - 1]);
-        return publisherHandlers.handleCheckDedup(request, env, type, refId);
-      }
-
       // ── Membership Module — User Routes ───────────────────────────────────
       if (request.method === 'GET' && url.pathname === '/api/membership/status') {
         return membershipHandlers.handleGetStatus(request, env);
@@ -10838,7 +10759,7 @@ export default {
     //   Phase 1: alerts + calendar (time-sensitive, ~5ms CPU)
     //   Phase 2: referral/wheel retries (~3ms CPU)
     //   Phase 3a (minute 0/30): notif queue + market overview (~5ms CPU)
-    //   Phase 3b (minute 15/45): publisher + news AI (~8ms CPU with batching)
+    //   Phase 3b (minute 15/45): news AI (~8ms CPU with batching)
     //
     // PHASE LAYOUT (1-min cron):
     //   Alternate: alerts OR calendar (~3ms CPU) + broadcast batch (~2ms CPU)
@@ -10932,14 +10853,8 @@ export default {
           const bResult = notificationPlatformRepo.requeueStaleBroadcasts
             ? await notificationPlatformRepo.requeueStaleBroadcasts(env, pool)
             : { requeued: 0 };
-          // NEWSBE-018 FIX: Also requeue stale tg_publisher_queue items stuck
-          // in 'processing' after a Worker crash mid-send. Mirrors the
-          // notification_queue requeue pattern.
-          const pResult = publisherRepo?.requeueStalePublisherQueue
-            ? await publisherRepo.requeueStalePublisherQueue(env, pool)
-            : { requeued: 0 };
-          if (qResult.requeued > 0 || bResult.requeued > 0 || pResult.requeued > 0) {
-            console.log('[CRON] Phase 4 requeue:', JSON.stringify({ queue: qResult.requeued, broadcasts: bResult.requeued, publisher: pResult.requeued }));
+          if (qResult.requeued > 0 || bResult.requeued > 0) {
+            console.log('[CRON] Phase 4 requeue:', JSON.stringify({ queue: qResult.requeued, broadcasts: bResult.requeued }));
           }
         } catch (e) {
           console.warn('[CRON] Phase 4 requeue failed:', e?.message);
@@ -11095,15 +11010,6 @@ export default {
             try { await marketOverviewSvc.refreshOverview(env); _logPhase('phase3-market', 'ok'); } catch (e) {
               _logPhase('phase3-market', 'error', { error: e?.message });
               console.warn('[CRON] market overview failed:', e?.message);
-            }
-          }
-        }
-        // Publisher runs on non-0/30 minutes (same as before)
-        if (minute !== 0 && minute !== 30) {
-          if (publisherHandlers?.processPublisherQueue) {
-            try { await publisherHandlers.processPublisherQueue(env, { maxItems: 8 }); _logPhase('phase3-publisher', 'ok'); } catch (e) {
-              _logPhase('phase3-publisher', 'error', { error: e?.message });
-              console.warn('[CRON] publisher failed:', e?.message);
             }
           }
         }

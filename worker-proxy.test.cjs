@@ -1470,73 +1470,6 @@ test('P1-09 (behavioral): /api/market/prices with 20 symbols only fetches 15', a
 // ============================================================================
 
 // APP_JS_PATH and WORKER_PATH already declared in P1 test section above.
-const PUBLISHER_REPO_PATH = path.join(__dirname, 'src', 'repositories', 'publisher.js');
-
-// ── NEWSBE-003: publisher markFailed off-by-one ──
-
-test('NEWSBE-003 (source): markFailed uses attempts + 1 >= max_attempts (not attempts >= max_attempts)', () => {
-  const src = fs.readFileSync(PUBLISHER_REPO_PATH, 'utf8');
-  const fnStart = src.indexOf('async function markFailed');
-  const fnEnd = src.indexOf('async function cancel');
-  assert.ok(fnStart > -1 && fnEnd > fnStart, 'markFailed function must exist before cancel');
-  const markFailedSrc = src.slice(fnStart, fnEnd);
-  // The CASE must use attempts + 1 (post-increment value) not attempts (pre-increment)
-  assert.ok(
-    /CASE WHEN attempts \+ 1 >= max_attempts THEN 'failed'/.test(markFailedSrc),
-    'markFailed status CASE must use attempts + 1 >= max_attempts. Got: ' + markFailedSrc
-  );
-  assert.ok(
-    /CASE WHEN attempts \+ 1 < max_attempts THEN NOW\(\) \+ INTERVAL/.test(markFailedSrc),
-    'markFailed scheduled_at CASE must use attempts + 1 < max_attempts. Got: ' + markFailedSrc
-  );
-  // Must NOT use the old pre-increment comparison
-  assert.ok(
-    !/CASE WHEN attempts >= max_attempts THEN 'failed'/.test(markFailedSrc),
-    'markFailed must NOT use old attempts >= max_attempts (off-by-one bug)'
-  );
-});
-
-// ── NEWSBE-018: requeueStalePublisherQueue ──
-
-test('NEWSBE-018 (source): requeueStalePublisherQueue function exists and exported', () => {
-  const src = fs.readFileSync(PUBLISHER_REPO_PATH, 'utf8');
-  assert.ok(/async function requeueStalePublisherQueue/.test(src), 'requeueStalePublisherQueue function must exist');
-  assert.ok(/requeueStalePublisherQueue,/.test(src), 'requeueStalePublisherQueue must be exported');
-});
-
-test('NEWSBE-018 (source): requeueStalePublisherQueue resets processing items older than 5 minutes', () => {
-  const src = fs.readFileSync(PUBLISHER_REPO_PATH, 'utf8');
-  const fnStart = src.indexOf('async function requeueStalePublisherQueue');
-  const fnEnd = src.indexOf('async function checkDedup');
-  assert.ok(fnStart > -1 && fnEnd > fnStart, 'requeueStalePublisherQueue must exist before checkDedup');
-  const fnSrc = src.slice(fnStart, fnEnd);
-  assert.ok(/status = 'pending', claimed_at = NULL/.test(fnSrc), 'must reset status to pending and clear claimed_at');
-  assert.ok(/status = 'processing'/.test(fnSrc), 'must target status = processing');
-  assert.ok(/claimed_at < NOW\(\) - INTERVAL '5 minutes'/.test(fnSrc), 'must use 5-minute staleness threshold');
-});
-
-test('NEWSBE-018 (source): claimPendingBatch sets claimed_at = NOW()', () => {
-  const src = fs.readFileSync(PUBLISHER_REPO_PATH, 'utf8');
-  const fnStart = src.indexOf('async function claimPendingBatch');
-  const fnEnd = src.indexOf('NEWSBE-018 FIX: Requeue');
-  assert.ok(fnStart > -1, 'claimPendingBatch must exist');
-  const fnSrc = src.slice(fnStart, fnEnd > fnStart ? fnEnd : fnStart + 800);
-  assert.ok(/SET status = 'processing', claimed_at = NOW\(\)/.test(fnSrc), 'claimPendingBatch must set claimed_at = NOW()');
-});
-
-test('NEWSBE-018 (source): ensureSchema adds claimed_at column + index', () => {
-  const src = fs.readFileSync(PUBLISHER_REPO_PATH, 'utf8');
-  assert.ok(/ALTER TABLE tg_publisher_queue ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ/.test(src), 'must add claimed_at column idempotently');
-  assert.ok(/CREATE INDEX IF NOT EXISTS idx_tgpq_processing_claimed/.test(src), 'must create index on claimed_at for processing items');
-});
-
-test('NEWSBE-018 (source): cron Phase 4 calls requeueStalePublisherQueue', () => {
-  const src = fs.readFileSync(WORKER_PATH, 'utf8');
-  assert.ok(
-    /publisherRepo\?\.requeueStalePublisherQueue/.test(src),
-    'cron Phase 4 must call publisherRepo.requeueStalePublisherQueue'
-  );
-});
 
 // ── NEWSBE-016: processNewsAIBatch re-caches with short TTL on batchAnalyzeNews failure ──
 
@@ -1970,17 +1903,6 @@ test('NEWSBE-007 (source): listRecent REMOVED from news_articles repo', () => {
   assert.ok(/fingerprint,/.test(src), 'fingerprint must still be exported');
   assert.ok(/findByUrl,/.test(src), 'findByUrl must still be exported');
   assert.ok(/saveAnalysis,/.test(src), 'saveAnalysis must still be exported');
-});
-
-// ── NEWSBE-008: autoPublishCheck removed from publisher controller ──
-
-test('NEWSBE-008 (source): autoPublishCheck REMOVED from publisher controller', () => {
-  const src = fs.readFileSync(path.join(__dirname, 'src', 'controllers', 'publisher.js'), 'utf8');
-  assert.ok(!/async function autoPublishCheck\s*\(/.test(src), 'autoPublishCheck function must be removed');
-  assert.ok(!/autoPublishCheck,/.test(src), 'autoPublishCheck export must be removed');
-  assert.ok(/NEWSBE-008 FIX \(DEAD CODE REMOVED\)/.test(src), 'must have removal comment');
-  // processPublisherQueue must still be exported
-  assert.ok(/processPublisherQueue,/.test(src), 'processPublisherQueue must still be exported');
 });
 
 // ── NEWSBE-009: fetchCMCFearAndGreed removed from market_overview_service ──
