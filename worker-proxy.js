@@ -10909,6 +10909,8 @@ export default {
             console.warn('[CRON] processQueue (1min) failed:', e?.message);
           }
         }
+      }).catch((e) => {
+        console.error(JSON.stringify({ scope: 'cron-unhandled', cron: '* * * * *', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
       }));
       // Return early — 1-min cron does NOTHING else
       return;
@@ -11113,6 +11115,8 @@ export default {
         }
       }
 
+    }).catch((e) => {
+      console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
     }));
 
     // ═══════════════════════════════════════════════════════════════════

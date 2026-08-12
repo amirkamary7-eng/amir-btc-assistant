@@ -81,13 +81,32 @@ export function createUserHandlers(deps) {
 
     payload.user_id = userId;
     try {
+      // INSTRUMENTATION: Per-operation error logging for root-cause analysis.
+      const _bsLog = (op, status, extra) => {
+        const entry = { scope: 'bootstrap-op', op, status, ts: Date.now(), ...extra };
+        console.warn(JSON.stringify(entry));
+      };
+
       if (typeof userRepo.ensureTable === 'function') {
-        try { await userRepo.ensureTable(env); } catch {}
+        try { await userRepo.ensureTable(env); _bsLog('ensureTable', 'ok'); } catch (e) {
+          _bsLog('ensureTable', 'error', { errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 200) });
+        }
       }
-      const preExistingUser = await userRepo.getById(env, userId);
+
+      let preExistingUser;
+      try {
+        preExistingUser = await userRepo.getById(env, userId);
+        _bsLog('getById', 'ok');
+      } catch (e) {
+        _bsLog('getById', 'error', { errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 200) });
+        throw e;
+      }
+
       const isNewUser = !preExistingUser;
 
-      const userRow = await userRepo.bootstrap(env, userId, {
+      let userRow;
+      try {
+        userRow = await userRepo.bootstrap(env, userId, {
         username: normalizeOptionalString(payload.username) || normalizeOptionalString(tgUser?.username),
         first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(tgUser?.first_name),
         last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(tgUser?.last_name),
@@ -109,7 +128,14 @@ export function createUserHandlers(deps) {
       // referrals + token_transactions + token_balances, not users). Using userRow
       // directly saves 1 DB round-trip per bootstrap with zero behavior change.
       const freshUserRow = userRow;
-      const watchlist = await watchlistRepo.getSymbols(env, userId);
+      let watchlist;
+      try {
+        watchlist = await watchlistRepo.getSymbols(env, userId);
+        _bsLog('getSymbols', 'ok');
+      } catch (e) {
+        _bsLog('getSymbols', 'error', { errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 200) });
+        throw e;
+      }
 
       let channelJoined = false;
       if (tgUser?.id) {
