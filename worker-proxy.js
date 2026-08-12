@@ -9994,7 +9994,7 @@ export default {
       // Unprotected routes (health, market, charts, calendar, public analyses, bootstrap) are above this line.
       let _protectedUser = null;
       let _joinBlocked = null;
-      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|notif-delete-diag)/;
+      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|notif-delete-diag|wheel)/;
       const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
 
       // ── CPU TRACE: attach trace array to request for instrumentation ──

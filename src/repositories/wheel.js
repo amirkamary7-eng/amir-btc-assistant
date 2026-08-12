@@ -147,19 +147,23 @@ export function createWheelRepository(deps) {
   /**
    * Get or create today's daily free spins for a user.
    *
-   * ROOT CAUSE FIX (F-1 + F-2 + 2.1): Completely rewritten to support
-   * multiple daily spins (max_spins_per_user, default 3).
+   * WHEEL-RACE-FIX (verified via concurrency test): Completely rewritten to
+   * perform lock + count + conditional insert + final read inside a SINGLE
+   * transaction. The previous implementation used TWO separate transactions
+   * (txn1: lock+count, txn2: lock+insert), which released the advisory lock
+   * between them. Two concurrent calls could both see count=0 and both insert
+   * maxSpins rows, resulting in 2×maxSpins rows — verified by
+   * wheel-race-concurrency-test.cjs (3 concurrent calls → 9 rows for maxSpins=3).
    *
-   * Approach:
-   * 1. Acquire advisory lock keyed on (user_id + today) — serializes
-   *    concurrent calls for the same user/day.
-   * 2. COUNT today's available spins for the user.
-   * 3. If count < maxSpins, create new spin rows until we reach maxSpins.
-   * 4. Return all available (unused) spins for today.
-   *
-   * This guarantees exactly maxSpins available spins per user per UTC day,
-   * regardless of how many times the API is called or how many concurrent
-   * requests are made.
+   * New approach: a single CTE-based SQL statement atomically:
+   *   1. Counts today's spins (available + used) — the TRUE total
+   *   2. Calculates needed = GREATEST(0, maxSpins - count)
+   *   3. Inserts exactly `needed` rows via generate_series
+   *   4. Returns before_count + inserted_count
+   * The advisory lock (pg_advisory_xact_lock) is acquired as a separate query
+   * in the SAME transaction, BEFORE the CTE — serializing concurrent calls.
+   * The lock is only released on COMMIT, so the second caller's COUNT sees
+   * the first caller's INSERTs.
    *
    * @param {object} env - Worker env
    * @param {string} userId - Telegram user ID
@@ -172,48 +176,46 @@ export function createWheelRepository(deps) {
     const lockKey = _hashLockKey(uid + '_' + tehranToday);
     const expiresAtISO = getNextTehranMidnightISO();
 
-    // WHEEL-001 + WHEEL-002 FIX: Count ALL spins (available + used) and
-    // do INSERTs inside the SAME transaction as the advisory lock.
-    // Previously: only status='available' was counted (bypassable) and
-    // INSERTs ran outside the transaction (race condition).
-
+    // Single transaction: lock → count → conditional insert.
+    // The CTE does count + conditional insert atomically. generate_series(1, 0)
+    // returns 0 rows, so when count >= maxSpins, no rows are inserted.
     const txnQueries = [
       { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
       {
-        sql: `SELECT COUNT(*)::int AS cnt FROM wheel_spins
+        sql: `
+          WITH current_count AS (
+            SELECT COUNT(*)::int AS cnt FROM wheel_spins
+            WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
+              AND spin_date = $2::date AND status IN ('available', 'used')
+          ),
+          to_insert AS (
+            SELECT generate_series(1, GREATEST(0, $3 - (SELECT cnt FROM current_count))) AS i
+          ),
+          inserted AS (
+            INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
+            SELECT $1, 'daily', 'daily_free', 'available', '{}', NOW(), $4, $2::date
+            FROM to_insert
+            RETURNING id
+          )
+          SELECT
+            (SELECT cnt FROM current_count) AS before_count,
+            (SELECT COUNT(*)::int FROM inserted) AS inserted_count
+        `,
+        params: [uid, tehranToday, Number(maxSpins), expiresAtISO],
+      },
+      {
+        sql: `SELECT id, status FROM wheel_spins
               WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-              AND spin_date = $2::date AND status IN ('available', 'used')`,
+              AND spin_date = $2::date AND status = 'available'
+              ORDER BY id ASC`,
         params: [uid, tehranToday],
       },
     ];
 
     const results = await queryDbTransaction(env, txnQueries);
-    const totalCount = results[1].rows[0]?.cnt || 0;
-    const needed = Math.max(0, maxSpins - totalCount);
+    const finalRows = results[2].rows || [];
 
-    if (needed > 0) {
-      // Insert needed spins INSIDE a new transaction (with lock held)
-      const insertQueries = [
-        { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
-      ];
-      for (let i = 0; i < needed; i++) {
-        insertQueries.push({
-          sql: `INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
-                VALUES ($1, 'daily', 'daily_free', 'available', '{}', NOW(), $2, $3::date)`,
-          params: [uid, expiresAtISO, tehranToday],
-        });
-      }
-      await queryDbTransaction(env, insertQueries);
-    }
-
-    // Return all available spins for today
-    const finalResult = await queryDb(env,
-      `SELECT id, status FROM wheel_spins
-       WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-       AND spin_date = $2::date AND status = 'available'`,
-      [uid, tehranToday]);
-
-    return { spins: finalResult.rows, total_available: finalResult.rows.length, total_allowed: maxSpins };
+    return { spins: finalRows, total_available: finalRows.length, total_allowed: maxSpins };
   }
 
   /**
