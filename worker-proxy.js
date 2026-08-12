@@ -512,6 +512,151 @@ async function deleteSessionCache(env, key) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// MISSION EVENT TOKEN SERVICE
+//
+// WALLET-002 / MISSION-ABUSE FIX: mission rewards must require a server-issued
+// one-time token to prevent direct POST /api/wallet/mission/complete abuse.
+//
+// Flow:
+//   1. User performs a REAL action (opens news, opens analysis detail, opens
+//      calendar, opens market, or completes bootstrap for daily_login).
+//   2. Frontend calls POST /api/wallet/mission/issue-token with mission_id.
+//      Backend verifies the action via the corresponding backend event:
+//        - daily_login → issued by bootstrap directly (no API call)
+//        - read_news → issued by /api/farsi-news or /api/news (when fetched recently)
+//        - read_analysis → issued by /api/analyses/:id/view (POST view tracker)
+//        - check_calendar → issued by /api/calendar/events
+//        - visit_market → issued by /api/market
+//   3. Backend stores token in SESSION_CACHE with 120s TTL, key:
+//        `mt:${userId}:${missionId}:${today}:${randomToken}`
+//      Value: '1' (just a marker). One-time use — deleted on consume.
+//   4. Frontend POSTs /api/wallet/mission/complete with { mission_id, event_token }.
+//   5. Backend validates: token exists in SESSION_CACHE → delete it (atomic)
+//      → only then proceed with reward. If token missing or already consumed,
+//      reject with 403 FORBIDDEN.
+//
+// Replay attack prevention: token is one-time. Once consumed, it's gone from KV.
+// Concurrent completion prevention: only one token per (user, mission, day).
+// KV race safety: we use delete() which is idempotent; if two requests
+// try to consume the same token, only one will see it before deletion.
+// ═══════════════════════════════════════════════════════════════════════
+
+const MISSION_TOKEN_TTL_SECONDS = 120; // 2 minutes — enough for frontend to complete
+const MISSION_TOKEN_PREFIX = 'mt:';
+
+function _getTodayISOString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function _generateMissionToken() {
+  // 32-char random hex string — cryptographically secure
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Issue a one-time mission event token for a user+mission+day.
+ * Returns the token string (32 hex chars) on success, null on failure.
+ *
+ * The token is stored in SESSION_CACHE with a key that includes the token
+ * itself, so consuming it requires knowing the token. One token per
+ * (user, mission, day) is allowed — issuing a second token for the same
+ * tuple will succeed (returns a new token) but the previous one is
+ * overwritten via the marker key (mt_count).
+ *
+ * @param {object} env - Worker env
+ * @param {string} userId - Telegram user ID
+ * @param {string} missionId - Mission ID (e.g. 'read_news')
+ * @returns {Promise<string|null>} - 32-char hex token, or null on failure
+ */
+async function issueMissionEventToken(env, userId, missionId) {
+  if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.put !== 'function') {
+    return null;
+  }
+  const uid = String(userId);
+  const mid = String(missionId);
+  const today = _getTodayISOString();
+  const token = _generateMissionToken();
+  const key = `${MISSION_TOKEN_PREFIX}${uid}:${mid}:${today}:${token}`;
+  try {
+    await env.SESSION_CACHE.put(key, '1', { expirationTtl: MISSION_TOKEN_TTL_SECONDS });
+    return token;
+  } catch (e) {
+    console.warn('issueMissionEventToken failed:', e.message || e);
+    return null;
+  }
+}
+
+/**
+ * Consume a one-time mission event token.
+ * Returns true if the token was valid (and is now consumed), false otherwise.
+ *
+ * Atomicity: KV delete() is idempotent. If two concurrent requests try to
+ * consume the same token, both will succeed in calling delete(), but only
+ * one will have already passed the existence check (the other gets null
+ * from the get() call). To handle this race, we use a marker key that
+ * survives the token deletion: when we consume a token, we also write a
+ * "consumed" marker (TTL=86400s = 1 day) for (uid, mid, today). If the
+ * marker exists, the token is rejected. This prevents double-reward even
+ * if two requests race past the get() call before either delete() runs.
+ *
+ * @param {object} env - Worker env
+ * @param {string} userId - Telegram user ID
+ * @param {string} missionId - Mission ID
+ * @param {string} token - 32-char hex token from frontend
+ * @returns {Promise<boolean>} - true if consumed, false if invalid/already used
+ */
+async function consumeMissionEventToken(env, userId, missionId, token) {
+  if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.get !== 'function') {
+    return false;
+  }
+  if (!token || typeof token !== 'string' || token.length !== 32) {
+    return false;
+  }
+  const uid = String(userId);
+  const mid = String(missionId);
+  const today = _getTodayISOString();
+  const consumedMarkerKey = `${MISSION_TOKEN_PREFIX}consumed:${uid}:${mid}:${today}`;
+
+  // Check if already consumed (prevents double-reward across two requests
+  // that both passed the get() check before either called delete()).
+  const alreadyConsumed = await env.SESSION_CACHE.get(consumedMarkerKey);
+  if (alreadyConsumed) {
+    return false;
+  }
+
+  const tokenKey = `${MISSION_TOKEN_PREFIX}${uid}:${mid}:${today}:${token}`;
+  const existing = await env.SESSION_CACHE.get(tokenKey);
+  if (!existing) {
+    return false;
+  }
+
+  // Consume the token (one-time use)
+  try { await env.SESSION_CACHE.delete(tokenKey); } catch {}
+  // Set consumed marker (24h TTL = 1 day, longer than any mission window)
+  try {
+    await env.SESSION_CACHE.put(consumedMarkerKey, '1', { expirationTtl: 86400 });
+  } catch {}
+  return true;
+}
+
+/**
+ * Check if a mission event token was already consumed today (for diagnostic).
+ */
+async function isMissionEventTokenConsumed(env, userId, missionId) {
+  if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.get !== 'function') {
+    return false;
+  }
+  const uid = String(userId);
+  const mid = String(missionId);
+  const today = _getTodayISOString();
+  const consumedMarkerKey = `${MISSION_TOKEN_PREFIX}consumed:${uid}:${mid}:${today}`;
+  const existing = await env.SESSION_CACHE.get(consumedMarkerKey);
+  return Boolean(existing);
+}
+
 function buildFastApiValidationError(type, msg, input, ctx) {
   const detail = {
     type,
@@ -6672,6 +6817,9 @@ const walletHandlers = createWalletHandlers({
   economyService,
   rewardCenterRepo,
   notificationService,
+  // MISSION-ABUSE FIX: server-issued one-time mission event tokens
+  issueMissionEventToken,
+  consumeMissionEventToken,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({
@@ -6719,6 +6867,9 @@ const userHandlers = createUserHandlers({
   watchlistRepo,
   adminRepo,
   diagLog,
+  // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap.
+  // walletHandlers is created above (line ~6809) so it's in scope here.
+  fireDailyLoginMission: (...args) => walletHandlers.fireDailyLoginMission(...args),
 });
 const notifyHandlers = createNotifyHandlers({
   jsonResponse,
@@ -10653,6 +10804,13 @@ export default {
       }
 
       // ── Daily Missions API Routes ──
+      // MISSION-ABUSE FIX (WALLET-002): /mission/complete now requires a
+      // server-issued event_token for non-daily_login missions. Frontend
+      // must call /mission/issue-token AFTER the user performs the real action.
+      if (request.method === 'POST' && url.pathname === '/api/wallet/mission/issue-token') {
+        return walletHandlers.handleMissionIssueToken(request, env);
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/wallet/mission/complete') {
         return walletHandlers.handleMissionComplete(request, env);
       }

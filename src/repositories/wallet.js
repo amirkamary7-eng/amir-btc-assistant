@@ -382,20 +382,27 @@ export function createWalletRepository(deps) {
       }
     }
 
-    // WALLET-001 FIX: Use a single CTE-based transaction that atomically
-    // inserts the transaction record AND increments the balance ONLY if
-    // the transaction INSERT succeeds. This eliminates the need for a
-    // compensating reversal UPDATE outside the transaction.
+    // WALLET-001-FIX (verified via wallet-credit-concurrency-test.cjs):
+    // Use a single CTE-based transaction that atomically inserts the
+    // transaction record AND UPSERTS the balance row ONLY if the
+    // transaction INSERT succeeds.
     //
-    // Previous approach (replaced):
-    //   1. UPSERT balance += amt (always succeeds)
-    //   2. INSERT tx ON CONFLICT DO NOTHING (may return 0 rows)
-    //   3. If tx conflict: UPDATE balance -= amt (OUTSIDE transaction — crash risk)
+    // Previous approach (BUG): UPDATE-only on token_balances.
+    //   1. INSERT tx ON CONFLICT DO NOTHING RETURNING id
+    //   2. UPDATE token_balances SET balance = balance + amt WHERE user_id = $1
+    // Bug: if user has no balance row (no row in token_balances), UPDATE
+    // affects 0 rows → balance NOT increased. But the tx IS inserted, so
+    // on retry the idempotency check returns "idempotent:true" — silently
+    // losing the credit. Verified by WALLET-001-BUG test.
     //
-    // New approach:
+    // New approach (FIX): UPSERT instead of UPDATE.
     //   1. INSERT tx ON CONFLICT DO NOTHING RETURNING id (may return 0 rows)
-    //   2. UPDATE balance += amt ONLY WHERE the tx INSERT returned a row
-    // Both steps in a single transaction — no compensating reversal needed.
+    //   2. INSERT INTO token_balances (user_id, balance) VALUES ($1, $2)
+    //      ON CONFLICT (user_id) DO UPDATE SET balance = balance + EXCLUDED.balance
+    //      — but ONLY when tx_insert returned a row (via WHERE clause in CTE)
+    // This creates the balance row if missing, and increments it if present.
+    // Idempotency preserved: if tx conflict, balance is NOT touched.
+    // Race-safe: ON CONFLICT DO UPDATE is atomic in PostgreSQL.
     const results = await queryDbTransaction(env, [
       {
         sql: `WITH tx_insert AS (
@@ -403,23 +410,28 @@ export function createWalletRepository(deps) {
                 VALUES ($1, $2, $3, $4, 'completed', $5, $6, $7, NOW(), NOW())
                 ON CONFLICT DO NOTHING
                 RETURNING id
+              ),
+              balance_upsert AS (
+                INSERT INTO token_balances (user_id, balance, updated_at)
+                SELECT $1, $2, NOW() FROM tx_insert
+                ON CONFLICT (user_id) DO UPDATE
+                  SET balance = token_balances.balance + EXCLUDED.balance,
+                      updated_at = NOW()
               )
-              UPDATE token_balances
-              SET balance = token_balances.balance + $2, updated_at = NOW()
-              FROM tx_insert
-              WHERE token_balances.user_id = $1
-              RETURNING token_balances.balance, tx_insert.id AS tx_id`,
+              SELECT
+                (SELECT id FROM tx_insert LIMIT 1) AS tx_id,
+                (SELECT balance FROM token_balances WHERE user_id = $1) AS balance`,
         params: [uid, amt, txType, source, description || txType, refId || null, metadataJson],
       },
     ]);
 
     const row = results[0].rows[0];
-    const newBalance = Number(row?.balance || 0);
     const txId = row?.tx_id;
+    const newBalance = Number(row?.balance || 0);
 
     // If txId is null, the ON CONFLICT triggered — a concurrent caller
-    // already inserted this transaction. Balance was NOT incremented
-    // (because the CTE's UPDATE only runs when tx_insert returns a row).
+    // already inserted this transaction. Balance was NOT touched
+    // (because the CTE's UPSERT only runs when tx_insert returns a row).
     if (!txId) {
       // Read the existing transaction for the return value
       const existing = await queryDb(env,

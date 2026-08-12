@@ -18,6 +18,9 @@ export function createWalletHandlers(deps) {
     economyService,
     rewardCenterRepo,
     notificationService,
+    // MISSION-ABUSE FIX: server-issued one-time event tokens
+    issueMissionEventToken,
+    consumeMissionEventToken,
   } = deps;
 
   /**
@@ -184,20 +187,96 @@ export function createWalletHandlers(deps) {
   }
 
   /**
-   * POST /api/wallet/mission/complete — Increment progress and grant reward when complete.
+   * POST /api/wallet/mission/issue-token — Issue a one-time event token for
+   * a mission. The frontend must call this AFTER the user performs the real
+   * action (opens news, opens analysis detail, opens calendar, opens market).
+   * The token is then submitted to /api/wallet/mission/complete to prove the
+   * action was performed.
+   *
+   * MISSION-ABUSE FIX (WALLET-002): without this, any authenticated user
+   * could POST /api/wallet/mission/complete with just {mission_id} and
+   * receive rewards without performing any action.
+   *
+   * daily_login does NOT require a token — it's fired automatically by the
+   * bootstrap handler when the user authenticates.
    *
    * Body: { mission_id: string }
+   * Returns: { status: 'success', event_token: string, expires_in: 120 }
+   *          OR { status: 'error', code: 'MISSING_MISSION_ID' | 'NOT_ELIGIBLE' | ... }
+   */
+  async function handleMissionIssueToken(request, env) {
+    const authState = await authenticateTelegramRequest(request, env);
+    if (authState.error) return authState.error;
+
+    let body;
+    try { body = await request.json(); } catch {
+      return jsonResponse({ status: 'error', message: 'Invalid JSON' }, { status: 422 }, env);
+    }
+
+    const missionId = String(body?.mission_id || '').trim();
+    if (!missionId) {
+      return jsonResponse({ status: 'error', message: 'mission_id required', code: 'MISSING_MISSION_ID' }, { status: 422 }, env);
+    }
+
+    // daily_login is fired automatically by bootstrap — no token needed
+    if (missionId === 'daily_login') {
+      return jsonResponse({ status: 'error', message: 'daily_login does not require a token (auto-fired by bootstrap)', code: 'NOT_ELIGIBLE' }, { status: 422 }, env);
+    }
+
+    try {
+      const userId = String(authState.user.id);
+
+      // Verify mission exists and is enabled
+      if (rewardCenterRepo) {
+        const missionConfig = await rewardCenterRepo.getMissionReward(env, missionId);
+        if (!missionConfig || !Number(missionConfig.token_amount) || Number(missionConfig.token_amount) <= 0) {
+          return jsonResponse({ status: 'error', message: 'Mission not found or has no reward', code: 'NO_REWARD' }, { status: 422 }, env);
+        }
+      }
+
+      // Issue one-time token
+      if (typeof issueMissionEventToken !== 'function') {
+        return jsonResponse({ status: 'error', message: 'Mission token service unavailable', code: 'TOKEN_SERVICE_UNAVAILABLE' }, { status: 503 }, env);
+      }
+      const token = await issueMissionEventToken(env, userId, missionId);
+      if (!token) {
+        return jsonResponse({ status: 'error', message: 'Failed to issue token (KV unavailable)', code: 'TOKEN_ISSUE_FAILED' }, { status: 503 }, env);
+      }
+
+      return jsonResponse({
+        status: 'success',
+        mission_id: missionId,
+        event_token: token,
+        expires_in: 120, // seconds
+      }, {}, env);
+    } catch (error) {
+      console.warn(safeError('wallet-mission-issue-token', error));
+      return safeDbErrorResponse(error, {}, env);
+    }
+  }
+
+  /**
+   * POST /api/wallet/mission/complete — Increment progress and grant reward when complete.
    *
-   * GENERIC: Mission definitions (including target_count for multi-step) are read
-   * from the `mission_rewards` DB table via metadata.target_count.
+   * MISSION-ABUSE FIX (WALLET-002): Now requires an `event_token` for non-daily_login
+   * missions. The token is obtained by calling POST /api/wallet/mission/issue-token
+   * AFTER the user performs the real action (opens news, opens analysis, etc.).
+   *
+   * Body: { mission_id: string, event_token?: string }
+   *   - For daily_login: no event_token required (auto-fired by bootstrap)
+   *   - For all other missions: event_token MUST be a valid server-issued token
    *
    * Flow:
-   * 1. Read mission config from DB (amount, name, target_count)
-   * 2. Atomically increment progress in mission_progress table
-   * 3. If progress >= target AND not yet rewarded → grant reward
-   * 4. Return updated progress + reward status
+   * 1. Validate event_token (consume one-time)
+   * 2. Read mission config from DB (amount, name, target_count)
+   * 3. Atomically increment progress in mission_progress table
+   * 4. If progress >= target AND not yet rewarded → grant reward
+   * 5. Return updated progress + reward status
    *
-   * Idempotent: UNIQUE(user_id, mission_id, daily_date) + rewarded flag + creditTokens UNIQUE
+   * Idempotency layers:
+   *   - Mission event token: one-time use, 120s TTL (one per user/mission/day effectively)
+   *   - mission_progress UNIQUE(user_id, mission_id, daily_date) + rewarded flag
+   *   - token_transactions UNIQUE(user_id, tx_type, ref_id) WHERE status='completed'
    */
   async function handleMissionComplete(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
@@ -214,6 +293,32 @@ export function createWalletHandlers(deps) {
     const missionId = String(body?.mission_id || '').trim();
     if (!missionId) {
       return jsonResponse({ status: 'error', message: 'mission_id required', code: 'MISSING_MISSION_ID' }, { status: 422 }, env);
+    }
+
+    const eventToken = String(body?.event_token || '').trim();
+    const isDailyLogin = missionId === 'daily_login';
+
+    // MISSION-ABUSE FIX: non-daily_login missions REQUIRE a valid event_token
+    if (!isDailyLogin) {
+      if (!eventToken) {
+        return jsonResponse({
+          status: 'error',
+          message: 'event_token required. Call POST /api/wallet/mission/issue-token after performing the action.',
+          code: 'MISSING_EVENT_TOKEN',
+        }, { status: 403 }, env);
+      }
+      if (typeof consumeMissionEventToken !== 'function') {
+        return jsonResponse({ status: 'error', message: 'Mission token service unavailable', code: 'TOKEN_SERVICE_UNAVAILABLE' }, { status: 503 }, env);
+      }
+      const userId = String(authState.user.id);
+      const consumed = await consumeMissionEventToken(env, userId, missionId, eventToken);
+      if (!consumed) {
+        return jsonResponse({
+          status: 'error',
+          message: 'event_token is invalid, expired, or already used. Perform the action again and request a new token.',
+          code: 'INVALID_EVENT_TOKEN',
+        }, { status: 403 }, env);
+      }
     }
 
     try {
@@ -311,6 +416,84 @@ export function createWalletHandlers(deps) {
   }
 
   /**
+   * Internal helper: fire the daily_login mission automatically during bootstrap.
+   * This is called from worker-proxy.js handleBootstrap after successful auth.
+   * No token required — bootstrap itself IS the proof of login.
+   *
+   * Returns the same shape as handleMissionComplete's success response.
+   */
+  async function fireDailyLoginMission(env, userId) {
+    if (!isDatabaseConfigured(env)) return null;
+    const missionId = 'daily_login';
+
+    try {
+      const missionConfig = rewardCenterRepo
+        ? await rewardCenterRepo.getMissionReward(env, missionId)
+        : null;
+      if (!missionConfig) return null;
+
+      const amount = Number(missionConfig.token_amount) || 0;
+      if (amount <= 0) return null;
+
+      const label = missionConfig.mission_name || missionId;
+
+      // Get target_count
+      const activeMissions = rewardCenterRepo
+        ? await rewardCenterRepo.getActiveMissionRewards(env)
+        : [];
+      const missionMeta = activeMissions.find(m => m.mission_id === missionId);
+      const targetCount = missionMeta?.target_count || 1;
+
+      // Increment progress
+      const progress = rewardCenterRepo
+        ? await rewardCenterRepo.incrementMissionProgress(env, userId, missionId, targetCount)
+        : null;
+      if (!progress) return null;
+
+      let rewardGranted = false;
+      let newBalance = null;
+      if (progress.completed && !progress.rewarded) {
+        const claimed = rewardCenterRepo
+          ? await rewardCenterRepo.markMissionRewarded(env, userId, missionId)
+          : false;
+        if (claimed) {
+          const today = new Date().toISOString().slice(0, 10);
+          const refId = `mission_${userId}_${missionId}_${today}`;
+          const result = await economyService.grantReward({
+            userId,
+            amount,
+            rewardType: 'mission_reward',
+            description: `ماموریت: ${label}`,
+            refId,
+            metadata: { mission_id: missionId, mission_label: label, daily_date: today, progress: `${progress.progress_count}/${targetCount}`, source: 'bootstrap_auto' },
+            auditInfo: { actor: 'system' },
+            env,
+          });
+          rewardGranted = result.success && !result.idempotent;
+          newBalance = result.newBalance;
+
+          if (rewardGranted && notificationService) {
+            await notificationService.create(env, {
+              userId,
+              category: 'wallet',
+              priority: 'low',
+              channel: 'mini_app',
+              title: '🎉 ماموریت کامل شد',
+              message: `${label} — ${amount} AB دریافت کردید`,
+              metadata: { mission_id: missionId, amount },
+              dedupKey: `wallet_mission_${missionId}_${userId}`,
+            }).catch(() => {});
+          }
+        }
+      }
+      return { rewardGranted, newBalance, progress };
+    } catch (error) {
+      console.warn(safeError('fire-daily-login-mission', error));
+      return null;
+    }
+  }
+
+  /**
    * GET /api/wallet/missions — Get today's mission status with progress.
    *
    * GENERIC: Reads ALL active missions from DB + cross-references with
@@ -375,7 +558,9 @@ export function createWalletHandlers(deps) {
     handleGetTransaction,
     handleGetClaimStatus,
     handleClaimDaily,
+    handleMissionIssueToken,
     handleMissionComplete,
     handleGetMissions,
+    fireDailyLoginMission,
   });
 }

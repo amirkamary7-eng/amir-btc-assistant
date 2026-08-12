@@ -5684,15 +5684,38 @@ async function loadMissionStatus() {
 /**
  * Complete a daily mission. Called by MissionBus.fire — not directly
  * from interaction points.
+ *
+ * MISSION-ABUSE FIX (WALLET-002): for non-daily_login missions, frontend
+ * must first call /api/wallet/mission/issue-token AFTER the user performs
+ * the real action, then submit the token to /api/wallet/mission/complete.
+ * daily_login is fired automatically by bootstrap — frontend doesn't need
+ * to call this for daily_login.
  */
 async function completeMission(missionId) {
     if (_completedMissionsToday.has(missionId)) return;
     if (!API_BASE || !canRunSessionRequests()) return;
 
     try {
+        // daily_login doesn't require an event_token (auto-fired by bootstrap).
+        // All other missions require a server-issued event_token.
+        let eventToken = null;
+        if (missionId !== 'daily_login') {
+            const tokenResp = await apiFetch('/api/wallet/mission/issue-token', {
+                method: 'POST',
+                body: JSON.stringify({ mission_id: missionId }),
+            });
+            if (tokenResp?.status !== 'success' || !tokenResp.event_token) {
+                // Token issuance failed — abort. The mission is NOT completed.
+                // This is by design: it prevents abuse where frontend directly
+                // calls /mission/complete without performing the action.
+                return;
+            }
+            eventToken = tokenResp.event_token;
+        }
+
         const data = await apiFetch('/api/wallet/mission/complete', {
             method: 'POST',
-            body: JSON.stringify({ mission_id: missionId }),
+            body: JSON.stringify({ mission_id: missionId, event_token: eventToken }),
         });
 
         if (data?.status === 'success') {

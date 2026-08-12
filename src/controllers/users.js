@@ -26,6 +26,8 @@ export function createUserHandlers(deps) {
     watchlistRepo,
     adminRepo,
     diagLog,
+    // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap
+    fireDailyLoginMission,
   } = deps;
 
   /**
@@ -184,6 +186,21 @@ export function createUserHandlers(deps) {
           if (dbAdmin && dbAdmin.active) isUserAdmin = true;
         } catch (e) {
           console.warn('[BOOTSTRAP] Admin DB check failed:', e?.message);
+        }
+      }
+
+      // MISSION-ABUSE FIX (WALLET-002): auto-fire the daily_login mission.
+      // Bootstrap itself IS proof of login — no event_token needed for this mission.
+      // Only fire for channel members (missions are for members) and when DB is configured.
+      // Idempotency: mission_progress UNIQUE(user_id, mission_id, daily_date) + rewarded flag
+      // + token_transactions UNIQUE(user_id, tx_type, ref_id) ensure no double-reward across
+      // multiple bootstrap calls in the same day.
+      if (channelJoined && isDatabaseConfigured(env) && typeof fireDailyLoginMission === 'function') {
+        try {
+          await fireDailyLoginMission(env, userId);
+        } catch (e) {
+          // Non-fatal — bootstrap must succeed even if mission reward fails.
+          console.warn('[BOOTSTRAP] fireDailyLoginMission failed (non-fatal):', e?.message);
         }
       }
 
