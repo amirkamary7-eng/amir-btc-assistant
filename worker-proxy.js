@@ -2312,13 +2312,26 @@ async function retryFailedWheelRewards(env) {
     for (const row of result.rows) {
       try {
         const refId = `wheel_${row.user_id}_${row.spin_date_str}_${row.spin_id}`;
+        // WHEEL-TYPE-FIX: Map the stored wheel reward type ('token', 'voucher',
+        // etc.) to the canonical economy type 'wheel_reward'. The economy
+        // service rejects non-canonical types with INVALID_REWARD_TYPE, which
+        // was causing 100% of wheel reward retries to fail. The 'spin' type
+        // is handled separately (would need grantPremiumSpin, not grantReward).
+        const isSpinType = row.reward_type === 'spin';
+        if (isSpinType) {
+          // 'spin' rewards should have been fulfilled at spin time via
+          // grantPremiumSpin. Skip retry for spin-type rewards — they can't
+          // be retroactively granted via grantReward.
+          retried++;
+          continue;
+        }
         const grantResult = await economyService.grantReward({
           userId: row.user_id,
           amount: Number(row.reward_amount),
-          rewardType: row.reward_type,
+          rewardType: 'wheel_reward',
           description: `Wheel reward (retry): ${row.reward_label || row.reward_type}`,
           refId: refId,
-          metadata: { spin_id: row.spin_id, retry: true },
+          metadata: { spin_id: row.spin_id, retry: true, reward_type: row.reward_type, reward_label: row.reward_label },
           auditInfo: { actor: 'cron-retry' },
           env,
         });

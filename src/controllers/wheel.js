@@ -165,13 +165,20 @@ export function createWheelHandlers(deps) {
             await wheelRepo.grantPremiumSpin(env, authState.user.id, 'wheel_reward');
             rewardResult = { success: true, newBalance: null, txId: null, idempotent: false };
           } else {
+            // WHEEL-TYPE-FIX: Map the wheel reward type (from wheel_rewards table:
+            // 'token', 'voucher', 'nft', etc.) to the canonical economy reward
+            // type 'wheel_reward'. The economy service (grantReward) only accepts
+            // canonical types from REWARD_TYPES — it rejects 'token' etc. with
+            // INVALID_REWARD_TYPE. Without this mapping, 100% of token rewards
+            // fail silently (spin consumed, no credit). The original reward type
+            // is preserved in metadata for analytics.
             rewardResult = await economyService.grantReward({
               userId: authState.user.id,
               amount: spinResult.reward.amount,
-              rewardType: spinResult.reward.type,
+              rewardType: 'wheel_reward',
               description: `Wheel reward: ${spinResult.reward.label || spinResult.reward.type}`,
               refId: rewardRefId,
-              metadata: { spin_id: spinResult.spin_id, spin_type: spinResult.spin_type, reward_label: spinResult.reward.label },
+              metadata: { spin_id: spinResult.spin_id, spin_type: spinResult.spin_type, reward_label: spinResult.reward.label, reward_type: spinResult.reward.type },
               auditInfo: { actor: 'system', ip: request.headers.get('cf-connecting-ip') || null },
               env,
             });
