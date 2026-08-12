@@ -107,12 +107,17 @@ export function createUserHandlers(deps) {
       let userRow;
       try {
         userRow = await userRepo.bootstrap(env, userId, {
-        username: normalizeOptionalString(payload.username) || normalizeOptionalString(tgUser?.username),
-        first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(tgUser?.first_name),
-        last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(tgUser?.last_name),
-        lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
-        is_premium: Boolean(tgUser?.is_premium),
-      });
+          username: normalizeOptionalString(payload.username) || normalizeOptionalString(tgUser?.username),
+          first_name: normalizeOptionalString(payload.first_name) || normalizeOptionalString(tgUser?.first_name),
+          last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(tgUser?.last_name),
+          lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
+          is_premium: Boolean(tgUser?.is_premium),
+        });
+        _bsLog('bootstrap', 'ok');
+      } catch (e) {
+        _bsLog('bootstrap', 'error', { errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 200) });
+        throw e;
+      }
       let signedReferrerId = normalizeOptionalString(payload.referrer_id);
       if (auth?.startParam && typeof auth.startParam === 'string') {
         const match = auth.startParam.match(/^ref_(\d+)$/);
