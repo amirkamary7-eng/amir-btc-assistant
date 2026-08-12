@@ -3561,24 +3561,52 @@ async function translateToFarsi(text, env) {
   let result = text;
 
   // ── Primary: Cloudflare Workers AI ─────────────────────────────────
+  // P0-2 FIX: Circuit Breaker protection for translation. Uses a SEPARATE
+  // provider key ('translation-workers-ai') from the summary path's
+  // 'workers-ai' because m2m100-1.2b is a different model with different
+  // quota limits. When circuit is OPEN, skip Workers AI entirely and fall
+  // through to Google Translate (if allowed) or original text.
   if (env?.AI) {
-    try {
-      const response = await env.AI.run('@cf/meta/m2m100-1.2b', {
-        text,
-        source_lang: 'english',
-        target_lang: 'persian',
-      });
-      const translated = response?.translated_text;
-      if (translated && typeof translated === 'string' && translated.trim()) {
-        result = translated.trim();
+    const cbTranslation = await shouldAttemptProvider(env, 'translation-workers-ai');
+    if (cbTranslation.attempt) {
+      try {
+        const response = await env.AI.run('@cf/meta/m2m100-1.2b', {
+          text,
+          source_lang: 'english',
+          target_lang: 'persian',
+        });
+        const translated = response?.translated_text;
+        if (translated && typeof translated === 'string' && translated.trim()) {
+          result = translated.trim();
+          // SUCCESS — record in circuit breaker
+          try { await recordCircuitResult(env, 'translation-workers-ai', true); } catch {}
+        } else {
+          // Empty response — record as retryable failure
+          try { await recordCircuitResult(env, 'translation-workers-ai', false, 'retryable', 'empty_response'); } catch {}
+        }
+      } catch (e) {
+        // AI unavailable or model error — record failure in circuit breaker
+        const msg = e?.message || String(e) || '';
+        const isNonRetryable = /not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
+          && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg);
+        try { await recordCircuitResult(env, 'translation-workers-ai', false, isNonRetryable ? 'non_retryable' : 'retryable', msg.substring(0, 120)); } catch {}
+        console.warn('[TRANSLATE] m2m100 failed (non-fatal):', e?.message);
       }
-    } catch (e) {
-      // AI unavailable or model error — fall through to Google Translate
-      console.warn('[TRANSLATE] m2m100 failed (non-fatal):', e?.message);
+    } else {
+      // Circuit OPEN — skip Workers AI, fall through to Google Translate
+      console.warn('[TRANSLATE] m2m100 circuit OPEN — skipping to Google fallback');
     }
   }
 
   // ── Fallback: Google Translate (unofficial) ───────────────────────
+  // P0-2 FIX: Only use Google Translate if Workers AI failed (result still
+  // equals input). This prevents flood: when Workers AI circuit is OPEN,
+  // we don't blindly send ALL translations to Google — we still try (one
+  // request per text), but the in-memory cache + circuit breaker on the
+  // Workers AI side limits the overall load. Google Translate has no
+  // circuit breaker here (unofficial endpoint, rate limits are IP-based
+  // and hard to detect reliably), but the Workers AI circuit prevents
+  // the cascade from starting in the first place.
   if (result === text && env?.AI) {
     // Only use Google Translate if AI failed (result still equals input)
     try {
@@ -3678,16 +3706,18 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
       item.description || '',
     ]);
   } else {
-    // ROOT-CAUSE FIX: Process translations in BATCHES of 10 to stay under subrequest limit.
+    // ROOT-CAUSE FIX: Process translations in BATCHES of 3 to stay under subrequest limit.
+    // P0-2 FIX: Reduced from 10 to 3 to prevent Workers AI 429 "Capacity exceeded".
     // Each translateToFarsi call = 1 AI.run() subrequest (+ potentially 1 Google fetch).
-    // With 7 sources × 3 articles × 2 = 42 translation calls, we batch them 10 at a time.
+    // With 7 sources × 3 articles × 2 = 42 translation calls, we batch them 3 at a time.
+    // This stays well under Workers AI capacity limits and the 50-subrequest ceiling.
     const allTranslatableItems = limitedItems.flatMap((item) => [
       { text: item.title || 'بدون عنوان', isTitle: true },
       { text: item.description || '', isTitle: false },
     ]);
 
     allTranslations = [];
-    const TRANSLATION_BATCH_SIZE = 10;
+    const TRANSLATION_BATCH_SIZE = 3; // P0-2 FIX: was 10, reduced to 3
     for (let i = 0; i < allTranslatableItems.length; i += TRANSLATION_BATCH_SIZE) {
       const batch = allTranslatableItems.slice(i, i + TRANSLATION_BATCH_SIZE);
       const batchResults = await Promise.all(
@@ -3849,78 +3879,93 @@ async function fetchFarsiNews(env, categoryFilter) {
     }
   }
 
-  // Fetch ALL sources in parallel
-  const sources = await fetchAllNewsRss();
-  if (sources.length === 0) {
-    return { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
-  }
-
-  try {
-    // Build articles from all sources in parallel (translate within each source)
-    const allArticles = (
-      await Promise.all(
-        sources.map((s) => buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env, s.skipTranslate))
-      )
-    ).flat();
-
-    // Deduplicate by URL (same article from multiple sources)
-    // NEWSBE-004 FIX: Use canonicalized URL for dedup so the same article
-    // with different tracking params (utm_*) or trailing slash doesn't
-    // appear twice.
-    const seen = new Set();
-    const deduped = allArticles.filter((a) => {
-      if (!a.url) return false;
-      const canonical = canonicalizeUrl(a.url);
-      if (seen.has(canonical)) return false;
-      seen.add(canonical);
-      return true;
-    });
-
-    if (deduped.length > 0) {
-      // Limit total cached articles to reduce payload size and KV storage
-      const MAX_NEWS_ARTICLES = 12;
-      const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
-
-      // Cache the full (unfiltered) trimmed list
-      await writeAppCache(
-        env,
-        FARSI_NEWS_CACHE_KEY,
-        JSON.stringify(trimmed),
-        getNumericEnv(env, 'NEWS_CACHE_TTL', 1800), // 30 minutes
-      );
-
-      // ── AI NEWS: Background AI summarization is handled by CRON, not here ──
-      // The cron handler (scheduled) calls processNewsAIBatch with real ctx.waitUntil.
-      // This ensures AI summaries are generated within 1 minute of article appearing.
-      // (NEWSBE-006: legacy processNewsAIJobs was removed — it was never called.)
-
-      // Enrich with AI summaries (from KV cache — instant if pre-processed by cron)
-      const enriched = await enrichNewsWithAISummaries(env, trimmed);
-
-      const categoryCounts = {
-        all: enriched.length,
-        crypto: enriched.filter(a => a.category === 'crypto').length,
-        forex: enriched.filter(a => a.category === 'forex').length,
-        economy: enriched.filter(a => a.category === 'economy').length,
-      };
-
-      // Apply category filter if requested
-      const data = categoryFilter
-        ? enriched.filter((a) => a.category === categoryFilter)
-        : enriched;
-
-      return {
-        status: 'success',
-        source: `${sources.map((s) => s.sourceName).join(', ')}_live`,
-        data,
-        category_counts: categoryCounts,
-      };
+  // P0-3 FIX: Wrap the entire live-fetch pipeline in singleFlight to prevent
+  // Thundering Herd. When KV cache expires (every 30 min), N concurrent
+  // /api/farsi-news requests would ALL miss cache and ALL run the full
+  // RSS + translation pipeline in parallel. singleFlight ensures only ONE
+  // pipeline runs per isolate — concurrent requests share its result.
+  //
+  // IMPORTANT: singleFlight is PER-ISOLATE, not a distributed lock. Multiple
+  // Cloudflare Workers isolates can still run the pipeline concurrently (one
+  // per isolate). For full cross-isolate protection, a KV-based distributed
+  // lock would be needed — but that's a larger architectural change outside
+  // the scope of this minimal P0 fix. The per-isolate singleFlight still
+  // significantly reduces redundant work (within a busy isolate, many
+  // requests share one pipeline run instead of each running their own).
+  return await singleFlight('farsi-news:live-fetch', async () => {
+    // Fetch ALL sources in parallel
+    const sources = await fetchAllNewsRss();
+    if (sources.length === 0) {
+      return { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
     }
-  } catch {
-    // Parse/translate failure
-  }
 
-  return { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
+    try {
+      // Build articles from all sources in parallel (translate within each source)
+      const allArticles = (
+        await Promise.all(
+          sources.map((s) => buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env, s.skipTranslate))
+        )
+      ).flat();
+
+      // Deduplicate by URL (same article from multiple sources)
+      // NEWSBE-004 FIX: Use canonicalized URL for dedup so the same article
+      // with different tracking params (utm_*) or trailing slash doesn't
+      // appear twice.
+      const seen = new Set();
+      const deduped = allArticles.filter((a) => {
+        if (!a.url) return false;
+        const canonical = canonicalizeUrl(a.url);
+        if (seen.has(canonical)) return false;
+        seen.add(canonical);
+        return true;
+      });
+
+      if (deduped.length > 0) {
+        // Limit total cached articles to reduce payload size and KV storage
+        const MAX_NEWS_ARTICLES = 12;
+        const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
+
+        // Cache the full (unfiltered) trimmed list
+        await writeAppCache(
+          env,
+          FARSI_NEWS_CACHE_KEY,
+          JSON.stringify(trimmed),
+          getNumericEnv(env, 'NEWS_CACHE_TTL', 1800), // 30 minutes
+        );
+
+        // ── AI NEWS: Background AI summarization is handled by CRON, not here ──
+        // The cron handler (scheduled) calls processNewsAIBatch with real ctx.waitUntil.
+        // This ensures AI summaries are generated within 1 minute of article appearing.
+        // (NEWSBE-006: legacy processNewsAIJobs was removed — it was never called.)
+
+        // Enrich with AI summaries (from KV cache — instant if pre-processed by cron)
+        const enriched = await enrichNewsWithAISummaries(env, trimmed);
+
+        const categoryCounts = {
+          all: enriched.length,
+          crypto: enriched.filter(a => a.category === 'crypto').length,
+          forex: enriched.filter(a => a.category === 'forex').length,
+          economy: enriched.filter(a => a.category === 'economy').length,
+        };
+
+        // Apply category filter if requested
+        const data = categoryFilter
+          ? enriched.filter((a) => a.category === categoryFilter)
+          : enriched;
+
+        return {
+          status: 'success',
+          source: `${sources.map((s) => s.sourceName).join(', ')}_live`,
+          data,
+          category_counts: categoryCounts,
+        };
+      }
+    } catch {
+      // Parse/translate failure
+    }
+
+    return { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
+  });
 }
 
 // ── AI NEWS SUMMARIZATION: Background processing architecture ──
@@ -5760,63 +5805,101 @@ ${headlines}`;
   }
 
   // Method 1: Gemini 2.0 Flash (primary) — always tried first
+  // P0-1 FIX: Circuit Breaker protection — skip Gemini if its circuit is OPEN
+  // (prevents hammering a rate-limited provider every 15-min cron tick).
+  // Records result so failures from batch path also trip the circuit (shared
+  // with summary path's circuit state for 'gemini').
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) && GEMINI_API_KEY) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 2048, topP: 0.8 },
-          }),
-          signal: controller.signal,
-        }
-      );
-      clearTimeout(timeout);
+    // Check circuit breaker first
+    const cbGemini = await shouldAttemptProvider(env, 'gemini');
+    if (cbGemini.attempt) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { temperature: 0.2, maxOutputTokens: 2048, topP: 0.8 },
+            }),
+            signal: controller.signal,
+          }
+        );
+        clearTimeout(timeout);
 
-      if (res.ok) {
-        const data = await res.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        const parsed = parseBatchResult(text);
-        if (parsed && Object.keys(parsed).length > 0) {
-          console.log('[NEWS-AI-BATCH] ✅ Gemini PRIMARY succeeded — no fallback needed');
-          return parsed;
+        if (res.ok) {
+          const data = await res.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const parsed = parseBatchResult(text);
+          if (parsed && Object.keys(parsed).length > 0) {
+            // SUCCESS — record in circuit breaker
+            try { await recordCircuitResult(env, 'gemini', true); } catch {}
+            console.log('[NEWS-AI-BATCH] ✅ Gemini PRIMARY succeeded — no fallback needed');
+            return parsed;
+          }
+          // Empty/malformed response — record as retryable failure
+          try { await recordCircuitResult(env, 'gemini', false, 'retryable', 'empty_response'); } catch {}
+          console.warn('[NEWS-AI-BATCH] ⚠️ Gemini returned empty/malformed response — falling back to Workers AI');
+        } else {
+          const errorType = classifyHttpError(res.status);
+          let errBody = '';
+          try { errBody = (await res.text()).substring(0, 200); } catch {}
+          // Record failure in circuit breaker (429/5xx = retryable, counts toward OPEN)
+          try { await recordCircuitResult(env, 'gemini', false, errorType, `http_${res.status}`); } catch {}
+          console.warn(`[NEWS-AI-BATCH] ⚠️ Gemini failed (HTTP ${res.status}): ${errBody} — falling back to Workers AI`);
         }
-      } else {
-        let errBody = '';
-        try { errBody = (await res.text()).substring(0, 200); } catch {}
-        console.warn(`[NEWS-AI-BATCH] ⚠️ Gemini failed (HTTP ${res.status}): ${errBody} — falling back to Workers AI`);
+      } catch (e) {
+        // Network/timeout error — record as retryable
+        const isAbort = e?.name === 'AbortError';
+        try { await recordCircuitResult(env, 'gemini', false, 'retryable', isAbort ? 'timeout' : 'network_error'); } catch {}
+        console.warn('[NEWS-AI-BATCH] ⚠️ Gemini failed:', e?.message, '— falling back to Workers AI');
       }
-    } catch (e) {
-      console.warn('[NEWS-AI-BATCH] ⚠️ Gemini failed:', e?.message, '— falling back to Workers AI');
+    } else {
+      console.warn(`[NEWS-AI-BATCH] ⚠️ Gemini circuit OPEN (retry_after ${cbGemini.retry_after}) — skipping to Workers AI`);
     }
   }
 
   // Method 2: Workers AI (fallback 1) — ONLY if Gemini didn't succeed
+  // P0-1 FIX: Circuit Breaker protection — skip Workers AI if its circuit is OPEN
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true) && hasWorkersAI) {
-    try {
-      const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-        messages: [
-          { role: 'system', content: 'You are a crypto market analyst. Return ONLY a JSON array with sentiment, impact, reason (in Farsi), and coins for each headline.' },
-          { role: 'user', content: prompt },
-        ],
-        max_tokens: 2048,
-        temperature: 0.2,
-      });
+    const cbWAI = await shouldAttemptProvider(env, 'workers-ai');
+    if (cbWAI.attempt) {
+      try {
+        const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+          messages: [
+            { role: 'system', content: 'You are a crypto market analyst. Return ONLY a JSON array with sentiment, impact, reason (in Farsi), and coins for each headline.' },
+            { role: 'user', content: prompt },
+          ],
+          max_tokens: 2048,
+          temperature: 0.2,
+        });
 
-      if (aiResponse?.response) {
-        const parsed = parseBatchResult(aiResponse.response);
-        if (parsed && Object.keys(parsed).length > 0) {
-          console.log('[NEWS-AI-BATCH] ⚠️ Workers AI fallback succeeded (Gemini was unavailable)');
-          return parsed;
+        if (aiResponse?.response) {
+          const parsed = parseBatchResult(aiResponse.response);
+          if (parsed && Object.keys(parsed).length > 0) {
+            // SUCCESS — record in circuit breaker
+            try { await recordCircuitResult(env, 'workers-ai', true); } catch {}
+            console.log('[NEWS-AI-BATCH] ⚠️ Workers AI fallback succeeded (Gemini was unavailable)');
+            return parsed;
+          }
+          // Empty/malformed response — record as retryable failure
+          try { await recordCircuitResult(env, 'workers-ai', false, 'retryable', 'empty_response'); } catch {}
+        } else {
+          try { await recordCircuitResult(env, 'workers-ai', false, 'retryable', 'empty_response'); } catch {}
         }
+      } catch (e) {
+        const msg = e?.message || String(e) || '';
+        // Classify: non-retryable (model not found/auth) vs retryable (429/capacity/timeout)
+        const isNonRetryable = /not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
+          && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg);
+        try { await recordCircuitResult(env, 'workers-ai', false, isNonRetryable ? 'non_retryable' : 'retryable', msg.substring(0, 120)); } catch {}
+        console.warn('[NEWS-AI-BATCH] Workers AI failed:', msg);
       }
-    } catch (e) {
-      console.warn('[NEWS-AI-BATCH] Workers AI failed:', e?.message);
+    } else {
+      console.warn(`[NEWS-AI-BATCH] ⚠️ Workers AI circuit OPEN (retry_after ${cbWAI.retry_after}) — skipping to rule-based fallback`);
     }
   }
 
@@ -5950,40 +6033,53 @@ async function processNewsAIBatch(env, pool = null) {
     // ── STEP 4: TRANSLATION (only for filtered articles, title only) ──
     // Phase 2 optimization: only translate title, skip description translation.
     // Description is kept in original language for AI analysis context.
+    // P0-2 FIX: Concurrency limit — process translations in batches of 3
+    // (was Promise.all over ALL filtered articles = up to 10 parallel).
+    // This prevents 10 simultaneous Workers AI calls that can trigger 429
+    // "Capacity temporarily exceeded" errors. Batches of 3 stay under
+    // Workers AI capacity limits while keeping total latency acceptable
+    // (10 articles / 3 per batch = 4 batches × ~500ms = ~2s total).
     stepLog('TRANSLATION_start', { articles: filtered.length });
     let allArticles;
     try {
-      allArticles = await Promise.all(
-        filtered.map(async (f) => {
-          const item = f.item;
-          let translatedTitle = item.title || 'بدون عنوان';
+      const TRANSLATION_CONCURRENCY = 3; // P0-2 FIX: cap parallel translations
+      const processOne = async (f) => {
+        const item = f.item;
+        let translatedTitle = item.title || 'بدون عنوان';
 
-          // Only translate if not already Farsi
-          if (!item._skipTranslate) {
-            try {
-              translatedTitle = await translateToFarsi(item.title || 'بدون عنوان', env);
-            } catch (e) {
-              console.warn('[NEWS-AI-CRON] translateToFarsi failed:', e?.message);
-            }
+        // Only translate if not already Farsi
+        if (!item._skipTranslate) {
+          try {
+            translatedTitle = await translateToFarsi(item.title || 'بدون عنوان', env);
+          } catch (e) {
+            console.warn('[NEWS-AI-CRON] translateToFarsi failed:', e?.message);
           }
+        }
 
-          const rawTitle = String(translatedTitle).replace(/\n/g, ' ').trim();
-          return {
-            title: sanitizeNewsTitle(rawTitle),
-            title_en: item.title || '',
-            description: String(item.description || '').replace(/\n/g, ' ').trim(),
-            time_ago: parseRelativeTime(item.pubDate),
-            pub_date: item.pubDate ? new Date(item.pubDate).toISOString() : null,
-            source: item._sourceName,
-            category: item._category || 'crypto',
-            image: item.image,
-            url: item.url,
-            sentiment: classifySentiment(item.title, item.description),
-            importance_tags: f.tags,
-            importance_score: f.score,
-          };
-        })
-      );
+        const rawTitle = String(translatedTitle).replace(/\n/g, ' ').trim();
+        return {
+          title: sanitizeNewsTitle(rawTitle),
+          title_en: item.title || '',
+          description: String(item.description || '').replace(/\n/g, ' ').trim(),
+          time_ago: parseRelativeTime(item.pubDate),
+          pub_date: item.pubDate ? new Date(item.pubDate).toISOString() : null,
+          source: item._sourceName,
+          category: item._category || 'crypto',
+          image: item.image,
+          url: item.url,
+          sentiment: classifySentiment(item.title, item.description),
+          importance_tags: f.tags,
+          importance_score: f.score,
+        };
+      };
+
+      // Process in batches of TRANSLATION_CONCURRENCY
+      allArticles = [];
+      for (let i = 0; i < filtered.length; i += TRANSLATION_CONCURRENCY) {
+        const batch = filtered.slice(i, i + TRANSLATION_CONCURRENCY);
+        const batchResults = await Promise.all(batch.map(processOne));
+        allArticles.push(...batchResults);
+      }
     } catch (transErr) {
       stepLog('TRANSLATION_FAILED', { error: transErr?.message, stack: transErr?.stack?.substring(0, 200) });
       throw transErr;

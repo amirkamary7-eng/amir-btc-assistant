@@ -1741,8 +1741,10 @@ test('NEWSBE-004 (source): fetchFarsiNews dedup uses canonicalizeUrl', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
   const fnStart = src.indexOf('async function fetchFarsiNews');
   assert.ok(fnStart > -1, 'fetchFarsiNews must exist');
-  // Search a wider window for the dedup block (it's after the cache-read path)
-  const fnSrc = src.slice(fnStart, fnStart + 3500);
+  // Search a wider window for the dedup block (it's after the cache-read path
+  // + the P0-3 singleFlight wrapper comment). Window increased from 3500 to 5000
+  // to accommodate the singleFlight wrapper + P0-3 FIX comment.
+  const fnSrc = src.slice(fnStart, fnStart + 5000);
   assert.ok(/const canonical = canonicalizeUrl\(a\.url\)/.test(fnSrc), 'fetchFarsiNews dedup must use canonicalizeUrl. Window: ' + fnSrc.slice(fnSrc.indexOf('Deduplicate'), fnSrc.indexOf('Deduplicate') + 300));
   assert.ok(/seen\.has\(canonical\)/.test(fnSrc), 'fetchFarsiNews dedup must check canonical against seen set');
 });

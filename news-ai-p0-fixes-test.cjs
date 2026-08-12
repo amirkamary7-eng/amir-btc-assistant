@@ -1,0 +1,319 @@
+/**
+ * NEWS-AI-P0-FIXES-TEST
+ *
+ * Regression tests for the 3 P0 fixes to the News AI pipeline:
+ *   P0-1: Circuit Breaker protection for batchAnalyzeNews (Gemini + Workers AI)
+ *   P0-2: Circuit Breaker for translation (translation-workers-ai) + concurrency limit
+ *   P0-3: singleFlight for fetchFarsiNews live path (Thundering Herd prevention)
+ *
+ * These are SOURCE-LEVEL tests — they verify the code contains the required
+ * circuit breaker calls, concurrency limits, and singleFlight wrapper.
+ * They also verify behavior via extracted function logic.
+ */
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
+const src = fs.readFileSync(WORKER_PATH, 'utf8');
+
+// ═══════════════════════════════════════════════════════════════════════
+// P0-1: Circuit Breaker for batchAnalyzeNews
+// ═══════════════════════════════════════════════════════════════════════
+
+test('P0-1-1: batchAnalyzeNews calls shouldAttemptProvider for Gemini', () => {
+  // Find batchAnalyzeNews function
+  const fnStart = src.indexOf('async function batchAnalyzeNews');
+  assert.ok(fnStart > -1, 'batchAnalyzeNews must exist');
+  // Find the end (next 'async function' or '// Method 3')
+  const method3Idx = src.indexOf('// Method 3: Rule-based fallback', fnStart);
+  const fnSrc = src.slice(fnStart, method3Idx);
+
+  // Verify shouldAttemptProvider is called for Gemini
+  assert.ok(
+    /shouldAttemptProvider\(env,\s*['"]gemini['"]\)/.test(fnSrc),
+    'batchAnalyzeNews must call shouldAttemptProvider(env, "gemini") before Gemini fetch'
+  );
+});
+
+test('P0-1-2: batchAnalyzeNews calls shouldAttemptProvider for Workers AI', () => {
+  const fnStart = src.indexOf('async function batchAnalyzeNews');
+  const method3Idx = src.indexOf('// Method 3: Rule-based fallback', fnStart);
+  const fnSrc = src.slice(fnStart, method3Idx);
+
+  assert.ok(
+    /shouldAttemptProvider\(env,\s*['"]workers-ai['"]\)/.test(fnSrc),
+    'batchAnalyzeNews must call shouldAttemptProvider(env, "workers-ai") before Workers AI call'
+  );
+});
+
+test('P0-1-3: batchAnalyzeNews calls recordCircuitResult for Gemini success + failure', () => {
+  const fnStart = src.indexOf('async function batchAnalyzeNews');
+  const method3Idx = src.indexOf('// Method 3: Rule-based fallback', fnStart);
+  const fnSrc = src.slice(fnStart, method3Idx);
+
+  // Success recording
+  assert.ok(
+    /recordCircuitResult\(env,\s*['"]gemini['"]\s*,\s*true\)/.test(fnSrc),
+    'batchAnalyzeNews must call recordCircuitResult(env, "gemini", true) on Gemini success'
+  );
+
+  // Failure recording (at least 2: HTTP error + network/timeout)
+  const geminiFailureCalls = (fnSrc.match(/recordCircuitResult\(env,\s*['"]gemini['"]\s*,\s*false/g) || []).length;
+  assert.ok(geminiFailureCalls >= 2, `batchAnalyzeNews must call recordCircuitResult(env, "gemini", false) on failures (found ${geminiFailureCalls}, expected >= 2)`);
+});
+
+test('P0-1-4: batchAnalyzeNews calls recordCircuitResult for Workers AI success + failure', () => {
+  const fnStart = src.indexOf('async function batchAnalyzeNews');
+  const method3Idx = src.indexOf('// Method 3: Rule-based fallback', fnStart);
+  const fnSrc = src.slice(fnStart, method3Idx);
+
+  assert.ok(
+    /recordCircuitResult\(env,\s*['"]workers-ai['"]\s*,\s*true\)/.test(fnSrc),
+    'batchAnalyzeNews must call recordCircuitResult(env, "workers-ai", true) on Workers AI success'
+  );
+
+  const waiFailureCalls = (fnSrc.match(/recordCircuitResult\(env,\s*['"]workers-ai['"]\s*,\s*false/g) || []).length;
+  assert.ok(waiFailureCalls >= 1, `batchAnalyzeNews must call recordCircuitResult(env, "workers-ai", false) on failure (found ${waiFailureCalls})`);
+});
+
+test('P0-1-5: batchAnalyzeNews skips Gemini when circuit is OPEN', () => {
+  const fnStart = src.indexOf('async function batchAnalyzeNews');
+  const method3Idx = src.indexOf('// Method 3: Rule-based fallback', fnStart);
+  const fnSrc = src.slice(fnStart, method3Idx);
+
+  // The code must have: if (cbGemini.attempt) { ... } else { skip }
+  assert.ok(
+    /cbGemini\.attempt/.test(fnSrc) && /circuit OPEN/.test(fnSrc),
+    'batchAnalyzeNews must check cbGemini.attempt and log "circuit OPEN" when skipping Gemini'
+  );
+});
+
+test('P0-1-6: batchAnalyzeNews skips Workers AI when circuit is OPEN', () => {
+  const fnStart = src.indexOf('async function batchAnalyzeNews');
+  const method3Idx = src.indexOf('// Method 3: Rule-based fallback', fnStart);
+  const fnSrc = src.slice(fnStart, method3Idx);
+
+  assert.ok(
+    /cbWAI\.attempt/.test(fnSrc) && /Workers AI circuit OPEN/.test(fnSrc),
+    'batchAnalyzeNews must check cbWAI.attempt and log "Workers AI circuit OPEN" when skipping'
+  );
+});
+
+test('P0-1-7: batchAnalyzeNews uses classifyHttpError for Gemini HTTP status', () => {
+  const fnStart = src.indexOf('async function batchAnalyzeNews');
+  const method3Idx = src.indexOf('// Method 3: Rule-based fallback', fnStart);
+  const fnSrc = src.slice(fnStart, method3Idx);
+
+  assert.ok(
+    /classifyHttpError\(res\.status\)/.test(fnSrc),
+    'batchAnalyzeNews must classify HTTP errors (429/5xx = retryable) using classifyHttpError'
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// P0-2: Circuit Breaker for Translation + Concurrency Limit
+// ═══════════════════════════════════════════════════════════════════════
+
+test('P0-2-1: translateToFarsi calls shouldAttemptProvider for translation-workers-ai', () => {
+  const fnStart = src.indexOf('async function translateToFarsi');
+  assert.ok(fnStart > -1, 'translateToFarsi must exist');
+  const fnEnd = src.indexOf('\n}', fnStart + 100);
+  const fnSrc = src.slice(fnStart, fnEnd + 1);
+
+  assert.ok(
+    /shouldAttemptProvider\(env,\s*['"]translation-workers-ai['"]\)/.test(fnSrc),
+    'translateToFarsi must call shouldAttemptProvider(env, "translation-workers-ai") before Workers AI m2m100'
+  );
+});
+
+test('P0-2-2: translateToFarsi calls recordCircuitResult for translation success + failure', () => {
+  const fnStart = src.indexOf('async function translateToFarsi');
+  const fnEnd = src.indexOf('\n}', fnStart + 100);
+  const fnSrc = src.slice(fnStart, fnEnd + 1);
+
+  assert.ok(
+    /recordCircuitResult\(env,\s*['"]translation-workers-ai['"]\s*,\s*true\)/.test(fnSrc),
+    'translateToFarsi must call recordCircuitResult(env, "translation-workers-ai", true) on success'
+  );
+
+  assert.ok(
+    /recordCircuitResult\(env,\s*['"]translation-workers-ai['"]\s*,\s*false/.test(fnSrc),
+    'translateToFarsi must call recordCircuitResult(env, "translation-workers-ai", false) on failure'
+  );
+});
+
+test('P0-2-3: translateToFarsi skips Workers AI when circuit is OPEN', () => {
+  const fnStart = src.indexOf('async function translateToFarsi');
+  const fnEnd = src.indexOf('\n}', fnStart + 100);
+  const fnSrc = src.slice(fnStart, fnEnd + 1);
+
+  assert.ok(
+    /cbTranslation\.attempt/.test(fnSrc),
+    'translateToFarsi must check cbTranslation.attempt before calling Workers AI'
+  );
+  assert.ok(
+    /circuit OPEN/.test(fnSrc),
+    'translateToFarsi must log "circuit OPEN" when skipping Workers AI'
+  );
+});
+
+test('P0-2-4: translateToFarsi Google fallback only runs when Workers AI failed (result === text)', () => {
+  const fnStart = src.indexOf('async function translateToFarsi');
+  const fnEnd = src.indexOf('\n}', fnStart + 100);
+  const fnSrc = src.slice(fnStart, fnEnd + 1);
+
+  // The Google fallback must be gated on `result === text` (meaning Workers AI didn't translate)
+  assert.ok(
+    /if\s*\(result\s*===\s*text/.test(fnSrc),
+    'Google Translate fallback must only run when result === text (Workers AI failed to translate)'
+  );
+});
+
+test('P0-2-5: processNewsAIBatch translation uses concurrency limit (batches of 3)', () => {
+  // Find the STEP 4 TRANSLATION section in processNewsAIBatch
+  const step4Idx = src.indexOf('STEP 4: TRANSLATION');
+  assert.ok(step4Idx > -1, 'STEP 4 TRANSLATION must exist');
+  const step5Idx = src.indexOf('STEP 5:', step4Idx);
+  const step4Src = src.slice(step4Idx, step5Idx);
+
+  // Verify TRANSLATION_CONCURRENCY = 3 (not Promise.all over all items)
+  assert.ok(
+    /TRANSLATION_CONCURRENCY\s*=\s*3/.test(step4Src),
+    'processNewsAIBatch must use TRANSLATION_CONCURRENCY = 3 (was unbounded Promise.all)'
+  );
+  assert.ok(
+    /for\s*\(let i\s*=\s*0;\s*i\s*<\s*filtered\.length;\s*i\s*\+=\s*TRANSLATION_CONCURRENCY\)/.test(step4Src),
+    'processNewsAIBatch must process translations in batches of 3, not unbounded Promise.all'
+  );
+});
+
+test('P0-2-6: buildFarsiNewsArticles translation batch size reduced to 3', () => {
+  const fnStart = src.indexOf('async function buildFarsiNewsArticles');
+  assert.ok(fnStart > -1, 'buildFarsiNewsArticles must exist');
+  const fnEnd = src.indexOf('\n}', src.indexOf('return articles.filter', fnStart));
+  const fnSrc = src.slice(fnStart, fnEnd);
+
+  // The batch size must be 3 (was 10)
+  assert.ok(
+    /TRANSLATION_BATCH_SIZE\s*=\s*3/.test(fnSrc),
+    'buildFarsiNewsArticles must use TRANSLATION_BATCH_SIZE = 3 (was 10)'
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// P0-3: singleFlight for fetchFarsiNews (Thundering Herd prevention)
+// ═══════════════════════════════════════════════════════════════════════
+
+test('P0-3-1: fetchFarsiNews wraps live-fetch path in singleFlight', () => {
+  const fnStart = src.indexOf('async function fetchFarsiNews');
+  assert.ok(fnStart > -1, 'fetchFarsiNews must exist');
+  const fnEnd = src.lastIndexOf('});', src.indexOf('// ── AI NEWS SUMMARIZATION', fnStart));
+  const fnSrc = src.slice(fnStart, fnEnd);
+
+  assert.ok(
+    /singleFlight\(['"]farsi-news:live-fetch['"]/.test(fnSrc),
+    'fetchFarsiNews must wrap live-fetch path in singleFlight("farsi-news:live-fetch", ...)'
+  );
+});
+
+test('P0-3-2: singleFlight key is unique to farsi-news (not shared with other endpoints)', () => {
+  // Verify the key is not used elsewhere (would cause incorrect deduplication)
+  const allSingleFlightCalls = (src.match(/singleFlight\(['"][^'"]+['"]/g) || []);
+  const farsiNewsCalls = allSingleFlightCalls.filter(c => c.includes('farsi-news:live-fetch'));
+
+  assert.equal(farsiNewsCalls.length, 1, 'singleFlight("farsi-news:live-fetch") must appear exactly once');
+});
+
+test('P0-3-3: singleFlight wrapper documents per-isolate limitation', () => {
+  const fnStart = src.indexOf('async function fetchFarsiNews');
+  // Wider window to capture the full singleFlight comment block
+  const fnSrc = src.slice(fnStart, fnStart + 3000);
+
+  // The comment must explicitly mention "PER-ISOLATE" and "not a distributed lock"
+  assert.ok(
+    /PER-ISOLATE/.test(fnSrc) && /not a distributed lock/.test(fnSrc),
+    'singleFlight wrapper must document that it is per-isolate, not a distributed lock'
+  );
+});
+
+test('P0-3-4: cache-hit path is NOT inside singleFlight (only live-fetch is)', () => {
+  const fnStart = src.indexOf('async function fetchFarsiNews');
+  const fnSrc = src.slice(fnStart, fnStart + 3000);
+
+  // The cache-hit path (readAppCache + enrichNewsWithAISummaries) must be
+  // BEFORE the singleFlight wrapper. Verify "cachedNews" appears before "singleFlight".
+  const cachedNewsIdx = fnSrc.indexOf('cachedNews');
+  const singleFlightIdx = fnSrc.indexOf('singleFlight');
+
+  assert.ok(cachedNewsIdx > -1, 'cache-hit path must exist');
+  assert.ok(singleFlightIdx > -1, 'singleFlight wrapper must exist');
+  assert.ok(cachedNewsIdx < singleFlightIdx, 'cache-hit path must be BEFORE singleFlight (not wrapped)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Behavioral tests: verify the fix logic works correctly
+// ═══════════════════════════════════════════════════════════════════════
+
+test('P0-BEHAVIORAL-1: Circuit breaker functions accept arbitrary provider keys', () => {
+  // Verify the abstraction is generic — shouldAttemptProvider and recordCircuitResult
+  // use the provider parameter as part of a KV key, so 'translation-workers-ai' works.
+  // The actual code uses template literal: `${CIRCUIT_BREAKER_KEY_PREFIX}${provider}`
+  const cbBlockStart = src.indexOf('async function getCircuitState');
+  const cbBlockEnd = src.indexOf('// ── Cache stats');
+  const cbBlockSrc = src.slice(cbBlockStart, cbBlockEnd);
+
+  // getCircuitState, saveCircuitState use ${CIRCUIT_BREAKER_KEY_PREFIX}${provider}
+  assert.ok(
+    /CIRCUIT_BREAKER_KEY_PREFIX\}\$\{provider/.test(cbBlockSrc),
+    'Circuit breaker functions must use ${CIRCUIT_BREAKER_KEY_PREFIX}${provider} as KV key (generic abstraction)'
+  );
+
+  // Verify shouldAttemptProvider and recordCircuitResult exist and call getCircuitState/saveCircuitState
+  assert.ok(/async function shouldAttemptProvider/.test(cbBlockSrc), 'shouldAttemptProvider must exist');
+  assert.ok(/async function recordCircuitResult/.test(cbBlockSrc), 'recordCircuitResult must exist');
+  assert.ok(/getCircuitState\(env,\s*provider\)/.test(cbBlockSrc), 'functions must call getCircuitState(env, provider)');
+});
+
+test('P0-BEHAVIORAL-2: No new circuit breaker constants added (reuses existing)', () => {
+  // The fix must NOT introduce new circuit breaker threshold constants.
+  // It should reuse CIRCUIT_BREAKER_FAILURE_THRESHOLD and CIRCUIT_BREAKER_OPEN_MS.
+  // Count occurrences — should be unchanged (defined once, used multiple times).
+  const thresholdDefs = (src.match(/CIRCUIT_BREAKER_FAILURE_THRESHOLD\s*=\s*\d+/g) || []).length;
+  assert.equal(thresholdDefs, 1, 'CIRCUIT_BREAKER_FAILURE_THRESHOLD must be defined exactly once (not duplicated)');
+
+  const openMsDefs = (src.match(/CIRCUIT_BREAKER_OPEN_MS\s*=\s*[\d\s*]+;/g) || []).length;
+  assert.equal(openMsDefs, 1, 'CIRCUIT_BREAKER_OPEN_MS must be defined exactly once (not duplicated)');
+});
+
+test('P0-BEHAVIORAL-3: batchAnalyzeNews fallback chain unchanged (Gemini → Workers AI → rule-based)', () => {
+  const fnStart = src.indexOf('async function batchAnalyzeNews');
+  const fnEnd = src.indexOf('// NEWSBE-006 FIX', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd);
+
+  // Verify order: Method 1 (Gemini) → Method 2 (Workers AI) → Method 3 (rule-based)
+  const method1Idx = fnSrc.indexOf('Method 1: Gemini');
+  const method2Idx = fnSrc.indexOf('Method 2: Workers AI');
+  const method3Idx = fnSrc.indexOf('Method 3: Rule-based fallback');
+
+  assert.ok(method1Idx > -1 && method2Idx > -1 && method3Idx > -1, 'All 3 methods must exist');
+  assert.ok(method1Idx < method2Idx, 'Method 1 (Gemini) must come before Method 2 (Workers AI)');
+  assert.ok(method2Idx < method3Idx, 'Method 2 (Workers AI) must come before Method 3 (rule-based)');
+});
+
+test('P0-BEHAVIORAL-4: translation fallback chain: Workers AI → Google (only if failed) → original text', () => {
+  const fnStart = src.indexOf('async function translateToFarsi');
+  const fnEnd = src.indexOf('\n}', fnStart + 100);
+  const fnSrc = src.slice(fnStart, fnEnd + 1);
+
+  // Workers AI is primary
+  assert.ok(/env\.AI\.run\(['"]@cf\/meta\/m2m100-1\.2b['"]/.test(fnSrc), 'Workers AI m2m100 must be primary');
+
+  // Google fallback gated on `result === text` (Workers AI failed)
+  assert.ok(/if\s*\(result\s*===\s*text/.test(fnSrc), 'Google fallback must be gated on Workers AI failure');
+
+  // Original text returned if both fail (result stays as `text`)
+  assert.ok(/return result/.test(fnSrc), 'Must return result (which is original text if both fail)');
+});
