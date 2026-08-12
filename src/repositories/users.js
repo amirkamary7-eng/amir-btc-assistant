@@ -134,8 +134,13 @@ export function createUserRepository(deps) {
    * ROOT CAUSE FIX: Now tracks last_active_at on every bootstrap (Mini App open)
    * and sets mini_app_opened_at on first Mini App open.
    */
-  async function bootstrap(env, userId, payload) {
-    const existingUser = await getById(env, userId);
+  async function bootstrap(env, userId, payload, existingUser = null) {
+    // If existingUser is not provided, fetch it (backward compatible).
+    // When the controller already has it from a prior getById() call,
+    // passing it here avoids a duplicate DB query.
+    if (!existingUser) {
+      existingUser = await getById(env, userId);
+    }
     const fallbackLang = existingUser?.lang || 'fa';
     const lang = normalizeLanguage(payload.lang, fallbackLang);
     const isPremium = Boolean(payload.is_premium);

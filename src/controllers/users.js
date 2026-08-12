@@ -112,7 +112,7 @@ export function createUserHandlers(deps) {
           last_name: normalizeOptionalString(payload.last_name) || normalizeOptionalString(tgUser?.last_name),
           lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
           is_premium: Boolean(tgUser?.is_premium),
-        });
+        }, preExistingUser);
         _bsLog('bootstrap', 'ok');
       } catch (e) {
         _bsLog('bootstrap', 'error', { errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 200) });

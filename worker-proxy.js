@@ -7866,6 +7866,7 @@ async function handleTelegramWebhook(request, env) {
   }
   // ── End webhook secret validation ─────────────────────────────────────────
 
+  let messageContext = null;
   try {
     const updatePayload = await request.json();
     const callbackQuery = updatePayload?.callback_query;
@@ -7883,10 +7884,10 @@ async function handleTelegramWebhook(request, env) {
         return new Response(null, { status: 200, headers: withCors({}, env) });
       }
 
-      // Rate limit: max 1 callback per 10 seconds per user
+      // Rate limit: max 1 callback per 60 seconds per user (Cloudflare KV minimum TTL)
       const rateLimited = await isCallbackRateLimited(env, userId);
       if (rateLimited) {
-        await answerTelegramCallbackQuery(env, callbackQuery.id, '⏳ لطفاً ۱۰ ثانیه صبر کنید و دوباره تلاش کنید.', false);
+        await answerTelegramCallbackQuery(env, callbackQuery.id, '⏳ لطفاً ۱ دقیقه صبر کنید و دوباره تلاش کنید.', false);
         return new Response(null, { status: 200, headers: withCors({}, env) });
       }
 
@@ -7939,7 +7940,7 @@ async function handleTelegramWebhook(request, env) {
     }
 
     // ── Handle /start command ───────────────────────────────────────────────
-    const messageContext = extractTelegramMessageContext(updatePayload);
+    messageContext = extractTelegramMessageContext(updatePayload);
         if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
       return new Response(null, {
         status: 200,
@@ -10580,7 +10581,7 @@ export default {
             const _rlKey = `jl:${_joinUserId}`;
             const _existing = await env.RATE_LIMITS.get(_rlKey);
             if (_existing) {
-              return jsonResponse({ status: 'error', message: 'Too many requests. Please wait a few seconds.', code: 'RATE_LIMITED' }, { status: 429 }, env);
+              return jsonResponse({ status: 'error', message: 'Too many requests. Please wait 60 seconds before trying again.', code: 'RATE_LIMITED', retry_after: 60 }, { status: 429 }, env);
             }
             // Cloudflare KV requires expirationTtl >= 60 seconds.
             // Was 3s → caused "KV PUT failed: Invalid expiration_ttl" on every request.
