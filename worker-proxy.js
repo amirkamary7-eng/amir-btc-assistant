@@ -204,6 +204,14 @@ function safeDbErrorResponse(error, options = {}, env = null) {
     message = 'Database unavailable',
   } = options;
 
+  // Log the actual error for diagnostics — no sensitive data (passwords, tokens,
+  // init-data) is included. The error message from pg/neon typically contains
+  // connection details or query errors, which are safe to log. The safeError()
+  // function already strips DB connection strings and token/key patterns.
+  if (error) {
+    console.warn(safeError('db-error-detail', error));
+  }
+
   return jsonResponse(
     {
       status: statusValue,
@@ -1821,6 +1829,15 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
   // Request-scoped shared pool: if env._reqPool is set (by the route wrapper),
   // reuse it instead of creating a per-call Pool. This means ALL queryDb calls
   // within one request share ONE WebSocket → ONE TLS handshake.
+  //
+  // RACE CONDITION FIX: env is shared across concurrent requests in the same
+  // isolate. withSharedPool's save/restore pattern (env._reqPool = _prevReqPool)
+  // can restore a pool that was already ended by another concurrent request's
+  // finally block. When this happens, pool.query() throws "Cannot use a pool
+  // after calling end on the pool". Previously this error was RE-THROWN → 503.
+  // FIX: On this specific error, clear env._reqPool and FALL THROUGH to the
+  // neon/per-call pool path. This makes the stale-pool error non-fatal — the
+  // query simply uses a fresh pool.
   if (env && env._reqPool) {
     try {
       const _result = await env._reqPool.query(sqlText, params);
@@ -1844,7 +1861,15 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
       });
       // If the shared pool is broken, clear it so future calls fall back.
       env._reqPool = null;
-      throw error;
+      // STALE-POOL FIX: "Cannot use a pool after calling end on the pool" is a
+      // race condition in the save/restore pattern, NOT a real DB error. Don't
+      // throw — fall through to the neon/per-call pool path below. The query
+      // will succeed with a fresh pool.
+      if (_errMsg.includes('Cannot use a pool after calling end on the pool')) {
+        // Fall through to neon() / per-call pool path
+      } else {
+        throw error;
+      }
     }
   }
 
