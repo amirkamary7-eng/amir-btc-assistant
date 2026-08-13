@@ -18,7 +18,18 @@ export function createNotificationPlatformHandlers(deps) {
     notificationPlatformRepo,
     sendTelegramMessage,
     adminRepo,
+    // NEW-1 FIX: Rate limiting for admin mutations
+    isUserRateLimited,
   } = deps;
+
+  // NEW-1 FIX: Check admin rate limit for notification platform mutations
+  async function checkNpRateLimit(env, adminId) {
+    if (!isUserRateLimited || !env.RATE_LIMITS) return null;
+    if (await isUserRateLimited(env, String(adminId), 'admin-mutation', 20, 60)) {
+      return jsonResponse({ status: 'error', message: 'Too many admin actions. Please wait.', code: 'RATE_LIMITED' }, { status: 429 }, env);
+    }
+    return null;
+  }
 
   // PHASE 3 FIX: Helper to get user ID from _protectedUser (set by global middleware
   // in production) or fallback to authenticateTelegramRequest (non-production).
@@ -145,6 +156,7 @@ export function createNotificationPlatformHandlers(deps) {
   async function handleCreateTemplate(request, env) {
     const { error: authErr } = await requireAdmin(request, env, 'broadcast');
     if (authErr) return authErr;
+    const _rlErr = await checkNpRateLimit(env, "unknown"); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -156,6 +168,7 @@ export function createNotificationPlatformHandlers(deps) {
   async function handleUpdateTemplate(request, env, templateId) {
     const { error: authErr } = await requireAdmin(request, env, 'broadcast');
     if (authErr) return authErr;
+    const _rlErr = await checkNpRateLimit(env, "unknown"); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -168,6 +181,7 @@ export function createNotificationPlatformHandlers(deps) {
   async function handleDeleteTemplate(request, env, templateId) {
     const { error: authErr } = await requireAdmin(request, env, 'broadcast');
     if (authErr) return authErr;
+    const _rlErr = await checkNpRateLimit(env, "unknown"); if (_rlErr) return _rlErr;
     try {
       const ok = await notificationPlatformRepo.deleteTemplate(env, templateId);
       if (!ok) return jsonResponse({ status: 'error', message: 'Template not found' }, { status: 404 }, env);
@@ -190,6 +204,7 @@ export function createNotificationPlatformHandlers(deps) {
   async function handleCreateBroadcast(request, env) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'broadcast');
     if (authErr) return authErr;
+    const _rlErr = await checkNpRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {

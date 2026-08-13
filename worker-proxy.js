@@ -7116,6 +7116,8 @@ const rewardCenterHandlers = createRewardCenterHandlers({
   getClientIp: (request) => request.headers.get('cf-connecting-ip') || null,
   adminRepo,
   rewardCenterRepo,
+  // NEW-1 FIX: Rate limiting for admin mutations
+  isUserRateLimited,
 });
 //#endregion
 
@@ -7133,6 +7135,8 @@ const notificationPlatformHandlers = createNotificationPlatformHandlers({
   notificationPlatformRepo,
   sendTelegramMessage,
   adminRepo,
+  // NEW-1 FIX: Rate limiting for admin mutations
+  isUserRateLimited,
 });
 //#endregion
 
