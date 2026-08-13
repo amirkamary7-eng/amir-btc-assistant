@@ -767,9 +767,13 @@ test('404: unknown route returns 404', async () => {
 
 test('OPTIONS: preflight returns 204 with CORS headers', async () => {
   const worker = loadWorker();
-  const env = createEnv();
+  // A-5 FIX: Test must set WEBAPP_URL since CORS now fails closed when it's missing
+  const env = createEnv({ WEBAPP_URL: 'https://amir-btc-assistant.pages.dev' });
   const response = await worker.fetch(
-    new Request('http://localhost/api/health', { method: 'OPTIONS' }),
+    new Request('http://localhost/api/health', {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://amir-btc-assistant.pages.dev' },
+    }),
     env,
     {},
   );

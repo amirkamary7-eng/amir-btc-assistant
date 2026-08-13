@@ -1731,6 +1731,12 @@ async function loadAdminRewards() {
                 '<div class="admin-list-item-meta">' +
                 adminFormatDate(r.created_at || r.date) +
                 '</div>' +
+                (r.status === 'pending' ?
+                    '<div class="admin-list-item-actions" style="margin-top:8px;display:flex;gap:6px;">' +
+                        '<button class="admin-btn admin-btn-sm admin-btn-green" onclick="adminApproveReward(\'' + adminEscapeJsId(r.id) + '\')">تأیید</button>' +
+                        '<button class="admin-btn admin-btn-sm admin-btn-red" onclick="adminRejectReward(\'' + adminEscapeJsId(r.id) + '\')">رد</button>' +
+                    '</div>'
+                : '') +
                 '</div>';
         });
         container.innerHTML = html;
@@ -1749,6 +1755,55 @@ function filterAdminRewards(status, btn) {
     }
     loadAdminRewards();
 }
+
+// A-4 Rewards UI: Approve/Reject actions for pending rewards
+var _adminRewardActionInProgress = false;
+
+async function adminApproveReward(rewardId) {
+    if (_adminRewardActionInProgress) return;
+    _adminRewardActionInProgress = true;
+    try {
+        const data = await adminApiFetch('/api/admin/rewards/' + encodeURIComponent(rewardId) + '/status', {
+            method: 'PUT',
+            body: JSON.stringify({ status: 'approved' }),
+        });
+        if (data && data.status === 'success') {
+            adminToast('پاداش تأیید شد', 'success');
+            loadAdminRewards();
+        } else {
+            adminToast(data?.message || 'خطا در تأیید پاداش', 'error');
+        }
+    } catch (e) {
+        adminToast('خطا در ارتباط با سرور', 'error');
+        console.error('adminApproveReward:', e);
+    } finally {
+        _adminRewardActionInProgress = false;
+    }
+}
+
+async function adminRejectReward(rewardId) {
+    if (_adminRewardActionInProgress) return;
+    _adminRewardActionInProgress = true;
+    try {
+        const data = await adminApiFetch('/api/admin/rewards/' + encodeURIComponent(rewardId) + '/status', {
+            method: 'PUT',
+            body: JSON.stringify({ status: 'rejected' }),
+        });
+        if (data && data.status === 'success') {
+            adminToast('پاداش رد شد', 'success');
+            loadAdminRewards();
+        } else {
+            adminToast(data?.message || 'خطا در رد پاداش', 'error');
+        }
+    } catch (e) {
+        adminToast('خطا در ارتباط با سرور', 'error');
+        console.error('adminRejectReward:', e);
+    } finally {
+        _adminRewardActionInProgress = false;
+    }
+}
+window.adminApproveReward = adminApproveReward;
+window.adminRejectReward = adminRejectReward;
 
 // ─── Transactions ───────────────────────────────────────────
 
@@ -2820,14 +2875,100 @@ async function loadNpTemplates() {
         if (_isLoadTokenStale(token)) return;
         let rows = '';
         if (data && data.status === 'success' && Array.isArray(data.templates)) {
+            _npTemplateCache = data.templates;
             rows = data.templates.map(function (t) {
-                return '<tr><td>' + adminEscapeHtml(t.key) + '</td><td>' + adminEscapeHtml(t.category) + '</td><td>' + adminEscapeHtml(t.priority) + '</td><td>' + adminEscapeHtml(t.channel) + '</td><td>' + (t.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>') + '</td></tr>';
+                return '<tr>' +
+                    '<td>' + adminEscapeHtml(t.key) + '</td>' +
+                    '<td>' + adminEscapeHtml(t.category) + '</td>' +
+                    '<td>' + adminEscapeHtml(t.priority) + '</td>' +
+                    '<td>' + adminEscapeHtml(t.channel) + '</td>' +
+                    '<td>' + (t.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>') + '</td>' +
+                    '<td><button class="adm-btn-sm" onclick="editNpTemplate(\'' + adminEscapeJsId(t.id) + '\')">ویرایش</button></td>' +
+                '</tr>';
             }).join('');
         }
-        section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">قالب‌های اعلان</h4><div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>کلید</th><th>دسته</th><th>اولویت</th><th>کانال</th><th>وضعیت</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5" class="admin-empty">قالبی موجود نیست</td></tr>') + '</tbody></table></div></div>';
+        section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">قالب‌های اعلان</h4>' +
+            '<button class="adm-btn adm-btn-primary" onclick="showNpTemplateForm()" style="margin-bottom:10px;">افزودن قالب</button>' +
+            '<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>کلید</th><th>دسته</th><th>اولویت</th><th>کانال</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>' + (rows || '<tr><td colspan="6" class="admin-empty">قالبی موجود نیست</td></tr>') + '</tbody></table></div></div>';
     } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
 }
 window.loadNpTemplates = loadNpTemplates;
+
+// Notification Templates UI: Create/Edit form
+var _npTemplateCache = [];
+
+function showNpTemplateForm() {
+    var section = document.getElementById('np-templates-section');
+    if (!section) return;
+    section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">قالب جدید</h4>' +
+        '<div class="rc-form-grid">' +
+        '<div class="rc-field"><label>کلید</label><input type="text" id="np-tpl-key" placeholder="wheel_reward"></div>' +
+        '<div class="rc-field"><label>دسته</label><input type="text" id="np-tpl-category" value="system"></div>' +
+        '<div class="rc-field"><label>اولویت</label><select id="np-tpl-priority"><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option></select></div>' +
+        '<div class="rc-field"><label>کانال</label><select id="np-tpl-channel"><option value="mini_app">mini_app</option><option value="telegram">telegram</option><option value="both" selected>both</option></select></div>' +
+        '<div class="rc-field"><label>عنوان</label><input type="text" id="np-tpl-title" placeholder="عنوان اعلان"></div>' +
+        '<div class="rc-field"><label>فعال</label><select id="np-tpl-active"><option value="true">بله</option><option value="false">خیر</option></select></div>' +
+        '</div>' +
+        '<div class="rc-field" style="margin-top:10px;"><label>متن پیام</label><textarea id="np-tpl-message" rows="4" placeholder="متن اعلان..."></textarea></div>' +
+        '<button class="adm-btn adm-btn-primary" onclick="saveNpTemplate(null)" style="margin-top:10px;">ذخیره</button> ' +
+        '<button class="adm-btn" onclick="loadNpTemplates()">انصراف</button>' +
+        '</div>';
+}
+
+function editNpTemplate(templateId) {
+    var tpl = _npTemplateCache.find(function (t) { return String(t.id) === String(templateId); });
+    if (!tpl) { adminToast('قالب یافت نشد', 'error'); return; }
+    var section = document.getElementById('np-templates-section');
+    if (!section) return;
+    section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">ویرایش قالب: ' + adminEscapeHtml(tpl.key) + '</h4>' +
+        '<div class="rc-form-grid">' +
+        '<div class="rc-field"><label>دسته</label><input type="text" id="np-tpl-category" value="' + adminEscapeHtml(tpl.category || '') + '"></div>' +
+        '<div class="rc-field"><label>اولویت</label><select id="np-tpl-priority"><option value="low"' + (tpl.priority === 'low' ? ' selected' : '') + '>low</option><option value="medium"' + (tpl.priority === 'medium' ? ' selected' : '') + '>medium</option><option value="high"' + (tpl.priority === 'high' ? ' selected' : '') + '>high</option></select></div>' +
+        '<div class="rc-field"><label>کانال</label><select id="np-tpl-channel"><option value="mini_app"' + (tpl.channel === 'mini_app' ? ' selected' : '') + '>mini_app</option><option value="telegram"' + (tpl.channel === 'telegram' ? ' selected' : '') + '>telegram</option><option value="both"' + (tpl.channel === 'both' ? ' selected' : '') + '>both</option></select></div>' +
+        '<div class="rc-field"><label>عنوان</label><input type="text" id="np-tpl-title" value="' + adminEscapeHtml(tpl.title || '') + '"></div>' +
+        '<div class="rc-field"><label>فعال</label><select id="np-tpl-active"><option value="true"' + (tpl.is_active ? ' selected' : '') + '>بله</option><option value="false"' + (!tpl.is_active ? ' selected' : '') + '>خیر</option></select></div>' +
+        '</div>' +
+        '<div class="rc-field" style="margin-top:10px;"><label>متن پیام</label><textarea id="np-tpl-message" rows="4">' + adminEscapeHtml(tpl.message || '') + '</textarea></div>' +
+        '<button class="adm-btn adm-btn-primary" onclick="saveNpTemplate(\'' + adminEscapeJsId(templateId) + '\')" style="margin-top:10px;">به‌روزرسانی</button> ' +
+        '<button class="adm-btn" onclick="loadNpTemplates()">انصراف</button> ' +
+        '<button class="adm-btn adm-btn-red" onclick="deleteNpTemplate(\'' + adminEscapeJsId(templateId) + '\')">حذف</button>' +
+        '</div>';
+}
+
+async function saveNpTemplate(templateId) {
+    var payload = {
+        key: document.getElementById('np-tpl-key') ? document.getElementById('np-tpl-key').value : undefined,
+        category: document.getElementById('np-tpl-category') ? document.getElementById('np-tpl-category').value : 'system',
+        priority: document.getElementById('np-tpl-priority') ? document.getElementById('np-tpl-priority').value : 'medium',
+        channel: document.getElementById('np-tpl-channel') ? document.getElementById('np-tpl-channel').value : 'both',
+        title: document.getElementById('np-tpl-title') ? document.getElementById('np-tpl-title').value : '',
+        message: document.getElementById('np-tpl-message') ? document.getElementById('np-tpl-message').value : '',
+        is_active: document.getElementById('np-tpl-active') ? document.getElementById('np-tpl-active').value === 'true' : true,
+    };
+    // Remove undefined fields
+    Object.keys(payload).forEach(function (k) { if (payload[k] === undefined) delete payload[k]; });
+    try {
+        var url = '/api/admin/notifications/templates';
+        var method = 'POST';
+        if (templateId) { url = '/api/admin/notifications/templates/' + encodeURIComponent(templateId); method = 'PUT'; }
+        var data = await adminApiFetch(url, { method: method, body: JSON.stringify(payload) });
+        if (data && data.status === 'success') { adminToast('قالب ذخیره شد', 'success'); loadNpTemplates(); }
+        else { adminToast(data?.message || 'خطا در ذخیره', 'error'); }
+    } catch (e) { adminToast('خطا', 'error'); console.error('saveNpTemplate:', e); }
+}
+
+async function deleteNpTemplate(templateId) {
+    if (!confirm('از حذف این قالب مطمئن هستید؟')) return;
+    try {
+        var data = await adminApiFetch('/api/admin/notifications/templates/' + encodeURIComponent(templateId), { method: 'DELETE' });
+        if (data && data.status === 'success') { adminToast('قالب حذف شد', 'success'); loadNpTemplates(); }
+        else { adminToast(data?.message || 'خطا در حذف', 'error'); }
+    } catch (e) { adminToast('خطا', 'error'); console.error('deleteNpTemplate:', e); }
+}
+window.showNpTemplateForm = showNpTemplateForm;
+window.editNpTemplate = editNpTemplate;
+window.saveNpTemplate = saveNpTemplate;
+window.deleteNpTemplate = deleteNpTemplate;
 
 async function loadNpAnalytics() {
     const section = document.getElementById('np-analytics-section');

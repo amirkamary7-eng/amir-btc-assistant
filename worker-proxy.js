@@ -80,13 +80,23 @@ function withCors(headers = {}, env = null) {
   if (isLocalhost) {
     merged.set('Access-Control-Allow-Origin', reqOrigin);
   } else if (env) {
-    try {
-      merged.set('Access-Control-Allow-Origin', new URL(resolveWebAppUrl(env)).origin);
-    } catch {
-      merged.set('Access-Control-Allow-Origin', '*');
+    // A-5 FIX: Fail-closed in production — if WEBAPP_URL is not set or malformed,
+    // do NOT fall back to '*'. Return the request origin (if present) or empty.
+    // This prevents cross-origin access from arbitrary domains when misconfigured.
+    const webappUrl = resolveWebAppUrl(env);
+    if (webappUrl) {
+      try {
+        merged.set('Access-Control-Allow-Origin', new URL(webappUrl).origin);
+      } catch {
+        // Malformed WEBAPP_URL — fail closed (no wildcard)
+        merged.set('Access-Control-Allow-Origin', reqOrigin || '');
+      }
+    } else {
+      // WEBAPP_URL not set — fail closed (no wildcard)
+      merged.set('Access-Control-Allow-Origin', reqOrigin || '');
     }
   } else {
-    merged.set('Access-Control-Allow-Origin', '*');
+    merged.set('Access-Control-Allow-Origin', reqOrigin || '');
   }
   merged.set('Access-Control-Allow-Methods', CORS_METHODS);
   merged.set('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
@@ -7088,6 +7098,8 @@ const adminHandlers = createAdminHandlers({
   notificationPlatformRepo,
   notificationService,
   diagLog,
+  // A-3 FIX: Rate limiting for admin mutations
+  isUserRateLimited,
 });
 
 // ── Reward Center (admin handlers) ──

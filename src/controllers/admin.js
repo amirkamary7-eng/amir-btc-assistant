@@ -27,7 +27,20 @@ export function createAdminHandlers(deps) {
     notificationPlatformRepo,
     notificationService,
     diagLog,
+    // A-3 FIX: Rate limiting for admin mutations
+    isUserRateLimited,
   } = deps;
+
+  // A-3 FIX: Check admin rate limit. Returns 429 Response if throttled, null if OK.
+  // Limits: 20 mutations per 60 seconds per admin (generous for legitimate workflows
+  // but prevents brute-force/abuse). Only applied to mutation endpoints (POST/PUT/DELETE).
+  async function checkAdminRateLimit(request, env, adminId) {
+    if (!isUserRateLimited || !env.RATE_LIMITS) return null;
+    if (await isUserRateLimited(env, String(adminId), 'admin-mutation', 20, 60)) {
+      return jsonResponse({ status: 'error', message: 'Too many admin actions. Please wait.', code: 'RATE_LIMITED' }, { status: 429 }, env);
+    }
+    return null;
+  }
 
   // ---------------------------------------------------------------------------
   // Shared admin auth middleware
@@ -262,6 +275,7 @@ export function createAdminHandlers(deps) {
     // (which allowed admins.view to pass via OR mapping → privilege escalation)
     const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'admins.add');
     if (authErr) return authErr;
+    const _rlErr = await checkAdminRateLimit(request, env, authedAdmin.telegram_id); if (_rlErr) return _rlErr;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
@@ -335,6 +349,7 @@ export function createAdminHandlers(deps) {
     // P0 FIX: Use granular permission 'admins.edit' instead of legacy 'manage_admins'
     const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'admins.edit');
     if (authErr) return authErr;
+    const _rlErr = await checkAdminRateLimit(request, env, authedAdmin.telegram_id); if (_rlErr) return _rlErr;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
@@ -415,6 +430,7 @@ export function createAdminHandlers(deps) {
     // P0 FIX: Use granular permission 'admins.delete' instead of legacy 'manage_admins'
     const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'admins.delete');
     if (authErr) return authErr;
+    const _rlErr = await checkAdminRateLimit(request, env, authedAdmin.telegram_id); if (_rlErr) return _rlErr;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
@@ -537,6 +553,7 @@ export function createAdminHandlers(deps) {
   async function handleReplyTicket(request, env, ticketId) {
     const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'manage_tickets');
     if (authErr) return authErr;
+    const _rlErr = await checkAdminRateLimit(request, env, authedAdmin.telegram_id); if (_rlErr) return _rlErr;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
@@ -616,6 +633,7 @@ export function createAdminHandlers(deps) {
   async function handleUpdateTicketStatus(request, env, ticketId) {
     const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'manage_tickets');
     if (authErr) return authErr;
+    const _rlErr = await checkAdminRateLimit(request, env, authedAdmin.telegram_id); if (_rlErr) return _rlErr;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
@@ -667,6 +685,7 @@ export function createAdminHandlers(deps) {
   async function handleCreateBroadcast(request, env) {
     const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'broadcast');
     if (authErr) return authErr;
+    const _rlErr = await checkAdminRateLimit(request, env, authedAdmin.telegram_id); if (_rlErr) return _rlErr;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
@@ -708,12 +727,19 @@ export function createAdminHandlers(deps) {
       let sentCount = 0;
       let failedCount = 0;
 
-      // Phase 2: Send via NotificationService (single entry point — handles settings, queue, telegram)
-      // No fallback — service is always available (wired in worker-proxy.js DI)
-      for (const userId of targetUsers) {
-        try {
-          if (notificationService) {
-            const result = await notificationService.create(env, {
+      // A-4 FIX: Process broadcasts in bounded batches (25 per batch) instead of
+      // sequential per-user loop. This prevents Worker timeout on large user bases
+      // and limits DB connection pressure. Each batch runs with bounded concurrency
+      // (25 parallel notificationService.create calls), then waits for the batch to
+      // complete before starting the next. This stays within Cloudflare Workers'
+      // 50-subrequest limit and prevents unbounded DB operations.
+      const BROADCAST_BATCH_SIZE = 25;
+      for (let i = 0; i < targetUsers.length; i += BROADCAST_BATCH_SIZE) {
+        const batch = targetUsers.slice(i, i + BROADCAST_BATCH_SIZE);
+        const batchResults = await Promise.allSettled(
+          batch.map(async (userId) => {
+            if (!notificationService) throw new Error('notification_service_unavailable');
+            return notificationService.create(env, {
               userId: String(userId),
               category: 'announcement',
               priority: 'high',
@@ -723,15 +749,16 @@ export function createAdminHandlers(deps) {
               metadata: { broadcast_id: String(broadcast.id), target_type },
               dedupKey: `admin_broadcast_${broadcast.id}_${userId}`,
             });
-            if (result.status === 'delivered') sentCount++;
-            else if (result.status === 'filtered') { /* user opted out — not a failure */ }
+          })
+        );
+        for (const r of batchResults) {
+          if (r.status === 'fulfilled') {
+            if (r.value?.status === 'delivered') sentCount++;
+            else if (r.value?.status === 'filtered') { /* user opted out — not a failure */ }
             else failedCount++;
           } else {
             failedCount++;
           }
-        } catch (sendErr) {
-          failedCount++;
-          console.warn(safeError('broadcast-send-fail', sendErr));
         }
       }
 
@@ -817,6 +844,7 @@ export function createAdminHandlers(deps) {
   async function handleUpdateReward(request, env, rewardId) {
     const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
+    const _rlErr = await checkAdminRateLimit(request, env, authedAdmin.telegram_id); if (_rlErr) return _rlErr;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
@@ -980,6 +1008,7 @@ export function createAdminHandlers(deps) {
   async function handleDeleteTicket(request, env, ticketId) {
     const { error: authErr } = await requireAdmin(request, env, 'manage_tickets');
     if (authErr) return authErr;
+    const _rlErr = await checkAdminRateLimit(request, env, auth?.user?.id || "unknown"); if (_rlErr) return _rlErr;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
