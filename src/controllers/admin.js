@@ -76,7 +76,7 @@ export function createAdminHandlers(deps) {
     'manage_admins':   ['admins.view','admins.add','admins.edit','admins.delete'],
     'manage_tickets':  ['tickets.view','tickets.reply','tickets.close'],
     'manage_rewards':  ['wallet.reward','referral.reward'],
-    'view_users':      ['users.view','users.manage','users.block'],
+    'view_users':      ['users.view'],  // P2 FIX: Removed orphan 'users.manage' and 'users.block' (no implementation)
     'view_tickets':    ['tickets.view'],
     'view_transactions':['wallet.view','wallet.manage'],
     'view_referrals':  ['referral.manage','referral.reward'],
@@ -257,7 +257,9 @@ export function createAdminHandlers(deps) {
   // ---------------------------------------------------------------------------
 
   async function handleAddAdmin(request, env) {
-    const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'manage_admins');
+    // P0 FIX: Use granular permission 'admins.add' instead of legacy 'manage_admins'
+    // (which allowed admins.view to pass via OR mapping → privilege escalation)
+    const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'admins.add');
     if (authErr) return authErr;
 
     if (!isDatabaseConfigured(env)) {
@@ -283,6 +285,17 @@ export function createAdminHandlers(deps) {
 
     const role = normalizeOptionalString(payload.role) || 'admin';
     const permissions = Array.isArray(payload.permissions) ? payload.permissions : [];
+
+    // P0 FIX: Non-super-admins cannot create admins with elevated privileges
+    const authedIsSuper = authedAdmin.is_super || authedAdmin.role === 'super_admin' || (authedAdmin.permissions && authedAdmin.permissions.includes('*'));
+    if (!authedIsSuper) {
+      if (role === 'super_admin') {
+        return jsonResponse({ detail: 'Only super admins can create super admin accounts' }, { status: 403 }, env);
+      }
+      if (permissions.includes('*')) {
+        return jsonResponse({ detail: 'Only super admins can grant wildcard permissions' }, { status: 403 }, env);
+      }
+    }
 
     try {
       await adminRepo.ensureSchema(env);
@@ -318,7 +331,8 @@ export function createAdminHandlers(deps) {
   // ---------------------------------------------------------------------------
 
   async function handleUpdateAdmin(request, env, adminId) {
-    const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'manage_admins');
+    // P0 FIX: Use granular permission 'admins.edit' instead of legacy 'manage_admins'
+    const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'admins.edit');
     if (authErr) return authErr;
 
     if (!isDatabaseConfigured(env)) {
@@ -350,6 +364,25 @@ export function createAdminHandlers(deps) {
         return jsonResponse({ detail: 'Cannot modify super admin' }, { status: 403 }, env);
       }
 
+      // P0 FIX: Non-super-admins cannot escalate privileges
+      const authedIsSuper = authedAdmin.is_super || authedAdmin.role === 'super_admin' || (authedAdmin.permissions && authedAdmin.permissions.includes('*'));
+      if (!authedIsSuper) {
+        // Cannot set role to super_admin
+        if (payload.role === 'super_admin') {
+          return jsonResponse({ detail: 'Only super admins can assign super_admin role' }, { status: 403 }, env);
+        }
+        // Cannot set permissions to include '*'
+        if (Array.isArray(payload.permissions) && payload.permissions.includes('*')) {
+          return jsonResponse({ detail: 'Only super admins can grant wildcard permissions' }, { status: 403 }, env);
+        }
+        // P0 FIX: Non-super-admins cannot modify their own role or permissions (self-escalation)
+        if (String(targetAdmin.telegram_id) === String(authedAdmin.telegram_id)) {
+          if (payload.role !== undefined || payload.permissions !== undefined) {
+            return jsonResponse({ detail: 'Cannot modify your own role or permissions' }, { status: 403 }, env);
+          }
+        }
+      }
+
       const updates = {};
       if (payload.role !== undefined) updates.role = payload.role;
       if (payload.permissions !== undefined) updates.permissions = payload.permissions;
@@ -378,7 +411,8 @@ export function createAdminHandlers(deps) {
   // ---------------------------------------------------------------------------
 
   async function handleDeleteAdmin(request, env, adminId) {
-    const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'manage_admins');
+    // P0 FIX: Use granular permission 'admins.delete' instead of legacy 'manage_admins'
+    const { error: authErr, admin: authedAdmin } = await requireAdmin(request, env, 'admins.delete');
     if (authErr) return authErr;
 
     if (!isDatabaseConfigured(env)) {

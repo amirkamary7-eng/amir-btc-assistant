@@ -481,6 +481,7 @@ const _adminSectionLabels = {
     'system-controls': 'کنترل سیستم',
     'system-health': 'سلامت سیستم',
     'logs': 'لاگ‌ها',
+    'membership': 'عضویت ویژه',
 };
 
 function openAdminPanel() {
@@ -1374,8 +1375,8 @@ async function loadAdminTickets(page) {
             const replies = (t.replies && t.replies.length) ? t.replies : [];
             const priorityCls = t.priority === 'high' ? 'tk-priority-high' : (t.priority === 'medium' ? 'tk-priority-medium' : 'tk-priority-low');
 
-            html += '<div class="tk-card ' + (isExpanded ? 'tk-expanded' : '') + '" id="adm-ticket-' + t.id + '">' +
-                '<div class="tk-card-header" onclick="toggleAdminTicketDetail(\'' + t.id + '\')">' +
+            html += '<div class="tk-card ' + (isExpanded ? 'tk-expanded' : '') + '" id="adm-ticket-' + adminEscapeHtml(String(t.id)) + '">' +
+                '<div class="tk-card-header" onclick="toggleAdminTicketDetail(\'' + adminEscapeHtml(String(t.id)).replace(/'/g, '&#39;') + '\')">' +
                     '<div class="tk-card-header-left">' +
                         '<span class="tk-card-icon ' + si.cls + '">' + si.icon + '</span>' +
                         '<div class="tk-card-header-text">' +
