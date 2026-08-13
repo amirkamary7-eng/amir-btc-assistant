@@ -170,6 +170,29 @@ function adminEscapeHtml(str) {
     return div.innerHTML;
 }
 
+// A-1 FIX: Escape a value for safe use inside a JavaScript string literal
+// within an HTML onclick attribute. This handles BOTH contexts:
+//   1. HTML attribute context (quotes, angle brackets)
+//   2. JavaScript string context (single quotes, backslashes)
+// Use this for ANY dynamic value placed inside onclick="fn('VALUE')"
+// or onclick="fn(\"VALUE\")" or template-literal onclick.
+function adminEscapeJsId(value) {
+    // First: HTML-escape for attribute context
+    var htmlEscaped = adminEscapeHtml(String(value || ''));
+    // Then: escape single quotes and backslashes for JS string context
+    // adminEscapeHtml already converts ' to &#39; and " to &quot;,
+    // but within onclick="..." the browser decodes HTML entities BEFORE
+    // parsing the JS. So &#39; becomes ' again in the JS engine.
+    // We need to prevent the ' from terminating the JS string.
+    // Solution: replace &#39; (which decodes to ') with \\' (JS-escaped quote)
+    // and replace &quot; (which decodes to ") with \\" (JS-escaped quote)
+    // and backslash with \\\\
+    return htmlEscaped
+        .replace(/&#39;/g, '\\&#39;')   // &#39; → \' (prevent JS string termination)
+        .replace(/&quot;/g, '\\&quot;')  // &quot; → \" (prevent JS string termination)
+        .replace(/\\/g, '\\\\');          // \ → \\ (prevent JS escape sequence injection)
+}
+
 function adminFormatDate(iso) {
     if (!iso) return '—';
     try {
@@ -1065,9 +1088,9 @@ async function loadAdminList() {
                 // Row 4: action buttons (fixed position)
                 '<div class="adm-card-actions">' +
                     '<button class="admin-btn admin-btn-sm admin-btn-' + (isActive ? 'ghost' : 'green') +
-                    '" onclick="toggleAdminActive(\'' + (admin.id || '') + '\', ' + isActive + ')">' +
+                    '" onclick="toggleAdminActive(\'' + adminEscapeJsId(admin.id) + '\', ' + isActive + ')">' +
                     (isActive ? 'غیرفعال‌سازی' : 'فعال‌سازی') + '</button>' +
-                    (!isSuper ? '<button class="admin-btn admin-btn-sm admin-btn-red" onclick="removeAdmin(\'' + (admin.id || '') + '\', \'' + (admin.telegram_id || '') + '\')">حذف</button>' : '<span class="adm-card-protected">حفاظت‌شده</span>') +
+                    (!isSuper ? '<button class="admin-btn admin-btn-sm admin-btn-red" onclick="removeAdmin(\'' + adminEscapeJsId(admin.id) + '\', \'' + adminEscapeJsId(admin.telegram_id) + '\')">حذف</button>' : '<span class="adm-card-protected">حفاظت‌شده</span>') +
                 '</div>' +
                 '</div>';
         });
@@ -1419,22 +1442,22 @@ async function loadAdminTickets(page) {
 
                 // Reply form
                 html += '<div class="tk-reply-form">' +
-                    '<textarea id="adm-reply-' + t.id + '" class="tk-reply-input" placeholder="پاسخ خود را بنویسید..." rows="3"></textarea>' +
-                    '<button class="tk-btn tk-btn-primary" onclick="adminReplyTicket(\'' + t.id + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال پاسخ</button>' +
+                    '<textarea id="adm-reply-' + adminEscapeHtml(String(t.id)) + '" class="tk-reply-input" placeholder="پاسخ خود را بنویسید..." rows="3"></textarea>' +
+                    '<button class="tk-btn tk-btn-primary" onclick="adminReplyTicket(\'' + adminEscapeJsId(t.id) + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال پاسخ</button>' +
                     '</div>';
 
                 // Status controls
                 html += '<div class="tk-actions">';
                 if (t.status !== 'closed') {
-                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + t.id + '\',\'closed\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg> بستن</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'closed\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg> بستن</button>';
                 }
                 if (t.status !== 'open') {
-                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + t.id + '\',\'open\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> باز کردن</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'open\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> باز کردن</button>';
                 }
                 if (t.status !== 'answered') {
-                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + t.id + '\',\'answered\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> پاسخ داده شده</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'answered\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> پاسخ داده شده</button>';
                 }
-                html += '<button class="tk-btn tk-btn-danger" onclick="adminDeleteTicket(\'' + t.id + '\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> حذف</button>';
+                html += '<button class="tk-btn tk-btn-danger" onclick="adminDeleteTicket(\'' + adminEscapeJsId(t.id) + '\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> حذف</button>';
                 html += '</div>';
 
                 html += '</div>';
@@ -2200,8 +2223,8 @@ async function loadRcWheelRewards() {
                     <td>${adminEscapeHtml(r.campaign_id || '--')}</td>
                     <td>${r.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
                     <td>
-                        <button class="adm-btn-sm" onclick="toggleRcWheelReward(${r.id}, ${!r.is_active})">${r.is_active ? 'غیرفعال' : 'فعال'}</button>
-                        <button class="adm-btn-sm adm-btn-danger" onclick="deleteRcWheelReward(${r.id})">حذف</button>
+                        <button class="adm-btn-sm" onclick="toggleRcWheelReward(${adminEscapeHtml(String(r.id))}, ${!r.is_active})">${r.is_active ? 'غیرفعال' : 'فعال'}</button>
+                        <button class="adm-btn-sm adm-btn-danger" onclick="deleteRcWheelReward(${adminEscapeHtml(String(r.id))})">حذف</button>
                     </td>
                 </tr>`;
             }).join('');
@@ -2296,7 +2319,7 @@ async function loadRcReferralTiers() {
                     <td>${adminFormatNumber(t.bonus_spins)}</td>
                     <td>${adminEscapeHtml(t.campaign_id || '--')}</td>
                     <td>${t.is_enabled ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
-                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcReferralTier(${t.id})">حذف</button></td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcReferralTier(${adminEscapeHtml(String(t.id))})">حذف</button></td>
                 </tr>`;
             }).join('');
             section.innerHTML = `
@@ -2372,7 +2395,7 @@ async function loadRcMissionRewards() {
                     <td>${adminFormatNumber(m.token_amount)} AB</td>
                     <td>${adminFormatNumber(m.bonus_spins)}</td>
                     <td>${m.is_enabled ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
-                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcMissionReward(${m.id})">حذف</button></td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcMissionReward(${adminEscapeHtml(String(m.id))})">حذف</button></td>
                 </tr>`;
             }).join('');
             section.innerHTML = `
@@ -2534,7 +2557,7 @@ async function loadRcLibrary() {
                     <td>${adminFormatNumber(item.amount)}</td>
                     <td>${adminEscapeHtml(item.category)}</td>
                     <td>${item.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
-                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcLibraryItem(${item.id})">حذف</button></td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcLibraryItem(${adminEscapeHtml(String(item.id))})">حذف</button></td>
                 </tr>`;
             }).join('');
             section.innerHTML = `

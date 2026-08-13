@@ -235,7 +235,8 @@ export function createAdminHandlers(deps) {
   // ---------------------------------------------------------------------------
 
   async function handleListAdmins(request, env) {
-    const { error: authErr } = await requireAdmin(request, env);
+    // A-6 FIX: Require admins.view permission (was no permission check)
+    const { error: authErr } = await requireAdmin(request, env, 'admins.view');
     if (authErr) return authErr;
 
     if (!isDatabaseConfigured(env)) {
@@ -835,6 +836,16 @@ export function createAdminHandlers(deps) {
     if (!status) {
       return jsonResponse(
         buildBodyFieldValidationError('status', 'string_too_short', 'status is required', status, { min_length: 1 }),
+        { status: 422 }, env);
+    }
+
+    // A-2 FIX: Strict whitelist validation for reward status.
+    // Only existing business statuses are accepted. Arbitrary strings
+    // (e.g., 'hacked', 'random') are rejected before reaching the DB.
+    const VALID_REWARD_STATUSES = ['pending', 'approved', 'rejected', 'delivered', 'claimed'];
+    if (!VALID_REWARD_STATUSES.includes(status)) {
+      return jsonResponse(
+        { status: 'error', message: `Invalid status. Must be one of: ${VALID_REWARD_STATUSES.join(', ')}`, code: 'INVALID_STATUS' },
         { status: 422 }, env);
     }
 
