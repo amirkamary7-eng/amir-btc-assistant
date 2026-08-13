@@ -1743,14 +1743,13 @@ test('NEWSBE-004 (source): hashUrl uses canonicalizeUrl', () => {
 
 test('NEWSBE-004 (source): fetchFarsiNews dedup uses canonicalizeUrl', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
-  const fnStart = src.indexOf('async function fetchFarsiNews');
-  assert.ok(fnStart > -1, 'fetchFarsiNews must exist');
-  // Search a wider window for the dedup block (it's after the cache-read path
-  // + the P0-3 singleFlight wrapper comment). Window increased from 3500 to 5000
-  // to accommodate the singleFlight wrapper + P0-3 FIX comment.
-  const fnSrc = src.slice(fnStart, fnStart + 5000);
-  assert.ok(/const canonical = canonicalizeUrl\(a\.url\)/.test(fnSrc), 'fetchFarsiNews dedup must use canonicalizeUrl. Window: ' + fnSrc.slice(fnSrc.indexOf('Deduplicate'), fnSrc.indexOf('Deduplicate') + 300));
-  assert.ok(/seen\.has\(canonical\)/.test(fnSrc), 'fetchFarsiNews dedup must check canonical against seen set');
+  // P0-B FIX: dedup logic moved to _runNewsLiveFetchPipeline (called by fetchFarsiNews).
+  // Search both fetchFarsiNews and _runNewsLiveFetchPipeline for the dedup block.
+  const fnStart = src.indexOf('async function _runNewsLiveFetchPipeline');
+  assert.ok(fnStart > -1, '_runNewsLiveFetchPipeline must exist (P0-B: extracted from fetchFarsiNews)');
+  const fnSrc = src.slice(fnStart, fnStart + 3000);
+  assert.ok(/const canonical = canonicalizeUrl\(a\.url\)/.test(fnSrc), '_runNewsLiveFetchPipeline dedup must use canonicalizeUrl');
+  assert.ok(/seen\.has\(canonical\)/.test(fnSrc), '_runNewsLiveFetchPipeline dedup must check canonical against seen set');
 });
 
 test('NEWSBE-004 (source): processNewsAIBatch dedup uses canonicalizeUrl', () => {
@@ -1758,7 +1757,8 @@ test('NEWSBE-004 (source): processNewsAIBatch dedup uses canonicalizeUrl', () =>
   // Find STEP 5 DEDUP in processNewsAIBatch
   const idx = src.indexOf('STEP 5: DEDUP by URL');
   assert.ok(idx > -1, 'STEP 5 DEDUP must exist in processNewsAIBatch');
-  const dedupBlock = src.slice(idx, idx + 500);
+  // P0-C fix added comments to this block, widening it beyond 500 chars.
+  const dedupBlock = src.slice(idx, idx + 800);
   assert.ok(/canonicalizeUrl\(a\.url\)/.test(dedupBlock), 'processNewsAIBatch dedup must use canonicalizeUrl');
   assert.ok(/NEWSBE-004 FIX/.test(dedupBlock), 'must have NEWSBE-004 FIX comment');
 });

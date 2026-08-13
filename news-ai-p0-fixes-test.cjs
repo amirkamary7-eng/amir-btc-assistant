@@ -229,8 +229,9 @@ test('P0-3-2: singleFlight key is unique to farsi-news (not shared with other en
 
 test('P0-3-3: singleFlight wrapper documents per-isolate limitation', () => {
   const fnStart = src.indexOf('async function fetchFarsiNews');
-  // Wider window to capture the full singleFlight comment block
-  const fnSrc = src.slice(fnStart, fnStart + 3000);
+  // Wider window (5000 chars) to capture the full singleFlight comment block
+  // P0-B fix added more comments, so the window needs to be wider.
+  const fnSrc = src.slice(fnStart, fnStart + 5000);
 
   // The comment must explicitly mention "PER-ISOLATE" and "not a distributed lock"
   assert.ok(
@@ -314,6 +315,110 @@ test('P0-BEHAVIORAL-4: translation fallback chain: Workers AI → Google (only i
   // Google fallback gated on `result === text` (Workers AI failed)
   assert.ok(/if\s*\(result\s*===\s*text/.test(fnSrc), 'Google fallback must be gated on Workers AI failure');
 
-  // Original text returned if both fail (result stays as `text`)
-  assert.ok(/return result/.test(fnSrc), 'Must return result (which is original text if both fail)');
+  // P0-C FIX: translateToFarsi now returns { text, translation_failed } object.
+  // Must return cacheEntry (not bare result string).
+  assert.ok(/return cacheEntry/.test(fnSrc), 'Must return cacheEntry ({ text, translation_failed })');
+
+  // P0-C FIX: translation_failed flag must be set when both providers fail
+  assert.ok(/translation_failed\s*=\s*true/.test(fnSrc), 'Must set translation_failed=true when both providers fail');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// P0-B/C/D FIX REGRESSION TESTS (2026-08-13)
+// ═══════════════════════════════════════════════════════════════════════
+
+test('P0-A-1: NEWS_CACHE_TTL in wrangler.jsonc is 1800 (not 300)', () => {
+  const wranglerSrc = fs.readFileSync(path.join(__dirname, 'wrangler.jsonc'), 'utf8');
+  // All 3 environments must have NEWS_CACHE_TTL: 1800
+  const matches = wranglerSrc.match(/"NEWS_CACHE_TTL":\s*(\d+)/g) || [];
+  assert.ok(matches.length >= 3, `Expected at least 3 NEWS_CACHE_TTL entries, found ${matches.length}`);
+  for (const m of matches) {
+    const val = parseInt(m.match(/\d+$/)[0], 10);
+    assert.equal(val, 1800, `NEWS_CACHE_TTL must be 1800, got ${val}`);
+  }
+});
+
+test('P0-B-1: fetchFarsiNews accepts ctx parameter (3rd arg)', () => {
+  const fnStart = src.indexOf('async function fetchFarsiNews');
+  const fnEnd = src.indexOf('// ── P0-B FIX', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/fetchFarsiNews\(env,\s*categoryFilter,\s*ctx\s*=\s*null\)/.test(fnSrc), 'fetchFarsiNews must accept ctx as 3rd parameter');
+});
+
+test('P0-B-2: handleFarsiNews passes ctx to fetchFarsiNews', () => {
+  const fnStart = src.indexOf('async function handleFarsiNews');
+  const fnEnd = src.indexOf('async function handleTelegramWebhook');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/handleFarsiNews\(request,\s*env,\s*ctx\s*=\s*null\)/.test(fnSrc), 'handleFarsiNews must accept ctx as 3rd parameter');
+  assert.ok(/fetchFarsiNews\(env,\s*categoryFilter,\s*ctx\)/.test(fnSrc), 'handleFarsiNews must pass ctx to fetchFarsiNews');
+});
+
+test('P0-B-3: fetchFarsiNews uses ctx.waitUntil for background refresh on cache miss', () => {
+  const fnStart = src.indexOf('async function fetchFarsiNews');
+  const fnEnd = src.indexOf('// ── P0-B FIX: Extracted pipeline');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/ctx\.waitUntil\(/.test(fnSrc), 'fetchFarsiNews must use ctx.waitUntil for background refresh');
+  assert.ok(/emptyResult/.test(fnSrc), 'fetchFarsiNews must return emptyResult immediately on cache miss with ctx');
+});
+
+test('P0-B-4: _runNewsLiveFetchPipeline extracted as separate function', () => {
+  assert.ok(/async function _runNewsLiveFetchPipeline\(env\)/.test(src), '_runNewsLiveFetchPipeline must be a separate function');
+});
+
+test('P0-B-5: singleFlight still used for pipeline (thundering herd prevention)', () => {
+  const fnStart = src.indexOf('async function fetchFarsiNews');
+  const fnEnd = src.indexOf('async function _runNewsLiveFetchPipeline');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/singleFlight\(['"]farsi-news:live-fetch['"]/.test(fnSrc), 'singleFlight must still wrap the pipeline');
+});
+
+test('P0-C-1: translateToFarsi returns { text, translation_failed } object', () => {
+  const fnStart = src.indexOf('async function translateToFarsi');
+  const fnEnd = src.indexOf('\n}', fnStart + 100);
+  const fnSrc = src.slice(fnStart, fnEnd + 1);
+  assert.ok(/return\s*\{\s*text:\s*'',\s*translation_failed:\s*false\s*\}/.test(fnSrc), 'Must return { text, translation_failed } for empty input');
+  assert.ok(/const cacheEntry = \{\s*text:\s*result,\s*translation_failed\s*\}/.test(fnSrc), 'Must construct cacheEntry object');
+});
+
+test('P0-C-2: buildFarsiNewsArticles sets translation_failed on articles', () => {
+  const fnStart = src.indexOf('async function buildFarsiNewsArticles');
+  const fnEnd = src.indexOf('async function sanitizeNewsTitle');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/translation_failed/.test(fnSrc), 'buildFarsiNewsArticles must set translation_failed field');
+  // title is set to empty string via assignment (title = '') not object property (title: '')
+  assert.ok(/title\s*=\s*''/.test(fnSrc), 'buildFarsiNewsArticles must set title to empty on translation failure');
+  assert.ok(/title_en:/.test(fnSrc), 'buildFarsiNewsArticles must preserve English title in title_en');
+});
+
+test('P0-C-3: processNewsAIBatch (cron) handles new translateToFarsi return type', () => {
+  const fnStart = src.indexOf('const processOne = async (f) =>');
+  const fnEnd = src.indexOf('};', fnStart + 10);
+  const fnSrc = src.slice(fnStart, fnEnd + 2);
+  assert.ok(/tResult\.text/.test(fnSrc), 'processOne must use tResult.text from translateToFarsi');
+  assert.ok(/tResult\.translation_failed/.test(fnSrc), 'processOne must use tResult.translation_failed');
+  assert.ok(/translation_failed/.test(fnSrc), 'processOne must set translation_failed on article');
+});
+
+test('P0-C-4: cron path filters out empty-title articles (translation_failed)', () => {
+  const fnStart = src.indexOf('STEP 5: DEDUP by URL');
+  const fnEnd = src.indexOf('STEP 6:', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/!a\.title \|\| !a\.title\.trim\(\)/.test(fnSrc), 'Cron dedup must filter out empty titles (translation_failed articles)');
+});
+
+test('P0-D-1: buildFarsiNewsArticles only translates titles (not descriptions)', () => {
+  const fnStart = src.indexOf('async function buildFarsiNewsArticles');
+  const fnEnd = src.indexOf('async function sanitizeNewsTitle');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  // Must NOT have flatMap with title + description
+  assert.ok(!/flatMap.*title.*description/.test(fnSrc), 'buildFarsiNewsArticles must NOT translate descriptions (was title+description flatMap)');
+  // Must only translate titles
+  assert.ok(/titlesToTranslate\s*=/.test(fnSrc), 'buildFarsiNewsArticles must have titlesToTranslate array (title only)');
+});
+
+test('P0-D-2: buildFarsiNewsArticles description is kept in original English', () => {
+  const fnStart = src.indexOf('async function buildFarsiNewsArticles');
+  const fnEnd = src.indexOf('async function sanitizeNewsTitle');
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/P0-D FIX: Description is NOT translated/.test(fnSrc), 'Must document that description is not translated');
 });

@@ -3574,17 +3574,20 @@ const _translationCache = new Map();
 const TRANSLATION_CACHE_MAX = 500;
 
 async function translateToFarsi(text, env) {
-  if (!text) return '';
+  if (!text) return { text: '', translation_failed: false };
 
   // OPTIMIZATION: Check in-memory translation cache first.
   // This avoids redundant AI/Google Translate calls for the same text
   // across multiple news refresh cycles.
+  // P0-C FIX: Cache now stores { text, translation_failed } objects so that
+  // cached results preserve whether the translation actually succeeded.
   const cacheKey = text.length > 100 ? text.substring(0, 100) : text;
   if (_translationCache.has(cacheKey)) {
     return _translationCache.get(cacheKey);
   }
 
   let result = text;
+  let translation_failed = false;
 
   // ── Primary: Cloudflare Workers AI ─────────────────────────────────
   // P0-2 FIX: Circuit Breaker protection for translation. Uses a SEPARATE
@@ -3604,6 +3607,7 @@ async function translateToFarsi(text, env) {
         const translated = response?.translated_text;
         if (translated && typeof translated === 'string' && translated.trim()) {
           result = translated.trim();
+          translation_failed = false;
           // SUCCESS — record in circuit breaker
           try { await recordCircuitResult(env, 'translation-workers-ai', true); } catch {}
         } else {
@@ -3650,7 +3654,10 @@ async function translateToFarsi(text, env) {
         const body = await response.json();
         if (Array.isArray(body?.[0])) {
           const translated = body[0].map((part) => part?.[0] || '').join('').trim();
-          if (translated) result = translated;
+          if (translated) {
+            result = translated;
+            translation_failed = false;
+          }
         }
       }
     } catch (e) {
@@ -3659,15 +3666,24 @@ async function translateToFarsi(text, env) {
     }
   }
 
-  // Cache the result (even if it's the original text — avoids retrying failed translations)
+  // P0-C FIX: If result still equals input text, BOTH providers failed.
+  // Mark translation_failed=true so callers can exclude the English text
+  // from the Farsi news feed (instead of silently serving English as Farsi).
+  if (result === text) {
+    translation_failed = true;
+  }
+
+  const cacheEntry = { text: result, translation_failed };
+
+  // Cache the result (even on failure — avoids retrying failed translations)
   if (_translationCache.size >= TRANSLATION_CACHE_MAX) {
     // Evict oldest entry (first key in Map insertion order)
     const firstKey = _translationCache.keys().next().value;
     _translationCache.delete(firstKey);
   }
-  _translationCache.set(cacheKey, result);
+  _translationCache.set(cacheKey, cacheEntry);
 
-  return result;
+  return cacheEntry;
 }
 
 /**
@@ -3717,67 +3733,82 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
 
   // ROOT-CAUSE FIX: Limit to 3 articles per source (was 5).
   // Cloudflare Workers free plan has a 50 subrequest limit per invocation.
-  // With 7 sources × 5 articles × 2 translations = 70 subrequests → exceeds limit.
-  // Now: 7 sources × 3 articles × 2 translations = 42 subrequests (under 50).
-  // Plus RSS fetches (7) + article HTML fetches (up to 5) + AI summaries (up to 3) = 57 max.
-  // To stay under 50: we process translations in 2 batches if needed.
+  // P0-D FIX: Only translate TITLE (not description). This halves translation
+  // calls from 42 to 21 (7 sources × 3 articles × 1 translation). Description
+  // is kept in original English — it is NOT displayed in the frontend (neither
+  // card nor modal); it's only used internally by classifySentiment().
+  // This matches the cron path behavior (processNewsAIBatch only translates title).
   const MAX_ARTICLES_PER_SOURCE = 3;
   const limitedItems = items.slice(0, MAX_ARTICLES_PER_SOURCE);
 
-  let allTranslations;
+  let titleTranslations; // Array of { text, translation_failed }
   if (skipTranslate) {
     // Persian sources — no translation needed
-    allTranslations = limitedItems.map((item) => [
-      item.title || 'بدون عنوان',
-      item.description || '',
-    ]);
+    titleTranslations = limitedItems.map((item) => ({
+      text: item.title || 'بدون عنوان',
+      translation_failed: false,
+    }));
   } else {
     // ROOT-CAUSE FIX: Process translations in BATCHES of 3 to stay under subrequest limit.
     // P0-2 FIX: Reduced from 10 to 3 to prevent Workers AI 429 "Capacity exceeded".
-    // Each translateToFarsi call = 1 AI.run() subrequest (+ potentially 1 Google fetch).
-    // With 7 sources × 3 articles × 2 = 42 translation calls, we batch them 3 at a time.
-    // This stays well under Workers AI capacity limits and the 50-subrequest ceiling.
-    const allTranslatableItems = limitedItems.flatMap((item) => [
-      { text: item.title || 'بدون عنوان', isTitle: true },
-      { text: item.description || '', isTitle: false },
-    ]);
+    // P0-D FIX: Only translate title (was title + description). 7×3×1 = 21 calls.
+    const titlesToTranslate = limitedItems.map((item) => item.title || 'بدون عنوان');
 
-    allTranslations = [];
-    const TRANSLATION_BATCH_SIZE = 3; // P0-2 FIX: was 10, reduced to 3
-    for (let i = 0; i < allTranslatableItems.length; i += TRANSLATION_BATCH_SIZE) {
-      const batch = allTranslatableItems.slice(i, i + TRANSLATION_BATCH_SIZE);
+    titleTranslations = [];
+    const TRANSLATION_BATCH_SIZE = 3;
+    for (let i = 0; i < titlesToTranslate.length; i += TRANSLATION_BATCH_SIZE) {
+      const batch = titlesToTranslate.slice(i, i + TRANSLATION_BATCH_SIZE);
       const batchResults = await Promise.all(
-        batch.map(item => translateToFarsi(item.text, env))
+        batch.map(text => translateToFarsi(text, env))
       );
-      allTranslations.push(...batchResults);
+      titleTranslations.push(...batchResults);
     }
   }
 
   const articles = [];
   for (let i = 0; i < limitedItems.length; i++) {
-    const translatedTitle = allTranslations[i * 2];
-    const translatedDescription = allTranslations[i * 2 + 1];
+    const titleResult = titleTranslations[i];
+    const originalTitle = limitedItems[i].title || 'بدون عنوان';
+    const originalDescription = limitedItems[i].description || '';
 
-    // SANITIZE: AI translation (m2m100) sometimes produces repeated words/phrases.
-    // sanitizeNewsTitle removes duplicates BEFORE the title is cached in KV and
-    // sent to frontend. This is the root-cause fix for the "duplicate title" bug.
-    const rawTitle = String(translatedTitle || limitedItems[i].title || 'بدون عنوان').replace(/\n/g, ' ').trim();
+    // P0-C FIX: If translation failed, do NOT serve English text as Farsi.
+    // Set title to empty so the article is filtered out by the frontend
+    // (which requires non-empty title at line ~6632). Preserve English
+    // original in title_en for debugging/display purposes.
+    const translation_failed = titleResult?.translation_failed === true;
+
+    let title;
+    if (translation_failed) {
+      title = ''; // Filtered out by frontend (empty title)
+    } else {
+      // SANITIZE: AI translation (m2m100) sometimes produces repeated words/phrases.
+      const rawTitle = String(titleResult?.text || originalTitle).replace(/\n/g, ' ').trim();
+      title = sanitizeNewsTitle(rawTitle);
+    }
+
+    // P0-D FIX: Description is NOT translated — kept in original English.
+    // Frontend does NOT display description in cards or modal.
+    // It's only used by classifySentiment() which works on English text.
+    const description = String(originalDescription).replace(/\n/g, ' ').trim();
 
     articles.push({
-      title: sanitizeNewsTitle(rawTitle),
-      description: String(translatedDescription || limitedItems[i].description || '').replace(/\n/g, ' ').trim(),
+      title,
+      title_en: translation_failed ? originalTitle : (limitedItems[i].title || ''),
+      description,
+      translation_failed,
       time_ago: parseRelativeTime(limitedItems[i].pubDate),
-      // Raw publication date in ISO format (UTC) — frontend converts to
-      // Asia/Tehran for display. Item 2: news time in Tehran timezone.
       pub_date: limitedItems[i].pubDate ? new Date(limitedItems[i].pubDate).toISOString() : null,
       source: sourceName,
       category: category || 'crypto',
       image: limitedItems[i].image,
       url: limitedItems[i].url,
-      sentiment: classifySentiment(limitedItems[i].title, limitedItems[i].description),
+      sentiment: classifySentiment(originalTitle, originalDescription),
     });
   }
 
+  // P0-C FIX: Articles with translation_failed have empty title — they'll be
+  // filtered out here (item.title is falsy). This prevents English text from
+  // appearing in the Farsi news feed as if it were a successful translation.
   return articles.filter((item) => item.title || item.description);
 }
 
@@ -3859,7 +3890,7 @@ function classifySentiment(title, description) {
   return 'neutral';
 }
 
-async function fetchFarsiNews(env, categoryFilter) {
+async function fetchFarsiNews(env, categoryFilter, ctx = null) {
   // P1-08 FIX (NEWSBE-001): Read from the BASE cache key (FARSI_NEWS_CACHE_KEY),
   // NOT a category-specific key. The write path (fetchFarsiNews line ~3407 and
   // processNewsAIBatch lines ~5636/5675) ALWAYS writes to the base key with the
@@ -3905,11 +3936,18 @@ async function fetchFarsiNews(env, categoryFilter) {
     }
   }
 
-  // P0-3 FIX: Wrap the entire live-fetch pipeline in singleFlight to prevent
-  // Thundering Herd. When KV cache expires (every 30 min), N concurrent
-  // /api/farsi-news requests would ALL miss cache and ALL run the full
-  // RSS + translation pipeline in parallel. singleFlight ensures only ONE
-  // pipeline runs per isolate — concurrent requests share its result.
+  // ── P0-B FIX: User request does NOT run the heavy pipeline synchronously ──
+  //
+  // Previously: cache miss → singleFlight → full RSS fetch (8 subrequests) +
+  // translation (up to 21 AI calls) → user waits 5-15 seconds.
+  //
+  // Now: cache miss → return lightweight fallback immediately → trigger
+  // background refresh via ctx.waitUntil (if ctx available). The cron job
+  // (every 15 min) is the PRIMARY cache populator. With P0-A (TTL=1800 >
+  // cron=900), cache misses are rare (only on first deploy or KV failure).
+  //
+  // The singleFlight wrapper is still used for the background refresh to
+  // prevent duplicate pipeline runs within the same isolate.
   //
   // IMPORTANT: singleFlight is PER-ISOLATE, not a distributed lock. Multiple
   // Cloudflare Workers isolates can still run the pipeline concurrently (one
@@ -3918,80 +3956,105 @@ async function fetchFarsiNews(env, categoryFilter) {
   // the scope of this minimal P0 fix. The per-isolate singleFlight still
   // significantly reduces redundant work (within a busy isolate, many
   // requests share one pipeline run instead of each running their own).
-  return await singleFlight('farsi-news:live-fetch', async () => {
-    // Fetch ALL sources in parallel
-    const sources = await fetchAllNewsRss();
-    if (sources.length === 0) {
-      return { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
-    }
+  //
+  // If ctx is NOT available (e.g., called from a non-HTTP context), fall back
+  // to the old synchronous behavior for backward compatibility.
 
+  const emptyResult = { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
+
+  // Start the pipeline via singleFlight (exactly once per isolate).
+  // The promise is either awaited (sync fallback) or passed to ctx.waitUntil (async).
+  const refreshPromise = singleFlight('farsi-news:live-fetch', async () => {
     try {
-      // Build articles from all sources in parallel (translate within each source)
-      const allArticles = (
-        await Promise.all(
-          sources.map((s) => buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env, s.skipTranslate))
-        )
-      ).flat();
-
-      // Deduplicate by URL (same article from multiple sources)
-      // NEWSBE-004 FIX: Use canonicalized URL for dedup so the same article
-      // with different tracking params (utm_*) or trailing slash doesn't
-      // appear twice.
-      const seen = new Set();
-      const deduped = allArticles.filter((a) => {
-        if (!a.url) return false;
-        const canonical = canonicalizeUrl(a.url);
-        if (seen.has(canonical)) return false;
-        seen.add(canonical);
-        return true;
-      });
-
-      if (deduped.length > 0) {
-        // Limit total cached articles to reduce payload size and KV storage
-        const MAX_NEWS_ARTICLES = 12;
-        const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
-
-        // Cache the full (unfiltered) trimmed list
-        await writeAppCache(
-          env,
-          FARSI_NEWS_CACHE_KEY,
-          JSON.stringify(trimmed),
-          getNumericEnv(env, 'NEWS_CACHE_TTL', 1800), // 30 minutes
-        );
-
-        // ── AI NEWS: Background AI summarization is handled by CRON, not here ──
-        // The cron handler (scheduled) calls processNewsAIBatch with real ctx.waitUntil.
-        // This ensures AI summaries are generated within 1 minute of article appearing.
-        // (NEWSBE-006: legacy processNewsAIJobs was removed — it was never called.)
-
-        // Enrich with AI summaries (from KV cache — instant if pre-processed by cron)
-        const enriched = await enrichNewsWithAISummaries(env, trimmed);
-
-        const categoryCounts = {
-          all: enriched.length,
-          crypto: enriched.filter(a => a.category === 'crypto').length,
-          forex: enriched.filter(a => a.category === 'forex').length,
-          economy: enriched.filter(a => a.category === 'economy').length,
-        };
-
-        // Apply category filter if requested
-        const data = categoryFilter
-          ? enriched.filter((a) => a.category === categoryFilter)
-          : enriched;
-
-        return {
-          status: 'success',
-          source: `${sources.map((s) => s.sourceName).join(', ')}_live`,
-          data,
-          category_counts: categoryCounts,
-        };
-      }
-    } catch {
-      // Parse/translate failure
+      return await _runNewsLiveFetchPipeline(env);
+    } catch (e) {
+      console.warn('[NEWS] Background refresh failed (non-fatal):', e?.message);
+      return [];
     }
-
-    return { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
   });
+
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    // P0-B: Background refresh — user gets immediate empty response.
+    // Cache will be populated for the NEXT request (within ~5-15 seconds).
+    // The .catch() prevents unhandled rejection from killing the Worker.
+    ctx.waitUntil(refreshPromise.catch(() => {}));
+    return emptyResult;
+  }
+
+  // Fallback: no ctx (shouldn't happen in HTTP path, but defensive).
+  // Run pipeline synchronously for backward compatibility.
+  const result = await refreshPromise;
+  if (result && result.length > 0) {
+    const data = categoryFilter
+      ? result.filter((a) => a.category === categoryFilter)
+      : result;
+    const categoryCounts = {
+      all: result.length,
+      crypto: result.filter(a => a.category === 'crypto').length,
+      forex: result.filter(a => a.category === 'forex').length,
+      economy: result.filter(a => a.category === 'economy').length,
+    };
+    return { status: 'success', source: 'live', data, category_counts: categoryCounts };
+  }
+  return emptyResult;
+}
+
+// ── P0-B FIX: Extracted pipeline for background/synchronous refresh ──
+// This function does NOT return a user-facing response. It fetches RSS,
+// translates titles, deduplicates, and writes to KV cache. Returns the
+// trimmed article array on success, or null/empty array on failure.
+async function _runNewsLiveFetchPipeline(env) {
+  const sources = await fetchAllNewsRss();
+  if (sources.length === 0) {
+    return [];
+  }
+
+  try {
+    // Build articles from all sources in parallel (translate within each source)
+    const allArticles = (
+      await Promise.all(
+        sources.map((s) => buildFarsiNewsArticles(s.rssText, s.sourceName, s.category, env, s.skipTranslate))
+      )
+    ).flat();
+
+    // Deduplicate by URL (same article from multiple sources)
+    // NEWSBE-004 FIX: Use canonicalized URL for dedup so the same article
+    // with different tracking params (utm_*) or trailing slash doesn't
+    // appear twice.
+    const seen = new Set();
+    const deduped = allArticles.filter((a) => {
+      if (!a.url) return false;
+      const canonical = canonicalizeUrl(a.url);
+      if (seen.has(canonical)) return false;
+      seen.add(canonical);
+      return true;
+    });
+
+    if (deduped.length > 0) {
+      // Limit total cached articles to reduce payload size and KV storage
+      const MAX_NEWS_ARTICLES = 12;
+      const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
+
+      // Cache the full (unfiltered) trimmed list
+      await writeAppCache(
+        env,
+        FARSI_NEWS_CACHE_KEY,
+        JSON.stringify(trimmed),
+        getNumericEnv(env, 'NEWS_CACHE_TTL', 1800), // 30 minutes (P0-A: was 300)
+      );
+
+      // ── AI NEWS: Background AI summarization is handled by CRON, not here ──
+      // The cron handler (scheduled) calls processNewsAIBatch with real ctx.waitUntil.
+      // This ensures AI summaries are generated within 1 minute of article appearing.
+      // (NEWSBE-006: legacy processNewsAIJobs was removed — it was never called.)
+
+      return trimmed;
+    }
+  } catch {
+    // Parse/translate failure
+  }
+
+  return [];
 }
 
 // ── AI NEWS SUMMARIZATION: Background processing architecture ──
@@ -6071,22 +6134,38 @@ async function processNewsAIBatch(env, pool = null) {
       const TRANSLATION_CONCURRENCY = 3; // P0-2 FIX: cap parallel translations
       const processOne = async (f) => {
         const item = f.item;
-        let translatedTitle = item.title || 'بدون عنوان';
+        const originalTitle = item.title || 'بدون عنوان';
+        let translatedTitle = originalTitle;
+        let translation_failed = false;
 
         // Only translate if not already Farsi
         if (!item._skipTranslate) {
           try {
-            translatedTitle = await translateToFarsi(item.title || 'بدون عنوان', env);
+            // P0-C FIX: translateToFarsi now returns { text, translation_failed }
+            const tResult = await translateToFarsi(originalTitle, env);
+            translatedTitle = tResult.text;
+            translation_failed = tResult.translation_failed;
           } catch (e) {
             console.warn('[NEWS-AI-CRON] translateToFarsi failed:', e?.message);
+            translation_failed = true;
           }
         }
 
-        const rawTitle = String(translatedTitle).replace(/\n/g, ' ').trim();
+        // P0-C FIX: If translation failed, set title to empty so article is
+        // filtered out (not served as English text pretending to be Farsi).
+        let title;
+        if (translation_failed) {
+          title = '';
+        } else {
+          const rawTitle = String(translatedTitle).replace(/\n/g, ' ').trim();
+          title = sanitizeNewsTitle(rawTitle);
+        }
+
         return {
-          title: sanitizeNewsTitle(rawTitle),
-          title_en: item.title || '',
+          title,
+          title_en: originalTitle,
           description: String(item.description || '').replace(/\n/g, ' ').trim(),
+          translation_failed,
           time_ago: parseRelativeTime(item.pubDate),
           pub_date: item.pubDate ? new Date(item.pubDate).toISOString() : null,
           source: item._sourceName,
@@ -6114,9 +6193,13 @@ async function processNewsAIBatch(env, pool = null) {
 
     // ── STEP 5: DEDUP by URL (safety net — filterAndScoreNews already deduped by title) ──
     // NEWSBE-004 FIX: Use canonicalized URL for dedup (strips utm_*, trailing slash).
+    // P0-C FIX: Also filter out articles with empty title (translation_failed=true).
+    // These articles have translation_failed flag set and title='' — they should
+    // NOT be cached/served as Farsi news. English original is preserved in title_en.
     const seen = new Set();
     const deduped = allArticles.filter((a) => {
       if (!a.url) return false;
+      if (!a.title || !a.title.trim()) return false; // P0-C: exclude failed translations
       const canonical = canonicalizeUrl(a.url);
       if (seen.has(canonical)) return false;
       seen.add(canonical);
@@ -8125,7 +8208,7 @@ async function handleForexData(env, options = {}) {
 }
 //#endregion
 
-async function handleFarsiNews(request, env) {
+async function handleFarsiNews(request, env, ctx = null) {
   const url = new URL(request.url);
   const category = url.searchParams.get('category');
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
@@ -8137,7 +8220,7 @@ async function handleFarsiNews(request, env) {
     ? category
     : null;
 
-  const result = await fetchFarsiNews(env, categoryFilter);
+  const result = await fetchFarsiNews(env, categoryFilter, ctx);
   const allData = result.data || [];
 
   // Pagination
@@ -10148,7 +10231,7 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/farsi-news') {
-        return await handleFarsiNews(request, env);
+        return await handleFarsiNews(request, env, ctx);
       }
 
 
