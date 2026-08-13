@@ -21,7 +21,18 @@ export function createWalletHandlers(deps) {
     // MISSION-ABUSE FIX: server-issued one-time event tokens
     issueMissionEventToken,
     consumeMissionEventToken,
+    // Rate limiting for wallet endpoints
+    isUserRateLimited,
   } = deps;
+
+  // Rate limit helper for wallet mutation endpoints
+  async function checkWalletRateLimit(env, userId, category, max, windowSec) {
+    if (!isUserRateLimited || !env.RATE_LIMITS) return null;
+    if (await isUserRateLimited(env, String(userId), category, max, windowSec)) {
+      return jsonResponse({ status: 'error', message: 'Too many requests. Please wait.', code: 'RATE_LIMITED' }, { status: 429 }, env);
+    }
+    return null;
+  }
 
   /**
    * GET /api/wallet — Full wallet state: balance, tier, recent transactions.
@@ -158,6 +169,9 @@ export function createWalletHandlers(deps) {
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
+    // Rate limit: 5 claims per 60s (prevents abuse while allowing retries)
+    const rlErr = await checkWalletRateLimit(env, authState.user.id, 'wallet_claim', 5, 60);
+    if (rlErr) return rlErr;
     try {
       const DAILY_REWARD = 10;
       const clientIp = request.headers.get('cf-connecting-ip') || null;
@@ -207,6 +221,10 @@ export function createWalletHandlers(deps) {
   async function handleMissionIssueToken(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
+
+    // Rate limit: 10 token requests per 60s (prevents KV abuse)
+    const rlErr = await checkWalletRateLimit(env, authState.user.id, 'wallet_mission_token', 10, 60);
+    if (rlErr) return rlErr;
 
     let body;
     try { body = await request.json(); } catch {
@@ -284,6 +302,10 @@ export function createWalletHandlers(deps) {
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
+
+    // Rate limit: 10 completions per 60s (prevents abuse while allowing all 5 missions + retries)
+    const rlErr = await checkWalletRateLimit(env, authState.user.id, 'wallet_mission_complete', 10, 60);
+    if (rlErr) return rlErr;
 
     let body;
     try { body = await request.json(); } catch {

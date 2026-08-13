@@ -6964,6 +6964,8 @@ const walletHandlers = createWalletHandlers({
   // MISSION-ABUSE FIX: server-issued one-time mission event tokens
   issueMissionEventToken,
   consumeMissionEventToken,
+  // Rate limiting for wallet endpoints
+  isUserRateLimited,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({

@@ -12833,9 +12833,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (currentMarketTab === 'forex') renderMarket();
             }).catch(() => {});
         }
-        if (_joinLockShown && !_maintenanceBlocked) {
-            // Bootstrap confirmed membership — but _startDataLoading already
-            // fired below. Just update admin UI here.
+        if (!_maintenanceBlocked) {
+            // P0 FIX: Mission loading was gated on _joinLockShown which is
+            // FALSE for members (setJoinLockState('joined') sets it to false).
+            // This meant loadMissionStatus() was NEVER called for members,
+            // so missions never loaded, MissionBus never auto-instrumented
+            // tabs, and no mission events ever fired.
+            // FIX: Load missions for ALL users who passed bootstrap (member
+            // or ambiguous). The backend already gates mission endpoints
+            // behind channel membership (PROTECTED_PATHS includes 'wallet'
+            // which covers /api/wallet/missions and /api/wallet/mission/*).
+            // Non-members will get 403 from the backend — loadMissionStatus
+            // handles errors gracefully (catch + empty array).
             updateAnalysisFabVisibility();
             // Load today's mission status + fire daily_open mission
             if (typeof loadMissionStatus === 'function') {

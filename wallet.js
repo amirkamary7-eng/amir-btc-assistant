@@ -670,7 +670,7 @@ const WalletApp = (() => {
             <div class="reward-desc">${esc(WT('unlock_premium'))}</div>
             <div class="reward-footer">
               <span class="reward-cost">500 AB</span>
-              <span class="reward-status status-available">${esc(WT('available'))}</span>
+              <span class="reward-status status-coming">${esc(WT('coming_soon'))}</span>
             </div>
           </div>
           <div class="wallet-marketplace-card">
