@@ -5017,7 +5017,7 @@ async function processOneArticleSummary(env, pool = null) {
   try { await recordCacheStat(env, false); } catch {}
 
   // Helper: requeue with retry state (mutates queue in place + persists)
-  async function requeueWithRetry(reason, errorDetail) {
+  async function requeueWithRetry(reason, errorDetail, attempts) {
     const newRetryCount = (article.retry_count || 0) + 1;
     const backoffMin = NEWS_SUMMARY_BACKOFF_MINUTES[Math.min(newRetryCount - 1, NEWS_SUMMARY_BACKOFF_MINUTES.length - 1)] || 30;
     article.retry_count = newRetryCount;
@@ -5026,6 +5026,17 @@ async function processOneArticleSummary(env, pool = null) {
     if (newRetryCount >= NEWS_SUMMARY_MAX_RETRIES) {
       article.status = 'failed';
       article.fail_reason = reason;
+    }
+    // Persist per-provider error details on the queue item (same format as the
+    // all_providers_non_retryable path at line ~5303). This allows monitoring
+    // to show the ACTUAL provider errors instead of a generic 'all_providers_failed'
+    // string. Without this, fail_attempts is null and the real error is lost.
+    if (attempts && Array.isArray(attempts) && attempts.length > 0) {
+      article.fail_attempts = attempts.map(a => ({
+        provider: a.provider,
+        error: a.error,
+        errorType: a.errorType,
+      }));
     }
     // Move to end of queue (so other eligible items get a chance first)
     queue.splice(idx, 1);
@@ -5316,7 +5327,7 @@ async function processOneArticleSummary(env, pool = null) {
   const failSummary = fallbackResult.attempts
     .map(a => `${a.provider}:${a.success ? 'ok' : a.error}`)
     .join(', ');
-  return requeueWithRetry('all_providers_failed', failSummary);
+  return requeueWithRetry('all_providers_failed', failSummary, fallbackResult.attempts);
 }
 
 /**

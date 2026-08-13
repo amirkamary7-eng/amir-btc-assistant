@@ -422,3 +422,95 @@ test('P0-D-2: buildFarsiNewsArticles description is kept in original English', (
   const fnSrc = src.slice(fnStart, fnEnd);
   assert.ok(/P0-D FIX: Description is NOT translated/.test(fnSrc), 'Must document that description is not translated');
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// ERROR PERSISTENCE FIX: requeueWithRetry must store fail_attempts
+// ═══════════════════════════════════════════════════════════════════════
+
+test('ERR-PERSIST-1: requeueWithRetry accepts attempts parameter', () => {
+  const fnStart = src.indexOf('async function requeueWithRetry');
+  const fnEnd = src.indexOf('\n  }', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd + 2);
+  assert.ok(/requeueWithRetry\(reason,\s*errorDetail,\s*attempts\)/.test(fnSrc),
+    'requeueWithRetry must accept attempts as 3rd parameter');
+});
+
+test('ERR-PERSIST-2: requeueWithRetry stores fail_attempts on article', () => {
+  const fnStart = src.indexOf('async function requeueWithRetry');
+  const fnEnd = src.indexOf('\n  }', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd + 2);
+  // Must set article.fail_attempts from attempts array
+  assert.ok(/article\.fail_attempts\s*=/.test(fnSrc),
+    'requeueWithRetry must set article.fail_attempts');
+  assert.ok(/attempts\.map/.test(fnSrc),
+    'Must map attempts to fail_attempts array');
+  // Must include provider, error, errorType (same format as non-retryable path)
+  assert.ok(/provider:\s*a\.provider/.test(fnSrc),
+    'fail_attempts must include provider field');
+  assert.ok(/error:\s*a\.error/.test(fnSrc),
+    'fail_attempts must include error field');
+  assert.ok(/errorType:\s*a\.errorType/.test(fnSrc),
+    'fail_attempts must include errorType field');
+});
+
+test('ERR-PERSIST-3: requeueWithRetry guards against missing attempts', () => {
+  const fnStart = src.indexOf('async function requeueWithRetry');
+  const fnEnd = src.indexOf('\n  }', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd + 2);
+  // Must check that attempts is a non-empty array before setting fail_attempts
+  assert.ok(/attempts\s*&&\s*Array\.isArray\(attempts\)\s*&&\s*attempts\.length\s*>\s*0/.test(fnSrc),
+    'requeueWithRetry must guard: only set fail_attempts if attempts is a non-empty array');
+});
+
+test('ERR-PERSIST-4: all_providers_failed caller passes attempts to requeueWithRetry', () => {
+  // Find the call site at the end of processOneArticleSummary
+  const callIdx = src.indexOf("requeueWithRetry('all_providers_failed'");
+  assert.ok(callIdx > -1, 'Must have requeueWithRetry call with all_providers_failed');
+  const callSrc = src.slice(callIdx, callIdx + 200);
+  assert.ok(/fallbackResult\.attempts/.test(callSrc),
+    'all_providers_failed caller must pass fallbackResult.attempts as 3rd arg');
+});
+
+test('ERR-PERSIST-5: other requeueWithRetry callers still work (no attempts param)', () => {
+  // Other callers (fetch_error, invalid_url_scheme, etc.) don't pass attempts.
+  // This is correct — those failures happen before AI providers are called.
+  // Verify they still call with 2 args (reason, errorDetail) — no 3rd arg.
+  const callers = [
+    "requeueWithRetry('kv_write_failed'",
+    "requeueWithRetry('invalid_url_scheme'",
+    "requeueWithRetry('fetch_'",
+    "requeueWithRetry('fetch_error'",
+  ];
+  for (const caller of callers) {
+    const idx = src.indexOf(caller);
+    assert.ok(idx > -1, `Must have caller: ${caller}`);
+    // Get the full call (up to closing paren)
+    const callSrc = src.slice(idx, idx + 200);
+    // These should NOT pass a 3rd argument (no attempts)
+    // Check that the call ends with 2 args: reason, errorDetail)
+    assert.ok(!/fallbackResult\.attempts/.test(callSrc),
+      `${caller} should NOT pass fallbackResult.attempts (no AI providers called)`);
+  }
+});
+
+test('ERR-PERSIST-6: fail_attempts format matches non-retryable path', () => {
+  // The non-retryable path (all_providers_non_retryable) stores:
+  //   article.fail_attempts = attempts.map(a => ({ provider, error, errorType }))
+  // The retryable path (requeueWithRetry) must use the SAME format.
+  const retryableStart = src.indexOf('async function requeueWithRetry');
+  const retryableEnd = src.indexOf('\n  }', retryableStart);
+  const retryableSrc = src.slice(retryableStart, retryableEnd + 2);
+
+  const nonRetryableStart = src.indexOf("article.fail_reason = 'all_providers_non_retryable'");
+  const nonRetryableEnd = src.indexOf('\n    }', nonRetryableStart);
+  const nonRetryableSrc = src.slice(nonRetryableStart, nonRetryableEnd);
+
+  // Both must have provider, error, errorType fields
+  const fields = ['provider', 'error', 'errorType'];
+  for (const field of fields) {
+    assert.ok(new RegExp(`${field}:\\s*a\\.${field}`).test(retryableSrc),
+      `retryable path must include ${field} field`);
+    assert.ok(new RegExp(`${field}:\\s*a\\.${field}`).test(nonRetryableSrc),
+      `non-retryable path must include ${field} field (format consistency)`);
+  }
+});
