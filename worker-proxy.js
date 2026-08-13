@@ -11324,16 +11324,26 @@ export default {
       }
 
       // ── PHASE 1d: News Summary Queue Processing (every 5 min) ──
-      // Process up to 2 article summaries per tick from the KV queue.
+      // Process up to 4 article summaries per tick from the KV queue.
       // Queue persists across cron ticks — no article is lost.
-      // ROOT-CAUSE FIX (Phase 10.5): increased from 1 to 2 articles per tick
-      // to halve queue drain time. Each article uses ~1 fetch + 1 AI call = 2
-      // subrequests. 2 articles = 4 subrequests + 7 RSS = 11 total — well under
-      // Cloudflare Free's 50 subrequest limit.
+      //
+      // FIX B (Summary queue throughput): increased from 2 to 4 articles per tick.
+      // Previous: 2 × 12 ticks/hour = 24 summaries/hour (queue could grow when AI
+      // providers had intermittent failures). New: 4 × 12 = 48/hour — drains queue
+      // 2× faster, reducing the window where articles lack AI summaries.
+      //
+      // Resource budget verification (5-min cron ONLY runs this + calendar + broadcast,
+      // NOT the heavy 15-min processNewsAIBatch):
+      //   - Subrequests: 4 articles × (1 HTML fetch + 1 AI call) = 8 subrequests
+      //     + calendar (1-2) + broadcast (1-2) = ~12 total — well under 50 limit
+      //   - CPU: 4 × ~3ms (AI fetch+parse) = ~12ms — within 5-min cron's CPU budget
+      //     (5-min cron doesn't run alerts baseline or RSS fetches)
+      //   - Early break: if queue empty or no eligible items, loop breaks immediately
+      //     (no wasted subrequests)
       // If queue is empty, processOneArticleSummary returns immediately (no extra work).
       // Feature flags respected inside processOneArticleSummary (NEWS_SUMMARY_ENABLED).
       if (isEvery5Min) {
-        const MAX_SUMMARIES_PER_TICK = 2;
+        const MAX_SUMMARIES_PER_TICK = 4;
         for (let i = 0; i < MAX_SUMMARIES_PER_TICK; i++) {
           try {
             const summaryResult = await processOneArticleSummary(env, pool);
