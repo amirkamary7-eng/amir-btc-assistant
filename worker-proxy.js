@@ -1504,7 +1504,23 @@ function getSharedNeon(env) {
     // fullResults:true → returns { rows, rowCount, fields, ... } exactly like
     // pool.query(), so all existing callers (result.rows[0], result.rowCount)
     // keep working unchanged.
-    sql = neon(url, { fullResults: true });
+    //
+    // ROOT-CAUSE FIX (analyses 500/hang): neon() HTTP client uses fetch()
+    // internally with NO timeout by default. If Neon's HTTP endpoint is
+    // momentarily unresponsive, the fetch() hangs indefinitely → Worker
+    // runtime cancels the request ("code had hung"). Fix: pass fetchOptions
+    // with a per-request AbortSignal via a custom fetchOptions function.
+    // The neon SDK merges fetchOptions into each fetch() call, so this signal
+    // applies to every query. 10s is generous (normal queries complete in
+    // <500ms) but bounded — if Neon is truly down, the Worker fails fast
+    // instead of hanging.
+    sql = neon(url, {
+      fullResults: true,
+      fetchOptions: {
+        // AbortSignal with 10s timeout — prevents indefinite hang on Neon HTTP
+        signal: AbortSignal.timeout(10000),
+      },
+    });
   } catch (e) {
     console.warn('[DB] neon() client init failed:', e?.message);
     return null;
