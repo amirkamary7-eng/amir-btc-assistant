@@ -34,25 +34,38 @@ export function createWheelRepository(deps) {
   }
 
   // Calculate the Tehran-midnight timestamp for expires_at
-  // Returns an ISO string for the NEXT 00:00 Asia/Tehran
+  // Returns an ISO string for the NEXT 00:00 Asia/Tehran (which is 20:30 UTC previous day).
+  //
+  // FIX 4 (Finding D CONFIRMED): The previous implementation used setDate()/setHours()
+  // on a Date object that was constructed with a +03:30 offset. However, setDate() and
+  // setHours() operate in UTC (the Date internal representation), NOT in Tehran time.
+  // This produced UTC midnight (00:00Z = 03:30 Tehran) instead of Tehran midnight
+  // (00:00+03:30 = 20:30Z previous day). The result was 3.5 hours LATE — spins
+  // expired at 03:30 Tehran instead of 00:00 Tehran.
+  //
+  // FIX: Use Intl.DateTimeFormat to get Tehran's current DATE (YYYY-MM-DD),
+  // then construct the next day's midnight directly as an ISO string with +03:30 offset.
+  // Date.UTC handles month/year overflow (e.g., Dec 31 → Jan 1). No setDate/setHours used.
   function getNextTehranMidnightISO() {
     const now = new Date();
-    // Get Tehran time components
-    const tehranParts = new Intl.DateTimeFormat('en-US', {
+    // Get today's date in Tehran (YYYY-MM-DD) using en-CA locale (ISO 8601 format)
+    const fmt = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Tehran',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false,
-    }).formatToParts(now);
-    const p = {};
-    for (const part of tehranParts) p[part.type] = part.value;
-    // Build a Date for "now" in Tehran, then add 1 day and set to 00:00
-    // Tehran is UTC+3:30, so 00:00 Tehran = previous day 20:30 UTC
-    const tehranNow = new Date(`${p.year}-${p.month}-${p.day}T${p.hour === '24' ? '00' : p.hour}:${p.minute}:${p.second}+03:30`);
-    const tomorrowMidnight = new Date(tehranNow);
-    tomorrowMidnight.setDate(tomorrowMidnight.getDate() + 1);
-    tomorrowMidnight.setHours(0, 0, 0, 0);
-    return tomorrowMidnight.toISOString();
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const todayStr = fmt.format(now); // e.g. "2026-08-13"
+    const [y, m, d] = todayStr.split('-').map(Number);
+
+    // Next day (UTC-safe: Date.UTC handles month/year overflow correctly)
+    const nextDay = new Date(Date.UTC(y, m - 1, d + 1));
+    const yyyy = nextDay.getUTCFullYear();
+    const mm = String(nextDay.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(nextDay.getUTCDate()).padStart(2, '0');
+
+    // Tehran midnight = 00:00:00+03:30 (which is 20:30:00Z previous day UTC)
+    return new Date(`${yyyy}-${mm}-${dd}T00:00:00+03:30`).toISOString();
   }
 
   /**
@@ -179,6 +192,18 @@ export function createWheelRepository(deps) {
     // Single transaction: lock → count → conditional insert.
     // The CTE does count + conditional insert atomically. generate_series(1, 0)
     // returns 0 rows, so when count >= maxSpins, no rows are inserted.
+    //
+    // FIX 5 (Finding E+F CONFIRMED): Previously the count query was:
+    //   AND status IN ('available', 'used')
+    // This counted 'available' rows even if their expires_at was in the past
+    // (zombie rows created by the Finding D timezone bug). Those rows counted
+    // toward the maxSpins limit, so getOrCreateDailySpins would NOT create
+    // replacement spins. But getAvailableSpins filters by expires_at > NOW(),
+    // returning 0 available → user locked for the entire day.
+    //
+    // FIX: Only count 'available' rows that are NOT expired (expires_at IS NULL
+    // OR expires_at > NOW()). 'used' rows always count (they represent consumed
+    // spins). This ensures zombie rows don't block creation of fresh spins.
     const txnQueries = [
       { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
       {
@@ -186,7 +211,11 @@ export function createWheelRepository(deps) {
           WITH current_count AS (
             SELECT COUNT(*)::int AS cnt FROM wheel_spins
             WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
-              AND spin_date = $2::date AND status IN ('available', 'used')
+              AND spin_date = $2::date
+              AND (
+                status = 'used'
+                OR (status = 'available' AND (expires_at IS NULL OR expires_at > NOW()))
+              )
           ),
           to_insert AS (
             SELECT generate_series(1, GREATEST(0, $3 - (SELECT cnt FROM current_count))) AS i
@@ -207,6 +236,7 @@ export function createWheelRepository(deps) {
         sql: `SELECT id, status FROM wheel_spins
               WHERE user_id = $1 AND spin_type = 'daily' AND source = 'daily_free'
               AND spin_date = $2::date AND status = 'available'
+              AND (expires_at IS NULL OR expires_at > NOW())
               ORDER BY id ASC`,
         params: [uid, tehranToday],
       },

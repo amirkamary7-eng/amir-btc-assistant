@@ -1155,9 +1155,77 @@ const ReferralApp = (() => {
     }
   }
 
-  function renderPage(data) {
+  // FIX 1+2: Track last-rendered data signature to skip redundant full-page re-renders.
+  // The referral page makes 6 parallel API calls on open. On cache hit, it renders
+  // cached data immediately, then renders again when fresh data arrives. If the
+  // fresh data is identical to the cached data (common case), the second render
+  // destroys the entire DOM (including Wheel, animations, count-up, scroll position)
+  // and rebuilds it — causing visible flicker, scroll jump, and Wheel countdown reset.
+  // This signature comparison skips the second render when data hasn't changed.
+  let _lastRenderedSignature = null;
+
+  function computeDataSignature(data) {
+    // Deterministic signature of the data that affects the rendered page.
+    // Only includes fields that change the visible UI — excludes volatile
+    // fields like timestamps that don't affect rendering.
+    try {
+      const sig = {
+        stats: data.stats ? {
+          total: data.stats.total,
+          active: data.stats.active,
+          rewarded: data.stats.rewarded,
+          pending: data.stats.pending,
+          total_earned: data.stats.total_earned,
+          reward_per_invite: data.stats.reward_per_invite,
+        } : null,
+        balance: data.balance,
+        tier: data.tier ? {
+          current: data.tier.current,
+          next: data.tier.next,
+          progress: data.tier.progress,
+          remaining: data.tier.remaining,
+        } : null,
+        wheel: data.wheel ? {
+          total_available: data.wheel.total_available,
+          premium_spins: data.wheel.premium_spins,
+          next_reset_at: data.wheel.next_reset_at || null,
+          daily_spin: data.wheel.daily_spin ? { available: data.wheel.daily_spin.available } : null,
+        } : null,
+        leaderboard: data.leaderboard?.leaderboard?.length || 0,
+        historyLen: data.history?.length || 0,
+        historyHasMore: data.historyHasMore || false,
+        lastPrize: data.lastPrize ? {
+          reward_type: data.lastPrize.reward_type,
+          reward_amount: data.lastPrize.reward_amount,
+        } : null,
+      };
+      return JSON.stringify(sig);
+    } catch (_) {
+      return null; // If signature fails, always render (safe fallback)
+    }
+  }
+
+  function renderPage(data, opts = {}) {
     const page = document.getElementById('referral-full-page');
     if (!page) return;
+
+    // FIX 1+2: Skip render if data signature matches last render.
+    // This prevents the second renderPage() call (from fresh API data)
+    // from destroying the DOM when the data hasn't visibly changed.
+    // The 'force' option bypasses this check (used by openReferral for
+    // the initial cache render, and by explicit user-triggered refreshes).
+    if (!opts.force) {
+      const sig = computeDataSignature(data);
+      if (sig && sig === _lastRenderedSignature) {
+        // Data unchanged — skip full-page re-render.
+        // Only update wheelStatus referralData refs so refreshWheelStatus()
+        // can still do partial updates if needed.
+        if (data.wheel) wheelStatus = data.wheel;
+        referralData = data;
+        return;
+      }
+      _lastRenderedSignature = sig;
+    }
 
     // Apply tier vars on the page wrapper for tier-aware coloring
     applyTierVars(page, data.tier?.current || 'Bronze');
@@ -1184,6 +1252,10 @@ const ReferralApp = (() => {
     page.classList.add('open');
     document.body.style.overflow = 'hidden';
 
+    // FIX 1+2: Reset the data signature on each open so the first render
+    // always runs (even if data matches a previous visit's signature).
+    _lastRenderedSignature = null;
+
     // ROOT CAUSE FIX for flicker: Previously, openReferral() ALWAYS did
     // page.innerHTML = buildSkeleton() which WIPED the entire page, then
     // rendered cached data (~50ms later), then rendered fresh API data
@@ -1201,7 +1273,8 @@ const ReferralApp = (() => {
         const cached = JSON.parse(cachedStr);
         if (cached && cached.ts && cached.data) {
           historyOffset = (cached.data.history?.length) || 0;
-          renderPage(cached.data);
+          // force: true — always render on open (signature was just reset)
+          renderPage(cached.data, { force: true });
           hasCache = true;
         }
       }
@@ -1215,6 +1288,9 @@ const ReferralApp = (() => {
     // Load all data in parallel (background refresh)
     // Using Promise.allSettled so one slow/failed call doesn't block rendering.
     // Render ONLY ONCE after all calls settle — no intermediate renders.
+    // FIX 1+2: If fresh data matches cached data signature, renderPage()
+    // will skip the redundant full-page re-render (preserving scroll,
+    // animations, count-up, and Wheel countdown state).
     (async () => {
       const results = await Promise.allSettled([
         fetchStats(),
@@ -1246,6 +1322,7 @@ const ReferralApp = (() => {
         tier,
       };
       historyOffset = (historyRes?.referrals?.length) || 0;
+      // No force: true here — if data matches cached signature, skip re-render.
       renderPage(data);
 
       // Persist to localStorage for instant render on next open
@@ -1644,6 +1721,16 @@ const ReferralApp = (() => {
       fetchWheelHistory(),
     ]);
     if (newStatus) {
+      // Update the global wheelStatus so startWheelCountdown() picks up
+      // the latest next_reset_at timestamp.
+      wheelStatus = newStatus;
+      // FIX 3: Invalidate the data signature so the next renderPage() call
+      // (if any) will actually re-render with the new wheel data.
+      _lastRenderedSignature = null;
+      if (referralData) {
+        referralData.wheel = newStatus;
+        referralData.lastPrize = lastPrize;
+      }
       // P1 FIX: Selector was '.rc-wheel-card' but buildWheelCard() renders
       // '.rc-wheel-unified'. Fixed to match actual DOM structure.
       const wheelCard = document.querySelector('.rc-wheel-unified');

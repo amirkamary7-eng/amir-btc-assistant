@@ -85,9 +85,16 @@
   0%   { opacity: 0; transform: translateX(-12px); }
   100% { opacity: 1; transform: translateX(0); }
 }
-[dir="rtl"] @keyframes rcHistSlideIn {
+/* FIX 7 (Finding I CONFIRMED): [dir="rtl"] @keyframes is INVALID CSS — a selector
+ * cannot precede an @keyframes at-rule. Browser ignores the entire block.
+ * Correct pattern: define a separate @keyframes with a different name, then
+ * apply it via a selector on the animated element. */
+@keyframes rcHistSlideInRtl {
   0%   { opacity: 0; transform: translateX(12px); }
   100% { opacity: 1; transform: translateX(0); }
+}
+[dir="rtl"] .rc-hist-item {
+  animation-name: rcHistSlideInRtl;
 }
 /* #endregion */
 
