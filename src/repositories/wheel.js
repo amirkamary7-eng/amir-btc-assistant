@@ -413,5 +413,6 @@ export function createWheelRepository(deps) {
     consumeSpin,
     getSpinHistory,
     grantPremiumSpin,
+    getNextTehranMidnightISO,
   });
 }

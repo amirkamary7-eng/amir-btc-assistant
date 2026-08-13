@@ -1110,12 +1110,33 @@ const ReferralApp = (() => {
     const timeEl = document.getElementById('rc-wheel-countdown-time');
     if (!timeEl) return;
 
+    // P0-B FIX: Use backend-provided next_reset_at (Tehran midnight ISO)
+    // instead of local device midnight. Falls back to local midnight only
+    // if backend didn't provide the timestamp.
+    const resetAt = wheelStatus?.next_reset_at ? new Date(wheelStatus.next_reset_at) : null;
+
     function updateCountdown() {
-      // Next free spin = midnight local time (24h cycle for daily spin)
       const now = new Date();
-      const tomorrow = new Date(now);
-      tomorrow.setHours(24, 0, 0, 0);
-      const diff = tomorrow - now;
+      // P0-B FIX: Use backend timestamp if available, otherwise local midnight
+      const target = resetAt || (() => {
+        const t = new Date(now);
+        t.setHours(24, 0, 0, 0);
+        return t;
+      })();
+      let diff = target - now;
+
+      // P0-A FIX: When countdown reaches zero, refresh server state
+      if (diff <= 0) {
+        stopWheelCountdown();
+        timeEl.textContent = '00:00:00';
+        // Refresh wheel status from backend — new daily spins should be available
+        refreshWheelStatus().then(() => {
+          // renderPage will be called by refreshWheelStatus if data changed,
+          // which will restart countdown if still no spins, or show spin button
+          // if spins are now available.
+        }).catch(() => {});
+        return;
+      }
 
       const h = Math.floor(diff / 3600000);
       const m = Math.floor((diff % 3600000) / 60000);
@@ -1623,8 +1644,9 @@ const ReferralApp = (() => {
       fetchWheelHistory(),
     ]);
     if (newStatus) {
-      // Update the wheel card on the referral page (if visible)
-      const wheelCard = document.querySelector('.rc-wheel-card');
+      // P1 FIX: Selector was '.rc-wheel-card' but buildWheelCard() renders
+      // '.rc-wheel-unified'. Fixed to match actual DOM structure.
+      const wheelCard = document.querySelector('.rc-wheel-unified');
       if (wheelCard && referralData) {
         const wheelSection = wheelCard.closest('.rc-section');
         if (wheelSection) {
@@ -1633,6 +1655,9 @@ const ReferralApp = (() => {
           temp.innerHTML = newHtml;
           const newSection = temp.firstElementChild;
           if (newSection) wheelSection.replaceWith(newSection);
+          // P0-A FIX: Restart countdown if the new state still has no spins
+          const wheelCountdown = document.getElementById('rc-wheel-countdown');
+          if (wheelCountdown) startWheelCountdown();
         }
       }
     }

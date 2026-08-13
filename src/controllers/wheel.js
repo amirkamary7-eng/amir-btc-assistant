@@ -55,6 +55,13 @@ export function createWheelHandlers(deps) {
       const availableSpins = await wheelRepo.getAvailableSpins(env, authState.user.id);
       const premiumCount = availableSpins.spins.filter(s => s.type === 'premium').length;
 
+      // P0-B FIX: Return next_reset_at (Tehran midnight ISO) so frontend
+      // doesn't guess reset time using local device timezone.
+      let nextResetAt = null;
+      if (typeof wheelRepo.getNextTehranMidnightISO === 'function') {
+        try { nextResetAt = wheelRepo.getNextTehranMidnightISO(); } catch {}
+      }
+
       return jsonResponse({
         status: 'success',
         daily_spin: {
@@ -65,6 +72,7 @@ export function createWheelHandlers(deps) {
         total_available: availableSpins.spins.length,
         total_allowed: maxSpins,
         spins_used: maxSpins - dailySpins.total_available,
+        next_reset_at: nextResetAt,
         config: {
           is_enabled: config.is_enabled,
           segment_count: config.segment_count,
