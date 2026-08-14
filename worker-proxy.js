@@ -327,7 +327,20 @@ async function readJsonBody(request, maxSize = MAX_BODY_BYTES, env = null) {
   if (contentLength && Number(contentLength) > maxSize) {
     return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }, env) };
   }
-  const body = await request.text();
+  // HOTFIX: Add 10s timeout to request.text() — prevents indefinite hang when
+  // client sends Content-Length but no body (or very slow body). Without this,
+  // the Worker hangs until the runtime kills it ("code had hung").
+  // 10s is generous for reading a max-100KB body. On timeout, return 408.
+  let body;
+  try {
+    const bodyTimeoutMs = 10000;
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Request body read timeout')), bodyTimeoutMs);
+    });
+    body = await Promise.race([request.text(), timeoutPromise]);
+  } catch (e) {
+    return { error: jsonResponse({ detail: 'Request body read timeout' }, { status: 408 }, env) };
+  }
   if (body.length > maxSize) {
     return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }, env) };
   }
@@ -5183,11 +5196,19 @@ async function publishArticleToFarsiNews(env, article) {
     }
 
     // Write back
+    // HOTFIX: Increased TTL from 1800 (30 min) to 86400 (24 hours).
+    // Before Commit 1, processNewsAIBatch refreshed the TTL every 15 min.
+    // After Commit 1 (publication gate), only publishArticleToFarsiNews writes
+    // to news:farsi. If no summary completes within 30 min, the cache expired
+    // → users saw an empty news feed. With a 24h TTL, the cache survives
+    // gaps between publishes. Articles are deduped by URL and capped at 12,
+    // so stale entries are not a concern. The publication gate ensures only
+    // analyzed articles enter the cache.
     await writeAppCache(
       env,
       FARSI_NEWS_CACHE_KEY,
       JSON.stringify(articles),
-      getNumericEnv(env, 'NEWS_CACHE_TTL', 1800),
+      getNumericEnv(env, 'NEWS_CACHE_TTL', 86400),
     );
 
     return { published: true, url: article.url, published_at: publishedAt, list_length: articles.length };
@@ -6754,6 +6775,26 @@ async function processNewsAIBatch(env, pool = null) {
       }
     } else {
       stepLog('SUMMARY_ENQUEUE_skipped', { reason: 'flag_disabled' });
+    }
+
+    // ── STEP 8.5: REFRESH news:farsi TTL (HOTFIX — cache starvation fix) ──
+    // After Commit 1 (publication gate), processNewsAIBatch no longer writes
+    // new articles to news:farsi. However, if no summary completes within
+    // the TTL window, the cache expires and users see an empty feed.
+    // This step reads the EXISTING news:farsi content and re-writes it with
+    // a fresh TTL — WITHOUT adding any new/unanalyzed articles.
+    // This is NOT a publication — it only extends the lifetime of already-
+    // published articles. The publication gate remains intact: only
+    // publishArticleToFarsiNews() can add new articles to news:farsi.
+    try {
+      const existingNews = await readAppCache(env, FARSI_NEWS_CACHE_KEY);
+      if (existingNews) {
+        await writeAppCache(env, FARSI_NEWS_CACHE_KEY, existingNews, getNumericEnv(env, 'NEWS_CACHE_TTL', 86400));
+        stepLog('KV_ARTICLES_ttl_refreshed', { ttl: getNumericEnv(env, 'NEWS_CACHE_TTL', 86400) });
+      }
+    } catch (e) {
+      // Non-fatal — TTL refresh is best-effort
+      console.warn('[NEWS-AI-CRON] TTL refresh failed (non-fatal):', e?.message);
     }
 
     // ── STEP 9: PROCESS ONE ARTICLE FROM QUEUE ──
