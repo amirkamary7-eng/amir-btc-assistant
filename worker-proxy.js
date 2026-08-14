@@ -5782,6 +5782,7 @@ async function getNewsAIMonitoring(env) {
       NEWS_BATCH_ANALYSIS_ENABLED: isNewsBatchAnalysisEnabled(env),
       NEWS_QUEUE_ENABLED: isNewsQueueEnabled(env),
       // Phase 10: provider flags
+      NEWS_PROVIDER_GROQ: isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true),
       NEWS_PROVIDER_GEMINI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true),
       NEWS_PROVIDER_WORKERS_AI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true),
       NEWS_PROVIDER_OPENAI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false),
