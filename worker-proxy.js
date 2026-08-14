@@ -6800,12 +6800,15 @@ async function processNewsAIBatch(env, pool = null) {
     const result = {
       ok: true,
       articlesCached: trimmed.length,
-      newsCacheWritten: newsWriteActuallyWritten,
-      newsCacheSkipped: !newsWriteActuallyWritten,
-      newsWriteWasSkipped: newsWriteWasSkipped,
-      kvAvailable: kvAvailable,
-      inMemoryCached: inMemoryCached,
-      inMemoryMatches: inMemoryMatches,
+      // HOTFIX (Commit 2.1): Removed 6 undefined variable references that were
+      // left over from Commit 1's publication gate. Commit 1 removed the
+      // variable declarations (newsWriteActuallyWritten, newsWriteWasSkipped,
+      // kvAvailable, inMemoryCached, inMemoryMatches) from STEP 6 when it
+      // eliminated the premature news:farsi write, but the references in this
+      // result object were not removed — causing ReferenceError on every
+      // */15 cron tick. These fields are no longer relevant because
+      // processNewsAIBatch no longer writes to news:farsi (publication gate
+      // publishes via publishArticleToFarsiNews() in succeedWithSummary instead).
       newsJsonLength: newsJson.length,
       enqueue: enqueueResult,
       ai: summaryResult,
