@@ -24,6 +24,7 @@ export function createAssistantHandlers(deps) {
     writeRateLimitCache,
     getTodayIsoDate,
     getNumericEnv,
+    queryDb,
   } = deps;
 
   // ── Constants ──────────────────────────────────────────────────────────────
@@ -196,11 +197,10 @@ export function createAssistantHandlers(deps) {
   // ── External AI Providers (fallback) ───────────────────────────────────────
 
   async function callGemini(env, prompt, imageBase64) {
-    const apiKey = normalizeOptionalString(env.GEMINI_API_KEY);
-    if (!apiKey) {
-      throw new Error('Gemini not configured');
-    }
-
+    // Gemini requests now route through the Supabase DB gateway (EU region)
+    // to bypass Google's geo-restriction on Hong Kong. The API key is stored
+    // securely in Supabase Vault and never exposed to the Worker.
+    // Model: gemini-3.5-flash (gemini-2.0-flash is deprecated).
     const parts = [{ text: prompt }];
     if (imageBase64) {
       parts.push({
@@ -211,36 +211,42 @@ export function createAssistantHandlers(deps) {
       });
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
-    let response;
-    try {
-      response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
-        method: 'POST',
-        headers: {
-          'x-goog-api-key': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          // Phase 5.4.2 — system instruction in native field, not in user content
-          systemInstruction: {
-            parts: [{ text: ASSISTANT_SYSTEM_PROMPT }],
-          },
-          contents: [
-            {
-              parts,
-            },
-          ],
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
+    const contents = [{ parts }];
+    const systemInstruction = { parts: [{ text: ASSISTANT_SYSTEM_PROMPT }] };
+
+    const dbResult = await queryDb(env,
+      `SELECT public.gemini_generate(
+        $1::text,
+        $2::jsonb,
+        $3::jsonb,
+        $4::jsonb
+      ) AS result`,
+      [
+        'gemini-3.5-flash',
+        JSON.stringify(contents),
+        JSON.stringify({ temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 }),
+        JSON.stringify(systemInstruction),
+      ]
+    );
+
+    const geminiResult = dbResult.rows[0]?.result || {};
+    const statusCode = geminiResult.status_code;
+    const responseBody = geminiResult.response_body || '';
+
+    if (statusCode !== 200) {
+      let errorMsg = `HTTP ${statusCode}`;
+      try {
+        const errData = JSON.parse(responseBody);
+        errorMsg = errData?.error?.message || errorMsg;
+      } catch {}
+      throw new Error(getProviderErrorDetail('Gemini failed', errorMsg, `HTTP ${statusCode}`));
     }
 
-    const data = await readJsonResponseSafe(response);
-    if (!response.ok) {
-      throw new Error(getProviderErrorDetail('Gemini failed', data?.error?.message || (await response.text()), `HTTP ${response.status}`));
+    let data;
+    try {
+      data = JSON.parse(responseBody);
+    } catch {
+      throw new Error('Invalid Gemini response JSON');
     }
 
     const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;

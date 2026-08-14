@@ -107,9 +107,11 @@ test('P0-1-7: batchAnalyzeNews uses classifyHttpError for Gemini HTTP status', (
   const method3Idx = src.indexOf('// Method 3: Rule-based fallback', fnStart);
   const fnSrc = src.slice(fnStart, method3Idx);
 
+  // Gemini now routes through DB gateway. The HTTP status comes from
+  // geminiResult.status_code (not res.status). classifyHttpError is still used.
   assert.ok(
-    /classifyHttpError\(res\.status\)/.test(fnSrc),
-    'batchAnalyzeNews must classify HTTP errors (429/5xx = retryable) using classifyHttpError'
+    /classifyHttpError\(statusCode \|\| 500\)/.test(fnSrc),
+    'batchAnalyzeNews must classify HTTP errors (429/5xx = retryable) using classifyHttpError on statusCode'
   );
 });
 

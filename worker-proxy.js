@@ -4145,21 +4145,11 @@ function classifyHttpError(status) {
  */
 async function tryGemini(env, prompt, systemPrompt) {
   const t0 = Date.now();
-  const GEMINI_API_KEY = env.GEMINI_API_KEY;
-  if (!GEMINI_API_KEY) {
-    return { provider: 'gemini', success: false, error: 'no_api_key', errorType: 'non_retryable', duration_ms: 0 };
-  }
+  // Gemini requests now route through the Supabase DB gateway (EU region)
+  // to bypass Google's geo-restriction on Hong Kong. The API key is stored
+  // securely in Supabase Vault and never exposed to the Worker.
+  // Model: gemini-3.5-flash (gemini-2.0-flash is deprecated).
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    // NEWSSEC-006 FIX: When systemPrompt is provided, use Gemini's
-    // systemInstruction field to separate system instructions from
-    // untrusted article text. Previously system + article were concatenated
-    // into ONE user message, allowing a malicious article containing
-    // "ignore previous instructions" to override the journalist prompt.
-    // systemInstruction is treated as system-priority by Gemini and cannot
-    // be overridden by user content. Backward compatible: if systemPrompt
-    // is undefined, falls back to the old single-prompt behavior.
     const requestBody = {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 },
@@ -4167,27 +4157,37 @@ async function tryGemini(env, prompt, systemPrompt) {
     if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim()) {
       requestBody.systemInstruction = { parts: [{ text: systemPrompt }] };
     }
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      }
-    );
-    clearTimeout(timeout);
 
-    if (!res.ok) {
-      const errorType = classifyHttpError(res.status);
-      let errorBody = '';
-      try { errorBody = (await res.text()).substring(0, 200); } catch {}
-      return { provider: 'gemini', success: false, error: `http_${res.status}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0 };
+    // Call the DB function gemini_generate() via queryDb (standalone, NOT in transaction)
+    // The function runs with SECURITY DEFINER, reads the API key from vault,
+    // calls http_post() to Google's API from the EU DB server, and returns the response.
+    const dbResult = await queryDb(env,
+      `SELECT public.gemini_generate(
+        $1::text,
+        $2::jsonb,
+        $3::jsonb,
+        $4::jsonb
+      ) AS result`,
+      [
+        'gemini-3.5-flash',
+        JSON.stringify(requestBody.contents),
+        JSON.stringify(requestBody.generationConfig),
+        requestBody.systemInstruction ? JSON.stringify(requestBody.systemInstruction) : null,
+      ]
+    );
+
+    const result = dbResult.rows[0]?.result || {};
+    const statusCode = result.status_code;
+    const responseBody = result.response_body || '';
+
+    if (statusCode !== 200) {
+      const errorType = classifyHttpError(statusCode || 500);
+      return { provider: 'gemini', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 200), duration_ms: Date.now() - t0 };
     }
 
     let data;
     try {
-      data = await res.json();
+      data = JSON.parse(responseBody);
     } catch (e) {
       return { provider: 'gemini', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0 };
     }
@@ -5859,7 +5859,6 @@ async function enrichNewsWithAISummaries(env, articles) {
 async function batchAnalyzeNews(env, articles) {
   if (!articles || articles.length === 0) return {};
 
-  const GEMINI_API_KEY = env.GEMINI_API_KEY;
   const hasWorkersAI = !!env.AI;
 
   // Build prompt with all article titles
@@ -5904,55 +5903,50 @@ ${headlines}`;
     } catch { return null; }
   }
 
-  // Method 1: Gemini 2.0 Flash (primary) — always tried first
-  // P0-1 FIX: Circuit Breaker protection — skip Gemini if its circuit is OPEN
-  // (prevents hammering a rate-limited provider every 15-min cron tick).
-  // Records result so failures from batch path also trip the circuit (shared
-  // with summary path's circuit state for 'gemini').
-  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) && GEMINI_API_KEY) {
+  // Method 1: Gemini via DB gateway (primary) — always tried first
+  // Routes through Supabase EU (http_post) to bypass geo-restriction.
+  // Model: gemini-3.5-flash (gemini-2.0-flash is deprecated).
+  // P0-1 FIX: Circuit Breaker protection — skip Gemini if its circuit is OPEN.
+  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
     // Check circuit breaker first
     const cbGemini = await shouldAttemptProvider(env, 'gemini');
     if (cbGemini.attempt) {
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: { temperature: 0.2, maxOutputTokens: 2048, topP: 0.8 },
-            }),
-            signal: controller.signal,
-          }
+        const dbResult = await queryDb(env,
+          `SELECT public.gemini_generate(
+            $1::text,
+            $2::jsonb,
+            $3::jsonb,
+            NULL::jsonb
+          ) AS result`,
+          [
+            'gemini-3.5-flash',
+            JSON.stringify([{ parts: [{ text: prompt }] }]),
+            JSON.stringify({ temperature: 0.2, maxOutputTokens: 2048, topP: 0.8 }),
+          ]
         );
-        clearTimeout(timeout);
 
-        if (res.ok) {
-          const data = await res.json();
+        const geminiResult = dbResult.rows[0]?.result || {};
+        const statusCode = geminiResult.status_code;
+        const responseBody = geminiResult.response_body || '';
+
+        if (statusCode === 200) {
+          const data = JSON.parse(responseBody);
           const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
           const parsed = parseBatchResult(text);
           if (parsed && Object.keys(parsed).length > 0) {
-            // SUCCESS — record in circuit breaker
             try { await recordCircuitResult(env, 'gemini', true); } catch {}
             console.log('[NEWS-AI-BATCH] ✅ Gemini PRIMARY succeeded — no fallback needed');
             return parsed;
           }
-          // Empty/malformed response — record as retryable failure
           try { await recordCircuitResult(env, 'gemini', false, 'retryable', 'empty_response'); } catch {}
           console.warn('[NEWS-AI-BATCH] ⚠️ Gemini returned empty/malformed response — falling back to Workers AI');
         } else {
-          const errorType = classifyHttpError(res.status);
-          let errBody = '';
-          try { errBody = (await res.text()).substring(0, 200); } catch {}
-          // Record failure in circuit breaker (429/5xx = retryable, counts toward OPEN)
-          try { await recordCircuitResult(env, 'gemini', false, errorType, `http_${res.status}`); } catch {}
-          console.warn(`[NEWS-AI-BATCH] ⚠️ Gemini failed (HTTP ${res.status}): ${errBody} — falling back to Workers AI`);
+          const errorType = classifyHttpError(statusCode || 500);
+          try { await recordCircuitResult(env, 'gemini', false, errorType, `http_${statusCode}`); } catch {}
+          console.warn(`[NEWS-AI-BATCH] ⚠️ Gemini failed (HTTP ${statusCode}): ${responseBody.substring(0, 200)} — falling back to Workers AI`);
         }
       } catch (e) {
-        // Network/timeout error — record as retryable
         const isAbort = e?.name === 'AbortError';
         try { await recordCircuitResult(env, 'gemini', false, 'retryable', isAbort ? 'timeout' : 'network_error'); } catch {}
         console.warn('[NEWS-AI-BATCH] ⚠️ Gemini failed:', e?.message, '— falling back to Workers AI');
@@ -7160,6 +7154,7 @@ const assistantHandlers = createAssistantHandlers({
   writeRateLimitCache,
   getTodayIsoDate,
   getNumericEnv,
+  queryDb,
 });
 const analysisRepo = createAnalysisRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 const analysisHandlers = createAnalysisHandlers({

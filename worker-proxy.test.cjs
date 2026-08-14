@@ -715,22 +715,41 @@ test('AI Chat: missing message field returns 422', async () => {
 test('AI Chat: with mocked Gemini returns reply', async () => {
   const worker = loadWorker();
   const rateLimits = createMemoryKv();
-  const env = createEnv({ RATE_LIMITS: rateLimits, GEMINI_API_KEY: 'fake-key' });
+  // Gemini now routes through DB function gemini_generate() via queryDb.
+  // The test env doesn't have a real DB, so Cloudflare AI (primary) will
+  // also fail. We need to mock the DB pool to handle gemini_generate calls.
+  // Set up _reqPool BEFORE the request so withSharedPool uses it.
+  const mockPool = {
+    query: async (sql, params) => {
+      if (sql.includes('gemini_generate')) {
+        return {
+          rows: [{
+            result: {
+              status_code: 200,
+              response_body: JSON.stringify({
+                candidates: [{
+                  content: { parts: [{ text: 'Bitcoin is a decentralized digital currency.' }] },
+                }],
+              }),
+            }
+          }]
+        };
+      }
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GEMINI_API_KEY: 'fake-key',
+    _reqPool: mockPool,
+    // Set DATABASE_URL to empty so withSharedPool skips real pool creation
+    // and uses our mock _reqPool instead.
+    DATABASE_URL: '',
+  });
   const user = { id: 999888, first_name: 'Test' };
   const initData = buildInitData('test-bot-token', user);
-
-  // Mock global fetch for Gemini API call
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    if (String(url).includes('generativelanguage.googleapis.com')) {
-      return new Response(JSON.stringify({
-        candidates: [{
-          content: { parts: [{ text: 'Bitcoin is a decentralized digital currency.' }] },
-        }],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    return originalFetch.call(globalThis, url, init);
-  };
 
   try {
     const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
@@ -743,7 +762,7 @@ test('AI Chat: with mocked Gemini returns reply', async () => {
     assert.ok(res.body.reply);
     assert.ok(res.body.reply.includes('Bitcoin'));
   } finally {
-    globalThis.fetch = originalFetch;
+    // cleanup
   }
 });
 
