@@ -293,6 +293,11 @@ async function sendRequest(worker, env, method, urlPath, options = {}) {
     if (!reqHeaders.has('Content-Type')) {
       reqHeaders.set('Content-Type', 'application/json');
     }
+    // HOTFIX (Commit 2.3): Set Content-Length so readJsonBody's stream reader
+    // knows a body is expected. Without this, readJsonBody returns { payload: {} }
+    // for requests with bodies but no Content-Length header.
+    const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+    reqHeaders.set('Content-Length', String(Buffer.byteLength(bodyStr)));
   }
   const request = new Request(url, reqOpts);
   const response = await worker.fetch(request, env, {});

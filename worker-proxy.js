@@ -327,25 +327,103 @@ async function readJsonBody(request, maxSize = MAX_BODY_BYTES, env = null) {
   if (contentLength && Number(contentLength) > maxSize) {
     return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }, env) };
   }
-  // HOTFIX: Add 10s timeout to request.text() — prevents indefinite hang when
-  // client sends Content-Length but no body (or very slow body). Without this,
-  // the Worker hangs until the runtime kills it ("code had hung").
-  // 10s is generous for reading a max-100KB body. On timeout, return 408.
-  let body;
-  try {
-    const bodyTimeoutMs = 10000;
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Request body read timeout')), bodyTimeoutMs);
-    });
-    body = await Promise.race([request.text(), timeoutPromise]);
-  } catch (e) {
-    return { error: jsonResponse({ detail: 'Request body read timeout' }, { status: 408 }, env) };
+
+  // HOTFIX (Commit 2.3): Workers-compatible body reader with per-chunk timeout.
+  // The previous Promise.race + setTimeout pattern was ineffective because
+  // Cloudflare Workers runtime kills the Worker BEFORE setTimeout fires when
+  // the Worker is waiting on I/O (request.text() stream).
+  //
+  // This implementation reads the body stream chunk-by-chunk using a Reader.
+  // Each chunk read has a 5s timeout. If no chunk arrives within 5s, we
+  // immediately return 408. This works because:
+  // 1. Reading a chunk is a microtask-level I/O operation that the runtime
+  //    tracks as "active" (not "hung")
+  // 2. The 5s timeout per-chunk is short enough that the runtime doesn't
+  //    classify the Worker as "hung" before it fires
+  // 3. If the client sends Content-Length but no body, the first chunk read
+  //    never resolves → 5s timeout fires → 408 returned
+  //
+  // For empty bodies (no Content-Length or Content-Length: 0), we skip
+  // stream reading entirely and return empty JSON — no hang possible.
+  //
+  // FALLBACK: If request.body is not a ReadableStream (e.g., in Node.js test
+  // environment or if the stream was already consumed), fall back to
+  // request.text() with a Promise.race timeout. This is less reliable in
+  // production Workers but necessary for backward compatibility.
+  const CHUNK_TIMEOUT_MS = 5000;
+
+  // If no body expected, return empty object immediately (no stream read)
+  if (!contentLength || Number(contentLength) === 0) {
+    // Double-check: request.body might still exist even without Content-Length
+    // (some clients/proxies don't send Content-Length). If body is null/undefined,
+    // return empty object. If body exists, fall through to stream reading.
+    if (!request.body) {
+      return { payload: {} };
+    }
   }
-  if (body.length > maxSize) {
+
+  let bodyText;
+  try {
+    // Check if request.body is a ReadableStream (Workers/Node 18+)
+    if (request.body && typeof request.body.getReader === 'function') {
+      // Use the ReadableStream reader API for per-chunk timeout control
+      const reader = request.body.getReader();
+      const decoder = new TextDecoder();
+      let chunks = [];
+      let totalSize = 0;
+
+      // Read chunks with timeout
+      while (true) {
+        // Race the chunk read against a timeout
+        const readPromise = reader.read();
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('chunk_timeout')), CHUNK_TIMEOUT_MS);
+        });
+
+        let result;
+        try {
+          result = await Promise.race([readPromise, timeoutPromise]);
+        } catch (e) {
+          // Timeout or read error — abort and return 408
+          try { await reader.cancel(); } catch {}
+          return { error: jsonResponse({ detail: 'Request body read timeout' }, { status: 408 }, env) };
+        }
+
+        if (result.done) {
+          break;
+        }
+
+        if (result.value) {
+          totalSize += result.value.byteLength;
+          if (totalSize > maxSize) {
+            try { await reader.cancel(); } catch {}
+            return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }, env) };
+          }
+          chunks.push(decoder.decode(result.value, { stream: true }));
+        }
+      }
+
+      bodyText = chunks.join('');
+
+      // Release the reader
+      try { await reader.closed; } catch {}
+    } else {
+      // Fallback: no ReadableStream available — use request.text() with timeout
+      // This path is for backward compatibility (Node.js test env, already-consumed stream)
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('body_timeout')), CHUNK_TIMEOUT_MS);
+      });
+      bodyText = await Promise.race([request.text(), timeoutPromise]);
+    }
+  } catch (e) {
+    return { error: jsonResponse({ detail: 'Request body read error' }, { status: 400 }, env) };
+  }
+
+  if (bodyText.length > maxSize) {
     return { error: jsonResponse({ detail: 'Request body too large' }, { status: 413 }, env) };
   }
   try {
-    return { payload: JSON.parse(body) };
+    return { payload: JSON.parse(bodyText) };
   } catch {
     return { error: jsonResponse(buildBodyFieldValidationError('body', 'json_invalid', 'JSON decode error', null), { status: 422 }, env) };
   }
@@ -4117,41 +4195,14 @@ async function fetchFarsiNews(env, categoryFilter, ctx = null) {
 
   const emptyResult = { status: 'success', source: 'rss_unavailable', data: [], category_counts: { all: 0, crypto: 0, forex: 0, economy: 0 } };
 
-  // Start the pipeline via singleFlight (exactly once per isolate).
-  // The promise is either awaited (sync fallback) or passed to ctx.waitUntil (async).
-  const refreshPromise = singleFlight('farsi-news:live-fetch', async () => {
-    try {
-      return await _runNewsLiveFetchPipeline(env);
-    } catch (e) {
-      console.warn('[NEWS] Background refresh failed (non-fatal):', e?.message);
-      return [];
-    }
-  });
-
-  if (ctx && typeof ctx.waitUntil === 'function') {
-    // P0-B: Background refresh — user gets immediate empty response.
-    // Cache will be populated for the NEXT request (within ~5-15 seconds).
-    // The .catch() prevents unhandled rejection from killing the Worker.
-    ctx.waitUntil(refreshPromise.catch(() => {}));
-    return emptyResult;
-  }
-
-  // Fallback: no ctx (shouldn't happen in HTTP path, but defensive).
-  // Run pipeline synchronously for backward compatibility.
-  // PUBLICATION GATE (Commit 1): The live-fetch pipeline returns articles
-  // WITHOUT analysis (no ai_summary). These must NOT be returned to the user
-  // directly — they must go through the enqueue → analyze → publish flow.
-  // Since this path no longer writes to news:farsi (Commit 1 removed that),
-  // we return emptyResult. The cron will process the articles and publish
-  // them after analysis completes.
-  const result = await refreshPromise;
-  if (result && result.length > 0) {
-    // Articles discovered but NOT yet analyzed — do NOT return to user.
-    // They have been returned from the pipeline for internal use only.
-    // The cron handler will enqueue + analyze + publish them.
-    // Return empty feed — user will see articles after analysis completes.
-    return emptyResult;
-  }
+  // HOTFIX (Commit 2.3): Removed the useless ctx.waitUntil(_runNewsLiveFetchPipeline)
+  // background refresh. After Commit 1 (publication gate), _runNewsLiveFetchPipeline
+  // no longer writes to news:farsi — it returns articles but nobody publishes them.
+  // The waitUntil task was wasting CPU/subrequests on RSS fetches + AI translations
+  // that get cancelled by the runtime ("waitUntil() tasks did not complete within
+  // the allowed time"). The cron (processNewsAIBatch) is the ONLY path that
+  // populates news:farsi via publishArticleToFarsiNews() after summary completion.
+  // The publication gate from Commit 1 remains fully intact.
   return emptyResult;
 }
 
@@ -4978,6 +5029,30 @@ async function enqueueForSummary(env, articles) {
 
   // Get existing queue
   const queue = await getSummaryQueue(env);
+
+  // HOTFIX (Commit 2.3): Remove ALL failed items from the queue before building
+  // existingByUrl. Failed items block re-enqueue of the same URL (existingByUrl
+  // check skips any URL already in the queue, including failed ones). This causes
+  // the queue to fill with failed items that never get retried and block new
+  // articles from being enqueued. By removing failed items here, we allow new
+  // articles (including ones with URLs that previously failed) to be enqueued.
+  // The 24h cleanup in the trim logic (line ~5055) was too slow — failed items
+  // stayed for 24h, blocking the queue. This cleanup runs on EVERY enqueue call,
+  // so failed items are removed immediately when new articles are discovered.
+  // Rules: Only removes items with status='failed'. Does NOT touch pending,
+  // processing, or any other queue. Does NOT delete user data or news history.
+  const queueBeforeClean = queue.length;
+  for (let i = queue.length - 1; i >= 0; i--) {
+    if (queue[i].status === 'failed') {
+      queue.splice(i, 1);
+    }
+  }
+  const failedRemoved = queueBeforeClean - queue.length;
+  if (failedRemoved > 0) {
+    console.log(`[NEWS-QUEUE] Cleaned ${failedRemoved} failed items from queue (was ${queueBeforeClean}, now ${queue.length})`);
+    await saveSummaryQueue(env, queue);
+  }
+
   const existingByUrl = new Map(queue.map(q => [q.url, q]));
   let enqueued = 0;
   let skipped = 0;

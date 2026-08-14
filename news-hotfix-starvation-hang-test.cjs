@@ -80,17 +80,19 @@ test('HOTFIX22-2b: TTL refresh is in processNewsAIBatch (not in publishArticleTo
 // Test 3: readJsonBody returns 408 on timeout
 // ============================================================================
 
-test('HOTFIX22-3: readJsonBody has 10s timeout that returns 408', () => {
+test('HOTFIX22-3: readJsonBody has timeout that returns 408', () => {
   const fnStart = source.indexOf('async function readJsonBody');
   assert.ok(fnStart > -1, 'readJsonBody must exist');
-  const fnBlock = source.slice(fnStart, fnStart + 1500);
+  const fnBlock = source.slice(fnStart, fnStart + 5000);
 
-  // Must have Promise.race for timeout
+  // Must have Promise.race for timeout (per-chunk or fallback)
   assert.ok(/Promise\.race/.test(fnBlock),
     'readJsonBody must use Promise.race for timeout');
-  // Must have 10000ms (10s) timeout
-  assert.ok(/10000/.test(fnBlock),
-    'readJsonBody must have 10s (10000ms) timeout');
+  // Must have timeout (CHUNK_TIMEOUT_MS = 5000)
+  assert.ok(/CHUNK_TIMEOUT_MS/.test(fnBlock),
+    'readJsonBody must have CHUNK_TIMEOUT_MS');
+  assert.ok(/5000/.test(fnBlock),
+    'readJsonBody must have 5s (5000ms) chunk timeout');
   // Must return 408 on timeout
   assert.ok(/status:\s*408/.test(fnBlock),
     'readJsonBody must return HTTP 408 on timeout');
@@ -104,7 +106,7 @@ test('HOTFIX22-3: readJsonBody has 10s timeout that returns 408', () => {
 
 test('HOTFIX22-3b: readJsonBody timeout does NOT remove existing validation', () => {
   const fnStart = source.indexOf('async function readJsonBody');
-  const fnBlock = source.slice(fnStart, fnStart + 1500);
+  const fnBlock = source.slice(fnStart, fnStart + 5000);
 
   // Content-Length check must still exist
   assert.ok(/Content-Length/.test(fnBlock),
