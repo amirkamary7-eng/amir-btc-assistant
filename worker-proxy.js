@@ -5045,6 +5045,10 @@ async function enqueueForSummary(env, articles) {
       importance_score: a.importance_score || 0,
       // published_at is set when publishArticleToFarsiNews() runs (after summary success)
       published_at: null,
+      // QUEUE PRIORITY (Commit 2): New articles get 'high' priority.
+      // Retries/failures get 'low' priority (set in requeueWithRetry).
+      // Queue selection prefers high + oldest enqueued_at first.
+      priority: 'high',
     });
     existingByUrl.set(a.url, queue[queue.length - 1]);
     enqueued++;
@@ -5206,23 +5210,66 @@ async function processOneArticleSummary(env, pool = null) {
 
   const now = Date.now();
 
-  // Find first eligible item (FIFO among eligible)
+  // Find first eligible item — QUEUE PRIORITY (Commit 2):
+  // Selection order:
+  //   1. HIGH priority + oldest enqueued_at (new articles first)
+  //   2. LOW priority + oldest enqueued_at (retries — anti-starvation)
+  //
+  // Anti-starvation: If there are HIGH-priority items but we've processed
+  // many in a row, LOW-priority items still get a chance. We use a simple
+  // heuristic: if there are eligible LOW-priority items AND the oldest
+  // HIGH-priority item was enqueued less than 2 minutes ago, give LOW
+  // a 20% chance of being selected. This prevents LOW from being
+  // permanently blocked while still prioritizing new articles.
+  //
   // PHASE B FIX (AI-1): Skip items with status='processing' to prevent
   // concurrent processOneArticleSummary calls from processing the same article.
-  // Previously, */5 and */15 crons could both pick the same eligible item
-  // → 2-3× duplicate AI calls on 15-min boundaries.
-  // Now: mark item as 'processing' and save queue BEFORE AI call.
-  // Concurrent calls see status='processing' and skip it.
   let idx = -1;
+  let highIdx = -1;
+  let lowIdx = -1;
+  let highOldestEnqueued = Infinity;
+  let lowOldestEnqueued = Infinity;
   for (let i = 0; i < queue.length; i++) {
     const item = queue[i];
     if (!item || !item.url) continue;
     if (item.status === 'failed') continue;
-    if (item.status === 'processing') continue; // PHASE B FIX: skip items being processed
-    // Eligible if next_retry is null or in the past
+    if (item.status === 'processing') continue;
     if (item.next_retry && item.next_retry > now) continue;
-    idx = i;
-    break;
+    const itemPriority = item.priority || 'high'; // backward compat: old items default to high
+    const itemEnqueued = item.enqueued_at || now;
+    if (itemPriority === 'low') {
+      if (lowIdx === -1 || itemEnqueued < lowOldestEnqueued) {
+        lowIdx = i;
+        lowOldestEnqueued = itemEnqueued;
+      }
+    } else {
+      if (highIdx === -1 || itemEnqueued < highOldestEnqueued) {
+        highIdx = i;
+        highOldestEnqueued = itemEnqueued;
+      }
+    }
+  }
+
+  // Selection logic: prefer HIGH, but give LOW a chance to prevent starvation
+  if (highIdx !== -1) {
+    // There are eligible HIGH-priority items.
+    // Anti-starvation: if LOW items exist AND the HIGH item is very recent
+    // (<2 min old), give LOW a 20% chance of being selected instead.
+    // This ensures LOW items eventually get processed even under continuous
+    // HIGH-priority load. 20% = roughly 1 in 5 ticks processes a LOW item.
+    if (lowIdx !== -1 && (now - highOldestEnqueued) < 2 * 60 * 1000) {
+      // 20% chance to pick LOW instead of HIGH (anti-starvation)
+      if (Math.random() < 0.2) {
+        idx = lowIdx;
+      } else {
+        idx = highIdx;
+      }
+    } else {
+      idx = highIdx;
+    }
+  } else if (lowIdx !== -1) {
+    // No HIGH-priority items eligible — process LOW
+    idx = lowIdx;
   }
 
   if (idx === -1) {
@@ -5343,10 +5390,28 @@ async function processOneArticleSummary(env, pool = null) {
   async function requeueWithRetry(reason, errorDetail, attempts) {
     const newRetryCount = (article.retry_count || 0) + 1;
     const backoffMin = NEWS_SUMMARY_BACKOFF_MINUTES[Math.min(newRetryCount - 1, NEWS_SUMMARY_BACKOFF_MINUTES.length - 1)] || 30;
+    // QUEUE PRIORITY (Commit 2): Retried items get LOW priority so new articles
+    // (HIGH priority) are processed first. This prevents old retries from
+    // blocking newly discovered news.
+    article.priority = 'low';
     article.retry_count = newRetryCount;
     article.last_attempt = now;
-    article.next_retry = now + backoffMin * 60 * 1000;
-    if (newRetryCount >= NEWS_SUMMARY_MAX_RETRIES) {
+    // COMMIT 2 — RETRY JITTER: Add ±20% jitter to backoff delay.
+    // Without jitter, all items that fail at the same cron tick retry at the
+    // exact same time (thundering herd). Jitter spreads retries across a
+    // wider window, reducing provider load spikes.
+    // Example: 5 min backoff → actual delay = 4 to 6 min (±20%)
+    const jitterMultiplier = 1 + (Math.random() - 0.5) * 0.4; // 0.8 to 1.2
+    const backoffMs = Math.round(backoffMin * 60 * 1000 * jitterMultiplier);
+    article.next_retry = now + backoffMs;
+    // COMMIT 2 — PERMANENT FAILURE for non-retryable HTTP errors:
+    // fetch_403 and fetch_404 mean the article URL itself is permanently
+    // inaccessible (paywalled, deleted, moved). Retrying 3× wastes AI
+    // provider calls and queue slots. Mark as failed immediately.
+    // Transient provider errors (429, 5xx, 408, network) still use retry/backoff.
+    const PERMANENT_FAIL_REASONS = ['fetch_403', 'fetch_404', 'fetch_410', 'invalid_url_scheme'];
+    const isPermanentFailure = PERMANENT_FAIL_REASONS.includes(reason);
+    if (isPermanentFailure || newRetryCount >= NEWS_SUMMARY_MAX_RETRIES) {
       article.status = 'failed';
       article.fail_reason = reason;
     }
@@ -5601,6 +5666,8 @@ async function processOneArticleSummary(env, pool = null) {
     article.last_attempt = now;
     article.status = 'failed'; // skip retries — article has no content
     article.fail_reason = 'text_too_short';
+    // QUEUE PRIORITY (Commit 2): Failed items get LOW priority (for monitoring consistency)
+    article.priority = 'low';
     queue.splice(idx, 1);
     queue.push(article);
     await saveSummaryQueue(env, queue);
@@ -5664,6 +5731,8 @@ async function processOneArticleSummary(env, pool = null) {
     article.last_attempt = now;
     article.status = 'failed';
     article.fail_reason = 'all_providers_non_retryable';
+    // QUEUE PRIORITY (Commit 2): Failed items get LOW priority (for monitoring consistency)
+    article.priority = 'low';
     article.fail_attempts = fallbackResult.attempts.map(a => ({ provider: a.provider, error: a.error, errorType: a.errorType }));
     queue.splice(idx, 1);
     queue.push(article);
