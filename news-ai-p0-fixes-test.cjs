@@ -516,3 +516,105 @@ test('ERR-PERSIST-6: fail_attempts format matches non-retryable path', () => {
       `non-retryable path must include ${field} field (format consistency)`);
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// GROQ INTEGRATION TESTS
+// ═══════════════════════════════════════════════════════════════════════
+
+test('GROQ-1: tryGroq function exists', () => {
+  assert.ok(/async function tryGroq\(/.test(src), 'tryGroq function must exist');
+});
+
+test('GROQ-2: tryGroq uses groq_generate DB function', () => {
+  const fnStart = src.indexOf('async function tryGroq');
+  const fnEnd = src.indexOf('\n}', fnStart + 100);
+  const fnSrc = src.slice(fnStart, fnEnd + 2);
+  assert.ok(/groq_generate/.test(fnSrc), 'tryGroq must call groq_generate DB function');
+  assert.ok(/llama-3\.3-70b-versatile/.test(fnSrc), 'tryGroq must use llama-3.3-70b-versatile model');
+});
+
+test('GROQ-3: tryGroq does NOT use GEMINI_API_KEY', () => {
+  const fnStart = src.indexOf('async function tryGroq');
+  const fnEnd = src.indexOf('\n}', fnStart + 100);
+  const fnSrc = src.slice(fnStart, fnEnd + 2);
+  assert.ok(!/GEMINI_API_KEY/.test(fnSrc), 'tryGroq must NOT reference GEMINI_API_KEY');
+});
+
+test('GROQ-4: tryGroq does NOT use generativelanguage.googleapis.com', () => {
+  const fnStart = src.indexOf('async function tryGroq');
+  const fnEnd = src.indexOf('\n}', fnStart + 100);
+  const fnSrc = src.slice(fnStart, fnEnd + 2);
+  assert.ok(!/generativelanguage\.googleapis\.com/.test(fnSrc), 'tryGroq must NOT call Google Gemini API directly');
+});
+
+test('GROQ-5: Groq is first provider in generateSummaryWithFallback', () => {
+  const fnStart = src.indexOf('Provider 0: Groq');
+  assert.ok(fnStart > -1, 'Groq must be Provider 0 in summary chain');
+  const geminiStart = src.indexOf('Provider 1: Gemini');
+  assert.ok(geminiStart > fnStart, 'Gemini must come AFTER Groq');
+});
+
+test('GROQ-6: Groq is first method in batchAnalyzeNews', () => {
+  const fnStart = src.indexOf('async function batchAnalyzeNews');
+  const fnEnd = src.indexOf('async function _hashLockKey', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd);
+  const groqIdx = fnSrc.indexOf('Method 0: Groq');
+  const geminiIdx = fnSrc.indexOf('Method 1: Gemini');
+  assert.ok(groqIdx > -1, 'batchAnalyzeNews must have Method 0: Groq');
+  assert.ok(geminiIdx > -1, 'batchAnalyzeNews must have Method 1: Gemini');
+  assert.ok(groqIdx < geminiIdx, 'Groq must come before Gemini in batchAnalyzeNews');
+});
+
+test('GROQ-7: Groq is first provider in translateToFarsi', () => {
+  const fnStart = src.indexOf('async function translateToFarsi');
+  const fnEnd = src.indexOf('async function _runNewsLiveFetchPipeline', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd);
+  const groqIdx = fnSrc.indexOf('Primary: Groq');
+  const waiIdx = fnSrc.indexOf('Fallback 1: Cloudflare Workers AI');
+  assert.ok(groqIdx > -1, 'translateToFarsi must have Primary: Groq');
+  assert.ok(waiIdx > -1, 'translateToFarsi must have Fallback 1: Workers AI');
+  assert.ok(groqIdx < waiIdx, 'Groq must come before Workers AI in translateToFarsi');
+});
+
+test('GROQ-8: Groq circuit breaker uses "groq" provider key', () => {
+  const fnStart = src.indexOf('async function translateToFarsi');
+  const fnEnd = src.indexOf('async function _runNewsLiveFetchPipeline', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/shouldAttemptProvider\(env,\s*['"]groq['"]\)/.test(fnSrc), 'Translation must check circuit breaker for "groq"');
+  assert.ok(/recordCircuitResult\(env,\s*['"]groq['"]/.test(fnSrc), 'Translation must record circuit breaker for "groq"');
+});
+
+test('GROQ-9: Groq summary uses attemptProvider wrapper', () => {
+  assert.ok(/attemptProvider\(\s*['"]groq['"]/.test(src), 'Groq summary must use attemptProvider wrapper');
+});
+
+test('GROQ-10: NEWS_PROVIDER_GROQ flag exists with default true', () => {
+  assert.ok(/isNewsProviderEnabled\(env,\s*['"]NEWS_PROVIDER_GROQ['"]\s*,\s*true\)/.test(src),
+    'NEWS_PROVIDER_GROQ must be checked with default true');
+});
+
+test('GROQ-11: Groq provider added to monitoring provider lists', () => {
+  assert.ok(/providers.*=.*\['groq'/.test(src), 'Groq must be in provider monitoring list');
+  assert.ok(/providerNames.*=.*\['groq'/.test(src), 'Groq must be in providerNames list');
+  assert.ok(/providers_priority.*\['groq'/.test(src), 'Groq must be in providers_priority list');
+});
+
+test('GROQ-12: No hardcoded Groq API key', () => {
+  assert.ok(!/gsk_[A-Za-z0-9]{20,}/.test(src), 'No hardcoded Groq API key (gsk_*) in source');
+});
+
+test('GROQ-13: Groq falls back to Gemini on failure', () => {
+  // Find the integration point (not the function definition comment)
+  const fnStart = src.indexOf('// Provider 0: Groq (primary) — always tried first');
+  assert.ok(fnStart > -1, 'Groq summary integration must exist');
+  const afterGroq = src.slice(fnStart, fnStart + 1500);
+  assert.ok(/falling back to Gemini/.test(afterGroq), 'Groq failure must log "falling back to Gemini"');
+  assert.ok(/!summary/.test(afterGroq), 'Gemini must be gated on !summary (only if Groq failed)');
+});
+
+test('GROQ-14: Groq batch falls back to Gemini on failure', () => {
+  const fnStart = src.indexOf('Method 0: Groq');
+  const fnEnd = src.indexOf('Method 1: Gemini', fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd);
+  assert.ok(/falling back to Gemini/.test(fnSrc), 'Groq batch failure must log "falling back to Gemini"');
+});

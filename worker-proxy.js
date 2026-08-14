@@ -3589,7 +3589,47 @@ async function translateToFarsi(text, env) {
   let result = text;
   let translation_failed = false;
 
-  // ── Primary: Cloudflare Workers AI ─────────────────────────────────
+  // ── Primary: Groq (via DB gateway) ────────────────────────────────
+  // Groq uses llama-3.3-70b for translation — higher quality than m2m100.
+  // Circuit breaker key: 'groq' (shared with summary + batch paths).
+  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
+    const cbGroq = await shouldAttemptProvider(env, 'groq');
+    if (cbGroq.attempt) {
+      try {
+        const messages = [
+          { role: 'system', content: 'You are a professional translator. Translate the following English text to natural Persian (Farsi). Return ONLY the translation, no explanations or extra text.' },
+          { role: 'user', content: text }
+        ];
+        const dbResult = await queryDb(env,
+          `SELECT public.groq_generate($1::text, $2::jsonb, 500, 0.3) AS result`,
+          ['llama-3.3-70b-versatile', JSON.stringify(messages)]
+        );
+        const groqResult = dbResult.rows[0]?.result || {};
+        if (groqResult.status_code === 200) {
+          const data = JSON.parse(groqResult.response_body);
+          const translated = data?.choices?.[0]?.message?.content;
+          if (translated && typeof translated === 'string' && translated.trim() && translated.trim() !== text) {
+            result = translated.trim();
+            translation_failed = false;
+            try { await recordCircuitResult(env, 'groq', true); } catch {}
+          } else {
+            try { await recordCircuitResult(env, 'groq', false, 'retryable', 'empty_response'); } catch {}
+          }
+        } else {
+          const errorType = classifyHttpError(groqResult.status_code || 500);
+          try { await recordCircuitResult(env, 'groq', false, errorType, `http_${groqResult.status_code}`); } catch {}
+          console.warn('[TRANSLATE] Groq failed (non-fatal):', `HTTP ${groqResult.status_code}`);
+        }
+      } catch (e) {
+        try { await recordCircuitResult(env, 'groq', false, 'retryable', e?.message?.substring(0, 120)); } catch {}
+        console.warn('[TRANSLATE] Groq failed (non-fatal):', e?.message);
+      }
+    } else {
+      console.warn('[TRANSLATE] Groq circuit OPEN — skipping to Workers AI');
+    }
+  }
+
+  // ── Fallback 1: Cloudflare Workers AI ─────────────────────────────
   // P0-2 FIX: Circuit Breaker protection for translation. Uses a SEPARATE
   // provider key ('translation-workers-ai') from the summary path's
   // 'workers-ai' because m2m100-1.2b is a different model with different
@@ -4140,7 +4180,65 @@ function classifyHttpError(status) {
 }
 
 /**
- * Provider 1: Gemini 2.0 Flash (primary).
+ * Provider 0: Groq (primary) — routes through Supabase EU DB gateway.
+ * Uses llama-3.3-70b-versatile via OpenAI-compatible API.
+ * Returns { provider, success, summary?, error?, errorType, error_detail?, duration_ms }.
+ */
+async function tryGroq(env, prompt, systemPrompt) {
+  const t0 = Date.now();
+  try {
+    const messages = [];
+    if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim()) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+    messages.push({ role: 'user', content: prompt });
+
+    const dbResult = await queryDb(env,
+      `SELECT public.groq_generate(
+        $1::text,
+        $2::jsonb,
+        1024,
+        0.4
+      ) AS result`,
+      ['llama-3.3-70b-versatile', JSON.stringify(messages)]
+    );
+
+    const result = dbResult.rows[0]?.result || {};
+    const statusCode = result.status_code;
+    const responseBody = result.response_body || '';
+
+    if (statusCode !== 200) {
+      const errorType = classifyHttpError(statusCode || 500);
+      return { provider: 'groq', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 200), duration_ms: Date.now() - t0 };
+    }
+
+    let data;
+    try {
+      data = JSON.parse(responseBody);
+    } catch (e) {
+      return { provider: 'groq', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0 };
+    }
+
+    const text = data?.choices?.[0]?.message?.content;
+    if (text && text.trim().length >= 50) {
+      return { provider: 'groq', success: true, summary: text.trim(), duration_ms: Date.now() - t0 };
+    }
+    return { provider: 'groq', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
+  } catch (e) {
+    const isAbort = e?.name === 'AbortError';
+    return {
+      provider: 'groq',
+      success: false,
+      error: isAbort ? 'timeout' : 'network_error',
+      errorType: 'retryable',
+      error_detail: e?.message?.substring(0, 120),
+      duration_ms: Date.now() - t0,
+    };
+  }
+}
+
+/**
+ * Provider 1: Gemini (via DB gateway).
  * Returns { provider, success, summary?, error?, errorType, error_detail?, duration_ms }.
  */
 async function tryGemini(env, prompt, systemPrompt) {
@@ -4570,7 +4668,19 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
   // No parallel calls — sequential fallback to minimize cost + latency.
   // ────────────────────────────────────────────────────────────────────────────
 
-  // Provider 1: Gemini (primary) — always tried first
+  // Provider 0: Groq (primary) — always tried first
+  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
+    const r = await attemptProvider('groq', () => tryGroq(env, prompt, systemPrompt));
+    if (r.success) {
+      summary = r.summary;
+      usedProvider = 'groq';
+      console.log('[NEWS-AI-FALLBACK] ✅ Groq PRIMARY succeeded — no fallback needed');
+    } else {
+      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq failed (error=${r.error}, type=${r.errorType}) — falling back to Gemini`);
+    }
+  }
+
+  // Provider 1: Gemini (fallback 1) — tried if Groq didn't succeed
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
     // NEWSSEC-006 FIX: Pass systemPrompt so Gemini uses systemInstruction
     // (system-priority, cannot be overridden by untrusted article text).
@@ -5608,7 +5718,7 @@ async function getNewsAIMonitoring(env) {
   let avgProvider = null;
   let avgSummaryTimeMs = 0;
   if (providerStats) {
-    const providers = ['gemini', 'workers-ai', 'openai'];
+    const providers = ['groq', 'gemini', 'workers-ai', 'openai'];
     let maxSuccess = 0;
     for (const p of providers) {
       if (providerStats[p] && providerStats[p].success > maxSuccess) {
@@ -5622,7 +5732,7 @@ async function getNewsAIMonitoring(env) {
   }
 
   // ── Phase 10.5: Circuit Breaker state per provider ──
-  const providerNames = ['gemini', 'workers-ai', 'openai'];
+  const providerNames = ['groq', 'gemini', 'workers-ai', 'openai'];
   const providerStatus = {};
   let circuitOpenCount = 0;
   for (const p of providerNames) {
@@ -5683,7 +5793,7 @@ async function getNewsAIMonitoring(env) {
       news_list_ttl_minutes: 30,
       // Phase 10: provider config
       openai_model: OPENAI_MODEL,
-      providers_priority: ['gemini', 'workers-ai', 'openai'],
+      providers_priority: ['groq', 'gemini', 'workers-ai', 'openai'],
       // Phase 10.5: circuit breaker config
       circuit_breaker_threshold: CIRCUIT_BREAKER_FAILURE_THRESHOLD,
       circuit_breaker_open_ms: CIRCUIT_BREAKER_OPEN_MS,
@@ -5761,6 +5871,7 @@ async function enrichNewsWithAISummaries(env, articles) {
   let allProvidersCircuitOpen = false;
   try {
     const enabledProviders = [];
+    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) enabledProviders.push('groq');
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) enabledProviders.push('gemini');
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true)) enabledProviders.push('workers-ai');
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) enabledProviders.push('openai');
@@ -5903,7 +6014,51 @@ ${headlines}`;
     } catch { return null; }
   }
 
-  // Method 1: Gemini via DB gateway (primary) — always tried first
+  // Method 0: Groq via DB gateway (primary) — always tried first
+  // Routes through Supabase EU to bypass geo-restriction.
+  // Model: llama-3.3-70b-versatile
+  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
+    const cbGroq = await shouldAttemptProvider(env, 'groq');
+    if (cbGroq.attempt) {
+      try {
+        const messages = [
+          { role: 'system', content: 'You are a crypto market analyst. Return ONLY a JSON array, no other text.' },
+          { role: 'user', content: prompt }
+        ];
+        const dbResult = await queryDb(env,
+          `SELECT public.groq_generate($1::text, $2::jsonb, 2048, 0.2) AS result`,
+          ['llama-3.3-70b-versatile', JSON.stringify(messages)]
+        );
+        const groqResult = dbResult.rows[0]?.result || {};
+        const statusCode = groqResult.status_code;
+        const responseBody = groqResult.response_body || '';
+
+        if (statusCode === 200) {
+          const data = JSON.parse(responseBody);
+          const text = data?.choices?.[0]?.message?.content || '';
+          const parsed = parseBatchResult(text);
+          if (parsed && Object.keys(parsed).length > 0) {
+            try { await recordCircuitResult(env, 'groq', true); } catch {}
+            console.log('[NEWS-AI-BATCH] ✅ Groq PRIMARY succeeded — no fallback needed');
+            return parsed;
+          }
+          try { await recordCircuitResult(env, 'groq', false, 'retryable', 'empty_response'); } catch {}
+          console.warn('[NEWS-AI-BATCH] ⚠️ Groq returned empty/malformed response — falling back to Gemini');
+        } else {
+          const errorType = classifyHttpError(statusCode || 500);
+          try { await recordCircuitResult(env, 'groq', false, errorType, `http_${statusCode}`); } catch {}
+          console.warn(`[NEWS-AI-BATCH] ⚠️ Groq failed (HTTP ${statusCode}) — falling back to Gemini`);
+        }
+      } catch (e) {
+        try { await recordCircuitResult(env, 'groq', false, 'retryable', e?.name === 'AbortError' ? 'timeout' : 'network_error'); } catch {}
+        console.warn('[NEWS-AI-BATCH] ⚠️ Groq failed:', e?.message, '— falling back to Gemini');
+      }
+    } else {
+      console.warn(`[NEWS-AI-BATCH] ⚠️ Groq circuit OPEN — skipping to Gemini`);
+    }
+  }
+
+  // Method 1: Gemini via DB gateway (fallback 1) — tried if Groq didn't succeed
   // Routes through Supabase EU (http_post) to bypass geo-restriction.
   // Model: gemini-3.5-flash (gemini-2.0-flash is deprecated).
   // P0-1 FIX: Circuit Breaker protection — skip Gemini if its circuit is OPEN.
