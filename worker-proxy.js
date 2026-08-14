@@ -234,6 +234,94 @@ function safeDbErrorResponse(error, options = {}, env = null) {
 
 const MAX_BODY_BYTES = 102400; // 100 KB
 
+// ── DIAGNOSTIC INSTRUMENTATION (temporary — bootstrap hang root-cause analysis) ──
+// Emits ONLY console.warn JSON. No I/O, no KV, no DB, no fetch, no timers.
+// Every event: { event, requestId, traceId, stage, phase, timestamp, ...extra }
+// Safe to remove after root cause is identified.
+
+// Reusable secret sanitizer for diagnostic logging.
+// Strips common secret patterns from ANY string before it is logged.
+// Patterns covered (extends safeError's 2 patterns):
+//   - Connection strings: postgres://, postgresql://, pgbouncer://, postgresql+srv://
+//     (user:password@host) → ***:***@
+//   - Key=value secrets: token=..., key=..., secret=..., password=..., apikey=...,
+//     api_key=..., bot_token=..., authorization=... (quoted or unquoted) → key=***
+//   - Bearer tokens: Authorization: Bearer xxx → Bearer ***
+//   - Telegram Bot API URLs: https://api.telegram.org/bot<token>/... → bot***/...
+//   - Telegram initData strings (query-string with hash): hash=...&user=... → INITDATA_REDACTED
+//   - Generic hex/base64 secrets (>=32 chars): redacted → ***
+// All replacements are case-insensitive. After sanitization, strings are truncated to 150 chars.
+function _sanitizeDiagString(str) {
+  let s = String(str || '');
+  if (!s) return s;
+  // Connection strings with credentials
+  s = s.replace(/(postgres(?:ql|ql\+srv)?|pgbouncer):\/\/[^\s/@:]+:[^\s/@]+@/gi, '$1://***:***@');
+  // Telegram Bot API URL token exposure (https://api.telegram.org/bot<TOKEN>/...)
+  // Bot tokens contain a colon (e.g. 123456789:AAExxxx), so we must include it.
+  s = s.replace(/(api\.telegram\.org\/bot)[A-Za-z0-9_:-]+/gi, '$1***');
+  // Authorization Bearer tokens
+  s = s.replace(/(bearer\s+)[A-Za-z0-9._\-]+/gi, '$1***');
+  // Key=value secrets (quoted or unquoted, up to whitespace/quote/comma/end)
+  s = s.replace(/(token|key|secret|password|apikey|api_key|bot_token|authorization|access_token|refresh_token)\s*[=:]\s*["']?[^"'\s,;]+/gi, '$1=***');
+  // Telegram initData query-string (contains hash= + user= pairs) — redact entirely
+  if (/\bhash=[A-Fa-f0-9]+/.test(s) && /\buser=/.test(s)) {
+    s = '[INITDATA_REDACTED]';
+  }
+  return s.slice(0, 150);
+}
+
+// Recursively sanitize any value (string/number/boolean/object/array) for diagnostic logging.
+// Objects/arrays are deep-cloned with all string values sanitized.
+function _sanitizeDiagValue(value, depth = 0) {
+  if (depth > 5) return '[max-depth]'; // prevent infinite recursion on circular refs
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') return _sanitizeDiagString(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'function') return '[function]';
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((v) => _sanitizeDiagValue(v, depth + 1));
+  }
+  if (typeof value === 'object') {
+    const out = {};
+    let count = 0;
+    // Keys whose VALUE must be fully redacted regardless of content.
+    const redactKeys = new Set([
+      'authorization', 'cookie', 'set-cookie', 'x-telegram-init-data',
+      'initdata', 'init_data', 'password', 'secret', 'token', 'bot_token',
+      'api_key', 'apikey', 'access_token', 'refresh_token',
+    ]);
+    for (const k of Object.keys(value)) {
+      if (count >= 30) break; // cap object size (allows keys 0..29 = 30 keys)
+      count++;
+      const keyLower = String(k).toLowerCase();
+      if (redactKeys.has(keyLower)) {
+        // Redact the value entirely — the key name itself indicates a secret
+        out[k] = '[REDACTED]';
+      } else {
+        out[k] = _sanitizeDiagValue(value[k], depth + 1);
+      }
+    }
+    return out;
+  }
+  return String(value).slice(0, 150);
+}
+
+function _bsDiag(env, stage, phase, extra = {}) {
+  try {
+    const rid = (env && env._bsDiagId) || _traceId || 'no-id';
+    const entry = {
+      event: 'bootstrap-diag',
+      requestId: rid,
+      traceId: _traceId,
+      stage,
+      phase,
+      timestamp: new Date().toISOString(),
+      ..._sanitizeDiagValue(extra),
+    };
+    console.warn(JSON.stringify(entry));
+  } catch { /* instrumentation must never fail the request */ }
+}
+
 async function readJsonBody(request, maxSize = MAX_BODY_BYTES, env = null) {
   const contentLength = request.headers.get('Content-Length');
   if (contentLength && Number(contentLength) > maxSize) {
@@ -2625,14 +2713,20 @@ async function getChatMemberDebugPayload(userId, env) {
 
   try {
     const telegramUrl = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${encodeURIComponent(uid)}`;
+    // DIAGNOSTIC: telegram-api checkpoint (temporary — root cause analysis).
+    // Does NOT add a timeout. Only observes start/end/error of the existing fetch.
+    _bsDiag(env, 'telegram-api', 'start');
+    const _bsTgT0 = Date.now();
     const telegramResponse = await fetch(telegramUrl);
     const data = await telegramResponse.json();
+    _bsDiag(env, 'telegram-api', 'end', { durationMs: Date.now() - _bsTgT0, httpStatus: telegramResponse.status });
     payload.telegram_response = data;
     const status = data?.result?.status || '';
     payload.joined = Boolean(data?.ok && JOINED_STATUSES.has(status));
 
     return payload;
   } catch (error) {
+    _bsDiag(env, 'telegram-api', 'error', { errorName: error instanceof Error ? error.name : 'Error', errorMessage: String(error?.message || '').slice(0, 150) });
     payload.telegram_response = {
       exception: error instanceof Error ? error.name : 'Error',
       message: error instanceof Error ? error.message : String(error),
@@ -7273,6 +7367,8 @@ const userHandlers = createUserHandlers({
   watchlistRepo,
   adminRepo,
   diagLog,
+  // DIAGNOSTIC: temporary instrumentation for bootstrap hang root-cause analysis.
+  _bsDiag,
   // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap.
   // walletHandlers is created above (line ~6809) so it's in scope here.
   fireDailyLoginMission: (...args) => walletHandlers.fireDailyLoginMission(...args),
@@ -11108,6 +11204,9 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/users/bootstrap') {
+        // DIAGNOSTIC: per-bootstrap correlation ID (temporary — root cause analysis).
+        env._bsDiagId = 'bs_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+        _bsDiag(env, 'shared-pool', 'start');
         // FIX (Focused Verification — Bootstrap Rate Limit):
         // Previously, userId was extracted from initData WITHOUT HMAC validation,
         // allowing an attacker to consume a victim's rate limit quota by sending
@@ -11117,11 +11216,16 @@ export default {
         // rate limit counter — attacker cannot DoS a victim's bootstrap.
         // If auth succeeds, we rate limit with the HMAC-validated userId.
         // Limit: 10 req/60s per user. KV fail-open behavior preserved.
+        const _bsRlT0 = Date.now();
+        _bsDiag(env, 'rate-limit', 'start');
         try {
           const _bsAuth = await authenticateTelegramRequest(request, env);
           if (_bsAuth.user) {
             // Authenticated user — check rate limit with validated userId
             if (await isUserRateLimited(env, _bsAuth.user.id, 'bootstrap', 10, 60)) {
+              _bsDiag(env, 'rate-limit', 'end', { durationMs: Date.now() - _bsRlT0, result: 'rate_limited' });
+              _bsDiag(env, 'shared-pool', 'end', { durationMs: Date.now() - _bsRlT0, result: 'rate_limited' });
+              env._bsDiagId = null;
               return jsonResponse({ status: 'error', message: 'Too many requests', code: 'RATE_LIMITED' }, { status: 429 }, env);
             }
           }
@@ -11129,8 +11233,22 @@ export default {
           // just fall through to handleBootstrap which will return 401.
           // This ensures attacker requests with fake initData don't consume
           // any victim's rate limit quota.
-        } catch { /* rate limit check failed — allow request (fail-open) */ }
-        return userHandlers.handleBootstrap(request, env);
+          _bsDiag(env, 'rate-limit', 'end', { durationMs: Date.now() - _bsRlT0, result: 'ok' });
+        } catch (e) {
+          _bsDiag(env, 'rate-limit', 'error', { durationMs: Date.now() - _bsRlT0, errorName: e?.constructor?.name, errorMessage: String(e?.message || '').slice(0, 150) });
+        }
+        // DIAGNOSTIC: log shared-pool:end when handleBootstrap settles (via .then).
+        // Does NOT alter the returned Promise — only observes settlement.
+        // If handleBootstrap hangs, this .then() never fires → absent end log.
+        const _bsDispatchT0 = Date.now();
+        const _bsResult = userHandlers.handleBootstrap(request, env);
+        if (_bsResult && typeof _bsResult.then === 'function') {
+          _bsResult.then(
+            () => _bsDiag(env, 'shared-pool', 'end', { durationMs: Date.now() - _bsDispatchT0, result: 'resolved' }),
+            () => _bsDiag(env, 'shared-pool', 'end', { durationMs: Date.now() - _bsDispatchT0, result: 'rejected' })
+          );
+        }
+        return _bsResult;
       }
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
