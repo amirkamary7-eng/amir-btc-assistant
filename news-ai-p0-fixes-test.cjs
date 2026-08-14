@@ -244,7 +244,9 @@ test('P0-3-3: singleFlight wrapper documents per-isolate limitation', () => {
 
 test('P0-3-4: cache-hit path is NOT inside singleFlight (only live-fetch is)', () => {
   const fnStart = src.indexOf('async function fetchFarsiNews');
-  const fnSrc = src.slice(fnStart, fnStart + 3000);
+  // PUBLICATION GATE (Commit 1): window increased from 3000 to 5000 to accommodate
+  // the readyOnly filter code added between cache-hit and singleFlight.
+  const fnSrc = src.slice(fnStart, fnStart + 5000);
 
   // The cache-hit path (readAppCache + enrichNewsWithAISummaries) must be
   // BEFORE the singleFlight wrapper. Verify "cachedNews" appears before "singleFlight".

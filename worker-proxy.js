@@ -4055,14 +4055,22 @@ async function fetchFarsiNews(env, categoryFilter, ctx = null) {
       }));
       // Enrich with AI summaries from KV (if available)
       const enriched = await enrichNewsWithAISummaries(env, sanitized);
+      // PUBLICATION GATE (Commit 1): Defense-in-depth — filter out any article
+      // that still has no ai_summary. With the publication gate, articles should
+      // only enter news:farsi after analysis completes. But if a stale cache
+      // entry from before this commit still has ai_summary=null (old article
+      // published before the gate was active), we filter it out here so users
+      // NEVER see a pending article. This filter will become a no-op once all
+      // pre-gate cache entries expire (TTL=30min).
+      const readyOnly = enriched.filter(a => a && a.ai_summary && String(a.ai_summary).trim().length > 0);
       const data = categoryFilter
-        ? enriched.filter((a) => a.category === categoryFilter)
-        : enriched;
+        ? readyOnly.filter((a) => a.category === categoryFilter)
+        : readyOnly;
       const categoryCounts = {
-        all: enriched.length,
-        crypto: enriched.filter(a => a.category === 'crypto').length,
-        forex: enriched.filter(a => a.category === 'forex').length,
-        economy: enriched.filter(a => a.category === 'economy').length,
+        all: readyOnly.length,
+        crypto: readyOnly.filter(a => a.category === 'crypto').length,
+        forex: readyOnly.filter(a => a.category === 'forex').length,
+        economy: readyOnly.filter(a => a.category === 'economy').length,
       };
       return { status: 'success', source: 'cache', data, category_counts: categoryCounts };
     } catch {
@@ -4117,18 +4125,19 @@ async function fetchFarsiNews(env, categoryFilter, ctx = null) {
 
   // Fallback: no ctx (shouldn't happen in HTTP path, but defensive).
   // Run pipeline synchronously for backward compatibility.
+  // PUBLICATION GATE (Commit 1): The live-fetch pipeline returns articles
+  // WITHOUT analysis (no ai_summary). These must NOT be returned to the user
+  // directly — they must go through the enqueue → analyze → publish flow.
+  // Since this path no longer writes to news:farsi (Commit 1 removed that),
+  // we return emptyResult. The cron will process the articles and publish
+  // them after analysis completes.
   const result = await refreshPromise;
   if (result && result.length > 0) {
-    const data = categoryFilter
-      ? result.filter((a) => a.category === categoryFilter)
-      : result;
-    const categoryCounts = {
-      all: result.length,
-      crypto: result.filter(a => a.category === 'crypto').length,
-      forex: result.filter(a => a.category === 'forex').length,
-      economy: result.filter(a => a.category === 'economy').length,
-    };
-    return { status: 'success', source: 'live', data, category_counts: categoryCounts };
+    // Articles discovered but NOT yet analyzed — do NOT return to user.
+    // They have been returned from the pipeline for internal use only.
+    // The cron handler will enqueue + analyze + publish them.
+    // Return empty feed — user will see articles after analysis completes.
+    return emptyResult;
   }
   return emptyResult;
 }
@@ -4169,13 +4178,13 @@ async function _runNewsLiveFetchPipeline(env) {
       const MAX_NEWS_ARTICLES = 12;
       const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
 
-      // Cache the full (unfiltered) trimmed list
-      await writeAppCache(
-        env,
-        FARSI_NEWS_CACHE_KEY,
-        JSON.stringify(trimmed),
-        getNumericEnv(env, 'NEWS_CACHE_TTL', 1800), // 30 minutes (P0-A: was 300)
-      );
+      // PUBLICATION GATE (Commit 1): Do NOT write to news:farsi here.
+      // Articles are published ONLY after succeedWithSummary completes the
+      // full AI analysis and writes news:ai:{hash}. This ensures users never
+      // see an article without a completed analysis (no ai_summary: null).
+      // The HTTP path returns articles for internal processing only — the
+      // cron handler (processNewsAIBatch) will enqueue them for analysis.
+      // Publication happens in succeedWithSummary via publishArticleToFarsiNews().
 
       // ── AI NEWS: Background AI summarization is handled by CRON, not here ──
       // The cron handler (scheduled) calls processNewsAIBatch with real ctx.waitUntil.
@@ -5022,6 +5031,20 @@ async function enqueueForSummary(env, articles) {
       summary_started_at: null,   // set when processOneArticleSummary picks this item
       summary_completed_at: null, // set when summary saved to KV (success)
       provider_used: null,        // 'gemini' | 'workers-ai' | 'openai'
+      // PUBLICATION GATE (Commit 1): Carry enriched analysis fields from
+      // batchAnalyzeNews into the queue. These are used by publishArticleToFarsiNews()
+      // to construct the published article with sentiment/impact/coins already set.
+      sentiment: a.sentiment || 'neutral',
+      impact: a.impact || 'low',
+      impact_reason: a.impact_reason || '',
+      coins: a.coins || [],
+      time_ago: a.time_ago || null,
+      pub_date: a.pub_date || null,
+      image: a.image || null,
+      importance_tags: a.importance_tags || [],
+      importance_score: a.importance_score || 0,
+      // published_at is set when publishArticleToFarsiNews() runs (after summary success)
+      published_at: null,
     });
     existingByUrl.set(a.url, queue[queue.length - 1]);
     enqueued++;
@@ -5074,6 +5097,102 @@ async function enqueueForSummary(env, articles) {
  * Returns { processed: true, success, url, reason, retry_count, duration_ms }
  *      or { processed: false, empty: true } when no eligible item.
  */
+
+// ── PUBLICATION GATE (Commit 1) ──────────────────────────────────────────────
+// publishArticleToFarsiNews: Adds a fully-analyzed article to the public
+// news:farsi KV cache. Called ONLY from succeedWithSummary() AFTER the AI
+// summary has been written to news:ai:{hash} and the DB row has been saved.
+//
+// This is the SOLE entry point for articles into the public feed.
+// No article reaches /api/farsi-news without passing through this gate.
+//
+// Behavior:
+//   1. Read current news:farsi list from KV
+//   2. If article (by canonical URL) already exists → replace it (update in place)
+//   3. If new → prepend to front of list (newest first)
+//   4. Trim to MAX_NEWS_ARTICLES (12) — drop oldest from end
+//   5. Write back with NEWS_CACHE_TTL (1800s = 30 min)
+//   6. Set published_at timestamp
+//
+// Atomicity: Read-modify-write is NOT atomic across concurrent cron ticks.
+// However, the queue claim (status='processing' with 10-min TTL) ensures only
+// ONE tick processes a given article at a time. Two different articles being
+// published concurrently could race, but the last-write-wins semantics are
+// acceptable here — both articles will appear (one may briefly be missing).
+// The dedup by canonical URL prevents duplicates within a single write.
+async function publishArticleToFarsiNews(env, article) {
+  if (!env || !env.APP_CACHE || typeof env.APP_CACHE.put !== 'function') {
+    return { published: false, reason: 'no_kv' };
+  }
+  if (!article || !article.url) {
+    return { published: false, reason: 'no_url' };
+  }
+
+  const publishedAt = Date.now();
+  const canonicalUrl = canonicalizeUrl(article.url);
+  const MAX_NEWS_ARTICLES = 12;
+
+  // Construct the published article object with all fields the API/frontend expect
+  const publishedArticle = {
+    title: article.title || article.title_en || '',
+    title_en: article.title_en || '',
+    description: String(article.description || '').replace(/\n/g, ' ').trim().slice(0, 2000),
+    time_ago: article.time_ago || null,
+    pub_date: article.pub_date || null,
+    source: article.source || '',
+    category: article.category || 'crypto',
+    image: article.image || null,
+    url: article.url,
+    sentiment: article.sentiment || 'neutral',
+    impact: article.impact || 'low',
+    impact_reason: article.impact_reason || '',
+    coins: article.coins || [],
+    importance_tags: article.importance_tags || [],
+    importance_score: article.importance_score || 0,
+    published_at: publishedAt,
+  };
+
+  try {
+    // Read current list
+    const existing = await readAppCache(env, FARSI_NEWS_CACHE_KEY);
+    let articles = [];
+    if (existing) {
+      try {
+        articles = JSON.parse(existing);
+        if (!Array.isArray(articles)) articles = [];
+      } catch {
+        articles = [];
+      }
+    }
+
+    // Dedup by canonical URL — replace if exists, else prepend
+    const idx = articles.findIndex(a => a && a.url && canonicalizeUrl(a.url) === canonicalUrl);
+    if (idx >= 0) {
+      articles[idx] = { ...articles[idx], ...publishedArticle };
+    } else {
+      articles.unshift(publishedArticle);
+    }
+
+    // Trim to max
+    if (articles.length > MAX_NEWS_ARTICLES) {
+      articles = articles.slice(0, MAX_NEWS_ARTICLES);
+    }
+
+    // Write back
+    await writeAppCache(
+      env,
+      FARSI_NEWS_CACHE_KEY,
+      JSON.stringify(articles),
+      getNumericEnv(env, 'NEWS_CACHE_TTL', 1800),
+    );
+
+    return { published: true, url: article.url, published_at: publishedAt, list_length: articles.length };
+  } catch (e) {
+    console.warn('[NEWS-PUBLISH] publishArticleToFarsiNews failed (non-fatal):', e?.message);
+    return { published: false, reason: 'kv_error', error: String(e?.message || '').slice(0, 150) };
+  }
+}
+
 async function processOneArticleSummary(env, pool = null) {
   const t0 = Date.now();
 
@@ -5333,6 +5452,31 @@ async function processOneArticleSummary(env, pool = null) {
             ? (completedAt - article.summary_started_at) : null,
         });
       } catch {}
+
+      // ── PUBLICATION GATE (Commit 1) ──
+      // Publish the article to news:farsi NOW — after AI summary is written
+      // to news:ai:{hash} AND DB row is saved. This is the SOLE point where
+      // an article becomes visible to /api/farsi-news.
+      // If publish fails (KV error), the article is still "analyzed" (summary
+      // exists in news:ai:{hash}) but won't appear in the feed list until the
+      // next processNewsAIBatch tick re-populates news:farsi. However, since
+      // processNewsAIBatch no longer writes to news:farsi (Commit 1), a
+      // publish failure means the article won't be visible until the next
+      // successful publish of ANY article (which re-reads + re-writes the list).
+      // This is acceptable — publish failures are rare (KV is reliable).
+      let publishResult = null;
+      try {
+        publishResult = await publishArticleToFarsiNews(env, article);
+        if (publishResult.published) {
+          console.log('[NEWS-PUBLISH] Article published:', article.url?.substring(0, 80), 'published_at=', publishResult.published_at);
+        } else {
+          console.warn('[NEWS-PUBLISH] Article NOT published:', article.url?.substring(0, 80), 'reason=', publishResult.reason);
+        }
+      } catch (e) {
+        // Publish failure is non-fatal — the summary is already saved in KV+DB.
+        // The article will be visible on the next publish cycle.
+        console.warn('[NEWS-PUBLISH] publishArticleToFarsiNews exception (non-fatal):', e?.message);
+      }
     } catch (e) {
       // KV write failed — treat as retryable failure
       return requeueWithRetry('kv_write_failed', e?.message);
@@ -5348,6 +5492,11 @@ async function processOneArticleSummary(env, pool = null) {
       duration_ms: Date.now() - t0,
       fallback_used: attempts.length > 1,
       e2e_total_ms: (article.rss_fetched_at) ? (completedAt - article.rss_fetched_at) : null,
+      // PUBLICATION GATE (Commit 1): track discovery → publish latency
+      published: publishResult?.published || false,
+      published_at: publishResult?.published_at || null,
+      discovery_to_publish_ms: (publishResult?.published_at && article.rss_fetched_at)
+        ? (publishResult.published_at - article.rss_fetched_at) : null,
     };
   }
 
@@ -6466,44 +6615,35 @@ async function processNewsAIBatch(env, pool = null) {
     }
     stepLog('QUEUE_done', { deduped: deduped.length });
 
-    // ── STEP 6: CACHE ARTICLES in KV (TTL=30min, max=12 articles) ──
-    // Phase 5 optimization: TTL 5min → 30min, max 30 → 12 articles.
+    // ── STEP 6: (PUBLICATION GATE — Commit 1) NO LONGER WRITES news:farsi ──
+    // Previously this step wrote articles to news:farsi KV cache BEFORE analysis.
+    // Now articles are published ONLY after succeedWithSummary completes the
+    // full AI analysis (news:ai:{hash} write). This ensures users never see
+    // articles with ai_summary: null.
+    //
+    // The trimmed/deduped articles proceed to STEP 7 (batch analysis) and
+    // STEP 8 (enqueue for summary). Publication happens later in
+    // succeedWithSummary() → publishArticleToFarsiNews().
     const MAX_NEWS_ARTICLES = 12;
     const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
-    const newsJson = JSON.stringify(trimmed);
-    const newsWriteBefore = _kvWriteStats.totalWrites;
-    const newsSkippedBefore = _kvWriteStats.totalSkipped;
-    const kvAvailable = !!(env.APP_CACHE && typeof env.APP_CACHE.put === 'function');
-    // MKT-006 FIX: _kvWriteCache now stores {value, expiresAt} objects.
-    // Adapt the comparison to read .value from the entry.
-    const _newsCacheEntry = _kvWriteCache.get(FARSI_NEWS_CACHE_KEY);
-    const inMemoryCached = !!_newsCacheEntry;
-    const inMemoryMatches = _newsCacheEntry?.value === newsJson;
-    try {
-      await writeAppCache(
-        env,
-        FARSI_NEWS_CACHE_KEY,
-        newsJson,
-        getNumericEnv(env, 'NEWS_CACHE_TTL', 1800), // 30 minutes (was 300 = 5 min)
-      );
-      stepLog('KV_ARTICLES_cached', { count: trimmed.length });
-    } catch (cacheErr) {
-      console.warn('[NEWS-AI-CRON] Failed to cache articles (non-fatal):', cacheErr?.message);
-      stepLog('KV_ARTICLES_cache_failed', { error: cacheErr?.message });
-    }
-    const newsWriteActuallyWritten = _kvWriteStats.totalWrites > newsWriteBefore;
-    const newsWriteWasSkipped = _kvWriteStats.totalSkipped > newsSkippedBefore;
+    const newsJson = JSON.stringify(trimmed); // kept for compatibility (stepLog only)
+    stepLog('KV_ARTICLES_skip_publish_gate', { count: trimmed.length, reason: 'publication_gate_commit1' });
 
     // ── STEP 7: BATCH AI ANALYSIS (1 AI call for all articles) ──
     // Phase 3: Replaces individual sentiment with AI-powered batch analysis.
     // Returns: sentiment, impact, impact_reason, coins for each article.
     // Feature flag: NEWS_BATCH_ANALYSIS_ENABLED — when off, skip (rule-based sentiment stays).
+    //
+    // PUBLICATION GATE (Commit 1): batch analysis enriches the in-memory article
+    // objects (sentiment/impact/coins) but does NOT publish them. These enriched
+    // fields are carried into the queue and used when publishArticleToFarsiNews()
+    // runs after summary completion.
     let batchAnalysis = {};
     if (isNewsBatchAnalysisEnabled(env)) {
       stepLog('BATCH_ANALYZE_start', { articles: trimmed.length });
       try {
         batchAnalysis = await batchAnalyzeNews(env, trimmed);
-        // Enrich articles with AI analysis results
+        // Enrich articles with AI analysis results (in-memory only — NOT cached to news:farsi)
         for (let i = 0; i < trimmed.length; i++) {
           const analysis = batchAnalysis[i];
           if (analysis) {
@@ -6517,25 +6657,14 @@ async function processNewsAIBatch(env, pool = null) {
             trimmed[i].coins = trimmed[i].coins || [];
           }
         }
-        // Re-cache with enriched data
-        try {
-          await writeAppCache(env, FARSI_NEWS_CACHE_KEY, JSON.stringify(trimmed), getNumericEnv(env, 'NEWS_CACHE_TTL', 1800));
-        } catch {}
+        // PUBLICATION GATE (Commit 1): Removed re-cache to news:farsi.
+        // Articles are not published here — only enriched in memory for queue.
         stepLog('BATCH_ANALYZE_done', { analyzed: Object.keys(batchAnalysis).length });
       } catch (batchErr) {
         stepLog('BATCH_ANALYZE_FAILED', { error: batchErr?.message });
-        // NEWSBE-016 FIX: Previously the first KV write (above, with rule-based
-        // sentiment + missing impact/impact_reason/coins) remained cached for
-        // the full 30-min TTL when batchAnalyzeNews failed. Users would see
-        // stale/incomplete analysis for 30 minutes. Now we re-write the cache
-        // with a SHORT TTL (60s) so the next cron tick (within 1-5 min) can
-        // re-attempt the AI analysis instead of serving the stale entry for
-        // 30 min. The articles themselves are still served (rule-based
-        // sentiment is better than no news), just with a faster retry window.
-        try {
-          await writeAppCache(env, FARSI_NEWS_CACHE_KEY, newsJson, 60);
-          stepLog('KV_ARTICLES_recached_short_ttl_on_batch_fail', { ttl: 60 });
-        } catch {}
+        // PUBLICATION GATE (Commit 1): Removed the 60s TTL re-cache on batch fail.
+        // Articles are not published here regardless of batch analysis outcome.
+        // They proceed to enqueue (STEP 8) and are published only after summary success.
       }
     } else {
       stepLog('BATCH_ANALYZE_skipped', { reason: 'flag_disabled' });

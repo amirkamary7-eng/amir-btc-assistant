@@ -1400,6 +1400,8 @@ test('P1-08 (behavioral): category-filtered farsi-news request hits base cache (
   // Mock: KV cache returns a list with mixed categories.
   // Expected: /api/farsi-news?category=crypto reads from 'news:farsi' (base),
   // returns only crypto articles, source='cache'. No RSS fetch attempted.
+  // PUBLICATION GATE (Commit 1): API now filters out articles without ai_summary.
+  // So cached articles must have a corresponding news:ai:{hash} entry to be returned.
   const kvStore = new Map();
   const cachedArticles = [
     { url: 'https://a.com/1', title: 'BTC up', category: 'crypto', source: 'test' },
@@ -1407,6 +1409,13 @@ test('P1-08 (behavioral): category-filtered farsi-news request hits base cache (
     { url: 'https://c.com/3', title: 'ETH up', category: 'crypto', source: 'test' },
   ];
   kvStore.set('news:farsi', JSON.stringify(cachedArticles));
+  // PUBLICATION GATE: Add AI summaries so articles pass the readyOnly filter
+  // hashUrl is a simple hash function used in worker-proxy.js — we just need
+  // to provide the KV entries that enrichNewsWithAISummaries will read.
+  // For testing, we mock the KV to return a summary for each article URL hash.
+  kvStore.set('news:ai:' + simpleHash('https://a.com/1'), JSON.stringify({ summary: 'BTC analysis', provider: 'test', generated_at: Date.now() }));
+  kvStore.set('news:ai:' + simpleHash('https://b.com/2'), JSON.stringify({ summary: 'EUR analysis', provider: 'test', generated_at: Date.now() }));
+  kvStore.set('news:ai:' + simpleHash('https://c.com/3'), JSON.stringify({ summary: 'ETH analysis', provider: 'test', generated_at: Date.now() }));
   let rssFetchCalled = false;
 
   const pgOverride = {
@@ -1444,6 +1453,30 @@ test('P1-08 (behavioral): category-filtered farsi-news request hits base cache (
   }
   assert.equal(res.body.data.length, 2, 'must return exactly 2 crypto articles. Got: ' + res.body.data.length);
 });
+
+// Simple hash function matching worker-proxy.js hashUrl (for test setup only)
+// hashUrl canonicalizes the URL first, then hashes — we replicate that here.
+function simpleHash(url) {
+  // Minimal canonicalizeUrl (same as worker-proxy.js: lowercase host, strip utm, remove trailing slash)
+  let canonical = String(url || '');
+  try {
+    const u = new URL(canonical);
+    const host = u.hostname.toLowerCase();
+    let p = u.pathname;
+    if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
+    const params = new URLSearchParams(u.search);
+    for (const t of ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','fbclid','gclid','ref','source','mc_cid','mc_eid']) params.delete(t);
+    const qs = params.toString();
+    canonical = 'https://' + host + p + (qs ? '?' + qs : '');
+  } catch {}
+  let hash = 0;
+  for (let i = 0; i < canonical.length; i++) {
+    const char = canonical.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
 
 // ── P1-09 (NEWSBE-020): /api/market/prices slice(0, 15) not slice(0, 20) ──
 
@@ -1494,16 +1527,21 @@ test('P1-09 (behavioral): /api/market/prices with 20 symbols only fetches 15', a
 
 // APP_JS_PATH and WORKER_PATH already declared in P1 test section above.
 
-// ── NEWSBE-016: processNewsAIBatch re-caches with short TTL on batchAnalyzeNews failure ──
+// ── NEWSBE-016: PUBLICATION GATE (Commit 1) — batchAnalyzeNews failure no longer re-caches ──
+// Previously: batchAnalyzeNews failure re-wrote news:farsi with 60s TTL (stale articles served).
+// Now (Commit 1): processNewsAIBatch does NOT write to news:farsi at all. Articles are published
+// ONLY by publishArticleToFarsiNews() after succeedWithSummary completes. So batchAnalyzeNews
+// failure has no cache to re-write — articles simply proceed to enqueue without sentiment enrichment.
 
-test('NEWSBE-016 (source): batchAnalyzeNews catch block re-writes cache with short TTL (60s)', () => {
+test('NEWSBE-016 (source): PUBLICATION GATE — batchAnalyzeNews catch block does NOT write news:farsi', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
-  // Find the BATCH_ANALYZE_FAILED catch block
   const idx = src.indexOf("stepLog('BATCH_ANALYZE_FAILED'");
   assert.ok(idx > -1, 'BATCH_ANALYZE_FAILED stepLog must exist');
   const catchBlock = src.slice(idx, idx + 800);
-  assert.ok(/NEWSBE-016 FIX/.test(catchBlock), 'catch block must have NEWSBE-016 FIX comment');
-  assert.ok(/writeAppCache\(env, FARSI_NEWS_CACHE_KEY, newsJson, 60\)/.test(catchBlock), 'must re-write cache with 60s TTL on failure');
+  // PUBLICATION GATE: the catch block must NOT contain any writeAppCache to FARSI_NEWS_CACHE_KEY
+  assert.ok(!/writeAppCache\(env,\s*FARSI_NEWS_CACHE_KEY/.test(catchBlock),
+    'PUBLICATION GATE: batchAnalyzeNews catch block must NOT write to news:farsi');
+  assert.ok(/PUBLICATION GATE/.test(catchBlock), 'catch block must have PUBLICATION GATE comment');
 });
 
 // ── NEWSFE-011: safeLocalStorageSetItem helper + toggleSaveNews uses it ──
