@@ -319,9 +319,9 @@ test('SECURITY-01: Version tampering — accepting archived version → 409', as
   assert.equal(res.body.code, 'RULES_NOT_ACTIVE');
 });
 
-test('SECURITY-02: No premium gating yet — source inspection', () => {
-  const authorityCalls = WORKER_SRC.match(/membershipAuthority\.(require|isPremium)\s*\(/g) || [];
-  assert.equal(authorityCalls.length, 0, 'Phase 1: still no premium gating');
+test('SECURITY-02: No Premium-exclusive gating — require() not called', () => {
+  const requireCalls = WORKER_SRC.match(/membershipAuthority\.require\s*\(/g) || [];
+  assert.equal(requireCalls.length, 0, 'no authority.require() calls');
 });
 
 test('SECURITY-03: Rules routes registered in worker', () => {

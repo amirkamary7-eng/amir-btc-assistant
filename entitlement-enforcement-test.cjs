@@ -200,9 +200,10 @@ test('NOCHANGE-02: Alert token cost unchanged (5 AB)', () => {
   assert.ok(ALERT_ECON_SRC.includes("('price_alert', TRUE, 3, 5)"), 'alert seed unchanged');
 });
 
-test('NOCHANGE-03: Daily claim still 10 AB (not changed in Phase 3)', () => {
+test('NOCHANGE-03: Daily claim now tier-based (Phase 4: Normal 10, Premium 20)', () => {
   const w = fs.readFileSync(path.join(__dirname, 'src/controllers/wallet.js'), 'utf8');
-  assert.ok(w.includes('const DAILY_REWARD = 10'), 'daily claim still 10 AB');
+  assert.ok(w.includes('_getDailyRewardAmount'), 'daily claim uses tier-based helper');
+  assert.ok(!w.includes('const DAILY_REWARD = 10;'), 'no hard-coded 10');
 });
 
 test('NOCHANGE-04: Watchlist frontend still MAX_WATCHLIST=7 (frontend limit)', () => {

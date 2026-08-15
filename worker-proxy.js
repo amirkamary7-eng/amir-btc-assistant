@@ -2240,8 +2240,8 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
   }
 
   // DB-driven reward amount (async — reads from referral_reward_tiers)
-  const rewardAmount = await getReferralRewardPerInvite(env);
-  if (rewardAmount <= 0) return null;
+  const baseRewardAmount = await getReferralRewardPerInvite(env);
+  if (baseRewardAmount <= 0) return null;
 
   // Find unrewarded referral for this invitee
   const pendingResult = await queryDb(
@@ -2257,13 +2257,25 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
   const pending = pendingResult.rows[0] || null;
   if (!pending) return null;
 
+  // PHASE 4: Apply tier-based referral reward (Normal 3 AB, Premium 6 AB).
+  // Tier = INVITER's tier (the one who earns the reward), NOT the invitee's.
+  let finalRewardAmount = baseRewardAmount;
+  if (membershipAuthority && ENTITLEMENT_CONFIG && typeof ENTITLEMENT_CONFIG.getReferralRewardAmount === 'function') {
+    try {
+      const inviterIsPremium = await membershipAuthority.isPremium(env, String(pending.inviter_id));
+      finalRewardAmount = ENTITLEMENT_CONFIG.getReferralRewardAmount(inviterIsPremium);
+    } catch (e) {
+      finalRewardAmount = baseRewardAmount;
+    }
+  }
+
   // Atomic: credit tokens + transaction record + rewarded=TRUE + channel_verified=TRUE
   await creditReferralWithReward(
     env,
     String(pending.inviter_id),
     Number(pending.id),
     inviteeId,
-    rewardAmount,
+    finalRewardAmount,
     true, // alsoVerifyChannel
   );
 
@@ -7095,6 +7107,9 @@ const walletHandlers = createWalletHandlers({
   consumeMissionEventToken,
   // Rate limiting for wallet endpoints
   isUserRateLimited,
+  // PHASE 4: Tier-based daily claim + mission rewards
+  membershipAuthority,
+  entitlementConfig: ENTITLEMENT_CONFIG,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({

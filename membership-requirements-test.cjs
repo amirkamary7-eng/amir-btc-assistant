@@ -308,8 +308,8 @@ test('ROUTES-01: Requirement routes registered', () => {
   assert.ok(WORKER_SRC.includes('handleActivateRequirement'));
 });
 
-test('SEC-01: No premium gating yet', () => {
-  const calls = WORKER_SRC.match(/membershipAuthority\.(require|isPremium)\s*\(/g) || [];
+test('SEC-01: No Premium-exclusive gating — require() not called', () => {
+  const calls = WORKER_SRC.match(/membershipAuthority\.require\s*\(/g) || [];
   assert.equal(calls.length, 0);
 });
 

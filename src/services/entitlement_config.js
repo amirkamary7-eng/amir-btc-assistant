@@ -53,6 +53,29 @@ export const ENTITLEMENT_CONFIG = Object.freeze({
     normal_max: 7,
     premium_max: 20,
   },
+
+  // ─── Daily Claim (Phase 4) ────────────────────────────────────────────────
+  // Normal = 10 AB, Premium = 20 AB.
+  daily_claim: {
+    normal_amount: 10,
+    premium_amount: 20,
+  },
+
+  // ─── Mission Rewards (Phase 4) ────────────────────────────────────────────
+  // Normal = 1× base, Premium = 1.5× base.
+  // token_transactions.amount is INTEGER → must round.
+  // Rounding: Math.ceil (Premium always gets AT LEAST the multiplier value).
+  missions: {
+    normal_multiplier: 1.0,
+    premium_multiplier: 1.5,
+  },
+
+  // ─── Referral Rewards (Phase 4) ───────────────────────────────────────────
+  // Normal = 3 AB per invite, Premium = 6 AB per invite (inviter tier).
+  referral: {
+    normal_reward: 3,
+    premium_reward: 6,
+  },
 });
 
 /**
@@ -98,4 +121,44 @@ export function getWatchlistMax(isPremium) {
   return isPremium
     ? ENTITLEMENT_CONFIG.watchlist.premium_max
     : ENTITLEMENT_CONFIG.watchlist.normal_max;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 4: REWARD HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get daily claim reward amount for tier.
+ * Normal = 10 AB, Premium = 20 AB.
+ */
+export function getDailyClaimAmount(isPremium) {
+  return isPremium
+    ? ENTITLEMENT_CONFIG.daily_claim.premium_amount
+    : ENTITLEMENT_CONFIG.daily_claim.normal_amount;
+}
+
+/**
+ * Get referral reward amount for tier (inviter's tier).
+ * Normal = 3 AB, Premium = 6 AB.
+ */
+export function getReferralRewardAmount(isPremium) {
+  return isPremium
+    ? ENTITLEMENT_CONFIG.referral.premium_reward
+    : ENTITLEMENT_CONFIG.referral.normal_reward;
+}
+
+/**
+ * Apply mission reward multiplier based on tier.
+ * Normal = 1× base, Premium = 1.5× base.
+ * Rounding: Math.ceil (Premium users always get AT LEAST the multiplier value).
+ * token_transactions.amount is INTEGER, so we must round.
+ *
+ * Examples: base=5 → Premium=8 (ceil 7.5), base=10 → Premium=15 (exact).
+ */
+export function getMissionRewardAmount(baseAmount, isPremium) {
+  const base = Math.abs(Number(baseAmount) || 0);
+  if (base <= 0) return 0;
+  if (!isPremium) return Math.floor(base);
+  const multiplier = ENTITLEMENT_CONFIG.missions.premium_multiplier;
+  return Math.ceil(base * multiplier);
 }

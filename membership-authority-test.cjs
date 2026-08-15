@@ -362,11 +362,13 @@ test('AUTH-19: Constants — TTL=60s, PREMIUM_LEVELS correct', () => {
 
 // ─── Tests: Phase 0 scope guard ─────────────────────────────────────────────
 
-test('AUTH-20: Phase 0 — no feature handler calls authority yet (source inspection)', () => {
+test('AUTH-20: Phase 3/4 — authority is called for tier-based quotas (expected)', () => {
   const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
-  // The authority is wired (import + createMembershipAuthority) but NOT called
-  const handlerCalls = workerSrc.match(/membershipAuthority\.(isPremium|require|getEntitlement)\s*\(/g) || [];
-  assert.equal(handlerCalls.length, 0, 'Phase 0: no handler calls authority methods');
+  // Phase 3+4: isPremium IS called (for tier-based quotas and rewards), but require() is NOT.
+  const requireCalls = workerSrc.match(/membershipAuthority\.require\s*\(/g) || [];
+  assert.equal(requireCalls.length, 0, 'no authority.require() calls (no Premium-exclusive gating)');
+  const isPremiumCalls = workerSrc.match(/membershipAuthority\.isPremium\s*\(/g) || [];
+  assert.ok(isPremiumCalls.length >= 1, 'isPremium called for tier-based quotas (Phase 3/4)');
 });
 
 test('AUTH-21: Phase 0 — authority is wired in worker-proxy.js', () => {
