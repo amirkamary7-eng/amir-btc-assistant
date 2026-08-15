@@ -39,6 +39,7 @@ import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 import { createMembershipRepository } from './src/repositories/membership.js';
 import { createMembershipHandlers } from './src/controllers/membership.js';
+import { createMembershipAuthority } from './src/services/membership_authority.js';
 import { createNewsArticleRepository } from './src/repositories/news_articles.js';
 import { createAppContentRepository } from './src/repositories/app_content.js';
 
@@ -7266,6 +7267,16 @@ const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCa
 
 // ── Membership Module — factory wiring ──────────────────────────────────────
 const membershipRepo = createMembershipRepository({ queryDb, queryDbTransaction });
+
+// ── Membership Authority — Phase 0 foundation ───────────────────────────────
+// Single source of truth for Premium entitlement. Wired but NOT YET CALLED by
+// any feature handler. Future phases will use authority.isPremium() to gate
+// features. No existing behavior changes in Phase 0.
+const membershipAuthority = createMembershipAuthority({
+  membershipRepo,
+  readAppCache,
+  writeAppCache,
+});
 
 // ── News Articles Module — permanent storage for AI summaries ───────────────
 const newsArticleRepo = createNewsArticleRepository({ queryDb });
