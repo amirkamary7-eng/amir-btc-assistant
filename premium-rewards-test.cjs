@@ -193,14 +193,14 @@ test('NORMAL-03: Normal referral = 3 AB', () => {
 
 // ─── Scope ──────────────────────────────────────────────────────────────────
 
-test('SCOPE-01: No cosmetics (Phase 5)', () => {
-  assert.ok(!WORKER_SRC.includes('/api/cosmetics'));
-  assert.ok(!fs.existsSync(path.join(__dirname, 'src/repositories/cosmetics.js')));
+test('SCOPE-01: Cosmetics now exists (Phase 5)', () => {
+  assert.ok(WORKER_SRC.includes('/api/cosmetics'), 'cosmetics endpoint exists (Phase 5)');
+  assert.ok(fs.existsSync(path.join(__dirname, 'src/repositories/cosmetics.js')), 'cosmetics repo exists (Phase 5)');
 });
 
-test('SCOPE-02: No premium UI changes (Phase 6)', () => {
+test('SCOPE-02: Badge text is 💎 PREMIUM (Phase 5)', () => {
   const m = fs.readFileSync(path.join(__dirname, 'membership-user.js'), 'utf8');
-  assert.ok(!m.includes('💎 PREMIUM'), 'no 💎 PREMIUM in Phase 4');
+  assert.ok(m.includes('💎 PREMIUM'), 'badge text is 💎 PREMIUM (Phase 5)');
 });
 
 test('SCOPE-03: No authority.require() calls', () => {

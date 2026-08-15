@@ -115,13 +115,25 @@
         '<div class="mb-diamond-shimmer"></div>' +
         (!premium ? '<div class="mb-lock-icon">' + LOCK_SVG + '</div>' : '') +
       '</div>' +
-      '<span class="mb-badge-text">' + (premium ? 'Premium Member' : 'فعال‌سازی Premium') + '</span>';
+      '<span class="mb-badge-text">' + (premium ? '💎 PREMIUM' : 'فعال‌سازی Premium') + '</span>';
     badge.title = premium ? 'عضو ویژه AMIRBTC' : 'ارتقا به عضویت ویژه';
 
     // Apply/remove premium effects on profile card
     if (profileCard) {
+      // PHASE 5: Remove all previous cosmetic classes
+      var classesToRemove = [];
+      profileCard.classList.forEach(function (cls) {
+        if (cls.indexOf('profile-cosmetic--') === 0) classesToRemove.push(cls);
+      });
+      classesToRemove.forEach(function (cls) { profileCard.classList.remove(cls); });
+
       if (premium) {
         profileCard.classList.add('profile-card--premium');
+        // PHASE 5: Apply active cosmetic class if present
+        if (status && status.active_cosmetic && status.active_cosmetic.metadata) {
+          var cssClass = status.active_cosmetic.metadata.css_class;
+          if (cssClass) profileCard.classList.add(cssClass);
+        }
       } else {
         profileCard.classList.remove('profile-card--premium');
       }

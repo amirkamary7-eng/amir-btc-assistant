@@ -13635,3 +13635,113 @@ body.jl-locked .cd-fullscreen {
         transform: none;
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 5 — Profile Cosmetics Shop + Active Cosmetic Styles
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.cosmetics-shop-overlay {
+    position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px; animation: fadeIn 0.2s ease;
+}
+.cosmetics-shop {
+    background: var(--bg-card, #1a1d2e); border-radius: 18px;
+    max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto;
+    padding: 24px 20px; position: relative;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    animation: slideUp 0.3s ease;
+}
+.cosmetics-shop-close {
+    position: absolute; top: 14px; left: 14px;
+    background: rgba(255,255,255,0.06); border: none; border-radius: 8px;
+    width: 32px; height: 32px; color: var(--text-muted, #6B7A8D);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+}
+.cosmetics-shop-close:hover { background: rgba(255,255,255,0.12); color: var(--text, #fff); }
+.cosmetics-shop-header { text-align: center; margin-bottom: 20px; }
+.cosmetics-shop-title { font-size: 18px; font-weight: 700; margin: 0 0 6px; color: var(--text, #fff); }
+.cosmetics-shop-subtitle { font-size: 12px; color: var(--text-muted, #6B7A8D); margin: 0; line-height: 1.5; }
+.cosmetics-shop-loading { text-align: center; padding: 40px 0; color: var(--text-muted, #6B7A8D); }
+.cosmetics-shop-spinner {
+    width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.1);
+    border-top-color: var(--accent, #f7931a); border-radius: 50%;
+    margin: 0 auto 12px; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.cosmetics-shop-error { text-align: center; padding: 40px 0; color: var(--text-muted, #6B7A8D); }
+.cosmetics-shop-retry {
+    margin-top: 12px; padding: 8px 20px; border-radius: 10px;
+    background: var(--accent, #f7931a); color: #fff; border: none;
+    cursor: pointer; font-size: 13px; font-weight: 600;
+}
+.cosmetics-shop-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+@media (max-width: 380px) { .cosmetics-shop-grid { grid-template-columns: 1fr; } }
+.cosmetic-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px; padding: 14px; text-align: center; position: relative;
+    transition: all 0.2s; display: flex; flex-direction: column; align-items: center;
+}
+.cosmetic-card--locked { opacity: 0.5; filter: grayscale(0.8); }
+.cosmetic-card--active { border-color: var(--accent, #f7931a); box-shadow: 0 0 0 1px var(--accent, #f7931a); }
+.cosmetic-card-preview {
+    width: 64px; height: 64px; border-radius: 50%; margin-bottom: 10px;
+    background: radial-gradient(circle, var(--cosmetic-color, #9ca3af) 0%, transparent 70%);
+    display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
+}
+.cosmetic-card-glow {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: radial-gradient(circle, var(--cosmetic-color, #9ca3af) 0%, transparent 60%);
+    opacity: 0.3; animation: cosmetic-pulse 2s ease-in-out infinite;
+}
+@keyframes cosmetic-pulse { 0%,100% { opacity: 0.2; } 50% { opacity: 0.5; } }
+.cosmetic-card-icon { font-size: 24px; z-index: 1; }
+.cosmetic-card-info { width: 100%; }
+.cosmetic-card-title { font-size: 13px; font-weight: 600; color: var(--text, #fff); margin-bottom: 2px; }
+.cosmetic-card-rarity { font-size: 10px; font-weight: 700; text-transform: uppercase; margin-bottom: 4px; }
+.cosmetic-card-desc { font-size: 10px; color: var(--text-muted, #6B7A8D); line-height: 1.4; margin-bottom: 6px; min-height: 28px; }
+.cosmetic-card-cost { font-size: 12px; font-weight: 700; color: var(--accent, #f7931a); margin-bottom: 8px; }
+.cosmetic-card-btn {
+    width: 100%; padding: 7px 10px; border-radius: 9px; border: none;
+    font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+}
+.cosmetic-card-btn--purchase { background: var(--accent, #f7931a); color: #fff; }
+.cosmetic-card-btn--purchase:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(247,147,26,0.3); }
+.cosmetic-card-btn--activate { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+.cosmetic-card-btn--activate:hover { background: rgba(34,197,94,0.25); }
+.cosmetic-card-btn--active { background: rgba(34,197,94,0.1); color: #22c55e; border: 1px solid rgba(34,197,94,0.2); cursor: default; }
+.cosmetic-card-btn--locked { background: rgba(255,255,255,0.05); color: var(--text-muted, #6B7A8D); cursor: not-allowed; }
+
+/* Active Cosmetic Profile Styles */
+.profile-card.profile-cosmetic--golden-aura { border-color: rgba(212,175,55,0.3); box-shadow: 0 8px 24px rgba(212,175,55,0.15); }
+.profile-card.profile-cosmetic--ice { border-color: rgba(125,211,252,0.3); box-shadow: 0 8px 24px rgba(125,211,252,0.15); }
+.profile-card.profile-cosmetic--energy { border-color: rgba(168,85,247,0.3); box-shadow: 0 8px 24px rgba(168,85,247,0.15); }
+.profile-card.profile-cosmetic--lava { border-color: rgba(249,115,22,0.3); box-shadow: 0 8px 24px rgba(249,115,22,0.15); }
+.profile-card.profile-cosmetic--cyber { border-color: rgba(34,211,238,0.3); box-shadow: 0 8px 24px rgba(34,211,238,0.15); }
+.profile-card.profile-cosmetic--nebula { border-color: rgba(139,92,246,0.3); box-shadow: 0 8px 24px rgba(139,92,246,0.15); }
+.profile-card.profile-cosmetic--galaxy { border-color: rgba(99,102,241,0.4); box-shadow: 0 8px 24px rgba(99,102,241,0.2); }
+.profile-card.profile-cosmetic--gold-frame { border-color: rgba(251,191,36,0.4); box-shadow: 0 8px 24px rgba(251,191,36,0.2); }
+.profile-card.profile-cosmetic--royal { border-color: rgba(124,58,237,0.4); box-shadow: 0 8px 24px rgba(124,58,237,0.2); }
+.profile-card.profile-cosmetic--legendary { border-color: rgba(245,158,11,0.5); box-shadow: 0 8px 32px rgba(245,158,11,0.25); }
+
+/* Premium badge gradient text */
+.membership-badge--premium .mb-badge-text {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; font-weight: 800; letter-spacing: 0.5px;
+}
+
+/* Cosmetics entry button */
+.cosmetics-entry-btn {
+    margin: 8px 20px 16px; padding: 10px 16px; border-radius: 12px;
+    background: linear-gradient(135deg, rgba(168,85,247,0.15), rgba(99,102,241,0.15));
+    border: 1px solid rgba(168,85,247,0.2); color: var(--text, #fff);
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.cosmetics-entry-btn:hover { transform: translateY(-1px); border-color: rgba(168,85,247,0.4); }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }

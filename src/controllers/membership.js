@@ -27,6 +27,8 @@ export function createMembershipHandlers(deps) {
     notificationService,
     sendTelegramMessage,
     resolveWebAppUrl,
+    // PHASE 5: Optional cosmetics repo for active cosmetic in status response
+    cosmeticsRepo,
   } = deps;
 
   // ─── Constants ────────────────────────────────────────────────────────────
@@ -159,6 +161,15 @@ export function createMembershipHandlers(deps) {
         lastName: auth.user.last_name || null,
       });
       const user = await membershipRepo.findByTelegramId(env, tgId);
+      // PHASE 5: Fetch active cosmetic (if cosmeticsRepo available)
+      let activeCosmetic = null;
+      if (cosmeticsRepo) {
+        try {
+          activeCosmetic = await cosmeticsRepo.getActive(env, tgId);
+        } catch (e) {
+          activeCosmetic = null;
+        }
+      }
       const dto = user ? {
         level: user.membership_level,
         status: user.membership_status,
@@ -167,10 +178,18 @@ export function createMembershipHandlers(deps) {
         approvedAt: user.approved_at,
         expireAt: user.expire_at,
         welcomeShown: Boolean(user.welcome_shown),
+        active_cosmetic: activeCosmetic ? {
+          cosmetic_id: activeCosmetic.cosmetic_id,
+          cosmetic_key: activeCosmetic.cosmetic_key,
+          title: activeCosmetic.title,
+          rarity: activeCosmetic.rarity,
+          metadata: activeCosmetic.metadata || {},
+        } : null,
       } : {
         level: 'FREE', status: 'INACTIVE', source: 'MANUAL',
         lifetime: false, approvedAt: null, expireAt: null,
         welcomeShown: true,
+        active_cosmetic: null,
       };
       await writeAppCache(env, cacheKey, JSON.stringify(dto), CACHE_TTL.STATUS);
       return jsonResponse({ ok: true, data: dto }, {}, env);

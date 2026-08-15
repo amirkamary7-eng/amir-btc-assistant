@@ -41,6 +41,8 @@ import { createMembershipRepository } from './src/repositories/membership.js';
 import { createMembershipHandlers } from './src/controllers/membership.js';
 import { createMembershipAuthority } from './src/services/membership_authority.js';
 import { ENTITLEMENT_CONFIG } from './src/services/entitlement_config.js';
+import { createCosmeticsRepository } from './src/repositories/cosmetics.js';
+import { createCosmeticsHandlers } from './src/controllers/cosmetics.js';
 import { createNewsArticleRepository } from './src/repositories/news_articles.js';
 import { createAppContentRepository } from './src/repositories/app_content.js';
 
@@ -7111,6 +7113,21 @@ const walletHandlers = createWalletHandlers({
   membershipAuthority,
   entitlementConfig: ENTITLEMENT_CONFIG,
 });
+
+// ── Cosmetics Module — Phase 5 ──────────────────────────────────────────────
+const cosmeticsRepo = createCosmeticsRepository({ queryDb, queryDbTransaction, isDatabaseConfigured });
+const cosmeticsHandlers = createCosmeticsHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  buildBodyFieldValidationError,
+  isDatabaseConfigured,
+  cosmeticsRepo,
+  membershipAuthority,
+  economyService,
+});
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({
   jsonResponse,
@@ -7331,6 +7348,8 @@ const membershipHandlers = createMembershipHandlers({
   notificationService,
   sendTelegramMessage,
   resolveWebAppUrl,
+  // PHASE 5: Cosmetics repo for active cosmetic in status response
+  cosmeticsRepo,
 });
 
 async function handleChartResolve(request, env) {
@@ -10706,6 +10725,22 @@ export default {
       // ── Phase 2: Membership Requirements ──────────────────────────────────
       if (request.method === 'GET' && url.pathname === '/api/membership/requirement') {
         return membershipHandlers.handleGetRequirement(request, env);
+      }
+
+      // ── Phase 5: Profile Cosmetics ─────────────────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/cosmetics') {
+        return cosmeticsHandlers.handleGetCatalog(request, env);
+      }
+      if (request.method === 'GET' && url.pathname === '/api/cosmetics/mine') {
+        return cosmeticsHandlers.handleGetMine(request, env);
+      }
+      if (request.method === 'POST' && url.pathname.startsWith('/api/cosmetics/') && url.pathname.endsWith('/purchase')) {
+        const cosmeticId = url.pathname.slice('/api/cosmetics/'.length, -'/purchase'.length);
+        return cosmeticsHandlers.handlePurchase(request, env, cosmeticId);
+      }
+      if (request.method === 'POST' && url.pathname.startsWith('/api/cosmetics/') && url.pathname.endsWith('/activate')) {
+        const cosmeticId = url.pathname.slice('/api/cosmetics/'.length, -'/activate'.length);
+        return cosmeticsHandlers.handleActivate(request, env, cosmeticId);
       }
 
       // ── Membership Module — Admin Routes ──────────────────────────────────
