@@ -7350,6 +7350,11 @@ const membershipHandlers = createMembershipHandlers({
   resolveWebAppUrl,
   // PHASE 5: Cosmetics repo for active cosmetic in status response
   cosmeticsRepo,
+  // PHASE 7A: MembershipAuthority for entitlement cache invalidation.
+  // Injected here so that admin/user state-changing handlers
+  // (approve, suspend, reactivate, expire, set-level, bulk approve/reject,
+  // user reapply) can immediately bust mb:ent:{id} via invalidateCaches().
+  membershipAuthority,
 });
 
 async function handleChartResolve(request, env) {

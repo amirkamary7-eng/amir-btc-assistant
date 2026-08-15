@@ -29,6 +29,13 @@ export function createMembershipHandlers(deps) {
     resolveWebAppUrl,
     // PHASE 5: Optional cosmetics repo for active cosmetic in status response
     cosmeticsRepo,
+    // PHASE 7A: MembershipAuthority — entitlement cache invalidation.
+    // Required so that admin/user state-changing paths (approve, suspend,
+    // reactivate, expire, set-level, bulk approve/reject, user reapply)
+    // can immediately bust the mb:ent:{id} positive entitlement cache.
+    // See invalidateCaches() below. Optional for backwards compatibility
+    // with existing tests that don't supply it (skipped if absent).
+    membershipAuthority,
   } = deps;
 
   // ─── Constants ────────────────────────────────────────────────────────────
@@ -72,6 +79,24 @@ export function createMembershipHandlers(deps) {
       if (telegramId) {
         await env.APP_CACHE?.delete?.(ckStatus(telegramId));
         await env.APP_CACHE?.delete?.(ckUserReqs(telegramId));
+        // PHASE 7A (I1 fix): invalidate the MembershipAuthority entitlement
+        // cache (mb:ent:{id}) on every membership state change so that
+        // isPremium() / getEntitlement() cannot return a stale POSITIVE
+        // result for up to CACHE_TTL_POSITIVE (60s) after an admin
+        // suspend / expire / set-level→FREE.
+        //
+        // membershipAuthority.invalidate() also clears mb:status:{id}
+        // (same key as ckStatus above) — calling both is idempotent and
+        // harmless. We keep the explicit ckStatus delete above so the
+        // behavior is preserved even if membershipAuthority is not
+        // injected (backwards compatibility with older test harnesses).
+        if (membershipAuthority && typeof membershipAuthority.invalidate === 'function') {
+          await membershipAuthority.invalidate(env, telegramId);
+        } else {
+          // Fallback: direct KV delete of the entitlement cache key.
+          // Mirrors membership_authority.js _cacheKey() prefix 'mb:ent:'.
+          await env.APP_CACHE?.delete?.('mb:ent:' + telegramId);
+        }
       }
       // Invalidate prefixes by deleting known keys — KV doesn't support prefix delete,
       // so we use a version tombstone for list caches (lightweight approach).
