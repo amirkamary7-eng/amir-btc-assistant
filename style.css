@@ -12491,6 +12491,192 @@ body.jl-locked .cd-fullscreen {
 }
 .mb-uid-submit:active { transform: scale(0.97); }
 .mb-uid-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+/* PHASE 7B (B1): Disabled-with-hint state — visible but clearly locked.
+   Slightly stronger opacity than :disabled so the hint text is readable. */
+.mb-uid-submit--disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    border-color: rgba(139, 150, 168, 0.25);
+    background: rgba(139, 150, 168, 0.08);
+    color: #8B96A8;
+}
+.mb-uid-submit--disabled:hover {
+    background: rgba(139, 150, 168, 0.08);
+    border-color: rgba(139, 150, 168, 0.25);
+}
+
+/* ─── PHASE 7B (B1): Premium Rules + Acceptance Section ─────────────────── */
+/* Polished dark fintech card with gold accent. RTL-friendly. Matches the
+   existing .mb-quota-preview / .mb-uid-form visual language. */
+.mb-rules-section {
+    margin: 14px 0;
+    padding: 14px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.04), rgba(245, 158, 11, 0.01));
+    border: 1px solid rgba(245, 158, 11, 0.15);
+    position: relative;
+    overflow: hidden;
+}
+.mb-rules-section::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.4), transparent);
+}
+.mb-rules-section--inactive {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.06);
+}
+.mb-rules-section--inactive::before {
+    background: linear-gradient(90deg, transparent, rgba(139, 150, 168, 0.25), transparent);
+}
+.mb-rules-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+}
+.mb-rules-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.mb-rules-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.2px;
+}
+.mb-rules-version {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #F5A623;
+    font-size: 10.5px;
+    font-weight: 700;
+    font-family: 'Inter', system-ui, sans-serif;
+    letter-spacing: 0.3px;
+}
+.mb-rules-effective {
+    font-size: 10.5px;
+    color: #6B7A8D;
+    font-weight: 500;
+}
+.mb-rules-body {
+    font-size: 12px;
+    line-height: 1.65;
+    color: #B8C1D1;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 160px;
+    overflow-y: auto;
+    /* Custom scrollbar for the rules body */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(245, 158, 11, 0.3) transparent;
+}
+.mb-rules-body::-webkit-scrollbar { width: 5px; }
+.mb-rules-body::-webkit-scrollbar-track { background: transparent; }
+.mb-rules-body::-webkit-scrollbar-thumb {
+    background: rgba(245, 158, 11, 0.25);
+    border-radius: 3px;
+}
+.mb-rules-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(245, 158, 11, 0.4);
+}
+.mb-rules-body--empty {
+    color: #6B7A8D;
+    font-style: italic;
+    background: rgba(255, 255, 255, 0.02);
+    max-height: none;
+    overflow: visible;
+}
+/* Custom checkbox row — accessible, RTL-friendly, polished */
+.mb-rules-accept {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: all 0.25s ease;
+    user-select: none;
+}
+.mb-rules-accept:hover {
+    background: rgba(245, 158, 11, 0.06);
+    border-color: rgba(245, 158, 11, 0.2);
+}
+.mb-rules-accept:active { transform: scale(0.99); }
+/* Hide the native checkbox — we render a custom one for visual consistency */
+.mb-rules-checkbox {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+.mb-rules-checkbox:focus-visible + .mb-rules-checkbox-custom {
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+}
+.mb-rules-checkbox-custom {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    border: 1.5px solid rgba(139, 150, 168, 0.4);
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: transparent;
+    transition: all 0.2s ease;
+    margin-top: 1px;
+}
+.mb-rules-checkbox:checked + .mb-rules-checkbox-custom {
+    background: linear-gradient(135deg, #F5A623, #d97706);
+    border-color: rgba(245, 158, 11, 0.6);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.3);
+}
+.mb-rules-checkbox-custom svg {
+    transform: scale(0.8);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+.mb-rules-checkbox:checked + .mb-rules-checkbox-custom svg {
+    opacity: 1;
+}
+.mb-rules-accept-label {
+    flex: 1;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #B8C1D1;
+    font-weight: 500;
+}
+/* Mobile / narrow WebView — rules body shrinks, checkbox row tightens */
+@media (max-width: 380px) {
+    .mb-rules-section { padding: 12px; margin: 10px 0; }
+    .mb-rules-body { font-size: 11.5px; max-height: 140px; padding: 8px 10px; }
+    .mb-rules-accept { padding: 8px 10px; gap: 8px; }
+    .mb-rules-accept-label { font-size: 11px; }
+    .mb-rules-title { font-size: 12px; }
+}
+@media (max-width: 320px) {
+    .mb-rules-body { max-height: 120px; }
+    .mb-rules-title-row { gap: 6px; }
+}
 
 /* Success state */
 .mb-success {

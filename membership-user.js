@@ -17,6 +17,14 @@
   var _loading = false;
   var _popupOpen = false;
   var _requirement = null;
+  // PHASE 7B (B1): Active Premium Rules cache. Mirrors the _requirement pattern
+  // (load once, cache for the session). The backend also KV-caches the rules
+  // payload for 5 min under 'mb:rules:active', so repeated frontend fetches
+  // are cheap — but we avoid even that by caching in-memory per session.
+  var _rules = null;
+  // PHASE 7B (B1): Tracks whether the user has accepted the currently-active
+  // rules version in the current popup session. Reset when popup closes.
+  var _rulesAcceptedVersion = null;
 
   // Fallback values used if the requirement API is unavailable (pre-migration
   // or network error). These match the EXACT current hard-coded behavior so
@@ -34,10 +42,31 @@
     },
   };
 
+  // PHASE 7B (B1): Fallback when /api/membership/rules is unavailable or
+  // returns no active version. active:false tells the popup to render the
+  // rules section in a soft "rules currently unavailable" mode that does
+  // NOT block submission (mirrors the backend FAIL-OPEN behavior at
+  // src/controllers/membership.js:242-256 — if the rules table is missing
+  // or has no ACTIVE version, /request succeeds without acceptance).
+  var FALLBACK_RULES = { active: false, version: null, title: null, body_markdown: null, summary: null };
+
   function getInitData() {
     return window.Telegram?.WebApp?.initData || '';
   }
 
+  /**
+   * PHASE 7B (B1): apiFetch now returns parsed JSON even on non-2xx responses
+   * so callers can read structured error fields like `code` and `active_version`
+   * (e.g. RULES_NOT_ACCEPTED). The returned object gains an `_httpStatus` field.
+   *
+   * Backward compatibility: callers that only check `res.ok` still work.
+   * Callers that previously relied on the throw-on-non-2xx behavior must now
+   * check `res.ok` explicitly (the only such caller was the old submitUid,
+   * which is updated below to use the structured payload).
+   *
+   * Network errors (fetch() rejection) still throw — those are not HTTP
+   * responses and cannot carry a JSON body.
+   */
   function apiFetch(path, options) {
     options = options || {};
     options.headers = options.headers || {};
@@ -45,8 +74,17 @@
     options.headers['X-Telegram-Init-Data'] = getInitData();
     options.headers['Cache-Control'] = 'no-store';
     return fetch(API_BASE + path, options).then(function (res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.json();
+      // Always parse JSON if possible, even on error responses, so callers
+      // can read structured error fields (code, active_version, details, etc.).
+      return res.json().then(function (body) {
+        var enriched = body || {};
+        enriched._httpStatus = res.status;
+        enriched.ok = res.ok;
+        return enriched;
+      }).catch(function () {
+        // JSON parse failed (e.g. empty body) — return a minimal object.
+        return { ok: res.ok, _httpStatus: res.status, error: 'HTTP ' + res.status };
+      });
     });
   }
 
@@ -76,6 +114,49 @@
   /** Synchronous getter — returns cached requirement or fallback. */
   function getRequirement() {
     return _requirement || FALLBACK_REQUIREMENT;
+  }
+
+  /**
+   * PHASE 7B (B1): Load the active Premium Rules from the API.
+   * Mirrors the loadRequirement() pattern: load once, cache for the session.
+   * The backend KV-caches the rules payload for 5 min, so even the first
+   * fetch is cheap. On any error or non-active response, falls back to
+   * FALLBACK_RULES (active:false) which renders the rules section in a
+   * soft non-blocking mode — matching the backend FAIL-OPEN behavior.
+   */
+  async function loadRules() {
+    if (_rules) return _rules;
+    try {
+      var res = await apiFetch('/api/membership/rules');
+      if (res && res.ok && res.data && res.data.active) {
+        _rules = res.data;
+      } else if (res && res.ok && res.data && res.data.active === false) {
+        // Backend returned a valid response but no active rules version.
+        _rules = FALLBACK_RULES;
+      } else {
+        _rules = FALLBACK_RULES;
+      }
+    } catch (e) {
+      _rules = FALLBACK_RULES;
+    }
+    return _rules;
+  }
+
+  /** PHASE 7B (B1): Synchronous getter — returns cached rules or fallback. */
+  function getRules() {
+    return _rules || FALLBACK_RULES;
+  }
+
+  /**
+   * PHASE 7B (B1): Force-refresh the rules cache. Used when the backend
+   * returns RULES_NOT_ACCEPTED with a new active_version (e.g. admin
+   * published a new rules version while the user had the popup open).
+   * Resets _rulesAcceptedVersion so the user must re-accept.
+   */
+  async function refreshRules() {
+    _rules = null;
+    _rulesAcceptedVersion = null;
+    return loadRules();
   }
 
   function formatFaDate(iso) {
@@ -164,6 +245,11 @@
     renderSkeleton();
     try {
       loadRequirement().catch(function () { /* fallback handles it */ });
+      // PHASE 7B (B1): Pre-fetch active rules in the background so the
+      // activation popup renders instantly when opened. Non-blocking —
+      // the popup's own openActivationPopup() will await loadRules() if
+      // the pre-fetch hasn't completed yet.
+      loadRules().catch(function () { /* fallback handles it */ });
       var res = await apiFetch('/api/membership/status');
       if (res && res.ok && res.data) {
         _cache = res.data;
@@ -229,6 +315,10 @@
       setTimeout(function () { overlay.remove(); }, 200);
     }
     _popupOpen = false;
+    // PHASE 7B (B1): Reset per-popup rules acceptance state so re-opening
+    // the activation popup requires fresh acceptance. The rules payload
+    // itself (_rules) stays cached for the session to avoid duplicate fetches.
+    _rulesAcceptedVersion = null;
   }
 
   // ─── Phase 4: Premium Welcome Popup (one-time, auto-show) ────────────────
@@ -440,9 +530,31 @@
 
   // ─── Activation Popup (FREE user) ─────────────────────────────────────────
 
-  function openActivationPopup(rejectedRequest) {
+  /**
+   * PHASE 7B (B1): Activation popup is now async — it awaits loadRules()
+   * so the rules section renders with the active version + summary text
+   * before the user can interact. The rest of the popup structure is
+   * preserved exactly (quota preview, benefits, timeline, register CTA,
+   * UID form, rejected-note).
+   *
+   * The rules section is inserted between the timeline-note and the
+   * register button. It includes:
+   *   - A version badge (e.g. "قوانین v1")
+   *   - The rules summary text (or body_markdown fallback)
+   *   - An explicit acceptance checkbox (Persian label)
+   *   - The submit button is disabled until the checkbox is checked
+   *     (only when rules.active === true; when inactive/missing, the
+   *      checkbox is hidden and submission is allowed — matching the
+   *      backend FAIL-OPEN behavior).
+   */
+  async function openActivationPopup(rejectedRequest) {
     closePopup();
     _popupOpen = true;
+
+    // PHASE 7B (B1): Ensure rules are loaded before rendering the popup.
+    // loadRules() is idempotent (returns cached _rules if already fetched).
+    await loadRules();
+    var rules = getRules();
 
     // Compute step status
     var steps = computeStepStatus(null, _cache);
@@ -452,6 +564,9 @@
     var uidLabel = req.uid_label || ('شناسه کاربری ' + (req.exchange_name || 'Bitunix') + ' خود را وارد کنید');
     var buttonText = (req.metadata && req.metadata.button_text) || ('ثبت‌نام در ' + (req.exchange_name || 'Bitunix'));
     var timelineStep1Text = (req.metadata && req.metadata.timeline_step_1) || ('ثبت‌نام از طریق لینک رسمی ' + (req.exchange_name || 'Bitunix'));
+
+    // PHASE 7B (B1): Build the rules section HTML.
+    var rulesSectionHtml = buildRulesSectionHtml(rules);
 
     var overlay = document.createElement('div');
     overlay.className = 'mb-popup-overlay';
@@ -501,16 +616,18 @@
           timelineStep(6, 'فعال‌سازی دائمی Premium', steps[5]) +
         '</ul>' +
         '<div class="mb-timeline-note">عضویت Premium پس از تکمیل تمام مراحل و تأیید اطلاعات توسط تیم فعال خواهد شد.</div>' +
+        // PHASE 7B (B1): Rules + Acceptance section
+        rulesSectionHtml +
         // Register button
         '<button class="mb-cta-register" onclick="MembershipApp.openBitunix()">' +
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>' +
           esc(buttonText) +
         '</button>' +
-        // UID form
+        // UID form — submit button starts disabled when rules.active is true
         '<div class="mb-uid-form">' +
           '<label class="mb-uid-label">ثبت درخواست عضویت</label>' +
           '<input type="text" class="mb-uid-input" id="mb-uid-input" placeholder="' + esc(uidLabel) + '" dir="ltr" />' +
-          '<button class="mb-uid-submit" onclick="MembershipApp.submitUid()">' +
+          '<button class="mb-uid-submit' + (rules.active ? ' mb-uid-submit--disabled' : '') + '" id="mb-uid-submit" onclick="MembershipApp.submitUid()"' + (rules.active ? ' disabled' : '') + ' aria-disabled="' + (rules.active ? 'true' : 'false') + '">' +
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
             'ارسال درخواست عضویت' +
           '</button>' +
@@ -521,6 +638,120 @@
         ) +
       '</div>';
     document.body.appendChild(overlay);
+
+    // PHASE 7B (B1): If rules are active, wire up the checkbox to enable/disable
+    // the submit button. When rules are inactive (FAIL-OPEN), the checkbox is
+    // not rendered and the submit button starts enabled.
+    if (rules.active) {
+      wireRulesCheckbox(rules);
+    }
+  }
+
+  /**
+   * PHASE 7B (B1): Build the HTML for the rules + acceptance section.
+   * Renders a polished card with:
+   *   - Header row: "قوانین عضویت Premium" title + version badge (e.g. "v1")
+   *   - Rules body text (summary, or body_markdown stripped of # headers)
+   *   - Custom checkbox row with Persian acceptance label
+   *
+   * When rules.active === false, renders a minimal non-blocking notice
+   * (matching backend FAIL-OPEN: submission proceeds without acceptance).
+   */
+  function buildRulesSectionHtml(rules) {
+    if (!rules || !rules.active) {
+      // FAIL-OPEN mode: no active rules version. Don't block submission.
+      // Render a subtle notice so the user understands why there's no checkbox.
+      return '<div class="mb-rules-section mb-rules-section--inactive">' +
+        '<div class="mb-rules-header">' +
+          '<div class="mb-rules-title-row">' +
+            '<span class="mb-rules-title">📋 قوانین عضویت</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="mb-rules-body mb-rules-body--empty">قوانین فعال در حال حاضر در دسترس نیست. می‌توانید درخواست خود را ارسال کنید؛ در صورت نیاز، تیم پس از بررسی با شما تماس خواهد گرفت.</div>' +
+      '</div>';
+    }
+
+    var versionBadge = rules.version ? ('<span class="mb-rules-version">v' + esc(rules.version) + '</span>') : '';
+    var titleText = rules.title || 'قوانین عضویت Premium';
+    // Prefer summary; fall back to body_markdown (strip markdown # headers for display).
+    var bodyText = rules.summary || stripMarkdownHeaders(rules.body_markdown) || '';
+    var effectiveDate = rules.effective_at ? formatFaDate(rules.effective_at) : '';
+
+    return '<div class="mb-rules-section">' +
+      '<div class="mb-rules-header">' +
+        '<div class="mb-rules-title-row">' +
+          '<span class="mb-rules-title">📋 ' + esc(titleText) + '</span>' +
+          versionBadge +
+        '</div>' +
+        (effectiveDate ? '<div class="mb-rules-effective">از ' + esc(effectiveDate) + '</div>' : '') +
+      '</div>' +
+      (bodyText ? '<div class="mb-rules-body">' + esc(bodyText) + '</div>' : '') +
+      // Custom checkbox — accessible, RTL-friendly, polished
+      '<label class="mb-rules-accept" for="mb-rules-checkbox">' +
+        '<input type="checkbox" id="mb-rules-checkbox" class="mb-rules-checkbox" onchange="MembershipApp.onRulesCheckboxChange(this)" />' +
+        '<span class="mb-rules-checkbox-custom" aria-hidden="true">' +
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>' +
+        '</span>' +
+        '<span class="mb-rules-accept-label">قوانین عضویت Premium را مطالعه کرده و می‌پذیرم. در صورت نقض قوانین، عضویت من ممکن است لغو شود.</span>' +
+      '</label>' +
+    '</div>';
+  }
+
+  /**
+   * PHASE 7B (B1): Wire the checkbox change handler to enable/disable the
+   * submit button. Called once after the popup is appended to the DOM.
+   */
+  function wireRulesCheckbox(rules) {
+    var checkbox = document.getElementById('mb-rules-checkbox');
+    var submitBtn = document.getElementById('mb-uid-submit');
+    if (!checkbox || !submitBtn) return;
+    // Initial state: unchecked → submit disabled.
+    updateSubmitButtonState(submitBtn, false);
+  }
+
+  /**
+   * PHASE 7B (B1): Checkbox onchange handler. Updates the submit button
+   * enabled/disabled state and the visual styling.
+   */
+  function onRulesCheckboxChange(checkbox) {
+    var submitBtn = document.getElementById('mb-uid-submit');
+    if (!submitBtn) return;
+    updateSubmitButtonState(submitBtn, checkbox.checked);
+  }
+
+  /**
+   * PHASE 7B (B1): Update the submit button's disabled state + visual class.
+   * When disabled, the button shows a "قوانین را بپذیرید" hint instead of
+   * the normal "ارسال درخواست عضویت" label.
+   */
+  function updateSubmitButtonState(submitBtn, enabled) {
+    if (!submitBtn) return;
+    if (enabled) {
+      submitBtn.disabled = false;
+      submitBtn.setAttribute('aria-disabled', 'false');
+      submitBtn.classList.remove('mb-uid-submit--disabled');
+      submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال درخواست عضویت';
+    } else {
+      submitBtn.disabled = true;
+      submitBtn.setAttribute('aria-disabled', 'true');
+      submitBtn.classList.add('mb-uid-submit--disabled');
+      submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> ابتدا قوانین را بپذیرید';
+    }
+  }
+
+  /**
+   * PHASE 7B (B1): Strip leading markdown # headers from rules body for
+   * plain-text display. Preserves paragraph breaks. The backend stores rules
+   * as body_markdown; we display the summary when available, but fall back
+   * to a cleaned version of body_markdown if summary is empty.
+   */
+  function stripMarkdownHeaders(text) {
+    if (!text) return '';
+    return String(text)
+      .split('\n')
+      .map(function (line) { return line.replace(/^#{1,6}\s*/, ''); })
+      .join('\n')
+      .trim();
   }
 
   // ─── Pending Popup ────────────────────────────────────────────────────────
@@ -615,7 +846,39 @@
     }
   }
 
+  /**
+   * PHASE 7B (B1): Rewritten submitUid to enforce the accept→request ordering.
+   *
+   * Flow:
+   *   1. Validate UID format (unchanged).
+   *   2. If rules.active === true:
+   *      a. Verify the checkbox is checked. If not, show actionable message.
+   *      b. If not already accepted in this session (_rulesAcceptedVersion),
+   *         call POST /api/membership/rules/accept with the active version.
+   *      c. Only proceed if acceptance succeeds.
+   *   3. Call POST /api/membership/request (unchanged payload).
+   *   4. On 403 RULES_NOT_ACCEPTED:
+   *      - Refresh the rules cache (admin may have published a new version).
+   *      - Re-render the rules section with the new version.
+   *      - Reset the checkbox to unchecked.
+   *      - Show a clear Persian message: "قوانین به‌روزرسانی شده‌اند. لطفاً نسخه جدید را مطالعه و تأیید کنید."
+   *   5. Duplicate-click protection: _submitInFlight flag prevents concurrent submissions.
+   */
+  var _submitInFlight = false;
+
   async function submitUid() {
+    // PHASE 7B (B1): Duplicate-click protection.
+    if (_submitInFlight) return;
+    _submitInFlight = true;
+
+    try {
+      await _submitUidInternal();
+    } finally {
+      _submitInFlight = false;
+    }
+  }
+
+  async function _submitUidInternal() {
     var input = document.getElementById('mb-uid-input');
     if (!input) return;
     var uid = input.value.trim();
@@ -626,7 +889,67 @@
       return;
     }
 
-    var btn = document.querySelector('.mb-uid-submit');
+    var rules = getRules();
+
+    // PHASE 7B (B1): If rules are active, require explicit acceptance.
+    if (rules && rules.active) {
+      var checkbox = document.getElementById('mb-rules-checkbox');
+      if (!checkbox || !checkbox.checked) {
+        if (window.admToast) admToast('برای ارسال درخواست، ابتدا قوانین عضویت را مطالعه و تأیید کنید.', 'error');
+        else alert('برای ارسال درخواست، ابتدا قوانین عضویت را مطالعه و تأیید کنید.');
+        return;
+      }
+
+      // PHASE 7B (B1): Call POST /api/membership/rules/accept BEFORE /request,
+      // but only if we haven't already accepted this exact version in this
+      // popup session (avoids redundant accept calls on re-submits after a
+      // non-rules error, e.g. UID already exists).
+      if (_rulesAcceptedVersion !== rules.version) {
+        var btn = document.getElementById('mb-uid-submit');
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round" stroke-dasharray="40" stroke-dashoffset="20"/></svg> در حال ثبت پذیرش قوانین...';
+        }
+
+        try {
+          var acceptRes = await apiFetch('/api/membership/rules/accept', {
+            method: 'POST',
+            body: JSON.stringify({ rules_version: rules.version, source: 'activation_popup' }),
+          });
+          if (!acceptRes || !acceptRes.ok) {
+            // Acceptance failed — show structured error, re-enable button, abort.
+            var acceptMsg = (acceptRes && acceptRes.error) ? acceptRes.error : 'خطا در ثبت پذیرش قوانین. لطفاً دوباره تلاش کنید.';
+            if (acceptRes && acceptRes.code === 'RULES_NOT_FOUND') {
+              // The version we have is stale — refresh rules and re-render.
+              await refreshRulesAndRerenderSection();
+              acceptMsg = 'نسخه قوانین به‌روزرسانی شده است. لطفاً نسخه جدید را مطالعه و تأیید کنید.';
+            } else if (acceptRes && acceptRes.code === 'RULES_NOT_ACTIVE') {
+              await refreshRulesAndRerenderSection();
+              acceptMsg = 'نسخه قوانین فعال تغییر کرده است. لطفاً نسخه جدید را تأیید کنید.';
+            }
+            if (window.admToast) admToast(acceptMsg, 'error');
+            else alert(acceptMsg);
+            // Restore the button to the "accept rules" hint state (unchecked).
+            var checkboxAfter = document.getElementById('mb-rules-checkbox');
+            if (checkboxAfter) { checkboxAfter.checked = false; }
+            updateSubmitButtonState(document.getElementById('mb-uid-submit'), false);
+            return;
+          }
+          // Acceptance succeeded — record the version so we don't re-accept on retry.
+          _rulesAcceptedVersion = rules.version;
+        } catch (e) {
+          if (window.admToast) admToast('خطا در ارتباط با سرور. لطفاً دوباره تلاش کنید.', 'error');
+          else alert('خطا در ارتباط با سرور. لطفاً دوباره تلاش کنید.');
+          var checkboxErr = document.getElementById('mb-rules-checkbox');
+          if (checkboxErr) { checkboxErr.checked = false; }
+          updateSubmitButtonState(document.getElementById('mb-uid-submit'), false);
+          return;
+        }
+      }
+    }
+
+    // ── Submit the membership request ────────────────────────────────────
+    var btn = document.getElementById('mb-uid-submit');
     if (btn) {
       btn.disabled = true;
       btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round" stroke-dasharray="40" stroke-dashoffset="20"/></svg> در حال ارسال...';
@@ -641,22 +964,92 @@
       });
       if (res && res.ok) {
         openSuccessPopup();
-      } else {
-        var msg = (res && res.error) ? res.error : 'خطا در ثبت درخواست';
-        if (window.admToast) admToast(msg, 'error');
-        else alert(msg);
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال درخواست عضویت';
-        }
+        return;
       }
+
+      // PHASE 7B (B1): Handle RULES_NOT_ACCEPTED gracefully.
+      if (res && res.code === 'RULES_NOT_ACCEPTED') {
+        // Admin published a new rules version, or our acceptance wasn't recorded.
+        // Refresh the rules cache, re-render the section, reset the checkbox,
+        // and show an actionable Persian message.
+        await refreshRulesAndRerenderSection();
+        var checkboxReset = document.getElementById('mb-rules-checkbox');
+        if (checkboxReset) { checkboxReset.checked = false; }
+        updateSubmitButtonState(document.getElementById('mb-uid-submit'), false);
+        var rulesMsg = 'قوانین عضویت به‌روزرسانی شده‌اند. لطفاً نسخه جدید را مطالعه کرده و دوباره تأیید کنید.';
+        if (window.admToast) admToast(rulesMsg, 'error');
+        else alert(rulesMsg);
+        return;
+      }
+
+      // Other errors — show structured message.
+      var msg = (res && res.error) ? res.error : 'خطا در ثبت درخواست';
+      if (window.admToast) admToast(msg, 'error');
+      else alert(msg);
+      // Restore button to appropriate state based on rules acceptance.
+      restoreSubmitButtonState();
     } catch (e) {
-      if (window.admToast) admToast('خطا: ' + e.message, 'error');
-      else alert('خطا: ' + e.message);
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال درخواست عضویت';
+      // Network error (fetch() rejected) — not an HTTP response.
+      if (window.admToast) admToast('خطا در ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.', 'error');
+      else alert('خطا در ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.');
+      restoreSubmitButtonState();
+    }
+  }
+
+  /**
+   * PHASE 7B (B1): Refresh the rules cache and re-render the rules section
+   * in-place (without rebuilding the whole popup). Used when the backend
+   * returns RULES_NOT_ACCEPTED or RULES_NOT_FOUND, indicating the active
+   * version changed while the user had the popup open.
+   */
+  async function refreshRulesAndRerenderSection() {
+    await refreshRules();
+    var newRules = getRules();
+    var sectionEl = document.querySelector('.mb-rules-section');
+    if (sectionEl) {
+      // Replace the section's outerHTML with the fresh rendering.
+      var tmp = document.createElement('div');
+      tmp.innerHTML = buildRulesSectionHtml(newRules);
+      var newSection = tmp.firstElementChild;
+      if (newSection) {
+        sectionEl.replaceWith(newSection);
       }
+    }
+    // Also update the submit button's initial disabled state.
+    var submitBtn = document.getElementById('mb-uid-submit');
+    if (submitBtn) {
+      if (newRules.active) {
+        updateSubmitButtonState(submitBtn, false);
+      } else {
+        // Rules became inactive (FAIL-OPEN) — enable submission.
+        submitBtn.disabled = false;
+        submitBtn.setAttribute('aria-disabled', 'false');
+        submitBtn.classList.remove('mb-uid-submit--disabled');
+        submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال درخواست عضویت';
+      }
+    }
+  }
+
+  /**
+   * PHASE 7B (B1): Restore the submit button to the appropriate state after
+   * a non-fatal error (re-enable if rules already accepted, else show hint).
+   */
+  function restoreSubmitButtonState() {
+    var btn = document.getElementById('mb-uid-submit');
+    if (!btn) return;
+    var rules = getRules();
+    if (rules && rules.active && _rulesAcceptedVersion === rules.version) {
+      // Already accepted — re-enable the submit button.
+      updateSubmitButtonState(btn, true);
+    } else if (rules && rules.active) {
+      // Not yet accepted — show the "accept rules" hint.
+      updateSubmitButtonState(btn, false);
+    } else {
+      // FAIL-OPEN — no acceptance required.
+      btn.disabled = false;
+      btn.setAttribute('aria-disabled', 'false');
+      btn.classList.remove('mb-uid-submit--disabled');
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال درخواست عضویت';
     }
   }
 
@@ -704,7 +1097,9 @@
     openBitunix: openBitunix,
     openRegisterUrl: openRegisterUrl,
     submitUid: submitUid,
-    refresh: function () { _cache = null; _requirement = null; return loadCard(); },
+    // PHASE 7B (B1): Exposed for the inline onchange handler on the checkbox.
+    onRulesCheckboxChange: onRulesCheckboxChange,
+    refresh: function () { _cache = null; _requirement = null; _rules = null; _rulesAcceptedVersion = null; return loadCard(); },
   };
 
   // ─── Ripple animation for both CTA buttons ──────────────────────────────
