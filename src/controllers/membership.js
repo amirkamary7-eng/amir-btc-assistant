@@ -85,7 +85,11 @@ export function createMembershipHandlers(deps) {
 
   function validateCreateRequest(body) {
     const errors = [];
-    if (!body.exchange || !SUPPORTED_EXCHANGES.includes(body.exchange)) {
+    // Phase 2: Exchange validation is now data-driven (checked against the active
+    // requirement in handleSubmitRequest via isExchangeMatchingActive). Here we
+    // only validate that exchange is a non-empty string of reasonable length.
+    const rawExchange = typeof body.exchange === 'string' ? body.exchange.trim() : '';
+    if (!rawExchange || rawExchange.length > 64) {
       errors.push({ field: 'exchange', message: 'Invalid exchange' });
     }
     const uid = String(body.uid || '').trim();
@@ -95,7 +99,7 @@ export function createMembershipHandlers(deps) {
     if (body.note && String(body.note).length > 500) {
       errors.push({ field: 'note', message: 'Note too long' });
     }
-    return { valid: errors.length === 0, errors, uid, exchange: body.exchange, note: body.note };
+    return { valid: errors.length === 0, errors, uid, exchange: rawExchange, note: body.note };
   }
 
   function parsePagination(url) {
@@ -232,6 +236,27 @@ export function createMembershipHandlers(deps) {
         console.warn('[membership] rules check failed, fail-open:', rulesErr?.message || rulesErr);
       }
 
+      // ── Phase 2: Requirement Exchange Validation ──────────────────────────
+      // FAIL-OPEN: if the requirements table doesn't exist, has no active version,
+      // or the query errors, the request proceeds with the legacy validation.
+      let activeRequirement = null;
+      try {
+        const check = await membershipRepo.isExchangeMatchingActive(env, v.exchange);
+        if (check.requirement) {
+          activeRequirement = check.requirement;
+          if (!check.matches) {
+            return jsonResponse({
+              error: `Exchange must be ${check.requirement.exchange_name} (current active requirement)`,
+              code: 'EXCHANGE_NOT_MATCHING_REQUIREMENT',
+              active_exchange: check.requirement.exchange_name,
+              active_version: check.requirement.version,
+            }, { status: 403 }, env);
+          }
+        }
+      } catch (reqErr) {
+        console.warn('[membership] requirement check failed, fail-open:', reqErr?.message || reqErr);
+      }
+
       // Upsert user
       await membershipRepo.upsertByTelegramId(env, {
         telegramId: tgId,
@@ -274,7 +299,7 @@ export function createMembershipHandlers(deps) {
       } catch (e) { /* non-fatal */ }
 
       await invalidateCaches(env, tgId);
-      return jsonResponse({ ok: true, data: { status: 'PENDING', exchange: v.exchange, uid: v.uid, rules_version: activeRulesVersion } }, { status: 201 }, env);
+      return jsonResponse({ ok: true, data: { status: 'PENDING', exchange: v.exchange, uid: v.uid, rules_version: activeRulesVersion, requirement_version: activeRequirement ? activeRequirement.version : null } }, { status: 201 }, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
@@ -345,6 +370,99 @@ export function createMembershipHandlers(deps) {
       if (!rules) return jsonResponse({ ok: true, data: { has_accepted: false, rules_version: null, active: false } }, {}, env);
       const acceptance = await membershipRepo.getAcceptance(env, tgId, rules.version);
       return jsonResponse({ ok: true, data: { has_accepted: !!acceptance, rules_version: rules.version, active: true, accepted_at: acceptance?.accepted_at || null } }, {}, env);
+    } catch (e) { return safeDbErrorResponse(e, {}, env); }
+  }
+
+  // ─── Handlers: Membership Requirements (Phase 2) ──────────────────────────
+
+  /** GET /api/membership/requirement — get current active requirement (cached 5 min) */
+  async function handleGetRequirement(request, env) {
+    const auth = await requireUser(request, env);
+    if (auth.error) return auth.error;
+    if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
+    const cacheKey = 'mb:req:active';
+    const cached = await readAppCache(env, cacheKey);
+    if (cached) return jsonResponse({ ok: true, data: JSON.parse(cached) }, {}, env);
+    try {
+      const req = await membershipRepo.getActiveRequirement(env);
+      if (!req) {
+        return jsonResponse({ ok: true, data: { active: false, exchange_name: null, version: null } }, {}, env);
+      }
+      const dto = {
+        active: true, id: req.id, version: req.version, label: req.label,
+        exchange_name: req.exchange_name, exchange_register_url: req.exchange_register_url,
+        uid_label: req.uid_label, referral_code: req.referral_code,
+        requires_first_trade: req.requires_first_trade,
+        required_volume: Number(req.required_volume) || 0,
+        reward_level: req.reward_level, grace_period_days: req.grace_period_days,
+        metadata: req.metadata || {},
+      };
+      await writeAppCache(env, cacheKey, JSON.stringify(dto), CACHE_TTL.STATUS);
+      return jsonResponse({ ok: true, data: dto }, {}, env);
+    } catch (e) { return safeDbErrorResponse(e, {}, env); }
+  }
+
+  /** GET /api/admin/membership/requirements — list all requirements (admin) */
+  async function handleListRequirements(request, env) {
+    const auth = await requireAdminUser(request, env);
+    if (auth.error) return auth.error;
+    if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
+    try {
+      const requirements = await membershipRepo.listAllRequirements(env);
+      return jsonResponse({ ok: true, data: requirements }, {}, env);
+    } catch (e) { return safeDbErrorResponse(e, {}, env); }
+  }
+
+  /** POST /api/admin/membership/requirements — create a new requirement (DRAFT) */
+  async function handleCreateRequirement(request, env) {
+    const auth = await requireAdminUser(request, env);
+    if (auth.error) return auth.error;
+    if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
+    const { payload, error } = await readJsonBody(request);
+    if (error) return error;
+    if (!payload?.exchange_name || !payload?.exchange_register_url) {
+      return buildBodyFieldValidationError([{ field: 'exchange_name', message: 'exchange_name and exchange_register_url required' }], env);
+    }
+    try {
+      const req = await membershipRepo.createRequirement(env, payload);
+      await env.APP_CACHE?.delete?.('mb:req:active');
+      try {
+        await membershipRepo.createAuditLog(env, {
+          adminId: String(auth.user.id), adminUsername: auth.user.username || null,
+          action: 'REQUIREMENT_CREATED',
+          detail: `Exchange: ${payload.exchange_name}, Label: ${payload.label || payload.exchange_name}`,
+        });
+      } catch (e) { /* non-fatal */ }
+      return jsonResponse({ ok: true, data: req }, { status: 201 }, env);
+    } catch (e) { return safeDbErrorResponse(e, {}, env); }
+  }
+
+  /** POST /api/admin/membership/requirements/activate — switch active requirement */
+  async function handleActivateRequirement(request, env) {
+    const auth = await requireAdminUser(request, env);
+    if (auth.error) return auth.error;
+    if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
+    const { payload, error } = await readJsonBody(request);
+    if (error) return error;
+    const version = Number(payload?.version);
+    if (!Number.isFinite(version) || version < 1) {
+      return buildBodyFieldValidationError([{ field: 'version', message: 'version must be a positive integer' }], env);
+    }
+    try {
+      const target = await membershipRepo.getRequirementByVersion(env, version);
+      if (!target) return jsonResponse({ error: 'Requirement version not found', code: 'NOT_FOUND' }, { status: 404 }, env);
+      if (target.status === 'ACTIVE') return jsonResponse({ ok: true, data: target, message: 'Already active' }, {}, env);
+      const activated = await membershipRepo.activateRequirement(env, version, String(auth.user.id));
+      if (!activated) return jsonResponse({ error: 'Activation failed', code: 'ACTIVATION_FAILED' }, { status: 500 }, env);
+      await env.APP_CACHE?.delete?.('mb:req:active');
+      try {
+        await membershipRepo.createAuditLog(env, {
+          adminId: String(auth.user.id), adminUsername: auth.user.username || null,
+          action: 'REQUIREMENT_ACTIVATED',
+          detail: `Activated requirement v${version} (${target.exchange_name})`,
+        });
+      } catch (e) { /* non-fatal */ }
+      return jsonResponse({ ok: true, data: activated }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
@@ -885,6 +1003,11 @@ export function createMembershipHandlers(deps) {
     handleGetRules,
     handleAcceptRules,
     handleCheckAcceptance,
+    // Phase 2: Requirements + Exchange Decoupling
+    handleGetRequirement,
+    handleListRequirements,
+    handleCreateRequirement,
+    handleActivateRequirement,
     handleGetStats,
     handleListRequests,
     handleGetRequest,

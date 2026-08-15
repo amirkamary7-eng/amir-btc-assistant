@@ -10672,6 +10672,10 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/membership/rules/accepted') {
         return membershipHandlers.handleCheckAcceptance(request, env);
       }
+      // ── Phase 2: Membership Requirements ──────────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/membership/requirement') {
+        return membershipHandlers.handleGetRequirement(request, env);
+      }
 
       // ── Membership Module — Admin Routes ──────────────────────────────────
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/stats') {
@@ -10730,6 +10734,16 @@ export default {
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/logs/export') {
         return membershipHandlers.handleExportLogs(request, env);
+      }
+      // ── Phase 2: Admin Requirement Management ─────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/admin/membership/requirements') {
+        return membershipHandlers.handleListRequirements(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/requirements') {
+        return membershipHandlers.handleCreateRequirement(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/requirements/activate') {
+        return membershipHandlers.handleActivateRequirement(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/notifications') {

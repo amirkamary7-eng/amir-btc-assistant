@@ -16,6 +16,23 @@
   var _cache = null;
   var _loading = false;
   var _popupOpen = false;
+  var _requirement = null;
+
+  // Fallback values used if the requirement API is unavailable (pre-migration
+  // or network error). These match the EXACT current hard-coded behavior so
+  // there is zero user-visible change in the fallback path.
+  var FALLBACK_REQUIREMENT = {
+    active: true,
+    exchange_name: 'Bitunix',
+    exchange_register_url: 'https://www.bitunix.com/register?vipCode=AMIRBTC',
+    uid_label: 'شناسه کاربری Bitunix خود را وارد کنید',
+    referral_code: 'AMIRBTC',
+    label: 'Bitunix + First Trade',
+    metadata: {
+      timeline_step_1: 'ثبت‌نام از طریق لینک رسمی Bitunix',
+      button_text: 'ثبت‌نام در Bitunix',
+    },
+  };
 
   function getInitData() {
     return window.Telegram?.WebApp?.initData || '';
@@ -38,6 +55,27 @@
     var d = document.createElement('div');
     d.textContent = String(s);
     return d.innerHTML;
+  }
+
+  /** Phase 2: Load the active exchange requirement from the API. */
+  async function loadRequirement() {
+    if (_requirement) return _requirement;
+    try {
+      var res = await apiFetch('/api/membership/requirement');
+      if (res && res.ok && res.data && res.data.active) {
+        _requirement = res.data;
+      } else {
+        _requirement = FALLBACK_REQUIREMENT;
+      }
+    } catch (e) {
+      _requirement = FALLBACK_REQUIREMENT;
+    }
+    return _requirement;
+  }
+
+  /** Synchronous getter — returns cached requirement or fallback. */
+  function getRequirement() {
+    return _requirement || FALLBACK_REQUIREMENT;
   }
 
   function formatFaDate(iso) {
@@ -113,6 +151,7 @@
     _loading = true;
     renderSkeleton();
     try {
+      loadRequirement().catch(function () { /* fallback handles it */ });
       var res = await apiFetch('/api/membership/status');
       if (res && res.ok && res.data) {
         _cache = res.data;
@@ -348,6 +387,12 @@
     // Compute step status
     var steps = computeStepStatus(null, _cache);
 
+    // Phase 2: Data-driven exchange requirement values.
+    var req = getRequirement();
+    var uidLabel = req.uid_label || ('شناسه کاربری ' + (req.exchange_name || 'Bitunix') + ' خود را وارد کنید');
+    var buttonText = (req.metadata && req.metadata.button_text) || ('ثبت‌نام در ' + (req.exchange_name || 'Bitunix'));
+    var timelineStep1Text = (req.metadata && req.metadata.timeline_step_1) || ('ثبت‌نام از طریق لینک رسمی ' + (req.exchange_name || 'Bitunix'));
+
     var overlay = document.createElement('div');
     overlay.className = 'mb-popup-overlay';
     overlay.onclick = function (e) { if (e.target === overlay) closePopup(); };
@@ -376,7 +421,7 @@
         '</div>' +
         // Timeline — 6 steps
         '<ul class="mb-timeline">' +
-          timelineStep(1, 'ثبت‌نام از طریق لینک رسمی Bitunix', steps[0]) +
+          timelineStep(1, timelineStep1Text, steps[0]) +
           timelineStep(2, 'ثبت UID صرافی', steps[1]) +
           timelineStep(3, 'واریز اولیه به حساب صرافی', steps[2]) +
           timelineStep(4, 'انجام اولین معامله (First Trade)', steps[3]) +
@@ -387,12 +432,12 @@
         // Register button
         '<button class="mb-cta-register" onclick="MembershipApp.openBitunix()">' +
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>' +
-          'ثبت‌نام در Bitunix' +
+          esc(buttonText) +
         '</button>' +
         // UID form
         '<div class="mb-uid-form">' +
           '<label class="mb-uid-label">ثبت درخواست عضویت</label>' +
-          '<input type="text" class="mb-uid-input" id="mb-uid-input" placeholder="شناسه کاربری Bitunix خود را وارد کنید" dir="ltr" />' +
+          '<input type="text" class="mb-uid-input" id="mb-uid-input" placeholder="' + esc(uidLabel) + '" dir="ltr" />' +
           '<button class="mb-uid-submit" onclick="MembershipApp.submitUid()">' +
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
             'ارسال درخواست عضویت' +
@@ -435,7 +480,7 @@
         '</div>' +
         // Timeline with current status
         '<ul class="mb-timeline">' +
-          timelineStep(1, 'ثبت‌نام از طریق لینک رسمی Bitunix', steps[0]) +
+          timelineStep(1, (getRequirement().metadata && getRequirement().metadata.timeline_step_1) || ('ثبت‌نام از طریق لینک رسمی ' + (getRequirement().exchange_name || 'Bitunix')), steps[0]) +
           timelineStep(2, 'ثبت UID صرافی', steps[1]) +
           timelineStep(3, 'واریز اولیه به حساب صرافی', steps[2]) +
           timelineStep(4, 'انجام اولین معامله (First Trade)', steps[3]) +
@@ -485,7 +530,12 @@
   // ─── Actions ──────────────────────────────────────────────────────────────
 
   function openBitunix() {
-    var url = 'https://www.bitunix.com/register?vipCode=AMIRBTC';
+    return openRegisterUrl();
+  }
+
+  function openRegisterUrl() {
+    var req = getRequirement();
+    var url = req.exchange_register_url || FALLBACK_REQUIREMENT.exchange_register_url;
     if (window.Telegram?.WebApp?.openLink) {
       window.Telegram.WebApp.openLink(url);
     } else {
@@ -511,9 +561,11 @@
     }
 
     try {
+      var req = getRequirement();
+      var exchangeName = req.exchange_name || 'Bitunix';
       var res = await apiFetch('/api/membership/request', {
         method: 'POST',
-        body: JSON.stringify({ exchange: 'Bitunix', uid: uid }),
+        body: JSON.stringify({ exchange: exchangeName, uid: uid }),
       });
       if (res && res.ok) {
         openSuccessPopup();
@@ -578,8 +630,9 @@
     closePopup: closePopup,
     closeWelcomePopup: closeWelcomePopup,
     openBitunix: openBitunix,
+    openRegisterUrl: openRegisterUrl,
     submitUid: submitUid,
-    refresh: function () { _cache = null; return loadCard(); },
+    refresh: function () { _cache = null; _requirement = null; return loadCard(); },
   };
 
   // ─── Ripple animation for both CTA buttons ──────────────────────────────
