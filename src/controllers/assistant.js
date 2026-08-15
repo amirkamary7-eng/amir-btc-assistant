@@ -25,6 +25,9 @@ export function createAssistantHandlers(deps) {
     getTodayIsoDate,
     getNumericEnv,
     queryDb,
+    // PHASE 3: MembershipAuthority + EntitlementConfig for tier-based limits
+    membershipAuthority,
+    entitlementConfig,
   } = deps;
 
   // ── Constants ──────────────────────────────────────────────────────────────
@@ -377,16 +380,30 @@ export function createAssistantHandlers(deps) {
       return { allowed: false, reason: 'cooldown', retry_after: cooldownSeconds };
     }
 
+    // PHASE 3: Determine tier via MembershipAuthority (fail-safe to Normal).
+    let isPremium = false;
+    if (membershipAuthority) {
+      try { isPremium = await membershipAuthority.isPremium(env, userId); } catch { isPremium = false; }
+    }
+
     const isoDate = getTodayIsoDate();
     const msgKey = buildRateLimitKey(RATE_LIMIT_MSG_PREFIX, userId, isoDate);
     const imgKey = buildRateLimitKey(RATE_LIMIT_IMG_PREFIX, userId, isoDate);
-    const msgLimit = getNumericEnv(env, 'AI_DAILY_MESSAGE_LIMIT', 50);
-    const imgLimit = getNumericEnv(env, 'AI_DAILY_IMAGE_LIMIT', 3);
+
+    // PHASE 3: Use entitlement config for tier-based limits.
+    let msgLimit, imgLimit;
+    if (entitlementConfig) {
+      msgLimit = isPremium ? entitlementConfig.ai_chat.premium_daily_limit : entitlementConfig.ai_chat.normal_daily_limit;
+      imgLimit = isPremium ? entitlementConfig.ai_image.premium_daily_limit : entitlementConfig.ai_image.normal_daily_limit;
+    } else {
+      msgLimit = getNumericEnv(env, 'AI_DAILY_MESSAGE_LIMIT', 50);
+      imgLimit = getNumericEnv(env, 'AI_DAILY_IMAGE_LIMIT', 3);
+    }
 
     const rawMsg = await readRateLimitCache(env, msgKey);
     const msgCount = rawMsg && /^\d+$/.test(String(rawMsg)) ? Number(rawMsg) : 0;
     if (msgCount >= msgLimit) {
-      return { allowed: false, reason: 'daily_message_limit', used: msgCount };
+      return { allowed: false, reason: 'daily_message_limit', used: msgCount, limit: msgLimit, isPremium };
     }
 
     const rawImg = await readRateLimitCache(env, imgKey);
@@ -398,6 +415,7 @@ export function createAssistantHandlers(deps) {
       messages_limit: msgLimit,
       images_used: imgCount,
       images_limit: imgLimit,
+      isPremium,
     };
   }
 

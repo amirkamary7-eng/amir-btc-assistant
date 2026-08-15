@@ -20,7 +20,25 @@ export function createWatchlistHandlers(deps) {
     buildBodyFieldValidationError,
     isDatabaseConfigured,
     watchlistRepo,
+    // PHASE 3: MembershipAuthority + EntitlementConfig for tier-based watchlist limit.
+    membershipAuthority,
+    entitlementConfig,
   } = deps;
+
+  /**
+   * PHASE 3: Get the effective watchlist max for a user based on tier.
+   * Normal = 7, Premium = 20. Fail-safe: Normal on any error.
+   */
+  async function _getEffectiveMaxWatchlist(env, userId) {
+    let isPremium = false;
+    if (membershipAuthority) {
+      try { isPremium = await membershipAuthority.isPremium(env, userId); } catch { isPremium = false; }
+    }
+    if (entitlementConfig) {
+      return isPremium ? entitlementConfig.watchlist.premium_max : entitlementConfig.watchlist.normal_max;
+    }
+    return 7; // Legacy fallback
+  }
 
   /**
    * GET /api/watchlist — Return the authenticated user's watchlist symbols.
@@ -78,8 +96,10 @@ export function createWatchlistHandlers(deps) {
     }
 
     payload.user_id = String(auth.user.id);
+    // PHASE 3: Tier-based watchlist limit (Normal 7, Premium 20)
+    const maxWatchlist = await _getEffectiveMaxWatchlist(env, payload.user_id);
     const symbols = Array.isArray(payload.symbols)
-      ? [...new Set(payload.symbols.map((value) => String(value).toUpperCase().trim()).filter(Boolean))].slice(0, 7)
+      ? [...new Set(payload.symbols.map((value) => String(value).toUpperCase().trim()).filter(Boolean))].slice(0, maxWatchlist)
       : [];
     try {
       const storedSymbols = await watchlistRepo.replace(env, payload.user_id, symbols);

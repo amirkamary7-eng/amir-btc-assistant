@@ -40,6 +40,7 @@ import { createMarketOverviewService } from './src/services/market_overview_serv
 import { createMembershipRepository } from './src/repositories/membership.js';
 import { createMembershipHandlers } from './src/controllers/membership.js';
 import { createMembershipAuthority } from './src/services/membership_authority.js';
+import { ENTITLEMENT_CONFIG } from './src/services/entitlement_config.js';
 import { createNewsArticleRepository } from './src/repositories/news_articles.js';
 import { createAppContentRepository } from './src/repositories/app_content.js';
 
@@ -490,8 +491,14 @@ async function writeRateLimitCache(env, key, value, expirationTtl) {
     return;
   }
 
+  // PHASE 3 FIX (AI-DEF-01): Cloudflare KV requires expirationTtl >= 60.
+  // Previously, AI_COOLDOWN_SECONDS=4 was passed directly, causing the KV PUT
+  // to fail silently. Fix: clamp TTL to minimum 60 seconds.
+  const MIN_KV_TTL = 60;
+  const effectiveTtl = Math.max(MIN_KV_TTL, Number(expirationTtl) || MIN_KV_TTL);
+
   try {
-    await env.RATE_LIMITS.put(key, value, { expirationTtl });
+    await env.RATE_LIMITS.put(key, value, { expirationTtl: effectiveTtl });
     _trackKvWrite('RATE_LIMITS:' + key);
   } catch (e) {
     console.warn('writeRateLimitCache failed:', e.message || e);
@@ -6978,6 +6985,15 @@ const alertEconomyRepo = createAlertEconomyRepository({
 const walletRepo = createWalletRepository({ queryDb, queryDbTransaction });
 const economyService = createEconomyService({ walletRepo, queryDb });
 
+// ── Membership Module — Phase 3: created here so handlers can inject
+// membershipAuthority for tier-based quota enforcement. ──
+const membershipRepo = createMembershipRepository({ queryDb, queryDbTransaction });
+const membershipAuthority = createMembershipAuthority({
+  membershipRepo,
+  readAppCache,
+  writeAppCache,
+});
+
 const alertRepo = createAlertRepository({ queryDb, ensureUserRow, normalizeOptionalString });
 const alertHandlers = createAlertHandlers({
   jsonResponse,
@@ -6990,6 +7006,8 @@ const alertHandlers = createAlertHandlers({
   alertRepo,
   alertEconomyRepo,
   economyService,
+  // PHASE 3: MembershipAuthority for tier-based alert quota
+  membershipAuthority,
 });
 const watchlistRepo = createWatchlistRepository({ queryDb, queryDbTransaction, ensureUserRow });
 const watchlistHandlers = createWatchlistHandlers({
@@ -7001,6 +7019,9 @@ const watchlistHandlers = createWatchlistHandlers({
   buildBodyFieldValidationError,
   isDatabaseConfigured,
   watchlistRepo,
+  // PHASE 3: Tier-based watchlist limit
+  membershipAuthority,
+  entitlementConfig: ENTITLEMENT_CONFIG,
 });
 const referralRepo = createReferralRepository({ queryDb, getReferralRewardPerInvite, getNumericEnv });
 const referralHandlers = createReferralHandlers({
@@ -7054,6 +7075,9 @@ const wheelHandlers = createWheelHandlers({
   rewardCenterRepo,
   notificationPlatformRepo,
   notificationService,
+  // PHASE 3: Tier-based daily spins
+  membershipAuthority,
+  entitlementConfig: ENTITLEMENT_CONFIG,
 });
 const walletHandlers = createWalletHandlers({
   jsonResponse,
@@ -7156,6 +7180,9 @@ const assistantHandlers = createAssistantHandlers({
   getTodayIsoDate,
   getNumericEnv,
   queryDb,
+  // PHASE 3: Tier-based AI quota
+  membershipAuthority,
+  entitlementConfig: ENTITLEMENT_CONFIG,
 });
 const analysisRepo = createAnalysisRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 const analysisHandlers = createAnalysisHandlers({
@@ -7265,18 +7292,7 @@ const alertEconomyHandlers = createAlertEconomyHandlers({
 // ── Market Overview Service (CMC) — all CMC calls centralized here ──
 const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCache, fetchJson });
 
-// ── Membership Module — factory wiring ──────────────────────────────────────
-const membershipRepo = createMembershipRepository({ queryDb, queryDbTransaction });
-
-// ── Membership Authority — Phase 0 foundation ───────────────────────────────
-// Single source of truth for Premium entitlement. Wired but NOT YET CALLED by
-// any feature handler. Future phases will use authority.isPremium() to gate
-// features. No existing behavior changes in Phase 0.
-const membershipAuthority = createMembershipAuthority({
-  membershipRepo,
-  readAppCache,
-  writeAppCache,
-});
+// ── Membership Module — factory wiring (moved to line ~6984 for Phase 3) ────
 
 // ── News Articles Module — permanent storage for AI summaries ───────────────
 const newsArticleRepo = createNewsArticleRepository({ queryDb });
