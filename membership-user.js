@@ -337,6 +337,51 @@
     _popupOpen = true;
     var levelLabel = { VIP: 'VIP', PREMIUM: 'پرمیوم', ELITE: 'الیت' }[status.level] || status.level;
 
+    // Phase 6: Build active cosmetic display
+    var cosmeticHtml = '';
+    if (status.active_cosmetic) {
+      cosmeticHtml =
+        '<div class="mb-vip-cosmetic">' +
+          '<div class="mb-vip-cosmetic-icon">🎨</div>' +
+          '<div class="mb-vip-cosmetic-info">' +
+            '<div class="mb-vip-cosmetic-label">ظاهر فعال</div>' +
+            '<div class="mb-vip-cosmetic-name">' + esc(status.active_cosmetic.title) + '</div>' +
+          '</div>' +
+          '<button class="mb-vip-cosmetic-btn" onclick="MembershipApp.closePopup(); if(window.CosmeticsApp)CosmeticsApp.openShop();">تغییر</button>' +
+        '</div>';
+    } else {
+      cosmeticHtml =
+        '<div class="mb-vip-cosmetic mb-vip-cosmetic--empty">' +
+          '<div class="mb-vip-cosmetic-icon">🎨</div>' +
+          '<div class="mb-vip-cosmetic-info">' +
+            '<div class="mb-vip-cosmetic-label">ظاهر پروفایل</div>' +
+            '<div class="mb-vip-cosmetic-name">بدون ظاهر فعال</div>' +
+          '</div>' +
+          '<button class="mb-vip-cosmetic-btn" onclick="MembershipApp.closePopup(); if(window.CosmeticsApp)CosmeticsApp.openShop();">فروشگاه</button>' +
+        '</div>';
+    }
+
+    // Phase 6: Tier-based quota summary
+    var quotaHtml =
+      '<div class="mb-vip-quotas">' +
+        '<div class="mb-vip-quota">' +
+          '<div class="mb-vip-quota-icon">🔔</div>' +
+          '<div class="mb-vip-quota-info"><div class="mb-vip-quota-label">هشدارهای قیمتی</div><div class="mb-vip-quota-val">۱۰ رایگان در روز</div></div>' +
+        '</div>' +
+        '<div class="mb-vip-quota">' +
+          '<div class="mb-vip-quota-icon">🤖</div>' +
+          '<div class="mb-vip-quota-info"><div class="mb-vip-quota-label">چت هوش مصنوعی</div><div class="mb-vip-quota-val">۱۰۰ پیام در روز</div></div>' +
+        '</div>' +
+        '<div class="mb-vip-quota">' +
+          '<div class="mb-vip-quota-icon">🎡</div>' +
+          '<div class="mb-vip-quota-info"><div class="mb-vip-quota-label">چرخ شانس</div><div class="mb-vip-quota-val">۵ اسپین در روز</div></div>' +
+        '</div>' +
+        '<div class="mb-vip-quota">' +
+          '<div class="mb-vip-quota-icon">⭐</div>' +
+          '<div class="mb-vip-quota-info"><div class="mb-vip-quota-label">واچ‌لیست</div><div class="mb-vip-quota-val">۲۰ نماد</div></div>' +
+        '</div>' +
+      '</div>';
+
     var overlay = document.createElement('div');
     overlay.className = 'mb-popup-overlay';
     overlay.onclick = function (e) { if (e.target === overlay) closePopup(); };
@@ -352,8 +397,8 @@
             '<div class="mb-popup-diamond-icon">' + DIAMOND_SVG + '</div>' +
             '<div class="mb-popup-diamond-shimmer"></div>' +
           '</div>' +
-          '<h2 class="mb-popup-title">عضویت ویژه AMIRBTC Premium</h2>' +
-          '<p class="mb-popup-subtitle">عضویت شما فعال است. تمام امکانات اختصاصی بدون محدودیت در دسترس شماست.</p>' +
+          '<h2 class="mb-popup-title">💎 PREMIUM</h2>' +
+          '<p class="mb-popup-subtitle">عضویت شما فعال است. تمام امکانات اختصاصی با سهمیه بالاتر در دسترس شماست.</p>' +
         '</div>' +
         '<div class="mb-vip-status">' +
           '<div class="mb-vip-badge">' +
@@ -380,10 +425,13 @@
                 '</div>'
             ) +
           '</div>' +
+          cosmeticHtml +
+          quotaHtml +
           '<div class="mb-benefits">' +
             benefitRow('diamond', 'دسترسی دائمی Premium', 'تمام امکانات ویژه برای همیشه') +
             benefitRow('bolt', 'امکانات اختصاصی آینده', 'دسترسی زودهنگام به قابلیت‌های جدید') +
-            benefitRow('shield', 'نشان Premium در پروفایل', 'badge ویژه در پروفایل شما') +
+            benefitRow('shield', 'نشان 💎 PREMIUM در پروفایل', 'badge ویژه در پروفایل شما') +
+            benefitRow('gift', 'فروشگاه ظاهر پروفایل', 'خرید سبک‌های بصری با AB Token') +
           '</div>' +
         '</div>' +
       '</div>';
@@ -420,8 +468,20 @@
             '<div class="mb-popup-diamond-icon">' + DIAMOND_SVG + '</div>' +
             '<div class="mb-popup-diamond-shimmer"></div>' +
           '</div>' +
-          '<h2 class="mb-popup-title">عضویت ویژه AMIRBTC Premium</h2>' +
-          '<p class="mb-popup-subtitle">با فعال‌سازی عضویت Premium، امکانات اختصاصی، دسترسی‌های ویژه و مزایای دائمی حساب شما فعال خواهد شد.</p>' +
+          '<h2 class="mb-popup-title">💎 PREMIUM</h2>' +
+          '<p class="mb-popup-subtitle">با فعال‌سازی عضویت Premium، سهمیه بالاتر، امکانات اختصاصی و مزایای دائمی حساب شما فعال خواهد شد.</p>' +
+        '</div>' +
+        // Phase 6: Premium quota preview (Normal → Premium comparison)
+        '<div class="mb-quota-preview">' +
+          '<div class="mb-quota-preview-title">مزایای Premium</div>' +
+          '<div class="mb-quota-preview-grid">' +
+            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🔔</span><span class="mb-qpi-label">هشدارها</span><span class="mb-qpi-normal">۳</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۱۰</span></div>' +
+            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🤖</span><span class="mb-qpi-label">چت AI</span><span class="mb-qpi-normal">۵۰</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۱۰۰</span></div>' +
+            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🎡</span><span class="mb-qpi-label">چرخ</span><span class="mb-qpi-normal">۳</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۵</span></div>' +
+            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">⭐</span><span class="mb-qpi-label">واچ‌لیست</span><span class="mb-qpi-normal">۷</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۲۰</span></div>' +
+            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🎁</span><span class="mb-qpi-label">پاداش روزانه</span><span class="mb-qpi-normal">۱۰</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۲۰</span></div>' +
+            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🎨</span><span class="mb-qpi-label">ظاهر پروفایل</span><span class="mb-qpi-normal">❌</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">✅</span></div>' +
+          '</div>' +
         '</div>' +
         // Benefits
         '<div class="mb-benefits">' +

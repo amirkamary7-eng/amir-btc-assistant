@@ -13745,3 +13745,76 @@ body.jl-locked .cd-fullscreen {
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 6 — Premium UI Enhancements
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── VIP Status: Active Cosmetic Display ─────────────────────────────────── */
+.mb-vip-cosmetic {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 12px; margin: 12px 0;
+    background: linear-gradient(135deg, rgba(168,85,247,0.08), rgba(99,102,241,0.08));
+    border: 1px solid rgba(168,85,247,0.15);
+}
+.mb-vip-cosmetic--empty {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.mb-vip-cosmetic-icon { font-size: 20px; }
+.mb-vip-cosmetic-info { flex: 1; }
+.mb-vip-cosmetic-label { font-size: 10px; color: var(--text-muted, #6B7A8D); margin-bottom: 2px; }
+.mb-vip-cosmetic-name { font-size: 13px; font-weight: 600; color: var(--text, #fff); }
+.mb-vip-cosmetic-btn {
+    padding: 6px 14px; border-radius: 8px; border: none; cursor: pointer;
+    background: rgba(168,85,247,0.2); color: #c084fc;
+    font-size: 11px; font-weight: 600; transition: all 0.2s;
+}
+.mb-vip-cosmetic-btn:hover { background: rgba(168,85,247,0.3); }
+
+/* ─── VIP Status: Quota Summary ───────────────────────────────────────────── */
+.mb-vip-quotas {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    margin: 12px 0;
+}
+.mb-vip-quota {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-radius: 10px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05);
+}
+.mb-vip-quota-icon { font-size: 16px; flex-shrink: 0; }
+.mb-vip-quota-info { flex: 1; min-width: 0; }
+.mb-vip-quota-label { font-size: 10px; color: var(--text-muted, #6B7A8D); margin-bottom: 1px; }
+.mb-vip-quota-val { font-size: 12px; font-weight: 600; color: var(--accent, #f7931a); }
+
+/* ─── Activation Popup: Quota Preview ─────────────────────────────────────── */
+.mb-quota-preview {
+    margin: 14px 0; padding: 14px; border-radius: 12px;
+    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);
+}
+.mb-quota-preview-title {
+    font-size: 12px; font-weight: 700; color: var(--text, #fff);
+    margin-bottom: 10px; text-align: center;
+}
+.mb-quota-preview-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+@media (max-width: 360px) { .mb-quota-preview-grid { grid-template-columns: 1fr; } }
+.mb-quota-preview-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 10px; border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    font-size: 11px;
+}
+.mb-qpi-icon { font-size: 14px; flex-shrink: 0; }
+.mb-qpi-label { flex: 1; color: var(--text-muted, #6B7A8D); font-weight: 500; }
+.mb-qpi-normal { color: var(--text-muted, #6B7A8D); font-weight: 600; }
+.mb-qpi-arrow { color: var(--text-muted, #6B7A8D); font-size: 10px; }
+.mb-qpi-premium { color: var(--accent, #f7931a); font-weight: 700; }
+
+/* ─── Premium Badge Gradient Text ─────────────────────────────────────────── */
+.membership-badge--premium .mb-badge-text {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; font-weight: 800; letter-spacing: 0.5px;
+}
