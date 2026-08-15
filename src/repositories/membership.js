@@ -397,6 +397,93 @@ export function createMembershipRepository(deps) {
     return Math.round(row.avg * 10) / 10;
   }
 
+  // ─── Premium Rules (Phase 1) ──────────────────────────────────────────────
+
+  /** Get the currently ACTIVE rules version, or null if none. */
+  async function getActiveRules(env) {
+    try {
+      const result = await queryDb(env,
+        `SELECT id, version, title, body_markdown, summary, status, effective_at, created_at
+         FROM membership_rules
+         WHERE status = 'ACTIVE'
+         ORDER BY version DESC
+         LIMIT 1`
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] getActiveRules failed:', e.message || e);
+      return null;
+    }
+  }
+
+  /** Get a specific rules version by version number. */
+  async function getRulesByVersion(env, version) {
+    try {
+      const result = await queryDb(env,
+        `SELECT id, version, title, body_markdown, summary, status, effective_at, created_at
+         FROM membership_rules
+         WHERE version = $1
+         LIMIT 1`,
+        [Number(version)]
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] getRulesByVersion failed:', e.message || e);
+      return null;
+    }
+  }
+
+  /** Check if a user has accepted a specific rules version. */
+  async function getAcceptance(env, telegramId, rulesVersion) {
+    try {
+      const result = await queryDb(env,
+        `SELECT id, telegram_id, rules_version, request_id, accepted_at, ip, user_agent, metadata
+         FROM membership_rule_acceptances
+         WHERE telegram_id = $1 AND rules_version = $2
+         LIMIT 1`,
+        [String(telegramId), Number(rulesVersion)]
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] getAcceptance failed:', e.message || e);
+      return null;
+    }
+  }
+
+  /** Record a user's acceptance (idempotent via ON CONFLICT). */
+  async function recordAcceptance(env, input) {
+    try {
+      const result = await queryDb(env,
+        `INSERT INTO membership_rule_acceptances
+           (telegram_id, rules_version, request_id, ip, user_agent, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (telegram_id, rules_version) DO UPDATE
+           SET accepted_at = membership_rule_acceptances.accepted_at
+         RETURNING id, telegram_id, rules_version, request_id, accepted_at`,
+        [String(input.telegramId), Number(input.rulesVersion), input.requestId || null,
+         input.ip || null, input.userAgent || null, JSON.stringify(input.metadata || {})]
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] recordAcceptance failed:', e.message || e);
+      throw e;
+    }
+  }
+
+  /** Stamp a membership request with the rules version active at submission time. */
+  async function stampRequestRulesVersion(env, requestId, rulesVersion) {
+    if (!requestId || !rulesVersion) return null;
+    try {
+      await queryDb(env,
+        `UPDATE membership_requests SET rules_version = $2, updated_at = NOW() WHERE id = $1`,
+        [String(requestId), Number(rulesVersion)]
+      );
+    } catch (e) {
+      console.warn('[membership] stampRequestRulesVersion failed:', e.message || e);
+    }
+    return null;
+  }
+
   return {
     ensureSchema,
     markWelcomeShown,
@@ -425,6 +512,12 @@ export function createMembershipRepository(deps) {
     countApprovalsSince,
     newUsersCountSince,
     avgApprovalHours,
+    // Phase 1: Rules + Acceptance
+    getActiveRules,
+    getRulesByVersion,
+    getAcceptance,
+    recordAcceptance,
+    stampRequestRulesVersion,
     // expose transaction helper for service layer
     _queryDbTransaction: queryDbTransaction,
   };

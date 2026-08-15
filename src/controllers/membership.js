@@ -214,6 +214,24 @@ export function createMembershipHandlers(deps) {
       if (pending) {
         return jsonResponse({ error: 'Duplicate pending request', code: 'DUPLICATE_REQUEST' }, { status: 409 }, env);
       }
+
+      // ── Phase 1: Rules Acceptance Validation ──────────────────────────────
+      // FAIL-OPEN: if the rules table doesn't exist, has no active version, or
+      // the query errors, the request proceeds WITHOUT requiring acceptance.
+      let activeRulesVersion = null;
+      try {
+        const activeRules = await membershipRepo.getActiveRules(env);
+        if (activeRules && activeRules.version) {
+          activeRulesVersion = activeRules.version;
+          const acceptance = await membershipRepo.getAcceptance(env, tgId, activeRules.version);
+          if (!acceptance) {
+            return jsonResponse({ error: 'Premium rules must be accepted before submitting a request', code: 'RULES_NOT_ACCEPTED', active_version: activeRules.version }, { status: 403 }, env);
+          }
+        }
+      } catch (rulesErr) {
+        console.warn('[membership] rules check failed, fail-open:', rulesErr?.message || rulesErr);
+      }
+
       // Upsert user
       await membershipRepo.upsertByTelegramId(env, {
         telegramId: tgId,
@@ -223,12 +241,19 @@ export function createMembershipHandlers(deps) {
       });
 
       // Transactional: create request + update user status + audit log
+      const hasRulesVersion = activeRulesVersion !== null;
       const txQueries = [
-        {
-          sql: `INSERT INTO membership_requests (telegram_id, exchange_name, exchange_uid, note)
-                VALUES ($1, $2, $3, $4) RETURNING *`,
-          params: [tgId, v.exchange, v.uid, v.note || null],
-        },
+        hasRulesVersion
+          ? {
+              sql: `INSERT INTO membership_requests (telegram_id, exchange_name, exchange_uid, note, rules_version)
+                    VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+              params: [tgId, v.exchange, v.uid, v.note || null, activeRulesVersion],
+            }
+          : {
+              sql: `INSERT INTO membership_requests (telegram_id, exchange_name, exchange_uid, note)
+                    VALUES ($1, $2, $3, $4) RETURNING *`,
+              params: [tgId, v.exchange, v.uid, v.note || null],
+            },
         {
           sql: `UPDATE membership_users SET membership_status = 'PENDING', updated_at = NOW() WHERE telegram_id = $1`,
           params: [tgId],
@@ -249,7 +274,77 @@ export function createMembershipHandlers(deps) {
       } catch (e) { /* non-fatal */ }
 
       await invalidateCaches(env, tgId);
-      return jsonResponse({ ok: true, data: { status: 'PENDING', exchange: v.exchange, uid: v.uid } }, { status: 201 }, env);
+      return jsonResponse({ ok: true, data: { status: 'PENDING', exchange: v.exchange, uid: v.uid, rules_version: activeRulesVersion } }, { status: 201 }, env);
+    } catch (e) { return safeDbErrorResponse(e, {}, env); }
+  }
+
+  // ─── Handlers: Premium Rules (Phase 1) ────────────────────────────────────
+
+  /** GET /api/membership/rules — get current active rules (cached 5 min) */
+  async function handleGetRules(request, env) {
+    const auth = await requireUser(request, env);
+    if (auth.error) return auth.error;
+    if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
+    const cacheKey = 'mb:rules:active';
+    const cached = await readAppCache(env, cacheKey);
+    if (cached) return jsonResponse({ ok: true, data: JSON.parse(cached) }, {}, env);
+    try {
+      const rules = await membershipRepo.getActiveRules(env);
+      if (!rules) {
+        return jsonResponse({ ok: true, data: { version: null, title: null, body_markdown: null, summary: null, active: false } }, {}, env);
+      }
+      const dto = {
+        version: rules.version, title: rules.title,
+        body_markdown: rules.body_markdown, summary: rules.summary,
+        effective_at: rules.effective_at, created_at: rules.created_at,
+        active: rules.status === 'ACTIVE',
+      };
+      await writeAppCache(env, cacheKey, JSON.stringify(dto), CACHE_TTL.STATUS);
+      return jsonResponse({ ok: true, data: dto }, {}, env);
+    } catch (e) { return safeDbErrorResponse(e, {}, env); }
+  }
+
+  /** POST /api/membership/rules/accept — record user's acceptance of active rules */
+  async function handleAcceptRules(request, env) {
+    const auth = await requireUser(request, env);
+    if (auth.error) return auth.error;
+    if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
+    const { payload, error } = await readJsonBody(request);
+    if (error) return error;
+    const submittedVersion = Number(payload?.rules_version);
+    if (!Number.isFinite(submittedVersion) || submittedVersion < 1) {
+      return buildBodyFieldValidationError([{ field: 'rules_version', message: 'rules_version must be a positive integer' }], env);
+    }
+    const tgId = String(auth.user.id);
+    const ip = request.headers.get('cf-connecting-ip') || (request.headers.get('x-forwarded-for') || '').split(',')[0].trim() || null;
+    const userAgent = request.headers.get('user-agent') || null;
+    try {
+      const rules = await membershipRepo.getRulesByVersion(env, submittedVersion);
+      if (!rules) return jsonResponse({ error: 'Rules version not found', code: 'RULES_NOT_FOUND' }, { status: 404 }, env);
+      if (rules.status !== 'ACTIVE') {
+        return jsonResponse({ error: 'Cannot accept a non-active rules version', code: 'RULES_NOT_ACTIVE' }, { status: 409 }, env);
+      }
+      const acceptance = await membershipRepo.recordAcceptance(env, {
+        telegramId: tgId, rulesVersion: submittedVersion,
+        requestId: payload?.request_id || null, ip, userAgent,
+        metadata: { source: payload?.source || 'membership_page' },
+      });
+      if (!acceptance) return jsonResponse({ error: 'Failed to record acceptance', code: 'ACCEPTANCE_FAILED' }, { status: 500 }, env);
+      return jsonResponse({ ok: true, data: { accepted: true, rules_version: acceptance.rules_version, accepted_at: acceptance.accepted_at } }, {}, env);
+    } catch (e) { return safeDbErrorResponse(e, {}, env); }
+  }
+
+  /** GET /api/membership/rules/accepted — check if current user has accepted active rules */
+  async function handleCheckAcceptance(request, env) {
+    const auth = await requireUser(request, env);
+    if (auth.error) return auth.error;
+    if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
+    const tgId = String(auth.user.id);
+    try {
+      const rules = await membershipRepo.getActiveRules(env);
+      if (!rules) return jsonResponse({ ok: true, data: { has_accepted: false, rules_version: null, active: false } }, {}, env);
+      const acceptance = await membershipRepo.getAcceptance(env, tgId, rules.version);
+      return jsonResponse({ ok: true, data: { has_accepted: !!acceptance, rules_version: rules.version, active: true, accepted_at: acceptance?.accepted_at || null } }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
@@ -786,6 +881,10 @@ export function createMembershipHandlers(deps) {
     handleGetMyRequests,
     handleSubmitRequest,
     handleMarkWelcomeShown,
+    // Phase 1: Rules + Acceptance
+    handleGetRules,
+    handleAcceptRules,
+    handleCheckAcceptance,
     handleGetStats,
     handleListRequests,
     handleGetRequest,

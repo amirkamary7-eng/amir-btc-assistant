@@ -10662,6 +10662,16 @@ export default {
       if (request.method === 'POST' && url.pathname === '/api/membership/welcome-shown') {
         return membershipHandlers.handleMarkWelcomeShown(request, env);
       }
+      // ── Phase 1: Premium Rules + Acceptance ──────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/membership/rules') {
+        return membershipHandlers.handleGetRules(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/membership/rules/accept') {
+        return membershipHandlers.handleAcceptRules(request, env);
+      }
+      if (request.method === 'GET' && url.pathname === '/api/membership/rules/accepted') {
+        return membershipHandlers.handleCheckAcceptance(request, env);
+      }
 
       // ── Membership Module — Admin Routes ──────────────────────────────────
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/stats') {
