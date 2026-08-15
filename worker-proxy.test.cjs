@@ -1532,21 +1532,18 @@ test('P1-09 (behavioral): /api/market/prices with 20 symbols only fetches 15', a
 
 // APP_JS_PATH and WORKER_PATH already declared in P1 test section above.
 
-// ── NEWSBE-016: PUBLICATION GATE (Commit 1) — batchAnalyzeNews failure no longer re-caches ──
-// Previously: batchAnalyzeNews failure re-wrote news:farsi with 60s TTL (stale articles served).
-// Now (Commit 1): processNewsAIBatch does NOT write to news:farsi at all. Articles are published
-// ONLY by publishArticleToFarsiNews() after succeedWithSummary completes. So batchAnalyzeNews
-// failure has no cache to re-write — articles simply proceed to enqueue without sentiment enrichment.
+// ── NEWSBE-016: Commit 2.6 — batchAnalyzeNews failure leaves articles in news:farsi ──
+// Articles are published to news:farsi in STEP 6 (before AI). If batchAnalyzeNews fails,
+// articles remain visible with rule-based sentiment. No need for short TTL re-cache.
 
-test('NEWSBE-016 (source): PUBLICATION GATE — batchAnalyzeNews catch block does NOT write news:farsi', () => {
+test('NEWSBE-016 (source): Commit 2.6 — batchAnalyzeNews catch block does NOT need re-cache', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
   const idx = src.indexOf("stepLog('BATCH_ANALYZE_FAILED'");
   assert.ok(idx > -1, 'BATCH_ANALYZE_FAILED stepLog must exist');
   const catchBlock = src.slice(idx, idx + 800);
-  // PUBLICATION GATE: the catch block must NOT contain any writeAppCache to FARSI_NEWS_CACHE_KEY
-  assert.ok(!/writeAppCache\(env,\s*FARSI_NEWS_CACHE_KEY/.test(catchBlock),
-    'PUBLICATION GATE: batchAnalyzeNews catch block must NOT write to news:farsi');
-  assert.ok(/PUBLICATION GATE/.test(catchBlock), 'catch block must have PUBLICATION GATE comment');
+  // Commit 2.6: articles are already in news:farsi from STEP 6 — no re-cache needed on failure
+  assert.ok(/Articles remain in news:farsi/.test(catchBlock),
+    'catch block must note articles remain in news:farsi from STEP 6');
 });
 
 // ── NEWSFE-011: safeLocalStorageSetItem helper + toggleSaveNews uses it ──

@@ -4158,22 +4158,18 @@ async function fetchFarsiNews(env, categoryFilter, ctx = null) {
       }));
       // Enrich with AI summaries from KV (if available)
       const enriched = await enrichNewsWithAISummaries(env, sanitized);
-      // PUBLICATION GATE (Commit 1): Defense-in-depth — filter out any article
-      // that still has no ai_summary. With the publication gate, articles should
-      // only enter news:farsi after analysis completes. But if a stale cache
-      // entry from before this commit still has ai_summary=null (old article
-      // published before the gate was active), we filter it out here so users
-      // NEVER see a pending article. This filter will become a no-op once all
-      // pre-gate cache entries expire (TTL=30min).
-      const readyOnly = enriched.filter(a => a && a.ai_summary && String(a.ai_summary).trim().length > 0);
+      // RESTORED (Commit 2.6): Return ALL articles — AI is enrichment, not a display requirement.
+      // Articles with ai_summary=null have ai_status='pending' and are shown with a premium
+      // pending UI in the frontend. The readyOnly filter (Commit 1) is removed because
+      // articles are now published to news:farsi immediately after translation (STEP 6).
       const data = categoryFilter
-        ? readyOnly.filter((a) => a.category === categoryFilter)
-        : readyOnly;
+        ? enriched.filter((a) => a.category === categoryFilter)
+        : enriched;
       const categoryCounts = {
-        all: readyOnly.length,
-        crypto: readyOnly.filter(a => a.category === 'crypto').length,
-        forex: readyOnly.filter(a => a.category === 'forex').length,
-        economy: readyOnly.filter(a => a.category === 'economy').length,
+        all: enriched.length,
+        crypto: enriched.filter(a => a.category === 'crypto').length,
+        forex: enriched.filter(a => a.category === 'forex').length,
+        economy: enriched.filter(a => a.category === 'economy').length,
       };
       return { status: 'success', source: 'cache', data, category_counts: categoryCounts };
     } catch {
@@ -6848,13 +6844,28 @@ async function processNewsAIBatch(env, pool = null) {
     // full AI analysis (news:ai:{hash} write). This ensures users never see
     // articles with ai_summary: null.
     //
-    // The trimmed/deduped articles proceed to STEP 7 (batch analysis) and
-    // STEP 8 (enqueue for summary). Publication happens later in
-    // succeedWithSummary() → publishArticleToFarsiNews().
+    // RESTORED (Commit 2.6): Articles are published to news:farsi IMMEDIATELY
+    // after translation/dedup — BEFORE AI analysis. AI is an enrichment layer,
+    // not a display requirement. Articles appear with ai_summary=null, ai_status='pending'.
+    // When AI succeeds, publishArticleToFarsiNews() updates the same article (dedup by URL).
+    // If AI fails, the article remains visible — the frontend shows a premium pending state.
     const MAX_NEWS_ARTICLES = 12;
     const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
-    const newsJson = JSON.stringify(trimmed); // kept for compatibility (stepLog only)
-    stepLog('KV_ARTICLES_skip_publish_gate', { count: trimmed.length, reason: 'publication_gate_commit1' });
+    const newsJson = JSON.stringify(trimmed);
+
+    // Write translated articles to news:farsi IMMEDIATELY (before AI analysis)
+    try {
+      await writeAppCache(
+        env,
+        FARSI_NEWS_CACHE_KEY,
+        newsJson,
+        getNumericEnv(env, 'NEWS_CACHE_TTL', 86400),
+      );
+      stepLog('KV_ARTICLES_published_immediate', { count: trimmed.length });
+    } catch (cacheErr) {
+      console.warn('[NEWS-AI-CRON] Failed to cache articles (non-fatal):', cacheErr?.message);
+      stepLog('KV_ARTICLES_cache_failed', { error: cacheErr?.message });
+    }
 
     // ── STEP 7: BATCH AI ANALYSIS (1 AI call for all articles) ──
     // Phase 3: Replaces individual sentiment with AI-powered batch analysis.
@@ -6884,14 +6895,18 @@ async function processNewsAIBatch(env, pool = null) {
             trimmed[i].coins = trimmed[i].coins || [];
           }
         }
-        // PUBLICATION GATE (Commit 1): Removed re-cache to news:farsi.
-        // Articles are not published here — only enriched in memory for queue.
+        // RESTORED (Commit 2.6): Re-cache with enriched sentiment/impact data.
+        // Articles are already in news:farsi from STEP 6 — this updates them with
+        // AI-powered sentiment/impact/coins. If batch analysis fails, the original
+        // rule-based sentiment from STEP 6 remains (better than no news).
+        try {
+          await writeAppCache(env, FARSI_NEWS_CACHE_KEY, JSON.stringify(trimmed), getNumericEnv(env, 'NEWS_CACHE_TTL', 86400));
+        } catch {}
         stepLog('BATCH_ANALYZE_done', { analyzed: Object.keys(batchAnalysis).length });
       } catch (batchErr) {
         stepLog('BATCH_ANALYZE_FAILED', { error: batchErr?.message });
-        // PUBLICATION GATE (Commit 1): Removed the 60s TTL re-cache on batch fail.
-        // Articles are not published here regardless of batch analysis outcome.
-        // They proceed to enqueue (STEP 8) and are published only after summary success.
+        // Articles remain in news:farsi with rule-based sentiment from STEP 6.
+        // No need for short TTL re-cache — articles are already visible.
       }
     } else {
       stepLog('BATCH_ANALYZE_skipped', { reason: 'flag_disabled' });

@@ -123,7 +123,7 @@ test('HOTFIX22-3b: readJsonBody timeout does NOT remove existing validation', ()
 // Test 4: Commit 1 publication gate remains intact
 // ============================================================================
 
-test('HOTFIX22-4: Commit 1 publication gate remains intact', () => {
+test('HOTFIX22-4: Instant news display restored — articles published before AI', () => {
   // publishArticleToFarsiNews must still exist
   assert.ok(source.includes('async function publishArticleToFarsiNews'),
     'publishArticleToFarsiNews must still exist (Commit 1)');
@@ -139,8 +139,8 @@ test('HOTFIX22-4: Commit 1 publication gate remains intact', () => {
   const batchBlock = source.slice(batchStart, batchEnd > 0 ? batchEnd : batchStart + 10000);
 
   // Find STEP 6 — must have the "skip publish gate" comment
-  assert.ok(/KV_ARTICLES_skip_publish_gate/.test(batchBlock),
-    'STEP 6 must still skip publication (Commit 1 publication gate)');
+  assert.ok(/KV_ARTICLES_published_immediate/.test(batchBlock),
+    'STEP 6 must publish articles immediately (Commit 2.6)');
 
   // The TTL refresh (STEP 8.5) must only re-write existing content, not add new
   const refreshIdx = batchBlock.indexOf('STEP 8.5: REFRESH news:farsi TTL');
@@ -149,9 +149,6 @@ test('HOTFIX22-4: Commit 1 publication gate remains intact', () => {
   assert.ok(/existingNews/.test(refreshBlock),
     'TTL refresh must use existingNews (not new articles)');
 
-  // API filter (readyOnly) must still exist
-  assert.ok(source.includes('readyOnly'),
-    'API readyOnly filter must remain (Commit 1)');
 });
 
 // ============================================================================

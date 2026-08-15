@@ -110,7 +110,7 @@ test('QP-9: Commit 1 publication gate remains intact (publishArticleToFarsiNews)
   assert.ok(source.includes('PUBLICATION GATE (Commit 1)'),
     'PUBLICATION GATE comments must remain (Commit 1)');
   // Verify news:farsi is NOT written in processNewsAIBatch
-  const step6Idx = source.indexOf('KV_ARTICLES_skip_publish_gate');
+  const step6Idx = source.indexOf('KV_ARTICLES_published_immediate');
   assert.ok(step6Idx > -1, 'Commit 1 publication gate (skip write) must remain');
   // Verify API filter for ai_summary
   assert.ok(source.includes('readyOnly'),

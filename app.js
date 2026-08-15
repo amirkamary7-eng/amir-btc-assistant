@@ -7957,38 +7957,38 @@ function buildNewsPendingBox(aiStatus) {
     const isRateLimited = (status === 'rate_limited');
     const isRetry = (status === 'retry');
 
-    let message, boxClass, iconClass, showSpinner;
+    let message, boxClass, iconClass, showShimmer;
     if (isFailed) {
-        message = 'تحلیل این خبر در حال حاضر در دسترس نیست. می‌توانید منبع اصلی را مطالعه کنید.';
-        boxClass = 'news-modal-summary-box news-modal-loading news-modal-failed';
-        iconClass = 'news-modal-ai-icon-failed';
-        showSpinner = false;
+        message = 'تحلیل این خبر فعلاً در دسترس نیست. می‌توانید منبع اصلی را مطالعه کنید.';
+        boxClass = 'news-modal-summary-box news-modal-loading news-modal-ai-unavailable';
+        iconClass = 'news-modal-ai-icon-unavailable';
+        showShimmer = false;
     } else if (isRateLimited) {
         message = 'سرویس‌های هوش مصنوعی در حال حاضر دارای محدودیت نرخ هستند. تحلیل خبر بزودی تولید خواهد شد.';
-        boxClass = 'news-modal-summary-box news-modal-loading news-modal-rate-limited';
+        boxClass = 'news-modal-summary-box news-modal-loading news-modal-ai-retry';
         iconClass = '';
-        showSpinner = true;
+        showShimmer = true;
     } else if (isRetry) {
         message = 'تولید تحلیل این خبر با خطا مواجه شد و در حال تلاش مجدد است. طی چند دقیقه آینده تکمیل خواهد شد.';
-        boxClass = 'news-modal-summary-box news-modal-loading news-modal-retry';
+        boxClass = 'news-modal-summary-box news-modal-loading news-modal-ai-retry';
         iconClass = '';
-        showSpinner = true;
+        showShimmer = true;
     } else {
-        // pending, unknown, processing — all show "in progress" message
-        message = 'تحلیل این خبر در حال تولید است و طی چند دقیقه آینده تکمیل خواهد شد.';
-        boxClass = 'news-modal-summary-box news-modal-loading';
+        // pending, unknown, processing — premium "preparing" state
+        message = 'در حال آماده‌سازی...';
+        boxClass = 'news-modal-summary-box news-modal-loading news-modal-ai-pending';
         iconClass = '';
-        showSpinner = true;
+        showShimmer = true;
     }
 
     return '<div class="' + boxClass + '">' +
         '<div class="news-modal-summary-header">' +
             '<svg class="news-modal-ai-icon ' + iconClass + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" stroke-linejoin="round"/><circle cx="12" cy="20" r="1"/></svg>' +
-            '<span>تحلیل خبر</span>' +
+            '<span>تحلیل هوشمند</span>' +
         '</div>' +
         '<div class="news-modal-summary-text news-modal-pending-text">' +
-            (showSpinner ? '<div class="news-modal-pending-spinner"></div>' : '') +
-            message +
+            (showShimmer ? '<div class="news-modal-shimmer-bar"></div>' : '') +
+            '<p class="news-modal-pending-msg">' + message + '</p>' +
         '</div>' +
     '</div>';
 }

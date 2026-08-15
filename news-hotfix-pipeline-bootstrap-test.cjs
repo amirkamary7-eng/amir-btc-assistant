@@ -48,26 +48,17 @@ test('HOTFIX23-1: fetchFarsiNews does NOT call ctx.waitUntil for background refr
     'fetchFarsiNews must have the HOTFIX (Commit 2.3) comment');
 });
 
-test('HOTFIX23-2: Publication gate remains active', () => {
-  // publishArticleToFarsiNews must still exist
+test('HOTFIX23-2: Instant news display + AI enrichment path intact', () => {
+  // publishArticleToFarsiNews must still exist (used for AI enrichment updates)
   assert.ok(source.includes('async function publishArticleToFarsiNews'),
-    'publishArticleToFarsiNews must still exist (Commit 1 publication gate)');
+    'publishArticleToFarsiNews must still exist (AI enrichment updates)');
 
-  // PUBLICATION GATE comments must remain
-  assert.ok(source.includes('PUBLICATION GATE (Commit 1)'),
-    'PUBLICATION GATE comments must remain');
-
-  // readyOnly filter must still exist
-  assert.ok(source.includes('readyOnly'),
-    'API readyOnly filter must remain');
-
-  // processNewsAIBatch must NOT write new articles to news:farsi
-  // (only TTL refresh of existing content is allowed)
+  // processNewsAIBatch must write articles to news:farsi immediately (Commit 2.6)
   const batchStart = source.indexOf('async function processNewsAIBatch');
   const batchEnd = source.indexOf('function parseCalendarDate', batchStart);
   const batchBlock = source.slice(batchStart, batchEnd > 0 ? batchEnd : batchStart + 15000);
-  assert.ok(/KV_ARTICLES_skip_publish_gate/.test(batchBlock),
-    'STEP 6 must still skip publication (Commit 1 publication gate)');
+  assert.ok(/KV_ARTICLES_published_immediate/.test(batchBlock),
+    'STEP 6 must publish articles immediately (Commit 2.6 restored instant display)');
 });
 
 test('HOTFIX23-3: Failed queue cleanup only removes status=failed items', () => {

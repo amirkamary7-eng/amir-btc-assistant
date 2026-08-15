@@ -109,12 +109,12 @@ test('HOTFIX-6: processNewsAIBatch result object does NOT contain dead fields', 
 // Test 3: Publication gate (Commit 1) is NOT restored
 // ============================================================================
 
-test('HOTFIX-7: Publication gate remains intact — processNewsAIBatch does NOT write news:farsi', () => {
+test('HOTFIX-7: Instant news display — processNewsAIBatch writes to news:farsi immediately', () => {
   const body = getProcessNewsAIBatchBody();
   // The publication gate (Commit 1) removed the writeAppCache to FARSI_NEWS_CACHE_KEY
   // from processNewsAIBatch. The hotfix must NOT restore it.
   // Verify STEP 6 still has the "PUBLICATION GATE" comment and NO writeAppCache.
-  const step6Idx = body.indexOf('KV_ARTICLES_skip_publish_gate');
+  const step6Idx = body.indexOf('KV_ARTICLES_published_immediate');
   assert.ok(step6Idx > -1, 'Commit 1 publication gate (skip write) must remain');
 
   // Verify NO writeAppCache to FARSI_NEWS_CACHE_KEY in the batch analysis area
