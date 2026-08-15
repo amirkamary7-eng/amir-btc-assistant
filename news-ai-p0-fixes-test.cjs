@@ -333,14 +333,15 @@ test('P0-BEHAVIORAL-4: translation fallback chain: Workers AI → Google (only i
 // P0-B/C/D FIX REGRESSION TESTS (2026-08-13)
 // ═══════════════════════════════════════════════════════════════════════
 
-test('P0-A-1: NEWS_CACHE_TTL in wrangler.jsonc is 1800 (not 300)', () => {
+test('P0-A-1: NEWS_CACHE_TTL in wrangler.jsonc is 86400 (was 1800, increased in Commit 2.5)', () => {
   const wranglerSrc = fs.readFileSync(path.join(__dirname, 'wrangler.jsonc'), 'utf8');
-  // All 3 environments must have NEWS_CACHE_TTL: 1800
+  // All 3 environments must have NEWS_CACHE_TTL: 86400 (24h)
+  // Was 1800 (30 min) — increased to 86400 to prevent cache starvation
   const matches = wranglerSrc.match(/"NEWS_CACHE_TTL":\s*(\d+)/g) || [];
   assert.ok(matches.length >= 3, `Expected at least 3 NEWS_CACHE_TTL entries, found ${matches.length}`);
   for (const m of matches) {
     const val = parseInt(m.match(/\d+$/)[0], 10);
-    assert.equal(val, 1800, `NEWS_CACHE_TTL must be 1800, got ${val}`);
+    assert.equal(val, 86400, `NEWS_CACHE_TTL must be 86400 (24h), got ${val}`);
   }
 });
 

@@ -4919,6 +4919,7 @@ async function recordProviderAttempt(env, provider, success, durationMs) {
   try {
     const raw = await readAppCache(env, NEWS_AI_PROVIDER_STATS_KEY).catch(() => null);
     let stats = {
+      groq: { success: 0, failed: 0, total_ms: 0 },
       gemini: { success: 0, failed: 0, total_ms: 0 },
       'workers-ai': { success: 0, failed: 0, total_ms: 0 },
       'openai': { success: 0, failed: 0, total_ms: 0 },
@@ -4933,7 +4934,7 @@ async function recordProviderAttempt(env, provider, success, durationMs) {
       if (parsed && typeof parsed === 'object') {
         stats = { ...stats, ...parsed };
         // Ensure nested provider objects exist
-        for (const k of ['gemini', 'workers-ai', 'openai']) {
+        for (const k of ['groq', 'gemini', 'workers-ai', 'openai']) {
           if (!stats[k]) stats[k] = { success: 0, failed: 0, total_ms: 0 };
         }
         if (!stats.fallback_to) stats.fallback_to = {};
@@ -5597,6 +5598,13 @@ async function processOneArticleSummary(env, pool = null) {
   // (Phase 10: store provider + attempts as JSON for monitoring + frontend visibility)
   async function succeedWithSummary(summary, provider, attempts) {
     const completedAt = Date.now();
+    // FIX (Commit 2.5): Move publishResult declaration OUTSIDE the try block.
+    // Previously `let publishResult` was inside the outer try (line 5682),
+    // but referenced in the return statement outside that block (lines 5711-5714),
+    // causing ReferenceError: publishResult is not defined after every successful
+    // summary. The article WAS published (KV write completed), but the error
+    // broke the 5-min cron loop and masked the success.
+    let publishResult = null;
     try {
       // Store as JSON with metadata (backward-compatible: enrichNewsWithAISummaries parses both)
       const payload = JSON.stringify({
@@ -5679,7 +5687,7 @@ async function processOneArticleSummary(env, pool = null) {
       // publish failure means the article won't be visible until the next
       // successful publish of ANY article (which re-reads + re-writes the list).
       // This is acceptable — publish failures are rare (KV is reliable).
-      let publishResult = null;
+      // publishResult is now declared in the outer function scope (line 5606).
       try {
         publishResult = await publishArticleToFarsiNews(env, article);
         if (publishResult.published) {
