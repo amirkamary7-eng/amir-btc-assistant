@@ -2804,18 +2804,30 @@ async function getChatMemberDebugPayload(userId, env) {
 
   try {
     const telegramUrl = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${encodeURIComponent(uid)}`;
-    // DIAGNOSTIC: telegram-api checkpoint (temporary — root cause analysis).
-    // Does NOT add a timeout. Only observes start/end/error of the existing fetch.
+    // HOTFIX (Commit 2.4): Add 5s AbortController timeout to Telegram getChatMember fetch.
+    // Without this, the fetch can hang indefinitely, causing the Worker to be killed
+    // by the runtime ("code had hung"). This is on the critical path for both
+    // bootstrap and all protected endpoints (via requireChannelJoin → resolveChannelMembership
+    // → checkChannelMembership → getChatMemberDebugPayload).
+    // On timeout/abort, the existing catch block handles it gracefully — returns
+    // payload with telegram_response.exception set, and the caller treats it as
+    // "not joined" (safe fallback). No membership semantics change.
     _bsDiag(env, 'telegram-api', 'start');
     const _bsTgT0 = Date.now();
-    const telegramResponse = await fetch(telegramUrl);
-    const data = await telegramResponse.json();
-    _bsDiag(env, 'telegram-api', 'end', { durationMs: Date.now() - _bsTgT0, httpStatus: telegramResponse.status });
-    payload.telegram_response = data;
-    const status = data?.result?.status || '';
-    payload.joined = Boolean(data?.ok && JOINED_STATUSES.has(status));
+    const tgController = new AbortController();
+    const tgTimeoutId = setTimeout(() => tgController.abort(), 5000);
+    try {
+      const telegramResponse = await fetch(telegramUrl, { signal: tgController.signal });
+      const data = await telegramResponse.json();
+      _bsDiag(env, 'telegram-api', 'end', { durationMs: Date.now() - _bsTgT0, httpStatus: telegramResponse.status });
+      payload.telegram_response = data;
+      const status = data?.result?.status || '';
+      payload.joined = Boolean(data?.ok && JOINED_STATUSES.has(status));
 
-    return payload;
+      return payload;
+    } finally {
+      clearTimeout(tgTimeoutId);
+    }
   } catch (error) {
     _bsDiag(env, 'telegram-api', 'error', { errorName: error instanceof Error ? error.name : 'Error', errorMessage: String(error?.message || '').slice(0, 150) });
     payload.telegram_response = {
@@ -5059,6 +5071,18 @@ async function enqueueForSummary(env, articles) {
 
   const now = Date.now();
 
+  // HOTFIX (Commit 2.4): Load the permanently failed URL set from KV.
+  // This prevents re-enqueuing URLs that have permanently failed (fetch_403/404)
+  // in the last 24 hours. Without this, the same 403 article gets discovered,
+  // enqueued, and fails again every cron tick — creating an infinite loop.
+  let failedUrlSet = {};
+  try {
+    const raw = await readAppCache(env, 'news:failed_urls').catch(() => null);
+    if (raw) {
+      try { failedUrlSet = JSON.parse(raw); } catch {}
+    }
+  } catch {}
+
   // Add new articles (not already in queue, not already summarized, not failed)
   for (const a of articles) {
     if (!a.url) { skipped++; continue; }
@@ -5066,6 +5090,15 @@ async function enqueueForSummary(env, articles) {
     const existing = existingByUrl.get(a.url);
     if (existing) {
       // Already in queue — skip (don't touch its retry state)
+      skipped++;
+      continue;
+    }
+
+    // HOTFIX (Commit 2.4): Skip URLs that have permanently failed in the last 24h.
+    // This prevents the infinite 403 loop: discover → enqueue → fetch_403 → fail
+    // → cleanup → discover same article → enqueue → fetch_403 → fail → ...
+    const canonicalUrl = canonicalizeUrl(a.url);
+    if (failedUrlSet[canonicalUrl]) {
       skipped++;
       continue;
     }
@@ -5510,6 +5543,27 @@ async function processOneArticleSummary(env, pool = null) {
     if (isPermanentFailure || newRetryCount >= NEWS_SUMMARY_MAX_RETRIES) {
       article.status = 'failed';
       article.fail_reason = reason;
+      // HOTFIX (Commit 2.4): Track permanently failed URLs in KV so they are NOT
+      // re-enqueued on the next cron tick. Without this, the Hotfix 2.3 cleanup
+      // removes the failed item, the next tick discovers the same article, enqueues
+      // it, and it fails again — creating an infinite loop that wastes the only
+      // summary slot. The KV set has a 24h TTL — after that, the URL is retried
+      // (in case the article becomes accessible). Only permanent failures
+      // (fetch_403/404/410/invalid_url) are tracked — transient errors (429, 5xx)
+      // are NOT tracked because they may recover.
+      if (isPermanentFailure && article.url) {
+        try {
+          const failedKey = 'news:failed_urls';
+          const existing = await readAppCache(env, failedKey).catch(() => null);
+          let failedSet = {};
+          if (existing) {
+            try { failedSet = JSON.parse(existing); } catch {}
+          }
+          const canonical = canonicalizeUrl(article.url);
+          failedSet[canonical] = { reason, ts: now };
+          await writeAppCache(env, failedKey, JSON.stringify(failedSet), 24 * 3600);
+        } catch {}
+      }
     }
     // Persist per-provider error details on the queue item (same format as the
     // all_providers_non_retryable path at line ~5303). This allows monitoring
