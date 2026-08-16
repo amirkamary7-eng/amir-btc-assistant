@@ -46,6 +46,9 @@ export function createAlertEconomyRepository(deps) {
         )
       `);
 
+      // PHASE 3: Add premium_free_per_day column (idempotent).
+      await queryDb(env, `ALTER TABLE alert_config ADD COLUMN IF NOT EXISTS premium_free_per_day INTEGER NOT NULL DEFAULT 10`).catch(() => {});
+
       // Indexes
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_alert_quota_user_date ON alert_quota (user_id, alert_type, quota_date)`).catch(() => {});
 
@@ -118,7 +121,7 @@ export function createAlertEconomyRepository(deps) {
   }
 
   function _defaultConfig(alertType) {
-    return { alert_type: alertType, is_enabled: alertType === 'price_alert', free_per_day: 3, cost_per_extra: 5 };
+    return { alert_type: alertType, is_enabled: alertType === 'price_alert', free_per_day: 3, premium_free_per_day: 10, cost_per_extra: 5 };
   }
 
   function _mapConfig(r) {
@@ -126,6 +129,7 @@ export function createAlertEconomyRepository(deps) {
       alert_type: r.alert_type,
       is_enabled: r.is_enabled,
       free_per_day: Number(r.free_per_day),
+      premium_free_per_day: Number(r.premium_free_per_day != null ? r.premium_free_per_day : 10),
       cost_per_extra: Number(r.cost_per_extra),
     };
   }
@@ -136,9 +140,16 @@ export function createAlertEconomyRepository(deps) {
 
   /**
    * Check if user can create an alert, and how much it costs.
-   * Returns: { allowed, isFree, costInTokens, usedToday, freeRemaining, config }
+   * PHASE 3: Now accepts optional isPremium parameter. When true, uses
+   * premium_free_per_day instead of free_per_day.
+   * FAIL-SAFE: If isPremium is not true, Normal quota is used.
+   *
+   * @param {object} env
+   * @param {string} userId
+   * @param {string} alertType
+   * @param {boolean} [isPremium=false]
    */
-  async function checkQuota(env, userId, alertType) {
+  async function checkQuota(env, userId, alertType, isPremium) {
     await ensureSchema(env);
     const config = await getConfig(env, alertType);
 
@@ -146,20 +157,24 @@ export function createAlertEconomyRepository(deps) {
       return { allowed: false, reason: 'SERVICE_DISABLED', config };
     }
 
+    // PHASE 3: Pick the effective free quota based on tier.
+    const effectiveFreePerDay = (isPremium === true)
+      ? (config.premium_free_per_day || config.free_per_day)
+      : config.free_per_day;
+
     if (!isDatabaseConfigured(env)) {
-      return { allowed: true, isFree: true, costInTokens: 0, usedToday: 0, freeRemaining: config.free_per_day, config };
+      return { allowed: true, isFree: true, costInTokens: 0, usedToday: 0, freeRemaining: effectiveFreePerDay, config };
     }
 
     try {
-      // Get today's usage (UTC date)
-      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+      const today = new Date().toISOString().slice(0, 10);
       const result = await queryDb(env, `
         SELECT used_count FROM alert_quota
         WHERE user_id = $1 AND alert_type = $2 AND quota_date = $3
       `, [String(userId), String(alertType), today]);
 
       const usedToday = Number(result.rows[0]?.used_count || 0);
-      const freeRemaining = Math.max(0, config.free_per_day - usedToday);
+      const freeRemaining = Math.max(0, effectiveFreePerDay - usedToday);
       const isFree = freeRemaining > 0;
       const costInTokens = isFree ? 0 : config.cost_per_extra;
 

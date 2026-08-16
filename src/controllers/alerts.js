@@ -22,6 +22,8 @@ export function createAlertHandlers(deps) {
     alertRepo,
     alertEconomyRepo,
     economyService,
+    // PHASE 3: MembershipAuthority for tier-based quota lookup.
+    membershipAuthority,
   } = deps;
 
   /**
@@ -116,7 +118,12 @@ export function createAlertHandlers(deps) {
     const alertRefId = `alert_${payload.user_id}_${rawSymbol}_${rawPrice}_${rawDirection}_${new Date().toISOString().slice(0, 10)}`;
 
     if (alertEconomyRepo) {
-      const quota = await alertEconomyRepo.checkQuota(env, payload.user_id, 'price_alert');
+      // PHASE 3: Determine tier via MembershipAuthority (fail-safe to Normal).
+      let isPremium = false;
+      if (membershipAuthority) {
+        try { isPremium = await membershipAuthority.isPremium(env, payload.user_id); } catch { isPremium = false; }
+      }
+      const quota = await alertEconomyRepo.checkQuota(env, payload.user_id, 'price_alert', isPremium);
       if (!quota.allowed) {
         return jsonResponse({
           status: 'error',
@@ -165,11 +172,11 @@ export function createAlertHandlers(deps) {
       // The UNIQUE constraint on token_transactions prevents double-refund.
       if (alertEconomyRepo && economyService) {
         try {
-          const quota = await alertEconomyRepo.checkQuota(env, payload.user_id, 'price_alert');
-          if (quota.costInTokens > 0) {
+          const refundQuota = await alertEconomyRepo.checkQuota(env, payload.user_id, 'price_alert', isPremium);
+          if (refundQuota.costInTokens > 0) {
             await economyService.grantReward({
               userId: payload.user_id,
-              amount: quota.costInTokens,
+              amount: refundQuota.costInTokens,
               rewardType: 'marketplace_refund',
               description: `Refund: alert creation failed (${rawSymbol} ${rawDirection} ${rawPrice})`,
               refId: `${alertRefId}_refund`,

@@ -162,7 +162,11 @@ function loadWorker(pgOverride) {
     let modSource = fs.readFileSync(resolvedPath, 'utf8');
     modSource = modSource
       .replace(/export\s+function\s+(\w+)/g, 'module.exports.$1 = function $1')
-      .replace(/export\s+default\s+/g, 'module.exports.default = ');
+      .replace(/export\s+default\s+/g, 'module.exports.default = ')
+      // PHASE 3: Support export const and export { ... } patterns
+      .replace(/export\s+const\s+(\w+)\s*=/g, 'module.exports.$1 =')
+      .replace(/export\s+let\s+(\w+)\s*=/g, 'module.exports.$1 =')
+      .replace(/export\s+var\s+(\w+)\s*=/g, 'module.exports.$1 =');
     const mod = { exports: {} };
     new Function('require', 'module', 'exports',
       'console.log = () => {}; console.warn = () => {}; console.error = () => {};\n' + modSource

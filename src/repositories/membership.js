@@ -397,6 +397,205 @@ export function createMembershipRepository(deps) {
     return Math.round(row.avg * 10) / 10;
   }
 
+  // ─── Premium Rules (Phase 1) ──────────────────────────────────────────────
+
+  /** Get the currently ACTIVE rules version, or null if none. */
+  async function getActiveRules(env) {
+    try {
+      const result = await queryDb(env,
+        `SELECT id, version, title, body_markdown, summary, status, effective_at, created_at
+         FROM membership_rules
+         WHERE status = 'ACTIVE'
+         ORDER BY version DESC
+         LIMIT 1`
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] getActiveRules failed:', e.message || e);
+      return null;
+    }
+  }
+
+  /** Get a specific rules version by version number. */
+  async function getRulesByVersion(env, version) {
+    try {
+      const result = await queryDb(env,
+        `SELECT id, version, title, body_markdown, summary, status, effective_at, created_at
+         FROM membership_rules
+         WHERE version = $1
+         LIMIT 1`,
+        [Number(version)]
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] getRulesByVersion failed:', e.message || e);
+      return null;
+    }
+  }
+
+  /** Check if a user has accepted a specific rules version. */
+  async function getAcceptance(env, telegramId, rulesVersion) {
+    try {
+      const result = await queryDb(env,
+        `SELECT id, telegram_id, rules_version, request_id, accepted_at, ip, user_agent, metadata
+         FROM membership_rule_acceptances
+         WHERE telegram_id = $1 AND rules_version = $2
+         LIMIT 1`,
+        [String(telegramId), Number(rulesVersion)]
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] getAcceptance failed:', e.message || e);
+      return null;
+    }
+  }
+
+  /** Record a user's acceptance (idempotent via ON CONFLICT). */
+  async function recordAcceptance(env, input) {
+    try {
+      const result = await queryDb(env,
+        `INSERT INTO membership_rule_acceptances
+           (telegram_id, rules_version, request_id, ip, user_agent, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (telegram_id, rules_version) DO UPDATE
+           SET accepted_at = membership_rule_acceptances.accepted_at
+         RETURNING id, telegram_id, rules_version, request_id, accepted_at`,
+        [String(input.telegramId), Number(input.rulesVersion), input.requestId || null,
+         input.ip || null, input.userAgent || null, JSON.stringify(input.metadata || {})]
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] recordAcceptance failed:', e.message || e);
+      throw e;
+    }
+  }
+
+  /** Stamp a membership request with the rules version active at submission time. */
+  async function stampRequestRulesVersion(env, requestId, rulesVersion) {
+    if (!requestId || !rulesVersion) return null;
+    try {
+      await queryDb(env,
+        `UPDATE membership_requests SET rules_version = $2, updated_at = NOW() WHERE id = $1`,
+        [String(requestId), Number(rulesVersion)]
+      );
+    } catch (e) {
+      console.warn('[membership] stampRequestRulesVersion failed:', e.message || e);
+    }
+    return null;
+  }
+
+  // ─── Membership Requirements (Phase 2) ────────────────────────────────────
+
+  /** Get the currently ACTIVE requirement, or null if none. */
+  async function getActiveRequirement(env) {
+    try {
+      const result = await queryDb(env,
+        `SELECT id, version, label, exchange_name, exchange_register_url, uid_label,
+                referral_code, requires_first_trade, required_volume, reward_level,
+                grace_period_days, status, effective_at, expires_at, metadata
+         FROM membership_requirements
+         WHERE status = 'ACTIVE'
+         ORDER BY version DESC
+         LIMIT 1`
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] getActiveRequirement failed:', e.message || e);
+      return null;
+    }
+  }
+
+  /** Get a specific requirement by version. */
+  async function getRequirementByVersion(env, version) {
+    try {
+      const result = await queryDb(env,
+        `SELECT id, version, label, exchange_name, exchange_register_url, uid_label,
+                referral_code, requires_first_trade, required_volume, reward_level,
+                grace_period_days, status, effective_at, expires_at, metadata
+         FROM membership_requirements
+         WHERE version = $1
+         LIMIT 1`,
+        [Number(version)]
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] getRequirementByVersion failed:', e.message || e);
+      return null;
+    }
+  }
+
+  /** List all requirements (for admin). */
+  async function listAllRequirements(env) {
+    try {
+      const result = await queryDb(env,
+        `SELECT id, version, label, exchange_name, uid_label, referral_code,
+                requires_first_trade, required_volume, reward_level, grace_period_days,
+                status, effective_at, expires_at, created_at
+         FROM membership_requirements
+         ORDER BY version DESC`
+      );
+      return result.rows;
+    } catch (e) {
+      console.warn('[membership] listAllRequirements failed:', e.message || e);
+      return [];
+    }
+  }
+
+  /** Atomically switch the active requirement (deactivate old + activate target). */
+  async function activateRequirement(env, targetVersion) {
+    const v = Number(targetVersion);
+    if (!Number.isFinite(v) || v < 1) throw Object.assign(new Error('Invalid version'), { code: 'INVALID_VERSION' });
+    try {
+      await queryDbTransaction(env, [
+        { sql: `UPDATE membership_requirements SET status = 'ARCHIVED', expires_at = NOW(), updated_at = NOW() WHERE status = 'ACTIVE'`, params: [] },
+        { sql: `UPDATE membership_requirements SET status = 'ACTIVE', effective_at = NOW(), updated_at = NOW() WHERE version = $1 AND status != 'ARCHIVED'`, params: [v] },
+      ]);
+      return await getActiveRequirement(env);
+    } catch (e) {
+      console.warn('[membership] activateRequirement failed:', e.message || e);
+      throw e;
+    }
+  }
+
+  /** Create a new requirement version (DRAFT status). */
+  async function createRequirement(env, input) {
+    try {
+      const result = await queryDb(env,
+        `INSERT INTO membership_requirements
+           (label, exchange_name, exchange_register_url, uid_label, referral_code,
+            requires_first_trade, required_volume, reward_level, grace_period_days, status, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'DRAFT', $10)
+         RETURNING *`,
+        [
+          input.label || input.exchange_name || 'Requirement',
+          input.exchange_name,
+          input.exchange_register_url,
+          input.uid_label || ('شناسه کاربری ' + (input.exchange_name || '') + ' خود را وارد کنید'),
+          input.referral_code || null,
+          input.requires_first_trade ? true : false,
+          Number(input.required_volume) || 0,
+          input.reward_level || 'PREMIUM',
+          Number(input.grace_period_days) || 14,
+          JSON.stringify(input.metadata || {}),
+        ]
+      );
+      return result.rows[0] || null;
+    } catch (e) {
+      console.warn('[membership] createRequirement failed:', e.message || e);
+      throw e;
+    }
+  }
+
+  /** Check if an exchange name matches the active requirement. */
+  async function isExchangeMatchingActive(env, exchangeName) {
+    const req = await getActiveRequirement(env);
+    if (!req) return { matches: true, requirement: null };
+    return {
+      matches: String(req.exchange_name).toLowerCase() === String(exchangeName).toLowerCase(),
+      requirement: req,
+    };
+  }
+
   return {
     ensureSchema,
     markWelcomeShown,
@@ -425,6 +624,19 @@ export function createMembershipRepository(deps) {
     countApprovalsSince,
     newUsersCountSince,
     avgApprovalHours,
+    // Phase 1: Rules + Acceptance
+    getActiveRules,
+    getRulesByVersion,
+    getAcceptance,
+    recordAcceptance,
+    stampRequestRulesVersion,
+    // Phase 2: Requirements + Exchange Decoupling
+    getActiveRequirement,
+    getRequirementByVersion,
+    listAllRequirements,
+    activateRequirement,
+    createRequirement,
+    isExchangeMatchingActive,
     // expose transaction helper for service layer
     _queryDbTransaction: queryDbTransaction,
   };

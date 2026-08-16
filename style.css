@@ -12527,6 +12527,402 @@ body.jl-locked .cd-fullscreen {
 }
 .mb-uid-submit:active { transform: scale(0.97); }
 .mb-uid-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+/* PHASE 7B (B1): Disabled-with-hint state — visible but clearly locked.
+   Slightly stronger opacity than :disabled so the hint text is readable. */
+.mb-uid-submit--disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    border-color: rgba(139, 150, 168, 0.25);
+    background: rgba(139, 150, 168, 0.08);
+    color: #8B96A8;
+}
+.mb-uid-submit--disabled:hover {
+    background: rgba(139, 150, 168, 0.08);
+    border-color: rgba(139, 150, 168, 0.25);
+}
+
+/* ─── PHASE 7B (B1): Premium Rules + Acceptance Section ─────────────────── */
+/* Polished dark fintech card with gold accent. RTL-friendly. Matches the
+   existing .mb-quota-preview / .mb-uid-form visual language. */
+.mb-rules-section {
+    margin: 14px 0;
+    padding: 14px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.04), rgba(245, 158, 11, 0.01));
+    border: 1px solid rgba(245, 158, 11, 0.15);
+    position: relative;
+    overflow: hidden;
+}
+.mb-rules-section::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.4), transparent);
+}
+.mb-rules-section--inactive {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.06);
+}
+.mb-rules-section--inactive::before {
+    background: linear-gradient(90deg, transparent, rgba(139, 150, 168, 0.25), transparent);
+}
+.mb-rules-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+}
+.mb-rules-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.mb-rules-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.2px;
+}
+.mb-rules-version {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #F5A623;
+    font-size: 10.5px;
+    font-weight: 700;
+    font-family: 'Inter', system-ui, sans-serif;
+    letter-spacing: 0.3px;
+}
+.mb-rules-effective {
+    font-size: 10.5px;
+    color: #6B7A8D;
+    font-weight: 500;
+}
+.mb-rules-body {
+    font-size: 12px;
+    line-height: 1.65;
+    color: #B8C1D1;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 160px;
+    overflow-y: auto;
+    /* Custom scrollbar for the rules body */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(245, 158, 11, 0.3) transparent;
+}
+.mb-rules-body::-webkit-scrollbar { width: 5px; }
+.mb-rules-body::-webkit-scrollbar-track { background: transparent; }
+.mb-rules-body::-webkit-scrollbar-thumb {
+    background: rgba(245, 158, 11, 0.25);
+    border-radius: 3px;
+}
+.mb-rules-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(245, 158, 11, 0.4);
+}
+.mb-rules-body--empty {
+    color: #6B7A8D;
+    font-style: italic;
+    background: rgba(255, 255, 255, 0.02);
+    max-height: none;
+    overflow: visible;
+}
+/* Custom checkbox row — accessible, RTL-friendly, polished */
+.mb-rules-accept {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: all 0.25s ease;
+    user-select: none;
+}
+.mb-rules-accept:hover {
+    background: rgba(245, 158, 11, 0.06);
+    border-color: rgba(245, 158, 11, 0.2);
+}
+.mb-rules-accept:active { transform: scale(0.99); }
+/* Hide the native checkbox — we render a custom one for visual consistency */
+.mb-rules-checkbox {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+.mb-rules-checkbox:focus-visible + .mb-rules-checkbox-custom {
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+}
+.mb-rules-checkbox-custom {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    border: 1.5px solid rgba(139, 150, 168, 0.4);
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: transparent;
+    transition: all 0.2s ease;
+    margin-top: 1px;
+}
+.mb-rules-checkbox:checked + .mb-rules-checkbox-custom {
+    background: linear-gradient(135deg, #F5A623, #d97706);
+    border-color: rgba(245, 158, 11, 0.6);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.3);
+}
+.mb-rules-checkbox-custom svg {
+    transform: scale(0.8);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+.mb-rules-checkbox:checked + .mb-rules-checkbox-custom svg {
+    opacity: 1;
+}
+.mb-rules-accept-label {
+    flex: 1;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #B8C1D1;
+    font-weight: 500;
+}
+/* Mobile / narrow WebView — rules body shrinks, checkbox row tightens */
+@media (max-width: 380px) {
+    .mb-rules-section { padding: 12px; margin: 10px 0; }
+    .mb-rules-body { font-size: 11.5px; max-height: 140px; padding: 8px 10px; }
+    .mb-rules-accept { padding: 8px 10px; gap: 8px; }
+    .mb-rules-accept-label { font-size: 11px; }
+    .mb-rules-title { font-size: 12px; }
+}
+@media (max-width: 320px) {
+    .mb-rules-body { max-height: 120px; }
+    .mb-rules-title-row { gap: 6px; }
+}
+
+/* ─── PHASE 8L: Rules Summary + View Button + Benefits Sections ─────────── */
+.mb-rules-summary {
+    font-size: 11.5px;
+    color: #8B96A8;
+    margin-bottom: 10px;
+    line-height: 1.5;
+    text-align: right;
+}
+.mb-rules-view-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    background: rgba(245, 158, 11, 0.08);
+    color: #F5A623;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.25s ease;
+    margin-bottom: 12px;
+}
+.mb-rules-view-btn:hover {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.4);
+}
+.mb-rules-view-btn:active { transform: scale(0.97); }
+
+/* Benefits section titles + divider */
+.mb-benefits-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #6B7A8D;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 8px 0 4px 0;
+    padding-right: 2px;
+}
+.mb-benefits-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.06);
+    margin: 10px 0 6px 0;
+}
+/* Phase 8L: Upgrade benefit icon sizing + gold accent */
+.mb-benefit-icon {
+    color: #F5A623;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.12);
+    flex-shrink: 0;
+}
+
+/* ─── PHASE 8L: Full Rules Modal ─────────────────────────────────────────── */
+.mb-rules-modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    animation: mb-fade-in 0.2s ease;
+}
+.mb-rules-modal {
+    background: #0a0e1a;
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 420px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(245, 158, 11, 0.1);
+}
+.mb-rules-modal-close {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 2;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8B96A8;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.mb-rules-modal-close:hover {
+    background: rgba(255, 77, 77, 0.1);
+    border-color: rgba(255, 77, 77, 0.2);
+    color: #ff8080;
+}
+.mb-rules-modal-header {
+    padding: 18px 16px 12px 16px;
+    text-align: center;
+    border-bottom: 1px solid rgba(245, 158, 11, 0.1);
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.04), transparent);
+}
+.mb-rules-modal-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 4px 0;
+}
+.mb-rules-modal-version {
+    font-size: 10.5px;
+    color: #F5A623;
+    font-weight: 600;
+    background: rgba(245, 158, 11, 0.1);
+    padding: 2px 10px;
+    border-radius: 6px;
+}
+.mb-rules-modal-body {
+    padding: 14px 18px;
+    overflow-y: auto;
+    flex: 1;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(245, 158, 11, 0.3) transparent;
+    direction: rtl;
+    text-align: right;
+}
+.mb-rules-modal-body::-webkit-scrollbar { width: 4px; }
+.mb-rules-modal-body::-webkit-scrollbar-track { background: transparent; }
+.mb-rules-modal-body::-webkit-scrollbar-thumb {
+    background: rgba(245, 158, 11, 0.2);
+    border-radius: 2px;
+}
+.mb-rules-modal-body h2 {
+    font-size: 13px;
+    font-weight: 700;
+    color: #F5A623;
+    margin: 14px 0 6px 0;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(245, 158, 11, 0.1);
+}
+.mb-rules-modal-body h3 {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #fff;
+    margin: 12px 0 4px 0;
+}
+.mb-rules-modal-body h4 {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #B8C1D1;
+    margin: 8px 0 3px 0;
+}
+.mb-rules-modal-body p {
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: #B8C1D1;
+    margin: 0 0 6px 0;
+}
+.mb-rules-modal-body ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 6px 0;
+}
+.mb-rules-modal-body li {
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #B8C1D1;
+    padding: 2px 10px 2px 0;
+    position: relative;
+}
+.mb-rules-modal-body li::before {
+    content: '•';
+    color: #F5A623;
+    position: absolute;
+    right: 0;
+    font-size: 10px;
+}
+.mb-rules-modal-ok {
+    padding: 12px;
+    margin: 12px 16px 16px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.12);
+    color: #F5A623;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.25s ease;
+    flex-shrink: 0;
+}
+.mb-rules-modal-ok:hover {
+    background: rgba(245, 158, 11, 0.2);
+    border-color: rgba(245, 158, 11, 0.45);
+}
+.mb-rules-modal-ok:active { transform: scale(0.97); }
 
 /* Success state */
 .mb-success {
@@ -13670,4 +14066,187 @@ body.jl-locked .cd-fullscreen {
         opacity: 1;
         transform: none;
     }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 5 — Profile Cosmetics Shop + Active Cosmetic Styles
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.cosmetics-shop-overlay {
+    position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px; animation: fadeIn 0.2s ease;
+}
+.cosmetics-shop {
+    background: var(--bg-card, #1a1d2e); border-radius: 18px;
+    max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto;
+    padding: 24px 20px; position: relative;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    animation: slideUp 0.3s ease;
+}
+.cosmetics-shop-close {
+    position: absolute; top: 14px; left: 14px;
+    background: rgba(255,255,255,0.06); border: none; border-radius: 8px;
+    width: 32px; height: 32px; color: var(--text-muted, #6B7A8D);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+}
+.cosmetics-shop-close:hover { background: rgba(255,255,255,0.12); color: var(--text, #fff); }
+.cosmetics-shop-header { text-align: center; margin-bottom: 20px; }
+.cosmetics-shop-title { font-size: 18px; font-weight: 700; margin: 0 0 6px; color: var(--text, #fff); }
+.cosmetics-shop-subtitle { font-size: 12px; color: var(--text-muted, #6B7A8D); margin: 0; line-height: 1.5; }
+.cosmetics-shop-loading { text-align: center; padding: 40px 0; color: var(--text-muted, #6B7A8D); }
+.cosmetics-shop-spinner {
+    width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.1);
+    border-top-color: var(--accent, #f7931a); border-radius: 50%;
+    margin: 0 auto 12px; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.cosmetics-shop-error { text-align: center; padding: 40px 0; color: var(--text-muted, #6B7A8D); }
+.cosmetics-shop-retry {
+    margin-top: 12px; padding: 8px 20px; border-radius: 10px;
+    background: var(--accent, #f7931a); color: #fff; border: none;
+    cursor: pointer; font-size: 13px; font-weight: 600;
+}
+.cosmetics-shop-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+@media (max-width: 380px) { .cosmetics-shop-grid { grid-template-columns: 1fr; } }
+.cosmetic-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px; padding: 14px; text-align: center; position: relative;
+    transition: all 0.2s; display: flex; flex-direction: column; align-items: center;
+}
+.cosmetic-card--locked { opacity: 0.5; filter: grayscale(0.8); }
+.cosmetic-card--active { border-color: var(--accent, #f7931a); box-shadow: 0 0 0 1px var(--accent, #f7931a); }
+.cosmetic-card-preview {
+    width: 64px; height: 64px; border-radius: 50%; margin-bottom: 10px;
+    background: radial-gradient(circle, var(--cosmetic-color, #9ca3af) 0%, transparent 70%);
+    display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
+}
+.cosmetic-card-glow {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: radial-gradient(circle, var(--cosmetic-color, #9ca3af) 0%, transparent 60%);
+    opacity: 0.3; animation: cosmetic-pulse 2s ease-in-out infinite;
+}
+@keyframes cosmetic-pulse { 0%,100% { opacity: 0.2; } 50% { opacity: 0.5; } }
+.cosmetic-card-icon { font-size: 24px; z-index: 1; }
+.cosmetic-card-info { width: 100%; }
+.cosmetic-card-title { font-size: 13px; font-weight: 600; color: var(--text, #fff); margin-bottom: 2px; }
+.cosmetic-card-rarity { font-size: 10px; font-weight: 700; text-transform: uppercase; margin-bottom: 4px; }
+.cosmetic-card-desc { font-size: 10px; color: var(--text-muted, #6B7A8D); line-height: 1.4; margin-bottom: 6px; min-height: 28px; }
+.cosmetic-card-cost { font-size: 12px; font-weight: 700; color: var(--accent, #f7931a); margin-bottom: 8px; }
+.cosmetic-card-btn {
+    width: 100%; padding: 7px 10px; border-radius: 9px; border: none;
+    font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+}
+.cosmetic-card-btn--purchase { background: var(--accent, #f7931a); color: #fff; }
+.cosmetic-card-btn--purchase:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(247,147,26,0.3); }
+.cosmetic-card-btn--activate { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+.cosmetic-card-btn--activate:hover { background: rgba(34,197,94,0.25); }
+.cosmetic-card-btn--active { background: rgba(34,197,94,0.1); color: #22c55e; border: 1px solid rgba(34,197,94,0.2); cursor: default; }
+.cosmetic-card-btn--locked { background: rgba(255,255,255,0.05); color: var(--text-muted, #6B7A8D); cursor: not-allowed; }
+
+/* Active Cosmetic Profile Styles */
+.profile-card.profile-cosmetic--golden-aura { border-color: rgba(212,175,55,0.3); box-shadow: 0 8px 24px rgba(212,175,55,0.15); }
+.profile-card.profile-cosmetic--ice { border-color: rgba(125,211,252,0.3); box-shadow: 0 8px 24px rgba(125,211,252,0.15); }
+.profile-card.profile-cosmetic--energy { border-color: rgba(168,85,247,0.3); box-shadow: 0 8px 24px rgba(168,85,247,0.15); }
+.profile-card.profile-cosmetic--lava { border-color: rgba(249,115,22,0.3); box-shadow: 0 8px 24px rgba(249,115,22,0.15); }
+.profile-card.profile-cosmetic--cyber { border-color: rgba(34,211,238,0.3); box-shadow: 0 8px 24px rgba(34,211,238,0.15); }
+.profile-card.profile-cosmetic--nebula { border-color: rgba(139,92,246,0.3); box-shadow: 0 8px 24px rgba(139,92,246,0.15); }
+.profile-card.profile-cosmetic--galaxy { border-color: rgba(99,102,241,0.4); box-shadow: 0 8px 24px rgba(99,102,241,0.2); }
+.profile-card.profile-cosmetic--gold-frame { border-color: rgba(251,191,36,0.4); box-shadow: 0 8px 24px rgba(251,191,36,0.2); }
+.profile-card.profile-cosmetic--royal { border-color: rgba(124,58,237,0.4); box-shadow: 0 8px 24px rgba(124,58,237,0.2); }
+.profile-card.profile-cosmetic--legendary { border-color: rgba(245,158,11,0.5); box-shadow: 0 8px 32px rgba(245,158,11,0.25); }
+
+/* Premium badge gradient text */
+.membership-badge--premium .mb-badge-text {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; font-weight: 800; letter-spacing: 0.5px;
+}
+
+/* Cosmetics entry button */
+.cosmetics-entry-btn {
+    margin: 8px 20px 16px; padding: 10px 16px; border-radius: 12px;
+    background: linear-gradient(135deg, rgba(168,85,247,0.15), rgba(99,102,241,0.15));
+    border: 1px solid rgba(168,85,247,0.2); color: var(--text, #fff);
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.cosmetics-entry-btn:hover { transform: translateY(-1px); border-color: rgba(168,85,247,0.4); }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 6 — Premium UI Enhancements
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── VIP Status: Active Cosmetic Display ─────────────────────────────────── */
+.mb-vip-cosmetic {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 12px; margin: 12px 0;
+    background: linear-gradient(135deg, rgba(168,85,247,0.08), rgba(99,102,241,0.08));
+    border: 1px solid rgba(168,85,247,0.15);
+}
+.mb-vip-cosmetic--empty {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.mb-vip-cosmetic-icon { font-size: 20px; }
+.mb-vip-cosmetic-info { flex: 1; }
+.mb-vip-cosmetic-label { font-size: 10px; color: var(--text-muted, #6B7A8D); margin-bottom: 2px; }
+.mb-vip-cosmetic-name { font-size: 13px; font-weight: 600; color: var(--text, #fff); }
+.mb-vip-cosmetic-btn {
+    padding: 6px 14px; border-radius: 8px; border: none; cursor: pointer;
+    background: rgba(168,85,247,0.2); color: #c084fc;
+    font-size: 11px; font-weight: 600; transition: all 0.2s;
+}
+.mb-vip-cosmetic-btn:hover { background: rgba(168,85,247,0.3); }
+
+/* ─── VIP Status: Quota Summary ───────────────────────────────────────────── */
+.mb-vip-quotas {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    margin: 12px 0;
+}
+.mb-vip-quota {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-radius: 10px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05);
+}
+.mb-vip-quota-icon { font-size: 16px; flex-shrink: 0; }
+.mb-vip-quota-info { flex: 1; min-width: 0; }
+.mb-vip-quota-label { font-size: 10px; color: var(--text-muted, #6B7A8D); margin-bottom: 1px; }
+.mb-vip-quota-val { font-size: 12px; font-weight: 600; color: var(--accent, #f7931a); }
+
+/* ─── Activation Popup: Quota Preview ─────────────────────────────────────── */
+.mb-quota-preview {
+    margin: 14px 0; padding: 14px; border-radius: 12px;
+    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);
+}
+.mb-quota-preview-title {
+    font-size: 12px; font-weight: 700; color: var(--text, #fff);
+    margin-bottom: 10px; text-align: center;
+}
+.mb-quota-preview-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+@media (max-width: 360px) { .mb-quota-preview-grid { grid-template-columns: 1fr; } }
+.mb-quota-preview-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 10px; border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    font-size: 11px;
+}
+.mb-qpi-icon { font-size: 14px; flex-shrink: 0; }
+.mb-qpi-label { flex: 1; color: var(--text-muted, #6B7A8D); font-weight: 500; }
+.mb-qpi-normal { color: var(--text-muted, #6B7A8D); font-weight: 600; }
+.mb-qpi-arrow { color: var(--text-muted, #6B7A8D); font-size: 10px; }
+.mb-qpi-premium { color: var(--accent, #f7931a); font-weight: 700; }
+
+/* ─── Premium Badge Gradient Text ─────────────────────────────────────────── */
+.membership-badge--premium .mb-badge-text {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; font-weight: 800; letter-spacing: 0.5px;
 }

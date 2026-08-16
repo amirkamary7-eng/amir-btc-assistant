@@ -21,6 +21,7 @@ const hashedFiles = [
   'admin.js',
   'membership-user.js',
   'membership-admin.js',
+  'cosmetics.js',
 ];
 
 // ============================================================================

@@ -16,7 +16,25 @@ export function createWheelHandlers(deps) {
     rewardCenterRepo,
     notificationPlatformRepo,
     notificationService,
+    // PHASE 3: MembershipAuthority + EntitlementConfig for tier-based daily spins.
+    membershipAuthority,
+    entitlementConfig,
   } = deps;
+
+  /**
+   * PHASE 3: Get the effective max daily spins for a user based on tier.
+   * Normal = 3, Premium = 5. Fail-safe: Normal on any error.
+   */
+  async function _getEffectiveMaxSpins(env, userId) {
+    let isPremium = false;
+    if (membershipAuthority) {
+      try { isPremium = await membershipAuthority.isPremium(env, userId); } catch { isPremium = false; }
+    }
+    if (entitlementConfig) {
+      return isPremium ? entitlementConfig.wheel.premium_daily_spins : entitlementConfig.wheel.normal_daily_spins;
+    }
+    return 3; // Legacy fallback
+  }
 
   /**
    * GET /api/wheel/status — Get spin inventory + daily spin status + wheel config.
@@ -48,7 +66,8 @@ export function createWheelHandlers(deps) {
       if (rewardCenterRepo) {
         config = await rewardCenterRepo.getWheelConfig(env).catch(() => config);
       }
-      const maxSpins = config.max_spins_per_user || 3;
+      // PHASE 3: Override maxSpins with tier-based value (Normal 3, Premium 5)
+      const maxSpins = await _getEffectiveMaxSpins(env, authState.user.id);
 
       // Create daily spins (up to maxSpins) and get available count
       const dailySpins = await wheelRepo.getOrCreateDailySpins(env, authState.user.id, maxSpins);
@@ -142,7 +161,8 @@ export function createWheelHandlers(deps) {
         if (rewardCenterRepo) {
           config = await rewardCenterRepo.getWheelConfig(env).catch(() => config);
         }
-        const maxSpins = config.max_spins_per_user || 3;
+        // PHASE 3: Override maxSpins with tier-based value (Normal 3, Premium 5)
+      const maxSpins = await _getEffectiveMaxSpins(env, authState.user.id);
         const dailySpins = await wheelRepo.getOrCreateDailySpins(env, authState.user.id, maxSpins);
         if (dailySpins.total_available === 0 || !dailySpins.spins.length) {
           return jsonResponse({ status: 'error', message: 'No available spins', code: 'NO_SPINS' }, { status: 409 }, env);

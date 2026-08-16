@@ -13052,6 +13052,31 @@ window.setEventReminder = setEventReminder;
 window.removeEventReminder = removeEventReminder;
 window.toggleWatchlist = toggleWatchlist;
 window.showMiniToast = showMiniToast;
+// PHASE 7C-A (H1 fix): Wire window.admToast so the 17 call sites in
+// membership-user.js, cosmetics.js, and membership-admin.js no longer
+// fall through to native alert(). Delegates to adminToast (color-coded,
+// supports 'success'|'error'|'info' type) when available (admin.js is
+// lazy-loaded on first openAdminPanel call). Falls back to showToast
+// (always available, single-arg, haptic) when admin.js hasn't loaded yet.
+// This does NOT create a second toast system — it reuses the existing two.
+window.admToast = function admToastShim(message, type) {
+    if (typeof window.adminToast === 'function') {
+        // adminToast supports (message, type) with color-coded styling.
+        return window.adminToast(message, type);
+    }
+    // Fallback: showToast takes (msg) only — type is ignored. Still
+    // non-blocking, styled, with haptic feedback. Vastly better than
+    // native alert() which is LTR, blocking, and unstyled.
+    if (typeof showToast === 'function') {
+        return showToast(message);
+    }
+    // Last-resort fallback (should never reach here in practice).
+    if (typeof window.showMiniToast === 'function') {
+        return window.showMiniToast(message);
+    }
+    // Truly last resort.
+    try { window.alert(message); } catch (e) { /* noop */ }
+};
 window.updateDetailWatchBtn = updateDetailWatchBtn;
 window.toggleWatchlistFromDetail = toggleWatchlistFromDetail;
 window.refreshMarketData = refreshMarketData;

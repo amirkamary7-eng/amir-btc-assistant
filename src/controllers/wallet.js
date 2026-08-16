@@ -23,7 +23,33 @@ export function createWalletHandlers(deps) {
     consumeMissionEventToken,
     // Rate limiting for wallet endpoints
     isUserRateLimited,
+    // PHASE 4: MembershipAuthority + EntitlementConfig for tier-based rewards
+    membershipAuthority,
+    entitlementConfig,
   } = deps;
+
+  /**
+   * PHASE 4: Safe tier check via MembershipAuthority.
+   * Fail-safe: returns false (Normal) on any error.
+   */
+  async function _isPremiumSafe(env, userId) {
+    if (!membershipAuthority) return false;
+    try {
+      return await membershipAuthority.isPremium(env, String(userId));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * PHASE 4: Get daily claim reward amount based on tier.
+   */
+  function _getDailyRewardAmount(isPremium) {
+    if (entitlementConfig && typeof entitlementConfig.getDailyClaimAmount === 'function') {
+      return entitlementConfig.getDailyClaimAmount(isPremium);
+    }
+    return 10; // Legacy fallback (Normal)
+  }
 
   // Rate limit helper for wallet mutation endpoints
   async function checkWalletRateLimit(env, userId, category, max, windowSec) {
@@ -148,12 +174,15 @@ export function createWalletHandlers(deps) {
   async function handleGetClaimStatus(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
+    // PHASE 4: Tier-based daily reward amount
+    const isPremium = await _isPremiumSafe(env, authState.user.id);
+    const dailyReward = _getDailyRewardAmount(isPremium);
     if (!isDatabaseConfigured(env)) {
-      return jsonResponse({ status: 'success', claimed_today: false, daily_reward: 10 }, {}, env);
+      return jsonResponse({ status: 'success', claimed_today: false, daily_reward: dailyReward }, {}, env);
     }
     try {
       const claimed = await walletRepo.getDailyClaimStatus(env, authState.user.id);
-      return jsonResponse({ status: 'success', claimed_today: claimed, daily_reward: 10 }, {}, env);
+      return jsonResponse({ status: 'success', claimed_today: claimed, daily_reward: dailyReward }, {}, env);
     } catch (error) {
       console.warn(safeError('get-claim-status', error));
       return safeDbErrorResponse(error, {}, env);
@@ -173,7 +202,9 @@ export function createWalletHandlers(deps) {
     const rlErr = await checkWalletRateLimit(env, authState.user.id, 'wallet_claim', 5, 60);
     if (rlErr) return rlErr;
     try {
-      const DAILY_REWARD = 10;
+      // PHASE 4: Tier-based daily reward amount (Normal 10, Premium 20).
+      const isPremium = await _isPremiumSafe(env, authState.user.id);
+      const DAILY_REWARD = _getDailyRewardAmount(isPremium);
       const clientIp = request.headers.get('cf-connecting-ip') || null;
       const result = await walletRepo.claimDailyReward(env, authState.user.id, DAILY_REWARD);
 
@@ -351,12 +382,22 @@ export function createWalletHandlers(deps) {
         ? await rewardCenterRepo.getMissionReward(env, missionId)
         : { token_amount: 0, mission_name: missionId };
 
-      const amount = Number(missionConfig.token_amount) || 0;
+      const baseAmount = Number(missionConfig.token_amount) || 0;
       const label = missionConfig.mission_name || missionId;
 
-      if (amount <= 0) {
+      if (baseAmount <= 0) {
         return jsonResponse({ status: 'error', message: 'Mission has no reward configured or is disabled', code: 'NO_REWARD' }, { status: 422 }, env);
       }
+
+      // PHASE 4: Apply tier-based multiplier (Normal 1×, Premium 1.5×).
+      // Determined server-side via MembershipAuthority. The multiplier only
+      // affects the reward amount — it does NOT bypass duplicate protection,
+      // event_token validation, progress tracking, or idempotency.
+      // Rounding: Math.ceil (Premium users always get AT LEAST the multiplier value).
+      const isPremium = await _isPremiumSafe(env, userId);
+      const amount = (entitlementConfig && typeof entitlementConfig.getMissionRewardAmount === 'function')
+        ? entitlementConfig.getMissionRewardAmount(baseAmount, isPremium)
+        : baseAmount; // Legacy fallback: no multiplier
 
       // 2. Get target_count from mission metadata
       const activeMissions = rewardCenterRepo

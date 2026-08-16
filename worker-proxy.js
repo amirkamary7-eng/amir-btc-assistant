@@ -39,6 +39,10 @@ import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 import { createMembershipRepository } from './src/repositories/membership.js';
 import { createMembershipHandlers } from './src/controllers/membership.js';
+import { createMembershipAuthority } from './src/services/membership_authority.js';
+import { ENTITLEMENT_CONFIG } from './src/services/entitlement_config.js';
+import { createCosmeticsRepository } from './src/repositories/cosmetics.js';
+import { createCosmeticsHandlers } from './src/controllers/cosmetics.js';
 import { createNewsArticleRepository } from './src/repositories/news_articles.js';
 import { createAppContentRepository } from './src/repositories/app_content.js';
 
@@ -439,7 +443,11 @@ function isBotConfigured(env) {
 }
 
 function isDatabaseConfigured(env) {
-  return Boolean(env.DATABASE_URL || env.DIRECT_URL);
+  // Phase 8G.1: Also check env.HYPERDRIVE.connectionString — when a Hyperdrive
+  // binding is present, createPool() uses it (raw TCP at CF edge), but this
+  // gate function previously only checked DATABASE_URL/DIRECT_URL. Without
+  // this fix, routes would 503 even when Hyperdrive is correctly configured.
+  return Boolean(env.DATABASE_URL || env.DIRECT_URL || env.HYPERDRIVE?.connectionString);
 }
 
 function isCacheLayerConfigured(env) {
@@ -668,8 +676,14 @@ async function writeRateLimitCache(env, key, value, expirationTtl) {
     return;
   }
 
+  // PHASE 3 FIX (AI-DEF-01): Cloudflare KV requires expirationTtl >= 60.
+  // Previously, AI_COOLDOWN_SECONDS=4 was passed directly, causing the KV PUT
+  // to fail silently. Fix: clamp TTL to minimum 60 seconds.
+  const MIN_KV_TTL = 60;
+  const effectiveTtl = Math.max(MIN_KV_TTL, Number(expirationTtl) || MIN_KV_TTL);
+
   try {
-    await env.RATE_LIMITS.put(key, value, { expirationTtl });
+    await env.RATE_LIMITS.put(key, value, { expirationTtl: effectiveTtl });
     _trackKvWrite('RATE_LIMITS:' + key);
   } catch (e) {
     console.warn('writeRateLimitCache failed:', e.message || e);
@@ -983,10 +997,22 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
       .join('\n');
 
     // secret_key = HMAC-SHA256(key='WebAppData', message=botToken)
-    const secretKey = createHmac('sha256', 'WebAppData').update(botToken).digest();
-
-    // hash = HMAC-SHA256(key=secretKey, message=data_check_string)
-    const computedHash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+    // PHASE 8G.3: Use Web Crypto API (crypto.subtle) instead of node:crypto
+    // createHmac. The CF Workers node:crypto compat layer produces a different
+    // HMAC result than Node.js for the same inputs. Web Crypto is native to
+    // CF Workers and produces consistent, correct results matching the
+    // Telegram Bot API spec.
+    const enc = new TextEncoder();
+    const messageKey = await crypto.subtle.importKey(
+      'raw', enc.encode('WebAppData'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    const secretKeyBuf = await crypto.subtle.sign('HMAC', messageKey, enc.encode(botToken));
+    const hashKey = await crypto.subtle.importKey(
+      'raw', secretKeyBuf, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    const computedHashBuf = await crypto.subtle.sign('HMAC', hashKey, enc.encode(dataCheckString));
+    const computedHash = Array.from(new Uint8Array(computedHashBuf))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
 
     if (!safeCompareStrings(computedHash, receivedHash)) {
       console.error('[TG-AUTH] Hash mismatch — validation failed');
@@ -2411,8 +2437,8 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
   }
 
   // DB-driven reward amount (async — reads from referral_reward_tiers)
-  const rewardAmount = await getReferralRewardPerInvite(env);
-  if (rewardAmount <= 0) return null;
+  const baseRewardAmount = await getReferralRewardPerInvite(env);
+  if (baseRewardAmount <= 0) return null;
 
   // Find unrewarded referral for this invitee
   const pendingResult = await queryDb(
@@ -2428,13 +2454,25 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
   const pending = pendingResult.rows[0] || null;
   if (!pending) return null;
 
+  // PHASE 4: Apply tier-based referral reward (Normal 3 AB, Premium 6 AB).
+  // Tier = INVITER's tier (the one who earns the reward), NOT the invitee's.
+  let finalRewardAmount = baseRewardAmount;
+  if (membershipAuthority && ENTITLEMENT_CONFIG && typeof ENTITLEMENT_CONFIG.getReferralRewardAmount === 'function') {
+    try {
+      const inviterIsPremium = await membershipAuthority.isPremium(env, String(pending.inviter_id));
+      finalRewardAmount = ENTITLEMENT_CONFIG.getReferralRewardAmount(inviterIsPremium);
+    } catch (e) {
+      finalRewardAmount = baseRewardAmount;
+    }
+  }
+
   // Atomic: credit tokens + transaction record + rewarded=TRUE + channel_verified=TRUE
   await creditReferralWithReward(
     env,
     String(pending.inviter_id),
     Number(pending.id),
     inviteeId,
-    rewardAmount,
+    finalRewardAmount,
     true, // alsoVerifyChannel
   );
 
@@ -7621,6 +7659,15 @@ const alertEconomyRepo = createAlertEconomyRepository({
 const walletRepo = createWalletRepository({ queryDb, queryDbTransaction });
 const economyService = createEconomyService({ walletRepo, queryDb });
 
+// ── Membership Module — Phase 3: created here so handlers can inject
+// membershipAuthority for tier-based quota enforcement. ──
+const membershipRepo = createMembershipRepository({ queryDb, queryDbTransaction });
+const membershipAuthority = createMembershipAuthority({
+  membershipRepo,
+  readAppCache,
+  writeAppCache,
+});
+
 const alertRepo = createAlertRepository({ queryDb, ensureUserRow, normalizeOptionalString });
 const alertHandlers = createAlertHandlers({
   jsonResponse,
@@ -7633,6 +7680,8 @@ const alertHandlers = createAlertHandlers({
   alertRepo,
   alertEconomyRepo,
   economyService,
+  // PHASE 3: MembershipAuthority for tier-based alert quota
+  membershipAuthority,
 });
 const watchlistRepo = createWatchlistRepository({ queryDb, queryDbTransaction, ensureUserRow });
 const watchlistHandlers = createWatchlistHandlers({
@@ -7644,6 +7693,9 @@ const watchlistHandlers = createWatchlistHandlers({
   buildBodyFieldValidationError,
   isDatabaseConfigured,
   watchlistRepo,
+  // PHASE 3: Tier-based watchlist limit
+  membershipAuthority,
+  entitlementConfig: ENTITLEMENT_CONFIG,
 });
 const referralRepo = createReferralRepository({ queryDb, getReferralRewardPerInvite, getNumericEnv });
 const referralHandlers = createReferralHandlers({
@@ -7697,6 +7749,9 @@ const wheelHandlers = createWheelHandlers({
   rewardCenterRepo,
   notificationPlatformRepo,
   notificationService,
+  // PHASE 3: Tier-based daily spins
+  membershipAuthority,
+  entitlementConfig: ENTITLEMENT_CONFIG,
 });
 const walletHandlers = createWalletHandlers({
   jsonResponse,
@@ -7714,6 +7769,24 @@ const walletHandlers = createWalletHandlers({
   consumeMissionEventToken,
   // Rate limiting for wallet endpoints
   isUserRateLimited,
+  // PHASE 4: Tier-based daily claim + mission rewards
+  membershipAuthority,
+  entitlementConfig: ENTITLEMENT_CONFIG,
+});
+
+// ── Cosmetics Module — Phase 5 ──────────────────────────────────────────────
+const cosmeticsRepo = createCosmeticsRepository({ queryDb, queryDbTransaction, isDatabaseConfigured });
+const cosmeticsHandlers = createCosmeticsHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  buildBodyFieldValidationError,
+  isDatabaseConfigured,
+  cosmeticsRepo,
+  membershipAuthority,
+  economyService,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({
@@ -7801,6 +7874,9 @@ const assistantHandlers = createAssistantHandlers({
   getTodayIsoDate,
   getNumericEnv,
   queryDb,
+  // PHASE 3: Tier-based AI quota
+  membershipAuthority,
+  entitlementConfig: ENTITLEMENT_CONFIG,
 });
 const analysisRepo = createAnalysisRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 const analysisHandlers = createAnalysisHandlers({
@@ -7910,8 +7986,7 @@ const alertEconomyHandlers = createAlertEconomyHandlers({
 // ── Market Overview Service (CMC) — all CMC calls centralized here ──
 const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCache, fetchJson });
 
-// ── Membership Module — factory wiring ──────────────────────────────────────
-const membershipRepo = createMembershipRepository({ queryDb, queryDbTransaction });
+// ── Membership Module — factory wiring (moved to line ~6984 for Phase 3) ────
 
 // ── News Articles Module — permanent storage for AI summaries ───────────────
 const newsArticleRepo = createNewsArticleRepository({ queryDb });
@@ -7935,6 +8010,13 @@ const membershipHandlers = createMembershipHandlers({
   notificationService,
   sendTelegramMessage,
   resolveWebAppUrl,
+  // PHASE 5: Cosmetics repo for active cosmetic in status response
+  cosmeticsRepo,
+  // PHASE 7A: MembershipAuthority for entitlement cache invalidation.
+  // Injected here so that admin/user state-changing handlers
+  // (approve, suspend, reactivate, expire, set-level, bulk approve/reject,
+  // user reapply) can immediately bust mb:ent:{id} via invalidateCaches().
+  membershipAuthority,
 });
 
 async function handleChartResolve(request, env) {
@@ -11297,6 +11379,36 @@ export default {
       if (request.method === 'POST' && url.pathname === '/api/membership/welcome-shown') {
         return membershipHandlers.handleMarkWelcomeShown(request, env);
       }
+      // ── Phase 1: Premium Rules + Acceptance ──────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/membership/rules') {
+        return membershipHandlers.handleGetRules(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/membership/rules/accept') {
+        return membershipHandlers.handleAcceptRules(request, env);
+      }
+      if (request.method === 'GET' && url.pathname === '/api/membership/rules/accepted') {
+        return membershipHandlers.handleCheckAcceptance(request, env);
+      }
+      // ── Phase 2: Membership Requirements ──────────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/membership/requirement') {
+        return membershipHandlers.handleGetRequirement(request, env);
+      }
+
+      // ── Phase 5: Profile Cosmetics ─────────────────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/cosmetics') {
+        return cosmeticsHandlers.handleGetCatalog(request, env);
+      }
+      if (request.method === 'GET' && url.pathname === '/api/cosmetics/mine') {
+        return cosmeticsHandlers.handleGetMine(request, env);
+      }
+      if (request.method === 'POST' && url.pathname.startsWith('/api/cosmetics/') && url.pathname.endsWith('/purchase')) {
+        const cosmeticId = url.pathname.slice('/api/cosmetics/'.length, -'/purchase'.length);
+        return cosmeticsHandlers.handlePurchase(request, env, cosmeticId);
+      }
+      if (request.method === 'POST' && url.pathname.startsWith('/api/cosmetics/') && url.pathname.endsWith('/activate')) {
+        const cosmeticId = url.pathname.slice('/api/cosmetics/'.length, -'/activate'.length);
+        return cosmeticsHandlers.handleActivate(request, env, cosmeticId);
+      }
 
       // ── Membership Module — Admin Routes ──────────────────────────────────
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/stats') {
@@ -11355,6 +11467,16 @@ export default {
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/membership/logs/export') {
         return membershipHandlers.handleExportLogs(request, env);
+      }
+      // ── Phase 2: Admin Requirement Management ─────────────────────────────
+      if (request.method === 'GET' && url.pathname === '/api/admin/membership/requirements') {
+        return membershipHandlers.handleListRequirements(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/requirements') {
+        return membershipHandlers.handleCreateRequirement(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/membership/requirements/activate') {
+        return membershipHandlers.handleActivateRequirement(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/notifications') {
