@@ -196,7 +196,7 @@
         '<div class="mb-diamond-shimmer"></div>' +
         (!premium ? '<div class="mb-lock-icon">' + LOCK_SVG + '</div>' : '') +
       '</div>' +
-      '<span class="mb-badge-text">' + (premium ? '💎 PREMIUM' : 'فعال‌سازی Premium') + '</span>';
+      '<span class="mb-badge-text">' + (premium ? 'PREMIUM' : 'فعال‌سازی Premium') + '</span>';
     badge.title = premium ? 'عضو ویژه AMIRBTC' : 'ارتقا به عضویت ویژه';
 
     // Apply/remove premium effects on profile card
@@ -427,29 +427,9 @@
     _popupOpen = true;
     var levelLabel = { VIP: 'VIP', PREMIUM: 'پرمیوم', ELITE: 'الیت' }[status.level] || status.level;
 
-    // Phase 6: Build active cosmetic display
+    // Phase 8L: Removed cosmetic display from VIP popup — cosmetics will be
+    // accessed from the Shop/Cosmetics area, not the Premium info page.
     var cosmeticHtml = '';
-    if (status.active_cosmetic) {
-      cosmeticHtml =
-        '<div class="mb-vip-cosmetic">' +
-          '<div class="mb-vip-cosmetic-icon">🎨</div>' +
-          '<div class="mb-vip-cosmetic-info">' +
-            '<div class="mb-vip-cosmetic-label">ظاهر فعال</div>' +
-            '<div class="mb-vip-cosmetic-name">' + esc(status.active_cosmetic.title) + '</div>' +
-          '</div>' +
-          '<button class="mb-vip-cosmetic-btn" onclick="MembershipApp.closePopup(); if(window.CosmeticsApp)CosmeticsApp.openShop();">تغییر</button>' +
-        '</div>';
-    } else {
-      cosmeticHtml =
-        '<div class="mb-vip-cosmetic mb-vip-cosmetic--empty">' +
-          '<div class="mb-vip-cosmetic-icon">🎨</div>' +
-          '<div class="mb-vip-cosmetic-info">' +
-            '<div class="mb-vip-cosmetic-label">ظاهر پروفایل</div>' +
-            '<div class="mb-vip-cosmetic-name">بدون ظاهر فعال</div>' +
-          '</div>' +
-          '<button class="mb-vip-cosmetic-btn" onclick="MembershipApp.closePopup(); if(window.CosmeticsApp)CosmeticsApp.openShop();">فروشگاه</button>' +
-        '</div>';
-    }
 
     // Phase 6: Tier-based quota summary
     var quotaHtml =
@@ -487,7 +467,7 @@
             '<div class="mb-popup-diamond-icon">' + DIAMOND_SVG + '</div>' +
             '<div class="mb-popup-diamond-shimmer"></div>' +
           '</div>' +
-          '<h2 class="mb-popup-title">💎 PREMIUM</h2>' +
+          '<h2 class="mb-popup-title">PREMIUM</h2>' +
           '<p class="mb-popup-subtitle">عضویت شما فعال است. تمام امکانات اختصاصی با سهمیه بالاتر در دسترس شماست.</p>' +
         '</div>' +
         '<div class="mb-vip-status">' +
@@ -520,8 +500,7 @@
           '<div class="mb-benefits">' +
             benefitRow('diamond', 'دسترسی دائمی Premium', 'تمام امکانات ویژه برای همیشه') +
             benefitRow('bolt', 'امکانات اختصاصی آینده', 'دسترسی زودهنگام به قابلیت‌های جدید') +
-            benefitRow('shield', 'نشان 💎 PREMIUM در پروفایل', 'badge ویژه در پروفایل شما') +
-            benefitRow('gift', 'فروشگاه ظاهر پروفایل', 'خرید سبک‌های بصری با AB Token') +
+            benefitRow('shield', 'دسترسی به Badge حرفه‌ای', 'نمایش نشان اختصاصی Premium در پروفایل شما') +
           '</div>' +
         '</div>' +
       '</div>';
@@ -583,7 +562,7 @@
             '<div class="mb-popup-diamond-icon">' + DIAMOND_SVG + '</div>' +
             '<div class="mb-popup-diamond-shimmer"></div>' +
           '</div>' +
-          '<h2 class="mb-popup-title">💎 PREMIUM</h2>' +
+          '<h2 class="mb-popup-title">PREMIUM</h2>' +
           '<p class="mb-popup-subtitle">با فعال‌سازی عضویت Premium، سهمیه بالاتر، امکانات اختصاصی و مزایای دائمی حساب شما فعال خواهد شد.</p>' +
         '</div>' +
         // Phase 6: Premium quota preview (Normal → Premium comparison)
@@ -595,16 +574,22 @@
             '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🎡</span><span class="mb-qpi-label">چرخ</span><span class="mb-qpi-normal">۳</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۵</span></div>' +
             '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">⭐</span><span class="mb-qpi-label">واچ‌لیست</span><span class="mb-qpi-normal">۷</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۲۰</span></div>' +
             '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🎁</span><span class="mb-qpi-label">پاداش روزانه</span><span class="mb-qpi-normal">۱۰</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۲۰</span></div>' +
-            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🎨</span><span class="mb-qpi-label">ظاهر پروفایل</span><span class="mb-qpi-normal">❌</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">✅</span></div>' +
           '</div>' +
         '</div>' +
-        // Benefits
+        // Phase 8L: Clean benefits structure — Premium Benefits + Exclusive Access
         '<div class="mb-benefits">' +
+          '<div class="mb-benefits-section-title">مزایای Premium</div>' +
+          benefitRow('ai', 'چت هوش مصنوعی', '۱۰۰ پیام در روز با مدل‌های پیشرفته') +
+          benefitRow('bell', 'هشدارهای قیمتی', '۱۰ هشدار رایگان در روز') +
+          benefitRow('wheel', 'چرخ شانس', '۵ اسپین در روز با جوایز ویژه') +
+          benefitRow('star', 'واچ‌لیست', '۲۰ نماد در واچ‌لیست') +
+          benefitRow('gift', 'پاداش روزانه', '۲۰ AB Token رایگان هر روز') +
+          benefitRow('badge', 'دسترسی به Badge حرفه‌ای', 'نمایش نشان اختصاصی Premium در پروفایل شما') +
+          '<div class="mb-benefits-divider"></div>' +
+          '<div class="mb-benefits-section-title">دسترسی‌های اختصاصی</div>' +
+          benefitRow('bolt', 'اولویت دریافت قابلیت‌های جدید', 'دسترسی زودهنگام به امکانات جدید') +
+          benefitRow('shield', 'اولویت پشتیبانی', 'پاسخگویی اولویت‌دار تیم پشتیبانی') +
           benefitRow('diamond', 'دسترسی دائمی Premium', 'تمام امکانات ویژه برای همیشه') +
-          benefitRow('bolt', 'امکانات اختصاصی آینده', 'دسترسی زودهنگام به قابلیت‌های جدید') +
-          benefitRow('chart', 'اولویت دریافت قابلیت‌ها', 'اولویت در دریافت امکانات جدید') +
-          benefitRow('gift', 'جوایز و کمپین‌های ویژه', 'شرکت در کمپین‌های اختصاصی') +
-          benefitRow('shield', 'نشان Premium در پروفایل', 'badge ویژه در پروفایل شما') +
         '</div>' +
         // Timeline — 6 steps
         '<ul class="mb-timeline">' +
@@ -657,10 +642,14 @@
    * When rules.active === false, renders a minimal non-blocking notice
    * (matching backend FAIL-OPEN: submission proceeds without acceptance).
    */
+  /**
+   * PHASE 8L: Rewritten rules section — clean card with "مشاهده کامل قوانین" button.
+   * Full rules text is moved to a scrollable modal (openRulesModal) instead of
+   * cluttering the activation card. The acceptance checkbox is preserved.
+   */
   function buildRulesSectionHtml(rules) {
     if (!rules || !rules.active) {
       // FAIL-OPEN mode: no active rules version. Don't block submission.
-      // Render a subtle notice so the user understands why there's no checkbox.
       return '<div class="mb-rules-section mb-rules-section--inactive">' +
         '<div class="mb-rules-header">' +
           '<div class="mb-rules-title-row">' +
@@ -673,9 +662,8 @@
 
     var versionBadge = rules.version ? ('<span class="mb-rules-version">v' + esc(rules.version) + '</span>') : '';
     var titleText = rules.title || 'قوانین عضویت Premium';
-    // Prefer summary; fall back to body_markdown (strip markdown # headers for display).
-    var bodyText = rules.summary || stripMarkdownHeaders(rules.body_markdown) || '';
-    var effectiveDate = rules.effective_at ? formatFaDate(rules.effective_at) : '';
+    // Phase 8L: Store rules data for the modal — don't display full text in the card
+    _rulesDataForModal = rules;
 
     return '<div class="mb-rules-section">' +
       '<div class="mb-rules-header">' +
@@ -683,18 +671,101 @@
           '<span class="mb-rules-title">📋 ' + esc(titleText) + '</span>' +
           versionBadge +
         '</div>' +
-        (effectiveDate ? '<div class="mb-rules-effective">از ' + esc(effectiveDate) + '</div>' : '') +
       '</div>' +
-      (bodyText ? '<div class="mb-rules-body">' + esc(bodyText) + '</div>' : '') +
+      // Phase 8L: Short explanation + "مشاهده کامل قوانین" button (replaces full text)
+      '<div class="mb-rules-summary">برای ادامه، قوانین عضویت Premium را مطالعه و تأیید کنید.</div>' +
+      '<button class="mb-rules-view-btn" onclick="MembershipApp.openRulesModal()" type="button">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>' +
+        'مشاهده کامل قوانین' +
+      '</button>' +
       // Custom checkbox — accessible, RTL-friendly, polished
       '<label class="mb-rules-accept" for="mb-rules-checkbox">' +
         '<input type="checkbox" id="mb-rules-checkbox" class="mb-rules-checkbox" onchange="MembershipApp.onRulesCheckboxChange(this)" />' +
         '<span class="mb-rules-checkbox-custom" aria-hidden="true">' +
           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>' +
         '</span>' +
-        '<span class="mb-rules-accept-label">قوانین عضویت Premium را مطالعه کرده و می‌پذیرم. در صورت نقض قوانین، عضویت من ممکن است لغو شود.</span>' +
+        '<span class="mb-rules-accept-label">قوانین عضویت Premium را مطالعه کرده‌ام و با آن موافقم.</span>' +
       '</label>' +
     '</div>';
+  }
+
+  // Phase 8L: Store rules data for the modal
+  var _rulesDataForModal = null;
+
+  /**
+   * PHASE 8L: Full rules modal — scrollable premium rules viewer.
+   * Opens as an overlay on top of the activation popup. Uses the rules
+   * data from the backend (body_markdown). Does NOT invent new rules.
+   */
+  function openRulesModal() {
+    var rules = _rulesDataForModal;
+    if (!rules) return;
+
+    var titleText = rules.title || 'قوانین عضویت Premium';
+    var bodyText = rules.body_markdown || rules.summary || 'متن قوانین در دسترس نیست.';
+    // Convert markdown to simple HTML (headings, paragraphs, lists)
+    var htmlBody = convertMarkdownToHtml(bodyText);
+
+    var overlay = document.createElement('div');
+    overlay.className = 'mb-rules-modal-overlay';
+    overlay.onclick = function (e) { if (e.target === overlay) closeRulesModal(); };
+    overlay.innerHTML =
+      '<div class="mb-rules-modal">' +
+        '<button class="mb-rules-modal-close" onclick="MembershipApp.closeRulesModal()" aria-label="بستن">' +
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+        '</button>' +
+        '<div class="mb-rules-modal-header">' +
+          '<h3 class="mb-rules-modal-title">' + esc(titleText) + '</h3>' +
+          (rules.version ? '<span class="mb-rules-modal-version">نسخه ' + esc(rules.version) + '</span>' : '') +
+        '</div>' +
+        '<div class="mb-rules-modal-body">' + htmlBody + '</div>' +
+        '<button class="mb-rules-modal-ok" onclick="MembershipApp.closeRulesModal()">متوجه شدم</button>' +
+      '</div>';
+    document.body.appendChild(overlay);
+  }
+
+  function closeRulesModal() {
+    var modal = document.querySelector('.mb-rules-modal-overlay');
+    if (modal) {
+      modal.style.animation = 'mb-fade-in 0.2s ease reverse';
+      setTimeout(function () { modal.remove(); }, 200);
+    }
+  }
+
+  /**
+   * PHASE 8L: Convert markdown to simple HTML for the rules modal.
+   * Handles: # headings, ## subheadings, - bullet lists, **bold**, paragraphs.
+   */
+  function convertMarkdownToHtml(md) {
+    if (!md) return '';
+    var lines = String(md).split('\n');
+    var html = '';
+    var inList = false;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      // Headings
+      if (/^###\s/.test(line)) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<h4>' + esc(line.replace(/^###\s*/, '')) + '</h4>';
+      } else if (/^##\s/.test(line)) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<h3>' + esc(line.replace(/^##\s*/, '')) + '</h3>';
+      } else if (/^#\s/.test(line)) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<h2>' + esc(line.replace(/^#\s*/, '')) + '</h2>';
+      } else if (/^[-*]\s/.test(line)) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        html += '<li>' + esc(line.replace(/^[-*]\s*/, '')) + '</li>';
+      } else if (line.trim() === '') {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<br>';
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<p>' + esc(line) + '</p>';
+      }
+    }
+    if (inList) html += '</ul>';
+    return html;
   }
 
   /**
@@ -1055,13 +1126,29 @@
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
+  // Phase 8L: Professional premium SVG icon set — consistent stroke, gold accent
   function benefitRow(iconKey, title, desc) {
     var icons = {
-      diamond: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h12l4 6-10 13L2 9z"/><path d="M11 3 8 9l4 13 4-13-3-6"/></svg>',
-      bolt: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
-      chart: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
-      gift: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>',
-      shield: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+      // Premium diamond — permanent access
+      diamond: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l4 6-10 13L2 9z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/></svg>',
+      // Bolt — early access / future features
+      bolt: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+      // AI / brain — AI chat
+      ai: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v1a3 3 0 0 0-3 3v1a3 3 0 0 0 1 5 3 3 0 0 0 3 3 4 4 0 0 0 6 0 3 3 0 0 0 3-3 3 3 0 0 0 1-5v-1a3 3 0 0 0-3-3V6a4 4 0 0 0-4-4z"/><circle cx="9" cy="11" r="1"/><circle cx="15" cy="11" r="1"/><path d="M9 15c1 1 2 1 3 1s2 0 3-1"/></svg>',
+      // Bell — price alerts
+      bell: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+      // Wheel / radial — spin
+      wheel: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/></svg>',
+      // Star — watchlist
+      star: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+      // Gift — daily rewards
+      gift: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>',
+      // Shield / badge — professional badge
+      badge: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3z"/><path d="M9 12l2 2 4-4"/></svg>',
+      // Chart — priority features (kept for compatibility)
+      chart: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+      // Shield (generic) — support / protection
+      shield: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
     };
     return '<div class="mb-benefit">' +
       '<div class="mb-benefit-icon">' + (icons[iconKey] || icons.diamond) + '</div>' +
@@ -1072,12 +1159,14 @@
     '</div>';
   }
 
+  // Phase 8L: timelineStep — use Latin digits for clean stepper rendering
   function timelineStep(num, text, stepStatus) {
     var cls = 'mb-timeline-item';
     if (stepStatus === 'done') cls += ' mb-timeline-item--done';
     else if (stepStatus === 'pending') cls += ' mb-timeline-item--pending';
 
-    var stepContent = num;
+    // Phase 8L: Force Latin digits in stepper for consistent rendering
+    var stepContent = String(num);
     if (stepStatus === 'done') {
       stepContent = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
     }
@@ -1099,6 +1188,9 @@
     submitUid: submitUid,
     // PHASE 7B (B1): Exposed for the inline onchange handler on the checkbox.
     onRulesCheckboxChange: onRulesCheckboxChange,
+    // PHASE 8L: Exposed for the rules modal
+    openRulesModal: openRulesModal,
+    closeRulesModal: closeRulesModal,
     refresh: function () { _cache = null; _requirement = null; _rules = null; _rulesAcceptedVersion = null; return loadCard(); },
   };
 

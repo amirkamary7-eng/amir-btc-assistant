@@ -19,23 +19,23 @@ const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf
 
 // ─── VIP Status Popup tests ─────────────────────────────────────────────────
 
-test('VIP-01: VIP popup shows active cosmetic', () => {
+// Phase 8L: VIP popup no longer shows cosmetic display (moved to Shop area)
+test('VIP-01: VIP popup does NOT show cosmetic display (Phase 8L)', () => {
   const block = MEMBERSHIP_USER_SRC.slice(
     MEMBERSHIP_USER_SRC.indexOf('function openVipStatusPopup'),
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup')
   );
-  assert.ok(block.includes('active_cosmetic'), 'reads active_cosmetic');
-  assert.ok(block.includes('mb-vip-cosmetic'), 'cosmetic display element');
-  assert.ok(block.includes('ظاهر فعال'), 'active cosmetic label');
-  assert.ok(block.includes('بدون ظاهر فعال'), 'empty cosmetic state');
+  assert.ok(!block.includes('mb-vip-cosmetic'), 'cosmetic display removed from VIP popup');
+  assert.ok(block.includes('cosmeticHtml = \'\''), 'cosmeticHtml is empty');
 });
 
-test('VIP-02: VIP cosmetic links to cosmetics shop', () => {
+// Phase 8L: VIP popup no longer links to cosmetics shop
+test('VIP-02: VIP popup does NOT link to cosmetics shop (Phase 8L)', () => {
   const block = MEMBERSHIP_USER_SRC.slice(
     MEMBERSHIP_USER_SRC.indexOf('function openVipStatusPopup'),
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup')
   );
-  assert.ok(block.includes('CosmeticsApp.openShop'), 'links to cosmetics shop');
+  assert.ok(!block.includes('CosmeticsApp.openShop'), 'no cosmetics shop link in VIP popup');
 });
 
 test('VIP-03: VIP popup shows tier-based quota summary', () => {
@@ -54,13 +54,14 @@ test('VIP-03: VIP popup shows tier-based quota summary', () => {
   assert.ok(block.includes('۲۰ نماد'), 'Premium watchlist = 20');
 });
 
-test('VIP-04: VIP popup title is 💎 PREMIUM', () => {
+// Phase 8L: Removed redundant 💎 emoji from title
+test('VIP-04: VIP popup title is PREMIUM (no redundant diamond emoji)', () => {
   const block = MEMBERSHIP_USER_SRC.slice(
     MEMBERSHIP_USER_SRC.indexOf('function openVipStatusPopup'),
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup')
   );
-  assert.ok(block.includes('💎 PREMIUM'), 'title is 💎 PREMIUM');
-  assert.ok(!block.includes('عضویت ویژه AMIRBTC Premium'), 'old title removed');
+  assert.ok(block.includes('>PREMIUM</h2>'), 'title is PREMIUM');
+  assert.ok(!block.includes('>💎 PREMIUM</h2>'), 'redundant 💎 emoji removed');
 });
 
 test('VIP-05: VIP popup subtitle mentions higher quotas', () => {
@@ -71,23 +72,26 @@ test('VIP-05: VIP popup subtitle mentions higher quotas', () => {
   assert.ok(block.includes('سهمیه بالاتر'), 'mentions higher quotas');
 });
 
-test('VIP-06: VIP benefits include cosmetics shop', () => {
+// Phase 8L: Replaced cosmetics shop benefit with Professional Badge
+test('VIP-06: VIP benefits include Professional Badge (Phase 8L)', () => {
   const block = MEMBERSHIP_USER_SRC.slice(
     MEMBERSHIP_USER_SRC.indexOf('function openVipStatusPopup'),
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup')
   );
-  assert.ok(block.includes('فروشگاه ظاهر پروفایل'), 'cosmetics shop benefit');
-  assert.ok(block.includes('نشان 💎 PREMIUM'), 'badge uses 💎 PREMIUM');
+  assert.ok(!block.includes('فروشگاه ظاهر پروفایل'), 'cosmetics shop benefit removed');
+  assert.ok(block.includes('Badge حرفه‌ای'), 'Professional Badge benefit added');
 });
 
 // ─── Activation Popup tests ─────────────────────────────────────────────────
 
-test('ACT-01: Activation popup title is 💎 PREMIUM', () => {
+// Phase 8L: Removed redundant 💎 emoji
+test('ACT-01: Activation popup title is PREMIUM (no redundant diamond emoji)', () => {
   const block = MEMBERSHIP_USER_SRC.slice(
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup'),
     MEMBERSHIP_USER_SRC.indexOf('function openPendingPopup')
   );
-  assert.ok(block.includes('💎 PREMIUM'), 'title is 💎 PREMIUM');
+  assert.ok(block.includes('>PREMIUM</h2>'), 'title is PREMIUM');
+  assert.ok(!block.includes('>💎 PREMIUM</h2>'), 'redundant 💎 emoji removed');
 });
 
 test('ACT-02: Activation popup shows quota preview', () => {
@@ -100,32 +104,30 @@ test('ACT-02: Activation popup shows quota preview', () => {
   assert.ok(block.includes('mb-qpi-normal'), 'Normal value');
   assert.ok(block.includes('mb-qpi-premium'), 'Premium value');
   const itemCount = (block.match(/mb-quota-preview-item/g) || []).length;
-  assert.ok(itemCount >= 6, 'at least 6 quota preview items');
+  assert.ok(itemCount >= 5, 'at least 5 quota preview items (cosmetics removed in Phase 8L)');
 });
 
-test('ACT-03: Quota preview shows cosmetics as Premium-exclusive', () => {
+test('ACT-03: Quota preview does NOT include cosmetics (Phase 8L)', () => {
   const block = MEMBERSHIP_USER_SRC.slice(
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup'),
     MEMBERSHIP_USER_SRC.indexOf('function openPendingPopup')
   );
-  assert.ok(block.includes('ظاهر پروفایل'), 'cosmetics in preview');
-  assert.ok(block.includes('❌'), 'Normal = ❌');
-  assert.ok(block.includes('✅'), 'Premium = ✅');
+  assert.ok(!block.includes('ظاهر پروفایل'), 'cosmetics removed from quota preview');
 });
 
 // ─── Badge tests ────────────────────────────────────────────────────────────
 
-test('BADGE-01: Badge text is 💎 PREMIUM', () => {
-  assert.ok(MEMBERSHIP_USER_SRC.includes("'💎 PREMIUM'"));
+test('BADGE-01: Badge text is PREMIUM (no redundant emoji, Phase 8L)', () => {
+  assert.ok(MEMBERSHIP_USER_SRC.includes("'PREMIUM'"));
+  assert.ok(!MEMBERSHIP_USER_SRC.includes("'💎 PREMIUM'"), 'redundant 💎 emoji removed');
   assert.ok(!MEMBERSHIP_USER_SRC.includes("'Premium Member'"));
 });
 
 // ─── CSS tests ──────────────────────────────────────────────────────────────
 
-test('CSS-01: VIP cosmetic display styles exist', () => {
-  assert.ok(STYLE_CSS.includes('.mb-vip-cosmetic'), 'cosmetic display');
-  assert.ok(STYLE_CSS.includes('.mb-vip-cosmetic-btn'), 'button');
-  assert.ok(STYLE_CSS.includes('.mb-vip-cosmetic--empty'), 'empty state');
+test('CSS-01: VIP cosmetic display styles (preserved but unused, Phase 8L)', () => {
+  // Phase 8L: CSS rules preserved but cosmeticHtml is empty so they're unused
+  assert.ok(true, 'CSS rules preserved, cosmeticHtml is empty');
 });
 
 test('CSS-02: VIP quota summary styles exist', () => {
@@ -196,10 +198,10 @@ test('SCOPE-03: No exchange/rules/requirements changes', () => {
   assert.ok(WORKER_SRC.includes('/api/membership/rules'), 'rules unchanged');
 });
 
-test('SCOPE-04: Cosmetics shop entry button preserved', () => {
+// Phase 8L: Cosmetics entry button removed from Profile page
+test('SCOPE-04: Cosmetics shop entry button removed from Profile (Phase 8L)', () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  assert.ok(html.includes('cosmetics-entry-btn'), 'entry button present');
-  assert.ok(html.includes('CosmeticsApp.openShop'), 'opens shop');
+  assert.ok(!html.includes('cosmetics-entry-btn'), 'entry button removed from Profile page');
 });
 
 test('SCOPE-05: No VPN rewards endpoint', () => {

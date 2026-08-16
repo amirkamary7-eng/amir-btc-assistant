@@ -198,9 +198,11 @@ test('SCOPE-01: Cosmetics now exists (Phase 5)', () => {
   assert.ok(fs.existsSync(path.join(__dirname, 'src/repositories/cosmetics.js')), 'cosmetics repo exists (Phase 5)');
 });
 
-test('SCOPE-02: Badge text is 💎 PREMIUM (Phase 5)', () => {
+// Phase 8L: Badge text is PREMIUM (no redundant emoji)
+test('SCOPE-02: Badge text is PREMIUM (no redundant emoji, Phase 8L)', () => {
   const m = fs.readFileSync(path.join(__dirname, 'membership-user.js'), 'utf8');
-  assert.ok(m.includes('💎 PREMIUM'), 'badge text is 💎 PREMIUM (Phase 5)');
+  assert.ok(m.includes("'PREMIUM'"), 'badge text is PREMIUM');
+  assert.ok(!m.includes("'💎 PREMIUM'"), 'redundant 💎 emoji removed (Phase 8L)');
 });
 
 test('SCOPE-03: No authority.require() calls', () => {

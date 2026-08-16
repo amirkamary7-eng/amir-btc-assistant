@@ -138,15 +138,18 @@ test('B1-RENDER-03: Rules version displayed as "v<N>" badge', () => {
     'version prefix "v" displayed before the number');
 });
 
-test('B1-RENDER-04: Rules summary text rendered (falls back to body_markdown)', () => {
+// Phase 8L: Rules summary text no longer displayed in card — moved to modal
+test('B1-RENDER-04: Rules summary NOT in card (moved to modal, Phase 8L)', () => {
   const body = fnBody(MEMBERSHIP_USER_SRC, 'buildRulesSectionHtml');
-  assert.ok(body.includes('rules.summary'),
-    'summary is the preferred text source');
-  assert.ok(body.includes('stripMarkdownHeaders(rules.body_markdown)'),
-    'falls back to body_markdown (stripped of # headers)');
+  assert.ok(!body.includes('rules.summary'),
+    'summary no longer displayed in card (Phase 8L)');
+  assert.ok(!body.includes('stripMarkdownHeaders'),
+    'body_markdown no longer in card (Phase 8L)');
+  assert.ok(body.includes('_rulesDataForModal = rules'),
+    'rules data stored for modal');
 });
 
-test('B1-RENDER-05: Explicit acceptance checkbox with Persian label', () => {
+test('B1-RENDER-05: Explicit acceptance checkbox with Persian label (Phase 8L)', () => {
   const body = fnBody(MEMBERSHIP_USER_SRC, 'buildRulesSectionHtml');
   assert.ok(body.includes('type="checkbox"'),
     'checkbox input rendered');
@@ -154,11 +157,9 @@ test('B1-RENDER-05: Explicit acceptance checkbox with Persian label', () => {
     'checkbox has stable id');
   assert.ok(body.includes('mb-rules-accept-label'),
     'acceptance label element rendered');
-  // Persian acceptance text — must mention reading and accepting.
-  assert.ok(body.includes('مطالعه کرده و می‌پذیرم'),
+  // Phase 8L: Updated acceptance text (shorter, no violation consequence)
+  assert.ok(body.includes('مطالعه کرده‌ام و با آن موافقم'),
     'Persian acceptance text must mention reading + accepting');
-  assert.ok(body.includes('نقض قوانین'),
-    'Persian text must mention rules violation consequence');
 });
 
 test('B1-RENDER-06: Rules section inserted into activation popup HTML', () => {
@@ -169,12 +170,13 @@ test('B1-RENDER-06: Rules section inserted into activation popup HTML', () => {
     'rules section insertion point marked');
 });
 
-test('B1-RENDER-07: Effective date displayed in Persian (fa-IR) format', () => {
+// Phase 8L: Effective date no longer in card (moved to modal)
+test('B1-RENDER-07: Effective date NOT in card (moved to modal, Phase 8L)', () => {
   const body = fnBody(MEMBERSHIP_USER_SRC, 'buildRulesSectionHtml');
-  assert.ok(body.includes('formatFaDate(rules.effective_at)'),
-    'effective date passed through formatFaDate (fa-IR)');
-  assert.ok(body.includes('mb-rules-effective'),
-    'effective date element rendered');
+  assert.ok(!body.includes('formatFaDate(rules.effective_at)'),
+    'effective date no longer in card (Phase 8L)');
+  assert.ok(!body.includes('mb-rules-effective'),
+    'effective date element removed from card');
 });
 
 test('B1-RENDER-08: FAIL-OPEN rendering when rules.active === false', () => {
@@ -595,13 +597,13 @@ test('B1-CSS-06: Disabled submit button hint state styled (.mb-uid-submit--disab
 
 // ─── Tests: RTL / Persian rendering ────────────────────────────────────────
 
-test('B1-RTL-01: Persian text present in rules section (RTL content)', () => {
+test('B1-RTL-01: Persian text present in rules section (RTL content, Phase 8L)', () => {
   const body = fnBody(MEMBERSHIP_USER_SRC, 'buildRulesSectionHtml');
-  // Multiple distinct Persian phrases must be present.
+  // Phase 8L: Updated Persian phrases for new card design
   const persianPhrases = [
-    'قوانین عضویت',      // section title
-    'مطالعه کرده و می‌پذیرم', // acceptance label
-    'نقض قوانین',        // violation consequence
+    'قوانین عضویت',           // section title
+    'مطالعه کرده‌ام و با آن موافقم', // acceptance label (Phase 8L)
+    'مشاهده کامل قوانین',      // view full rules button (Phase 8L)
   ];
   for (const p of persianPhrases) {
     assert.ok(body.includes(p), 'Persian phrase present: ' + p);

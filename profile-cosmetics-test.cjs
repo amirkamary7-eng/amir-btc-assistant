@@ -158,8 +158,10 @@ test('WIRE-03: membershipAuthority + economyService in cosmetics handlers', () =
 
 // ─── Badge + status tests ───────────────────────────────────────────────────
 
-test('BADGE-01: badge text is 💎 PREMIUM', () => {
-  assert.ok(MEMBERSHIP_USER_SRC.includes("'💎 PREMIUM'"));
+// Phase 8L: Badge text is PREMIUM (no redundant emoji)
+test('BADGE-01: badge text is PREMIUM (no redundant emoji)', () => {
+  assert.ok(MEMBERSHIP_USER_SRC.includes("'PREMIUM'"));
+  assert.ok(!MEMBERSHIP_USER_SRC.includes("'💎 PREMIUM'"), 'redundant 💎 emoji removed (Phase 8L)');
   assert.ok(!MEMBERSHIP_USER_SRC.includes("'Premium Member'"));
 });
 
@@ -202,9 +204,9 @@ test('FE-03: renders locked cards for Normal', () => {
   assert.ok(COSMETICS_JS_SRC.includes('🔒 فقط Premium'));
 });
 
-test('FE-04: index.html has cosmetics entry button', () => {
-  assert.ok(INDEX_HTML.includes('cosmetics-entry-btn'));
-  assert.ok(INDEX_HTML.includes('CosmeticsApp.openShop'));
+// Phase 8L: cosmetics entry button removed from Profile page
+test('FE-04: index.html does NOT have cosmetics entry button (Phase 8L)', () => {
+  assert.ok(!INDEX_HTML.includes('cosmetics-entry-btn'), 'cosmetics entry button removed from Profile page');
 });
 
 test('FE-05: index.html loads cosmetics.js', () => {
