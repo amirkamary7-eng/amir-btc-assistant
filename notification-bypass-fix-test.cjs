@@ -175,12 +175,15 @@ test('DEAD-CAT: challenges removed from notification settings UI items', () => {
     'ch_challenges must not be an active item in the UI groups');
 });
 
-test('DEAD-CAT: promotions removed from notification settings UI items', () => {
+test('DEAD-CAT: promotions is back in UI as Premium-only (Phase 2 update)', () => {
   const groupsStart = APP_SRC.indexOf('const groups = [');
   const groupsEnd = APP_SRC.indexOf('];', groupsStart + 100);
   const groupsBlock = APP_SRC.slice(groupsStart, groupsEnd);
-  assert.ok(!groupsBlock.includes("key: 'ch_promotions'"),
-    'ch_promotions must not be an active item in the UI groups');
+  // Phase 2: ch_promotions is now back in UI as a Premium-only setting
+  assert.ok(groupsBlock.includes("key: 'ch_promotions'"),
+    'ch_promotions must be in UI as Premium-only setting (Phase 2)');
+  assert.ok(groupsBlock.includes('premiumOnly: true'),
+    'ch_promotions must have premiumOnly: true flag');
 });
 
 test('DEAD-CAT: Active categories still present in UI', () => {

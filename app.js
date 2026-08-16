@@ -10439,10 +10439,7 @@ async function renderNotifSettings() {
         {
             label: isFa ? 'اعلان‌های تبلیغاتی' : 'Promotional',
             items: [
-                // Phase 5: Removed ch_challenges, ch_promotions, ch_breaking_news, ch_security
-                // from UI — no notification producer emits these categories.
-                // Users could configure preferences that had no effect.
-                // These will be re-added when producers are implemented.
+                { key: 'ch_promotions', svg: NS_ICONS.promo, ic: 'ic-promo', t: isFa ? 'تبلیغات' : 'Promotions', d: isFa ? 'پیشنهادات ویژه و تبلیغات' : 'Special offers and promotions', def: 'none', premiumOnly: true },
             ]
         },
     ];
@@ -10471,8 +10468,14 @@ async function renderNotifSettings() {
         for (const cat of group.items) {
             const currentVal = settings[cat.key] || cat.def;
 
+            // Phase 3/4: Premium locking for premiumOnly categories
+            const isPremiumUser = window.MembershipApp && typeof window.MembershipApp.isPremiumCached === 'function'
+                ? window.MembershipApp.isPremiumCached()
+                : false;
+            const isLocked = cat.premiumOnly && !isPremiumUser;
+
             const card = document.createElement('div');
-            card.className = 'ns-prem-card';
+            card.className = isLocked ? 'ns-prem-card ns-prem-card--locked' : 'ns-prem-card';
 
             // Left: icon + text
             const left = document.createElement('div');
@@ -10489,25 +10492,37 @@ async function renderNotifSettings() {
             titleEl.textContent = cat.t;
             const descEl = document.createElement('div');
             descEl.className = 'ns-prem-desc';
-            descEl.textContent = cat.d;
+            descEl.textContent = isLocked
+                ? (isFa ? 'فقط برای اعضای Premium' : 'Premium members only')
+                : cat.d;
             textBox.appendChild(titleEl);
             textBox.appendChild(descEl);
 
             left.appendChild(iconBox);
             left.appendChild(textBox);
 
-            // Right: capsule selector
+            // Right: capsule selector or lock badge
             const capsule = document.createElement('div');
             capsule.className = 'ns-capsule';
             capsule.setAttribute('data-cat', cat.key);
 
-            for (const ch of channels) {
-                const btn = document.createElement('button');
-                btn.className = `ns-cap-btn${currentVal === ch.val ? ' active ' + ch.cls : ''}`;
-                btn.setAttribute('data-cat', cat.key);
-                btn.setAttribute('data-val', ch.val);
-                btn.innerHTML = NS_CHAN_ICONS[ch.val] + '<span>' + ch.label + '</span>';
-                capsule.appendChild(btn);
+            if (isLocked) {
+                // Phase 3: Free user — locked controls
+                capsule.classList.add('ns-capsule--locked');
+                const lockBadge = document.createElement('div');
+                lockBadge.className = 'ns-prem-lock';
+                lockBadge.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>' + (isFa ? 'Premium' : 'Premium') + '</span>';
+                capsule.appendChild(lockBadge);
+            } else {
+                // Phase 4: Premium user — functional controls
+                for (const ch of channels) {
+                    const btn = document.createElement('button');
+                    btn.className = `ns-cap-btn${currentVal === ch.val ? ' active ' + ch.cls : ''}`;
+                    btn.setAttribute('data-cat', cat.key);
+                    btn.setAttribute('data-val', ch.val);
+                    btn.innerHTML = NS_CHAN_ICONS[ch.val] + '<span>' + ch.label + '</span>';
+                    capsule.appendChild(btn);
+                }
             }
 
             card.appendChild(left);

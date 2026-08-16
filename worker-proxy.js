@@ -7965,6 +7965,8 @@ const notificationPlatformHandlers = createNotificationPlatformHandlers({
   adminRepo,
   // NEW-1 FIX: Rate limiting for admin mutations
   isUserRateLimited,
+  // Phase 2: Premium entitlement for advertisement settings
+  membershipAuthority,
 });
 //#endregion
 
