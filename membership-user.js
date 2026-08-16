@@ -580,7 +580,7 @@
           timelineStep(3, 'واریز اولیه به حساب صرافی', steps[2]) +
           timelineStep(4, 'انجام اولین معامله (First Trade)', steps[3]) +
           timelineStep(5, 'بررسی اطلاعات توسط تیم', steps[4]) +
-          timelineStep(6, 'فعال‌سازی دائمی Premium', steps[5]) +
+          timelineStep(6, 'فعال‌سازی پریمیوم', steps[5]) +
         '</ul>' +
         '<div class="mb-timeline-note">عضویت Premium پس از تکمیل تمام مراحل و تأیید اطلاعات توسط تیم فعال خواهد شد.</div>' +
         // PHASE 7B (B1): Rules + Acceptance section
@@ -635,7 +635,7 @@
       return '<div class="mb-rules-section mb-rules-section--inactive">' +
         '<div class="mb-rules-header">' +
           '<div class="mb-rules-title-row">' +
-            '<span class="mb-rules-title">📋 قوانین عضویت</span>' +
+            '<span class="mb-rules-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-left:4px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="10" y1="9" x2="12" y2="9"/></svg> قوانین عضویت</span>' +
           '</div>' +
         '</div>' +
         '<div class="mb-rules-body mb-rules-body--empty">قوانین فعال در حال حاضر در دسترس نیست. می‌توانید درخواست خود را ارسال کنید؛ در صورت نیاز، تیم پس از بررسی با شما تماس خواهد گرفت.</div>' +
@@ -650,7 +650,7 @@
     return '<div class="mb-rules-section">' +
       '<div class="mb-rules-header">' +
         '<div class="mb-rules-title-row">' +
-          '<span class="mb-rules-title">📋 ' + esc(titleText) + '</span>' +
+          '<span class="mb-rules-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-left:4px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="10" y1="9" x2="12" y2="9"/></svg> ' + esc(titleText) + '</span>' +
           versionBadge +
         '</div>' +
       '</div>' +
@@ -675,9 +675,9 @@
   var _rulesDataForModal = null;
 
   /**
-   * PHASE 8L: Full rules modal — scrollable premium rules viewer.
-   * Opens as an overlay on top of the activation popup. Uses the rules
-   * data from the backend (body_markdown). Does NOT invent new rules.
+   * PHASE 8N: Full rules modal — accordion-based premium rules viewer.
+   * Sections are extracted from markdown headings (#, ##). Each section
+   * is a collapsible accordion item matching the Settings/Terms UI.
    */
   function openRulesModal() {
     var rules = _rulesDataForModal;
@@ -685,8 +685,8 @@
 
     var titleText = rules.title || 'قوانین عضویت Premium';
     var bodyText = rules.body_markdown || rules.summary || 'متن قوانین در دسترس نیست.';
-    // Convert markdown to simple HTML (headings, paragraphs, lists)
-    var htmlBody = convertMarkdownToHtml(bodyText);
+    // Phase 8N: Build accordion sections from markdown headings
+    var accordionHtml = buildRulesAccordion(bodyText);
 
     var overlay = document.createElement('div');
     overlay.className = 'mb-rules-modal-overlay';
@@ -699,10 +699,27 @@
         '<div class="mb-rules-modal-header">' +
           '<h3 class="mb-rules-modal-title">' + esc(titleText) + '</h3>' +
         '</div>' +
-        '<div class="mb-rules-modal-body">' + htmlBody + '</div>' +
+        '<div class="mb-rules-modal-body">' + accordionHtml + '</div>' +
         '<button class="mb-rules-modal-ok" onclick="MembershipApp.closeRulesModal()">متوجه شدم</button>' +
       '</div>';
     document.body.appendChild(overlay);
+
+    // Phase 8N: Wire accordion toggle handlers
+    var headers = overlay.querySelectorAll('.mb-ra-header');
+    for (var i = 0; i < headers.length; i++) {
+      headers[i].addEventListener('click', function() {
+        var item = this.parentElement;
+        var body = item.querySelector('.mb-ra-body');
+        var isOpen = item.classList.contains('open');
+        if (isOpen) {
+          item.classList.remove('open');
+          body.style.maxHeight = '0';
+        } else {
+          item.classList.add('open');
+          body.style.maxHeight = body.scrollHeight + 'px';
+        }
+      });
+    }
   }
 
   function closeRulesModal() {
@@ -714,32 +731,85 @@
   }
 
   /**
-   * PHASE 8L: Convert markdown to simple HTML for the rules modal.
-   * Handles: # headings, ## subheadings, - bullet lists, **bold**, paragraphs.
+   * PHASE 8N: Build accordion sections from markdown.
+   * Splits the rules markdown by headings (#, ##) into sections.
+   * Each section becomes a collapsible accordion item.
+   * Content within each section (paragraphs, lists) is rendered as HTML.
    */
-  function convertMarkdownToHtml(md) {
-    if (!md) return '';
+  function buildRulesAccordion(md) {
+    if (!md) return '<p>متن قوانین در دسترس نیست.</p>';
     var lines = String(md).split('\n');
+    var sections = [];
+    var currentTitle = null;
+    var currentContent = [];
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var headingMatch = line.match(/^(#{1,2})\s+(.+)$/);
+      if (headingMatch) {
+        // Save previous section
+        if (currentTitle !== null) {
+          sections.push({ title: currentTitle, content: currentContent });
+        }
+        currentTitle = headingMatch[2];
+        currentContent = [];
+      } else {
+        if (currentTitle === null) {
+          // Content before first heading — create a default section
+          if (line.trim()) {
+            currentTitle = 'مقدمه';
+            currentContent = [line];
+          }
+        } else {
+          currentContent.push(line);
+        }
+      }
+    }
+    // Save last section
+    if (currentTitle !== null) {
+      sections.push({ title: currentTitle, content: currentContent });
+    }
+
+    // If no sections found (no headings), render as single block
+    if (sections.length === 0) {
+      return '<div class="mb-ra-body-inner">' + renderMarkdownLines(lines, 0) + '</div>';
+    }
+
+    // Build accordion HTML
+    var html = '';
+    for (var s = 0; s < sections.length; s++) {
+      var sec = sections[s];
+      var contentHtml = renderMarkdownLines(sec.content, 0);
+      html +=
+        '<div class="mb-ra-item">' +
+          '<div class="mb-ra-header">' +
+            '<span class="mb-ra-header-text">' + esc(sec.title) + '</span>' +
+            '<svg class="mb-ra-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>' +
+          '</div>' +
+          '<div class="mb-ra-body">' +
+            '<div class="mb-ra-body-inner">' + contentHtml + '</div>' +
+          '</div>' +
+        '</div>';
+    }
+    return html;
+  }
+
+  /**
+   * PHASE 8N: Render markdown lines as HTML (paragraphs, lists, sub-headings).
+   */
+  function renderMarkdownLines(lines, startIdx) {
     var html = '';
     var inList = false;
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
-      // Headings
       if (/^###\s/.test(line)) {
         if (inList) { html += '</ul>'; inList = false; }
         html += '<h4>' + esc(line.replace(/^###\s*/, '')) + '</h4>';
-      } else if (/^##\s/.test(line)) {
-        if (inList) { html += '</ul>'; inList = false; }
-        html += '<h3>' + esc(line.replace(/^##\s*/, '')) + '</h3>';
-      } else if (/^#\s/.test(line)) {
-        if (inList) { html += '</ul>'; inList = false; }
-        html += '<h2>' + esc(line.replace(/^#\s*/, '')) + '</h2>';
       } else if (/^[-*]\s/.test(line)) {
         if (!inList) { html += '<ul>'; inList = true; }
         html += '<li>' + esc(line.replace(/^[-*]\s*/, '')) + '</li>';
       } else if (line.trim() === '') {
         if (inList) { html += '</ul>'; inList = false; }
-        html += '<br>';
       } else {
         if (inList) { html += '</ul>'; inList = false; }
         html += '<p>' + esc(line) + '</p>';
@@ -840,7 +910,7 @@
           timelineStep(3, 'واریز اولیه به حساب صرافی', steps[2]) +
           timelineStep(4, 'انجام اولین معامله (First Trade)', steps[3]) +
           timelineStep(5, 'بررسی اطلاعات توسط تیم', steps[4]) +
-          timelineStep(6, 'فعال‌سازی دائمی Premium', steps[5]) +
+          timelineStep(6, 'فعال‌سازی پریمیوم', steps[5]) +
         '</ul>' +
         '<div class="mb-timeline-note">عضویت Premium پس از تکمیل تمام مراحل و تأیید اطلاعات توسط تیم فعال خواهد شد.</div>' +
         '<div class="mb-pending">' +

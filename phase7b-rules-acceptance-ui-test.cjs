@@ -456,8 +456,8 @@ test('B1-PRESERVE-05: Activation timeline (6 steps) preserved', () => {
     'timeline step 1 preserved');
   assert.ok(block.includes('timelineStep(6,'),
     'timeline step 6 preserved');
-  assert.ok(block.includes('فعال‌سازی دائمی Premium'),
-    'step 6 text preserved');
+  assert.ok(block.includes('فعال‌سازی پریمیوم'),
+    'step 6 text updated to فعال‌سازی پریمیوم (Phase 8N)');
 });
 
 test('B1-PRESERVE-06: Pending popup + openPendingPopup preserved', () => {
