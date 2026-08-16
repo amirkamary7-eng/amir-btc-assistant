@@ -39,7 +39,7 @@ export function createCosmeticsHandlers(deps) {
   /** GET /api/cosmetics — catalog with ownership status for current user */
   async function handleGetCatalog(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState;
+    if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
 
     const userId = String(authState.user.id);
@@ -84,7 +84,7 @@ export function createCosmeticsHandlers(deps) {
   /** GET /api/cosmetics/mine — user's owned cosmetics */
   async function handleGetMine(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState;
+    if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
 
     const userId = String(authState.user.id);
@@ -119,7 +119,7 @@ export function createCosmeticsHandlers(deps) {
   /** POST /api/cosmetics/:id/purchase — purchase a cosmetic (Premium only) */
   async function handlePurchase(request, env, cosmeticId) {
     const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState;
+    if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
 
     const userId = String(authState.user.id);
@@ -207,7 +207,7 @@ export function createCosmeticsHandlers(deps) {
   /** POST /api/cosmetics/:id/activate — activate an owned cosmetic (Premium only) */
   async function handleActivate(request, env, cosmeticId) {
     const authState = await authenticateTelegramRequest(request, env);
-    if (authState.error) return authState;
+    if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
 
     const userId = String(authState.user.id);
