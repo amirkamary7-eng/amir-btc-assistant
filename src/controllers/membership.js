@@ -263,6 +263,26 @@ export function createMembershipHandlers(deps) {
         return jsonResponse({ error: 'Duplicate pending request', code: 'DUPLICATE_REQUEST' }, { status: 409 }, env);
       }
 
+      // ── Phase 7C-B (H2 fix): State machine validation ──────────────────────
+      // A user whose current membership_status is SUSPENDED (or APPROVED /
+      // PENDING) must NOT be able to transition to PENDING by submitting a new
+      // request. This closes the suspension-bypass: previously a SUSPENDED user
+      // could submit a new request → status set to PENDING → admin approves →
+      // user returns to APPROVED/VIP, bypassing the suspension entirely.
+      //
+      // ALLOWED_TRANSITIONS only permits: INACTIVE→PENDING, REJECTED→PENDING,
+      // EXPIRED→PENDING. We reuse the existing canTransition() + 409
+      // INVALID_TRANSITION response format used by the admin action handlers.
+      const currentUser = await membershipRepo.findByTelegramId(env, tgId);
+      const currentStatus = currentUser?.membership_status || 'INACTIVE';
+      if (!canTransition(currentStatus, 'PENDING')) {
+        return jsonResponse({
+          error: `Cannot submit request from status ${currentStatus}`,
+          code: 'INVALID_TRANSITION',
+          details: { from: currentStatus, to: 'PENDING' },
+        }, { status: 409 }, env);
+      }
+
       // ── Phase 1: Rules Acceptance Validation ──────────────────────────────
       // FAIL-OPEN: if the rules table doesn't exist, has no active version, or
       // the query errors, the request proceeds WITHOUT requiring acceptance.
