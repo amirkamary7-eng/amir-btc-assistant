@@ -28,8 +28,6 @@ export function createUserHandlers(deps) {
     diagLog,
     // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap
     fireDailyLoginMission,
-    // DIAGNOSTIC: temporary instrumentation for bootstrap hang root-cause analysis.
-    _bsDiag,
   } = deps;
 
   /**
@@ -40,10 +38,6 @@ export function createUserHandlers(deps) {
    * for development/testing outside Telegram Webview.
    */
   async function handleBootstrap(request, env) {
-    // DIAGNOSTIC: entry checkpoint — fires BEFORE any I/O or try block.
-    // If this is absent in logs, the hang is BEFORE handleBootstrap is entered.
-    if (typeof _bsDiag === 'function') _bsDiag(env, 'entry', 'start');
-
     if (!isDatabaseConfigured(env)) {
       return jsonResponse(
         {
@@ -56,10 +50,7 @@ export function createUserHandlers(deps) {
     // Parse body first — readJsonBody consumes the stream, so it must run
     // before any subsequent reads.  authenticateTelegramRequest only reads
     // headers, so calling it after body parsing is safe.
-    if (typeof _bsDiag === 'function') _bsDiag(env, 'read-body', 'start');
-    const _bsBodyT0 = Date.now();
     const bodyResult = await readJsonBody(request, 102400, env);
-    if (typeof _bsDiag === 'function') _bsDiag(env, 'read-body', 'end', { durationMs: Date.now() - _bsBodyT0 });
     if (bodyResult.error) return bodyResult.error;
     let payload = bodyResult.payload;
 
@@ -74,10 +65,7 @@ export function createUserHandlers(deps) {
     let tgUser = null;
     let auth = null;
 
-    if (typeof _bsDiag === 'function') _bsDiag(env, 'telegram-auth', 'start');
-    const _bsAuthT0 = Date.now();
     auth = await optionalTelegramAuth(request, env);
-    if (typeof _bsDiag === 'function') _bsDiag(env, 'telegram-auth', 'end', { durationMs: Date.now() - _bsAuthT0 });
     if (auth.user) {
       userId = String(auth.user.id);
       tgUser = auth.user;
@@ -95,39 +83,23 @@ export function createUserHandlers(deps) {
 
     payload.user_id = userId;
     try {
-      // INSTRUMENTATION: Per-operation error logging for root-cause analysis.
-      const _bsLog = (op, status, extra) => {
-        const entry = { scope: 'bootstrap-op', op, status, ts: Date.now(), ...extra };
-        console.warn(JSON.stringify(entry));
-      };
-
       if (typeof userRepo.ensureTable === 'function') {
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'ensure-table', 'start');
-        const _bsEtT0 = Date.now();
-        try { await userRepo.ensureTable(env); _bsLog('ensureTable', 'ok'); if (typeof _bsDiag === 'function') _bsDiag(env, 'ensure-table', 'end', { durationMs: Date.now() - _bsEtT0 }); } catch (e) {
-          _bsLog('ensureTable', 'error', { errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 200) });
-          if (typeof _bsDiag === 'function') _bsDiag(env, 'ensure-table', 'error', { durationMs: Date.now() - _bsEtT0, errorName: e?.constructor?.name, errorMessage: String(e?.message || '').slice(0, 150) });
+        try { await userRepo.ensureTable(env); } catch (e) {
+          // ensureTable is best-effort — fall through so subsequent operations
+          // can surface the real error if the table truly is missing.
         }
       }
 
       let preExistingUser;
-      if (typeof _bsDiag === 'function') _bsDiag(env, 'get-user', 'start');
-      const _bsGuT0 = Date.now();
       try {
         preExistingUser = await userRepo.getById(env, userId);
-        _bsLog('getById', 'ok');
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'get-user', 'end', { durationMs: Date.now() - _bsGuT0, isNewUser: !preExistingUser });
       } catch (e) {
-        _bsLog('getById', 'error', { errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 200) });
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'get-user', 'error', { durationMs: Date.now() - _bsGuT0, errorName: e?.constructor?.name, errorMessage: String(e?.message || '').slice(0, 150) });
         throw e;
       }
 
       const isNewUser = !preExistingUser;
 
       let userRow;
-      if (typeof _bsDiag === 'function') _bsDiag(env, 'user-bootstrap', 'start');
-      const _bsUbT0 = Date.now();
       try {
         userRow = await userRepo.bootstrap(env, userId, {
           username: normalizeOptionalString(payload.username) || normalizeOptionalString(tgUser?.username),
@@ -136,11 +108,7 @@ export function createUserHandlers(deps) {
           lang: normalizeOptionalString(payload.lang) || normalizeOptionalString(tgUser?.language_code),
           is_premium: Boolean(tgUser?.is_premium),
         }, preExistingUser);
-        _bsLog('bootstrap', 'ok');
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'user-bootstrap', 'end', { durationMs: Date.now() - _bsUbT0 });
       } catch (e) {
-        _bsLog('bootstrap', 'error', { errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 200) });
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'user-bootstrap', 'error', { durationMs: Date.now() - _bsUbT0, errorName: e?.constructor?.name, errorMessage: String(e?.message || '').slice(0, 150) });
         throw e;
       }
       let signedReferrerId = normalizeOptionalString(payload.referrer_id);
@@ -149,13 +117,9 @@ export function createUserHandlers(deps) {
         if (match) signedReferrerId = match[1];
       }
 
-      if (typeof _bsDiag === 'function') _bsDiag(env, 'referral', 'start');
-      const _bsRfT0 = Date.now();
       try {
         await processReferralOnBootstrap(env, userId, signedReferrerId, Boolean(userRow?.channel_joined), isNewUser);
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'referral', 'end', { durationMs: Date.now() - _bsRfT0 });
       } catch (e) {
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'referral', 'error', { durationMs: Date.now() - _bsRfT0, errorName: e?.constructor?.name, errorMessage: String(e?.message || '').slice(0, 150) });
         throw e;
       }
 
@@ -167,25 +131,16 @@ export function createUserHandlers(deps) {
       // directly saves 1 DB round-trip per bootstrap with zero behavior change.
       const freshUserRow = userRow;
       let watchlist;
-      if (typeof _bsDiag === 'function') _bsDiag(env, 'watchlist', 'start');
-      const _bsWlT0 = Date.now();
       try {
         watchlist = await watchlistRepo.getSymbols(env, userId);
-        _bsLog('getSymbols', 'ok');
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'watchlist', 'end', { durationMs: Date.now() - _bsWlT0, count: watchlist?.length });
       } catch (e) {
-        _bsLog('getSymbols', 'error', { errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 200) });
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'watchlist', 'error', { durationMs: Date.now() - _bsWlT0, errorName: e?.constructor?.name, errorMessage: String(e?.message || '').slice(0, 150) });
         throw e;
       }
 
       let channelJoined = false;
       if (tgUser?.id) {
         try {
-          if (typeof _bsDiag === 'function') _bsDiag(env, 'membership-cache', 'start');
-          const _bsMcT0 = Date.now();
           let membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: false });
-          if (typeof _bsDiag === 'function') _bsDiag(env, 'membership-cache', 'end', { durationMs: Date.now() - _bsMcT0, joined: Boolean(membership?.joined) });
           if (membership?.joined) {
             channelJoined = true;
           } else {
@@ -205,15 +160,11 @@ export function createUserHandlers(deps) {
             if (freshUserRow?.channel_joined) {
               channelJoined = true;
             } else {
-              if (typeof _bsDiag === 'function') _bsDiag(env, 'membership-refresh', 'start');
-              const _bsMrT0 = Date.now();
               membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: true });
-              if (typeof _bsDiag === 'function') _bsDiag(env, 'membership-refresh', 'end', { durationMs: Date.now() - _bsMrT0, joined: Boolean(membership?.joined) });
               channelJoined = Boolean(membership?.joined);
             }
           }
         } catch (e) {
-          if (typeof _bsDiag === 'function') _bsDiag(env, 'membership', 'error', { errorName: e?.constructor?.name, errorMessage: String(e?.message || '').slice(0, 150) });
           channelJoined = Boolean(freshUserRow?.channel_joined);
         }
       } else {
@@ -222,15 +173,11 @@ export function createUserHandlers(deps) {
 
       let isUserAdmin = isAdminTelegramId(env, userId);
       if (!isUserAdmin && isDatabaseConfigured(env) && adminRepo) {
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'admin', 'start');
-        const _bsAdT0 = Date.now();
         try {
           await adminRepo.ensureSchema(env).catch(() => {});
           const dbAdmin = await adminRepo.getAdminByTelegramId(env, userId);
           if (dbAdmin && dbAdmin.active) isUserAdmin = true;
-          if (typeof _bsDiag === 'function') _bsDiag(env, 'admin', 'end', { durationMs: Date.now() - _bsAdT0, isAdmin: isUserAdmin });
         } catch (e) {
-          if (typeof _bsDiag === 'function') _bsDiag(env, 'admin', 'error', { durationMs: Date.now() - _bsAdT0, errorName: e?.constructor?.name, errorMessage: String(e?.message || '').slice(0, 150) });
           console.warn('[BOOTSTRAP] Admin DB check failed:', e?.message);
         }
       }
@@ -242,29 +189,21 @@ export function createUserHandlers(deps) {
       // + token_transactions UNIQUE(user_id, tx_type, ref_id) ensure no double-reward across
       // multiple bootstrap calls in the same day.
       if (channelJoined && isDatabaseConfigured(env) && typeof fireDailyLoginMission === 'function') {
-        if (typeof _bsDiag === 'function') _bsDiag(env, 'daily-mission', 'start');
-        const _bsDmT0 = Date.now();
         try {
           await fireDailyLoginMission(env, userId);
-          if (typeof _bsDiag === 'function') _bsDiag(env, 'daily-mission', 'end', { durationMs: Date.now() - _bsDmT0 });
         } catch (e) {
-          if (typeof _bsDiag === 'function') _bsDiag(env, 'daily-mission', 'error', { durationMs: Date.now() - _bsDmT0, errorName: e?.constructor?.name, errorMessage: String(e?.message || '').slice(0, 150) });
           // Non-fatal — bootstrap must succeed even if mission reward fails.
           console.warn('[BOOTSTRAP] fireDailyLoginMission failed (non-fatal):', e?.message);
         }
       }
 
-      if (typeof _bsDiag === 'function') _bsDiag(env, 'response', 'start');
-      const _bsResp = jsonResponse({
+      return jsonResponse({
         status: 'success',
         user: userRepo.normalizeRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
         watchlist, bot_username: String(env.BOT_USERNAME || ''), channel_joined: channelJoined, is_admin: isUserAdmin,
       }, {}, env);
-      if (typeof _bsDiag === 'function') _bsDiag(env, 'response', 'end');
-      return _bsResp;
     } catch (error) {
       console.warn(safeError('bootstrap-user', error));
-      if (typeof _bsDiag === 'function') _bsDiag(env, 'bootstrap-catch', 'error', { errorName: error?.constructor?.name, errorMessage: String(error?.message || '').slice(0, 150) });
       return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, env);
     }
   }

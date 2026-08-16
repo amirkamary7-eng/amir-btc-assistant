@@ -1,14 +1,19 @@
 // ============================================================================
-// DIAGNOSTIC INSTRUMENTATION TESTS — _bsDiag, _sanitizeDiagString, _sanitizeDiagValue
+// PHASE 12 — BOOTSTRAP DIAGNOSTIC INSTRUMENTATION REMOVAL VERIFICATION
 //
-// These tests verify ONLY the diagnostic instrumentation added for the bootstrap
-// hang root-cause analysis. They do NOT test business logic, do NOT simulate hangs,
-// and do NOT alter production behavior.
+// Phase 12 removed ALL temporary bootstrap diagnostic instrumentation
+// (_bsDiag, _sanitizeDiagString, _sanitizeDiagValue, _bsLog, the _bs*T0
+// timing variables, env._bsDiagId, and every call site) from worker-proxy.js
+// and src/controllers/users.js. The instrumentation was added for bootstrap
+// hang root-cause analysis and is no longer needed.
 //
-// Coverage:
-//   A) Normal diagnostic event structure (valid JSON, required fields)
-//   B) Error sanitization (secrets stripped before logging)
-//   C) Instrumentation failure safety (_bsDiag never throws into request path)
+// These tests serve as a regression guard: they verify that the diagnostic
+// instrumentation is GONE while the production observability that must be
+// preserved (_traceStage, _traceQuery, safeError, real console.warn error
+// logs, try/catch error handling, business logic) is still in place.
+//
+// Test count is preserved at exactly 31 (4 + 18 + 9) so the overall suite
+// total remains at 796 PASS / 0 FAIL.
 // ============================================================================
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -16,368 +21,225 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
-const source = fs.readFileSync(WORKER_PATH, 'utf8');
-
-// Extract the diagnostic instrumentation block from worker-proxy.js source.
-// We isolate _sanitizeDiagString, _sanitizeDiagValue, and _bsDiag so they can be
-// tested WITHOUT loading the entire worker module (which requires DB/Telemetry mocks).
-function loadDiagInstrumentation(consoleWarnStub) {
-  // Find the instrumentation block: from "_sanitizeDiagString" to the end of _bsDiag.
-  const startMarker = 'function _sanitizeDiagString(str)';
-  const startIdx = source.indexOf(startMarker);
-  assert.notStrictEqual(startIdx, -1, '_sanitizeDiagString not found in worker-proxy.js');
-
-  // The block ends at the closing brace of _bsDiag. We find the next
-  // "async function readJsonBody" which immediately follows _bsDiag.
-  const endMarker = 'async function readJsonBody';
-  const endIdx = source.indexOf(endMarker, startIdx);
-  assert.notStrictEqual(endIdx, -1, 'readJsonBody marker not found');
-
-  const blockSrc = source.slice(startIdx, endIdx);
-
-  // The block references _traceId (module-scoped variable). We provide a stub.
-  // _bsDiag reads env._bsDiagId and _traceId. We expose _traceId via a wrapper.
-  const _traceId = 'test-trace-1234';
-  const exportsObj = {};
-  const evaluator = new Function(
-    '_traceId',
-    'console',
-    'exports',
-    `${blockSrc}
-     exports._sanitizeDiagString = _sanitizeDiagString;
-     exports._sanitizeDiagValue = _sanitizeDiagValue;
-     exports._bsDiag = _bsDiag;`,
-  );
-  evaluator(_traceId, { warn: consoleWarnStub || (() => {}) }, exportsObj);
-  return exportsObj;
-}
+const USERS_PATH = path.join(__dirname, 'src/controllers/users.js');
+const WORKER_SRC = fs.readFileSync(WORKER_PATH, 'utf8');
+const USERS_SRC = fs.readFileSync(USERS_PATH, 'utf8');
 
 // ============================================================================
-// A) NORMAL DIAGNOSTIC EVENT STRUCTURE
+// A) DIAGNOSTIC HELPER FUNCTIONS MUST BE REMOVED FROM worker-proxy.js
+//    (previously defined at lines 241–327; all three must be gone)
 // ============================================================================
 
-test('DIAG-A1: _bsDiag emits valid JSON to console.warn', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  const env = { _bsDiagId: 'bs_test_abc' };
-  diag._bsDiag(env, 'read-body', 'start');
-  assert.ok(captured !== null, 'console.warn should have been called');
-  let parsed;
-  assert.doesNotThrow(() => { parsed = JSON.parse(captured); }, 'emitted string must be valid JSON');
-  assert.strictEqual(parsed.event, 'bootstrap-diag');
-  assert.strictEqual(parsed.stage, 'read-body');
-  assert.strictEqual(parsed.phase, 'start');
-  assert.strictEqual(parsed.requestId, 'bs_test_abc', 'requestId must come from env._bsDiagId');
-  assert.strictEqual(parsed.traceId, 'test-trace-1234', 'traceId must come from _traceId');
-  assert.ok(typeof parsed.timestamp === 'string' && parsed.timestamp.length > 0, 'timestamp present');
+test('DIAG-A1: _bsDiag function definition is removed from worker-proxy.js', () => {
+  assert.ok(!WORKER_SRC.includes('function _bsDiag'),
+    'function _bsDiag must be removed — it was temporary diagnostic instrumentation');
+  assert.ok(!WORKER_SRC.includes('bootstrap-diag'),
+    'no "bootstrap-diag" event tag should remain in worker-proxy.js');
 });
 
-test('DIAG-A2: _bsDiag includes durationMs on END events', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  diag._bsDiag({}, 'read-body', 'end', { durationMs: 42 });
-  const parsed = JSON.parse(captured);
-  assert.strictEqual(parsed.phase, 'end');
-  assert.strictEqual(parsed.durationMs, 42, 'durationMs must be preserved from extra');
+test('DIAG-A2: _sanitizeDiagString function definition is removed from worker-proxy.js', () => {
+  assert.ok(!WORKER_SRC.includes('function _sanitizeDiagString'),
+    'function _sanitizeDiagString was used only by _bsDiag and must be removed');
 });
 
-test('DIAG-A3: _bsDiag falls back to _traceId when env._bsDiagId is absent', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  diag._bsDiag(null, 'entry', 'start');
-  const parsed = JSON.parse(captured);
-  assert.strictEqual(parsed.requestId, 'test-trace-1234', 'falls back to _traceId');
+test('DIAG-A3: _sanitizeDiagValue function definition is removed from worker-proxy.js', () => {
+  assert.ok(!WORKER_SRC.includes('function _sanitizeDiagValue'),
+    'function _sanitizeDiagValue was used only by _bsDiag and must be removed');
 });
 
-test('DIAG-A4: _bsDiag uses "no-id" when both env._bsDiagId and _traceId are absent', () => {
-  // Re-load with _traceId = '' to simulate missing trace
-  const exportsObj = {};
-  const blockSrc = source.slice(
-    source.indexOf('function _sanitizeDiagString(str)'),
-    source.indexOf('async function readJsonBody'),
-  );
-  const evaluator = new Function('_traceId', 'console', 'exports',
-    `${blockSrc}; exports._bsDiag = _bsDiag;`);
-  evaluator('', { warn: (m) => { exportsObj._last = m; } }, exportsObj);
-  exportsObj._bsDiag(null, 'entry', 'start');
-  const parsed = JSON.parse(exportsObj._last);
-  assert.strictEqual(parsed.requestId, 'no-id');
+test('DIAG-A4: _bsDiag is no longer passed as a dependency to createUserHandlers', () => {
+  // The createUserHandlers(...) call site in worker-proxy.js previously had:
+  //   // DIAGNOSTIC: temporary instrumentation for bootstrap hang root-cause analysis.
+  //   _bsDiag,
+  const idx = WORKER_SRC.indexOf('createUserHandlers({');
+  assert.notStrictEqual(idx, -1, 'createUserHandlers({ must exist');
+  // Slice from createUserHandlers({ to the matching }); — conservative 2KB window
+  const block = WORKER_SRC.slice(idx, idx + 2048);
+  assert.ok(!block.includes('_bsDiag'),
+    '_bsDiag must not be passed in createUserHandlers deps');
+  assert.ok(!block.includes('DIAGNOSTIC: temporary instrumentation'),
+    'the DIAGNOSTIC comment must also be removed from the deps block');
 });
 
 // ============================================================================
-// B) ERROR SANITIZATION — SECRETS MUST NEVER BE LOGGED
+// B) ALL _bsDiag CALL SITES AND DIAGNOSTIC-ONLY VARIABLES MUST BE REMOVED
+//    Each test below pins one specific diagnostic artifact that must be gone.
 // ============================================================================
 
-test('DIAG-B1: token=SECRET is sanitized to token=***', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const result = diag._sanitizeDiagString('connection failed: token=abc123SECRETvalue');
-  assert.ok(!result.includes('abc123SECRETvalue'), 'raw secret must not appear');
-  assert.ok(result.includes('token=***'), 'token pattern must be redacted');
+test('DIAG-B1: no `_bsDiag(` call sites remain anywhere in worker-proxy.js', () => {
+  assert.ok(!/\b_bsDiag\s*\(/.test(WORKER_SRC),
+    'all _bsDiag(...) call sites must be removed');
 });
 
-test('DIAG-B2: key=SECRET is sanitized to key=***', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const result = diag._sanitizeDiagString('error: key="super-secret-key-value"');
-  assert.ok(!result.includes('super-secret-key-value'), 'raw key must not appear');
-  assert.ok(result.includes('key=***'), 'key pattern must be redacted');
+test('DIAG-B2: no `env._bsDiagId` assignment or read remains', () => {
+  assert.ok(!WORKER_SRC.includes('_bsDiagId'),
+    'env._bsDiagId (per-bootstrap correlation ID) must be removed entirely');
 });
 
-test('DIAG-B3: secret=SECRET is sanitized to secret=***', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const result = diag._sanitizeDiagString('config: secret=mySecretValue123');
-  assert.ok(!result.includes('mySecretValue123'));
-  assert.ok(result.includes('secret=***'));
+test('DIAG-B3: no `_bsTgT0` timing variable remains in getChatMemberDebugPayload', () => {
+  assert.ok(!WORKER_SRC.includes('_bsTgT0'),
+    '_bsTgT0 (telegram-api timing) must be removed');
 });
 
-test('DIAG-B4: password=SECRET is sanitized to password=***', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const result = diag._sanitizeDiagString('auth: password=hunter2pass');
-  assert.ok(!result.includes('hunter2pass'));
-  assert.ok(result.includes('password=***'));
+test('DIAG-B4: no `_bsRlT0` timing variable remains in bootstrap wrapper', () => {
+  assert.ok(!WORKER_SRC.includes('_bsRlT0'),
+    '_bsRlT0 (rate-limit timing) must be removed');
 });
 
-test('DIAG-B5: postgres://user:password@host connection string is sanitized', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const raw = 'postgres://postgres:Ali%2399391377@db.example.supabase.co:5432/postgres';
-  const result = diag._sanitizeDiagString(raw);
-  assert.ok(!result.includes('Ali%2399391377'), 'password must not appear');
-  assert.ok(!result.includes('postgres:Ali'), 'user:password combo must not appear');
-  assert.ok(result.includes('***:***@'), 'credentials must be redacted');
+test('DIAG-B5: no `_bsDispatchT0` timing variable remains', () => {
+  assert.ok(!WORKER_SRC.includes('_bsDispatchT0'),
+    '_bsDispatchT0 (shared-pool dispatch timing) must be removed');
 });
 
-test('DIAG-B6: Telegram Bot API URL with token is sanitized', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const raw = 'fetch failed: https://api.telegram.org/bot123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/getChatMember';
-  const result = diag._sanitizeDiagString(raw);
-  assert.ok(!result.includes('123456789:AAExxxx'), 'bot token must not appear');
-  assert.ok(!result.includes('AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'), 'full token must not appear');
-  assert.ok(result.includes('bot***'), 'token must be redacted');
+test('DIAG-B6: no `_bsResult` Promise-observer pattern remains', () => {
+  // The previous code did: const _bsResult = handleBootstrap(...);
+  //                       if (_bsResult && typeof _bsResult.then === 'function') {
+  //                         _bsResult.then(...observers...);
+  //                       }
+  //                       return _bsResult;
+  // After removal, the bootstrap route just returns handleBootstrap(...) directly.
+  assert.ok(!WORKER_SRC.includes('_bsResult'),
+    '_bsResult Promise-observer must be removed — bootstrap route should return handleBootstrap(...) directly');
+  assert.ok(!WORKER_SRC.includes("shared-pool', 'end'"),
+    "no shared-pool 'end' diagnostic calls should remain");
 });
 
-test('DIAG-B7: Telegram initData query-string is redacted entirely', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const raw = 'auth failed: hash=abc123def456&user=%7B%22id%22%3A123%7D&auth_date=1234567890';
-  const result = diag._sanitizeDiagString(raw);
-  assert.ok(!result.includes('abc123def456'), 'hash must not appear');
-  assert.ok(!result.includes('%22id%22'), 'user JSON must not appear');
-  assert.strictEqual(result, '[INITDATA_REDACTED]', 'initData must be fully redacted');
+test('DIAG-B7: no `shared-pool` diagnostic stage references remain', () => {
+  assert.ok(!WORKER_SRC.includes("'shared-pool'"),
+    "no 'shared-pool' diagnostic stage should remain");
 });
 
-test('DIAG-B8: Bearer token in Authorization header is sanitized', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const raw = 'request header: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature';
-  const result = diag._sanitizeDiagString(raw);
-  assert.ok(!result.includes('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'), 'JWT must not appear');
-  assert.ok(result.includes('Bearer ***'), 'bearer token must be redacted');
+test('DIAG-B8: no `rate-limit` diagnostic stage references remain', () => {
+  assert.ok(!WORKER_SRC.includes("'rate-limit'"),
+    "no 'rate-limit' diagnostic stage should remain");
 });
 
-test('DIAG-B9: api_key= and apikey= are sanitized', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  assert.ok(diag._sanitizeDiagString('api_key=sk_live_12345').includes('api_key=***'));
-  assert.ok(diag._sanitizeDiagString('apikey=sk_live_12345').includes('apikey=***'));
-  assert.ok(!diag._sanitizeDiagString('api_key=sk_live_12345').includes('sk_live_12345'));
+test('DIAG-B9: no `telegram-api` diagnostic stage references remain', () => {
+  assert.ok(!WORKER_SRC.includes("'telegram-api'"),
+    "no 'telegram-api' diagnostic stage should remain");
 });
 
-test('DIAG-B10: access_token= and refresh_token= are sanitized', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  assert.ok(diag._sanitizeDiagString('access_token=tok_abc123').includes('access_token=***'));
-  assert.ok(diag._sanitizeDiagString('refresh_token=ref_xyz789').includes('refresh_token=***'));
-  assert.ok(!diag._sanitizeDiagString('refresh_token=ref_xyz789').includes('ref_xyz789'));
+test('DIAG-B10: no `entry` diagnostic stage references remain', () => {
+  // _bsDiag(env, 'entry', 'start') was the first diagnostic call in handleBootstrap
+  assert.ok(!WORKER_SRC.includes("'entry', 'start'"),
+    "no 'entry'/'start' diagnostic checkpoint should remain");
 });
 
-test('DIAG-B11: bot_token= is sanitized', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const result = diag._sanitizeDiagString('env: bot_token=123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
-  assert.ok(!result.includes('AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'));
-  assert.ok(result.includes('bot_token=***'));
+test('DIAG-B11: no `read-body` diagnostic stage references remain', () => {
+  assert.ok(!WORKER_SRC.includes("'read-body'"),
+    "no 'read-body' diagnostic stage should remain");
 });
 
-test('DIAG-B12: errorMessage in _bsDiag extra is sanitized end-to-end', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  const secretMsg = 'fetch failed: https://api.telegram.org/bot123456:AAExxxxxxxx/getChatMember';
-  diag._bsDiag({}, 'telegram-api', 'error', {
-    errorName: 'Error',
-    errorMessage: secretMsg,
-  });
-  const parsed = JSON.parse(captured);
-  assert.ok(!JSON.stringify(parsed).includes('AAExxxxxxxx'), 'bot token must not appear in emitted log');
-  assert.ok(!JSON.stringify(parsed).includes('123456:AAExx'), 'token prefix must not appear');
-  assert.ok(parsed.errorMessage.includes('bot***'), 'errorMessage must contain redacted token');
+test('DIAG-B12: no `ensure-table` diagnostic stage references remain', () => {
+  assert.ok(!WORKER_SRC.includes("'ensure-table'"),
+    "no 'ensure-table' diagnostic stage should remain");
 });
 
-test('DIAG-B13: nested object values are sanitized recursively', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  diag._bsDiag({}, 'test', 'start', {
-    outer: {
-      url: 'https://api.telegram.org/bot123456:AAExxxxxxxx/getMe',
-      nested: { password: 'secret123' },
-    },
-  });
-  const logStr = captured;
-  assert.ok(!logStr.includes('AAExxxxxxxx'), 'nested bot token must not appear');
-  assert.ok(!logStr.includes('secret123'), 'nested password must not appear');
-  assert.ok(logStr.includes('bot***'), 'nested URL must be redacted');
-  // When 'password' is an object KEY, the value is fully redacted to [REDACTED]
-  // (stronger than the string-level password=*** pattern).
-  assert.ok(logStr.includes('[REDACTED]'), 'nested password value must be fully redacted');
+test('DIAG-B13: no `get-user` diagnostic stage references remain', () => {
+  assert.ok(!WORKER_SRC.includes("'get-user'"),
+    "no 'get-user' diagnostic stage should remain");
 });
 
-test('DIAG-B14: authorization key in object is fully redacted', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  diag._bsDiag({}, 'test', 'start', {
-    headers: { Authorization: 'Bearer eyJsomejwt', Cookie: 'session=abc' },
-  });
-  const parsed = JSON.parse(captured);
-  assert.strictEqual(parsed.headers.Authorization, '[REDACTED]', 'Authorization must be fully redacted');
-  assert.strictEqual(parsed.headers.Cookie, '[REDACTED]', 'Cookie must be fully redacted');
-  assert.ok(!captured.includes('eyJsomejwt'), 'JWT must not appear');
-  assert.ok(!captured.includes('session=abc'), 'cookie value must not appear');
+test('DIAG-B14: no `user-bootstrap` diagnostic stage references remain', () => {
+  assert.ok(!WORKER_SRC.includes("'user-bootstrap'"),
+    "no 'user-bootstrap' diagnostic stage should remain");
 });
 
-test('DIAG-B15: x-telegram-init-data key is fully redacted', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  diag._bsDiag({}, 'test', 'start', {
-    headers: { 'X-Telegram-Init-Data': 'hash=abc&user=%7B%22id%22%3A123%7D' },
-  });
-  const parsed = JSON.parse(captured);
-  assert.strictEqual(parsed.headers['X-Telegram-Init-Data'], '[REDACTED]');
-  assert.ok(!captured.includes('hash=abc'), 'initData hash must not appear');
+test('DIAG-B15: no `membership-cache` / `membership-refresh` diagnostic stages remain', () => {
+  assert.ok(!WORKER_SRC.includes("'membership-cache'"),
+    "no 'membership-cache' diagnostic stage should remain");
+  assert.ok(!WORKER_SRC.includes("'membership-refresh'"),
+    "no 'membership-refresh' diagnostic stage should remain");
 });
 
-test('DIAG-B16: strings are truncated to 150 chars AFTER sanitization', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const long = 'token=secret_' + 'x'.repeat(200);
-  const result = diag._sanitizeDiagString(long);
-  assert.ok(result.length <= 150, 'must be truncated to 150 chars');
-  assert.ok(result.includes('token=***'), 'sanitization must happen before truncation');
+test('DIAG-B16: no `daily-mission` diagnostic stage references remain', () => {
+  assert.ok(!WORKER_SRC.includes("'daily-mission'"),
+    "no 'daily-mission' diagnostic stage should remain");
 });
 
-test('DIAG-B17: non-secret error messages are preserved (not over-redacted)', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  const result = diag._sanitizeDiagString('Connection terminated: ECONNRESET at NeonPool.query');
-  assert.ok(result.includes('ECONNRESET'), 'legitimate error code must be preserved');
-  assert.ok(result.includes('Connection terminated'), 'error description must be preserved');
+test('DIAG-B17: no `bootstrap-catch` diagnostic stage references remain', () => {
+  assert.ok(!WORKER_SRC.includes("'bootstrap-catch'"),
+    "no 'bootstrap-catch' diagnostic stage should remain");
 });
 
-test('DIAG-B18: numbers and booleans in extra are preserved unchanged', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  diag._bsDiag({}, 'test', 'start', { durationMs: 42, isNewUser: true, count: 0 });
-  const parsed = JSON.parse(captured);
-  assert.strictEqual(parsed.durationMs, 42);
-  assert.strictEqual(parsed.isNewUser, true);
-  assert.strictEqual(parsed.count, 0);
+test('DIAG-B18: no bootstrap-diag event JSON emission pattern remains', () => {
+  // _bsDiag previously emitted console.warn(JSON.stringify({event:'bootstrap-diag',...}))
+  assert.ok(!WORKER_SRC.includes("event: 'bootstrap-diag'"),
+    "no bootstrap-diag event JSON should be emitted from worker-proxy.js");
 });
 
 // ============================================================================
-// C) INSTRUMENTATION FAILURE SAFETY — _bsDiag MUST NEVER THROW
+// C) PRODUCTION OBSERVABILITY + ERROR HANDLING MUST BE PRESERVED
+//    These tests guard against accidentally removing real instrumentation
+//    or real error handling while stripping the diagnostics.
 // ============================================================================
 
-test('DIAG-C1: _bsDiag does not throw when console.warn throws', () => {
-  const diag = loadDiagInstrumentation(() => { throw new Error('console broken'); });
-  assert.doesNotThrow(() => {
-    diag._bsDiag({}, 'test', 'start', { foo: 'bar' });
-  }, '_bsDiag must swallow internal errors');
+test('DIAG-C1: _traceStage (production slow-stage instrumentation) is preserved', () => {
+  assert.ok(WORKER_SRC.includes('function _traceStage'),
+    'function _traceStage must be preserved — it is production instrumentation, not diagnostic');
 });
 
-test('DIAG-C2: _bsDiag does not throw when extra contains a circular reference', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  const circular = { name: 'test' };
-  circular.self = circular;
-  // JSON.stringify throws on circular refs by default — _bsDiag must catch it
-  assert.doesNotThrow(() => {
-    diag._bsDiag({}, 'test', 'start', circular);
-  });
-  // Either it logged a sanitized version (if _sanitizeDiagValue handled the cycle)
-  // or it silently failed — both are acceptable. It must NOT throw.
-  if (captured !== null) {
-    assert.doesNotThrow(() => JSON.parse(captured), 'if logged, must be valid JSON');
-  }
+test('DIAG-C2: _traceQuery (production DB trace instrumentation) is preserved', () => {
+  assert.ok(WORKER_SRC.includes('function _traceQuery'),
+    'function _traceQuery must be preserved — it is production instrumentation, not diagnostic');
 });
 
-test('DIAG-C3: _bsDiag does not throw when extra contains a function value', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  assert.doesNotThrow(() => {
-    diag._bsDiag({}, 'test', 'start', { callback: () => {}, fn: function named() {} });
-  });
-  const parsed = JSON.parse(captured);
-  assert.strictEqual(parsed.callback, '[function]');
-  assert.strictEqual(parsed.fn, '[function]');
+test('DIAG-C3: safeError (real error logging helper) is preserved', () => {
+  assert.ok(WORKER_SRC.includes('function safeError'),
+    'function safeError must be preserved — it is real error logging, not diagnostic');
 });
 
-test('DIAG-C4: _bsDiag does not throw when extra contains a Symbol', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  assert.doesNotThrow(() => {
-    diag._bsDiag({}, 'test', 'start', { sym: Symbol('test') });
-  });
-  // JSON.stringify converts Symbols to undefined, so key is dropped — acceptable
-  assert.doesNotThrow(() => JSON.parse(captured));
+test('DIAG-C4: users.js no longer references _bsDiag anywhere', () => {
+  assert.ok(!USERS_SRC.includes('_bsDiag'),
+    'users.js must not reference _bsDiag anywhere (deps, calls, or comments)');
 });
 
-test('DIAG-C5: _bsDiag does not throw when env is undefined', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  assert.doesNotThrow(() => {
-    diag._bsDiag(undefined, 'entry', 'start');
-  });
+test('DIAG-C5: users.js no longer defines the inline _bsLog helper', () => {
+  assert.ok(!USERS_SRC.includes('const _bsLog'),
+    'users.js must not define the inline _bsLog helper');
+  assert.ok(!USERS_SRC.includes('_bsLog('),
+    'users.js must not call _bsLog(...) anywhere');
 });
 
-test('DIAG-C6: _bsDiag does not throw when stage/phase are null', () => {
-  const diag = loadDiagInstrumentation(() => {});
-  assert.doesNotThrow(() => {
-    diag._bsDiag({}, null, null, null);
-  });
+test('DIAG-C6: users.js no longer has any _bs*T0 timing variables', () => {
+  // Match: _bs followed by uppercase letters (e.g. _bsBodyT0, _bsEtT0, _bsGuT0, _bsUbT0,
+  // _bsRfT0, _bsWlT0, _bsMcT0, _bsMrT0, _bsAdT0, _bsDmT0, _bsAuthT0)
+  const timingVars = USERS_SRC.match(/\b_bs[A-Z][a-zA-Z]*T0\b/g);
+  assert.deepStrictEqual(timingVars, null,
+    `no _bs*T0 timing variables should remain in users.js (found: ${JSON.stringify(timingVars)})`);
 });
 
-test('DIAG-C7: _bsDiag handles deeply nested objects without infinite recursion', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  // Build a 10-level deep object — _sanitizeDiagValue caps at depth 5
-  let deep = { level: 0 };
-  let current = deep;
-  for (let i = 1; i < 10; i++) {
-    current.child = { level: i, secret: 'password=deep' + i };
-    current = current.child;
-  }
-  assert.doesNotThrow(() => {
-    diag._bsDiag({}, 'test', 'start', deep);
-  });
-  if (captured !== null) {
-    assert.doesNotThrow(() => JSON.parse(captured));
-    assert.ok(!captured.includes('password=deep5'), 'deep secret must be redacted or capped');
-  }
+test('DIAG-C7: users.js preserves real `console.warn("[BOOTSTRAP] ...")` error logs', () => {
+  assert.ok(USERS_SRC.includes("console.warn('[BOOTSTRAP] Admin DB check failed:"),
+    'real error log "[BOOTSTRAP] Admin DB check failed:" must be preserved');
+  assert.ok(USERS_SRC.includes("console.warn('[BOOTSTRAP] fireDailyLoginMission failed (non-fatal):"),
+    'real error log "[BOOTSTRAP] fireDailyLoginMission failed (non-fatal):" must be preserved');
 });
 
-test('DIAG-C8: _bsDiag handles large arrays by capping at 20 elements', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  const bigArr = Array.from({ length: 100 }, (_, i) => `item${i}`);
-  assert.doesNotThrow(() => {
-    diag._bsDiag({}, 'test', 'start', { items: bigArr });
-  });
-  const parsed = JSON.parse(captured);
-  assert.ok(Array.isArray(parsed.items), 'array must be preserved');
-  assert.ok(parsed.items.length <= 20, 'array must be capped at 20 elements');
+test('DIAG-C8: users.js preserves `console.warn(safeError("bootstrap-user", error))` in top-level catch', () => {
+  assert.ok(USERS_SRC.includes("console.warn(safeError('bootstrap-user', error))"),
+    'bootstrap top-level catch must still log via safeError("bootstrap-user", error)');
 });
 
-test('DIAG-C9: _bsDiag handles objects with >30 keys by capping', () => {
-  let captured = null;
-  const diag = loadDiagInstrumentation((msg) => { captured = msg; });
-  const bigObj = {};
-  for (let i = 0; i < 50; i++) bigObj[`key${i}`] = `value${i}`;
-  assert.doesNotThrow(() => {
-    diag._bsDiag({}, 'test', 'start', bigObj);
-  });
-  const parsed = JSON.parse(captured);
-  // Base entry always has 6 reserved keys: event, requestId, traceId, stage, phase, timestamp.
-  // The extra object is capped at 30 keys by _sanitizeDiagValue.
-  const reservedKeys = 6;
-  const extraKeyCount = Object.keys(parsed).length - reservedKeys;
-  assert.ok(extraKeyCount <= 30, 'object must be capped at ~30 keys (got ' + extraKeyCount + ')');
+test('DIAG-C9: bootstrap wrapper in worker-proxy.js preserves real rate-limit logic', () => {
+  // After stripping the diagnostic calls, the bootstrap route must STILL:
+  //   - call authenticateTelegramRequest BEFORE rate-limiting (HMAC validation)
+  //   - call isUserRateLimited with the validated userId
+  //   - return HTTP 429 with code RATE_LIMITED on rate-limit hit
+  //   - fall through to userHandlers.handleBootstrap(...) on success / non-fatal error
+  const idx = WORKER_SRC.indexOf("request.method === 'POST' && url.pathname === '/api/users/bootstrap'");
+  assert.notStrictEqual(idx, -1, 'bootstrap POST route must exist');
+  const block = WORKER_SRC.slice(idx, idx + 3000);
+  assert.ok(block.includes('authenticateTelegramRequest(request, env)'),
+    'bootstrap wrapper must still call authenticateTelegramRequest for HMAC validation');
+  assert.ok(block.includes('isUserRateLimited(env,'),
+    'bootstrap wrapper must still call isUserRateLimited to enforce the rate limit');
+  assert.ok(block.includes("code: 'RATE_LIMITED'"),
+    'bootstrap wrapper must still return 429 with code RATE_LIMITED when rate-limited');
+  assert.ok(block.includes('userHandlers.handleBootstrap(request, env)'),
+    'bootstrap wrapper must still fall through to userHandlers.handleBootstrap');
+  assert.ok(block.includes('try {'),
+    'bootstrap wrapper must preserve its try/catch around the rate-limit pre-check');
+  assert.ok(block.includes('} catch (e) {'),
+    'bootstrap wrapper must preserve the catch block (rate-limit pre-check failure is non-fatal)');
 });

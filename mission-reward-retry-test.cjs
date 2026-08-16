@@ -139,7 +139,11 @@ test('MISSION-RETRY-11: does NOT modify fireDailyLoginMission', () => {
 });
 
 test('MISSION-RETRY-12: does NOT add diagnostics or modify bootstrap', () => {
-  // Verify no _bsDiag or _bsLog references were added
+  // Phase 12: temporary bootstrap diagnostic instrumentation (_bsDiag / _bsLog)
+  // was removed from the codebase entirely. The retry function must not contain
+  // either helper — this assertion is now structural (the helpers no longer
+  // exist anywhere in worker-proxy.js, so their absence here is trivially true
+  // and serves as a regression guard against re-introduction).
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
     WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 2000
@@ -148,6 +152,11 @@ test('MISSION-RETRY-12: does NOT add diagnostics or modify bootstrap', () => {
     'no _bsDiag added to retry function');
   assert.ok(!retryBlock.includes('_bsLog'),
     'no _bsLog added to retry function');
+  // Whole-file regression guard: the diagnostic helpers themselves must be gone.
+  assert.ok(!WORKER_SRC.includes('function _bsDiag'),
+    '_bsDiag function definition must be removed from worker-proxy.js');
+  assert.ok(!WORKER_SRC.includes('function _sanitizeDiagString'),
+    '_sanitizeDiagString function definition must be removed from worker-proxy.js');
 });
 
 test('MISSION-RETRY-13: uses safeError for top-level catch (existing pattern)', () => {
