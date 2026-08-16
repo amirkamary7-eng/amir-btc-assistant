@@ -833,6 +833,36 @@ export function createNotificationPlatformRepository(deps) {
             continue;
           }
 
+          // BYPASS-3 FIX: Re-check user's current preference before sending Telegram.
+          // The preference was checked at enqueue time, but the user may have changed
+          // their preference since then. If they opted out (ch_<category>='none'),
+          // suppress the delivery and mark as 'skipped'.
+          //
+          // Exception: items with forceChannel=TRUE in the payload are mandatory
+          // system notifications (e.g. premium welcome, admin ticket alerts) that
+          // must be delivered regardless of user preference.
+          const itemCategory = payload.category || item.category || null;
+          const itemForceChannel = payload.forceChannel || item.force_channel || false;
+
+          if (itemCategory && !itemForceChannel) {
+            try {
+              const currentPref = await getUserChannelPreference(env, String(item.user_id), itemCategory, pool);
+              if (currentPref === 'none') {
+                // User opted out since enqueue — suppress delivery
+                await queryDb(env,
+                  `UPDATE notification_queue SET status = 'skipped', processed_at = NOW(), error = 'preference_changed_to_none' WHERE id = $1`,
+                  [item.id], 1, pool
+                );
+                processed++;
+                continue;
+              }
+            } catch (prefErr) {
+              // If preference check fails, fail-open (deliver) to avoid
+              // silently dropping notifications due to transient DB errors.
+              console.warn('processQueue preference re-check failed, delivering:', prefErr?.message);
+            }
+          }
+
           // Phase 2: Build Telegram payload with rich message fields
           const tgPayload = {
             chat_id: item.user_id,
@@ -1490,7 +1520,10 @@ export function createNotificationPlatformRepository(deps) {
     deleteTemplate,
     listBroadcasts,
     createBroadcast,
-    processBroadcast,
+    // BYPASS-4 FIX: processBroadcast removed from exports — dead code that
+    // uses forceChannel:'auto' (truthy → bypasses preference check).
+    // All callers use processBroadcastFull instead (which respects preferences).
+    // Kept as internal function for reference but not accessible externally.
     getAnalytics,
     enqueue,
     processQueue,

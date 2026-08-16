@@ -1242,6 +1242,8 @@
     // PHASE 8L: Exposed for the rules modal
     openRulesModal: openRulesModal,
     closeRulesModal: closeRulesModal,
+    // Phase 8: Exposed for hero banner — check cached Premium status
+    isPremiumCached: function () { return _cache ? isPremium(_cache) : false; },
     refresh: function () { _cache = null; _requirement = null; _rules = null; _rulesAcceptedVersion = null; return loadCard(); },
   };
 

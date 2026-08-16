@@ -10422,9 +10422,8 @@ async function renderNotifSettings() {
             items: [
                 { key: 'ch_price_alert', svg: NS_ICONS.price, ic: 'ic-price', t: isFa ? 'هشدار قیمت' : 'Price Alerts', d: isFa ? 'هنگام رسیدن قیمت به مقدار تعیین شده' : 'When price reaches your target', def: 'both' },
                 { key: 'ch_analysis', svg: NS_ICONS.analysis, ic: 'ic-analysis', t: isFa ? 'تحلیل‌های جدید' : 'Analysis', d: isFa ? 'انتشار تحلیل جدید بازار' : 'New market analysis published', def: 'both' },
-                { key: 'ch_breaking_news', svg: NS_ICONS.news, ic: 'ic-news', t: isFa ? 'اخبار فوری' : 'Breaking News', d: isFa ? 'خبرهای مهم و فوری بازار' : 'Important and urgent market news', def: 'both' },
                 { key: 'ch_calendar', svg: NS_ICONS.calendar, ic: 'ic-calendar', t: isFa ? 'تقویم اقتصادی' : 'Calendar Events', d: isFa ? 'هشدار رویدادهای مهم اقتصادی' : 'Important economic events', def: 'both' },
-                { key: 'ch_security', svg: NS_ICONS.security, ic: 'ic-security', t: isFa ? 'امنیت' : 'Security', d: isFa ? 'ورود جدید و فعالیت مشکوک' : 'New login and suspicious activity', def: 'both' },
+                // Phase 5: Removed ch_breaking_news, ch_security — no producer emits these.
             ]
         },
         {
@@ -10440,8 +10439,10 @@ async function renderNotifSettings() {
         {
             label: isFa ? 'اعلان‌های تبلیغاتی' : 'Promotional',
             items: [
-                { key: 'ch_challenges', svg: NS_ICONS.challenge, ic: 'ic-challenge', t: isFa ? 'چالش‌ها' : 'Challenges', d: isFa ? 'کمپین‌ها و رویدادهای ویژه' : 'Campaigns and special events', def: 'mini_app' },
-                { key: 'ch_promotions', svg: NS_ICONS.promo, ic: 'ic-promo', t: isFa ? 'تبلیغات' : 'Promotions', d: isFa ? 'پیشنهادات ویژه و تبلیغات' : 'Special offers and promotions', def: 'none' },
+                // Phase 5: Removed ch_challenges, ch_promotions, ch_breaking_news, ch_security
+                // from UI — no notification producer emits these categories.
+                // Users could configure preferences that had no effect.
+                // These will be re-added when producers are implemented.
             ]
         },
     ];
@@ -12949,6 +12950,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         const slider = document.getElementById('hero-banner-slider');
         const slides = document.querySelectorAll('.hero-slide');
         const dots = document.querySelectorAll('.hero-dot');
+
+        // Phase 8: Hide Premium upsell banner for Premium users.
+        // The first slide (data-slide="0") is the Premium upsell banner.
+        // Premium users should not see "فعال‌سازی Premium" (Activate Premium).
+        if (window.MembershipApp && typeof window.MembershipApp.isPremiumCached === 'function') {
+          // Check cached membership status (set by loadCard from /api/membership/status)
+          if (window.MembershipApp.isPremiumCached()) {
+            const upsellSlide = document.querySelector('.hero-slide[data-slide="0"]');
+            if (upsellSlide) upsellSlide.style.display = 'none';
+            const upsellDot = document.querySelector('.hero-dot[data-dot="0"]');
+            if (upsellDot) upsellDot.style.display = 'none';
+          }
+        }
         if (!slides.length || slides.length < 2) return;
         let current = 0;
         let autoTimer = null;

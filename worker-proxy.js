@@ -2301,7 +2301,6 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
         category: 'referral',
         priority: 'high',
         channel: 'telegram',
-        forceChannel: true,
         skipInApp: true,
         title: '🎉 تبریک!',
         message: messageText,
@@ -9843,9 +9842,16 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
         //   3. Otherwise → deliver via the user's preferred channel(s)
         //
         // REMOVED: legacy boolean price_alert check. The old `price_alert` column
-        // defaults to FALSE in the DB schema, which was silently blocking ALL
-        // alerts for users who never explicitly saved their notification settings.
-        // The new ch_price_alert column (default 'both') is the authoritative source.
+        // PHASE 2 FIX (BYPASS-2): Removed pre-check via _prefCache + forceChannel.
+        // Previously, getUserChannelPreference read from a 60s per-isolate cache,
+        // then forceChannel:true made sendNotification skip the fresh DB query.
+        // This created a 60s stale-cache window where opt-out was ignored.
+        //
+        // Now: pass channel:'both' WITHOUT forceChannel. sendNotification will
+        // do a fresh DB query for ch_price_alert on every dispatch. The pre-check
+        // for 'none' is still done here for the skip optimization (avoids
+        // unnecessary dispatch overhead), but the final authoritative check
+        // is in sendNotification's DB query.
         let userChannel = 'both'; // fail-open: deliver if checks fail
         if (notificationPlatformRepo) {
           try {
@@ -9897,8 +9903,8 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
               message: text,
               category: 'price_alert',
               priority: 'high',
-              channel: userChannel, // honor the preference we already resolved
-              forceChannel: true,   // we already checked — don't re-query
+              channel: 'both', // let sendNotification do fresh DB query
+              // forceChannel NOT set — sendNotification will query ch_price_alert from DB
               metadata: {
                 symbol,
                 price: String(candleClose),
