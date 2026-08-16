@@ -745,24 +745,24 @@
 
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
-      var headingMatch = line.match(/^(#{1,2})\s+(.+)$/);
+      // Phase 8O: Only ## headings create accordion sections.
+      // # heading is the document title (already shown in modal header) — skip it.
+      var headingMatch = line.match(/^##\s+(.+)$/);
       if (headingMatch) {
         // Save previous section
         if (currentTitle !== null) {
           sections.push({ title: currentTitle, content: currentContent });
         }
-        currentTitle = headingMatch[2];
+        currentTitle = headingMatch[1];
         currentContent = [];
+      } else if (/^#\s/.test(line)) {
+        // Phase 8O: Skip # level heading (document title) — it's the modal title
+        continue;
       } else {
-        if (currentTitle === null) {
-          // Content before first heading — create a default section
-          if (line.trim()) {
-            currentTitle = 'مقدمه';
-            currentContent = [line];
-          }
-        } else {
+        if (currentTitle !== null) {
           currentContent.push(line);
         }
+        // Content before first ## heading is skipped (it's the intro under # title)
       }
     }
     // Save last section
@@ -770,9 +770,9 @@
       sections.push({ title: currentTitle, content: currentContent });
     }
 
-    // If no sections found (no headings), render as single block
+    // If no sections found (no ## headings), render as single block
     if (sections.length === 0) {
-      return '<div class="mb-ra-body-inner">' + renderMarkdownLines(lines, 0) + '</div>';
+      return '<div class="mb-ra-body-inner">' + renderMarkdownLines(lines.filter(function(l) { return !/^#\s/.test(l); }), 0) + '</div>';
     }
 
     // Build accordion HTML
