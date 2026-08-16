@@ -2617,6 +2617,100 @@ async function retryFailedWheelRewards(env) {
 }
 
 /**
+ * PHASE 2: Retry failed daily mission rewards.
+ *
+ * If markMissionRewarded succeeds but economyService.grantReward fails
+ * (DB error, rule violation, etc.), the mission_progress row has
+ * rewarded=TRUE but no matching token_transactions row exists.
+ * This function finds those rows and re-grants the reward.
+ *
+ * Idempotent: creditTokens' UNIQUE constraint on (user_id, tx_type, ref_id)
+ * prevents double-credit even if this runs concurrently with a bootstrap.
+ *
+ * Bounded: LIMIT 20 per cron tick (every 15 min), oldest first.
+ * Window: today + yesterday (mission_progress.daily_date >= CURRENT_DATE - 1)
+ *
+ * Follows the same pattern as retryFailedWheelRewards above.
+ */
+async function retryFailedMissionRewards(env) {
+  if (!isDatabaseConfigured(env)) return;
+  if (!economyService || !walletRepo) return;
+  try {
+    // Find mission_progress rows from today + yesterday where:
+    //   completed = TRUE
+    //   rewarded = TRUE
+    //   no matching token_transactions row with the expected ref_id
+    //
+    // ref_id format (must match fireDailyLoginMission exactly):
+    //   'mission_' || user_id || '_daily_login_' || to_char(daily_date, 'YYYY-MM-DD')
+    const result = await queryDb(env,
+      `SELECT mp.user_id, mp.mission_id, mp.daily_date,
+              to_char(mp.daily_date, 'YYYY-MM-DD') AS date_str
+       FROM mission_progress mp
+       WHERE mp.completed = TRUE
+         AND mp.rewarded = TRUE
+         AND mp.daily_date >= CURRENT_DATE - 1
+         AND NOT EXISTS (
+           SELECT 1 FROM token_transactions tt
+           WHERE tt.user_id = mp.user_id
+             AND tt.tx_type = 'mission_reward'
+             AND tt.ref_id = 'mission_' || mp.user_id || '_' || mp.mission_id || '_' || to_char(mp.daily_date, 'YYYY-MM-DD')
+             AND tt.status = 'completed'
+         )
+       ORDER BY mp.daily_date ASC, mp.user_id ASC
+       LIMIT 20`,
+    );
+    if (result.rows.length === 0) return;
+
+    let retried = 0;
+    let succeeded = 0;
+    for (const row of result.rows) {
+      try {
+        // Reconstruct the exact ref_id used by fireDailyLoginMission
+        const refId = `mission_${row.user_id}_${row.mission_id}_${row.date_str}`;
+
+        // Get the current reward amount from DB (not hardcoded)
+        const missionConfig = rewardCenterRepo
+          ? await rewardCenterRepo.getMissionReward(env, String(row.mission_id))
+          : null;
+        if (!missionConfig || !Number(missionConfig.token_amount) || Number(missionConfig.token_amount) <= 0) {
+          // Mission disabled or amount zero — skip (can't reward)
+          retried++;
+          continue;
+        }
+
+        const amount = Number(missionConfig.token_amount);
+        const label = missionConfig.mission_name || row.mission_id;
+
+        const grantResult = await economyService.grantReward({
+          userId: String(row.user_id),
+          amount,
+          rewardType: 'mission_reward',
+          description: `ماموریت: ${label} (retry)`,
+          refId,
+          metadata: {
+            mission_id: String(row.mission_id),
+            mission_label: label,
+            daily_date: row.date_str,
+            retry: true,
+            source: 'cron_retry',
+          },
+          auditInfo: { actor: 'cron-retry' },
+          env,
+        });
+        retried++;
+        if (grantResult && (grantResult.success || grantResult.idempotent)) succeeded++;
+      } catch (e) {
+        // Individual retry failure — don't abort the batch
+        console.warn('Mission reward retry failed for user', row.user_id, 'mission', row.mission_id, 'date', row.date_str, e?.message);
+      }
+    }
+  } catch (e) {
+    console.warn(safeError('mission-reward-retry-cron', e));
+  }
+}
+
+/**
  * Process referral on user bootstrap.
  *
  * ── ROOT-CAUSE FIX (referral not registering for returning users) ──
@@ -12300,6 +12394,22 @@ export default {
         }
       })().catch((e) => {
         console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedWheel', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
+      }));
+      // PHASE 2: Mission reward retry — same pattern as referral/wheel retry
+      const _savedReqPoolForMission = env._reqPool;
+      env._reqPool = null;
+      ctx.waitUntil((async () => {
+        try {
+          await retryFailedMissionRewards(env);
+          _logPhase('phase2-mission', 'ok');
+        } catch (e) {
+          _logPhase('phase2-mission', 'error', { error: e?.message });
+          console.warn('[CRON] mission reward retry failed:', e?.message);
+        } finally {
+          env._reqPool = _savedReqPoolForMission;
+        }
+      })().catch((e) => {
+        console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedMission', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
       }));
     }
   },

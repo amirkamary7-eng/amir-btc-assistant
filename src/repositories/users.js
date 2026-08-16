@@ -10,6 +10,7 @@ export function createUserRepository(deps) {
   const { queryDb, queryDbTransaction, normalizeOptionalString } = deps;
 
   let _tableEnsured = false;
+  let _ensureTablePromise = null;
   // PHASE 1 SAFE OPTIMIZATION: Module-level flag for deleted_users table.
   // Previously checkReferralCooldown ran CREATE TABLE IF NOT EXISTS on EVERY
   // bootstrap with a valid referrer. Now it runs only once per isolate (matching
@@ -21,47 +22,54 @@ export function createUserRepository(deps) {
    * Ensure the users table has all required columns (idempotent).
    * Called once at module init. Adds new tracking columns if missing.
    *
-   * Schema additions (Phase 2 — Users redesign):
-   *   - last_active_at TIMESTAMPTZ: updated on every bootstrap (Mini App open)
-   *   - bot_joined_at TIMESTAMPTZ: set when user first interacts with the bot
-   *   - mini_app_opened_at TIMESTAMPTZ: set when user first opens the Mini App
-   *   - is_premium BOOLEAN: Telegram premium status (from initData)
-   *
-   * These allow the admin dashboard to show REAL activity metrics:
-   *   - Active Today: WHERE last_active_at >= CURRENT_DATE
-   *   - Joined Bot: WHERE bot_joined_at IS NOT NULL
-   *   - Opened Mini App: WHERE mini_app_opened_at IS NOT NULL
+   * Phase 5 optimization: Merged 9 sequential DDL round-trips into a single
+   * multi-statement queryDb call (same pattern as admin.js batchSql).
+   * Uses a Promise singleton to prevent concurrent cold-isolate initialization
+   * from piling up — all concurrent callers await the same in-flight promise.
+   * On failure, the promise is cleared so the next request can retry.
    */
   async function ensureTable(env) {
     if (_tableEnsured) return;
-    try {
-      await queryDb(env, `
-        CREATE TABLE IF NOT EXISTS users (
-          telegram_id VARCHAR(64) PRIMARY KEY,
-          username VARCHAR(128),
-          first_name VARCHAR(128),
-          last_name VARCHAR(128),
-          lang VARCHAR(8) DEFAULT 'fa',
-          channel_joined BOOLEAN DEFAULT FALSE,
-          channel_verified_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ DEFAULT NOW(),
-          updated_at TIMESTAMPTZ DEFAULT NOW()
-        )
-      `);
-      // Add new columns if missing (idempotent)
-      await queryDb(env, `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ`).catch(() => {});
-      await queryDb(env, `ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_joined_at TIMESTAMPTZ`).catch(() => {});
-      await queryDb(env, `ALTER TABLE users ADD COLUMN IF NOT EXISTS mini_app_opened_at TIMESTAMPTZ`).catch(() => {});
-      await queryDb(env, `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE`).catch(() => {});
-      await queryDb(env, `ALTER TABLE users ADD COLUMN IF NOT EXISTS beta_popup_seen BOOLEAN NOT NULL DEFAULT FALSE`).catch(() => {});
-      // Indexes for the new columns (for dashboard query performance)
-      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_users_last_active ON users (last_active_at DESC)`).catch(() => {});
-      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_users_created_at ON users (created_at DESC)`).catch(() => {});
-      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_users_channel_joined ON users (channel_joined) WHERE channel_joined = TRUE`).catch(() => {});
-      _tableEnsured = true;
-    } catch (e) {
-      console.warn('ensureTable users:', e?.message);
+    // Phase 5: Promise singleton — concurrent callers await the same initialization.
+    // On failure, _ensureTablePromise is cleared so the next request can retry.
+    if (!_ensureTablePromise) {
+      _ensureTablePromise = (async () => {
+        try {
+          // Single multi-statement DDL call (9 statements merged into 1 round-trip).
+          // All statements are idempotent (IF NOT EXISTS). Each ALTER/CREATE has
+          // its own catch in the original code — here we rely on IF NOT EXISTS
+          // for idempotency. If any statement fails, the whole batch fails and
+          // _ensureTablePromise is cleared for retry.
+          await queryDb(env, `
+            CREATE TABLE IF NOT EXISTS users (
+              telegram_id VARCHAR(64) PRIMARY KEY,
+              username VARCHAR(128),
+              first_name VARCHAR(128),
+              last_name VARCHAR(128),
+              lang VARCHAR(8) DEFAULT 'fa',
+              channel_joined BOOLEAN DEFAULT FALSE,
+              channel_verified_at TIMESTAMPTZ,
+              created_at TIMESTAMPTZ DEFAULT NOW(),
+              updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_joined_at TIMESTAMPTZ;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS mini_app_opened_at TIMESTAMPTZ;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS beta_popup_seen BOOLEAN NOT NULL DEFAULT FALSE;
+            CREATE INDEX IF NOT EXISTS idx_users_last_active ON users (last_active_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_users_created_at ON users (created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_users_channel_joined ON users (channel_joined) WHERE channel_joined = TRUE;
+          `);
+          _tableEnsured = true;
+        } catch (e) {
+          // Clear the promise so the next request can retry.
+          _ensureTablePromise = null;
+          console.warn('ensureTable users:', e?.message);
+        }
+      })();
     }
+    return _ensureTablePromise;
   }
 
   /**
