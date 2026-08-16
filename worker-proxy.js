@@ -818,10 +818,22 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
       .join('\n');
 
     // secret_key = HMAC-SHA256(key='WebAppData', message=botToken)
-    const secretKey = createHmac('sha256', 'WebAppData').update(botToken).digest();
-
-    // hash = HMAC-SHA256(key=secretKey, message=data_check_string)
-    const computedHash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+    // PHASE 8G.3: Use Web Crypto API (crypto.subtle) instead of node:crypto
+    // createHmac. The CF Workers node:crypto compat layer produces a different
+    // HMAC result than Node.js for the same inputs. Web Crypto is native to
+    // CF Workers and produces consistent, correct results matching the
+    // Telegram Bot API spec.
+    const enc = new TextEncoder();
+    const messageKey = await crypto.subtle.importKey(
+      'raw', enc.encode('WebAppData'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    const secretKeyBuf = await crypto.subtle.sign('HMAC', messageKey, enc.encode(botToken));
+    const hashKey = await crypto.subtle.importKey(
+      'raw', secretKeyBuf, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    const computedHashBuf = await crypto.subtle.sign('HMAC', hashKey, enc.encode(dataCheckString));
+    const computedHash = Array.from(new Uint8Array(computedHashBuf))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
 
     if (!safeCompareStrings(computedHash, receivedHash)) {
       console.error('[TG-AUTH] Hash mismatch — validation failed');
