@@ -427,30 +427,12 @@
     _popupOpen = true;
     var levelLabel = { VIP: 'VIP', PREMIUM: 'پرمیوم', ELITE: 'الیت' }[status.level] || status.level;
 
-    // Phase 8L: Removed cosmetic display from VIP popup — cosmetics will be
+    // Phase 8M: Removed cosmetic display from VIP popup — cosmetics will be
     // accessed from the Shop/Cosmetics area, not the Premium info page.
     var cosmeticHtml = '';
 
-    // Phase 6: Tier-based quota summary
-    var quotaHtml =
-      '<div class="mb-vip-quotas">' +
-        '<div class="mb-vip-quota">' +
-          '<div class="mb-vip-quota-icon">🔔</div>' +
-          '<div class="mb-vip-quota-info"><div class="mb-vip-quota-label">هشدارهای قیمتی</div><div class="mb-vip-quota-val">۱۰ رایگان در روز</div></div>' +
-        '</div>' +
-        '<div class="mb-vip-quota">' +
-          '<div class="mb-vip-quota-icon">🤖</div>' +
-          '<div class="mb-vip-quota-info"><div class="mb-vip-quota-label">چت هوش مصنوعی</div><div class="mb-vip-quota-val">۱۰۰ پیام در روز</div></div>' +
-        '</div>' +
-        '<div class="mb-vip-quota">' +
-          '<div class="mb-vip-quota-icon">🎡</div>' +
-          '<div class="mb-vip-quota-info"><div class="mb-vip-quota-label">چرخ شانس</div><div class="mb-vip-quota-val">۵ اسپین در روز</div></div>' +
-        '</div>' +
-        '<div class="mb-vip-quota">' +
-          '<div class="mb-vip-quota-icon">⭐</div>' +
-          '<div class="mb-vip-quota-info"><div class="mb-vip-quota-label">واچ‌لیست</div><div class="mb-vip-quota-val">۲۰ نماد</div></div>' +
-        '</div>' +
-      '</div>';
+    // Phase 8M: Removed redundant quota rows — benefits are unified below
+    var quotaHtml = '';
 
     var overlay = document.createElement('div');
     overlay.className = 'mb-popup-overlay';
@@ -487,7 +469,7 @@
             (status.lifetime
               ? '<div class="mb-vip-info-item mb-vip-lifetime">' +
                   '<div class="mb-vip-info-label">نوع عضویت</div>' +
-                  '<div class="mb-vip-info-val">∞ مادام‌العمر</div>' +
+                  '<div class="mb-vip-info-val">بدون تاریخ انقضا</div>' +
                 '</div>'
               : '<div class="mb-vip-info-item">' +
                   '<div class="mb-vip-info-label">انقضا</div>' +
@@ -497,10 +479,20 @@
           '</div>' +
           cosmeticHtml +
           quotaHtml +
+          // Phase 8M: Unified benefits structure — same as activation popup
           '<div class="mb-benefits">' +
-            benefitRow('diamond', 'دسترسی دائمی Premium', 'تمام امکانات ویژه برای همیشه') +
-            benefitRow('bolt', 'امکانات اختصاصی آینده', 'دسترسی زودهنگام به قابلیت‌های جدید') +
-            benefitRow('shield', 'دسترسی به Badge حرفه‌ای', 'نمایش نشان اختصاصی Premium در پروفایل شما') +
+            '<div class="mb-benefits-section-title">مزایای Premium</div>' +
+            benefitRow('ai', 'چت هوش مصنوعی', '۱۰۰ پیام در روز با مدل‌های پیشرفته') +
+            benefitRow('bell', 'هشدارهای قیمتی', '۱۰ هشدار رایگان در روز') +
+            benefitRow('wheel', 'چرخ شانس', '۵ اسپین در روز با جوایز ویژه') +
+            benefitRow('star', 'واچ‌لیست', '۲۰ نماد در واچ‌لیست') +
+            benefitRow('gift', 'پاداش روزانه', '۲۰ AB Token رایگان هر روز') +
+            benefitRow('badge', 'دسترسی به Badge حرفه‌ای', 'نمایش نشان اختصاصی Premium در پروفایل شما') +
+            '<div class="mb-benefits-divider"></div>' +
+            '<div class="mb-benefits-section-title">دسترسی‌های اختصاصی</div>' +
+            benefitRow('bolt', 'اولویت دریافت قابلیت‌های جدید', 'دسترسی زودهنگام به امکانات جدید') +
+            benefitRow('shield', 'اولویت پشتیبانی', 'پاسخگویی اولویت‌دار تیم پشتیبانی') +
+            benefitRow('diamond', 'دسترسی دائمی Premium', 'بدون تاریخ انقضا • مطابق شرایط و قوانین عضویت') +
           '</div>' +
         '</div>' +
       '</div>';
@@ -565,17 +557,7 @@
           '<h2 class="mb-popup-title">PREMIUM</h2>' +
           '<p class="mb-popup-subtitle">با فعال‌سازی عضویت Premium، سهمیه بالاتر، امکانات اختصاصی و مزایای دائمی حساب شما فعال خواهد شد.</p>' +
         '</div>' +
-        // Phase 6: Premium quota preview (Normal → Premium comparison)
-        '<div class="mb-quota-preview">' +
-          '<div class="mb-quota-preview-title">مزایای Premium</div>' +
-          '<div class="mb-quota-preview-grid">' +
-            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🔔</span><span class="mb-qpi-label">هشدارها</span><span class="mb-qpi-normal">۳</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۱۰</span></div>' +
-            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🤖</span><span class="mb-qpi-label">چت AI</span><span class="mb-qpi-normal">۵۰</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۱۰۰</span></div>' +
-            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🎡</span><span class="mb-qpi-label">چرخ</span><span class="mb-qpi-normal">۳</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۵</span></div>' +
-            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">⭐</span><span class="mb-qpi-label">واچ‌لیست</span><span class="mb-qpi-normal">۷</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۲۰</span></div>' +
-            '<div class="mb-quota-preview-item"><span class="mb-qpi-icon">🎁</span><span class="mb-qpi-label">پاداش روزانه</span><span class="mb-qpi-normal">۱۰</span><span class="mb-qpi-arrow">→</span><span class="mb-qpi-premium">۲۰</span></div>' +
-          '</div>' +
-        '</div>' +
+        // Phase 8M: Removed duplicate quota preview grid — benefits are listed below
         // Phase 8L: Clean benefits structure — Premium Benefits + Exclusive Access
         '<div class="mb-benefits">' +
           '<div class="mb-benefits-section-title">مزایای Premium</div>' +
@@ -589,7 +571,7 @@
           '<div class="mb-benefits-section-title">دسترسی‌های اختصاصی</div>' +
           benefitRow('bolt', 'اولویت دریافت قابلیت‌های جدید', 'دسترسی زودهنگام به امکانات جدید') +
           benefitRow('shield', 'اولویت پشتیبانی', 'پاسخگویی اولویت‌دار تیم پشتیبانی') +
-          benefitRow('diamond', 'دسترسی دائمی Premium', 'تمام امکانات ویژه برای همیشه') +
+          benefitRow('diamond', 'دسترسی دائمی Premium', 'بدون تاریخ انقضا • مطابق شرایط و قوانین عضویت') +
         '</div>' +
         // Timeline — 6 steps
         '<ul class="mb-timeline">' +
@@ -660,7 +642,7 @@
       '</div>';
     }
 
-    var versionBadge = rules.version ? ('<span class="mb-rules-version">v' + esc(rules.version) + '</span>') : '';
+    var versionBadge = ''; // Phase 8M: Version removed from UI (backend acceptance logic unchanged)
     var titleText = rules.title || 'قوانین عضویت Premium';
     // Phase 8L: Store rules data for the modal — don't display full text in the card
     _rulesDataForModal = rules;
@@ -716,7 +698,6 @@
         '</button>' +
         '<div class="mb-rules-modal-header">' +
           '<h3 class="mb-rules-modal-title">' + esc(titleText) + '</h3>' +
-          (rules.version ? '<span class="mb-rules-modal-version">نسخه ' + esc(rules.version) + '</span>' : '') +
         '</div>' +
         '<div class="mb-rules-modal-body">' + htmlBody + '</div>' +
         '<button class="mb-rules-modal-ok" onclick="MembershipApp.closeRulesModal()">متوجه شدم</button>' +

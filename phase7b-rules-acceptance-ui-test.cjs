@@ -123,19 +123,20 @@ test('B1-RENDER-02: buildRulesSectionHtml() renders the rules section', () => {
     'renders .mb-rules-section container');
   assert.ok(body.includes('mb-rules-title'),
     'renders rules title');
-  assert.ok(body.includes('mb-rules-version'),
-    'renders version badge');
-  assert.ok(body.includes('mb-rules-body'),
-    'renders rules body text');
+  // Phase 8M: Version badge removed from UI (backend logic unchanged)
+  assert.ok(body.includes('mb-rules-view-btn'),
+    'renders view rules button (Phase 8L)');
+  assert.ok(body.includes('mb-rules-accept'),
+    'renders acceptance checkbox');
 });
 
-test('B1-RENDER-03: Rules version displayed as "v<N>" badge', () => {
+// Phase 8M: Version removed from rules UI (backend acceptance logic unchanged)
+test('B1-RENDER-03: Version removed from rules UI (Phase 8M)', () => {
   const body = fnBody(MEMBERSHIP_USER_SRC, 'buildRulesSectionHtml');
-  // The version is embedded inside the span HTML: '>v' + esc(rules.version) + '</span>'
-  assert.ok(body.includes('mb-rules-version') && body.includes('esc(rules.version)'),
-    'version rendered inside .mb-rules-version badge with escaping');
-  assert.ok(body.includes(">v") || body.includes("v' + esc"),
-    'version prefix "v" displayed before the number');
+  assert.ok(!body.includes('mb-rules-version'),
+    'version badge removed from UI (Phase 8M)');
+  assert.ok(body.includes("versionBadge = ''"),
+    'versionBadge is empty string (Phase 8M)');
 });
 
 // Phase 8L: Rules summary text no longer displayed in card — moved to modal
@@ -438,17 +439,13 @@ test('B1-PRESERVE-03: Register button + openBitunix/openRegisterUrl preserved', 
     'register button onclick preserved');
 });
 
-test('B1-PRESERVE-04: Premium quota preview (Normal → Premium) preserved', () => {
+// Phase 8M: Quota preview removed from activation popup (duplicate benefits removed)
+test('B1-PRESERVE-04: Quota preview removed from activation popup (Phase 8M)', () => {
   const block = activationPopupBlock();
-  assert.ok(block.includes('mb-quota-preview'),
-    'quota preview container preserved');
-  assert.ok(block.includes('mb-quota-preview-grid'),
-    'quota preview grid preserved');
-  // Spot-check a few quota values.
-  assert.ok(block.includes('>۳<') && block.includes('>۱۰<'),
-    'alerts 3 → 10 preserved');
-  assert.ok(block.includes('>۵۰<') && block.includes('>۱۰۰<'),
-    'AI 50 → 100 preserved');
+  assert.ok(!block.includes('mb-quota-preview'),
+    'quota preview container removed (Phase 8M)');
+  assert.ok(!block.includes('mb-quota-preview-grid'),
+    'quota preview grid removed (Phase 8M)');
 });
 
 test('B1-PRESERVE-05: Activation timeline (6 steps) preserved', () => {

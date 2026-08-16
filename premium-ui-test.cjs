@@ -38,20 +38,14 @@ test('VIP-02: VIP popup does NOT link to cosmetics shop (Phase 8L)', () => {
   assert.ok(!block.includes('CosmeticsApp.openShop'), 'no cosmetics shop link in VIP popup');
 });
 
-test('VIP-03: VIP popup shows tier-based quota summary', () => {
+// Phase 8M: VIP popup quota rows removed (unified with benefits section)
+test('VIP-03: VIP popup does NOT show separate quota rows (Phase 8M)', () => {
   const block = MEMBERSHIP_USER_SRC.slice(
     MEMBERSHIP_USER_SRC.indexOf('function openVipStatusPopup'),
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup')
   );
-  assert.ok(block.includes('mb-vip-quotas'), 'quota summary container');
-  assert.ok(block.includes('هشدارهای قیمتی'), 'alerts quota');
-  assert.ok(block.includes('چت هوش مصنوعی'), 'AI chat quota');
-  assert.ok(block.includes('چرخ شانس'), 'wheel quota');
-  assert.ok(block.includes('واچ‌لیست'), 'watchlist quota');
-  assert.ok(block.includes('۱۰ رایگان در روز'), 'Premium alerts = 10/day');
-  assert.ok(block.includes('۱۰۰ پیام در روز'), 'Premium AI = 100/day');
-  assert.ok(block.includes('۵ اسپین در روز'), 'Premium wheel = 5/day');
-  assert.ok(block.includes('۲۰ نماد'), 'Premium watchlist = 20');
+  assert.ok(!block.includes('mb-vip-quotas'), 'quota summary container removed (Phase 8M)');
+  assert.ok(block.includes("quotaHtml = ''"), 'quotaHtml is empty (Phase 8M)');
 });
 
 // Phase 8L: Removed redundant 💎 emoji from title
@@ -94,17 +88,14 @@ test('ACT-01: Activation popup title is PREMIUM (no redundant diamond emoji)', (
   assert.ok(!block.includes('>💎 PREMIUM</h2>'), 'redundant 💎 emoji removed');
 });
 
-test('ACT-02: Activation popup shows quota preview', () => {
+// Phase 8M: Quota preview removed from activation popup (duplicate benefits removed)
+test('ACT-02: Activation popup does NOT show quota preview (Phase 8M)', () => {
   const block = MEMBERSHIP_USER_SRC.slice(
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup'),
     MEMBERSHIP_USER_SRC.indexOf('function openPendingPopup')
   );
-  assert.ok(block.includes('mb-quota-preview'), 'quota preview container');
-  assert.ok(block.includes('مزایای Premium'), 'preview title');
-  assert.ok(block.includes('mb-qpi-normal'), 'Normal value');
-  assert.ok(block.includes('mb-qpi-premium'), 'Premium value');
-  const itemCount = (block.match(/mb-quota-preview-item/g) || []).length;
-  assert.ok(itemCount >= 5, 'at least 5 quota preview items (cosmetics removed in Phase 8L)');
+  assert.ok(!block.includes('mb-quota-preview'), 'quota preview removed (Phase 8M)');
+  assert.ok(block.includes('mb-benefits-section-title'), 'benefits section title present');
 });
 
 test('ACT-03: Quota preview does NOT include cosmetics (Phase 8L)', () => {
