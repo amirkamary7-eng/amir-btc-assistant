@@ -99,6 +99,7 @@ VALUES (
   'ACTIVE',
   NOW(),
   'system'
+  )
 ON CONFLICT (version) DO NOTHING;
 
 -- Ensure exactly one ACTIVE version
