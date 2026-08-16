@@ -264,7 +264,11 @@ function isBotConfigured(env) {
 }
 
 function isDatabaseConfigured(env) {
-  return Boolean(env.DATABASE_URL || env.DIRECT_URL);
+  // Phase 8G.1: Also check env.HYPERDRIVE.connectionString — when a Hyperdrive
+  // binding is present, createPool() uses it (raw TCP at CF edge), but this
+  // gate function previously only checked DATABASE_URL/DIRECT_URL. Without
+  // this fix, routes would 503 even when Hyperdrive is correctly configured.
+  return Boolean(env.DATABASE_URL || env.DIRECT_URL || env.HYPERDRIVE?.connectionString);
 }
 
 function isCacheLayerConfigured(env) {

@@ -121,7 +121,15 @@
                                 "AI_COOLDOWN_SECONDS": 4,
                                 "REFERRAL_TOKENS_PER_INVITE": 3,
                                 "BOT_USERNAME": "Amir_BTC_AssistantBot"
-                        }
+                        },
+                        // Phase 8G.1: Staging Hyperdrive — connects to the SEPARATE staging
+                        // Supabase project (jrhlnrsydtvxmpryobcc). MUST NOT point to production.
+                        "hyperdrive": [
+                                {
+                                        "binding": "HYPERDRIVE",
+                                        "id": "417477e0da0d44a4a8d464399e39e072"
+                                }
+                        ]
                 },
                 "production": {
                         "name": "amir-btc-assistant-api-production",
