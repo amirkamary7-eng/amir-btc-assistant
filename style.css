@@ -14372,3 +14372,361 @@ body.jl-locked .cd-fullscreen {
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     background-clip: text; font-weight: 800; letter-spacing: 0.5px;
 }
+
+/* ============================================================================
+   ADVERTISEMENTS — Admin UI for Channel Join / Popup / Message campaigns
+   (uses the existing .rc-card / .rc-form-grid / .rc-field / .adm-table
+    design language; the additions below are section-specific helpers)
+   ============================================================================ */
+
+/* ─── Help banner (intro text above each ad table) ─── */
+.ads-help-banner {
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(245, 166, 35, 0.06);
+    border: 1px solid rgba(245, 166, 35, 0.18);
+    color: #e4e9f2;
+    font-size: 12px;
+    line-height: 1.6;
+    text-align: right; /* RTL */
+}
+.ads-help-banner strong {
+    color: #f7b950;
+    margin-inline-start: 4px;
+}
+
+/* ─── Small inline select for status changes inside table rows ─── */
+.adm-input-sm {
+    display: inline-block;
+    width: auto;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 7px;
+    padding: 5px 8px;
+    color: #e4e9f2;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: border-color 0.18s ease;
+}
+.adm-input-sm:focus {
+    outline: none;
+    border-color: rgba(247, 147, 26, 0.5);
+}
+.adm-input-sm:hover {
+    border-color: rgba(245, 166, 35, 0.35);
+}
+
+/* ─── Image Upload Widget (Popups + Messages) ─── */
+.ads-img-upload {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.ads-img-upload-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 9px;
+    border: 1px dashed rgba(245, 166, 35, 0.35);
+    background: rgba(245, 166, 35, 0.05);
+    color: #f7b950;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    width: fit-content;
+}
+.ads-img-upload-btn:hover {
+    background: rgba(245, 166, 35, 0.12);
+    border-color: rgba(245, 166, 35, 0.5);
+}
+.ads-img-upload-btn:active {
+    transform: scale(0.97);
+}
+.ads-img-preview {
+    width: 100%;
+    max-width: 200px;
+    height: auto;
+    border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    object-fit: contain;
+    background: rgba(0, 0, 0, 0.25);
+    margin-top: 6px;
+}
+.ads-img-hint {
+    font-size: 10px;
+    color: #6b7a8d;
+    margin-top: 2px;
+    line-height: 1.5;
+}
+
+/* ─── Larger textarea for message body ─── */
+.rc-field textarea {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 9px;
+    padding: 10px 12px;
+    color: #FFF;
+    font-size: 13px;
+    font-family: inherit;
+    line-height: 1.6;
+    resize: vertical;
+    min-height: 80px;
+    transition: border-color 0.2s ease;
+    width: 100%;
+}
+.rc-field textarea:focus {
+    outline: none;
+    border-color: rgba(245, 166, 35, 0.40);
+}
+
+/* ─── Radio groups (destinations + audience) — keep toggle-row styling ─── */
+.rc-field .rc-toggle-row input[type="radio"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #F5A623;
+    cursor: pointer;
+}
+
+/* ─── Mobile responsiveness for ads tables ─── */
+@media (max-width: 600px) {
+    .ads-help-banner {
+        font-size: 11px;
+        padding: 8px 10px;
+    }
+    .ads-img-preview {
+        max-width: 120px;
+    }
+    /* Make table action cells wrap nicely on mobile */
+    #admin-section-advertisements .adm-table td {
+        white-space: normal !important;
+        word-break: break-word;
+    }
+    #admin-section-advertisements .adm-table td:last-child {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+    }
+    #admin-section-advertisements .adm-table td:last-child .adm-btn-sm,
+    #admin-section-advertisements .adm-table td:last-child .adm-input-sm {
+        margin-inline-end: 4px;
+    }
+}
+
+/* ============================================================================
+   PHASE 3 — ADVERTISEMENT POPUP (Mini App open, 24h per-user cooldown)
+   Fixed template: image → title → body → button. Content configurable,
+   layout fixed. Matches beta-popup design language for visual consistency.
+   ============================================================================ */
+
+.ad-popup-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(2, 6, 17, 0.88);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100001; /* above beta-popup (100000) */
+    padding: 20px;
+    animation: ad-overlay-in 0.3s ease;
+}
+
+@keyframes ad-overlay-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes ad-card-in {
+    from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes ad-card-out {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(8px) scale(0.97);
+    }
+}
+
+.ad-popup-card {
+    position: relative;
+    background: linear-gradient(170deg, #0B1220 0%, #081526 50%, #0B1220 100%);
+    border: 1px solid rgba(245, 166, 35, 0.18);
+    border-radius: 20px;
+    max-width: 360px;
+    width: 100%;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+    animation: ad-card-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.ad-popup-closing .ad-popup-card {
+    animation: ad-card-out 0.3s ease forwards;
+}
+
+.ad-popup-closing {
+    animation: beta-overlay-out 0.3s ease forwards;
+}
+
+/* Close button (top-right, always visible) */
+.ad-popup-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.ad-popup-close:hover, .ad-popup-close:focus {
+    background: rgba(0, 0, 0, 0.75);
+    transform: scale(1.08);
+    outline: none;
+}
+
+/* Image — full-bleed at top, 16:9 aspect ratio, object-fit cover */
+.ad-popup-image-wrap {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: linear-gradient(135deg, #1a2332 0%, #0d1420 100%);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.ad-popup-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Body — title + text + button, padded */
+.ad-popup-body {
+    padding: 20px 22px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.ad-popup-title {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.35;
+    color: #F5FAFE;
+    text-align: start;
+    /* RTL-aware: Persian text right-aligned by default */
+}
+
+.ad-popup-text {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.6;
+    color: rgba(245, 250, 254, 0.78);
+    text-align: start;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ad-popup-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 8px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #F5A623 0%, #E8941A 100%);
+    color: #0B1220;
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    box-shadow: 0 4px 14px rgba(245, 166, 35, 0.3);
+    align-self: stretch;
+    text-align: center;
+}
+
+.ad-popup-button:hover, .ad-popup-button:focus {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    box-shadow: 0 6px 20px rgba(245, 166, 35, 0.4);
+    outline: none;
+}
+
+.ad-popup-button:active {
+    transform: translateY(0);
+}
+
+/* Mobile — slightly smaller, full-width */
+@media (max-width: 400px) {
+    .ad-popup-overlay {
+        padding: 12px;
+    }
+    .ad-popup-card {
+        max-width: 100%;
+        border-radius: 18px;
+    }
+    .ad-popup-body {
+        padding: 16px 18px 18px;
+    }
+    .ad-popup-title {
+        font-size: 17px;
+    }
+    .ad-popup-text {
+        font-size: 13px;
+    }
+    .ad-popup-button {
+        padding: 11px 18px;
+        font-size: 13px;
+    }
+}
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+    .ad-popup-overlay,
+    .ad-popup-card,
+    .ad-popup-closing .ad-popup-card,
+    .ad-popup-closing {
+        animation-duration: 0.01ms !important;
+        transition: none !important;
+    }
+}

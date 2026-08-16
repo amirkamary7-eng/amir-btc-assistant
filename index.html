@@ -1628,6 +1628,10 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                             <span>اقتصاد هشدارها</span>
                         </button>
+                        <button class="adm-nav-item" data-admin-section="advertisements" onclick="switchAdminSection('advertisements', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                            <span>تبلیغات</span>
+                        </button>
                         <button class="adm-nav-item" data-admin-section="membership" onclick="switchAdminSection('membership', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z"/><path d="M5 20h14"/></svg>
                             <span>عضویت ویژه</span>
@@ -2099,6 +2103,34 @@
                     </div>
                     <div id="ae-dashboard-grid" class="rc-overview-grid"><div class="admin-empty">در حال بارگذاری...</div></div>
                     <div id="ae-configs-section" style="margin-top:16px;"></div>
+                </section>
+
+                <!-- Advertisements Section (Channel Join / Popup / Messages) -->
+                <section class="adm-section" id="admin-section-advertisements">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title">📢 تبلیغات</h3>
+                            <p class="adm-section-desc">مدیریت کانال‌های عضویت، پاپ‌آپ مینی‌اپ و پیام‌های تبلیغاتی</p>
+                        </div>
+                    </div>
+
+                    <!-- Sub-navigation tabs -->
+                    <div class="rc-tabs" id="ads-tabs">
+                        <button class="rc-tab active" data-ads-tab="channels" onclick="switchAdsTab('channels', this)">🔗 کانال‌ها</button>
+                        <button class="rc-tab" data-ads-tab="popups" onclick="switchAdsTab('popups', this)">🪟 پاپ‌آپ</button>
+                        <button class="rc-tab" data-ads-tab="messages" onclick="switchAdsTab('messages', this)">📣 پیام‌ها</button>
+                    </div>
+
+                    <!-- Tab content containers -->
+                    <div class="rc-tab-content" id="ads-tab-channels">
+                        <div id="ads-channels-section"></div>
+                    </div>
+                    <div class="rc-tab-content" id="ads-tab-popups" style="display:none;">
+                        <div id="ads-popups-section"></div>
+                    </div>
+                    <div class="rc-tab-content" id="ads-tab-messages" style="display:none;">
+                        <div id="ads-messages-section"></div>
+                    </div>
                 </section>
 
                 <!-- ══════════════════════════════════════════════════════════

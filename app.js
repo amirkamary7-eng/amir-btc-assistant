@@ -22,6 +22,8 @@ let telegramAuthWaitPromise = null;
 let _authWaitAttempted = false;
 let bootstrapComplete = false;
 let _betaPopupShown = false; // session guard — prevents double-show within same tab
+let _adPopupShown = false; // session guard — prevents double-show of advertisement popup
+let _adPopupFetchInFlight = false; // prevents concurrent /api/advertisements/popups calls
 let _bootstrapPromise = null;
 let _bootstrapLongTimer = null; // Long-term bootstrap retry — survives visibility changes (NOT in _pollingIntervals)
 let _adminPanelInitialized = false;
@@ -1177,6 +1179,14 @@ async function bootstrapUser() {
         if (data.user && data.user.beta_popup_seen === false && !_betaPopupShown) {
             _betaPopupShown = true; // session guard — prevents double-show
             setTimeout(function() { openBetaPopup(); }, 800);
+        }
+
+        // ── Advertisement Popup (Phase 3) ──
+        // Fetch the next eligible admin-configured popup (24h per-user cooldown
+        // enforced server-side via KV). Shown after beta popup so beta takes
+        // precedence. Session guard prevents double-show on re-bootstrap.
+        if (!_adPopupShown) {
+            setTimeout(function() { maybeShowAdPopup(); }, 1200);
         }
     } catch (e) {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);
@@ -13780,6 +13790,173 @@ function closeBetaPopupAndOpenTickets() {
         }
     }, 350); // wait for popup close animation
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3 — Advertisement Popup (Mini App open, 24h per-user cooldown)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Flow:
+//   User opens Mini App
+//     → bootstrapUser() succeeds
+//     → maybeShowAdPopup() called (1.2s delay, after beta popup)
+//     → GET /api/advertisements/popups
+//     → backend iterates active popups, returns first NOT in 24h cooldown
+//     → if popup returned → openAdPopup(popup) renders fixed-template overlay
+//     → user dismisses → POST /api/advertisements/popups/:id/shown (sets KV cooldown)
+//     → next open within 24h → backend returns popup:null → no show
+//     → after 24h → backend returns popup again → shown again
+//
+// Template is FIXED (Phase 4): image → title → body → button. Admin can only
+// configure content, not layout. All text rendered via textContent (XSS-safe).
+
+async function maybeShowAdPopup() {
+    if (_adPopupShown || _adPopupFetchInFlight) return;
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) return;
+    if (isInTelegram() && !isTelegramAuthReady()) return;
+    // Don't show ad popup if beta popup is currently open
+    if (document.getElementById('beta-popup-overlay')) return;
+
+    _adPopupFetchInFlight = true;
+    try {
+        const data = await apiFetch('/api/advertisements/popups', { method: 'GET' });
+        if (data && data.status === 'success' && data.popup) {
+            _adPopupShown = true; // session guard — don't show again this session
+            openAdPopup(data.popup);
+        }
+        // If data.popup is null, the user is in cooldown or no active popups — silent.
+    } catch (e) {
+        // Non-fatal — ad popups are non-critical. Don't surface errors to user.
+        console.warn('[AD-POPUP] fetch failed:', e?.message || e);
+    } finally {
+        _adPopupFetchInFlight = false;
+    }
+}
+
+function openAdPopup(popup) {
+    if (!popup || !popup.id) return;
+
+    // Dedupe — remove any existing ad popup
+    const existing = document.getElementById('ad-popup-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ad-popup-overlay';
+    overlay.className = 'ad-popup-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'ad-popup-title-el');
+
+    // Backdrop click closes popup
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) closeAdPopup(popup.id);
+    });
+    // Escape key closes popup
+    overlay.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeAdPopup(popup.id);
+    });
+
+    // ── Fixed template: image (optional) → title → body → button (optional) ──
+    // All content is rendered via textContent (never innerHTML) for XSS safety.
+    // The backend also sanitizes (sanitizeText strips ALL HTML tags), so this
+    // is defense-in-depth.
+    const card = document.createElement('div');
+    card.className = 'ad-popup-card';
+    card.setAttribute('tabindex', '-1');
+
+    // Close button (top-right)
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'ad-popup-close';
+    closeBtn.setAttribute('type', 'button');
+    closeBtn.setAttribute('aria-label', 'بستن');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.addEventListener('click', function() { closeAdPopup(popup.id); });
+    card.appendChild(closeBtn);
+
+    // Image (optional) — only render if image_url is present and valid
+    if (popup.image_url) {
+        const imgWrap = document.createElement('div');
+        imgWrap.className = 'ad-popup-image-wrap';
+        const img = document.createElement('img');
+        img.className = 'ad-popup-image';
+        img.alt = popup.title || 'Advertisement';
+        img.loading = 'lazy';
+        img.src = popup.image_url;
+        // Security: referrerpolicy + no referrer to prevent leaking Mini App URL to external hosts
+        img.referrerPolicy = 'no-referrer';
+        // Graceful fallback if image fails to load
+        img.addEventListener('error', function() {
+            imgWrap.style.display = 'none';
+        });
+        imgWrap.appendChild(img);
+        card.appendChild(imgWrap);
+    }
+
+    // Body container (title + text + button)
+    const body = document.createElement('div');
+    body.className = 'ad-popup-body';
+
+    const title = document.createElement('h2');
+    title.className = 'ad-popup-title';
+    title.id = 'ad-popup-title-el';
+    title.textContent = popup.title || ''; // textContent = XSS-safe
+    body.appendChild(title);
+
+    if (popup.body_text) {
+        const text = document.createElement('p');
+        text.className = 'ad-popup-text';
+        text.textContent = popup.body_text; // textContent = XSS-safe
+        body.appendChild(text);
+    }
+
+    if (popup.button_label && popup.button_url) {
+        const btn = document.createElement('a');
+        btn.className = 'ad-popup-button';
+        btn.textContent = popup.button_label; // textContent = XSS-safe
+        btn.href = popup.button_url;
+        btn.target = '_blank';
+        btn.rel = 'noopener noreferrer';
+        // Record impression when user clicks the button (in addition to dismiss)
+        btn.addEventListener('click', function() {
+            try {
+                apiFetch('/api/advertisements/popups/' + encodeURIComponent(popup.id) + '/shown', { method: 'POST' }).catch(function() {});
+            } catch {}
+        });
+        body.appendChild(btn);
+    }
+
+    card.appendChild(body);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    // Focus the card for accessibility
+    setTimeout(function() { card.focus(); }, 100);
+}
+
+function closeAdPopup(popupId) {
+    const overlay = document.getElementById('ad-popup-overlay');
+    if (!overlay) return;
+
+    // Closing animation
+    overlay.classList.add('ad-popup-closing');
+    setTimeout(function() {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }, 300);
+
+    // Record impression (sets 24h KV cooldown server-side).
+    // Fire-and-forget — non-blocking. If this fails, the popup will re-show
+    // on next open (acceptable fallback — better to over-show than under-show).
+    if (popupId && API_BASE) {
+        try {
+            apiFetch('/api/advertisements/popups/' + encodeURIComponent(popupId) + '/shown', { method: 'POST' }).catch(function(e) {
+                console.warn('[AD-POPUP] failed to record impression:', e?.message || e);
+            });
+        } catch {}
+    }
+}
+
+window.maybeShowAdPopup = maybeShowAdPopup;
+window.openAdPopup = openAdPopup;
+window.closeAdPopup = closeAdPopup;
 
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {

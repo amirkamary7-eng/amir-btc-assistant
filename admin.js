@@ -135,6 +135,7 @@ const ADMIN_SECTION_PERMS = {
     'reward-center':       ['wallet.reward','referral.reward'],
     'notification-center': ['notifications.send','notifications.manage'],
     'alert-economy':       ['market.alerts'],
+    'advertisements':      ['ads.banners','ads.manage'],
     'membership':          null,  // all admins can manage membership
     'system-controls':     ['system.settings','system.maintenance'],
     'system-health':       ['system.settings'],
@@ -501,6 +502,7 @@ const _adminSectionLabels = {
     'reward-center': 'مرکز پاداش',
     'notification-center': 'مرکز اعلانات',
     'alert-economy': 'اقتصاد هشدارها',
+    'advertisements': 'تبلیغات',
     'system-controls': 'کنترل سیستم',
     'system-health': 'سلامت سیستم',
     'logs': 'لاگ‌ها',
@@ -649,6 +651,7 @@ function switchAdminSection(section, btn) {
         case 'reward-center': loadRewardCenterOverview(); break;
         case 'notification-center': loadNpOverview(); break;
         case 'alert-economy': loadAlertEconomyDashboard(); break;
+        case 'advertisements': loadAdvertisementsOverview(); break;
         case 'membership': loadAdminMembership(); break;
         case 'system-controls': loadMaintenanceSettings(); break;
         case 'system-health': loadAdminSystemHealth(); break;
@@ -3101,6 +3104,773 @@ window.adminReplyTicket = adminReplyTicket;
 window.adminSetTicketStatus = adminSetTicketStatus;
 window.adminDeleteTicket = adminDeleteTicket;
 window.toggleAdminTicketDetail = toggleAdminTicketDetail;
+
+// ════════════════════════════════════════════════════════════════════
+// ADVERTISEMENTS — Admin UI for Channel Join / Popup / Message campaigns
+// Backend: src/controllers/advertisements.js + src/repositories/advertisements.js
+// Three sub-tabs (channels / popups / messages) follow the reward-center
+// and notification-center pattern (.rc-tabs + .rc-tab-content).
+// ════════════════════════════════════════════════════════════════════
+
+var _adsCurrentTab = 'channels';
+var _adsChannelCache = [];
+var _adsPopupCache = [];
+var _adsMessageCache = [];
+
+// Persian labels + color classes for campaign statuses
+function _adStatusMeta(status) {
+    switch (status) {
+        case 'active':   return { label: 'فعال',    color: 'green' };
+        case 'paused':   return { label: 'متوقف',   color: 'orange' };
+        case 'archived': return { label: 'بایگانی', color: 'gray' };
+        case 'draft': default: return { label: 'پیش‌نویس', color: 'gray' };
+    }
+}
+
+function _adStatusBadge(status) {
+    var meta = _adStatusMeta(status);
+    return '<span class="admin-badge admin-badge-' + meta.color + '">' + adminEscapeHtml(meta.label) + '</span>';
+}
+
+// Build a small inline status dropdown for a campaign row
+function _adStatusSelect(setterFnName, id, currentStatus) {
+    var opts = [
+        { value: 'draft', label: 'پیش‌نویس' },
+        { value: 'active', label: 'فعال' },
+        { value: 'paused', label: 'متوقف' },
+        { value: 'archived', label: 'بایگانی' },
+    ];
+    var html = '<select class="adm-input adm-input-sm" onchange="' + adminEscapeHtml(setterFnName) +
+        '(\'' + adminEscapeJsId(String(id)) + '\', this.value)" style="padding:5px 8px;font-size:11px;min-width:96px;">';
+    opts.forEach(function (o) {
+        html += '<option value="' + adminEscapeHtml(o.value) + '"' + (currentStatus === o.value ? ' selected' : '') + '>' + adminEscapeHtml(o.label) + '</option>';
+    });
+    html += '</select>';
+    return html;
+}
+
+// Persian labels + color classes for destinations (mini_app/telegram/both)
+function _adsDestinationMeta(dest) {
+    switch (dest) {
+        case 'mini_app': return { icon: '📱', label: 'مینی‌اپ', color: 'blue' };
+        case 'telegram': return { icon: '✈️', label: 'تلگرام', color: 'blue' };
+        case 'both': default: return { icon: '📱✈️', label: 'هر دو', color: 'blue' };
+    }
+}
+
+// Persian labels + color classes for target audience (free/premium/all)
+function _adsAudienceMeta(aud) {
+    switch (aud) {
+        case 'free':    return { label: 'رایگان',  color: 'gray' };
+        case 'premium': return { label: 'ویژه',    color: 'orange' };
+        case 'all': default: return { label: 'همه', color: 'green' };
+    }
+}
+
+// ─── Tab Switcher ────────────────────────────────────────────
+
+function switchAdsTab(tab, btn) {
+    _adsCurrentTab = tab;
+    document.querySelectorAll('#ads-tabs .rc-tab').forEach(function (t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    else {
+        var target = document.querySelector('#ads-tabs .rc-tab[data-ads-tab="' + tab + '"]');
+        if (target) target.classList.add('active');
+    }
+    document.querySelectorAll('#admin-section-advertisements .rc-tab-content').forEach(function (c) { c.style.display = 'none'; });
+    var active = document.getElementById('ads-tab-' + tab);
+    if (active) active.style.display = '';
+    switch (tab) {
+        case 'channels': loadAdChannels(); break;
+        case 'popups':   loadAdPopups();   break;
+        case 'messages': loadAdMessages(); break;
+    }
+}
+window.switchAdsTab = switchAdsTab;
+
+// Entry point — called when the parent "advertisements" nav item is clicked.
+function loadAdvertisementsOverview() {
+    switchAdsTab('channels', null);
+}
+window.loadAdvertisementsOverview = loadAdvertisementsOverview;
+
+// ─── Shared Image Upload Widget ──────────────────────────────
+// Converts a file → base64 data URI via FileReader.readAsDataURL,
+// then POSTs to /api/admin/advertisements/upload-image and fills
+// the target input with the returned URL. Shows a live preview.
+
+async function uploadAdImage(file, targetInputId, previewImgId) {
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+        adminToast('حجم تصویر باید کمتر از ۵۰۰ کیلوبایت باشد', 'error');
+        return;
+    }
+    var allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'];
+    if (allowed.indexOf(file.type) === -1) {
+        adminToast('فرمت تصویر پشتیبانی نمی‌شود (JPEG/PNG/WEBP/GIF/AVIF)', 'error');
+        return;
+    }
+    var reader = new FileReader();
+    reader.onload = async function (e) {
+        var dataUri = e.target.result;
+        // Show local preview immediately (before upload completes)
+        var preview = document.getElementById(previewImgId);
+        if (preview) {
+            preview.src = dataUri;
+            preview.style.display = 'block';
+        }
+        try {
+            adminToast('در حال آپلود تصویر...', 'info');
+            var data = await adminApiFetch('/api/admin/advertisements/upload-image', {
+                method: 'POST',
+                body: JSON.stringify({ data_uri: dataUri, content_type: file.type })
+            });
+            if (data && data.status === 'success' && data.url) {
+                var input = document.getElementById(targetInputId);
+                if (input) input.value = data.url;
+                adminToast('تصویر آپلود شد', 'success');
+            } else {
+                adminToast((data && data.message) || 'خطا در آپلود تصویر', 'error');
+            }
+        } catch (err) {
+            console.error('uploadAdImage:', err);
+            adminToast('خطا در آپلود: ' + (err.message || ''), 'error');
+        }
+    };
+    reader.onerror = function () {
+        adminToast('خطا در خواندن فایل تصویر', 'error');
+    };
+    reader.readAsDataURL(file);
+}
+window.uploadAdImage = uploadAdImage;
+
+// ════════════════════════════════════════════════════════════════════
+// CHANNELS — /api/admin/advertisements/channels
+// ════════════════════════════════════════════════════════════════════
+
+async function loadAdChannels() {
+    var section = document.getElementById('ads-channels-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    var token = _adminLoadToken;
+    try {
+        var data = await adminApiFetch('/api/admin/advertisements/channels');
+        if (_isLoadTokenStale(token)) return;
+        if (data && data.status === 'success' && Array.isArray(data.channels)) {
+            _adsChannelCache = data.channels;
+            var rows = data.channels.map(function (c) {
+                var username = c.channel_username ? '@' + adminEscapeHtml(c.channel_username) : '—';
+                var title = c.channel_title ? adminEscapeHtml(c.channel_title) : '—';
+                var statusBadge = _adStatusBadge(c.campaign_status || c.status || 'draft');
+                var activeBadge = c.is_active
+                    ? '<span class="admin-badge admin-badge-green">بله</span>'
+                    : '<span class="admin-badge admin-badge-gray">خیر</span>';
+                var statusSelect = _adStatusSelect('setAdChannelStatus', c.id, c.campaign_status || c.status || 'draft');
+                return '<tr>' +
+                    '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
+                        '<div style="font-size:11px;color:#7a8499;margin-top:2px;">' + username + '</div>' +
+                        '<div style="font-size:10px;color:#5a6378;margin-top:2px;direction:ltr;text-align:right;">' + adminEscapeHtml(c.join_url || '') + '</div></td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td>' + activeBadge + '</td>' +
+                    '<td>' + adminFormatNumber(c.display_order || 0) + '</td>' +
+                    '<td style="white-space:normal;">' +
+                        '<button class="adm-btn-sm" onclick="showAdChannelForm(\'' + adminEscapeJsId(String(c.id)) + '\')">ویرایش</button> ' +
+                        statusSelect + ' ' +
+                        '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdChannel(\'' + adminEscapeJsId(String(c.id)) + '\')">حذف</button>' +
+                    '</td>' +
+                '</tr>';
+            }).join('');
+            section.innerHTML =
+                '<div class="ads-help-banner">' +
+                    '<strong>ℹ️ راهنما:</strong> این کانال‌ها به عنوان کانال‌های موردنیاز عضویت تنظیم می‌شوند. کاربر باید عضو همه کانال‌های فعال باشد.' +
+                '</div>' +
+                '<div class="rc-card">' +
+                    '<h4 class="rc-card-title">🔗 کانال‌های عضویت</h4>' +
+                    '<button class="adm-btn adm-btn-primary" onclick="showAdChannelForm(null)" style="margin-bottom:12px;">➕ افزودن کانال</button>' +
+                    '<div id="ads-channel-form" style="display:none;margin-bottom:14px;"></div>' +
+                    '<div class="adm-table-wrap">' +
+                        '<table class="adm-table">' +
+                            '<thead><tr><th>کانال</th><th>وضعیت</th><th>نمایش</th><th>ترتیب</th><th>عملیات</th></tr></thead>' +
+                            '<tbody>' + (rows || '<tr><td colspan="5" class="admin-empty">کانالی موجود نیست</td></tr>') + '</tbody>' +
+                        '</table>' +
+                    '</div>' +
+                '</div>';
+        } else {
+            _adsChannelCache = [];
+            section.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>';
+        }
+    } catch (e) {
+        _adsChannelCache = [];
+        section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        console.error('loadAdChannels:', e);
+    }
+}
+window.loadAdChannels = loadAdChannels;
+
+function showAdChannelForm(channelId) {
+    var form = document.getElementById('ads-channel-form');
+    if (!form) return;
+    // Create mode (channelId is null/undefined)
+    if (channelId === null || channelId === undefined) {
+        form.style.display = form.style.display === 'none' ? '' : 'none';
+        if (form.style.display === 'none') return;
+        form.innerHTML =
+            '<div class="rc-card" style="border-color:rgba(245,166,35,0.3);">' +
+                '<h4 class="rc-card-title">➕ کانال جدید</h4>' +
+                '<div class="rc-form-grid">' +
+                    '<div class="rc-field"><label>یوزرنیم کانال (بدون @)</label><input type="text" id="ads-ch-username" placeholder="amirbtc"></div>' +
+                    '<div class="rc-field"><label>عنوان کانال</label><input type="text" id="ads-ch-title" placeholder="کانال امیر بیت‌کوین"></div>' +
+                    '<div class="rc-field"><label>لینک عضویت</label><input type="text" id="ads-ch-joinurl" placeholder="https://t.me/amirbtc" dir="ltr"></div>' +
+                    '<div class="rc-field"><label>ترتیب نمایش</label><input type="number" id="ads-ch-order" value="0" min="0"></div>' +
+                    '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-ch-status"><option value="draft">پیش‌نویس</option><option value="active" selected>فعال</option><option value="paused">متوقف</option><option value="archived">بایگانی</option></select></div>' +
+                    '<div class="rc-field"><label>نمایش</label><label class="rc-toggle-row"><input type="checkbox" id="ads-ch-active" checked><span>فعال برای نمایش</span></label></div>' +
+                '</div>' +
+                '<button class="adm-btn adm-btn-primary" onclick="saveAdChannel(null)" style="margin-top:10px;">ایجاد کانال</button> ' +
+                '<button class="adm-btn" onclick="document.getElementById(\'ads-channel-form\').style.display=\'none\'" style="margin-top:10px;">انصراف</button>' +
+            '</div>';
+        return;
+    }
+    // Edit mode — find in cache
+    var ch = _adsChannelCache.find(function (c) { return String(c.id) === String(channelId); });
+    if (!ch) { adminToast('کانال یافت نشد', 'error'); return; }
+    var currentStatus = ch.campaign_status || ch.status || 'draft';
+    form.style.display = '';
+    form.innerHTML =
+        '<div class="rc-card" style="border-color:rgba(245,166,35,0.3);">' +
+            '<h4 class="rc-card-title">✏️ ویرایش کانال: @' + adminEscapeHtml(ch.channel_username || '') + '</h4>' +
+            '<div class="rc-form-grid">' +
+                '<div class="rc-field"><label>یوزرنیم کانال (بدون @)</label><input type="text" id="ads-ch-username" value="' + adminEscapeHtml(ch.channel_username || '') + '"></div>' +
+                '<div class="rc-field"><label>عنوان کانال</label><input type="text" id="ads-ch-title" value="' + adminEscapeHtml(ch.channel_title || '') + '"></div>' +
+                '<div class="rc-field"><label>لینک عضویت</label><input type="text" id="ads-ch-joinurl" value="' + adminEscapeHtml(ch.join_url || '') + '" dir="ltr"></div>' +
+                '<div class="rc-field"><label>ترتیب نمایش</label><input type="number" id="ads-ch-order" value="' + adminFormatNumber(ch.display_order || 0) + '" min="0"></div>' +
+                '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-ch-status">' +
+                    '<option value="draft"' + (currentStatus === 'draft' ? ' selected' : '') + '>پیش‌نویس</option>' +
+                    '<option value="active"' + (currentStatus === 'active' ? ' selected' : '') + '>فعال</option>' +
+                    '<option value="paused"' + (currentStatus === 'paused' ? ' selected' : '') + '>متوقف</option>' +
+                    '<option value="archived"' + (currentStatus === 'archived' ? ' selected' : '') + '>بایگانی</option>' +
+                '</select></div>' +
+                '<div class="rc-field"><label>نمایش</label><label class="rc-toggle-row"><input type="checkbox" id="ads-ch-active" ' + (ch.is_active ? 'checked' : '') + '><span>فعال برای نمایش</span></label></div>' +
+            '</div>' +
+            '<button class="adm-btn adm-btn-primary" onclick="saveAdChannel(\'' + adminEscapeJsId(String(channelId)) + '\')" style="margin-top:10px;">به‌روزرسانی</button> ' +
+            '<button class="adm-btn" onclick="document.getElementById(\'ads-channel-form\').style.display=\'none\'" style="margin-top:10px;">انصراف</button>' +
+        '</div>';
+}
+window.showAdChannelForm = showAdChannelForm;
+
+async function saveAdChannel(channelId) {
+    var joinUrl = (document.getElementById('ads-ch-joinurl') ? document.getElementById('ads-ch-joinurl').value : '').trim();
+    if (joinUrl.indexOf('https://t.me/') !== 0) {
+        adminToast('لینک عضویت باید با https://t.me/ شروع شود', 'error');
+        return;
+    }
+    var payload = {
+        channel_username: (document.getElementById('ads-ch-username') ? document.getElementById('ads-ch-username').value : '').trim().replace(/^@/, ''),
+        channel_title:    (document.getElementById('ads-ch-title') ? document.getElementById('ads-ch-title').value : '').trim(),
+        join_url:         joinUrl,
+        display_order:    Number(document.getElementById('ads-ch-order') ? document.getElementById('ads-ch-order').value : 0) || 0,
+        is_active:        document.getElementById('ads-ch-active') ? document.getElementById('ads-ch-active').checked : false,
+        status:           document.getElementById('ads-ch-status') ? document.getElementById('ads-ch-status').value : 'draft',
+    };
+    try {
+        var url = channelId
+            ? '/api/admin/advertisements/channels/' + encodeURIComponent(channelId)
+            : '/api/admin/advertisements/channels';
+        var method = channelId ? 'PUT' : 'POST';
+        var data = await adminApiFetch(url, { method: method, body: JSON.stringify(payload) });
+        if (data && data.status === 'success') {
+            adminToast(channelId ? 'کانال به‌روزرسانی شد' : 'کانال ایجاد شد', 'success');
+            var form = document.getElementById('ads-channel-form');
+            if (form) form.style.display = 'none';
+            loadAdChannels();
+        } else {
+            adminToast((data && data.message) || 'خطا در ذخیره', 'error');
+        }
+    } catch (e) {
+        console.error('saveAdChannel:', e);
+        adminToast('خطا در ذخیره: ' + (e.message || ''), 'error');
+    }
+}
+window.saveAdChannel = saveAdChannel;
+
+async function deleteAdChannel(channelId) {
+    if (!confirm('از حذف این کانال مطمئن هستید؟')) return;
+    try {
+        var data = await adminApiFetch('/api/admin/advertisements/channels/' + encodeURIComponent(channelId), { method: 'DELETE' });
+        if (data && data.status === 'success') {
+            adminToast('کانال حذف شد', 'success');
+            loadAdChannels();
+        } else {
+            adminToast((data && data.message) || 'خطا در حذف', 'error');
+        }
+    } catch (e) {
+        console.error('deleteAdChannel:', e);
+        adminToast('خطا در حذف', 'error');
+    }
+}
+window.deleteAdChannel = deleteAdChannel;
+
+async function setAdChannelStatus(channelId, status) {
+    try {
+        var data = await adminApiFetch('/api/admin/advertisements/channels/' + encodeURIComponent(channelId) + '/status', {
+            method: 'POST',
+            body: JSON.stringify({ status: status })
+        });
+        if (data && data.status === 'success') {
+            adminToast('وضعیت تغییر کرد', 'success');
+            loadAdChannels();
+        } else {
+            adminToast((data && data.message) || 'خطا در تغییر وضعیت', 'error');
+        }
+    } catch (e) {
+        console.error('setAdChannelStatus:', e);
+        adminToast('خطا در تغییر وضعیت', 'error');
+    }
+}
+window.setAdChannelStatus = setAdChannelStatus;
+
+// ════════════════════════════════════════════════════════════════════
+// POPUPS — /api/admin/advertisements/popups
+// ════════════════════════════════════════════════════════════════════
+
+async function loadAdPopups() {
+    var section = document.getElementById('ads-popups-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    var token = _adminLoadToken;
+    try {
+        var data = await adminApiFetch('/api/admin/advertisements/popups');
+        if (_isLoadTokenStale(token)) return;
+        if (data && data.status === 'success' && Array.isArray(data.popups)) {
+            _adsPopupCache = data.popups;
+            var rows = data.popups.map(function (p) {
+                var title = p.title ? adminEscapeHtml(p.title) : '—';
+                var statusBadge = _adStatusBadge(p.campaign_status || p.status || 'draft');
+                var cooldown = p.cooldown_seconds ? adminFormatNumber(p.cooldown_seconds) + 's' : '—';
+                var updated = p.updated_at ? adminFormatDate(p.updated_at) : '—';
+                var statusSelect = _adStatusSelect('setAdPopupStatus', p.id, p.campaign_status || p.status || 'draft');
+                return '<tr>' +
+                    '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
+                        '<div style="font-size:10px;color:#5a6378;margin-top:2px;">#' + adminEscapeHtml(p.id) + '</div>' +
+                        (p.image_url ? '<div style="margin-top:4px;"><img src="' + adminEscapeHtml(p.image_url) + '" style="width:36px;height:36px;border-radius:6px;object-fit:cover;" alt=""></div>' : '') +
+                    '</td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td>' + cooldown + '</td>' +
+                    '<td>' + adminEscapeHtml(updated) + '</td>' +
+                    '<td style="white-space:normal;">' +
+                        '<button class="adm-btn-sm" onclick="showAdPopupForm(\'' + adminEscapeJsId(String(p.id)) + '\')">ویرایش</button> ' +
+                        statusSelect + ' ' +
+                        '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdPopup(\'' + adminEscapeJsId(String(p.id)) + '\')">حذف</button>' +
+                    '</td>' +
+                '</tr>';
+            }).join('');
+            section.innerHTML =
+                '<div class="ads-help-banner">' +
+                    '<strong>ℹ️ راهنما:</strong> قالب پاپ‌آپ ثابت است: تصویر ← عنوان ← متن ← دکمه. فقط محتوا قابل تغییر است. ' +
+                    'کوئل‌داون به معنای مدت زمانی است که پس از نمایش پاپ‌آپ به یک کاربر، تا آن مدت دوباره نمایش داده نمی‌شود.' +
+                '</div>' +
+                '<div class="rc-card">' +
+                    '<h4 class="rc-card-title">🪟 پاپ‌آپ مینی‌اپ</h4>' +
+                    '<button class="adm-btn adm-btn-primary" onclick="showAdPopupForm(null)" style="margin-bottom:12px;">➕ افزودن پاپ‌آپ</button>' +
+                    '<div id="ads-popup-form" style="display:none;margin-bottom:14px;"></div>' +
+                    '<div class="adm-table-wrap">' +
+                        '<table class="adm-table">' +
+                            '<thead><tr><th>عنوان</th><th>وضعیت</th><th>۲۴h کوئل‌داون</th><th>آخرین تغییر</th><th>عملیات</th></tr></thead>' +
+                            '<tbody>' + (rows || '<tr><td colspan="5" class="admin-empty">پاپ‌آپی موجود نیست</td></tr>') + '</tbody>' +
+                        '</table>' +
+                    '</div>' +
+                '</div>';
+        } else {
+            _adsPopupCache = [];
+            section.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>';
+        }
+    } catch (e) {
+        _adsPopupCache = [];
+        section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        console.error('loadAdPopups:', e);
+    }
+}
+window.loadAdPopups = loadAdPopups;
+
+function _adsPopupFormHtml(p) {
+    // p === null → create mode; otherwise edit existing popup
+    var isEdit = (p !== null && p !== undefined);
+    var currentStatus = isEdit ? (p.campaign_status || p.status || 'draft') : 'active';
+    var headTitle = isEdit ? ('✏️ ویرایش پاپ‌آپ: ' + adminEscapeHtml(p.title || '')) : '➕ پاپ‌آپ جدید';
+    var saveArg = isEdit ? ('\'' + adminEscapeJsId(String(p.id)) + '\'') : 'null';
+    var saveLabel = isEdit ? 'به‌روزرسانی' : 'ایجاد پاپ‌آپ';
+    var titleVal   = isEdit ? adminEscapeHtml(p.title || '') : '';
+    var bodyVal    = isEdit ? adminEscapeHtml(p.body_text || '') : '';
+    var btnLabel   = isEdit ? adminEscapeHtml(p.button_label || '') : '';
+    var btnUrl     = isEdit ? adminEscapeHtml(p.button_url || '') : '';
+    var orderVal   = isEdit ? adminFormatNumber(p.display_order || 0) : '0';
+    var cooldown   = isEdit ? adminFormatNumber(p.cooldown_seconds || 86400) : '86400';
+    var activeChk  = isEdit ? (p.is_active ? 'checked' : '') : 'checked';
+    var imgUrl     = isEdit ? (p.image_url || '') : '';
+    // Image preview — show if URL exists
+    var previewInit = imgUrl
+        ? '<img id="ads-pp-preview" class="ads-img-preview" src="' + adminEscapeHtml(imgUrl) + '" alt="preview">'
+        : '<img id="ads-pp-preview" class="ads-img-preview" style="display:none;" alt="preview">';
+    return '<div class="rc-card" style="border-color:rgba(245,166,35,0.3);">' +
+        '<h4 class="rc-card-title">' + headTitle + '</h4>' +
+        '<div class="rc-form-grid">' +
+            '<div class="rc-field" style="grid-column:1/-1;"><label>عنوان</label><input type="text" id="ads-pp-title" value="' + titleVal + '" placeholder="عنوان پاپ‌آپ"></div>' +
+            '<div class="rc-field" style="grid-column:1/-1;"><label>متن پیام</label><textarea id="ads-pp-body" rows="4" placeholder="متن پیام پاپ‌آپ...">' + bodyVal + '</textarea></div>' +
+            '<div class="rc-field"><label>متن دکمه</label><input type="text" id="ads-pp-btnlabel" value="' + btnLabel + '" placeholder="مشاهده"></div>' +
+            '<div class="rc-field"><label>لینک دکمه</label><input type="text" id="ads-pp-btnurl" value="' + btnUrl + '" placeholder="https://..." dir="ltr"></div>' +
+            '<div class="rc-field"><label>ترتیب نمایش</label><input type="number" id="ads-pp-order" value="' + orderVal + '" min="0"></div>' +
+            '<div class="rc-field"><label>کوئل‌داون (ثانیه)</label><input type="number" id="ads-pp-cooldown" value="' + cooldown + '" min="0"></div>' +
+            '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-pp-status">' +
+                '<option value="draft"' + (currentStatus === 'draft' ? ' selected' : '') + '>پیش‌نویس</option>' +
+                '<option value="active"' + (currentStatus === 'active' ? ' selected' : '') + '>فعال</option>' +
+                '<option value="paused"' + (currentStatus === 'paused' ? ' selected' : '') + '>متوقف</option>' +
+                '<option value="archived"' + (currentStatus === 'archived' ? ' selected' : '') + '>بایگانی</option>' +
+            '</select></div>' +
+            '<div class="rc-field"><label>نمایش</label><label class="rc-toggle-row"><input type="checkbox" id="ads-pp-active" ' + activeChk + '><span>فعال برای نمایش</span></label></div>' +
+            '<div class="rc-field" style="grid-column:1/-1;"><label>تصویر</label>' +
+                '<input type="text" id="ads-pp-imgurl" value="' + adminEscapeHtml(imgUrl) + '" placeholder="https://..." dir="ltr" style="margin-bottom:8px;">' +
+                '<label class="ads-img-upload-btn"><input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" ' +
+                    'onchange="uploadAdImage(this.files[0], \'ads-pp-imgurl\', \'ads-pp-preview\')" style="display:none;"><span>📁 انتخاب تصویر</span></label> ' +
+                previewInit +
+                '<div class="ads-img-hint">می‌توانید یک URL تصویر https وارد کنید یا تصویر را آپلود کنید (حداکثر ۵۰۰KB).</div>' +
+            '</div>' +
+        '</div>' +
+        '<button class="adm-btn adm-btn-primary" onclick="saveAdPopup(' + saveArg + ')" style="margin-top:10px;">' + saveLabel + '</button> ' +
+        '<button class="adm-btn" onclick="document.getElementById(\'ads-popup-form\').style.display=\'none\'" style="margin-top:10px;">انصراف</button>' +
+    '</div>';
+}
+
+function showAdPopupForm(popupId) {
+    var form = document.getElementById('ads-popup-form');
+    if (!form) return;
+    if (popupId === null || popupId === undefined) {
+        form.style.display = form.style.display === 'none' ? '' : 'none';
+        if (form.style.display === 'none') return;
+        form.innerHTML = _adsPopupFormHtml(null);
+        return;
+    }
+    var pp = _adsPopupCache.find(function (c) { return String(c.id) === String(popupId); });
+    if (!pp) { adminToast('پاپ‌آپ یافت نشد', 'error'); return; }
+    form.style.display = '';
+    form.innerHTML = _adsPopupFormHtml(pp);
+}
+window.showAdPopupForm = showAdPopupForm;
+
+async function saveAdPopup(popupId) {
+    var payload = {
+        title:            (document.getElementById('ads-pp-title') ? document.getElementById('ads-pp-title').value : '').trim(),
+        body_text:        (document.getElementById('ads-pp-body') ? document.getElementById('ads-pp-body').value : '').trim(),
+        button_label:     (document.getElementById('ads-pp-btnlabel') ? document.getElementById('ads-pp-btnlabel').value : '').trim(),
+        button_url:       (document.getElementById('ads-pp-btnurl') ? document.getElementById('ads-pp-btnurl').value : '').trim(),
+        image_url:        (document.getElementById('ads-pp-imgurl') ? document.getElementById('ads-pp-imgurl').value : '').trim(),
+        display_order:    Number(document.getElementById('ads-pp-order') ? document.getElementById('ads-pp-order').value : 0) || 0,
+        cooldown_seconds: Number(document.getElementById('ads-pp-cooldown') ? document.getElementById('ads-pp-cooldown').value : 86400) || 0,
+        is_active:        document.getElementById('ads-pp-active') ? document.getElementById('ads-pp-active').checked : false,
+        status:           document.getElementById('ads-pp-status') ? document.getElementById('ads-pp-status').value : 'draft',
+    };
+    if (!payload.title) { adminToast('عنوان پاپ‌آپ الزامی است', 'error'); return; }
+    try {
+        var url = popupId
+            ? '/api/admin/advertisements/popups/' + encodeURIComponent(popupId)
+            : '/api/admin/advertisements/popups';
+        var method = popupId ? 'PUT' : 'POST';
+        var data = await adminApiFetch(url, { method: method, body: JSON.stringify(payload) });
+        if (data && data.status === 'success') {
+            adminToast(popupId ? 'پاپ‌آپ به‌روزرسانی شد' : 'پاپ‌آپ ایجاد شد', 'success');
+            var form = document.getElementById('ads-popup-form');
+            if (form) form.style.display = 'none';
+            loadAdPopups();
+        } else {
+            adminToast((data && data.message) || 'خطا در ذخیره', 'error');
+        }
+    } catch (e) {
+        console.error('saveAdPopup:', e);
+        adminToast('خطا در ذخیره: ' + (e.message || ''), 'error');
+    }
+}
+window.saveAdPopup = saveAdPopup;
+
+async function deleteAdPopup(popupId) {
+    if (!confirm('از حذف این پاپ‌آپ مطمئن هستید؟')) return;
+    try {
+        var data = await adminApiFetch('/api/admin/advertisements/popups/' + encodeURIComponent(popupId), { method: 'DELETE' });
+        if (data && data.status === 'success') {
+            adminToast('پاپ‌آپ حذف شد', 'success');
+            loadAdPopups();
+        } else {
+            adminToast((data && data.message) || 'خطا در حذف', 'error');
+        }
+    } catch (e) {
+        console.error('deleteAdPopup:', e);
+        adminToast('خطا در حذف', 'error');
+    }
+}
+window.deleteAdPopup = deleteAdPopup;
+
+async function setAdPopupStatus(popupId, status) {
+    try {
+        var data = await adminApiFetch('/api/admin/advertisements/popups/' + encodeURIComponent(popupId) + '/status', {
+            method: 'POST',
+            body: JSON.stringify({ status: status })
+        });
+        if (data && data.status === 'success') {
+            adminToast('وضعیت تغییر کرد', 'success');
+            loadAdPopups();
+        } else {
+            adminToast((data && data.message) || 'خطا در تغییر وضعیت', 'error');
+        }
+    } catch (e) {
+        console.error('setAdPopupStatus:', e);
+        adminToast('خطا در تغییر وضعیت', 'error');
+    }
+}
+window.setAdPopupStatus = setAdPopupStatus;
+
+// ════════════════════════════════════════════════════════════════════
+// MESSAGES — /api/admin/advertisements/messages
+// ════════════════════════════════════════════════════════════════════
+
+function _adsDestinationBadge(dest) {
+    var meta = _adsDestinationMeta(dest);
+    return '<span class="admin-badge admin-badge-' + meta.color + '">' + meta.icon + ' ' + adminEscapeHtml(meta.label) + '</span>';
+}
+
+function _adsAudienceBadge(aud) {
+    var meta = _adsAudienceMeta(aud);
+    return '<span class="admin-badge admin-badge-' + meta.color + '">' + adminEscapeHtml(meta.label) + '</span>';
+}
+
+async function loadAdMessages() {
+    var section = document.getElementById('ads-messages-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    var token = _adminLoadToken;
+    try {
+        var data = await adminApiFetch('/api/admin/advertisements/messages');
+        if (_isLoadTokenStale(token)) return;
+        if (data && data.status === 'success' && Array.isArray(data.messages)) {
+            _adsMessageCache = data.messages;
+            var rows = data.messages.map(function (m) {
+                var title = m.title ? adminEscapeHtml(m.title) : '—';
+                var destBadge = _adsDestinationBadge(m.destinations);
+                var audBadge = _adsAudienceBadge(m.target_audience);
+                var statusBadge = _adStatusBadge(m.campaign_status || m.status || 'draft');
+                var createdAt = m.created_at ? adminFormatDate(m.created_at) : '—';
+                var statusSelect = _adStatusSelect('setAdMessageStatus', m.id, m.campaign_status || m.status || 'draft');
+                var sendBtn = (m.campaign_status === 'active' || m.status === 'active')
+                    ? '<button class="adm-btn-sm" onclick="sendAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">📤 ارسال</button>'
+                    : '';
+                return '<tr>' +
+                    '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
+                        '<div style="font-size:10px;color:#5a6378;margin-top:2px;">#' + adminEscapeHtml(m.id) + '</div>' +
+                        (m.image_url ? '<div style="margin-top:4px;"><img src="' + adminEscapeHtml(m.image_url) + '" style="width:36px;height:36px;border-radius:6px;object-fit:cover;" alt=""></div>' : '') +
+                    '</td>' +
+                    '<td>' + destBadge + '</td>' +
+                    '<td>' + audBadge + '</td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td>' + adminEscapeHtml(createdAt) + '</td>' +
+                    '<td style="white-space:normal;">' +
+                        sendBtn + ' ' +
+                        '<button class="adm-btn-sm" onclick="showAdMessageForm(\'' + adminEscapeJsId(String(m.id)) + '\')">ویرایش</button> ' +
+                        statusSelect + ' ' +
+                        '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">حذف</button>' +
+                    '</td>' +
+                '</tr>';
+            }).join('');
+            section.innerHTML =
+                '<div class="ads-help-banner">' +
+                    '<strong>ℹ️ راهنما:</strong> فقط کمپین‌های فعال ارسال می‌شوند. Draft/Paused/Archived ارسال نمی‌شوند. ' +
+                    'دکمه «📤 ارسال» پیام را به مخاطبان هدف (بر اساس کانال و مخاطب انتخابی) تحویل می‌دهد. ' +
+                    'کاربران رایگان فقط در صورت انتخاب «همه» یا «رایگان» پیام را دریافت می‌کنند.' +
+                '</div>' +
+                '<div class="rc-card">' +
+                    '<h4 class="rc-card-title">📣 پیام‌های تبلیغاتی</h4>' +
+                    '<button class="adm-btn adm-btn-primary" onclick="showAdMessageForm(null)" style="margin-bottom:12px;">➕ افزودن پیام</button>' +
+                    '<div id="ads-message-form" style="display:none;margin-bottom:14px;"></div>' +
+                    '<div class="adm-table-wrap">' +
+                        '<table class="adm-table">' +
+                            '<thead><tr><th>کمپین</th><th>مقصد</th><th>مخاطب</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead>' +
+                            '<tbody>' + (rows || '<tr><td colspan="6" class="admin-empty">پیامی موجود نیست</td></tr>') + '</tbody>' +
+                        '</table>' +
+                    '</div>' +
+                '</div>';
+        } else {
+            _adsMessageCache = [];
+            section.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>';
+        }
+    } catch (e) {
+        _adsMessageCache = [];
+        section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        console.error('loadAdMessages:', e);
+    }
+}
+window.loadAdMessages = loadAdMessages;
+
+function _adsMessageFormHtml(m) {
+    var isEdit = (m !== null && m !== undefined);
+    var currentStatus = isEdit ? (m.campaign_status || m.status || 'draft') : 'active';
+    var currentDest = isEdit ? (m.destinations || 'both') : 'both';
+    var currentAud = isEdit ? (m.target_audience || 'all') : 'all';
+    var headTitle = isEdit ? ('✏️ ویرایش پیام: ' + adminEscapeHtml(m.title || '')) : '➕ پیام جدید';
+    var saveArg = isEdit ? ('\'' + adminEscapeJsId(String(m.id)) + '\'') : 'null';
+    var saveLabel = isEdit ? 'به‌روزرسانی' : 'ایجاد پیام';
+    var titleVal   = isEdit ? adminEscapeHtml(m.title || '') : '';
+    var bodyVal    = isEdit ? adminEscapeHtml(m.body_text || '') : '';
+    var btnLabel   = isEdit ? adminEscapeHtml(m.button_label || '') : '';
+    var btnUrl     = isEdit ? adminEscapeHtml(m.button_url || '') : '';
+    var activeChk  = isEdit ? (m.is_active ? 'checked' : '') : 'checked';
+    var imgUrl     = isEdit ? (m.image_url || '') : '';
+    var previewInit = imgUrl
+        ? '<img id="ads-msg-preview" class="ads-img-preview" src="' + adminEscapeHtml(imgUrl) + '" alt="preview">'
+        : '<img id="ads-msg-preview" class="ads-img-preview" style="display:none;" alt="preview">';
+    function radioChecked(val, current) { return val === current ? 'checked' : ''; }
+    return '<div class="rc-card" style="border-color:rgba(245,166,35,0.3);">' +
+        '<h4 class="rc-card-title">' + headTitle + '</h4>' +
+        '<div class="rc-form-grid">' +
+            '<div class="rc-field" style="grid-column:1/-1;"><label>عنوان</label><input type="text" id="ads-msg-title" value="' + titleVal + '" placeholder="عنوان پیام"></div>' +
+            '<div class="rc-field" style="grid-column:1/-1;"><label>متن پیام</label><textarea id="ads-msg-body" rows="6" placeholder="متن پیام...">' + bodyVal + '</textarea></div>' +
+            '<div class="rc-field"><label>متن دکمه</label><input type="text" id="ads-msg-btnlabel" value="' + btnLabel + '" placeholder="مشاهده"></div>' +
+            '<div class="rc-field"><label>لینک دکمه</label><input type="text" id="ads-msg-btnurl" value="' + btnUrl + '" placeholder="https://..." dir="ltr"></div>' +
+            '<div class="rc-field"><label>مقصد ارسال</label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-dest" value="mini_app" ' + radioChecked('mini_app', currentDest) + '><span>📱 مینی‌اپ</span></label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-dest" value="telegram" ' + radioChecked('telegram', currentDest) + '><span>✈️ تلگرام</span></label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-dest" value="both" ' + radioChecked('both', currentDest) + '><span>📱✈️ هر دو</span></label>' +
+            '</div>' +
+            '<div class="rc-field"><label>مخاطب هدف</label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-aud" value="free" ' + radioChecked('free', currentAud) + '><span>کاربران رایگان</span></label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-aud" value="premium" ' + radioChecked('premium', currentAud) + '><span>کاربران ویژه</span></label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-aud" value="all" ' + radioChecked('all', currentAud) + '><span>همه کاربران</span></label>' +
+            '</div>' +
+            '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-msg-status">' +
+                '<option value="draft"' + (currentStatus === 'draft' ? ' selected' : '') + '>پیش‌نویس</option>' +
+                '<option value="active"' + (currentStatus === 'active' ? ' selected' : '') + '>فعال</option>' +
+                '<option value="paused"' + (currentStatus === 'paused' ? ' selected' : '') + '>متوقف</option>' +
+                '<option value="archived"' + (currentStatus === 'archived' ? ' selected' : '') + '>بایگانی</option>' +
+            '</select></div>' +
+            '<div class="rc-field"><label>نمایش</label><label class="rc-toggle-row"><input type="checkbox" id="ads-msg-active" ' + activeChk + '><span>فعال</span></label></div>' +
+            '<div class="rc-field" style="grid-column:1/-1;"><label>تصویر (اختیاری)</label>' +
+                '<input type="text" id="ads-msg-imgurl" value="' + adminEscapeHtml(imgUrl) + '" placeholder="https://..." dir="ltr" style="margin-bottom:8px;">' +
+                '<label class="ads-img-upload-btn"><input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" ' +
+                    'onchange="uploadAdImage(this.files[0], \'ads-msg-imgurl\', \'ads-msg-preview\')" style="display:none;"><span>📁 انتخاب تصویر</span></label> ' +
+                previewInit +
+                '<div class="ads-img-hint">می‌توانید یک URL تصویر https وارد کنید یا تصویر را آپلود کنید (حداکثر ۵۰۰KB).</div>' +
+            '</div>' +
+        '</div>' +
+        '<button class="adm-btn adm-btn-primary" onclick="saveAdMessage(' + saveArg + ')" style="margin-top:10px;">' + saveLabel + '</button> ' +
+        '<button class="adm-btn" onclick="document.getElementById(\'ads-message-form\').style.display=\'none\'" style="margin-top:10px;">انصراف</button>' +
+    '</div>';
+}
+
+function showAdMessageForm(messageId) {
+    var form = document.getElementById('ads-message-form');
+    if (!form) return;
+    if (messageId === null || messageId === undefined) {
+        form.style.display = form.style.display === 'none' ? '' : 'none';
+        if (form.style.display === 'none') return;
+        form.innerHTML = _adsMessageFormHtml(null);
+        return;
+    }
+    var msg = _adsMessageCache.find(function (c) { return String(c.id) === String(messageId); });
+    if (!msg) { adminToast('پیام یافت نشد', 'error'); return; }
+    form.style.display = '';
+    form.innerHTML = _adsMessageFormHtml(msg);
+}
+window.showAdMessageForm = showAdMessageForm;
+
+async function saveAdMessage(messageId) {
+    var destEl = document.querySelector('input[name="ads-msg-dest"]:checked');
+    var audEl = document.querySelector('input[name="ads-msg-aud"]:checked');
+    var payload = {
+        title:          (document.getElementById('ads-msg-title') ? document.getElementById('ads-msg-title').value : '').trim(),
+        body_text:      (document.getElementById('ads-msg-body') ? document.getElementById('ads-msg-body').value : '').trim(),
+        button_label:   (document.getElementById('ads-msg-btnlabel') ? document.getElementById('ads-msg-btnlabel').value : '').trim(),
+        button_url:     (document.getElementById('ads-msg-btnurl') ? document.getElementById('ads-msg-btnurl').value : '').trim(),
+        image_url:      (document.getElementById('ads-msg-imgurl') ? document.getElementById('ads-msg-imgurl').value : '').trim(),
+        destinations:   destEl ? destEl.value : 'both',
+        target_audience: audEl ? audEl.value : 'all',
+        is_active:      document.getElementById('ads-msg-active') ? document.getElementById('ads-msg-active').checked : false,
+        status:         document.getElementById('ads-msg-status') ? document.getElementById('ads-msg-status').value : 'draft',
+    };
+    if (!payload.title) { adminToast('عنوان پیام الزامی است', 'error'); return; }
+    if (!payload.body_text) { adminToast('متن پیام الزامی است', 'error'); return; }
+    try {
+        var url = messageId
+            ? '/api/admin/advertisements/messages/' + encodeURIComponent(messageId)
+            : '/api/admin/advertisements/messages';
+        var method = messageId ? 'PUT' : 'POST';
+        var data = await adminApiFetch(url, { method: method, body: JSON.stringify(payload) });
+        if (data && data.status === 'success') {
+            adminToast(messageId ? 'پیام به‌روزرسانی شد' : 'پیام ایجاد شد', 'success');
+            var form = document.getElementById('ads-message-form');
+            if (form) form.style.display = 'none';
+            loadAdMessages();
+        } else {
+            adminToast((data && data.message) || 'خطا در ذخیره', 'error');
+        }
+    } catch (e) {
+        console.error('saveAdMessage:', e);
+        adminToast('خطا در ذخیره: ' + (e.message || ''), 'error');
+    }
+}
+window.saveAdMessage = saveAdMessage;
+
+async function deleteAdMessage(messageId) {
+    if (!confirm('از حذف این پیام مطمئن هستید؟')) return;
+    try {
+        var data = await adminApiFetch('/api/admin/advertisements/messages/' + encodeURIComponent(messageId), { method: 'DELETE' });
+        if (data && data.status === 'success') {
+            adminToast('پیام حذف شد', 'success');
+            loadAdMessages();
+        } else {
+            adminToast((data && data.message) || 'خطا در حذف', 'error');
+        }
+    } catch (e) {
+        console.error('deleteAdMessage:', e);
+        adminToast('خطا در حذف', 'error');
+    }
+}
+window.deleteAdMessage = deleteAdMessage;
+
+async function setAdMessageStatus(messageId, status) {
+    try {
+        var data = await adminApiFetch('/api/admin/advertisements/messages/' + encodeURIComponent(messageId) + '/status', {
+            method: 'POST',
+            body: JSON.stringify({ status: status })
+        });
+        if (data && data.status === 'success') {
+            adminToast('وضعیت تغییر کرد', 'success');
+            loadAdMessages();
+        } else {
+            adminToast((data && data.message) || 'خطا در تغییر وضعیت', 'error');
+        }
+    } catch (e) {
+        console.error('setAdMessageStatus:', e);
+        adminToast('خطا در تغییر وضعیت', 'error');
+    }
+}
+window.setAdMessageStatus = setAdMessageStatus;
+
+async function sendAdMessage(messageId) {
+    if (!confirm('ارسال این پیام به مخاطبان هدف؟ این عملیات ممکن است چند ثانیه طول بکشد.')) return;
+    try {
+        adminToast('در حال ارسال...', 'info');
+        var data = await adminApiFetch('/api/admin/advertisements/messages/' + encodeURIComponent(messageId) + '/send', {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+        if (data && data.status === 'success') {
+            var delivered = adminFormatNumber(data.delivered || 0);
+            var skipped = adminFormatNumber(data.skipped || 0);
+            adminToast('✓ ارسال شد — تحویل: ' + delivered + ' / رد شده: ' + skipped, 'success');
+            loadAdMessages();
+        } else {
+            adminToast((data && data.message) || 'خطا در ارسال', 'error');
+        }
+    } catch (e) {
+        console.error('sendAdMessage:', e);
+        adminToast('خطا در ارسال: ' + (e.message || ''), 'error');
+    }
+}
+window.sendAdMessage = sendAdMessage;
 
 // ════════════════════════════════════════════════════════════════════
 async function loadAdminMembership() {

@@ -32,6 +32,8 @@ import { createRewardCenterRepository } from './src/repositories/reward_center.j
 import { createRewardCenterHandlers } from './src/controllers/reward_center.js';
 import { createNotificationPlatformRepository, setEnvSendTelegramMessage } from './src/repositories/notification_platform.js';
 import { createNotificationPlatformHandlers } from './src/controllers/notification_platform.js';
+import { createAdvertisementsRepository } from './src/repositories/advertisements.js';
+import { createAdvertisementsHandlers } from './src/controllers/advertisements.js';
 import { createNotificationService } from './src/services/notification_service.js';
 import { createAlertEconomyRepository } from './src/repositories/alert_economy.js';
 import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
@@ -1260,9 +1262,14 @@ function extractTelegramMessageContext(updatePayload) {
 
 function buildStartReplyPayload(env, chatId, isMember, startParam) {
   if (!isMember) {
+    // PHASE 2: Build the join keyboard from env REQUIRED_CHANNEL + any
+    // admin-configured DB channels (ad_channels). The primary env channel
+    // is shown first (backward compat), then DB channels in display_order.
+    // We build the keyboard synchronously from env (DB channels are fetched
+    // separately and merged by the caller via buildStartReplyPayloadAsync).
     return {
       chat_id: chatId,
-      text: '👋 به دستیار هوشمند امیر بی‌تی‌سی خوش آمدید!\n\n📌 برای استفاده از امکانات برنامه، ابتدا عضو کانال رسمی شوید.',
+      text: '👋 به دستیار هوشمند امیر بی‌تی‌سی خوش آمدید!\n\n📌 برای استفاده از امکانات برنامه، ابتدا عضو کانال‌های رسمی شوید.',
       reply_markup: {
         inline_keyboard: [
           [
@@ -1306,6 +1313,50 @@ function buildStartReplyPayload(env, chatId, isMember, startParam) {
         ],
       ],
     },
+  };
+}
+
+/**
+ * PHASE 2: Async variant of buildStartReplyPayload that merges admin-configured
+ * DB required channels into the join keyboard. Used by the /start handler so
+ * the user sees EVERY channel they must join (env + DB) in one message.
+ */
+async function buildStartReplyPayloadAsync(env, chatId, isMember, startParam) {
+  const base = buildStartReplyPayload(env, chatId, isMember, startParam);
+  if (isMember) return base; // no join keyboard needed
+
+  // Fetch admin-configured DB channels (cached 60s in advertisementsRepo).
+  let dbChannels = [];
+  try {
+    if (typeof advertisementsRepo !== 'undefined') {
+      dbChannels = await advertisementsRepo.listActiveRequiredChannels(env);
+    }
+  } catch (e) {
+    console.warn('[start] listActiveRequiredChannels failed:', e.message || e);
+  }
+
+  if (dbChannels.length === 0) return base;
+
+  // Build merged keyboard: primary env channel first, then DB channels.
+  const envChannel = normalizeRequiredChannel(resolveRequiredChannel(env));
+  const envUrl = `https://t.me/${envChannel}`;
+  const envTitle = envChannel || 'کانال رسمی';
+
+  // Skip DB channels that duplicate the env channel (by username).
+  const seen = new Set([envChannel.toLowerCase()]);
+  const rows = [[{ text: `📢 ${envTitle}`, url: envUrl }]];
+  for (const ch of dbChannels) {
+    const uname = String(ch.username || '').toLowerCase().replace(/^@/, '');
+    if (seen.has(uname)) continue;
+    seen.add(uname);
+    rows.push([{ text: `📢 ${ch.title || uname}`, url: ch.joinUrl || `https://t.me/${uname}` }]);
+  }
+  rows.push([{ text: '✅ عضو شدم — ورود به اپلیکیشن', callback_data: 'check_join' }]);
+
+  return {
+    ...base,
+    text: '👋 به دستیار هوشمند امیر بی‌تی‌سی خوش آمدید!\n\n📌 برای استفاده از امکانات برنامه، ابتدا عضو تمام کانال‌های زیر شوید:',
+    reply_markup: { inline_keyboard: rows },
   };
 }
 
@@ -2916,6 +2967,118 @@ async function checkChannelMembership(userId, env) {
   return { joined: false, reason: 'api_error' };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 2 — Multi-channel join-lock (Admin-configured required channels)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The existing checkChannelMembership() checks ONLY the env.REQUIRED_CHANNEL.
+// Phase 2 extends this: admin-configured channels in ad_channels (active,
+// status='active') are ALSO required. A user must be a member of ALL of them
+// (env channel AND every DB channel) to pass requireChannelJoin.
+//
+// Cache strategy:
+//   - Module-level cache (60s TTL) for the active channel list — shared by all
+//     requests in the isolate. Invalidated on admin mutations.
+//   - Per-user KV cache (60s TTL) for the DB-channel membership result, keyed
+//     by `adch:${userId}:${channelSetHash}`. The hash includes every active
+//     channel username, so when admin changes the channel list, the hash
+//     changes → cache miss → fresh check. This satisfies Phase 2's requirement:
+//     "با تغییر لیست کانال‌ها توسط Admin، state قدیمی باعث bypass نشود."
+//
+// Telegram API budget: at most N getChatMember calls per uncached request,
+// where N = number of active DB channels (typically 1-3). Cached requests do
+// ZERO Telegram calls (KV hit). This bounds Telegram API load while enforcing
+// new channels within 60 seconds of admin change.
+
+async function _getActiveAdChannels(env) {
+  // Late-binding: advertisementsRepo is created after this function definition
+  // (it's a module-level const initialized in the fetch handler setup). We use
+  // a lazy getter to avoid TDZ issues.
+  if (typeof advertisementsRepo === 'undefined') return [];
+  try {
+    return await advertisementsRepo.listActiveRequiredChannels(env);
+  } catch (e) {
+    console.warn('[multi-channel] listActiveRequiredChannels failed:', e.message || e);
+    return [];
+  }
+}
+
+function _hashChannelSet(channels) {
+  if (!channels || channels.length === 0) return '0';
+  const names = channels.map(c => String(c.username || '').toLowerCase()).sort().join(',');
+  let h = 0;
+  for (let i = 0; i < names.length; i++) {
+    h = ((h << 5) - h + names.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h).toString(36);
+}
+
+async function _checkSingleTelegramChannel(env, chatId, userId) {
+  const botToken = String(env.TELEGRAM_BOT_TOKEN || '');
+  if (!botToken) return { joined: false, reason: 'bot_not_configured' };
+  const url = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${encodeURIComponent(userId)}`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  try {
+    const r = await fetch(url, { signal: controller.signal });
+    const data = await r.json();
+    if (data?.ok) {
+      const status = data?.result?.status || '';
+      return { joined: JOINED_STATUSES.has(status) };
+    }
+    return { joined: false, reason: 'api_error', detail: data?.description || '' };
+  } catch (e) {
+    return { joined: false, reason: 'api_error', detail: e.message || String(e) };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Check membership in ALL admin-configured required channels (ad_channels).
+ * Returns { joined: true } only if user is a member of every active channel.
+ * Uses per-user KV cache (60s TTL) keyed by channel-set hash for instant
+ * invalidation when admin changes the channel list.
+ */
+async function checkAdditionalRequiredChannels(env, userId) {
+  const uid = String(userId);
+  const channels = await _getActiveAdChannels(env);
+  if (channels.length === 0) {
+    return { joined: true, channels: 0 }; // no DB channels → trivially pass
+  }
+
+  const hash = _hashChannelSet(channels);
+  const cacheKey = `adch:${uid}:${hash}`;
+
+  // Check per-user KV cache (60s TTL).
+  if (env.RATE_LIMITS && typeof env.RATE_LIMITS.get === 'function') {
+    try {
+      const cached = await env.RATE_LIMITS.get(cacheKey);
+      if (cached === '1') return { joined: true, channels: channels.length, cached: true };
+      if (cached === '0') return { joined: false, channels: channels.length, cached: true, reason: 'not_member' };
+    } catch { /* non-fatal */ }
+  }
+
+  // Fresh check: call Telegram getChatMember for each channel.
+  for (const ch of channels) {
+    const chatId = ch.username.startsWith('-') ? ch.username : `@${ch.username}`;
+    const result = await _checkSingleTelegramChannel(env, chatId, uid);
+    if (!result.joined) {
+      // Cache negative result (60s) — avoids hammering Telegram for known-not-members.
+      if (env.RATE_LIMITS && typeof env.RATE_LIMITS.put === 'function') {
+        try { await env.RATE_LIMITS.put(cacheKey, '0', { expirationTtl: 60 }); } catch { /* non-fatal */ }
+      }
+      return { joined: false, channels: channels.length, reason: result.reason || 'not_member', channel: ch.username };
+    }
+  }
+
+  // All channels joined — cache positive result (60s).
+  if (env.RATE_LIMITS && typeof env.RATE_LIMITS.put === 'function') {
+    try { await env.RATE_LIMITS.put(cacheKey, '1', { expirationTtl: 60 }); } catch { /* non-fatal */ }
+  }
+  return { joined: true, channels: channels.length };
+}
+
 async function resolveChannelMembership(env, userId, { forceRefresh = false, skipRewardProcessing = false } = {}) {
   const uid = String(userId);
 
@@ -2931,12 +3094,34 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false, ski
     if (!forceRefresh) {
       const cached = await getCachedJoinStatus(env, uid);
       if (cached === true) {
+        // PHASE 2: Even on primary cache hit, enforce admin-configured DB channels.
+        // The DB-channel check has its own per-user cache (60s TTL, keyed by
+        // channel-set hash) so this is a KV read — cheap. If admin added a new
+        // required channel since the primary cache was written, the DB-channel
+        // cache key hash changes → cache miss → fresh Telegram check → enforces
+        // the new channel immediately (no stale bypass).
+        const extra = await checkAdditionalRequiredChannels(env, uid);
+        if (!extra.joined) {
+          // Primary channel joined, but a DB channel is not → revoke access.
+          await setCachedJoinStatus(env, uid, false);
+          if (isDatabaseConfigured(env)) {
+            await persistDbUserJoinState(env, uid, false).catch(() => {});
+          }
+          return { joined: false, reason: 'additional_channel_required', channel: extra.channel };
+        }
         return { joined: true, cached: true };
       }
 
       if (isDatabaseConfigured(env)) {
         const dbUser = await getDbUserJoinState(env, uid);
         if (dbUser?.channel_joined) {
+          // PHASE 2: same DB-channel enforcement on DB-cache hit.
+          const extra = await checkAdditionalRequiredChannels(env, uid);
+          if (!extra.joined) {
+            await setCachedJoinStatus(env, uid, false);
+            await persistDbUserJoinState(env, uid, false).catch(() => {});
+            return { joined: false, reason: 'additional_channel_required', channel: extra.channel };
+          }
           await setCachedJoinStatus(env, uid, true);
           return { joined: true, from_db: true };
         }
@@ -2945,6 +3130,16 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false, ski
 
     const result = await checkChannelMembership(uid, env);
     if (result.joined) {
+      // PHASE 2: primary env channel joined — now check admin-configured DB channels.
+      const extra = await checkAdditionalRequiredChannels(env, uid);
+      if (!extra.joined) {
+        // Primary channel joined but a DB channel is not → treat as not-joined.
+        await setCachedJoinStatus(env, uid, false);
+        if (isDatabaseConfigured(env)) {
+          await persistDbUserJoinState(env, uid, false).catch(() => {});
+        }
+        return { joined: false, reason: 'additional_channel_required', channel: extra.channel };
+      }
       await setCachedJoinStatus(env, uid, true);
       if (isDatabaseConfigured(env)) {
         await persistDbUserJoinState(env, uid, true);
@@ -2977,12 +3172,22 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false, ski
       if (isDatabaseConfigured(env)) {
         const dbUser = await getDbUserJoinState(env, uid);
         if (dbUser?.channel_joined) {
+          // PHASE 2: even on api_error fallback, enforce DB channels.
+          const extra = await checkAdditionalRequiredChannels(env, uid);
+          if (!extra.joined) {
+            return { joined: false, reason: 'additional_channel_required', channel: extra.channel };
+          }
           return { joined: true, from_db_fallback: true, reason: result.reason };
         }
       }
 
       const cached = await getCachedJoinStatus(env, uid);
       if (cached === true) {
+        // PHASE 2: even on cached fallback, enforce DB channels.
+        const extra = await checkAdditionalRequiredChannels(env, uid);
+        if (!extra.joined) {
+          return { joined: false, reason: 'additional_channel_required', channel: extra.channel };
+        }
         return { joined: true, cached_fallback: true, reason: result.reason };
       }
 
@@ -7970,6 +8175,33 @@ const notificationPlatformHandlers = createNotificationPlatformHandlers({
 });
 //#endregion
 
+// ── Advertisements repository + handlers (Channel Join / Popup / Message) ──
+// Central Advertisement system. Three campaign types, all admin-managed.
+// Connects to ch_promotions preference for message delivery (Phase 7).
+const advertisementsRepo = createAdvertisementsRepository({
+  queryDb,
+  isDatabaseConfigured,
+  isoDate: _rcIsoDate,
+  normalizeOptionalString,
+});
+
+const advertisementsHandlers = createAdvertisementsHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  requireAdmin: adminHandlers.requireAdmin,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  queryDb,
+  advertisementsRepo,
+  notificationPlatformRepo,
+  sendTelegramMessage,
+  membershipAuthority,
+  isUserRateLimited,
+});
+//#endregion
+
 // ── Alert Economy handlers (admin + user) ──
 const alertEconomyHandlers = createAlertEconomyHandlers({
   jsonResponse,
@@ -9120,7 +9352,7 @@ async function handleTelegramWebhook(request, env) {
       }
     }
 
-    const replyPayload = buildStartReplyPayload(env, messageContext.chatId, Boolean(membership?.joined), effectiveStartParam);
+    const replyPayload = await buildStartReplyPayloadAsync(env, messageContext.chatId, Boolean(membership?.joined), effectiveStartParam);
 
     const finalWebAppUrl = (replyPayload.reply_markup && replyPayload.reply_markup.inline_keyboard && replyPayload.reply_markup.inline_keyboard[0] && replyPayload.reply_markup.inline_keyboard[0][0] && replyPayload.reply_markup.inline_keyboard[0][0].web_app) ? replyPayload.reply_markup.inline_keyboard[0][0].web_app.url : 'no-webapp-button';
     await diagLog(env, { scope: 'diag-start-reply-url', webAppUrl: finalWebAppUrl });
@@ -10491,6 +10723,33 @@ export default {
         return calendarReminderHandlers.handleDelete(request, env, eventKey);
       }
 
+      // ═══════════════════════════════════════════════════════════════════════
+      // ADVERTISEMENTS — User routes (Phase 3: Popup, Phase 2: required-channels)
+      // ═══════════════════════════════════════════════════════════════════════
+
+      // Public (no auth) — serves uploaded ad images so <img src> can load them.
+      // Returns 404 (not JSON) for invalid IDs — intentionally matches static-asset semantics.
+      if (request.method === 'GET' && /^\/api\/advertisements\/image\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
+        const imageId = url.pathname.split('/').pop();
+        return advertisementsHandlers.handleServeImage(request, env, imageId);
+      }
+
+      // User: list active required channels (for /start join-lock screen).
+      if (request.method === 'GET' && url.pathname === '/api/advertisements/required-channels') {
+        return advertisementsHandlers.handleListRequiredChannels(request, env);
+      }
+
+      // User: get next eligible popup (respects 24h per-user cooldown).
+      if (request.method === 'GET' && url.pathname === '/api/advertisements/popups') {
+        return advertisementsHandlers.handleGetPopup(request, env);
+      }
+
+      // User: record popup impression (sets KV cooldown key).
+      if (request.method === 'POST' && /^\/api\/advertisements\/popups\/[A-Za-z0-9_-]+\/shown$/.test(url.pathname)) {
+        const popupId = url.pathname.split('/').slice(-2)[0];
+        return advertisementsHandlers.handleMarkPopupShown(request, env, popupId);
+      }
+
       // ── Market Overview (CMC-powered, no auth required) ──
       if (request.method === 'GET' && url.pathname === '/api/market/overview') {
         const overview = await marketOverviewSvc.getCachedOverview(env);
@@ -11691,6 +11950,81 @@ export default {
         const bId = url.pathname.split('/')[5];
         return notificationPlatformHandlers.handleProcessBroadcast(request, env, bId);
       }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // ADVERTISEMENTS — Admin routes (Phase 9: Channel Join / Popup / Message)
+      // All require `ads.manage` permission (enforced in handlers via requireAdmin).
+      // ═══════════════════════════════════════════════════════════════════════
+
+      // ── Admin: Channels (Phase 2 — Channel Join advertisement) ──
+      if (request.method === 'GET' && url.pathname === '/api/admin/advertisements/channels') {
+        return advertisementsHandlers.handleAdminListChannels(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/advertisements/channels') {
+        return advertisementsHandlers.handleAdminCreateChannel(request, env);
+      }
+      if (request.method === 'PUT' && /^\/api\/admin\/advertisements\/channels\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
+        const id = url.pathname.split('/').pop();
+        return advertisementsHandlers.handleAdminUpdateChannel(request, env, id);
+      }
+      if (request.method === 'DELETE' && /^\/api\/admin\/advertisements\/channels\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
+        const id = url.pathname.split('/').pop();
+        return advertisementsHandlers.handleAdminDeleteChannel(request, env, id);
+      }
+      if (request.method === 'POST' && /^\/api\/admin\/advertisements\/channels\/[A-Za-z0-9_-]+\/status$/.test(url.pathname)) {
+        const id = url.pathname.split('/')[5];
+        return advertisementsHandlers.handleAdminChannelStatus(request, env, id);
+      }
+
+      // ── Admin: Popups (Phase 3 + Phase 4 — Mini App Popup) ──
+      if (request.method === 'GET' && url.pathname === '/api/admin/advertisements/popups') {
+        return advertisementsHandlers.handleAdminListPopups(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/advertisements/popups') {
+        return advertisementsHandlers.handleAdminCreatePopup(request, env);
+      }
+      if (request.method === 'PUT' && /^\/api\/admin\/advertisements\/popups\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
+        const id = url.pathname.split('/').pop();
+        return advertisementsHandlers.handleAdminUpdatePopup(request, env, id);
+      }
+      if (request.method === 'DELETE' && /^\/api\/admin\/advertisements\/popups\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
+        const id = url.pathname.split('/').pop();
+        return advertisementsHandlers.handleAdminDeletePopup(request, env, id);
+      }
+      if (request.method === 'POST' && /^\/api\/admin\/advertisements\/popups\/[A-Za-z0-9_-]+\/status$/.test(url.pathname)) {
+        const id = url.pathname.split('/')[5];
+        return advertisementsHandlers.handleAdminPopupStatus(request, env, id);
+      }
+
+      // ── Admin: Messages (Phase 6 — Message Campaign) ──
+      if (request.method === 'GET' && url.pathname === '/api/admin/advertisements/messages') {
+        return advertisementsHandlers.handleAdminListMessages(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/advertisements/messages') {
+        return advertisementsHandlers.handleAdminCreateMessage(request, env);
+      }
+      if (request.method === 'PUT' && /^\/api\/admin\/advertisements\/messages\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
+        const id = url.pathname.split('/').pop();
+        return advertisementsHandlers.handleAdminUpdateMessage(request, env, id);
+      }
+      if (request.method === 'DELETE' && /^\/api\/admin\/advertisements\/messages\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
+        const id = url.pathname.split('/').pop();
+        return advertisementsHandlers.handleAdminDeleteMessage(request, env, id);
+      }
+      if (request.method === 'POST' && /^\/api\/admin\/advertisements\/messages\/[A-Za-z0-9_-]+\/status$/.test(url.pathname)) {
+        const id = url.pathname.split('/')[5];
+        return advertisementsHandlers.handleAdminMessageStatus(request, env, id);
+      }
+      if (request.method === 'POST' && /^\/api\/admin\/advertisements\/messages\/[A-Za-z0-9_-]+\/send$/.test(url.pathname)) {
+        const id = url.pathname.split('/')[5];
+        return advertisementsHandlers.handleAdminSendMessage(request, env, id);
+      }
+
+      // ── Admin: Image upload (Phase 5 — Image Optimization/Validation) ──
+      if (request.method === 'POST' && url.pathname === '/api/admin/advertisements/upload-image') {
+        return advertisementsHandlers.handleAdminUploadImage(request, env);
+      }
+      // ═══════════════════════════════════════════════════════════════════════
 
       if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
         return await sessionHandlers.handleHeartbeat(request, env);
