@@ -1827,16 +1827,138 @@ strong.down { color: var(--red); }
 .ns-prem-card:active { transform: scale(0.998); }
 
 /* Phase 3/4: Premium-locked advertisement settings */
-/* FIX (audit MED-1): Locked card was opacity:0.55 + grayscale(0.6) — looked
-   dimmed/faded. Now uses a subtle amber tint + full-color icon (no grayscale)
-   so it looks like an elegant Premium upsell, NOT a broken/disabled card. */
+/* PHASE 2: Free-user locked cards — muted but elegant (not broken/disabled).
+   Opacity 0.62 (within 0.55-0.65 spec), subtle amber tint, full-color icon.
+   Whole card is clickable → MembershipApp.open() (upgrade flow).
+   Hover lifts to 0.68 (subtle feedback, card still clearly looks disabled). */
 .ns-prem-card--locked {
-    opacity: 0.92;
-    border-color: rgba(245, 166, 35, 0.10);
-    background: linear-gradient(135deg, rgba(15,24,40,0.70) 0%, rgba(245,166,35,0.025) 100%);
+    opacity: 0.62;
+    border-color: rgba(245, 166, 35, 0.12);
+    background: linear-gradient(135deg, rgba(15,24,40,0.70) 0%, rgba(245,166,35,0.02) 100%);
+    transition: opacity 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.ns-prem-card--locked:hover { border-color: rgba(245,166,35,0.18); }
+.ns-prem-card--locked:hover {
+    opacity: 0.68;
+    border-color: rgba(245,166,35,0.18);
+    box-shadow: 0 2px 8px rgba(245,166,35,0.06);
+}
 .ns-prem-card--locked .ns-prem-icon { filter: none; }
+
+/* PHASE 2: Lock badge (top-right corner, Free users only) */
+.ns-prem-lock-badge {
+    position: absolute;
+    top: 8px;
+    inset-inline-end: 8px; /* RTL-aware (right in LTR, left in RTL) */
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: rgba(245, 166, 35, 0.10);
+    border: 1px solid rgba(245, 166, 35, 0.20);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(245, 166, 35, 0.75);
+    z-index: 2;
+    pointer-events: none; /* clicks pass through to the card */
+}
+.ns-prem-lock-badge svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* PHASE 2: Disabled capsule buttons (Free users see the same structure as
+   Premium but buttons are non-interactive: no hover, no state change) */
+.ns-cap-btn--disabled {
+    cursor: not-allowed !important;
+    opacity: 0.55;
+    pointer-events: none; /* card-level click handler catches all clicks */
+}
+.ns-cap-btn--disabled:hover,
+.ns-cap-btn--disabled:active {
+    transform: none !important;
+    background: rgba(255,255,255,0.03) !important;
+    border-color: rgba(255,255,255,0.06) !important;
+    color: rgba(245, 250, 254, 0.4) !important;
+}
+/* Muted active state for locked buttons (no green Premium active color) */
+.ns-cap-btn--disabled.off { background: rgba(255,255,255,0.02) !important; border-color: rgba(255,255,255,0.04) !important; color: rgba(245,250,254,0.3) !important; }
+.ns-cap-btn--disabled.app,
+.ns-cap-btn--disabled.bot,
+.ns-cap-btn--disabled.both {
+    background: rgba(255,255,255,0.02) !important;
+    border-color: rgba(255,255,255,0.04) !important;
+    color: rgba(245,250,254,0.3) !important;
+}
+
+/* PHASE 4: Upgrade message + CTA row (bottom of locked cards, Free users only) */
+.ns-prem-upgrade-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(245, 166, 35, 0.08);
+    flex-wrap: wrap; /* responsive — wraps on narrow screens */
+}
+.ns-prem-upgrade-msg {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: rgba(245, 250, 254, 0.45);
+    line-height: 1.4;
+    flex: 1;
+    min-width: 0;
+}
+.ns-prem-upgrade-msg svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    color: rgba(245, 166, 35, 0.55);
+}
+.ns-prem-upgrade-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, rgba(245,166,35,0.12) 0%, rgba(245,166,35,0.06) 100%);
+    border: 1px solid rgba(245, 166, 35, 0.30);
+    color: #F5A623;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+    font-family: inherit;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.ns-prem-upgrade-cta svg {
+    width: 12px;
+    height: 12px;
+}
+.ns-prem-upgrade-cta:hover {
+    background: linear-gradient(135deg, rgba(245,166,35,0.20) 0%, rgba(245,166,35,0.10) 100%);
+    border-color: rgba(245, 166, 35, 0.45);
+    transform: translateY(-1px);
+}
+.ns-prem-upgrade-cta:active {
+    transform: translateY(0);
+}
+
+/* Mobile responsive — upgrade row stacks vertically on narrow screens */
+@media (max-width: 480px) {
+    .ns-prem-upgrade-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+    .ns-prem-upgrade-cta {
+        justify-content: center;
+        width: 100%;
+    }
+}
 
 /* FIX (audit MED-3): Premium-unlocked variant — amber border + subtle glow to
    distinguish from free category cards. Applied via ns-prem-card--premium class. */

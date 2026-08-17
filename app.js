@@ -10383,6 +10383,9 @@ const NS_ICONS = {
     wallet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg>',
     challenge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
     promo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>',
+    // Lock + Crown icons for Free-user locked Premium cards (Feather-style, consistent with existing icon system)
+    lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+    crown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h20M3 22h18M5 18l-2-9 6 4 5-7 5 7 6-4-2 9"/></svg>',
 };
 
 // Channel selector icons
@@ -10505,6 +10508,39 @@ async function renderNotifSettings() {
                 card.appendChild(cornerBadge);
             }
 
+            // PHASE 2: For Free users (locked), add a Lock badge in the top corner
+            // + make the whole card clickable → MembershipApp.open() (Premium upgrade).
+            // Premium users are NOT affected — their cards remain exactly as before.
+            if (isLocked) {
+                const lockBadge = document.createElement('div');
+                lockBadge.className = 'ns-prem-lock-badge';
+                lockBadge.setAttribute('aria-hidden', 'true');
+                lockBadge.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+                card.appendChild(lockBadge);
+
+                // Make the whole card clickable → Premium upgrade flow (MembershipApp.open)
+                card.setAttribute('role', 'button');
+                card.setAttribute('tabindex', '0');
+                card.setAttribute('aria-disabled', 'true');
+                card.style.cursor = 'pointer';
+                const openUpgrade = function(e) {
+                    // Prevent the click from also triggering the capsule button (which is disabled anyway)
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (window.MembershipApp && typeof window.MembershipApp.open === 'function') {
+                        window.MembershipApp.open();
+                    }
+                };
+                card.addEventListener('click', openUpgrade);
+                // Keyboard accessibility — Enter/Space triggers upgrade
+                card.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openUpgrade(e);
+                    }
+                });
+            }
+
             // Left: icon + text
             const left = document.createElement('div');
             left.className = 'ns-prem-left';
@@ -10529,20 +10565,30 @@ async function renderNotifSettings() {
             left.appendChild(iconBox);
             left.appendChild(textBox);
 
-            // Right: capsule selector or lock badge
+            // Right: capsule selector (disabled for Free, functional for Premium)
             const capsule = document.createElement('div');
             capsule.className = 'ns-capsule';
             capsule.setAttribute('data-cat', cat.key);
 
             if (isLocked) {
-                // Phase 3: Free user — locked controls
+                // PHASE 2: Free user — show the SAME capsule structure as Premium,
+                // but all buttons are disabled (no hover, no state change, no API call).
+                // Clicking the card (or capsule buttons) → MembershipApp.open() upgrade.
                 capsule.classList.add('ns-capsule--locked');
-                const lockBadge = document.createElement('div');
-                lockBadge.className = 'ns-prem-lock';
-                lockBadge.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>' + (isFa ? 'Premium' : 'Premium') + '</span>';
-                capsule.appendChild(lockBadge);
+                capsule.setAttribute('aria-disabled', 'true');
+                for (const ch of channels) {
+                    const btn = document.createElement('button');
+                    btn.className = `ns-cap-btn ns-cap-btn--disabled${currentVal === ch.val ? ' ' + ch.cls : ''}`;
+                    btn.setAttribute('data-cat', cat.key);
+                    btn.setAttribute('data-val', ch.val);
+                    btn.setAttribute('disabled', 'disabled');
+                    btn.setAttribute('aria-disabled', 'true');
+                    btn.setAttribute('tabindex', '-1');
+                    btn.innerHTML = NS_CHAN_ICONS[ch.val] + '<span>' + ch.label + '</span>';
+                    capsule.appendChild(btn);
+                }
             } else {
-                // Phase 4: Premium user — functional controls
+                // Phase 4: Premium user — functional controls (UNCHANGED)
                 for (const ch of channels) {
                     const btn = document.createElement('button');
                     btn.className = `ns-cap-btn${currentVal === ch.val ? ' active ' + ch.cls : ''}`;
@@ -10555,6 +10601,36 @@ async function renderNotifSettings() {
 
             card.appendChild(left);
             card.appendChild(capsule);
+
+            // PHASE 4: For Free (locked) cards, add a muted upgrade message + CTA at the bottom.
+            // Premium users do NOT see this — their cards end at the capsule (unchanged).
+            if (isLocked) {
+                const msgRow = document.createElement('div');
+                msgRow.className = 'ns-prem-upgrade-row';
+
+                const msgText = document.createElement('div');
+                msgText.className = 'ns-prem-upgrade-msg';
+                msgText.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>' + (isFa ? 'برای دسترسی به این تنظیمات، به پریمیوم ارتقا دهید.' : 'Upgrade to Premium to access these settings.') + '</span>';
+                msgRow.appendChild(msgText);
+
+                const ctaBtn = document.createElement('button');
+                ctaBtn.className = 'ns-prem-upgrade-cta';
+                ctaBtn.setAttribute('type', 'button');
+                ctaBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 18h20M3 22h18M5 18l-2-9 6 4 5-7 5 7 6-4-2 9"/></svg><span>' + (isFa ? 'ارتقا به پریمیوم' : 'Upgrade to Premium') + '</span>';
+                // CTA click → upgrade flow (MembershipApp.open). The card-level click handler
+                // also does this, but having an explicit CTA button is clearer UX.
+                ctaBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (window.MembershipApp && typeof window.MembershipApp.open === 'function') {
+                        window.MembershipApp.open();
+                    }
+                });
+                msgRow.appendChild(ctaBtn);
+
+                card.appendChild(msgRow);
+            }
+
             cardList.appendChild(card);
         }
         frag.appendChild(cardList);
@@ -10568,6 +10644,15 @@ async function renderNotifSettings() {
     list.onclick = function(e) {
         const btn = e.target.closest('.ns-cap-btn');
         if (!btn) return;
+        // PHASE 2: Locked (Free user) buttons must NOT trigger settings change.
+        // The card-level click handler on the parent .ns-prem-card--locked already
+        // routes to MembershipApp.open() (upgrade flow). This guard prevents the
+        // settings API call from firing for Free users.
+        if (btn.classList.contains('ns-cap-btn--disabled') || btn.hasAttribute('disabled')) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         const catKey = btn.getAttribute('data-cat');
         const val = btn.getAttribute('data-val');
         if (catKey && val) handleChannelPrefChange(catKey, val);
