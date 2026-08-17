@@ -258,6 +258,11 @@ export function createAdvertisementsRepository(deps) {
       return _campaignCache.value.channels || [];
     }
     if (!isDatabaseConfigured(env)) { return []; }
+    // PHASE 1 FIX: Ensure schema exists before querying. On a fresh DB, the
+    // SELECT would throw "relation does not exist" → caught → returns [].
+    // But that hides the real issue (no tables) from the user forever.
+    // ensureSchema creates the tables so future calls work correctly.
+    await ensureSchema(env);
     try {
       const result = await queryDb(env, `
         SELECT c.id, c.channel_username, c.channel_title, c.join_url, c.display_order
@@ -291,6 +296,11 @@ export function createAdvertisementsRepository(deps) {
 
   async function listAllChannelsForAdmin(env) {
     if (!isDatabaseConfigured(env)) return [];
+    // PHASE 1 FIX: Ensure schema exists before querying. On a fresh production
+    // DB, ad_channels/ad_campaigns don't exist yet → SELECT would throw
+    // "relation does not exist" → 503. ensureSchema is idempotent (_schemaVerified
+    // flag skips after first success), so this is a no-op on warm isolates.
+    await ensureSchema(env);
     const result = await queryDb(env, `
       SELECT c.*, camp.title AS campaign_title, camp.status AS campaign_status
       FROM ad_channels c
@@ -449,6 +459,8 @@ export function createAdvertisementsRepository(deps) {
       return _campaignCache.value.popups;
     }
     if (!isDatabaseConfigured(env)) { return []; }
+    // PHASE 1 FIX: Ensure schema exists before querying (see listActiveRequiredChannels).
+    await ensureSchema(env);
     try {
       const result = await queryDb(env, `
         SELECT p.id, p.campaign_id, p.title, p.body_text, p.button_label,
@@ -469,6 +481,8 @@ export function createAdvertisementsRepository(deps) {
 
   async function listAllPopupsForAdmin(env) {
     if (!isDatabaseConfigured(env)) return [];
+    // PHASE 1 FIX: Ensure schema exists before querying (see listAllChannelsForAdmin).
+    await ensureSchema(env);
     const result = await queryDb(env, `
       SELECT p.*, camp.title AS campaign_title, camp.status AS campaign_status
       FROM ad_popups p
@@ -611,6 +625,8 @@ export function createAdvertisementsRepository(deps) {
 
   async function listAllMessagesForAdmin(env) {
     if (!isDatabaseConfigured(env)) return [];
+    // PHASE 1 FIX: Ensure schema exists before querying (see listAllChannelsForAdmin).
+    await ensureSchema(env);
     const result = await queryDb(env, `
       SELECT m.*, camp.title AS campaign_title, camp.status AS campaign_status
       FROM ad_messages m

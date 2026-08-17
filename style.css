@@ -14531,10 +14531,168 @@ body.jl-locked .cd-fullscreen {
     font-size: 12px;
     line-height: 1.6;
     text-align: right; /* RTL */
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+.ads-help-banner .ads-help-icon {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    color: #f7b950;
+    margin-top: 1px;
+}
+.ads-help-banner span {
+    flex: 1;
 }
 .ads-help-banner strong {
     color: #f7b950;
     margin-inline-start: 4px;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   PHASE 3 — SVG icon styles for Advertisement Admin UI.
+   Icons use the same dimensions as the rest of the admin panel:
+   16px in buttons, 14px in badges, 18px in card titles.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Tab icons (channels / popups / messages) */
+.rc-tab-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    margin-inline-end: 6px;
+    stroke-width: 2;
+}
+
+/* Card title icons (کانال‌های عضویت / پاپ‌آپ مینی‌اپ / پیام‌های تبلیغاتی) */
+.rc-card-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    margin-inline-end: 8px;
+    vertical-align: -3px;
+    color: #f7b950;
+}
+
+/* Button icons (افزودن / انتخاب تصویر / ارسال) */
+.adm-btn-icon {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    margin-inline-end: 6px;
+    vertical-align: -2px;
+}
+
+/* Badge icons (destination: mini_app / telegram / both) */
+.ads-badge-icon {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    margin-inline-end: 4px;
+    vertical-align: -1px;
+    display: inline-block;
+}
+
+/* Radio option icons (destination radios in message form) */
+.rc-radio-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    margin-inline-end: 5px;
+    vertical-align: -2px;
+    display: inline-block;
+}
+
+/* Icon wrapper for buttons that need icon + text aligned */
+.adm-icon-wrap {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   PHASE 5 — Premium empty + error states.
+   Replaces the old plain "admin-empty" text with SVG icon + message + CTA.
+   ════════════════════════════════════════════════════════════════════ */
+.ads-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 32px 20px;
+    text-align: center;
+    min-height: 160px;
+}
+.ads-empty-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: rgba(245, 166, 35, 0.06);
+    border: 1px solid rgba(245, 166, 35, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(245, 166, 35, 0.5);
+}
+.ads-empty-svg {
+    width: 22px;
+    height: 22px;
+}
+.ads-empty-text {
+    font-size: 13px;
+    color: #7a8499;
+    line-height: 1.5;
+    max-width: 280px;
+}
+.ads-empty-cta {
+    margin-top: 4px;
+}
+
+/* Error state */
+.ads-error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 32px 20px;
+    text-align: center;
+    min-height: 160px;
+}
+.ads-error-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #f87171;
+}
+.ads-error-svg {
+    width: 22px;
+    height: 22px;
+}
+.ads-error-text {
+    font-size: 13px;
+    color: #f87171;
+    line-height: 1.5;
+    max-width: 280px;
+}
+.ads-retry-btn {
+    margin-top: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: #e4e9f2;
+    font-size: 12px;
+    padding: 7px 16px;
+}
+.ads-retry-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
 }
 
 /* ─── Small inline select for status changes inside table rows ─── */

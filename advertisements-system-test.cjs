@@ -1060,3 +1060,295 @@ test('ADS-FIX-REL: releaseMessageClaim method exists', () => {
 });
 
 console.log('✅ All audit-fix tests loaded.');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 1 FIX TESTS — ensureSchema called in all list* functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+// FIX: listAllChannelsForAdmin calls ensureSchema
+test('ADS-FIX-SCHEMA-01: listAllChannelsForAdmin calls ensureSchema before query', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function listAllChannelsForAdmin');
+  assert.ok(fnStart > 0, 'listAllChannelsForAdmin function must exist');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 800);
+  assert.ok(fnBlock.includes('await ensureSchema(env)'),
+    'listAllChannelsForAdmin must call await ensureSchema(env) before SELECT (prevents 503 on fresh DB)');
+  assert.ok(fnBlock.includes('if (!isDatabaseConfigured(env)) return []'),
+    'listAllChannelsForAdmin must guard with isDatabaseConfigured');
+});
+
+// FIX: listAllPopupsForAdmin calls ensureSchema
+test('ADS-FIX-SCHEMA-02: listAllPopupsForAdmin calls ensureSchema before query', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function listAllPopupsForAdmin');
+  assert.ok(fnStart > 0, 'listAllPopupsForAdmin function must exist');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 800);
+  assert.ok(fnBlock.includes('await ensureSchema(env)'),
+    'listAllPopupsForAdmin must call await ensureSchema(env) before SELECT');
+});
+
+// FIX: listAllMessagesForAdmin calls ensureSchema
+test('ADS-FIX-SCHEMA-03: listAllMessagesForAdmin calls ensureSchema before query', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function listAllMessagesForAdmin');
+  assert.ok(fnStart > 0, 'listAllMessagesForAdmin function must exist');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 800);
+  assert.ok(fnBlock.includes('await ensureSchema(env)'),
+    'listAllMessagesForAdmin must call await ensureSchema(env) before SELECT');
+});
+
+// FIX: listActiveRequiredChannels calls ensureSchema
+test('ADS-FIX-SCHEMA-04: listActiveRequiredChannels calls ensureSchema before query', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function listActiveRequiredChannels');
+  assert.ok(fnStart > 0, 'listActiveRequiredChannels function must exist');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 1200);
+  assert.ok(fnBlock.includes('await ensureSchema(env)'),
+    'listActiveRequiredChannels must call await ensureSchema(env) before SELECT (user-facing endpoint)');
+});
+
+// FIX: listActivePopups calls ensureSchema
+test('ADS-FIX-SCHEMA-05: listActivePopups calls ensureSchema before query', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function listActivePopups');
+  assert.ok(fnStart > 0, 'listActivePopups function must exist');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 1200);
+  assert.ok(fnBlock.includes('await ensureSchema(env)'),
+    'listActivePopups must call await ensureSchema(env) before SELECT (user-facing endpoint)');
+});
+
+// FIX: _schemaVerified flag exists (idempotent — skips after first success)
+test('ADS-FIX-SCHEMA-06: _schemaVerified flag exists for idempotent ensureSchema', () => {
+  assert.ok(ADS_REPO_SRC.includes('let _schemaVerified = false'),
+    '_schemaVerified flag must exist (prevents re-running CREATE TABLE on every call)');
+  assert.ok(/if \(_schemaVerified\) return;/.test(ADS_REPO_SRC),
+    'ensureSchema must early-return if _schemaVerified is true (zero overhead on warm isolates)');
+});
+
+// FIX: CREATE TABLE IF NOT EXISTS (idempotent, safe for concurrent calls)
+test('ADS-FIX-SCHEMA-07: all CREATE TABLE statements use IF NOT EXISTS', () => {
+  const tables = ['ad_campaigns', 'ad_channels', 'ad_popups', 'ad_messages'];
+  tables.forEach(t => {
+    assert.ok(ADS_REPO_SRC.includes(`CREATE TABLE IF NOT EXISTS ${t}`),
+      `${t} must use CREATE TABLE IF NOT EXISTS (idempotent, safe for concurrent calls)`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3 — SVG icons replace emojis in Advertisement Admin UI
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('ADS-FIX-UI-EMOJI-01: _ADS_ICONS object exists with all required SVG icons', () => {
+  assert.ok(ADMIN_JS.includes('var _ADS_ICONS = {'),
+    '_ADS_ICONS object must exist in admin.js');
+  const iconBlock = ADMIN_JS.slice(
+    ADMIN_JS.indexOf('var _ADS_ICONS = {'),
+    ADMIN_JS.indexOf('};', ADMIN_JS.indexOf('var _ADS_ICONS = {')) + 2
+  );
+  const requiredIcons = ['megaphone', 'link', 'layout', 'plus', 'pencil', 'upload', 'info', 'smartphone', 'send', 'check', 'trash', 'close'];
+  requiredIcons.forEach(icon => {
+    assert.ok(iconBlock.includes(icon + ':'),
+      `_ADS_ICONS must include "${icon}" icon`);
+  });
+  // All icons must be SVG (not emoji)
+  assert.ok(iconBlock.includes('<svg'),
+    'icons must be inline SVG');
+  assert.ok(!/[\u{1F300}-\u{1F9FF}]/u.test(iconBlock),
+    'icon block must NOT contain emoji characters');
+});
+
+test('ADS-FIX-UI-EMOJI-02: _adsIcon helper renders SVG with CSS class', () => {
+  const fnStart = ADMIN_JS.indexOf('function _adsIcon(');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 400);
+  assert.ok(fnBlock.includes('_ADS_ICONS[key]'),
+    '_adsIcon must look up icon by key');
+  assert.ok(fnBlock.includes('class='),
+    '_adsIcon must inject CSS class into SVG');
+});
+
+test('ADS-FIX-UI-EMOJI-03: No decorative emojis in advertisement admin section', () => {
+  // Find the advertisement section in admin.js (from _ADS_ICONS to the end of ads functions)
+  const adsStart = ADMIN_JS.indexOf('// ADVERTISEMENTS — Admin UI');
+  const adsEnd = ADMIN_JS.indexOf('async function loadAdminMembership');
+  assert.ok(adsStart > 0 && adsEnd > adsStart, 'advertisement section must exist');
+  const adsBlock = ADMIN_JS.slice(adsStart, adsEnd);
+  // Check for common decorative emojis
+  const emojiPattern = /[\u{1F300}-\u{1F9FF}]|📢|🔗|🪟|📣|➕|✏️|🗑️|📁|ℹ️|📱|✈️|✓|📤|🔒|⭐|💎/u;
+  // Filter out the icon SVG definitions (which don't contain emojis)
+  const linesWithoutSvgDefs = adsBlock.split('\n').filter(l => !l.includes("'<'") && !l.includes('viewBox'));
+  const joined = linesWithoutSvgDefs.join('\n');
+  // The _ADS_ICONS object definition itself is fine — we only care about RENDERED content
+  // Check specific known emoji locations (card titles, buttons, help banners)
+  assert.ok(!adsBlock.includes('📢 تبلیغات'),
+    'section title must NOT have 📢 emoji');
+  assert.ok(!adsBlock.includes('🔗 کانال'),
+    'card title must NOT have 🔗 emoji');
+  assert.ok(!adsBlock.includes('🪟 پاپ'),
+    'card title must NOT have 🪟 emoji');
+  assert.ok(!adsBlock.includes('📣 پیام'),
+    'card title must NOT have 📣 emoji');
+  assert.ok(!adsBlock.includes('➕ افزودن'),
+    'add button must NOT have ➕ emoji (use _adsIcon("plus"))');
+  assert.ok(!adsBlock.includes('✏️ ویرایش'),
+    'edit form title must NOT have ✏️ emoji');
+  assert.ok(!adsBlock.includes('📁 انتخاب'),
+    'upload button must NOT have 📁 emoji');
+  assert.ok(!adsBlock.includes('ℹ️ راهنما'),
+    'help banner must NOT have ℹ️ emoji');
+  assert.ok(!adsBlock.includes("icon: '📱'"),
+    'destination meta must NOT use 📱 emoji (use iconKey)');
+  assert.ok(!adsBlock.includes("icon: '✈️'"),
+    'destination meta must NOT use ✈️ emoji (use iconKey)');
+  assert.ok(!adsBlock.includes('📤 ارسال'),
+    'send button must NOT have 📢 emoji');
+});
+
+test('ADS-FIX-UI-EMOJI-04: index.html advertisement section uses SVG tab icons (no emojis)', () => {
+  assert.ok(INDEX_HTML.includes('id="admin-section-advertisements"'),
+    'advertisement section must exist in index.html');
+  const adsStart = INDEX_HTML.indexOf('id="admin-section-advertisements"');
+  const adsEnd = INDEX_HTML.indexOf('</section>', adsStart);
+  const adsBlock = INDEX_HTML.slice(adsStart, adsEnd);
+  // Section title must NOT have emoji
+  assert.ok(!adsBlock.includes('📢 تبلیغات'),
+    'section title must NOT have 📢 emoji');
+  // Tabs must use SVG icons
+  assert.ok(adsBlock.includes('rc-tab-icon'),
+    'tabs must use rc-tab-icon CSS class for SVG icons');
+  assert.ok(adsBlock.includes('<svg class="rc-tab-icon"'),
+    'tab buttons must contain inline SVG with rc-tab-icon class');
+  // No emojis in tab labels
+  assert.ok(!adsBlock.includes('🔗 کانال‌ها'),
+    'channels tab must NOT have 🔗 emoji');
+  assert.ok(!adsBlock.includes('🪟 پاپ‌آپ'),
+    'popups tab must NOT have 🪟 emoji');
+  assert.ok(!adsBlock.includes('📣 پیام‌ها'),
+    'messages tab must NOT have 📣 emoji');
+});
+
+test('ADS-FIX-UI-EMOJI-05: _adsDestinationMeta uses iconKey (not emoji icon)', () => {
+  const fnStart = ADMIN_JS.indexOf('function _adsDestinationMeta');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 500);
+  assert.ok(fnBlock.includes('iconKey:'),
+    '_adsDestinationMeta must use iconKey (SVG lookup) instead of emoji icon');
+  assert.ok(!fnBlock.includes("icon: '📱'"),
+    '_adsDestinationMeta must NOT use 📱 emoji');
+  assert.ok(!fnBlock.includes("icon: '✈️'"),
+    '_adsDestinationMeta must NOT use ✈️ emoji');
+});
+
+test('ADS-FIX-UI-EMOJI-06: _adsDestinationBadge renders SVG icon', () => {
+  const fnStart = ADMIN_JS.indexOf('function _adsDestinationBadge');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 500);
+  assert.ok(fnBlock.includes('_adsIcon('),
+    '_adsDestinationBadge must call _adsIcon to render SVG icon');
+  assert.ok(fnBlock.includes('ads-badge-icon'),
+    '_adsDestinationBadge must use ads-badge-icon CSS class');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 5 — Premium empty + error states
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('ADS-FIX-UI-EMPTY-01: _adsEmptyState helper exists with SVG icon + CTA', () => {
+  const fnStart = ADMIN_JS.indexOf('function _adsEmptyState(');
+  assert.ok(fnStart > 0, '_adsEmptyState function must exist');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 600);
+  assert.ok(fnBlock.includes('_adsIcon('),
+    '_adsEmptyState must render an SVG icon');
+  assert.ok(fnBlock.includes('ads-empty-state'),
+    '_adsEmptyState must use ads-empty-state CSS class');
+  assert.ok(fnBlock.includes('ads-empty-icon'),
+    '_adsEmptyState must use ads-empty-icon for the icon container');
+  assert.ok(fnBlock.includes('ads-empty-text'),
+    '_adsEmptyState must use ads-empty-text for the message');
+});
+
+test('ADS-FIX-UI-EMPTY-02: _adsErrorState helper exists with retry button', () => {
+  const fnStart = ADMIN_JS.indexOf('function _adsErrorState(');
+  assert.ok(fnStart > 0, '_adsErrorState function must exist');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 600);
+  assert.ok(fnBlock.includes('_adsIcon('),
+    '_adsErrorState must render an SVG icon');
+  assert.ok(fnBlock.includes('ads-error-state'),
+    '_adsErrorState must use ads-error-state CSS class');
+  assert.ok(fnBlock.includes('ads-retry-btn'),
+    '_adsErrorState must include a retry button');
+  assert.ok(fnBlock.includes('تلاش مجدد'),
+    '_adsErrorState retry button must say "تلاش مجدد"');
+});
+
+test('ADS-FIX-UI-EMPTY-03: loadAdChannels uses premium empty + error states', () => {
+  const fnStart = ADMIN_JS.indexOf('async function loadAdChannels');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 4000);
+  assert.ok(fnBlock.includes('_adsEmptyState('),
+    'loadAdChannels must use _adsEmptyState for empty table rows');
+  assert.ok(fnBlock.includes('_adsErrorState('),
+    'loadAdChannels must use _adsErrorState for catch block');
+  assert.ok(!fnBlock.includes("'<div class=\"admin-empty\">خطا در بارگذاری</div>'"),
+    'loadAdChannels must NOT use the old plain "خطا در بارگذاری" text');
+});
+
+test('ADS-FIX-UI-EMPTY-04: loadAdPopups uses premium empty + error states', () => {
+  const fnStart = ADMIN_JS.indexOf('async function loadAdPopups');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 4000);
+  assert.ok(fnBlock.includes('_adsEmptyState('),
+    'loadAdPopups must use _adsEmptyState');
+  assert.ok(fnBlock.includes('_adsErrorState('),
+    'loadAdPopups must use _adsErrorState');
+});
+
+test('ADS-FIX-UI-EMPTY-05: loadAdMessages uses premium empty + error states', () => {
+  const fnStart = ADMIN_JS.indexOf('async function loadAdMessages');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 5000);
+  assert.ok(fnBlock.includes('_adsEmptyState('),
+    'loadAdMessages must use _adsEmptyState');
+  assert.ok(fnBlock.includes('_adsErrorState('),
+    'loadAdMessages must use _adsErrorState');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 6 — sendAdMessage loading state
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('ADS-FIX-UI-LOAD-01: sendAdMessage has button loading state', () => {
+  const fnStart = ADMIN_JS.indexOf('async function sendAdMessage');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 2500);
+  assert.ok(fnBlock.includes('sendBtn.disabled = true'),
+    'sendAdMessage must disable the send button during API call');
+  assert.ok(fnBlock.includes('در حال ارسال'),
+    'sendAdMessage must show "در حال ارسال" loading text');
+  assert.ok(fnBlock.includes('finally'),
+    'sendAdMessage must re-enable the button in a finally block');
+  assert.ok(fnBlock.includes("_adsIcon('refresh'"),
+    'sendAdMessage loading state must use refresh SVG icon');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3 — CSS for SVG icons exists
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('ADS-FIX-UI-CSS-01: SVG icon CSS classes exist in style.css', () => {
+  assert.ok(STYLE_SRC.includes('.rc-tab-icon'),
+    '.rc-tab-icon CSS class must exist (tab icons)');
+  assert.ok(STYLE_SRC.includes('.rc-card-icon'),
+    '.rc-card-icon CSS class must exist (card title icons)');
+  assert.ok(STYLE_SRC.includes('.adm-btn-icon'),
+    '.adm-btn-icon CSS class must exist (button icons)');
+  assert.ok(STYLE_SRC.includes('.ads-badge-icon'),
+    '.ads-badge-icon CSS class must exist (badge icons)');
+  assert.ok(STYLE_SRC.includes('.rc-radio-icon'),
+    '.rc-radio-icon CSS class must exist (radio option icons)');
+});
+
+test('ADS-FIX-UI-CSS-02: empty + error state CSS classes exist', () => {
+  assert.ok(STYLE_SRC.includes('.ads-empty-state'),
+    '.ads-empty-state CSS class must exist');
+  assert.ok(STYLE_SRC.includes('.ads-empty-icon'),
+    '.ads-empty-icon CSS class must exist');
+  assert.ok(STYLE_SRC.includes('.ads-empty-svg'),
+    '.ads-empty-svg CSS class must exist');
+  assert.ok(STYLE_SRC.includes('.ads-error-state'),
+    '.ads-error-state CSS class must exist');
+  assert.ok(STYLE_SRC.includes('.ads-error-icon'),
+    '.ads-error-icon CSS class must exist');
+  assert.ok(STYLE_SRC.includes('.ads-retry-btn'),
+    '.ads-retry-btn CSS class must exist');
+});
+
+console.log('✅ All PHASE 1-9 fix tests loaded.');

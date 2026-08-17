@@ -3117,6 +3117,70 @@ var _adsChannelCache = [];
 var _adsPopupCache = [];
 var _adsMessageCache = [];
 
+// ════════════════════════════════════════════════════════════════════
+// PHASE 3 — SVG icon set for Advertisement Admin UI.
+// Uses the SAME icon style as the rest of the admin panel:
+//   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+//   stroke-linecap="round" stroke-linejoin="round"
+// No icon library added — pure inline SVG, consistent with sidebar nav
+// and ticket buttons. Icons sized via CSS (.adm-btn svg, .rc-tab svg).
+// ════════════════════════════════════════════════════════════════════
+var _ADS_ICONS = {
+    megaphone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/><path d="M3 11v3a2 2 0 0 0 2 2h1v-7H5a2 2 0 0 0-2 2z"/></svg>',
+    link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+    layout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>',
+    mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>',
+    upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+    smartphone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>',
+    send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+    alertCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+};
+
+// Helper: render an icon by key with optional CSS class.
+function _adsIcon(key, className) {
+    var svg = _ADS_ICONS[key] || '';
+    if (className && svg) {
+        return svg.replace('<svg ', '<svg class="' + className + '" ');
+    }
+    return svg;
+}
+
+// Helper: icon + label span (for buttons / tabs).
+function _adsIconLabel(iconKey, label) {
+    return '<span class="adm-icon-wrap">' + _adsIcon(iconKey, 'adm-btn-icon') + '</span><span>' + adminEscapeHtml(label) + '</span>';
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PHASE 5 — Premium empty + error states with SVG icons + CTA.
+// Replaces the old plain "کانالی موجود نیست" / "خطا در بارگذاری" text.
+// ════════════════════════════════════════════════════════════════════
+function _adsEmptyState(iconKey, message, ctaFn, ctaLabel) {
+    var cta = (ctaFn && ctaLabel)
+        ? '<button class="adm-btn adm-btn-primary ads-empty-cta" onclick="' + adminEscapeHtml(ctaFn) + '">' + _adsIcon('plus', 'adm-btn-icon') + adminEscapeHtml(ctaLabel) + '</button>'
+        : '';
+    return '<div class="ads-empty-state">' +
+        '<div class="ads-empty-icon">' + _adsIcon(iconKey || 'inbox', 'ads-empty-svg') + '</div>' +
+        '<div class="ads-empty-text">' + adminEscapeHtml(message || 'موردی موجود نیست') + '</div>' +
+        cta +
+    '</div>';
+}
+
+function _adsErrorState(message, retryFn) {
+    return '<div class="ads-error-state">' +
+        '<div class="ads-error-icon">' + _adsIcon('alertCircle', 'ads-error-svg') + '</div>' +
+        '<div class="ads-error-text">' + adminEscapeHtml(message || 'بارگذاری اطلاعات انجام نشد') + '</div>' +
+        '<button class="adm-btn ads-retry-btn" onclick="' + adminEscapeHtml(retryFn) + '()">' + _adsIcon('refresh', 'adm-btn-icon') + 'تلاش مجدد</button>' +
+    '</div>';
+}
+
 // FIX (audit H3): Submit button loading state to prevent double-clicks.
 // Disables the button + shows "..." text during the API call. Re-enables on
 // completion (success or error). Used by saveAdChannel/saveAdPopup/saveAdMessage.
@@ -3174,9 +3238,9 @@ function _adStatusSelect(setterFnName, id, currentStatus) {
 // Persian labels + color classes for destinations (mini_app/telegram/both)
 function _adsDestinationMeta(dest) {
     switch (dest) {
-        case 'mini_app': return { icon: '📱', label: 'مینی‌اپ', color: 'blue' };
-        case 'telegram': return { icon: '✈️', label: 'تلگرام', color: 'blue' };
-        case 'both': default: return { icon: '📱✈️', label: 'هر دو', color: 'blue' };
+        case 'mini_app': return { iconKey: 'smartphone', label: 'مینی‌اپ', color: 'blue' };
+        case 'telegram': return { iconKey: 'send', label: 'تلگرام', color: 'blue' };
+        case 'both': default: return { iconKey: 'both', label: 'هر دو', color: 'blue' };
     }
 }
 
@@ -3306,26 +3370,27 @@ async function loadAdChannels() {
             }).join('');
             section.innerHTML =
                 '<div class="ads-help-banner">' +
-                    '<strong>ℹ️ راهنما:</strong> این کانال‌ها به عنوان کانال‌های موردنیاز عضویت تنظیم می‌شوند. کاربر باید عضو همه کانال‌های فعال باشد.' +
+                    _adsIcon('info', 'ads-help-icon') +
+                    '<span>این کانال‌ها به عنوان کانال‌های موردنیاز عضویت تنظیم می‌شوند. کاربر باید عضو همه کانال‌های فعال باشد.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
-                    '<h4 class="rc-card-title">🔗 کانال‌های عضویت</h4>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="showAdChannelForm(null)" style="margin-bottom:12px;">➕ افزودن کانال</button>' +
+                    '<h4 class="rc-card-title">' + _adsIcon('link', 'rc-card-icon') + 'کانال‌های عضویت</h4>' +
+                    '<button class="adm-btn adm-btn-primary" onclick="showAdChannelForm(null)" style="margin-bottom:12px;">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن کانال</button>' +
                     '<div id="ads-channel-form" style="display:none;margin-bottom:14px;"></div>' +
                     '<div class="adm-table-wrap">' +
                         '<table class="adm-table">' +
                             '<thead><tr><th>کانال</th><th>وضعیت</th><th>نمایش</th><th>ترتیب</th><th>عملیات</th></tr></thead>' +
-                            '<tbody>' + (rows || '<tr><td colspan="5" class="admin-empty">کانالی موجود نیست</td></tr>') + '</tbody>' +
+                            '<tbody>' + (rows || '<tr><td colspan="5">' + _adsEmptyState('link', 'هنوز کانالی اضافه نشده است', 'showAdChannelForm(null)', 'افزودن اولین کانال') + '</td></tr>') + '</tbody>' +
                         '</table>' +
                     '</div>' +
                 '</div>';
         } else {
             _adsChannelCache = [];
-            section.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>';
+            section.innerHTML = _adsEmptyState('link', 'داده‌ای دریافت نشد', 'loadAdChannels', 'تلاش مجدد');
         }
     } catch (e) {
         _adsChannelCache = [];
-        section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        section.innerHTML = _adsErrorState('بارگذاری کانال‌ها انجام نشد', 'loadAdChannels');
         console.error('loadAdChannels:', e);
     }
 }
@@ -3340,7 +3405,7 @@ function showAdChannelForm(channelId) {
         if (form.style.display === 'none') return;
         form.innerHTML =
             '<div class="rc-card" style="border-color:rgba(245,166,35,0.3);">' +
-                '<h4 class="rc-card-title">➕ کانال جدید</h4>' +
+                '<h4 class="rc-card-title">' + _adsIcon('plus', 'rc-card-icon') + 'کانال جدید</h4>' +
                 '<div class="rc-form-grid">' +
                     '<div class="rc-field"><label>یوزرنیم کانال (بدون @)</label><input type="text" id="ads-ch-username" placeholder="amirbtc"></div>' +
                     '<div class="rc-field"><label>عنوان کانال</label><input type="text" id="ads-ch-title" placeholder="کانال امیر بیت‌کوین"></div>' +
@@ -3361,7 +3426,7 @@ function showAdChannelForm(channelId) {
     form.style.display = '';
     form.innerHTML =
         '<div class="rc-card" style="border-color:rgba(245,166,35,0.3);">' +
-            '<h4 class="rc-card-title">✏️ ویرایش کانال: @' + adminEscapeHtml(ch.channel_username || '') + '</h4>' +
+            '<h4 class="rc-card-title">' + _adsIcon('pencil', 'rc-card-icon') + 'ویرایش کانال: @' + adminEscapeHtml(ch.channel_username || '') + '</h4>' +
             '<div class="rc-form-grid">' +
                 '<div class="rc-field"><label>یوزرنیم کانال (بدون @)</label><input type="text" id="ads-ch-username" value="' + adminEscapeHtml(ch.channel_username || '') + '"></div>' +
                 '<div class="rc-field"><label>عنوان کانال</label><input type="text" id="ads-ch-title" value="' + adminEscapeHtml(ch.channel_title || '') + '"></div>' +
@@ -3493,27 +3558,27 @@ async function loadAdPopups() {
             }).join('');
             section.innerHTML =
                 '<div class="ads-help-banner">' +
-                    '<strong>ℹ️ راهنما:</strong> قالب پاپ‌آپ ثابت است: تصویر ← عنوان ← متن ← دکمه. فقط محتوا قابل تغییر است. ' +
-                    'کوئل‌داون به معنای مدت زمانی است که پس از نمایش پاپ‌آپ به یک کاربر، تا آن مدت دوباره نمایش داده نمی‌شود.' +
+                    _adsIcon('info', 'ads-help-icon') +
+                    '<span>قالب پاپ‌آپ ثابت است: تصویر ← عنوان ← متن ← دکمه. فقط محتوا قابل تغییر است. کوئل‌داون به معنای مدت زمانی است که پس از نمایش پاپ‌آپ به یک کاربر، تا آن مدت دوباره نمایش داده نمی‌شود.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
-                    '<h4 class="rc-card-title">🪟 پاپ‌آپ مینی‌اپ</h4>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="showAdPopupForm(null)" style="margin-bottom:12px;">➕ افزودن پاپ‌آپ</button>' +
+                    '<h4 class="rc-card-title">' + _adsIcon('layout', 'rc-card-icon') + 'پاپ‌آپ مینی‌اپ</h4>' +
+                    '<button class="adm-btn adm-btn-primary" onclick="showAdPopupForm(null)" style="margin-bottom:12px;">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پاپ‌آپ</button>' +
                     '<div id="ads-popup-form" style="display:none;margin-bottom:14px;"></div>' +
                     '<div class="adm-table-wrap">' +
                         '<table class="adm-table">' +
-                            '<thead><tr><th>عنوان</th><th>وضعیت</th><th>۲۴h کوئل‌داون</th><th>آخرین تغییر</th><th>عملیات</th></tr></thead>' +
-                            '<tbody>' + (rows || '<tr><td colspan="5" class="admin-empty">پاپ‌آپی موجود نیست</td></tr>') + '</tbody>' +
+                            '<thead><tr><th>عنوان</th><th>وضعیت</th><th>کوئل‌داون (۲۴ ساعت)</th><th>آخرین تغییر</th><th>عملیات</th></tr></thead>' +
+                            '<tbody>' + (rows || '<tr><td colspan="5">' + _adsEmptyState('layout', 'هنوز پاپ‌آپی ساخته نشده است', 'showAdPopupForm(null)', 'افزودن اولین پاپ‌آپ') + '</td></tr>') + '</tbody>' +
                         '</table>' +
                     '</div>' +
                 '</div>';
         } else {
             _adsPopupCache = [];
-            section.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>';
+            section.innerHTML = _adsEmptyState('layout', 'داده‌ای دریافت نشد', 'loadAdPopups', 'تلاش مجدد');
         }
     } catch (e) {
         _adsPopupCache = [];
-        section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        section.innerHTML = _adsErrorState('بارگذاری پاپ‌آپ‌ها انجام نشد', 'loadAdPopups');
         console.error('loadAdPopups:', e);
     }
 }
@@ -3523,7 +3588,7 @@ function _adsPopupFormHtml(p) {
     // p === null → create mode; otherwise edit existing popup
     var isEdit = (p !== null && p !== undefined);
     var currentStatus = isEdit ? (p.campaign_status || p.status || 'draft') : 'active';
-    var headTitle = isEdit ? ('✏️ ویرایش پاپ‌آپ: ' + adminEscapeHtml(p.title || '')) : '➕ پاپ‌آپ جدید';
+    var headTitle = isEdit ? ('ویرایش پاپ‌آپ: ' + adminEscapeHtml(p.title || '')) : 'پاپ‌آپ جدید';
     var saveArg = isEdit ? ('\'' + adminEscapeJsId(String(p.id)) + '\'') : 'null';
     var saveLabel = isEdit ? 'به‌روزرسانی' : 'ایجاد پاپ‌آپ';
     var titleVal   = isEdit ? adminEscapeHtml(p.title || '') : '';
@@ -3557,7 +3622,7 @@ function _adsPopupFormHtml(p) {
             '<div class="rc-field" style="grid-column:1/-1;"><label>تصویر</label>' +
                 '<input type="text" id="ads-pp-imgurl" value="' + adminEscapeHtml(imgUrl) + '" placeholder="https://..." dir="ltr" style="margin-bottom:8px;">' +
                 '<label class="ads-img-upload-btn"><input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" ' +
-                    'onchange="uploadAdImage(this.files[0], \'ads-pp-imgurl\', \'ads-pp-preview\')" style="display:none;"><span>📁 انتخاب تصویر</span></label> ' +
+                    'onchange="uploadAdImage(this.files[0], \'ads-pp-imgurl\', \'ads-pp-preview\')" style="display:none;"><span>' + _adsIcon('upload', 'adm-btn-icon') + 'انتخاب تصویر</span></label> ' +
                 previewInit +
                 '<div class="ads-img-hint">می‌توانید یک URL تصویر https وارد کنید یا تصویر را آپلود کنید (حداکثر ۵۰۰KB).</div>' +
             '</div>' +
@@ -3662,7 +3727,13 @@ window.setAdPopupStatus = setAdPopupStatus;
 
 function _adsDestinationBadge(dest) {
     var meta = _adsDestinationMeta(dest);
-    return '<span class="admin-badge admin-badge-' + meta.color + '">' + meta.icon + ' ' + adminEscapeHtml(meta.label) + '</span>';
+    var iconHtml = '';
+    if (meta.iconKey === 'both') {
+        iconHtml = _adsIcon('smartphone', 'ads-badge-icon') + _adsIcon('send', 'ads-badge-icon');
+    } else if (meta.iconKey) {
+        iconHtml = _adsIcon(meta.iconKey, 'ads-badge-icon');
+    }
+    return '<span class="admin-badge admin-badge-' + meta.color + '">' + iconHtml + adminEscapeHtml(meta.label) + '</span>';
 }
 
 function _adsAudienceBadge(aud) {
@@ -3688,7 +3759,7 @@ async function loadAdMessages() {
                 var createdAt = m.created_at ? adminFormatDate(m.created_at) : '—';
                 var statusSelect = _adStatusSelect('setAdMessageStatus', m.id, m.campaign_status || m.status || 'draft');
                 var sendBtn = (m.campaign_status === 'active' || m.status === 'active')
-                    ? '<button class="adm-btn-sm" onclick="sendAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">📤 ارسال</button>'
+                    ? '<button class="adm-btn-sm" onclick="sendAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">' + _adsIcon('send', 'adm-btn-icon') + 'ارسال</button>'
                     : '';
                 return '<tr>' +
                     '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
@@ -3709,28 +3780,27 @@ async function loadAdMessages() {
             }).join('');
             section.innerHTML =
                 '<div class="ads-help-banner">' +
-                    '<strong>ℹ️ راهنما:</strong> فقط کمپین‌های فعال ارسال می‌شوند. Draft/Paused/Archived ارسال نمی‌شوند. ' +
-                    'دکمه «📤 ارسال» پیام را به مخاطبان هدف (بر اساس کانال و مخاطب انتخابی) تحویل می‌دهد. ' +
-                    'کاربران رایگان فقط در صورت انتخاب «همه» یا «رایگان» پیام را دریافت می‌کنند.' +
+                    _adsIcon('info', 'ads-help-icon') +
+                    '<span>فقط کمپین‌های فعال ارسال می‌شوند. Draft/Paused/Archived ارسال نمی‌شوند. دکمه «ارسال» پیام را به مخاطبان هدف (بر اساس کانال و مخاطب انتخابی) تحویل می‌دهد. کاربران رایگان فقط در صورت انتخاب «همه» یا «رایگان» پیام را دریافت می‌کنند.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
-                    '<h4 class="rc-card-title">📣 پیام‌های تبلیغاتی</h4>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="showAdMessageForm(null)" style="margin-bottom:12px;">➕ افزودن پیام</button>' +
+                    '<h4 class="rc-card-title">' + _adsIcon('mail', 'rc-card-icon') + 'پیام‌های تبلیغاتی</h4>' +
+                    '<button class="adm-btn adm-btn-primary" onclick="showAdMessageForm(null)" style="margin-bottom:12px;">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پیام</button>' +
                     '<div id="ads-message-form" style="display:none;margin-bottom:14px;"></div>' +
                     '<div class="adm-table-wrap">' +
                         '<table class="adm-table">' +
                             '<thead><tr><th>کمپین</th><th>مقصد</th><th>مخاطب</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead>' +
-                            '<tbody>' + (rows || '<tr><td colspan="6" class="admin-empty">پیامی موجود نیست</td></tr>') + '</tbody>' +
+                            '<tbody>' + (rows || '<tr><td colspan="6">' + _adsEmptyState('mail', 'هنوز پیامی ساخته نشده است', 'showAdMessageForm(null)', 'افزودن اولین پیام') + '</td></tr>') + '</tbody>' +
                         '</table>' +
                     '</div>' +
                 '</div>';
         } else {
             _adsMessageCache = [];
-            section.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>';
+            section.innerHTML = _adsEmptyState('mail', 'داده‌ای دریافت نشد', 'loadAdMessages', 'تلاش مجدد');
         }
     } catch (e) {
         _adsMessageCache = [];
-        section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        section.innerHTML = _adsErrorState('بارگذاری پیام‌ها انجام نشد', 'loadAdMessages');
         console.error('loadAdMessages:', e);
     }
 }
@@ -3741,7 +3811,7 @@ function _adsMessageFormHtml(m) {
     var currentStatus = isEdit ? (m.campaign_status || m.status || 'draft') : 'active';
     var currentDest = isEdit ? (m.destinations || 'both') : 'both';
     var currentAud = isEdit ? (m.target_audience || 'all') : 'all';
-    var headTitle = isEdit ? ('✏️ ویرایش پیام: ' + adminEscapeHtml(m.title || '')) : '➕ پیام جدید';
+    var headTitle = isEdit ? ('ویرایش پیام: ' + adminEscapeHtml(m.title || '')) : 'پیام جدید';
     var saveArg = isEdit ? ('\'' + adminEscapeJsId(String(m.id)) + '\'') : 'null';
     var saveLabel = isEdit ? 'به‌روزرسانی' : 'ایجاد پیام';
     var titleVal   = isEdit ? adminEscapeHtml(m.title || '') : '';
@@ -3762,9 +3832,9 @@ function _adsMessageFormHtml(m) {
             '<div class="rc-field"><label>متن دکمه</label><input type="text" id="ads-msg-btnlabel" value="' + btnLabel + '" placeholder="مشاهده"></div>' +
             '<div class="rc-field"><label>لینک دکمه</label><input type="text" id="ads-msg-btnurl" value="' + btnUrl + '" placeholder="https://..." dir="ltr"></div>' +
             '<div class="rc-field"><label>مقصد ارسال</label>' +
-                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-dest" value="mini_app" ' + radioChecked('mini_app', currentDest) + '><span>📱 مینی‌اپ</span></label>' +
-                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-dest" value="telegram" ' + radioChecked('telegram', currentDest) + '><span>✈️ تلگرام</span></label>' +
-                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-dest" value="both" ' + radioChecked('both', currentDest) + '><span>📱✈️ هر دو</span></label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-dest" value="mini_app" ' + radioChecked('mini_app', currentDest) + '><span>' + _adsIcon('smartphone', 'rc-radio-icon') + 'مینی‌اپ</span></label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-dest" value="telegram" ' + radioChecked('telegram', currentDest) + '><span>' + _adsIcon('send', 'rc-radio-icon') + 'تلگرام</span></label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-dest" value="both" ' + radioChecked('both', currentDest) + '><span>' + _adsIcon('smartphone', 'rc-radio-icon') + _adsIcon('send', 'rc-radio-icon') + 'هر دو</span></label>' +
             '</div>' +
             '<div class="rc-field"><label>مخاطب هدف</label>' +
                 '<label class="rc-toggle-row"><input type="radio" name="ads-msg-aud" value="free" ' + radioChecked('free', currentAud) + '><span>کاربران رایگان</span></label>' +
@@ -3781,7 +3851,7 @@ function _adsMessageFormHtml(m) {
             '<div class="rc-field" style="grid-column:1/-1;"><label>تصویر (اختیاری)</label>' +
                 '<input type="text" id="ads-msg-imgurl" value="' + adminEscapeHtml(imgUrl) + '" placeholder="https://..." dir="ltr" style="margin-bottom:8px;">' +
                 '<label class="ads-img-upload-btn"><input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" ' +
-                    'onchange="uploadAdImage(this.files[0], \'ads-msg-imgurl\', \'ads-msg-preview\')" style="display:none;"><span>📁 انتخاب تصویر</span></label> ' +
+                    'onchange="uploadAdImage(this.files[0], \'ads-msg-imgurl\', \'ads-msg-preview\')" style="display:none;"><span>' + _adsIcon('upload', 'adm-btn-icon') + 'انتخاب تصویر</span></label> ' +
                 previewInit +
                 '<div class="ads-img-hint">می‌توانید یک URL تصویر https وارد کنید یا تصویر را آپلود کنید (حداکثر ۵۰۰KB).</div>' +
             '</div>' +
@@ -3885,8 +3955,17 @@ window.setAdMessageStatus = setAdMessageStatus;
 
 async function sendAdMessage(messageId) {
     if (!confirm('ارسال این پیام به مخاطبان هدف؟ این عملیات ممکن است چند ثانیه طول بکشد.')) return;
+    // PHASE 6: Disable the send button during API call to prevent double-clicks.
+    // CAS protection (claimMessageForDelivery, 5-min cooldown) also exists backend-side.
+    var sendBtn = document.querySelector('button[onclick*="sendAdMessage(\'' + adminEscapeJsId(String(messageId)) + '\')"]');
+    if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = '0.65';
+        sendBtn.style.pointerEvents = 'none';
+        if (!sendBtn.dataset._origText) sendBtn.dataset._origText = sendBtn.innerHTML;
+        sendBtn.innerHTML = _adsIcon('refresh', 'adm-btn-icon') + 'در حال ارسال...';
+    }
     try {
-        adminToast('در حال ارسال...', 'info');
         var data = await adminApiFetch('/api/admin/advertisements/messages/' + encodeURIComponent(messageId) + '/send', {
             method: 'POST',
             body: JSON.stringify({})
@@ -3894,7 +3973,7 @@ async function sendAdMessage(messageId) {
         if (data && data.status === 'success') {
             var delivered = adminFormatNumber(data.delivered || 0);
             var skipped = adminFormatNumber(data.skipped || 0);
-            adminToast('✓ ارسال شد — تحویل: ' + delivered + ' / رد شده: ' + skipped, 'success');
+            adminToast('ارسال شد — تحویل: ' + delivered + ' / رد شده: ' + skipped, 'success');
             loadAdMessages();
         } else {
             adminToast((data && data.message) || 'خطا در ارسال', 'error');
@@ -3902,6 +3981,14 @@ async function sendAdMessage(messageId) {
     } catch (e) {
         console.error('sendAdMessage:', e);
         adminToast('خطا در ارسال: ' + (e.message || ''), 'error');
+    } finally {
+        // Re-enable the send button (only if campaign is still active — loadAdMessages may re-render)
+        if (sendBtn && sendBtn.dataset._origText) {
+            sendBtn.disabled = false;
+            sendBtn.style.opacity = '';
+            sendBtn.style.pointerEvents = '';
+            sendBtn.innerHTML = sendBtn.dataset._origText;
+        }
     }
 }
 window.sendAdMessage = sendAdMessage;
