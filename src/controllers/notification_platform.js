@@ -20,6 +20,8 @@ export function createNotificationPlatformHandlers(deps) {
     adminRepo,
     // NEW-1 FIX: Rate limiting for admin mutations
     isUserRateLimited,
+    // Phase 2: Premium entitlement for advertisement settings
+    membershipAuthority,
   } = deps;
 
   // NEW-1 FIX: Check admin rate limit for notification platform mutations
@@ -123,6 +125,32 @@ export function createNotificationPlatformHandlers(deps) {
     if (error) return error;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
+
+    // Phase 2: Premium entitlement check for advertisement settings.
+    // ch_promotions is a Premium-only preference. Free users cannot modify it.
+    const PREMIUM_ONLY_CATEGORIES = ['ch_promotions'];
+    const payload = bodyResult.payload || {};
+    const wantsPremiumOnly = PREMIUM_ONLY_CATEGORIES.some(cat => cat in payload);
+    if (wantsPremiumOnly && membershipAuthority) {
+      try {
+        const isPremium = await membershipAuthority.isPremium(env, String(userId));
+        if (!isPremium) {
+          return jsonResponse({
+            status: 'error',
+            message: 'Advertisement settings are only available for Premium members.',
+            code: 'PREMIUM_REQUIRED',
+          }, { status: 403 }, env);
+        }
+      } catch (e) {
+        // Fail-safe: if entitlement check fails, reject the change
+        return jsonResponse({
+          status: 'error',
+          message: 'Unable to verify membership status.',
+          code: 'ENTITLEMENT_CHECK_FAILED',
+        }, { status: 503 }, env);
+      }
+    }
+
     try {
       const settings = await notificationPlatformRepo.updateSettings(env, userId, bodyResult.payload);
       return jsonResponse({ status: 'success', settings }, {}, env);

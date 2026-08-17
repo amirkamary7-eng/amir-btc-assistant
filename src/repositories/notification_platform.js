@@ -630,92 +630,10 @@ export function createNotificationPlatformRepository(deps) {
     return result.rows[0] ? _mapBroadcast(result.rows[0]) : null;
   }
 
-  async function processBroadcast(env, broadcastId) {
-    if (!isDatabaseConfigured(env)) return { sent: 0, failed: 0 };
-    const bResult = await queryDb(env, `SELECT * FROM notification_broadcasts WHERE id = $1`, [Number(broadcastId)]);
-    const b = bResult.rows[0];
-    if (!b) return { sent: 0, failed: 0 };
-
-    // Get target users
-    // PHASE 3 FIX: Parameterized query to prevent SQL injection + proper JSONB handling.
-    // target_value is a JSONB column — when read by neon driver, it becomes a JS object.
-    // Previously: `AND telegram_id = '${b.target_value}'` → '[object Object]' → broken + SQL injection.
-    // Now: Extract telegram_id(s) from target_value and use parameterized query.
-    let userQuery = `SELECT telegram_id FROM users WHERE 1=1`;
-    let userParams = [];
-    if (b.target_type === 'active') {
-      userQuery += ` AND channel_joined = TRUE`;
-    } else if (b.target_type === 'specific' && b.target_value) {
-      // target_value is a parsed JS object from JSONB.
-      // Expected formats: { telegram_id: "123456" } or { user_ids: ["123", "456"] } or just "123456" (string)
-      let targetIds = [];
-      if (typeof b.target_value === 'string') {
-        targetIds = [b.target_value];
-      } else if (Array.isArray(b.target_value)) {
-        targetIds = b.target_value.map(String);
-      } else if (typeof b.target_value === 'object') {
-        if (b.target_value.telegram_id) {
-          targetIds = [String(b.target_value.telegram_id)];
-        } else if (Array.isArray(b.target_value.user_ids)) {
-          targetIds = b.target_value.user_ids.map(String);
-        } else if (Array.isArray(b.target_value.telegram_ids)) {
-          targetIds = b.target_value.telegram_ids.map(String);
-        }
-      }
-      if (targetIds.length > 0) {
-        // Build parameterized IN clause: AND telegram_id IN ($1, $2, ...)
-        const placeholders = targetIds.map((_, i) => `$${i + 1}`).join(', ');
-        userQuery += ` AND telegram_id IN (${placeholders})`;
-        userParams = targetIds;
-      } else {
-        // No valid target IDs — return empty result
-        return { sent: 0, failed: 0 };
-      }
-    }
-    const users = await queryDb(env, userQuery, userParams);
-    let sent = 0;
-    let failed = 0;
-
-    // ROOT CAUSE FIX (notification settings compliance):
-    // Previously this function directly INSERTed into notifications and
-    // called sendTelegramMessage, BYPASSING getUserChannelPreference entirely.
-    // Users who set ch_<category>='none' still received broadcasts.
-    //
-    // Now we route through dispatch() which internally checks
-    // getUserChannelPreference(env, userId, b.category). Users with
-    // ch_<category>='none' are filtered out. channel:'both' with
-    // forceChannel:'auto' lets dispatch respect the user's per-category
-    // channel preference (mini_app / telegram / both).
-    for (const u of users.rows) {
-      try {
-        const result = await dispatch(env, {
-          userId: String(u.telegram_id),
-          category: b.category || 'announcement',
-          channel: 'both',
-          forceChannel: 'auto',
-          title: b.title,
-          message: b.message,
-          priority: b.priority || 'medium',
-          icon: 'megaphone',
-          metadata: { broadcast_id: String(b.id) },
-        });
-        if (result && result.status && result.status !== 'filtered' && result.status !== 'error') {
-          sent++;
-        } else if (result && result.status === 'filtered') {
-          // User opted out of this category — don't count as failed
-        } else {
-          failed++;
-        }
-      } catch (e) {
-        failed++;
-        console.warn('Broadcast dispatch failed for user', u.telegram_id, e.message);
-      }
-    }
-
-    // Update broadcast status
-    await queryDb(env, `UPDATE notification_broadcasts SET status = 'sent', sent_at = NOW(), total_sent = $1 WHERE id = $2`, [sent, Number(broadcastId)]);
-    return { sent, failed };
-  }
+  // BYPASS-4 FIX: Deleted dead processBroadcast function (was lines 633-718).
+  // This function used forceChannel:'auto' (truthy → bypasses preference check).
+  // It had ZERO callers — all broadcast delivery uses processBroadcastFull instead.
+  // Verified: no internal callers, no external callers, no dynamic references, no test references.
 
   // ═══════════════════════════════════════════════════════════
   // ANALYTICS
@@ -831,6 +749,36 @@ export function createNotificationPlatformRepository(deps) {
             );
             processed++;
             continue;
+          }
+
+          // BYPASS-3 FIX: Re-check user's current preference before sending Telegram.
+          // The preference was checked at enqueue time, but the user may have changed
+          // their preference since then. If they opted out (ch_<category>='none'),
+          // suppress the delivery and mark as 'skipped'.
+          //
+          // Exception: items with forceChannel=TRUE in the payload are mandatory
+          // system notifications (e.g. premium welcome, admin ticket alerts) that
+          // must be delivered regardless of user preference.
+          const itemCategory = payload.category || item.category || null;
+          const itemForceChannel = payload.forceChannel || item.force_channel || false;
+
+          if (itemCategory && !itemForceChannel) {
+            try {
+              const currentPref = await getUserChannelPreference(env, String(item.user_id), itemCategory, pool);
+              if (currentPref === 'none') {
+                // User opted out since enqueue — suppress delivery
+                await queryDb(env,
+                  `UPDATE notification_queue SET status = 'skipped', processed_at = NOW(), error = 'preference_changed_to_none' WHERE id = $1`,
+                  [item.id], 1, pool
+                );
+                processed++;
+                continue;
+              }
+            } catch (prefErr) {
+              // If preference check fails, fail-open (deliver) to avoid
+              // silently dropping notifications due to transient DB errors.
+              console.warn('processQueue preference re-check failed, delivering:', prefErr?.message);
+            }
           }
 
           // Phase 2: Build Telegram payload with rich message fields
@@ -1490,7 +1438,10 @@ export function createNotificationPlatformRepository(deps) {
     deleteTemplate,
     listBroadcasts,
     createBroadcast,
-    processBroadcast,
+    // BYPASS-4 FIX: processBroadcast removed from exports — dead code that
+    // uses forceChannel:'auto' (truthy → bypasses preference check).
+    // All callers use processBroadcastFull instead (which respects preferences).
+    // Kept as internal function for reference but not accessible externally.
     getAnalytics,
     enqueue,
     processQueue,

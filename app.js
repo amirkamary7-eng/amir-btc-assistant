@@ -22,6 +22,8 @@ let telegramAuthWaitPromise = null;
 let _authWaitAttempted = false;
 let bootstrapComplete = false;
 let _betaPopupShown = false; // session guard — prevents double-show within same tab
+let _adPopupShown = false; // session guard — prevents double-show of advertisement popup
+let _adPopupFetchInFlight = false; // prevents concurrent /api/advertisements/popups calls
 let _bootstrapPromise = null;
 let _bootstrapLongTimer = null; // Long-term bootstrap retry — survives visibility changes (NOT in _pollingIntervals)
 let _adminPanelInitialized = false;
@@ -1177,6 +1179,14 @@ async function bootstrapUser() {
         if (data.user && data.user.beta_popup_seen === false && !_betaPopupShown) {
             _betaPopupShown = true; // session guard — prevents double-show
             setTimeout(function() { openBetaPopup(); }, 800);
+        }
+
+        // ── Advertisement Popup (Phase 3) ──
+        // Fetch the next eligible admin-configured popup (24h per-user cooldown
+        // enforced server-side via KV). Shown after beta popup so beta takes
+        // precedence. Session guard prevents double-show on re-bootstrap.
+        if (!_adPopupShown) {
+            setTimeout(function() { maybeShowAdPopup(); }, 1200);
         }
     } catch (e) {
         console.error('[BOOT] bootstrapUser FAILED:', e.message);
@@ -10422,9 +10432,8 @@ async function renderNotifSettings() {
             items: [
                 { key: 'ch_price_alert', svg: NS_ICONS.price, ic: 'ic-price', t: isFa ? 'هشدار قیمت' : 'Price Alerts', d: isFa ? 'هنگام رسیدن قیمت به مقدار تعیین شده' : 'When price reaches your target', def: 'both' },
                 { key: 'ch_analysis', svg: NS_ICONS.analysis, ic: 'ic-analysis', t: isFa ? 'تحلیل‌های جدید' : 'Analysis', d: isFa ? 'انتشار تحلیل جدید بازار' : 'New market analysis published', def: 'both' },
-                { key: 'ch_breaking_news', svg: NS_ICONS.news, ic: 'ic-news', t: isFa ? 'اخبار فوری' : 'Breaking News', d: isFa ? 'خبرهای مهم و فوری بازار' : 'Important and urgent market news', def: 'both' },
                 { key: 'ch_calendar', svg: NS_ICONS.calendar, ic: 'ic-calendar', t: isFa ? 'تقویم اقتصادی' : 'Calendar Events', d: isFa ? 'هشدار رویدادهای مهم اقتصادی' : 'Important economic events', def: 'both' },
-                { key: 'ch_security', svg: NS_ICONS.security, ic: 'ic-security', t: isFa ? 'امنیت' : 'Security', d: isFa ? 'ورود جدید و فعالیت مشکوک' : 'New login and suspicious activity', def: 'both' },
+                // Phase 5: Removed ch_breaking_news, ch_security — no producer emits these.
             ]
         },
         {
@@ -10440,8 +10449,7 @@ async function renderNotifSettings() {
         {
             label: isFa ? 'اعلان‌های تبلیغاتی' : 'Promotional',
             items: [
-                { key: 'ch_challenges', svg: NS_ICONS.challenge, ic: 'ic-challenge', t: isFa ? 'چالش‌ها' : 'Challenges', d: isFa ? 'کمپین‌ها و رویدادهای ویژه' : 'Campaigns and special events', def: 'mini_app' },
-                { key: 'ch_promotions', svg: NS_ICONS.promo, ic: 'ic-promo', t: isFa ? 'تبلیغات' : 'Promotions', d: isFa ? 'پیشنهادات ویژه و تبلیغات' : 'Special offers and promotions', def: 'none' },
+                { key: 'ch_promotions', svg: NS_ICONS.promo, ic: 'ic-promo', t: isFa ? 'تبلیغات' : 'Promotions', d: isFa ? 'پیشنهادات ویژه و تبلیغات' : 'Special offers and promotions', def: 'none', premiumOnly: true },
             ]
         },
     ];
@@ -10470,8 +10478,32 @@ async function renderNotifSettings() {
         for (const cat of group.items) {
             const currentVal = settings[cat.key] || cat.def;
 
+            // Phase 3/4: Premium locking for premiumOnly categories
+            const isPremiumUser = window.MembershipApp && typeof window.MembershipApp.isPremiumCached === 'function'
+                ? window.MembershipApp.isPremiumCached()
+                : false;
+            const isLocked = cat.premiumOnly && !isPremiumUser;
+            // FIX (audit MED-2/MED-3): Unlocked premium-only cards get the --premium
+            // variant (amber border + glow) + a ✦ PREMIUM corner badge so they're
+            // visually distinguished from free category cards.
+            const isPremiumUnlocked = cat.premiumOnly && isPremiumUser;
+
             const card = document.createElement('div');
-            card.className = 'ns-prem-card';
+            if (isLocked) {
+                card.className = 'ns-prem-card ns-prem-card--locked';
+            } else if (isPremiumUnlocked) {
+                card.className = 'ns-prem-card ns-prem-card--premium';
+            } else {
+                card.className = 'ns-prem-card';
+            }
+
+            // FIX (audit MED-2): Add ✦ PREMIUM corner badge for unlocked premium-only cards
+            if (isPremiumUnlocked) {
+                const cornerBadge = document.createElement('div');
+                cornerBadge.className = 'ns-prem-corner-badge';
+                cornerBadge.textContent = '✦ PREMIUM';
+                card.appendChild(cornerBadge);
+            }
 
             // Left: icon + text
             const left = document.createElement('div');
@@ -10488,25 +10520,37 @@ async function renderNotifSettings() {
             titleEl.textContent = cat.t;
             const descEl = document.createElement('div');
             descEl.className = 'ns-prem-desc';
-            descEl.textContent = cat.d;
+            descEl.textContent = isLocked
+                ? (isFa ? 'فقط برای اعضای Premium' : 'Premium members only')
+                : cat.d;
             textBox.appendChild(titleEl);
             textBox.appendChild(descEl);
 
             left.appendChild(iconBox);
             left.appendChild(textBox);
 
-            // Right: capsule selector
+            // Right: capsule selector or lock badge
             const capsule = document.createElement('div');
             capsule.className = 'ns-capsule';
             capsule.setAttribute('data-cat', cat.key);
 
-            for (const ch of channels) {
-                const btn = document.createElement('button');
-                btn.className = `ns-cap-btn${currentVal === ch.val ? ' active ' + ch.cls : ''}`;
-                btn.setAttribute('data-cat', cat.key);
-                btn.setAttribute('data-val', ch.val);
-                btn.innerHTML = NS_CHAN_ICONS[ch.val] + '<span>' + ch.label + '</span>';
-                capsule.appendChild(btn);
+            if (isLocked) {
+                // Phase 3: Free user — locked controls
+                capsule.classList.add('ns-capsule--locked');
+                const lockBadge = document.createElement('div');
+                lockBadge.className = 'ns-prem-lock';
+                lockBadge.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>' + (isFa ? 'Premium' : 'Premium') + '</span>';
+                capsule.appendChild(lockBadge);
+            } else {
+                // Phase 4: Premium user — functional controls
+                for (const ch of channels) {
+                    const btn = document.createElement('button');
+                    btn.className = `ns-cap-btn${currentVal === ch.val ? ' active ' + ch.cls : ''}`;
+                    btn.setAttribute('data-cat', cat.key);
+                    btn.setAttribute('data-val', ch.val);
+                    btn.innerHTML = NS_CHAN_ICONS[ch.val] + '<span>' + ch.label + '</span>';
+                    capsule.appendChild(btn);
+                }
             }
 
             card.appendChild(left);
@@ -12949,6 +12993,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         const slider = document.getElementById('hero-banner-slider');
         const slides = document.querySelectorAll('.hero-slide');
         const dots = document.querySelectorAll('.hero-dot');
+
+        // Phase 8: Hide Premium upsell banner for Premium users.
+        // The first slide (data-slide="0") is the Premium upsell banner.
+        // Premium users should not see "فعال‌سازی Premium" (Activate Premium).
+        if (window.MembershipApp && typeof window.MembershipApp.isPremiumCached === 'function') {
+          // Check cached membership status (set by loadCard from /api/membership/status)
+          if (window.MembershipApp.isPremiumCached()) {
+            const upsellSlide = document.querySelector('.hero-slide[data-slide="0"]');
+            if (upsellSlide) upsellSlide.style.display = 'none';
+            const upsellDot = document.querySelector('.hero-dot[data-dot="0"]');
+            if (upsellDot) upsellDot.style.display = 'none';
+          }
+        }
         if (!slides.length || slides.length < 2) return;
         let current = 0;
         let autoTimer = null;
@@ -13340,6 +13397,82 @@ function showJoinLock() {
     }
     // Hide the floating status card — the full lock takes over
     hideJoinStatusBar();
+    // PHASE 2 FIX (audit HIGH-1): Fetch admin-configured required channels
+    // and render them in the lock overlay so the user knows WHAT to join.
+    // The env REQUIRED_CHANNEL is always shown as the primary button; any
+    // admin-configured DB channels are shown as a list above the buttons.
+    _renderRequiredChannelsList();
+}
+
+/**
+ * PHASE 2: Fetch admin-configured required channels from
+ * /api/advertisements/required-channels and render them in the join-lock
+ * overlay. Each channel gets its own row with title + join link.
+ *
+ * If the API returns no channels (or fails), the overlay falls back to the
+ * hardcoded env REQUIRED_CHANNEL button (backward compat).
+ */
+async function _renderRequiredChannelsList() {
+    const container = document.getElementById('join-lock-channels');
+    if (!container) return;
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) {
+        container.style.display = 'none';
+        return;
+    }
+    try {
+        const data = await apiFetch('/api/advertisements/required-channels', { method: 'GET' });
+        if (!data || data.status !== 'success' || !Array.isArray(data.channels) || data.channels.length === 0) {
+            // No DB channels configured — hide container, rely on env button
+            container.style.display = 'none';
+            return;
+        }
+        // Render each channel as a row with title + join link.
+        // Use textContent for XSS safety (admin-supplied title/channel).
+        container.innerHTML = '';
+        const isFa = currentLang === 'fa';
+        const header = document.createElement('div');
+        header.className = 'jl-channels-header';
+        header.textContent = isFa ? 'کانال‌های موردنیاز:' : 'Required channels:';
+        container.appendChild(header);
+
+        for (const ch of data.channels) {
+            const row = document.createElement('div');
+            row.className = 'jl-channel-row';
+
+            const dot = document.createElement('span');
+            dot.className = 'jl-channel-dot jl-channel-dot--pending';
+            dot.setAttribute('aria-hidden', 'true');
+            dot.textContent = '○';
+            row.appendChild(dot);
+
+            const info = document.createElement('div');
+            info.className = 'jl-channel-info';
+            const title = document.createElement('span');
+            title.className = 'jl-channel-title';
+            title.textContent = ch.title || ch.username || '';
+            const uname = document.createElement('span');
+            uname.className = 'jl-channel-uname';
+            uname.textContent = '@' + (ch.username || '');
+            info.appendChild(title);
+            info.appendChild(uname);
+            row.appendChild(info);
+
+            const link = document.createElement('a');
+            link.className = 'jl-channel-join';
+            link.href = ch.joinUrl || ('https://t.me/' + (ch.username || ''));
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = isFa ? 'عضویت' : 'Join';
+            row.appendChild(link);
+
+            container.appendChild(row);
+        }
+        container.style.display = 'flex';
+    } catch (e) {
+        // Non-fatal — fall back to env button
+        console.warn('[JOIN-LOCK] required-channels fetch failed:', e?.message || e);
+        container.style.display = 'none';
+    }
 }
 
 /**
@@ -13751,6 +13884,173 @@ function closeBetaPopupAndOpenTickets() {
         }
     }, 350); // wait for popup close animation
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3 — Advertisement Popup (Mini App open, 24h per-user cooldown)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Flow:
+//   User opens Mini App
+//     → bootstrapUser() succeeds
+//     → maybeShowAdPopup() called (1.2s delay, after beta popup)
+//     → GET /api/advertisements/popups
+//     → backend iterates active popups, returns first NOT in 24h cooldown
+//     → if popup returned → openAdPopup(popup) renders fixed-template overlay
+//     → user dismisses → POST /api/advertisements/popups/:id/shown (sets KV cooldown)
+//     → next open within 24h → backend returns popup:null → no show
+//     → after 24h → backend returns popup again → shown again
+//
+// Template is FIXED (Phase 4): image → title → body → button. Admin can only
+// configure content, not layout. All text rendered via textContent (XSS-safe).
+
+async function maybeShowAdPopup() {
+    if (_adPopupShown || _adPopupFetchInFlight) return;
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) return;
+    if (isInTelegram() && !isTelegramAuthReady()) return;
+    // Don't show ad popup if beta popup is currently open
+    if (document.getElementById('beta-popup-overlay')) return;
+
+    _adPopupFetchInFlight = true;
+    try {
+        const data = await apiFetch('/api/advertisements/popups', { method: 'GET' });
+        if (data && data.status === 'success' && data.popup) {
+            _adPopupShown = true; // session guard — don't show again this session
+            openAdPopup(data.popup);
+        }
+        // If data.popup is null, the user is in cooldown or no active popups — silent.
+    } catch (e) {
+        // Non-fatal — ad popups are non-critical. Don't surface errors to user.
+        console.warn('[AD-POPUP] fetch failed:', e?.message || e);
+    } finally {
+        _adPopupFetchInFlight = false;
+    }
+}
+
+function openAdPopup(popup) {
+    if (!popup || !popup.id) return;
+
+    // Dedupe — remove any existing ad popup
+    const existing = document.getElementById('ad-popup-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ad-popup-overlay';
+    overlay.className = 'ad-popup-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'ad-popup-title-el');
+
+    // Backdrop click closes popup
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) closeAdPopup(popup.id);
+    });
+    // Escape key closes popup
+    overlay.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeAdPopup(popup.id);
+    });
+
+    // ── Fixed template: image (optional) → title → body → button (optional) ──
+    // All content is rendered via textContent (never innerHTML) for XSS safety.
+    // The backend also sanitizes (sanitizeText strips ALL HTML tags), so this
+    // is defense-in-depth.
+    const card = document.createElement('div');
+    card.className = 'ad-popup-card';
+    card.setAttribute('tabindex', '-1');
+
+    // Close button (top-right)
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'ad-popup-close';
+    closeBtn.setAttribute('type', 'button');
+    closeBtn.setAttribute('aria-label', 'بستن');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.addEventListener('click', function() { closeAdPopup(popup.id); });
+    card.appendChild(closeBtn);
+
+    // Image (optional) — only render if image_url is present and valid
+    if (popup.image_url) {
+        const imgWrap = document.createElement('div');
+        imgWrap.className = 'ad-popup-image-wrap';
+        const img = document.createElement('img');
+        img.className = 'ad-popup-image';
+        img.alt = popup.title || 'Advertisement';
+        img.loading = 'lazy';
+        img.src = popup.image_url;
+        // Security: referrerpolicy + no referrer to prevent leaking Mini App URL to external hosts
+        img.referrerPolicy = 'no-referrer';
+        // Graceful fallback if image fails to load
+        img.addEventListener('error', function() {
+            imgWrap.style.display = 'none';
+        });
+        imgWrap.appendChild(img);
+        card.appendChild(imgWrap);
+    }
+
+    // Body container (title + text + button)
+    const body = document.createElement('div');
+    body.className = 'ad-popup-body';
+
+    const title = document.createElement('h2');
+    title.className = 'ad-popup-title';
+    title.id = 'ad-popup-title-el';
+    title.textContent = popup.title || ''; // textContent = XSS-safe
+    body.appendChild(title);
+
+    if (popup.body_text) {
+        const text = document.createElement('p');
+        text.className = 'ad-popup-text';
+        text.textContent = popup.body_text; // textContent = XSS-safe
+        body.appendChild(text);
+    }
+
+    if (popup.button_label && popup.button_url) {
+        const btn = document.createElement('a');
+        btn.className = 'ad-popup-button';
+        btn.textContent = popup.button_label; // textContent = XSS-safe
+        btn.href = popup.button_url;
+        btn.target = '_blank';
+        btn.rel = 'noopener noreferrer';
+        // Record impression when user clicks the button (in addition to dismiss)
+        btn.addEventListener('click', function() {
+            try {
+                apiFetch('/api/advertisements/popups/' + encodeURIComponent(popup.id) + '/shown', { method: 'POST' }).catch(function() {});
+            } catch {}
+        });
+        body.appendChild(btn);
+    }
+
+    card.appendChild(body);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    // Focus the card for accessibility
+    setTimeout(function() { card.focus(); }, 100);
+}
+
+function closeAdPopup(popupId) {
+    const overlay = document.getElementById('ad-popup-overlay');
+    if (!overlay) return;
+
+    // Closing animation
+    overlay.classList.add('ad-popup-closing');
+    setTimeout(function() {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }, 300);
+
+    // Record impression (sets 24h KV cooldown server-side).
+    // Fire-and-forget — non-blocking. If this fails, the popup will re-show
+    // on next open (acceptable fallback — better to over-show than under-show).
+    if (popupId && API_BASE) {
+        try {
+            apiFetch('/api/advertisements/popups/' + encodeURIComponent(popupId) + '/shown', { method: 'POST' }).catch(function(e) {
+                console.warn('[AD-POPUP] failed to record impression:', e?.message || e);
+            });
+        } catch {}
+    }
+}
+
+window.maybeShowAdPopup = maybeShowAdPopup;
+window.openAdPopup = openAdPopup;
+window.closeAdPopup = closeAdPopup;
 
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {

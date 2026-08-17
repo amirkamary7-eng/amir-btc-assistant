@@ -488,6 +488,7 @@
             benefitRow('star', 'واچ‌لیست', '۲۰ نماد در واچ‌لیست') +
             benefitRow('gift', 'پاداش روزانه', '۲۰ AB Token رایگان هر روز') +
             benefitRow('badge', 'دسترسی به Badge حرفه‌ای', 'نمایش نشان اختصاصی Premium در پروفایل شما') +
+            benefitRow('megaphone', 'کنترل تبلیغات', 'مدیریت و غیرفعال‌سازی تبلیغات و اعلان‌های تبلیغاتی') +
             '<div class="mb-benefits-divider"></div>' +
             '<div class="mb-benefits-section-title">دسترسی‌های اختصاصی</div>' +
             benefitRow('bolt', 'اولویت دریافت قابلیت‌های جدید', 'دسترسی زودهنگام به امکانات جدید') +
@@ -567,6 +568,7 @@
           benefitRow('star', 'واچ‌لیست', '۲۰ نماد در واچ‌لیست') +
           benefitRow('gift', 'پاداش روزانه', '۲۰ AB Token رایگان هر روز') +
           benefitRow('badge', 'دسترسی به Badge حرفه‌ای', 'نمایش نشان اختصاصی Premium در پروفایل شما') +
+          benefitRow('megaphone', 'کنترل تبلیغات', 'مدیریت و غیرفعال‌سازی تبلیغات و اعلان‌های تبلیغاتی') +
           '<div class="mb-benefits-divider"></div>' +
           '<div class="mb-benefits-section-title">دسترسی‌های اختصاصی</div>' +
           benefitRow('bolt', 'اولویت دریافت قابلیت‌های جدید', 'دسترسی زودهنگام به امکانات جدید') +
@@ -1200,6 +1202,8 @@
       chart: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
       // Shield (generic) — support / protection
       shield: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+      // Megaphone — advertisement control (Phase 9: Premium Features card)
+      megaphone: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/><path d="M3 11v3a2 2 0 0 0 2 2h1v-7H5a2 2 0 0 0-2 2z"/></svg>',
     };
     return '<div class="mb-benefit">' +
       '<div class="mb-benefit-icon">' + (icons[iconKey] || icons.diamond) + '</div>' +
@@ -1242,6 +1246,8 @@
     // PHASE 8L: Exposed for the rules modal
     openRulesModal: openRulesModal,
     closeRulesModal: closeRulesModal,
+    // Phase 8: Exposed for hero banner — check cached Premium status
+    isPremiumCached: function () { return _cache ? isPremium(_cache) : false; },
     refresh: function () { _cache = null; _requirement = null; _rules = null; _rulesAcceptedVersion = null; return loadCard(); },
   };
 
