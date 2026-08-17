@@ -53,7 +53,7 @@ test('AD-PREM-02: renderNotifSettings checks isPremiumCached for locking', () =>
 
 test('AD-PREM-03: Locked card has ns-prem-card--locked class', () => {
   const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
-  const renderBlock = APP_SRC.slice(renderStart, renderStart + 5000);
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 6000);
   assert.ok(renderBlock.includes('ns-prem-card--locked'),
     'locked card must have ns-prem-card--locked class');
 });

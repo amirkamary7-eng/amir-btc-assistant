@@ -3117,12 +3117,34 @@ var _adsChannelCache = [];
 var _adsPopupCache = [];
 var _adsMessageCache = [];
 
+// FIX (audit H3): Submit button loading state to prevent double-clicks.
+// Disables the button + shows "..." text during the API call. Re-enables on
+// completion (success or error). Used by saveAdChannel/saveAdPopup/saveAdMessage.
+function _adsSetBtnLoading(btnSelector, loading, loadingText) {
+    var btn = document.querySelector(btnSelector);
+    if (!btn) return;
+    if (loading) {
+        if (!btn.dataset._origText) btn.dataset._origText = btn.textContent;
+        btn.disabled = true;
+        btn.style.opacity = '0.65';
+        btn.style.pointerEvents = 'none';
+        btn.textContent = loadingText || '...';
+    } else {
+        btn.disabled = false;
+        btn.style.opacity = '';
+        btn.style.pointerEvents = '';
+        if (btn.dataset._origText) btn.textContent = btn.dataset._origText;
+    }
+}
+
 // Persian labels + color classes for campaign statuses
+// FIX (audit H2): archived and draft were both 'gray' — visually indistinguishable.
+// Now archived uses a distinct dark-gray with strikethrough styling (see CSS).
 function _adStatusMeta(status) {
     switch (status) {
         case 'active':   return { label: 'فعال',    color: 'green' };
         case 'paused':   return { label: 'متوقف',   color: 'orange' };
-        case 'archived': return { label: 'بایگانی', color: 'gray' };
+        case 'archived': return { label: 'بایگانی', color: 'gray-dark' };
         case 'draft': default: return { label: 'پیش‌نویس', color: 'gray' };
     }
 }
@@ -3159,11 +3181,13 @@ function _adsDestinationMeta(dest) {
 }
 
 // Persian labels + color classes for target audience (free/premium/all)
+// FIX (audit H1): colors now match spec — free=blue, premium=amber/gold (using
+// the existing 'orange' badge which is the amber accent), all=gray.
 function _adsAudienceMeta(aud) {
     switch (aud) {
-        case 'free':    return { label: 'رایگان',  color: 'gray' };
+        case 'free':    return { label: 'رایگان',  color: 'blue' };
         case 'premium': return { label: 'ویژه',    color: 'orange' };
-        case 'all': default: return { label: 'همه', color: 'green' };
+        case 'all': default: return { label: 'همه', color: 'gray' };
     }
 }
 
@@ -3371,6 +3395,8 @@ async function saveAdChannel(channelId) {
         is_active:        document.getElementById('ads-ch-active') ? document.getElementById('ads-ch-active').checked : false,
         status:           document.getElementById('ads-ch-status') ? document.getElementById('ads-ch-status').value : 'draft',
     };
+    // FIX (audit H3): Disable submit button during API call to prevent double-clicks
+    _adsSetBtnLoading('#ads-channel-form .adm-btn-primary', true, 'در حال ذخیره...');
     try {
         var url = channelId
             ? '/api/admin/advertisements/channels/' + encodeURIComponent(channelId)
@@ -3388,6 +3414,8 @@ async function saveAdChannel(channelId) {
     } catch (e) {
         console.error('saveAdChannel:', e);
         adminToast('خطا در ذخیره: ' + (e.message || ''), 'error');
+    } finally {
+        _adsSetBtnLoading('#ads-channel-form .adm-btn-primary', false);
     }
 }
 window.saveAdChannel = saveAdChannel;
@@ -3568,6 +3596,7 @@ async function saveAdPopup(popupId) {
         status:           document.getElementById('ads-pp-status') ? document.getElementById('ads-pp-status').value : 'draft',
     };
     if (!payload.title) { adminToast('عنوان پاپ‌آپ الزامی است', 'error'); return; }
+    _adsSetBtnLoading('#ads-popup-form .adm-btn-primary', true, 'در حال ذخیره...');
     try {
         var url = popupId
             ? '/api/admin/advertisements/popups/' + encodeURIComponent(popupId)
@@ -3585,6 +3614,8 @@ async function saveAdPopup(popupId) {
     } catch (e) {
         console.error('saveAdPopup:', e);
         adminToast('خطا در ذخیره: ' + (e.message || ''), 'error');
+    } finally {
+        _adsSetBtnLoading('#ads-popup-form .adm-btn-primary', false);
     }
 }
 window.saveAdPopup = saveAdPopup;
@@ -3792,6 +3823,7 @@ async function saveAdMessage(messageId) {
     };
     if (!payload.title) { adminToast('عنوان پیام الزامی است', 'error'); return; }
     if (!payload.body_text) { adminToast('متن پیام الزامی است', 'error'); return; }
+    _adsSetBtnLoading('#ads-message-form .adm-btn-primary', true, 'در حال ذخیره...');
     try {
         var url = messageId
             ? '/api/admin/advertisements/messages/' + encodeURIComponent(messageId)
@@ -3809,6 +3841,8 @@ async function saveAdMessage(messageId) {
     } catch (e) {
         console.error('saveAdMessage:', e);
         adminToast('خطا در ذخیره: ' + (e.message || ''), 'error');
+    } finally {
+        _adsSetBtnLoading('#ads-message-form .adm-btn-primary', false);
     }
 }
 window.saveAdMessage = saveAdMessage;

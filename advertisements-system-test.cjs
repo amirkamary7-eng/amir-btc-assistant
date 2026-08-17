@@ -30,6 +30,9 @@ const ADS_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/adve
 const ADS_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/advertisements.js'), 'utf8');
 const NOTIF_PLATFORM_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/notification_platform.js'), 'utf8');
 const NOTIF_PLATFORM_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/notification_platform.js'), 'utf8');
+const STYLE_SRC = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+const INDEX_HTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const ADMIN_JS = fs.readFileSync(path.join(__dirname, 'admin.js'), 'utf8');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PHASE 1 — CAMPAIGN STATE (ad_campaigns registry)
@@ -385,12 +388,13 @@ test('ADS-MSG-09: Telegram delivery uses sendTelegramMessage (not a parallel sys
     'sendTelegramMessage must be called with env as first arg');
 });
 
-test('ADS-MSG-10: Safety cap: max 5000 users per send invocation', () => {
+test('ADS-MSG-10: Safety cap: max 1000 users per send invocation (audit H2 fix)', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
   // Slice generously — the safety cap appears near the end of the function (~line 612).
   const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
-  assert.ok(/delivered\s*\+\s*skipped\s*>=\s*5000/.test(fnBlock),
-    '_deliverMessageCampaign must enforce 5000-user safety cap');
+  // FIX (audit H2): safety cap lowered from 5000 → 1000 to fit Workers CPU limit
+  assert.ok(/delivered\s*\+\s*skipped\s*>=\s*1000/.test(fnBlock),
+    '_deliverMessageCampaign must enforce 1000-user safety cap (was 5000, exceeded Workers CPU)');
   assert.ok(fnBlock.includes('break'),
     'safety cap must break out of the delivery loop');
 });
@@ -479,7 +483,7 @@ test('ADS-SEP-02: Message campaigns (ad_messages) DO go through ch_promotions (v
 test('ADS-SEP-03: Both ad_channels and ad_messages use the same ad_campaigns registry with different type values', () => {
   // createChannel inserts with type='channel_join'
   const chStart = ADS_REPO_SRC.indexOf('async function createChannel');
-  const chBlock = ADS_REPO_SRC.slice(chStart, chStart + 1500);
+  const chBlock = ADS_REPO_SRC.slice(chStart, chStart + 2500);
   assert.ok(chBlock.includes("'channel_join'"),
     'createChannel must insert ad_campaigns row with type=channel_join');
   // createMessage inserts with type='message'
@@ -692,9 +696,9 @@ test('ADS-PERF-05: getUserChannelPreference (notification_platform) has per-user
     'getUserChannelPreference must check _prefCache before DB query');
 });
 
-test('ADS-PERF-06: checkAdditionalRequiredChannels uses per-user KV cache (60s TTL) to avoid repeated Telegram calls', () => {
+test('ADS-PERF-06: checkAdditionalRequiredChannels uses per-user KV cache (jittered TTL 55-95s, audit H3 fix) to avoid repeated Telegram calls', () => {
   const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2000);
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 3000);
   // KV cache read
   assert.ok(fnBlock.includes('env.RATE_LIMITS.get(cacheKey)'),
     'checkAdditionalRequiredChannels must read per-user KV cache');
@@ -703,9 +707,12 @@ test('ADS-PERF-06: checkAdditionalRequiredChannels uses per-user KV cache (60s T
     'checkAdditionalRequiredChannels must cache positive result');
   assert.ok(fnBlock.includes("env.RATE_LIMITS.put(cacheKey, '0'"),
     'checkAdditionalRequiredChannels must cache negative result');
-  // 60s TTL
-  assert.ok(/expirationTtl:\s*60/.test(fnBlock),
-    'per-user KV cache TTL must be 60s');
+  // FIX (audit H3): TTL is now jittered 55-95s to avoid cache stampede.
+  // Verify _ttlPos / _ttlNeg variables are used (not hardcoded 60).
+  assert.ok(fnBlock.includes('_ttlPos') && fnBlock.includes('_ttlNeg'),
+    'per-user KV cache TTL must use jittered _ttlPos/_ttlNeg variables (was hardcoded 60)');
+  assert.ok(/_ttl(Pos|Neg)\s*=\s*Math\.floor\(55\s*\+/.test(fnBlock),
+    'jittered TTL must be 55 + jitter (0-40s) = 55-95s range');
 });
 
 test('ADS-PERF-07: _deliverMessageCampaign uses bulk preference fetch (IN clause) not per-user N+1', () => {
@@ -819,3 +826,237 @@ test('ADS-R-06: Image serving route wired (public, no auth)', () => {
   assert.ok(!serveHandlerBlock.includes('authenticateTelegramRequest'),
     'handleServeImage must NOT call authenticateTelegramRequest (public route)');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIT FIX TESTS — Regression tests for issues found in final audit
+// ═══════════════════════════════════════════════════════════════════════════
+
+// FIX C1: createChannel uses queryDbTransaction for atomic INSERT
+test('ADS-FIX-C1: createChannel uses queryDbTransaction (atomic transaction)', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function createChannel');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 2500);
+  assert.ok(fnBlock.includes('queryDbTransaction'),
+    'createChannel must use queryDbTransaction for atomic INSERT (was bare BEGIN/COMMIT which is a no-op on neon HTTP)');
+  assert.ok(fnBlock.includes('INSERT INTO ad_campaigns') && fnBlock.includes('INSERT INTO ad_channels'),
+    'createChannel must INSERT into both ad_campaigns and ad_channels within the transaction');
+  assert.ok(!/queryDb\(env,\s*'BEGIN'\)/.test(fnBlock),
+    'createChannel must NOT use bare queryDb(env, "BEGIN") — it is a no-op on neon HTTP');
+});
+
+// FIX H1: CAS claim prevents concurrent double-delivery
+test('ADS-FIX-H1: handleAdminSendMessage uses CAS claim to prevent concurrent delivery', () => {
+  const fnStart = ADS_CTRL_SRC.indexOf('async function handleAdminSendMessage');
+  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 4000);
+  assert.ok(fnBlock.includes('claimMessageForDelivery'),
+    'handleAdminSendMessage must call claimMessageForDelivery before delivery');
+  assert.ok(fnBlock.includes('CAMPAIGN_RECENTLY_SENT'),
+    'must return CAMPAIGN_RECENTLY_SENT error code when claim fails (prevents double-click)');
+  assert.ok(fnBlock.includes('409'),
+    'must return 409 Conflict status when claim fails');
+  assert.ok(fnBlock.includes('releaseMessageClaim'),
+    'must release claim on delivery failure (allows retry)');
+});
+
+test('ADS-FIX-H1b: claimMessageForDelivery uses atomic UPDATE...RETURNING', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function claimMessageForDelivery');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 1200);
+  assert.ok(/UPDATE ad_messages.*SET last_processed_at = NOW\(\).*WHERE.*RETURNING/s.test(fnBlock),
+    'claimMessageForDelivery must use atomic UPDATE...WHERE...RETURNING for CAS claim');
+  assert.ok(fnBlock.includes('last_processed_at < NOW()'),
+    'claim must check last_processed_at cooldown (prevents re-delivery within 5 min)');
+  assert.ok(fnBlock.includes('rowCount'),
+    'claim must check rowCount to determine if claim succeeded');
+});
+
+// FIX H2: Safety cap lowered to 1000
+test('ADS-FIX-H2: Safety cap is 1000 (not 5000) to fit Workers CPU limit', () => {
+  const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
+  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
+  assert.ok(/>= 1000/.test(fnBlock),
+    'safety cap must be 1000 (was 5000 which exceeded Workers 30s CPU limit)');
+  assert.ok(!/>=\s*5000/.test(fnBlock),
+    'old 5000 cap must be removed');
+});
+
+// FIX H3: Jittered TTL for cache stampede prevention
+test('ADS-FIX-H3: checkAdditionalRequiredChannels uses jittered TTL (55-95s)', () => {
+  const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2500);
+  assert.ok(fnBlock.includes('_jitterSeed'),
+    'must use a jitter seed (per-user + hash) for consistent TTL');
+  assert.ok(fnBlock.includes('_ttlJitter'),
+    'must compute jitter value (0-40s)');
+  assert.ok(/expirationTtl:\s*_ttl(Pos|Neg)/.test(fnBlock),
+    'KV put must use jittered TTL variable (not hardcoded 60)');
+});
+
+// FIX UI-1: Channel Join frontend uses /api/advertisements/required-channels
+test('ADS-FIX-UI1: Frontend calls /api/advertisements/required-channels', () => {
+  const fnStart = APP_SRC.indexOf('async function _renderRequiredChannelsList');
+  assert.ok(fnStart > 0,
+    '_renderRequiredChannelsList function must exist in app.js');
+  const fnBlock = APP_SRC.slice(fnStart, fnStart + 3000);
+  assert.ok(fnBlock.includes('/api/advertisements/required-channels'),
+    'must fetch from /api/advertisements/required-channels');
+  assert.ok(fnBlock.includes('jl-channel-row'),
+    'must render each channel as a jl-channel-row');
+  assert.ok(fnBlock.includes('jl-channel-join'),
+    'must render per-channel join link');
+  assert.ok(fnBlock.includes('textContent'),
+    'must use textContent for XSS safety (admin-supplied title/channel)');
+});
+
+test('ADS-FIX-UI1b: showJoinLock calls _renderRequiredChannelsList', () => {
+  const fnStart = APP_SRC.indexOf('function showJoinLock');
+  const fnBlock = APP_SRC.slice(fnStart, fnStart + 1200);
+  assert.ok(fnBlock.includes('_renderRequiredChannelsList'),
+    'showJoinLock must call _renderRequiredChannelsList to populate the channel list');
+});
+
+test('ADS-FIX-UI1c: join-lock-channels container exists in index.html', () => {
+  assert.ok(INDEX_HTML.includes('id="join-lock-channels"'),
+    'index.html must have a #join-lock-channels container for the multi-channel list');
+});
+
+// FIX UI-2: Premium Features "Advertisement Control" benefit
+test('ADS-FIX-UI2: Premium Features includes Advertisement Control benefit', () => {
+  // Check membership-user.js for the benefit
+  const memSrc = fs.readFileSync(path.join(__dirname, 'membership-user.js'), 'utf8');
+  assert.ok(memSrc.includes("'megaphone'"),
+    'megaphone icon must be defined for the Advertisement Control benefit');
+  assert.ok(memSrc.includes('کنترل تبلیغات'),
+    'benefit title "کنترل تبلیغات" must be present');
+  assert.ok(memSrc.includes('مدیریت و غیرفعال‌سازی تبلیغات'),
+    'benefit description "مدیریت و غیرفعال‌سازی تبلیغات" must be present');
+  // Count occurrences — should appear in both the status popup and activation popup
+  const matches = memSrc.match(/benefitRow\('megaphone'/g) || [];
+  assert.ok(matches.length >= 2,
+    `megaphone benefit must appear in both popups (status + activation), got ${matches.length}`);
+});
+
+// FIX UI-3: Admin audience badge colors match spec (free=blue, premium=orange, all=gray)
+test('ADS-FIX-UI3: Audience badge colors match spec', () => {
+  const fnStart = ADMIN_JS.indexOf('function _adsAudienceMeta');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 600);
+  assert.ok(/case 'free':.*color: 'blue'/.test(fnBlock.replace(/\n/g, ' ')) || fnBlock.includes("case 'free':    return { label: 'رایگان',  color: 'blue' }"),
+    'free audience must be blue (was gray)');
+  assert.ok(fnBlock.includes("color: 'orange'"),
+    'premium audience must be orange/amber');
+  assert.ok(/case 'all':.*color: 'gray'/.test(fnBlock.replace(/\n/g, ' ')) || fnBlock.includes("case 'all': default: return { label: 'همه', color: 'gray' }"),
+    'all audience must be gray (was green)');
+});
+
+// FIX UI-3: archived status distinct from draft
+test('ADS-FIX-UI3b: archived status uses gray-dark (distinct from draft gray)', () => {
+  const fnStart = ADMIN_JS.indexOf('function _adStatusMeta');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 600);
+  assert.ok(fnBlock.includes("color: 'gray-dark'"),
+    "archived must use 'gray-dark' color (was same as draft 'gray')");
+  // CSS class must exist
+  assert.ok(STYLE_SRC.includes('.admin-badge-gray-dark'),
+    '.admin-badge-gray-dark CSS class must exist in style.css');
+  assert.ok(STYLE_SRC.includes('text-decoration: line-through'),
+    'archived badge must have line-through to visually distinguish from draft');
+});
+
+// FIX UI-4: .rc-field textarea scoped to ads section only
+test('ADS-FIX-UI4: .rc-field textarea scoped to ads section (no global leak)', () => {
+  // The unscoped rule must NOT exist
+  assert.ok(!/^\.rc-field textarea\s*\{/m.test(STYLE_SRC),
+    'unscoped .rc-field textarea rule must NOT exist (was leaking to notification-center)');
+  // The scoped rule must exist
+  assert.ok(STYLE_SRC.includes('#admin-section-advertisements .rc-field textarea'),
+    'scoped #admin-section-advertisements .rc-field textarea rule must exist');
+});
+
+// FIX UI-5: Premium card has --premium variant + corner badge + amber promo icon
+test('ADS-FIX-UI5: Premium unlocked card has --premium variant + corner badge', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 7000);
+  assert.ok(renderBlock.includes('ns-prem-card--premium'),
+    'unlocked premium-only card must have ns-prem-card--premium class');
+  assert.ok(renderBlock.includes('ns-prem-corner-badge'),
+    'unlocked premium-only card must have a ns-prem-corner-badge');
+  assert.ok(renderBlock.includes('isPremiumUnlocked'),
+    'must compute isPremiumUnlocked state (premiumOnly && isPremiumUser)');
+});
+
+test('ADS-FIX-UI5b: Premium card CSS has amber border + glow', () => {
+  assert.ok(STYLE_SRC.includes('.ns-prem-card--premium'),
+    '.ns-prem-card--premium CSS class must exist');
+  assert.ok(/\.ns-prem-card--premium\s*\{[^}]*border-color:\s*rgba\(245,\s*166,\s*35/.test(STYLE_SRC),
+    'premium card must have amber border-color');
+});
+
+test('ADS-FIX-UI5c: Locked card is elegant (not dimmed/faded)', () => {
+  // opacity must NOT be 0.55 (was too dim)
+  const lockedBlock = STYLE_SRC.slice(
+    STYLE_SRC.indexOf('.ns-prem-card--locked'),
+    STYLE_SRC.indexOf('.ns-prem-card--locked') + 300
+  );
+  assert.ok(!/opacity:\s*0\.55/.test(lockedBlock),
+    'locked card must NOT use opacity:0.55 (was too dim/faded)');
+  assert.ok(/opacity:\s*0\.9[0-9]/.test(lockedBlock),
+    'locked card must use opacity ~0.92 (elegant, not broken)');
+  assert.ok(!/grayscale\(0\.6\)/.test(lockedBlock),
+    'locked card icon must NOT be grayscale(0.6) — keep full color');
+});
+
+test('ADS-FIX-UI5d: Promo icon uses amber (not cyan)', () => {
+  const promoBlock = STYLE_SRC.slice(
+    STYLE_SRC.indexOf('.ic-promo'),
+    STYLE_SRC.indexOf('.ic-promo') + 200
+  );
+  assert.ok(!promoBlock.includes('#22D3EE'),
+    'promo icon must NOT use cyan #22D3EE (doesn\'t match Premium accent)');
+  assert.ok(promoBlock.includes('#F5A623') || promoBlock.includes('245,166,35'),
+    'promo icon must use amber #F5A623 (Premium accent)');
+});
+
+// FIX UI-3c: Submit button loading state
+test('ADS-FIX-UI3c: Submit buttons have loading state (_adsSetBtnLoading)', () => {
+  assert.ok(ADMIN_JS.includes('function _adsSetBtnLoading'),
+    '_adsSetBtnLoading helper must exist');
+  // All 3 save functions must use it
+  const saveChannelBlock = ADMIN_JS.slice(
+    ADMIN_JS.indexOf('async function saveAdChannel'),
+    ADMIN_JS.indexOf('async function saveAdChannel') + 2000
+  );
+  assert.ok(saveChannelBlock.includes('_adsSetBtnLoading') && saveChannelBlock.includes('در حال ذخیره'),
+    'saveAdChannel must call _adsSetBtnLoading');
+
+  const savePopupBlock = ADMIN_JS.slice(
+    ADMIN_JS.indexOf('async function saveAdPopup'),
+    ADMIN_JS.indexOf('async function saveAdPopup') + 2000
+  );
+  assert.ok(savePopupBlock.includes('_adsSetBtnLoading'),
+    'saveAdPopup must call _adsSetBtnLoading');
+
+  const saveMsgBlock = ADMIN_JS.slice(
+    ADMIN_JS.indexOf('async function saveAdMessage'),
+    ADMIN_JS.indexOf('async function saveAdMessage') + 2000
+  );
+  assert.ok(saveMsgBlock.includes('_adsSetBtnLoading'),
+    'saveAdMessage must call _adsSetBtnLoading');
+});
+
+// FIX H1c: queryDbTransaction wired into advertisementsRepo deps
+test('ADS-FIX-DEPS: queryDbTransaction wired into advertisementsRepo', () => {
+  // In the repository factory
+  assert.ok(ADS_REPO_SRC.includes('const { queryDb, queryDbTransaction, isDatabaseConfigured'),
+    'repository must destructure queryDbTransaction from deps');
+  // In worker-proxy.js instantiation
+  assert.ok(WORKER_SRC.includes('queryDbTransaction,\n  isDatabaseConfigured,\n  isoDate: _rcIsoDate,\n  normalizeOptionalString,\n});') ||
+         WORKER_SRC.includes('queryDbTransaction,'),
+    'worker-proxy must pass queryDbTransaction to createAdvertisementsRepository');
+});
+
+// FIX BE: releaseMessageClaim exists
+test('ADS-FIX-REL: releaseMessageClaim method exists', () => {
+  assert.ok(ADS_REPO_SRC.includes('async function releaseMessageClaim'),
+    'releaseMessageClaim method must exist in repository');
+  assert.ok(ADS_REPO_SRC.includes('releaseMessageClaim,'),
+    'releaseMessageClaim must be exported in the return statement');
+});
+
+console.log('✅ All audit-fix tests loaded.');

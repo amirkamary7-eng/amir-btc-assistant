@@ -1821,17 +1821,56 @@ strong.down { color: var(--red); }
     border-radius: 14px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.12);
     transition: border-color 0.18s ease;
+    position: relative;
 }
 .ns-prem-card:hover { border-color: rgba(245,166,35,0.10); }
 .ns-prem-card:active { transform: scale(0.998); }
 
 /* Phase 3/4: Premium-locked advertisement settings */
+/* FIX (audit MED-1): Locked card was opacity:0.55 + grayscale(0.6) — looked
+   dimmed/faded. Now uses a subtle amber tint + full-color icon (no grayscale)
+   so it looks like an elegant Premium upsell, NOT a broken/disabled card. */
 .ns-prem-card--locked {
-    opacity: 0.55;
-    border-color: rgba(255,255,255,0.03);
+    opacity: 0.92;
+    border-color: rgba(245, 166, 35, 0.10);
+    background: linear-gradient(135deg, rgba(15,24,40,0.70) 0%, rgba(245,166,35,0.025) 100%);
 }
-.ns-prem-card--locked:hover { border-color: rgba(255,255,255,0.03); }
-.ns-prem-card--locked .ns-prem-icon { filter: grayscale(0.6); }
+.ns-prem-card--locked:hover { border-color: rgba(245,166,35,0.18); }
+.ns-prem-card--locked .ns-prem-icon { filter: none; }
+
+/* FIX (audit MED-3): Premium-unlocked variant — amber border + subtle glow to
+   distinguish from free category cards. Applied via ns-prem-card--premium class. */
+.ns-prem-card--premium {
+    border-color: rgba(245, 166, 35, 0.22);
+    background: linear-gradient(135deg, rgba(15,24,40,0.70) 0%, rgba(245,166,35,0.04) 100%);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12), 0 0 0 1px rgba(245,166,35,0.06) inset;
+}
+.ns-prem-card--premium:hover {
+    border-color: rgba(245, 166, 35, 0.35);
+    box-shadow: 0 4px 12px rgba(245,166,35,0.12), 0 0 0 1px rgba(245,166,35,0.10) inset;
+}
+
+/* FIX (audit MED-2): Premium corner badge for unlocked premium-only cards */
+.ns-prem-corner-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    background: linear-gradient(135deg, #F5A623 0%, #E8941A 100%);
+    color: #0B1220;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    box-shadow: 0 1px 4px rgba(245,166,35,0.3);
+    z-index: 2;
+    pointer-events: none;
+}
+
 .ns-prem-capsule--locked, .ns-capsule--locked {
     display: flex;
     align-items: center;
@@ -1892,8 +1931,10 @@ strong.down { color: var(--red); }
 .ic-wallet svg { color: #10B981; }
 .ic-challenge { background: linear-gradient(135deg, rgba(236,72,153,0.18), rgba(236,72,153,0.06)); border: 1px solid rgba(236,72,153,0.12); }
 .ic-challenge svg { color: #EC4899; }
-.ic-promo { background: linear-gradient(135deg, rgba(34,211,238,0.16), rgba(34,211,238,0.04)); border: 1px solid rgba(34,211,238,0.10); }
-.ic-promo svg { color: #22D3EE; }
+/* FIX (audit MED-4): Promo icon was cyan (#22D3EE) — doesn't match the amber/gold
+   Premium accent. Now uses amber to signal this is a Premium-only feature. */
+.ic-promo { background: linear-gradient(135deg, rgba(245,166,35,0.18), rgba(245,166,35,0.06)); border: 1px solid rgba(245,166,35,0.12); }
+.ic-promo svg { color: #F5A623; }
 
 .ns-prem-text { min-width: 0; flex: 1; overflow: hidden; }
 .ns-prem-title {
@@ -9796,6 +9837,98 @@ body.jl-locked .cd-fullscreen {
 .join-lock-actions {
     display: flex; flex-direction: column; gap: 10px;
 }
+
+/* PHASE 2 — Multi-channel required channels list */
+.join-lock-channels {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    margin: 4px 0 12px;
+    padding: 12px;
+    background: rgba(245, 166, 35, 0.04);
+    border: 1px solid rgba(245, 166, 35, 0.12);
+    border-radius: 12px;
+}
+.jl-channels-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(245, 250, 254, 0.55);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 2px;
+    text-align: start;
+}
+.jl-channel-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: rgba(11, 18, 32, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+.jl-channel-row:hover {
+    border-color: rgba(245, 166, 35, 0.25);
+    background: rgba(11, 18, 32, 0.75);
+}
+.jl-channel-dot {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+}
+.jl-channel-dot--pending { color: rgba(245, 166, 35, 0.7); }
+.jl-channel-dot--joined { color: #4ADE80; }
+.jl-channel-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.jl-channel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #F5FAFE;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.jl-channel-uname {
+    font-size: 11px;
+    color: rgba(245, 250, 254, 0.45);
+    direction: ltr;
+    text-align: start;
+}
+.jl-channel-join {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7px 14px;
+    background: linear-gradient(135deg, #F5A623 0%, #E8941A 100%);
+    color: #0B1220;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+    border-radius: 8px;
+    transition: transform 0.15s ease, filter 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 2px 8px rgba(245, 166, 35, 0.25);
+}
+.jl-channel-join:hover, .jl-channel-join:focus {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    box-shadow: 0 4px 12px rgba(245, 166, 35, 0.4);
+    outline: none;
+}
+.jl-channel-join:active { transform: translateY(0); }
+
 .join-lock-btn {
     display: flex; align-items: center; justify-content: center; gap: 8px;
     width: 100%; height: 46px;
@@ -11865,6 +11998,14 @@ body.jl-locked .cd-fullscreen {
 .admin-badge-orange { background: rgba(255,138,0,0.15);  color: #FFA940; border-color: rgba(255,138,0,0.3); }
 .admin-badge-blue   { background: rgba(59,130,246,0.15); color: #60A5FA; border-color: rgba(59,130,246,0.3); }
 .admin-badge-gray   { background: rgba(255,255,255,0.06);color: rgba(255,255,255,0.5); border-color: rgba(255,255,255,0.1); }
+/* FIX (audit H2): distinct dark-gray for 'archived' status (was same as draft 'gray') */
+.admin-badge-gray-dark {
+    background: rgba(255,255,255,0.03);
+    color: rgba(255,255,255,0.32);
+    border-color: rgba(255,255,255,0.06);
+    text-decoration: line-through;
+    text-decoration-color: rgba(255,255,255,0.2);
+}
 
 /* ── Permission group form (add-admin) ── */
 .adm-perm-group {
@@ -14466,7 +14607,9 @@ body.jl-locked .cd-fullscreen {
 }
 
 /* ─── Larger textarea for message body ─── */
-.rc-field textarea {
+/* FIX (audit H4): Scope to ads section ONLY to avoid restyling notification-center
+   np-tpl-message textarea. Original rule `.rc-field textarea` leaked globally. */
+#admin-section-advertisements .rc-field textarea {
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 9px;
@@ -14480,7 +14623,7 @@ body.jl-locked .cd-fullscreen {
     transition: border-color 0.2s ease;
     width: 100%;
 }
-.rc-field textarea:focus {
+#admin-section-advertisements .rc-field textarea:focus {
     outline: none;
     border-color: rgba(245, 166, 35, 0.40);
 }

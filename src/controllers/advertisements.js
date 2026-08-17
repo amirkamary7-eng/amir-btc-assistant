@@ -478,7 +478,30 @@ export function createAdvertisementsHandlers(deps) {
         }, { status: 422 }, env);
       }
 
-      const result = await _deliverMessageCampaign(env, message);
+      // FIX (audit H1): Atomic CAS claim to prevent concurrent double-delivery.
+      // Two concurrent POST /send requests would both pass the above check and
+      // both deliver to all users. claimMessageForDelivery atomically sets
+      // last_processed_at = NOW() and only succeeds if the message hasn't been
+      // processed in the last 5 minutes. This prevents double-clicks AND
+      // prevents re-delivery within 5 min (admin must wait to re-send).
+      const claimed = await advertisementsRepo.claimMessageForDelivery(env, id, 5);
+      if (!claimed) {
+        return jsonResponse({
+          status: 'error',
+          message: 'This campaign was sent recently. Please wait 5 minutes before sending again.',
+          code: 'CAMPAIGN_RECENTLY_SENT',
+          retry_after_seconds: 300,
+        }, { status: 409 }, env);
+      }
+
+      let result;
+      try {
+        result = await _deliverMessageCampaign(env, message);
+      } catch (deliveryErr) {
+        // Release the claim on failure so admin can retry sooner than 5 min.
+        await advertisementsRepo.releaseMessageClaim(env, id);
+        throw deliveryErr;
+      }
       return jsonResponse({ status: 'success', ...result }, {}, env);
     } catch (e) {
       console.error('[advertisements] deliver failed:', e);
@@ -608,8 +631,13 @@ export function createAdvertisementsHandlers(deps) {
       }
 
       checkpoint = userIds[userIds.length - 1];
-      // Safety cap: 5000 users per send invocation (Workers CPU limit).
-      if (delivered + skipped >= 5000) break;
+      // Safety cap: 1000 users per send invocation (Workers CPU limit).
+      // FIX (audit H2): Was 5000 — at ~50ms per user (DB query + dispatch + TG send),
+      // 5000 users = 250s wall-clock, FAR exceeding Workers Paid plan 30s CPU limit.
+      // 1000 users = ~50s wall-clock — still risky but survivable with ctx.waitUntil.
+      // For larger audiences, admin should split into multiple sends (different
+      // audience filters) or use the notification_queue cron for async delivery.
+      if (delivered + skipped >= 1000) break;
     }
 
     // Record delivery metadata.

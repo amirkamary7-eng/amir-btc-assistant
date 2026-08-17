@@ -10483,9 +10483,27 @@ async function renderNotifSettings() {
                 ? window.MembershipApp.isPremiumCached()
                 : false;
             const isLocked = cat.premiumOnly && !isPremiumUser;
+            // FIX (audit MED-2/MED-3): Unlocked premium-only cards get the --premium
+            // variant (amber border + glow) + a ✦ PREMIUM corner badge so they're
+            // visually distinguished from free category cards.
+            const isPremiumUnlocked = cat.premiumOnly && isPremiumUser;
 
             const card = document.createElement('div');
-            card.className = isLocked ? 'ns-prem-card ns-prem-card--locked' : 'ns-prem-card';
+            if (isLocked) {
+                card.className = 'ns-prem-card ns-prem-card--locked';
+            } else if (isPremiumUnlocked) {
+                card.className = 'ns-prem-card ns-prem-card--premium';
+            } else {
+                card.className = 'ns-prem-card';
+            }
+
+            // FIX (audit MED-2): Add ✦ PREMIUM corner badge for unlocked premium-only cards
+            if (isPremiumUnlocked) {
+                const cornerBadge = document.createElement('div');
+                cornerBadge.className = 'ns-prem-corner-badge';
+                cornerBadge.textContent = '✦ PREMIUM';
+                card.appendChild(cornerBadge);
+            }
 
             // Left: icon + text
             const left = document.createElement('div');
@@ -13379,6 +13397,82 @@ function showJoinLock() {
     }
     // Hide the floating status card — the full lock takes over
     hideJoinStatusBar();
+    // PHASE 2 FIX (audit HIGH-1): Fetch admin-configured required channels
+    // and render them in the lock overlay so the user knows WHAT to join.
+    // The env REQUIRED_CHANNEL is always shown as the primary button; any
+    // admin-configured DB channels are shown as a list above the buttons.
+    _renderRequiredChannelsList();
+}
+
+/**
+ * PHASE 2: Fetch admin-configured required channels from
+ * /api/advertisements/required-channels and render them in the join-lock
+ * overlay. Each channel gets its own row with title + join link.
+ *
+ * If the API returns no channels (or fails), the overlay falls back to the
+ * hardcoded env REQUIRED_CHANNEL button (backward compat).
+ */
+async function _renderRequiredChannelsList() {
+    const container = document.getElementById('join-lock-channels');
+    if (!container) return;
+    if (!API_BASE || UserContext.isGuest() || UserContext.isPending()) {
+        container.style.display = 'none';
+        return;
+    }
+    try {
+        const data = await apiFetch('/api/advertisements/required-channels', { method: 'GET' });
+        if (!data || data.status !== 'success' || !Array.isArray(data.channels) || data.channels.length === 0) {
+            // No DB channels configured — hide container, rely on env button
+            container.style.display = 'none';
+            return;
+        }
+        // Render each channel as a row with title + join link.
+        // Use textContent for XSS safety (admin-supplied title/channel).
+        container.innerHTML = '';
+        const isFa = currentLang === 'fa';
+        const header = document.createElement('div');
+        header.className = 'jl-channels-header';
+        header.textContent = isFa ? 'کانال‌های موردنیاز:' : 'Required channels:';
+        container.appendChild(header);
+
+        for (const ch of data.channels) {
+            const row = document.createElement('div');
+            row.className = 'jl-channel-row';
+
+            const dot = document.createElement('span');
+            dot.className = 'jl-channel-dot jl-channel-dot--pending';
+            dot.setAttribute('aria-hidden', 'true');
+            dot.textContent = '○';
+            row.appendChild(dot);
+
+            const info = document.createElement('div');
+            info.className = 'jl-channel-info';
+            const title = document.createElement('span');
+            title.className = 'jl-channel-title';
+            title.textContent = ch.title || ch.username || '';
+            const uname = document.createElement('span');
+            uname.className = 'jl-channel-uname';
+            uname.textContent = '@' + (ch.username || '');
+            info.appendChild(title);
+            info.appendChild(uname);
+            row.appendChild(info);
+
+            const link = document.createElement('a');
+            link.className = 'jl-channel-join';
+            link.href = ch.joinUrl || ('https://t.me/' + (ch.username || ''));
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = isFa ? 'عضویت' : 'Join';
+            row.appendChild(link);
+
+            container.appendChild(row);
+        }
+        container.style.display = 'flex';
+    } catch (e) {
+        // Non-fatal — fall back to env button
+        console.warn('[JOIN-LOCK] required-channels fetch failed:', e?.message || e);
+        container.style.display = 'none';
+    }
 }
 
 /**

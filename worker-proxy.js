@@ -3050,7 +3050,19 @@ async function checkAdditionalRequiredChannels(env, userId) {
   const hash = _hashChannelSet(channels);
   const cacheKey = `adch:${uid}:${hash}`;
 
-  // Check per-user KV cache (60s TTL).
+  // FIX (audit H3): Jittered TTL to avoid cache-stampede when admin changes the
+  // channel list. Without jitter, all per-user cache entries expire at the same
+  // 60s mark → synchronized re-fetch → thundering herd of Telegram getChatMember
+  // calls → exceeds Telegram's 30 req/sec rate limit. With jitter (55-95s),
+  // expiration spreads out → at most 1-2 concurrent refreshes per second.
+  // Seed the jitter with uid+hash so the same user gets a consistent TTL
+  // (avoids the same user refreshing every 55s in a tight loop).
+  const _jitterSeed = (uid.charCodeAt(0) || 0) + hash.charCodeAt(0 || 0) || 0;
+  const _ttlJitter = 40 * (((_jitterSeed * 9301 + 49297) % 233280) / 233280); // 0-40s jitter
+  const _ttlPos = Math.floor(55 + _ttlJitter); // 55-95s for positive (joined)
+  const _ttlNeg = Math.floor(55 + _ttlJitter); // 55-95s for negative (not joined)
+
+  // Check per-user KV cache (jittered TTL).
   if (env.RATE_LIMITS && typeof env.RATE_LIMITS.get === 'function') {
     try {
       const cached = await env.RATE_LIMITS.get(cacheKey);
@@ -3064,17 +3076,17 @@ async function checkAdditionalRequiredChannels(env, userId) {
     const chatId = ch.username.startsWith('-') ? ch.username : `@${ch.username}`;
     const result = await _checkSingleTelegramChannel(env, chatId, uid);
     if (!result.joined) {
-      // Cache negative result (60s) — avoids hammering Telegram for known-not-members.
+      // Cache negative result (jittered TTL) — avoids hammering Telegram for known-not-members.
       if (env.RATE_LIMITS && typeof env.RATE_LIMITS.put === 'function') {
-        try { await env.RATE_LIMITS.put(cacheKey, '0', { expirationTtl: 60 }); } catch { /* non-fatal */ }
+        try { await env.RATE_LIMITS.put(cacheKey, '0', { expirationTtl: _ttlNeg }); } catch { /* non-fatal */ }
       }
       return { joined: false, channels: channels.length, reason: result.reason || 'not_member', channel: ch.username };
     }
   }
 
-  // All channels joined — cache positive result (60s).
+  // All channels joined — cache positive result (jittered TTL).
   if (env.RATE_LIMITS && typeof env.RATE_LIMITS.put === 'function') {
-    try { await env.RATE_LIMITS.put(cacheKey, '1', { expirationTtl: 60 }); } catch { /* non-fatal */ }
+    try { await env.RATE_LIMITS.put(cacheKey, '1', { expirationTtl: _ttlPos }); } catch { /* non-fatal */ }
   }
   return { joined: true, channels: channels.length };
 }
@@ -8180,6 +8192,7 @@ const notificationPlatformHandlers = createNotificationPlatformHandlers({
 // Connects to ch_promotions preference for message delivery (Phase 7).
 const advertisementsRepo = createAdvertisementsRepository({
   queryDb,
+  queryDbTransaction,
   isDatabaseConfigured,
   isoDate: _rcIsoDate,
   normalizeOptionalString,

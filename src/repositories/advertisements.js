@@ -151,7 +151,7 @@ export function sanitizeUrl(raw, maxLen = 2048) {
 }
 
 export function createAdvertisementsRepository(deps) {
-  const { queryDb, isDatabaseConfigured, isoDate, normalizeOptionalString } = deps;
+  const { queryDb, queryDbTransaction, isDatabaseConfigured, isoDate, normalizeOptionalString } = deps;
 
   let _schemaVerified = false;
 
@@ -314,22 +314,48 @@ export function createAdvertisementsRepository(deps) {
       throw new Error('join_url must be a https://t.me/... link');
     }
     const order = Math.max(0, Math.min(9999, parseInt(input.display_order || 0, 10)));
+    const status = _ALLOWED_STATUSES.has(input.status) ? input.status : 'active';
+    const isActive = input.is_active !== false;
 
-    await queryDb(env, 'BEGIN').catch(() => {});
-    try {
+    // FIX (audit C1): Use queryDbTransaction for atomic INSERT.
+    // Previously used bare BEGIN/COMMIT/ROLLBACK on queryDb — but queryDb
+    // routes through neon HTTP (stateless, one HTTP req per query) or a
+    // shared pool (each pool.query() acquires a DIFFERENT client in
+    // autocommit mode). BEGIN/COMMIT on different clients = NOT a transaction.
+    // If the second INSERT failed, the first INSERT was already committed
+    // → orphan ad_campaigns row. queryDbTransaction uses pool.connect() to
+    // get a SINGLE client and runs BEGIN/queries/COMMIT on that one client.
+    if (queryDbTransaction) {
+      await queryDbTransaction(env, [
+        {
+          sql: `INSERT INTO ad_campaigns (id, type, title, status, sort_order) VALUES ($1, 'channel_join', $2, $3, $4)`,
+          params: [campId, title, status, order],
+        },
+        {
+          sql: `INSERT INTO ad_channels (id, campaign_id, channel_username, channel_title, join_url, display_order, is_active)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          params: [id, campId, username, title, joinUrl, order, isActive],
+        },
+      ]);
+    } else {
+      // Fallback for environments without queryDbTransaction (should not
+      // happen in production — queryDbTransaction is always wired). This
+      // path is non-atomic but at least surfaces errors clearly.
       await queryDb(env,
         `INSERT INTO ad_campaigns (id, type, title, status, sort_order) VALUES ($1, 'channel_join', $2, $3, $4)`,
-        [campId, title, input.status || 'active', order]
+        [campId, title, status, order]
       );
-      await queryDb(env,
-        `INSERT INTO ad_channels (id, campaign_id, channel_username, channel_title, join_url, display_order, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [id, campId, username, title, joinUrl, order, input.is_active !== false]
-      );
-      await queryDb(env, 'COMMIT').catch(() => {});
-    } catch (e) {
-      await queryDb(env, 'ROLLBACK').catch(() => {});
-      throw e;
+      try {
+        await queryDb(env,
+          `INSERT INTO ad_channels (id, campaign_id, channel_username, channel_title, join_url, display_order, is_active)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [id, campId, username, title, joinUrl, order, isActive]
+        );
+      } catch (e) {
+        // Best-effort cleanup of orphan campaign row
+        await queryDb(env, `DELETE FROM ad_campaigns WHERE id = $1`, [campId]).catch(() => {});
+        throw e;
+      }
     }
     _invalidateCampaignCache();
     return getChannel(env, id);
@@ -692,6 +718,50 @@ export function createAdvertisementsRepository(deps) {
     return getMessage(env, id);
   }
 
+  /**
+   * FIX (audit H1): Atomic CAS claim to prevent concurrent double-delivery.
+   *
+   * Two concurrent POST /api/admin/advertisements/messages/:id/send requests
+   * would both pass the campaign_status check and both deliver to all users.
+   * This method atomically claims the message for delivery: only the FIRST
+   * caller wins (rowCount=1), the second caller gets rowCount=0 and exits.
+   *
+   * The claim sets last_processed_at = NOW() and only succeeds if the message
+   * hasn't been processed in the last COOLDOWN_MINUTES (default 5). This
+   * prevents accidental double-clicks AND prevents re-delivery within 5 min.
+   *
+   * Returns true if claimed (caller may proceed), false if another caller
+   * already claimed it recently (caller should exit with 409 Conflict).
+   */
+  async function claimMessageForDelivery(env, id, cooldownMinutes = 5) {
+    if (!isDatabaseConfigured(env)) return true; // fail-open if no DB
+    const existing = await getMessage(env, id);
+    if (!existing) return false;
+    const result = await queryDb(env,
+      `UPDATE ad_messages
+       SET last_processed_at = NOW(), updated_at = NOW()
+       WHERE campaign_id = $1
+         AND (last_processed_at IS NULL OR last_processed_at < NOW() - ($2 || ' minutes')::interval)
+       RETURNING id`,
+      [existing.campaign_id, String(cooldownMinutes)]
+    );
+    return (result.rowCount || 0) > 0;
+  }
+
+  /**
+   * Release a previously-claimed message delivery (on failure).
+   * Resets last_processed_at to NULL so the next attempt can claim.
+   */
+  async function releaseMessageClaim(env, id) {
+    if (!isDatabaseConfigured(env)) return;
+    const existing = await getMessage(env, id);
+    if (!existing) return;
+    await queryDb(env,
+      `UPDATE ad_messages SET last_processed_at = NULL WHERE campaign_id = $1`,
+      [existing.campaign_id]
+    ).catch(() => {});
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // IMAGE STORAGE (Phase 5) — KV-backed, validation-only (no resize in Worker)
   // ═══════════════════════════════════════════════════════════════════════
@@ -872,6 +942,8 @@ export function createAdvertisementsRepository(deps) {
     updateMessage,
     deleteMessage,
     setMessageStatus,
+    claimMessageForDelivery,
+    releaseMessageClaim,
     // Image
     storeImage,
     getImage,
