@@ -988,16 +988,20 @@ test('ADS-FIX-UI5b: Premium card CSS has amber border + glow', () => {
     'premium card must have amber border-color');
 });
 
-test('ADS-FIX-UI5c: Locked card is elegant (not dimmed/faded)', () => {
-  // opacity must NOT be 0.55 (was too dim)
+test('ADS-FIX-UI5c: Locked card is muted but elegant (opacity 0.55-0.65, no grayscale)', () => {
+  // PHASE 2: Free-user locked cards use opacity 0.55-0.65 (muted, not broken).
+  // The hover state lifts to 0.75 (visual feedback that card is interactive).
   const lockedBlock = STYLE_SRC.slice(
     STYLE_SRC.indexOf('.ns-prem-card--locked'),
-    STYLE_SRC.indexOf('.ns-prem-card--locked') + 300
+    STYLE_SRC.indexOf('.ns-prem-card--locked') + 400
   );
-  assert.ok(!/opacity:\s*0\.55/.test(lockedBlock),
-    'locked card must NOT use opacity:0.55 (was too dim/faded)');
-  assert.ok(/opacity:\s*0\.9[0-9]/.test(lockedBlock),
-    'locked card must use opacity ~0.92 (elegant, not broken)');
+  // opacity must be in 0.55-0.65 range (muted but visible)
+  assert.ok(/opacity:\s*0\.(5[5-9]|6[0-5])/.test(lockedBlock),
+    'locked card must use opacity 0.55-0.65 (muted but visible, not too dim)');
+  // hover state should lift opacity (visual feedback card is clickable)
+  assert.ok(/ns-prem-card--locked:hover[^}]*opacity:\s*0\.(7[0-9]|8[0-9])/s.test(lockedBlock) ||
+            STYLE_SRC.includes('.ns-prem-card--locked:hover'),
+    'locked card must have a hover state (visual feedback for clickability)');
   assert.ok(!/grayscale\(0\.6\)/.test(lockedBlock),
     'locked card icon must NOT be grayscale(0.6) — keep full color');
 });
@@ -1352,3 +1356,252 @@ test('ADS-FIX-UI-CSS-02: empty + error state CSS classes exist', () => {
 });
 
 console.log('✅ All PHASE 1-9 fix tests loaded.');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 2 — Free-user Locked Notification Settings UI (regression tests)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Lock + Crown SVG icons added to NS_ICONS
+test('ADS-FREE-UI-01: NS_ICONS has lock + crown SVG icons for Free-user locked UI', () => {
+  const nsIconsStart = APP_SRC.indexOf('const NS_ICONS = {');
+  const nsIconsEnd = APP_SRC.indexOf('};', nsIconsStart) + 2;
+  const nsIconsBlock = APP_SRC.slice(nsIconsStart, nsIconsEnd);
+  assert.ok(nsIconsBlock.includes('lock:'),
+    'NS_ICONS must have a lock icon');
+  assert.ok(nsIconsBlock.includes('crown:'),
+    'NS_ICONS must have a crown icon');
+  // Verify they are SVG (not emoji)
+  const lockIconStart = nsIconsBlock.indexOf('lock:');
+  const lockIconBlock = nsIconsBlock.slice(lockIconStart, lockIconStart + 300);
+  assert.ok(lockIconBlock.includes('<svg'),
+    'lock icon must be inline SVG');
+  assert.ok(lockIconBlock.includes('stroke="currentColor"'),
+    'lock icon must use stroke="currentColor" (consistent with Feather-style)');
+});
+
+// Lock badge added to locked cards (top corner, SVG)
+test('ADS-FREE-UI-02: Locked cards have ns-prem-lock-badge (SVG lock icon in corner)', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  assert.ok(renderBlock.includes('ns-prem-lock-badge'),
+    'locked card must have ns-prem-lock-badge element');
+  assert.ok(renderBlock.includes('aria-hidden'),
+    'lock badge must have aria-hidden (accessibility)');
+  // CSS class must exist
+  assert.ok(STYLE_SRC.includes('.ns-prem-lock-badge'),
+    '.ns-prem-lock-badge CSS class must exist');
+  assert.ok(/\.ns-prem-lock-badge\s*\{[^}]*position:\s*absolute/.test(STYLE_SRC),
+    'lock badge must be absolutely positioned in corner');
+});
+
+// Whole card is clickable for Free users → MembershipApp.open()
+test('ADS-FREE-UI-03: Free-user locked card is fully clickable → MembershipApp.open()', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  assert.ok(renderBlock.includes("window.MembershipApp.open"),
+    'clicking the locked card must call window.MembershipApp.open() (existing upgrade route)');
+  assert.ok(renderBlock.includes("card.setAttribute('role', 'button')"),
+    'locked card must have role="button" (accessibility)');
+  assert.ok(renderBlock.includes("card.setAttribute('tabindex', '0')"),
+    'locked card must have tabindex="0" (keyboard accessible)');
+  assert.ok(renderBlock.includes("aria-disabled"),
+    'locked card must have aria-disabled attribute');
+  assert.ok(renderBlock.includes('card.style.cursor') && renderBlock.includes("'pointer'"),
+    'locked card must have cursor: pointer (visual clickability)');
+});
+
+// Keyboard accessibility — Enter/Space triggers upgrade
+test('ADS-FREE-UI-04: Locked card keyboard accessibility (Enter/Space)', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  assert.ok(renderBlock.includes("e.key === 'Enter'") || renderBlock.includes("'Enter'"),
+    'Enter key must trigger upgrade');
+  assert.ok(renderBlock.includes("e.key === ' '") || renderBlock.includes("' '"),
+    'Space key must trigger upgrade');
+  assert.ok(renderBlock.includes('keydown'),
+    'locked card must have keydown event listener');
+});
+
+// Capsule buttons are disabled (no state change, no API call)
+test('ADS-FREE-UI-05: Free-user capsule buttons are disabled (ns-cap-btn--disabled)', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  assert.ok(renderBlock.includes('ns-cap-btn--disabled'),
+    'locked capsule buttons must have ns-cap-btn--disabled class');
+  assert.ok(renderBlock.includes("disabled', 'disabled'") || renderBlock.includes("'disabled'"),
+    'locked capsule buttons must have disabled attribute');
+  assert.ok(renderBlock.includes('aria-disabled'),
+    'locked capsule buttons must have aria-disabled');
+  assert.ok(renderBlock.includes("tabindex', '-1'") || renderBlock.includes("'-1'"),
+    'locked capsule buttons must have tabindex="-1" (removed from tab order)');
+});
+
+// Event delegation guard — disabled buttons don't trigger settings change
+test('ADS-FREE-UI-06: Event delegation guards against disabled button clicks', () => {
+  const handlerStart = APP_SRC.indexOf('list.onclick = function');
+  const handlerBlock = APP_SRC.slice(handlerStart, handlerStart + 800);
+  assert.ok(handlerBlock.includes('ns-cap-btn--disabled'),
+    'event delegation must check for ns-cap-btn--disabled class');
+  assert.ok(handlerBlock.includes('hasAttribute') && handlerBlock.includes('disabled'),
+    'event delegation must check for disabled attribute');
+  assert.ok(handlerBlock.includes('e.preventDefault') && handlerBlock.includes('e.stopPropagation'),
+    'event delegation must preventDefault + stopPropagation for disabled buttons');
+});
+
+// Upgrade message at bottom of locked card
+test('ADS-FREE-UI-07: Locked card has upgrade message with lock SVG', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  assert.ok(renderBlock.includes('ns-prem-upgrade-msg'),
+    'locked card must have ns-prem-upgrade-msg element');
+  assert.ok(renderBlock.includes('برای دسترسی به این تنظیمات، به پریمیوم ارتقا دهید'),
+    'locked card must show Persian upgrade message');
+  // Message has a lock SVG
+  const msgStart = renderBlock.indexOf('ns-prem-upgrade-msg');
+  const msgBlock = renderBlock.slice(msgStart, msgStart + 300);
+  assert.ok(msgBlock.includes('<svg'),
+    'upgrade message must include an SVG lock icon');
+});
+
+// CTA button "ارتقا به پریمیوم" with crown SVG
+test('ADS-FREE-UI-08: Locked card has CTA button with crown SVG → upgrade', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  assert.ok(renderBlock.includes('ns-prem-upgrade-cta'),
+    'locked card must have ns-prem-upgrade-cta button');
+  assert.ok(renderBlock.includes('ارتقا به پریمیوم'),
+    'CTA must show "ارتقا به پریمیوم"');
+  // CTA has crown SVG
+  const ctaStart = renderBlock.indexOf('ns-prem-upgrade-cta');
+  const ctaBlock = renderBlock.slice(ctaStart, ctaStart + 400);
+  assert.ok(ctaBlock.includes('<svg'),
+    'CTA must include an SVG icon (crown)');
+  // CTA click → MembershipApp.open()
+  assert.ok(renderBlock.includes("MembershipApp.open"),
+    'CTA click must call MembershipApp.open()');
+});
+
+// CTA click handler stops propagation (doesn't double-trigger card click)
+test('ADS-FREE-UI-09: CTA click stops propagation (no double-trigger)', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  // Find the CTA click handler
+  const ctaHandlerStart = renderBlock.indexOf("ctaBtn.addEventListener('click'");
+  assert.ok(ctaHandlerStart > 0,
+    'CTA must have a click event listener');
+  const ctaHandlerBlock = renderBlock.slice(ctaHandlerStart, ctaHandlerStart + 300);
+  assert.ok(ctaHandlerBlock.includes('e.preventDefault') && ctaHandlerBlock.includes('e.stopPropagation'),
+    'CTA click handler must preventDefault + stopPropagation (no double-trigger with card click)');
+});
+
+// Premium users are NOT affected — no lock badge, no upgrade message, no disabled buttons
+test('ADS-FREE-UI-10: Premium users see NO lock badge, NO upgrade message (unchanged)', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  // isLocked check guards all Free-only UI
+  assert.ok(renderBlock.includes('if (isLocked) {'),
+    'all Free-only UI (lock badge, upgrade message, CTA) must be inside if (isLocked)');
+  // Premium unlocked cards get corner badge, NOT lock badge
+  assert.ok(renderBlock.includes('isPremiumUnlocked'),
+    'isPremiumUnlocked must be computed (Premium path)');
+  assert.ok(renderBlock.includes('ns-prem-corner-badge'),
+    'Premium unlocked cards get corner badge (NOT lock badge)');
+  // Premium capsule buttons are NOT disabled
+  assert.ok(renderBlock.includes('Premium user — functional controls (UNCHANGED)'),
+    'Premium capsule section must be marked UNCHANGED');
+});
+
+// CSS: locked card opacity 0.55-0.65 (muted, not broken)
+test('ADS-FREE-UI-11: Locked card CSS opacity is 0.55-0.65 (muted)', () => {
+  const lockedBlock = STYLE_SRC.slice(
+    STYLE_SRC.indexOf('.ns-prem-card--locked'),
+    STYLE_SRC.indexOf('.ns-prem-card--locked') + 500
+  );
+  assert.ok(/opacity:\s*0\.(5[5-9]|6[0-5])/.test(lockedBlock),
+    'locked card opacity must be 0.55-0.65 (muted but visible)');
+});
+
+// CSS: disabled capsule buttons have no hover effect
+test('ADS-FREE-UI-12: Disabled capsule buttons have no hover effect', () => {
+  assert.ok(STYLE_SRC.includes('.ns-cap-btn--disabled'),
+    '.ns-cap-btn--disabled CSS class must exist');
+  assert.ok(/\.ns-cap-btn--disabled:hover[^{]*\{[^}]*transform:\s*none/i.test(STYLE_SRC) ||
+            STYLE_SRC.includes('.ns-cap-btn--disabled:hover'),
+    'disabled buttons must have hover:transform:none (no hover effect)');
+  assert.ok(/\.ns-cap-btn--disabled[^{]*\{[^}]*pointer-events:\s*none/i.test(STYLE_SRC),
+    'disabled buttons must have pointer-events:none (clicks pass through to card)');
+});
+
+// CSS: upgrade row + CTA styles exist
+test('ADS-FREE-UI-13: Upgrade message + CTA CSS classes exist', () => {
+  assert.ok(STYLE_SRC.includes('.ns-prem-upgrade-row'),
+    '.ns-prem-upgrade-row CSS class must exist');
+  assert.ok(STYLE_SRC.includes('.ns-prem-upgrade-msg'),
+    '.ns-prem-upgrade-msg CSS class must exist');
+  assert.ok(STYLE_SRC.includes('.ns-prem-upgrade-cta'),
+    '.ns-prem-upgrade-cta CSS class must exist');
+  // CTA has amber accent
+  assert.ok(/\.ns-prem-upgrade-cta\s*\{[^}]*#F5A623/.test(STYLE_SRC),
+    'CTA must use amber #F5A623 (Premium accent)');
+});
+
+// CSS: mobile responsive (upgrade row stacks on narrow screens)
+test('ADS-FREE-UI-14: Upgrade row is mobile responsive', () => {
+  assert.ok(STYLE_SRC.includes('@media (max-width: 480px)'),
+    'must have @media (max-width: 480px) breakpoint');
+  const mobileBlock = STYLE_SRC.slice(
+    STYLE_SRC.indexOf('@media (max-width: 480px)'),
+    STYLE_SRC.indexOf('@media (max-width: 480px)') + 300
+  );
+  assert.ok(mobileBlock.includes('ns-prem-upgrade-row'),
+    'mobile breakpoint must target ns-prem-upgrade-row');
+  assert.ok(mobileBlock.includes('flex-direction: column'),
+    'mobile upgrade row must stack vertically');
+});
+
+// CSS: RTL-aware lock badge position
+test('ADS-FREE-UI-15: Lock badge uses RTL-aware positioning', () => {
+  const lockBadgeBlock = STYLE_SRC.slice(
+    STYLE_SRC.indexOf('.ns-prem-lock-badge'),
+    STYLE_SRC.indexOf('.ns-prem-lock-badge') + 300
+  );
+  assert.ok(lockBadgeBlock.includes('inset-inline-end'),
+    'lock badge must use inset-inline-end (RTL-aware, not hardcoded right)');
+});
+
+// No new emojis added
+test('ADS-FREE-UI-16: No new emojis in Free-user locked UI code', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 12000);
+  // The new locked-card code should NOT use emojis (SVG only)
+  const lockedSection = renderBlock.slice(renderBlock.indexOf('PHASE 2: For Free users'));
+  assert.ok(!lockedSection.includes('🔒'),
+    'locked card code must NOT use 🔒 emoji (use SVG lock icon)');
+  assert.ok(!lockedSection.includes('👑'),
+    'locked card code must NOT use 👑 emoji (use SVG crown icon)');
+  assert.ok(lockedSection.includes('<svg'),
+    'locked card code must use inline SVG icons');
+});
+
+// Existing Premium detection source of truth is unchanged
+test('ADS-FREE-UI-17: Premium detection uses existing MembershipApp.isPremiumCached (no new logic)', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 5000);
+  assert.ok(renderBlock.includes('MembershipApp.isPremiumCached'),
+    'must use MembershipApp.isPremiumCached (existing source of truth)');
+  assert.ok(!renderBlock.includes('isPremiumUser =') || renderBlock.includes('MembershipApp.isPremiumCached'),
+    'must NOT create a new isPremium detection logic');
+});
+
+// Existing upgrade route is used (MembershipApp.open)
+test('ADS-FREE-UI-18: Upgrade uses existing MembershipApp.open route (no new route)', () => {
+  const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 12000);
+  assert.ok(renderBlock.includes('MembershipApp.open'),
+    'must use MembershipApp.open() (existing upgrade route)');
+  // Must NOT create a new openPremiumUpgrade function
+  assert.ok(!renderBlock.includes('openPremiumUpgrade'),
+    'must NOT create a new openPremiumUpgrade function (use existing MembershipApp.open)');
+});
+
+console.log('✅ All PHASE 2 Free-user Locked UI tests loaded.');

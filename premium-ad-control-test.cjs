@@ -53,25 +53,36 @@ test('AD-PREM-02: renderNotifSettings checks isPremiumCached for locking', () =>
 
 test('AD-PREM-03: Locked card has ns-prem-card--locked class', () => {
   const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
-  const renderBlock = APP_SRC.slice(renderStart, renderStart + 6000);
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 8000);
   assert.ok(renderBlock.includes('ns-prem-card--locked'),
     'locked card must have ns-prem-card--locked class');
 });
 
-test('AD-PREM-04: Locked card shows lock badge, not capsule buttons', () => {
+test('AD-PREM-04: Locked card shows lock badge + disabled capsule (PHASE 2 redesign)', () => {
   const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
-  const renderBlock = APP_SRC.slice(renderStart, renderStart + 8000);
-  assert.ok(renderBlock.includes('ns-prem-lock'),
-    'locked card must show lock badge');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  // PHASE 2: Lock badge is now ns-prem-lock-badge (SVG in top corner)
+  assert.ok(renderBlock.includes('ns-prem-lock-badge'),
+    'locked card must show lock badge (ns-prem-lock-badge)');
+  // PHASE 2: Capsule still has ns-capsule--locked class (disabled buttons)
   assert.ok(renderBlock.includes('ns-capsule--locked'),
     'locked capsule must have ns-capsule--locked class');
+  // PHASE 2: Capsule buttons are disabled (ns-cap-btn--disabled)
+  assert.ok(renderBlock.includes('ns-cap-btn--disabled'),
+    'locked capsule buttons must have ns-cap-btn--disabled class');
 });
 
-test('AD-PREM-05: Locked card shows "فقط برای اعضای Premium" text', () => {
+test('AD-PREM-05: Locked card shows upgrade message + CTA (PHASE 2)', () => {
   const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
-  const renderBlock = APP_SRC.slice(renderStart, renderStart + 8000);
-  assert.ok(renderBlock.includes('فقط برای اعضای Premium'),
-    'locked card must show Persian "Premium members only" text');
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
+  // PHASE 2: Upgrade message at bottom of card
+  assert.ok(renderBlock.includes('برای دسترسی به این تنظیمات، به پریمیوم ارتقا دهید'),
+    'locked card must show Persian upgrade message');
+  // PHASE 2: CTA button "ارتقا به پریمیوم"
+  assert.ok(renderBlock.includes('ارتقا به پریمیوم'),
+    'locked card must show CTA button "ارتقا به پریمیوم"');
+  assert.ok(renderBlock.includes('ns-prem-upgrade-cta'),
+    'CTA must have ns-prem-upgrade-cta class');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -80,7 +91,7 @@ test('AD-PREM-05: Locked card shows "فقط برای اعضای Premium" text', 
 
 test('AD-PREM-06: Premium user gets functional capsule buttons', () => {
   const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
-  const renderBlock = APP_SRC.slice(renderStart, renderStart + 8000);
+  const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
   assert.ok(renderBlock.includes('Premium user — functional controls'),
     'comment documents Premium user functional controls');
   assert.ok(renderBlock.includes('for (const ch of channels)'),
