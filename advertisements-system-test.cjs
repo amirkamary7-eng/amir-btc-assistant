@@ -990,7 +990,7 @@ test('ADS-FIX-UI5b: Premium card CSS has amber border + glow', () => {
 
 test('ADS-FIX-UI5c: Locked card is muted but elegant (opacity 0.55-0.65, no grayscale)', () => {
   // PHASE 2: Free-user locked cards use opacity 0.55-0.65 (muted, not broken).
-  // The hover state lifts to 0.75 (visual feedback that card is interactive).
+  // The hover state lifts to 0.68 (subtle feedback, card still clearly looks disabled).
   const lockedBlock = STYLE_SRC.slice(
     STYLE_SRC.indexOf('.ns-prem-card--locked'),
     STYLE_SRC.indexOf('.ns-prem-card--locked') + 400
@@ -998,10 +998,10 @@ test('ADS-FIX-UI5c: Locked card is muted but elegant (opacity 0.55-0.65, no gray
   // opacity must be in 0.55-0.65 range (muted but visible)
   assert.ok(/opacity:\s*0\.(5[5-9]|6[0-5])/.test(lockedBlock),
     'locked card must use opacity 0.55-0.65 (muted but visible, not too dim)');
-  // hover state should lift opacity (visual feedback card is clickable)
-  assert.ok(/ns-prem-card--locked:hover[^}]*opacity:\s*0\.(7[0-9]|8[0-9])/s.test(lockedBlock) ||
+  // hover state should be ≤ 0.70 (subtle feedback, card still clearly disabled)
+  assert.ok(/ns-prem-card--locked:hover[^}]*opacity:\s*0\.(6[8-9]|70)/s.test(lockedBlock) ||
             STYLE_SRC.includes('.ns-prem-card--locked:hover'),
-    'locked card must have a hover state (visual feedback for clickability)');
+    'locked card hover opacity must be ≤ 0.70 (card still clearly looks disabled)');
   assert.ok(!/grayscale\(0\.6\)/.test(lockedBlock),
     'locked card icon must NOT be grayscale(0.6) — keep full color');
 });
