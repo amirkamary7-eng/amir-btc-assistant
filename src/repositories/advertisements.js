@@ -160,6 +160,15 @@ export function createAdvertisementsRepository(deps) {
     if (_schemaVerified) return;
     if (!isDatabaseConfigured(env)) { _schemaVerified = true; return; }
 
+    // FIX (audit bug #2): Previously each CREATE TABLE had .catch(() => {}) which
+    // swallowed errors silently. This meant _schemaVerified was set to true even
+    // if CREATE TABLE failed (e.g. permission error, concurrent migration), and
+    // the admin would see "خطا در بارگذاری" with no clue why.
+    //
+    // Now: collect any schema errors. If ANY error occurs, log it and DON'T set
+    // _schemaVerified (so next call retries). If all succeed, set the flag.
+    const schemaErrors = [];
+
     try {
       // Unified campaign registry
       await queryDb(env, `
@@ -172,8 +181,8 @@ export function createAdvertisementsRepository(deps) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-      `).catch(() => {});
-      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_ad_campaigns_type_status ON ad_campaigns(type, status, sort_order)`).catch(() => {});
+      `).catch(e => { schemaErrors.push('ad_campaigns: ' + (e.message || String(e))); });
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_ad_campaigns_type_status ON ad_campaigns(type, status, sort_order)`).catch(e => { schemaErrors.push('idx_ad_campaigns: ' + (e.message || String(e))); });
 
       // Channel Join campaigns (Phase 2 + Phase 8)
       await queryDb(env, `
@@ -188,9 +197,9 @@ export function createAdvertisementsRepository(deps) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-      `).catch(() => {});
-      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_ad_channels_active ON ad_channels(is_active, display_order)`).catch(() => {});
-      await queryDb(env, `CREATE UNIQUE INDEX IF NOT EXISTS uq_ad_channels_username ON ad_channels(lower(channel_username)) WHERE is_active = TRUE`).catch(() => {});
+      `).catch(e => { schemaErrors.push('ad_channels: ' + (e.message || String(e))); });
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_ad_channels_active ON ad_channels(is_active, display_order)`).catch(e => { schemaErrors.push('idx_ad_channels: ' + (e.message || String(e))); });
+      await queryDb(env, `CREATE UNIQUE INDEX IF NOT EXISTS uq_ad_channels_username ON ad_channels(lower(channel_username)) WHERE is_active = TRUE`).catch(e => { schemaErrors.push('uq_ad_channels: ' + (e.message || String(e))); });
 
       // Mini App Popup campaigns (Phase 3 + Phase 4)
       await queryDb(env, `
@@ -208,8 +217,8 @@ export function createAdvertisementsRepository(deps) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-      `).catch(() => {});
-      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_ad_popups_active ON ad_popups(is_active, display_order)`).catch(() => {});
+      `).catch(e => { schemaErrors.push('ad_popups: ' + (e.message || String(e))); });
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_ad_popups_active ON ad_popups(is_active, display_order)`).catch(e => { schemaErrors.push('idx_ad_popups: ' + (e.message || String(e))); });
 
       // Message campaigns (Phase 6)
       await queryDb(env, `
@@ -229,12 +238,21 @@ export function createAdvertisementsRepository(deps) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-      `).catch(() => {});
-      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_ad_messages_active ON ad_messages(is_active, target_audience)`).catch(() => {});
+      `).catch(e => { schemaErrors.push('ad_messages: ' + (e.message || String(e))); });
+      await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_ad_messages_active ON ad_messages(is_active, target_audience)`).catch(e => { schemaErrors.push('idx_ad_messages: ' + (e.message || String(e))); });
 
-      _schemaVerified = true;
+      // FIX (audit bug #2): Only set _schemaVerified if ALL CREATE TABLE/INDEX
+      // operations succeeded. If any failed, log the errors and DON'T set the flag
+      // so the next call retries (and surfaces the error if it persists).
+      if (schemaErrors.length > 0) {
+        console.warn('[advertisements] ensureSchema partial failure:', schemaErrors.join('; '));
+        // Don't set _schemaVerified — next call will retry
+      } else {
+        _schemaVerified = true;
+      }
     } catch (e) {
       console.warn('[advertisements] schema check failed:', e.message || e);
+      // Don't set _schemaVerified — next call will retry
     }
   }
 
@@ -519,11 +537,19 @@ export function createAdvertisementsRepository(deps) {
       `INSERT INTO ad_campaigns (id, type, title, status, sort_order) VALUES ($1, 'popup', $2, $3, $4)`,
       [campId, title, input.status || 'active', order]
     );
-    await queryDb(env,
-      `INSERT INTO ad_popups (id, campaign_id, title, body_text, button_label, button_url, image_url, display_order, is_active, cooldown_seconds)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [id, campId, title, bodyText, buttonLabel, buttonUrl, imageUrl, order, input.is_active !== false, cooldown]
-    );
+    try {
+      await queryDb(env,
+        `INSERT INTO ad_popups (id, campaign_id, title, body_text, button_label, button_url, image_url, display_order, is_active, cooldown_seconds)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [id, campId, title, bodyText, buttonLabel, buttonUrl, imageUrl, order, input.is_active !== false, cooldown]
+      );
+    } catch (e) {
+      // FIX (audit bug #1): Cleanup orphan campaign row if popup INSERT fails.
+      // Without this, a failed INSERT (e.g. FK violation, CHECK constraint)
+      // would leave an orphan ad_campaigns row with no ad_popups child.
+      await queryDb(env, `DELETE FROM ad_campaigns WHERE id = $1`, [campId]).catch(() => {});
+      throw e;
+    }
     _invalidateCampaignCache();
     return getPopup(env, id);
   }
@@ -663,11 +689,19 @@ export function createAdvertisementsRepository(deps) {
       `INSERT INTO ad_campaigns (id, type, title, status, sort_order) VALUES ($1, 'message', $2, $3, 0)`,
       [campId, title, input.status || 'draft']
     );
-    await queryDb(env,
-      `INSERT INTO ad_messages (id, campaign_id, title, body_text, button_label, button_url, image_url, destinations, target_audience, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [id, campId, title, bodyText, buttonLabel, buttonUrl, imageUrl, destinations, audience, input.is_active !== false]
-    );
+    try {
+      await queryDb(env,
+        `INSERT INTO ad_messages (id, campaign_id, title, body_text, button_label, button_url, image_url, destinations, target_audience, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [id, campId, title, bodyText, buttonLabel, buttonUrl, imageUrl, destinations, audience, input.is_active !== false]
+      );
+    } catch (e) {
+      // FIX (audit bug #1): Cleanup orphan campaign row if message INSERT fails.
+      // Without this, a failed INSERT (e.g. CHECK constraint on destinations/target_audience)
+      // would leave an orphan ad_campaigns row with no ad_messages child.
+      await queryDb(env, `DELETE FROM ad_campaigns WHERE id = $1`, [campId]).catch(() => {});
+      throw e;
+    }
     _invalidateCampaignCache();
     return getMessage(env, id);
   }
