@@ -1605,3 +1605,95 @@ test('ADS-FREE-UI-18: Upgrade uses existing MembershipApp.open route (no new rou
 });
 
 console.log('✅ All PHASE 2 Free-user Locked UI tests loaded.');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FULL AUDIT — Regression tests for bugs found in root-cause audit
+// ═══════════════════════════════════════════════════════════════════════════
+
+// BUG #1 (CRITICAL): createPopup + createMessage lack orphan cleanup
+// If the second INSERT (ad_popups/ad_messages) fails, the first INSERT
+// (ad_campaigns) is already committed → orphan row with no child.
+test('ADS-AUDIT-01: createPopup cleans up orphan campaign row on INSERT failure', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function createPopup');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 2000);
+  // Must have a try/catch around the second INSERT that deletes the orphan
+  assert.ok(fnBlock.includes('try {'),
+    'createPopup must wrap the second INSERT in a try block');
+  assert.ok(fnBlock.includes('DELETE FROM ad_campaigns WHERE id = $1'),
+    'createPopup must cleanup orphan ad_campaigns row on INSERT failure');
+  assert.ok(fnBlock.includes('throw e'),
+    'createPopup must re-throw the error after cleanup');
+});
+
+test('ADS-AUDIT-02: createMessage cleans up orphan campaign row on INSERT failure', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function createMessage');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 2000);
+  assert.ok(fnBlock.includes('try {'),
+    'createMessage must wrap the second INSERT in a try block');
+  assert.ok(fnBlock.includes('DELETE FROM ad_campaigns WHERE id = $1'),
+    'createMessage must cleanup orphan ad_campaigns row on INSERT failure');
+  assert.ok(fnBlock.includes('throw e'),
+    'createMessage must re-throw the error after cleanup');
+});
+
+test('ADS-AUDIT-03: createChannel already has orphan cleanup (verified baseline)', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function createChannel');
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnStart + 3000);
+  // createChannel uses queryDbTransaction (atomic) — no orphan risk
+  assert.ok(fnBlock.includes('queryDbTransaction'),
+    'createChannel must use queryDbTransaction (atomic, no orphan risk)');
+});
+
+// BUG #2 (MEDIUM): ensureSchema swallows errors silently
+// Previously each CREATE TABLE had .catch(() => {}) which swallowed errors.
+// Now errors are collected + logged, and _schemaVerified is only set if all succeed.
+test('ADS-AUDIT-04: ensureSchema does NOT swallow errors with bare .catch(() => {})', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function ensureSchema');
+  // Find the closing brace of ensureSchema (next function after it)
+  const fnEnd = ADS_REPO_SRC.indexOf('function _genId', fnStart);
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnEnd);
+  // Remove comments (lines starting with // or containing //)
+  const codeLines = fnBlock.split('\n').filter(l => {
+    const trimmed = l.trim();
+    return !trimmed.startsWith('//') && !trimmed.startsWith('*');
+  });
+  const codeBlock = codeLines.join('\n');
+  // Must NOT have bare .catch(() => {}) in actual code (comments excluded)
+  assert.ok(!/\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/.test(codeBlock),
+    'ensureSchema must NOT use bare .catch(() => {}) in actual code — errors must be logged');
+  // Must collect errors
+  assert.ok(codeBlock.includes('schemaErrors'),
+    'ensureSchema must collect errors in schemaErrors array');
+  assert.ok(codeBlock.includes('schemaErrors.push'),
+    'ensureSchema must push errors to schemaErrors');
+  assert.ok(codeBlock.includes('console.warn'),
+    'ensureSchema must log errors via console.warn');
+});
+
+test('ADS-AUDIT-05: _schemaVerified only set if ALL CREATE TABLE succeed', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function ensureSchema');
+  const fnEnd = ADS_REPO_SRC.indexOf('function _genId', fnStart);
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnEnd);
+  // Must have the conditional: if (schemaErrors.length > 0) { log } else { _schemaVerified = true }
+  assert.ok(fnBlock.includes('schemaErrors.length > 0'),
+    'ensureSchema must check if schemaErrors.length > 0 before setting _schemaVerified');
+  assert.ok(/if\s*\(schemaErrors\.length\s*>\s*0\)\s*\{[^}]*console\.warn[^}]*\}\s*else\s*\{[^}]*_schemaVerified\s*=\s*true/.test(fnBlock.replace(/\n/g, ' ')),
+    'ensureSchema must only set _schemaVerified = true if no errors (else branch)');
+});
+
+test('ADS-AUDIT-06: ensureSchema logs partial failures with table names', () => {
+  const fnStart = ADS_REPO_SRC.indexOf('async function ensureSchema');
+  const fnEnd = ADS_REPO_SRC.indexOf('function _genId', fnStart);
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnEnd);
+  // Each .catch must push a descriptive error with table name
+  assert.ok(fnBlock.includes("'ad_campaigns: '"),
+    'ensureSchema must log ad_campaigns table name on failure');
+  assert.ok(fnBlock.includes("'ad_channels: '"),
+    'ensureSchema must log ad_channels table name on failure');
+  assert.ok(fnBlock.includes("'ad_popups: '"),
+    'ensureSchema must log ad_popups table name on failure');
+  assert.ok(fnBlock.includes("'ad_messages: '"),
+    'ensureSchema must log ad_messages table name on failure');
+});
+
+console.log('✅ All FULL AUDIT regression tests loaded.');
