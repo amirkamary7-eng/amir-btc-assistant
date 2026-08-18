@@ -444,7 +444,26 @@ test('WS-REG-02: All irrelevant results → context still injected (model decide
 // PHASE 10: WS-REG-03 — Real Web Search (runtime, uses real SDK)
 // ============================================================================
 
-test('WS-REG-03: Real web search → current 2026 data in context', async () => {
+test('WS-REG-03: Real web search → current 2026 data in context', async (t) => {
+  // This test uses the real z-ai-web-dev-sdk which requires a credential.
+  // In CI without the credential, the web search will fail silently and
+  // fall back to Wikipedia. We skip (not fail) if the SDK isn't available.
+  let sdkAvailable = false;
+  try {
+    const ZAI = (await import('z-ai-web-dev-sdk')).default;
+    const zai = await ZAI.create();
+    // Test if web_search actually works (needs credential)
+    const testResults = await zai.functions.invoke('web_search', { query: 'test', num: 1 });
+    if (Array.isArray(testResults) && testResults.length > 0) sdkAvailable = true;
+  } catch (e) {
+    sdkAvailable = false;
+  }
+
+  if (!sdkAvailable) {
+    t.skip('SKIPPED — z-ai-web-dev-sdk credential not available in CI');
+    return;
+  }
+
   const worker = loadWorker();
   const env = createEnv({});
   let webSearchCacheContent = null;
