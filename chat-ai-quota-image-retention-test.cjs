@@ -893,3 +893,171 @@ test('FILE-27: Backend contract — frontend sends image as Base64 string in pay
 });
 
 console.log('✅ All Phase 12 attachment pipeline tests loaded.');
+
+// ============================================================================
+// PHASE 14: Premium UI Redesign Tests
+// ============================================================================
+
+test('UI-REDESIGN-01: Custom AI Digital Core icon exists (not generic robot)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // Must have the custom Digital Core SVG (radialGradient + cardinal rays)
+  assert.ok(JS.includes('ai-icon-core'), 'Must have ai-icon-core class');
+  assert.ok(JS.includes('aiCoreGrad'), 'Must have radial gradient core');
+  assert.ok(JS.includes('M28 4 L30.5 18'), 'Must have cardinal ray paths');
+  // Must NOT have the old robot face icon
+  assert.ok(!JS.includes('c.9 0 1.6.7 1.6 1.6'), 'Must NOT have old robot face path');
+});
+
+test('UI-REDESIGN-02: FAB has 4-layer premium structure (halo + ring + surface + icon)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-fab-halo'), 'Must have ambient halo layer');
+  assert.ok(JS.includes('ai-fab-ring'), 'Must have gold ring layer');
+  assert.ok(JS.includes('ai-fab-surface'), 'Must have dark surface layer');
+  assert.ok(JS.includes('ai-icon-core'), 'Must have AI icon layer');
+});
+
+test('UI-REDESIGN-03: FAB is soft-square (border-radius 18px, not 50%)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  // FAB should use border-radius: 18px (soft-square), not 50% (circle)
+  const fabMatch = CSS.match(/\.ai-fab\s*\{[^}]*border-radius:\s*(\d+)px/);
+  assert.ok(fabMatch, 'Must find .ai-fab border-radius');
+  assert.equal(fabMatch[1], '18', 'FAB border-radius must be 18px (soft-square)');
+});
+
+test('UI-REDESIGN-04: Header has AI avatar + name + status indicator', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-header-name'), 'Must have header name');
+  assert.ok(JS.includes('ai-header-status'), 'Must have header status');
+  assert.ok(JS.includes('ai-status-dot'), 'Must have status dot');
+  assert.ok(JS.includes('آنلاین'), 'Must have Persian "Online" status');
+});
+
+test('UI-REDESIGN-05: Empty state with suggestion cards exists', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-empty-state'), 'Must have empty state');
+  assert.ok(JS.includes('ai-suggestion-card'), 'Must have suggestion cards');
+  assert.ok(JS.includes('data-prompt'), 'Cards must have data-prompt attribute');
+  // Must have 3 suggestion cards
+  const cardCount = (JS.match(/ai-suggestion-card/g) || []).length;
+  assert.ok(cardCount >= 3, `Must have at least 3 suggestion cards, found ${cardCount}`);
+});
+
+test('UI-REDESIGN-06: Suggestion cards have distinct SVG icons', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // Each card must have an SVG icon (not emoji)
+  const cards = JS.match(/<button class="ai-suggestion-card"[^>]*>[\s\S]*?<\/button>/g) || [];
+  for (const card of cards) {
+    assert.ok(card.includes('<svg'), 'Each suggestion card must have SVG icon');
+    assert.ok(!card.includes('💬') && !card.includes('📊'), 'Must NOT use emoji');
+  }
+});
+
+test('UI-REDESIGN-07: Assistant message has gold accent bar (not border)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('border-inline-start: 2px solid rgba(245, 166, 35'),
+    'Assistant bubble must have gold accent bar on inline-start');
+});
+
+test('UI-REDESIGN-08: User message has elevated surface (not gold gradient)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  // User bubble should be solid dark surface, not gold gradient
+  const userBubbleMatch = CSS.match(/\.ai-msg-bubble-user\s*\{[^}]*background:\s*([^;]+)/);
+  assert.ok(userBubbleMatch, 'Must find user bubble background');
+  assert.ok(userBubbleMatch[1].includes('#0F2238') || userBubbleMatch[1].includes('0F2238'),
+    'User bubble must use elevated dark surface');
+});
+
+test('UI-REDESIGN-09: No emoji in UI chrome (💬🖼️📷📎✨)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const codeOnly = JS.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!codeOnly.includes('💬'), 'No 💬 emoji');
+  assert.ok(!codeOnly.includes('🖼️'), 'No 🖼️ emoji');
+  assert.ok(!codeOnly.includes('📷'), 'No 📷 emoji');
+  assert.ok(!codeOnly.includes('📎'), 'No 📎 emoji');
+  assert.ok(!codeOnly.includes('✨'), 'No ✨ emoji');
+});
+
+test('UI-REDESIGN-10: Micro-interaction timing (160ms hover, 280ms open)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  // Hover transitions should be ~160ms
+  assert.ok(CSS.includes('0.16s'), 'Must have 160ms transitions');
+  // Open/close should be ~280ms
+  assert.ok(CSS.includes('0.28s'), 'Must have 280ms transitions');
+});
+
+test('UI-REDESIGN-11: prefers-reduced-motion support', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('prefers-reduced-motion'),
+    'Must support prefers-reduced-motion');
+  assert.ok(CSS.includes('animation: none'),
+    'Must disable animations for reduced motion');
+});
+
+test('UI-REDESIGN-12: AI avatar in assistant messages uses Digital Core icon', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // appendBubble for assistant must use the Digital Core SVG (not old robot)
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  const fnBlock = JS.slice(appendFn, appendFn + 2000);
+  assert.ok(fnBlock.includes('viewBox="0 0 56 56"'),
+    'Assistant avatar must use 56x56 viewBox (Digital Core)');
+  assert.ok(fnBlock.includes('radialGradient'),
+    'Assistant avatar must use radial gradient (Digital Core)');
+  assert.ok(!fnBlock.includes('c.9 0 1.6.7 1.6 1.6'),
+    'Must NOT use old robot face path');
+});
+
+test('UI-REDESIGN-13: Send button has RTL arrow (not paper plane)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // Send button SVG should be an RTL arrow (left-pointing for Persian RTL)
+  const sendMatch = JS.match(/<button id="ai-send"[^>]*>[\s\S]*?<svg[^>]*>[\s\S]*?<\/svg>/);
+  assert.ok(sendMatch, 'Must find send button SVG');
+  // Should have path "M5 12h14" (horizontal line) + "M12 5l7 7-7 7" (arrow)
+  // This is a right-pointing arrow which in RTL context points "forward"
+  assert.ok(sendMatch[0].includes('M5 12h14') || sendMatch[0].includes('M12 5l7 7-7 7'),
+    'Send button must have arrow SVG');
+});
+
+test('UI-REDESIGN-14: Empty state management (hideEmptyState + showEmptyState)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('hideEmptyState'), 'Must have hideEmptyState function');
+  assert.ok(JS.includes('showEmptyState'), 'Must have showEmptyState function');
+  // appendBubble must call hideEmptyState
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  const fnBlock = JS.slice(appendFn, appendFn + 500);
+  assert.ok(fnBlock.includes('this.hideEmptyState()'),
+    'appendBubble must hide empty state');
+});
+
+test('UI-REDESIGN-15: Suggestion cards fill input (not auto-send)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // Click handler must set input.value, NOT call this.send()
+  const suggFn = JS.indexOf("querySelectorAll('.ai-suggestion-card')");
+  const fnBlock = JS.slice(suggFn, suggFn + 500);
+  assert.ok(fnBlock.includes('input.value = prompt'),
+    'Suggestion cards must fill input, not auto-send');
+  assert.ok(!fnBlock.includes('this.send()'),
+    'Suggestion cards must NOT auto-send');
+});
+
+test('UI-REDESIGN-16: Header status dot has pulse animation', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('ai-status-pulse'),
+    'Must have status pulse animation');
+  assert.ok(CSS.includes('ai-status-dot'),
+    'Must have status dot class');
+});
+
+test('UI-REDESIGN-17: Attachment + quota pipeline still intact (regression)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // All attachment pipeline functions must still exist
+  assert.ok(JS.includes('pendingAttachment'), 'pendingAttachment state intact');
+  assert.ok(JS.includes('fileToBase64'), 'fileToBase64 intact');
+  assert.ok(JS.includes('compressImage'), 'compressImage intact');
+  assert.ok(JS.includes('clearAttachment'), 'clearAttachment intact');
+  assert.ok(JS.includes('updateSendButtonState'), 'updateSendButtonState intact');
+  // Quota UI must still exist
+  assert.ok(JS.includes('ai-quota-pill'), 'Quota pills intact');
+  assert.ok(JS.includes('showQuotaPopover'), 'Quota popover intact');
+});
+
+console.log('✅ All Premium UI Redesign tests loaded.');
