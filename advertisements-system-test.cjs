@@ -2312,13 +2312,17 @@ test('RT-37: worker-proxy.js NOT modified (News AI untouched)', () => {
 // RT-38..46: Web Search Upgrade (REAL_TIME_EXTERNAL → real web search)
 // ============================================================================
 
-// RT-38: Web Search provider exists (z-ai-web-dev-sdk)
-test('RT-38: Web Search provider exists (z-ai-web-dev-sdk)', () => {
+// RT-38: Web Search provider exists (direct fetch, Cloudflare Workers compatible)
+test('RT-38: Web Search uses direct fetch (not z-ai-web-dev-sdk import)', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  assert.ok(ASSISTANT_SRC.includes("import('z-ai-web-dev-sdk')"),
-    'Must dynamically import z-ai-web-dev-sdk for web search');
-  assert.ok(ASSISTANT_SRC.includes("zai.functions.invoke('web_search'"),
-    'Must call web_search function via SDK');
+  // Must NOT use the old z-ai-web-dev-sdk import (uses Node.js fs/path/os — not in Workers)
+  assert.ok(!ASSISTANT_SRC.includes("import('z-ai-web-dev-sdk')"),
+    'Must NOT import z-ai-web-dev-sdk (uses Node.js fs/path — not in Cloudflare Workers)');
+  // Must use direct fetch to ZAI API
+  assert.ok(ASSISTANT_SRC.includes('functions/invoke'),
+    'Must call ZAI API /functions/invoke endpoint directly');
+  assert.ok(ASSISTANT_SRC.includes('ZAI_API_KEY'),
+    'Must use ZAI_API_KEY from env');
   assert.ok(ASSISTANT_SRC.includes('async function performWebSearch'),
     'Must have performWebSearch function');
 });
@@ -2327,7 +2331,7 @@ test('RT-38: Web Search provider exists (z-ai-web-dev-sdk)', () => {
 test('RT-39: Search result structure includes url/name/snippet/host/date', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
   const performFn = ASSISTANT_SRC.indexOf('async function performWebSearch');
-  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 4000);
+  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 6000);
   assert.ok(fnBlock.includes('r.name') || fnBlock.includes('safeName'),
     'Must include result name/title');
   assert.ok(fnBlock.includes('r.snippet') || fnBlock.includes('safeSnippet'),
@@ -2363,7 +2367,7 @@ test('RT-40: Source authority ranking for trusted domains', () => {
 test('RT-41: Web search limited to 5 results max', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
   const performFn = ASSISTANT_SRC.indexOf('async function performWebSearch');
-  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 4000);
+  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 6000);
   assert.ok(fnBlock.includes('slice(0, 5)'),
     'Must limit to top 5 results');
   assert.ok(fnBlock.includes('num: 8'),
@@ -2445,7 +2449,7 @@ console.log('✅ All Web Search upgrade tests loaded.');
 test('RT-47: Web search instruction handles conflicting info correctly', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
   const performFn = ASSISTANT_SRC.indexOf('async function performWebSearch');
-  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 4000);
+  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 6000);
   // Must instruct model to prefer MOST RECENT when conflicting info
   assert.ok(fnBlock.includes('MOST RECENT'),
     'Must instruct model to prefer MOST RECENT result when conflicting info');
@@ -2463,7 +2467,7 @@ test('RT-48: Results sorted by authority THEN recency (date)', () => {
   assert.ok(ASSISTANT_SRC.includes('function parseResultDate'),
     'Must have parseResultDate function for date-based sorting');
   const performFn = ASSISTANT_SRC.indexOf('async function performWebSearch');
-  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 4000);
+  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 6000);
   // Sort must use parseResultDate as tiebreaker
   assert.ok(fnBlock.includes('parseResultDate(b) - parseResultDate(a)'),
     'Must sort by date as tiebreaker when authority is equal');

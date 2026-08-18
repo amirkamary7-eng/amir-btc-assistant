@@ -451,22 +451,34 @@ test('WS-REG-02: All irrelevant results → context still injected (model decide
 // ============================================================================
 
 test('WS-REG-03: Real web search → current 2026 data in context', async (t) => {
-  // This test uses the real z-ai-web-dev-sdk which requires a credential.
+  // This test uses the real ZAI API via direct fetch.
   // In CI without the credential, the web search will fail silently and
-  // fall back to Wikipedia. We skip (not fail) if the SDK isn't available.
+  // fall back to Wikipedia. We skip (not fail) if the API key isn't available.
   let sdkAvailable = false;
   try {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
-    // Test if web_search actually works (needs credential)
-    const testResults = await zai.functions.invoke('web_search', { query: 'test', num: 1 });
-    if (Array.isArray(testResults) && testResults.length > 0) sdkAvailable = true;
+    // Read ZAI config from /etc/.z-ai-config (available in dev, not CI)
+    const fs2 = require('node:fs');
+    const configStr = fs2.readFileSync('/etc/.z-ai-config', 'utf-8');
+    const config = JSON.parse(configStr);
+    if (config.apiKey && config.baseUrl) {
+      // Test if web_search actually works
+      const response = await fetch(`${config.baseUrl}/functions/invoke`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`,
+          'X-Z-AI-From': 'Z',
+        },
+        body: JSON.stringify({ function_name: 'web_search', arguments: { query: 'test', num: 1 } }),
+      });
+      if (response.ok) sdkAvailable = true;
+    }
   } catch (e) {
     sdkAvailable = false;
   }
 
   if (!sdkAvailable) {
-    t.skip('SKIPPED — z-ai-web-dev-sdk credential not available in CI');
+    t.skip('SKIPPED — ZAI API credential not available in CI');
     return;
   }
 
@@ -1061,3 +1073,151 @@ test('UI-REDESIGN-17: Attachment + quota pipeline still intact (regression)', ()
 });
 
 console.log('✅ All Premium UI Redesign tests loaded.');
+
+// ============================================================================
+// PHASE 7: Reliability + Visual Regression Tests
+// ============================================================================
+
+test('CHAT-AVAIL-01: Chat API success response renders correctly', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // send() must check data.status === 'success' and appendBubble
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 5000);
+  assert.ok(fnBlock.includes("data.status === 'success'"),
+    'send() must check for success status');
+  assert.ok(fnBlock.includes('this.appendBubble'),
+    'send() must append bubble on success');
+});
+
+test('CHAT-AVAIL-02: Provider failure correctly falls through provider chain', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // generateAssistantReply must iterate providers and try fallback
+  const genFn = SRC.indexOf('async function generateAssistantReply');
+  const fnBlock = SRC.slice(genFn, genFn + 2000);
+  assert.ok(fnBlock.includes('groq'), 'Must have Groq');
+  assert.ok(fnBlock.includes('gemini'), 'Must have Gemini');
+  assert.ok(fnBlock.includes('openrouter'), 'Must have OpenRouter');
+  assert.ok(fnBlock.includes('workers-ai'), 'Must have Workers AI');
+  assert.ok(fnBlock.includes('openai'), 'Must have OpenAI');
+});
+
+test('CHAT-AVAIL-03: Frontend does NOT convert valid response to unavailable', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // The catch block should only show error on actual failure (429/503)
+  // NOT on valid 200 responses
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 5000);
+  // Must NOT have t(\'ai_error\') on success path
+  const successIdx = fnBlock.indexOf("data.status === 'success'");
+  const errorIdx = fnBlock.indexOf("t('ai_error')");
+  assert.ok(successIdx > -1 && errorIdx > -1);
+  assert.ok(errorIdx > successIdx, 'ai_error must only appear after success check (in error/catch blocks)');
+});
+
+test('CHAT-AVAIL-04: Web search uses direct fetch (not z-ai-web-dev-sdk import)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Must NOT import z-ai-web-dev-sdk (Node.js SDK, not Workers-compatible)
+  assert.ok(!SRC.includes("import('z-ai-web-dev-sdk')"),
+    'Must NOT use z-ai-web-dev-sdk import (causes Worker crash)');
+  // Must use direct fetch to ZAI API
+  assert.ok(SRC.includes('functions/invoke'),
+    'Must use direct fetch to ZAI /functions/invoke');
+  assert.ok(SRC.includes('ZAI_API_KEY'),
+    'Must use ZAI_API_KEY from env (Worker secret)');
+});
+
+test('QUOTA-VISUAL-01: Healthy quota uses light/white color (#E2E8F0)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('.ai-quota-healthy') && CSS.includes('#E2E8F0'),
+    'Healthy quota must use light white color');
+});
+
+test('QUOTA-VISUAL-02: Warning quota uses gold (#F5A623)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('.ai-quota-warning') && CSS.includes('#F5A623'),
+    'Warning quota must use gold color');
+});
+
+test('QUOTA-VISUAL-03: Critical quota uses red/orange (#f87171)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('.ai-quota-critical') && CSS.includes('#f87171'),
+    'Critical quota must use red color');
+});
+
+test('QUOTA-VISUAL-04: Zero quota is clearly red (#ef4444)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('.ai-quota-empty') && CSS.includes('#ef4444'),
+    'Empty quota must be red');
+});
+
+test('FAB-VISUAL-01: Floating launcher has enhanced halo (inset -12px, blur 12px)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('inset: -12px') || CSS.includes('inset:-12px'),
+    'Halo must extend beyond button (inset -12px)');
+  assert.ok(CSS.includes('blur(12px)') || CSS.includes('blur: 12px'),
+    'Halo must have 12px blur for ambient glow');
+  assert.ok(CSS.includes('rgba(245, 166, 35, 0.18)'),
+    'Halo must use gold radial gradient');
+});
+
+test('FAB-VISUAL-02: Halo has pointer-events: none (does not block clicks)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('pointer-events: none'),
+    'Halo must not interfere with click/touch');
+});
+
+test('FAB-VISUAL-03: Reduced-motion mode disables halo animation', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('prefers-reduced-motion'),
+    'Must support prefers-reduced-motion');
+  // The reduced-motion block must disable ai-fab-halo animation
+  const reducedMatch = CSS.match(/prefers-reduced-motion[^}]*ai-fab-halo[^}]*/);
+  assert.ok(reducedMatch, 'Reduced motion must disable halo animation');
+});
+
+test('REGRESSION-01: Web search Powell/Warsh fixture still works', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Must still have performWebSearch + performWikipediaSearch + fetchExternalContext
+  assert.ok(SRC.includes('performWebSearch'), 'performWebSearch intact');
+  assert.ok(SRC.includes('performWikipediaSearch'), 'Wikipedia fallback intact');
+  assert.ok(SRC.includes('fetchExternalContext'), 'fetchExternalContext intact');
+  // Must have MOST RECENT instruction
+  assert.ok(SRC.includes('MOST RECENT'), 'MOST RECENT instruction intact');
+});
+
+test('REGRESSION-02: Image attachment pipeline still works', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('pendingAttachment'), 'pendingAttachment intact');
+  assert.ok(JS.includes('fileToBase64'), 'fileToBase64 intact');
+  assert.ok(JS.includes('compressImage'), 'compressImage intact');
+  assert.ok(JS.includes('clearAttachment'), 'clearAttachment intact');
+  assert.ok(JS.includes('status: \'ready\''), 'ready state intact');
+  assert.ok(JS.includes('status: \'processing\''), 'processing state intact');
+});
+
+test('REGRESSION-03: Provider chain preserved (Groq→Gemini→OpenRouter→Workers AI→OpenAI)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const providers = SRC.match(/const providers = \[([\s\S]*?)\];/);
+  assert.ok(providers);
+  const block = providers[1];
+  const groqIdx = block.indexOf("['groq'");
+  const geminiIdx = block.indexOf("['gemini'");
+  const orIdx = block.indexOf("['openrouter'");
+  const waIdx = block.indexOf("['workers-ai'");
+  const oaiIdx = block.indexOf("['openai'");
+  assert.ok(groqIdx < geminiIdx && geminiIdx < orIdx && orIdx < waIdx && waIdx < oaiIdx,
+    'Provider chain order preserved');
+});
+
+test('REGRESSION-04: Quotas NOT changed (Free=10, Premium=100, Free images=3, Premium images=10)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/services/entitlement_config.js'), 'utf8');
+  assert.ok(SRC.includes('normal_daily_limit: 10'), 'Free chat = 10');
+  assert.ok(SRC.includes('premium_daily_limit: 100'), 'Premium chat = 100');
+  // Check image quotas
+  const imgMatch = SRC.match(/ai_image:\s*\{[^}]*normal_daily_limit:\s*(\d+)[^}]*premium_daily_limit:\s*(\d+)/);
+  assert.ok(imgMatch, 'Must find image quota config');
+  assert.equal(imgMatch[1], '3', 'Free images = 3');
+  assert.equal(imgMatch[2], '10', 'Premium images = 10');
+});
+
+console.log('✅ All reliability + visual regression tests loaded.');
