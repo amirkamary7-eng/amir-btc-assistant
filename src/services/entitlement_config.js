@@ -27,8 +27,9 @@ export const ENTITLEMENT_CONFIG = Object.freeze({
 
   // ─── AI Assistant Chat ─────────────────────────────────────────────────────
   // KV-backed daily counters. Phase 3: tier-based limit.
+  // FINAL QUOTA (Phase 10): Free=10, Premium=100 messages/day.
   ai_chat: {
-    normal_daily_limit: 50,
+    normal_daily_limit: 10,
     premium_daily_limit: 100,
   },
 

@@ -2436,3 +2436,65 @@ test('RT-46: REAL_TIME_EXTERNAL not triggered for general questions', () => {
 });
 
 console.log('✅ All Web Search upgrade tests loaded.');
+
+// ============================================================================
+// RT-47..50: Web Search Answer Quality Regression (Kevin Warsh / Fed chair)
+// ============================================================================
+
+// RT-47: Web search instruction tells model to prefer MOST RECENT + authoritative
+test('RT-47: Web search instruction handles conflicting info correctly', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const performFn = ASSISTANT_SRC.indexOf('async function performWebSearch');
+  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 4000);
+  // Must instruct model to prefer MOST RECENT when conflicting info
+  assert.ok(fnBlock.includes('MOST RECENT'),
+    'Must instruct model to prefer MOST RECENT result when conflicting info');
+  // Must NOT use overly restrictive "If data is insufficient, say so"
+  assert.ok(!fnBlock.includes('If data is insufficient, say so'),
+    'Must NOT use restrictive "insufficient" instruction that triggers no-data response');
+  // Must have "Only say no data if ALL results are irrelevant"
+  assert.ok(fnBlock.includes('ALL results are irrelevant'),
+    'Must only say no-data when ALL results are irrelevant');
+});
+
+// RT-48: Authority ranking sorts by recency (date) as tiebreaker
+test('RT-48: Results sorted by authority THEN recency (date)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('function parseResultDate'),
+    'Must have parseResultDate function for date-based sorting');
+  const performFn = ASSISTANT_SRC.indexOf('async function performWebSearch');
+  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 4000);
+  // Sort must use parseResultDate as tiebreaker
+  assert.ok(fnBlock.includes('parseResultDate(b) - parseResultDate(a)'),
+    'Must sort by date as tiebreaker when authority is equal');
+});
+
+// RT-49: Authority domains include major Persian + international news
+test('RT-49: Authority domains include BBC, TGJU, Fararu (Persian + intl news)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('bbc.com'),
+    'Must include BBC as authoritative');
+  assert.ok(ASSISTANT_SRC.includes('tgju.org'),
+    'Must include TGJU (Persian financial news) as authoritative');
+  assert.ok(ASSISTANT_SRC.includes('fararu.com'),
+    'Must include Fararu (Persian news) as authoritative');
+  assert.ok(ASSISTANT_SRC.includes('reuters.com') && ASSISTANT_SRC.includes('bloomberg.com'),
+    'Must include Reuters + Bloomberg');
+  assert.ok(ASSISTANT_SRC.includes('federalreserve.gov'),
+    'Must include federalreserve.gov (highest authority)');
+});
+
+// RT-50: Authority domain matching includes subdomains + path matching
+test('RT-50: Authority matching handles subdomains (www.bbc.com matches bbc.com)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const rankFn = ASSISTANT_SRC.indexOf('function rankResultByAuthority');
+  const fnBlock = ASSISTANT_SRC.slice(rankFn, rankFn + 1000);
+  // Must use includes() or endsWith for subdomain matching
+  assert.ok(fnBlock.includes('host.includes(domain)') || fnBlock.includes('host.endsWith'),
+    'Must match subdomains (www.bbc.com → bbc.com)');
+  // Must have +10 baseline so authority domains beat non-authority
+  assert.ok(fnBlock.includes('+ 10'),
+    'Must have +10 baseline so authority domains beat non-authority');
+});
+
+console.log('✅ All Web Search answer quality tests loaded.');

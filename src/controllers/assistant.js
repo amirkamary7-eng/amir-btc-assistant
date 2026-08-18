@@ -416,7 +416,14 @@ export function createAssistantHandlers(deps) {
     'sec.gov', 'treasury.gov', 'commerce.gov', 'bls.gov',
     'ecb.europa.eu', 'bankofengland.co.uk', 'boj.or.jp', 'bis.org',
     'imf.org', 'worldbank.org', 'oecd.org',
+    // Major international news (high authority for current events)
     'reuters.com', 'bloomberg.com', 'wsj.com', 'ft.com', 'cnbc.com',
+    'bbc.com', 'bbc.co.uk', 'nytimes.com', 'washingtonpost.com',
+    'apnews.com', 'ap.org', 'aljazeera.com',
+    // Major Persian news outlets (authoritative for Persian queries)
+    'bbc.com/persian', 'irna.ir', 'isna.ir', 'mehrnews.com',
+    'tasnimnews.com', 'fararu.com', 'tgju.org', 'alef.ir',
+    // Crypto-specific news
     'coindesk.com', 'cointelegraph.com', 'decrypt.co', 'theblock.co',
     'bitcoin.org', 'ethereum.org', 'ripple.com',
   ];
@@ -436,13 +443,26 @@ export function createAssistantHandlers(deps) {
     let score = 0;
     for (let i = 0; i < AUTHORITY_DOMAINS.length; i++) {
       const domain = AUTHORITY_DOMAINS[i];
-      if (host === domain || host.endsWith('.' + domain)) {
-        score = AUTHORITY_DOMAINS.length - i;
+      // Match domain or subdomain (e.g., 'www.bbc.com' matches 'bbc.com', 'bbc.com/persian' matches 'bbc.com/persian')
+      if (host === domain || host.endsWith('.' + domain) || host.includes(domain)) {
+        // Earlier in the list = higher authority. +10 baseline so any authority domain beats non-authority.
+        score = AUTHORITY_DOMAINS.length - i + 10;
         break;
       }
     }
+    // Bonus for having a date (indicates freshness)
     if (result?.date && String(result.date).length > 3) score += 2;
     return score;
+  }
+
+  // Parse a date string into a timestamp (for recency sorting).
+  // Handles formats like "May 22, 2026", "Jan 31, 2026", "2026-05-22".
+  function parseResultDate(result) {
+    if (!result?.date) return 0;
+    const d = String(result.date).trim();
+    if (!d) return 0;
+    const parsed = Date.parse(d);
+    return isNaN(parsed) ? 0 : parsed;
   }
 
   // Sanitize a single search result (strip HTML, filter injection, limit length)
@@ -503,14 +523,25 @@ export function createAssistantHandlers(deps) {
     }
 
     const cleaned = searchResults.map(sanitizeSearchResult).filter(r => r.name || r.snippet);
-    const ranked = cleaned.sort((a, b) => rankResultByAuthority(b) - rankResultByAuthority(a));
+    // Sort: authority first, then recency (newest first), then original rank
+    const ranked = cleaned.sort((a, b) => {
+      const authDiff = rankResultByAuthority(b) - rankResultByAuthority(a);
+      if (authDiff !== 0) return authDiff;
+      // Same authority → prefer more recent
+      const dateDiff = parseResultDate(b) - parseResultDate(a);
+      if (dateDiff !== 0) return dateDiff;
+      return 0;
+    });
     const topResults = ranked.slice(0, 5);
 
     if (topResults.length === 0) return null;
 
     const parts = ['=== Verified Web Search Results (Real-Time Data) ==='];
-    parts.push('Instruction: Use ONLY this verified data. Mention source name and date when answering.');
-    parts.push('Do NOT invent information beyond what is listed here. If data is insufficient, say so.');
+    parts.push('Instruction: Use this verified data to answer the user question.');
+    parts.push('- When results contain conflicting info (e.g., old vs new), prefer the MOST RECENT result (check the Date field) and authoritative sources.');
+    parts.push('- Mention the source name and date when answering (e.g., "طبق آخرین اطلاعات از BBC...").');
+    parts.push('- Do NOT invent information beyond what is listed here.');
+    parts.push('- Only say "اطلاعات به‌روز قابل تأیید پیدا نشد" if ALL results are irrelevant to the question or empty.');
     parts.push('');
 
     for (let i = 0; i < topResults.length; i++) {

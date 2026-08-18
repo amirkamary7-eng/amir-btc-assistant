@@ -202,14 +202,34 @@ const AssistantUI = {
             if (el) el.innerText = '';
             return;
         }
+        // PHASE 2 FIX: Show loading state instead of hardcoded 50 fallback.
+        // Previously: data.messages_limit ?? 50 caused 50↔100 flicker when
+        // the async fetch hadn't resolved yet. Now show loading until real
+        // quota arrives from backend.
+        if (el) el.innerText = typeof t === 'function' ? '...' : 'Loading...';
         try {
             const data = await apiFetch(`/api/assistant/limits?user_id=${encodeURIComponent(getUserId())}`);
             const used = data.messages_used ?? 0;
-            const limit = data.messages_limit ?? 50;
-            el.innerText = typeof t === 'function'
-                ? `${used}/${limit} ${t('ai_messages_today')}`
-                : `${used}/${limit} messages today`;
-        } catch (_) {}
+            const limit = data.messages_limit;
+            // PHASE 2 FIX: If limit is undefined/null, show loading — NOT a hardcoded fallback.
+            if (limit == null) {
+                el.innerText = typeof t === 'function' ? '...' : 'Loading...';
+                return;
+            }
+            // PHASE 5: Show both message quota AND image quota from authoritative backend.
+            const imgUsed = data.images_used ?? 0;
+            const imgLimit = data.images_limit;
+            const msgLine = typeof t === 'function'
+                ? `💬 ${used}/${limit} ${t('ai_messages_today')}`
+                : `💬 ${used}/${limit} messages today`;
+            const imgLine = (imgLimit != null)
+                ? (typeof t === 'function' ? `🖼️ ${imgUsed}/${imgLimit}` : `🖼️ ${imgUsed}/${imgLimit} images`)
+                : '';
+            el.innerText = imgLine ? `${msgLine}  ${imgLine}` : msgLine;
+        } catch (_) {
+            // PHASE 2 FIX: On error, show nothing (not a hardcoded fallback).
+            if (el) el.innerText = '';
+        }
     },
 
     // ITEM 1: Premium chat bubbles — user right, AI left with avatar
@@ -304,14 +324,84 @@ const AssistantUI = {
     pendingImage: null,
     pendingFileText: null,
 
-    // ITEM 6: Image validation — max 1MB before upload
-    handleFile(e) {
+    // PHASE 4: Client-side image compression before upload.
+    // Reduces image to <=1MB by resizing + JPEG compression.
+    // This avoids Worker CPU/memory consumption for large images.
+    async compressImage(file) {
+        const MAX_SIZE = 1 * 1024 * 1024; // 1MB target
+        const MAX_DIMENSION = 1280; // max width/height
+
+        // If already small enough, return as-is
+        if (file.size <= MAX_SIZE) return file;
+
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const reader = new FileReader();
+            reader.onload = () => {
+                img.src = reader.result;
+                img.onload = () => {
+                    // Calculate new dimensions (preserve aspect ratio)
+                    let { width, height } = img;
+                    if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+                        const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
+                        width = Math.round(width * ratio);
+                        height = Math.round(height * ratio);
+                    }
+
+                    // Draw to canvas at reduced size
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    // Try decreasing JPEG quality until <=1MB
+                    let quality = 0.85;
+                    let blob = canvas.toBlob((b) => {
+                        if (!b) { resolve(file); return; }
+                        if (b.size <= MAX_SIZE || quality <= 0.3) {
+                            resolve(b);
+                        } else {
+                            // Reduce quality further
+                            quality = 0.6;
+                            canvas.toBlob((b2) => {
+                                resolve(b2 || file);
+                            }, 'image/jpeg', quality);
+                        }
+                    }, 'image/jpeg', quality);
+                };
+                img.onerror = () => resolve(file); // fallback to original
+            };
+            reader.onerror = () => reject(new Error('FileReader error'));
+            reader.readAsDataURL(file);
+        });
+    },
+
+    // ITEM 6: Image validation — max 1MB before upload (with compression)
+    async handleFile(e) {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        // ITEM 6 FIX: Validate file size (max 1MB)
+        // PHASE 4: Client-side compression for images >1MB
         const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
-        if (file.size > MAX_FILE_SIZE) {
+        let processedFile = file;
+
+        if (file.type.startsWith('image/') && file.size > MAX_FILE_SIZE) {
+            try {
+                processedFile = await this.compressImage(file);
+                // If still >1MB after compression, reject
+                if (processedFile.size > MAX_FILE_SIZE) {
+                    this.appendBubble('assistant', '❌ حجم تصویر حتی پس از فشرده‌سازی بیشتر از ۱ مگابایت است');
+                    e.target.value = '';
+                    return;
+                }
+            } catch (err) {
+                this.appendBubble('assistant', '❌ خطا در پردازش تصویر');
+                e.target.value = '';
+                return;
+            }
+        } else if (file.size > MAX_FILE_SIZE && !file.type.startsWith('image/')) {
+            // Non-image files: reject if >1MB (no compression)
             this.appendBubble('assistant', '❌ حجم فایل نباید بیشتر از ۱ مگابایت باشد');
             e.target.value = '';
             return;
@@ -323,7 +413,9 @@ const AssistantUI = {
                 this.pendingImage = reader.result;
                 this.appendBubble('user', '', reader.result);
             };
-            reader.readAsDataURL(file);
+            // Read the compressed file if available
+            const readTarget = (processedFile !== file) ? processedFile : file;
+            reader.readAsDataURL(readTarget);
         } else {
             const reader = new FileReader();
             reader.onload = () => {
