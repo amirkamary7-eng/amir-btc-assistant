@@ -430,7 +430,23 @@ const AssistantUI = {
 
     pendingImage: null,
     pendingFileText: null,
-    pendingFileMeta: null, // PHASE 14: tracks {name, type, originalSize, finalSize, compressed}
+    pendingFileMeta: null,
+    // PHASE 3: Formalized attachment state machine.
+    // pendingAttachment tracks the REAL attachment that sendMessage() will use.
+    // States: idle → processing → ready → sending → idle (or error → idle)
+    // CRITICAL: Preview is ALWAYS derived from pendingAttachment, never independent.
+    pendingAttachment: null, // { status, file, name, type, size, data, originalSize, finalSize, compressed, generation }
+
+    // PHASE 4: Convert Blob/File to Base64 Data URL (what backend expects).
+    // Returns a Promise<string> — must be awaited.
+    fileToBase64(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error('FileReader error'));
+            reader.readAsDataURL(blob);
+        });
+    },
 
     // PHASE 12: Client-side image compression with progressive quality reduction.
     // Handles PNG transparency by keeping PNG format when needed.
@@ -500,12 +516,17 @@ const AssistantUI = {
     },
 
     // PHASE 9-10: File preview card with size visualization
-    showFilePreview(file, compressionResult) {
+    // CRITICAL: Preview is built from pendingAttachment (the REAL send state),
+    // not from a separate File object. This ensures preview = what gets sent.
+    showFilePreview(attachment) {
         // Remove existing preview
         this.removeFilePreview();
-        const originalSize = compressionResult.originalSize || file.size;
-        const finalSize = compressionResult.finalSize || file.size;
-        const compressed = compressionResult.compressed || false;
+        if (!attachment) return;
+        const file = attachment.file;
+        const originalSize = attachment.originalSize || attachment.size || 0;
+        const finalSize = attachment.finalSize || attachment.size || 0;
+        const compressed = attachment.compressed || false;
+        const status = attachment.status || 'idle';
         const MAX_SIZE = 1 * 1024 * 1024;
         const sizePct = Math.min(100, (finalSize / MAX_SIZE) * 100);
         // PHASE 10: Three states — healthy (<800KB), warning (800KB-1MB), critical (>1MB)
@@ -523,6 +544,9 @@ const AssistantUI = {
             sizeLabel = 'بیش از حد مجاز';
             sizeColor = '#ef4444';
         }
+        // PHASE 5: If status is 'ready', show ready label instead of size label
+        const readyLabel = status === 'ready' ? 'آماده ارسال' : (status === 'error' ? 'خطا در آماده‌سازی' : sizeLabel);
+        const readyColor = status === 'ready' ? '#22c55e' : (status === 'error' ? '#ef4444' : sizeColor);
 
         const formatSize = (bytes) => {
             if (bytes < 1024) return bytes + ' B';
@@ -532,7 +556,7 @@ const AssistantUI = {
 
         const preview = document.createElement('div');
         preview.id = 'ai-file-preview';
-        preview.className = 'ai-file-preview';
+        preview.className = 'ai-file-preview' + (status === 'ready' ? ' ai-file-ready' : '') + (status === 'error' ? ' ai-file-error' : '');
         preview.innerHTML = `
             <div class="ai-file-preview-header">
                 <div class="ai-file-preview-thumb"></div>
@@ -547,11 +571,11 @@ const AssistantUI = {
                 <div class="ai-file-size-bar-fill ai-file-size-${sizeStatus}" style="width:${sizePct}%"></div>
             </div>
             <div class="ai-file-preview-status">
-                <span class="ai-file-status-text" style="color:${sizeColor}">
+                <span class="ai-file-status-text" style="color:${readyColor}">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        ${sizeStatus === 'healthy' ? '<polyline points="20 6 9 17 4 12"/>' : sizeStatus === 'warning' ? '<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>' : '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>'}
+                        ${status === 'ready' ? '<polyline points="20 6 9 17 4 12"/>' : sizeStatus === 'healthy' ? '<polyline points="20 6 9 17 4 12"/>' : sizeStatus === 'warning' ? '<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>' : '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>'}
                     </svg>
-                    ${sizeLabel}
+                    ${readyLabel}
                 </span>
                 <div class="ai-file-preview-actions">
                     <button class="ai-file-remove" type="button" aria-label="حذف فایل">
@@ -563,25 +587,58 @@ const AssistantUI = {
                 </div>
             </div>
         `;
-        // Load thumbnail
-        if (file.type.startsWith('image/')) {
+        // Load thumbnail from the REAL attachment data (Base64)
+        if (attachment.data && file.type.startsWith('image/')) {
+            const thumb = preview.querySelector('.ai-file-preview-thumb');
+            thumb.style.backgroundImage = `url(${attachment.data})`;
+        } else if (file.type.startsWith('image/') && !attachment.data) {
+            // Fallback: read file for thumbnail (but attachment.data is the real send state)
             const thumbReader = new FileReader();
             thumbReader.onload = () => {
                 const thumb = preview.querySelector('.ai-file-preview-thumb');
                 thumb.style.backgroundImage = `url(${thumbReader.result})`;
             };
-            thumbReader.readAsDataURL(compressionResult.blob || file);
+            thumbReader.readAsDataURL(file);
         }
         // Remove button
         preview.querySelector('.ai-file-remove').addEventListener('click', () => {
-            this.pendingImage = null;
-            this.pendingFileText = null;
-            this.pendingFileMeta = null;
-            this.removeFilePreview();
+            this.clearAttachment();
         });
         // Insert before messages area
         const messages = document.getElementById('ai-messages');
         messages.parentNode.insertBefore(preview, messages);
+    },
+
+    // PHASE 10: Clear attachment completely (remove + reset state)
+    clearAttachment() {
+        this.pendingAttachment = null;
+        this.pendingImage = null;
+        this.pendingFileText = null;
+        this.pendingFileMeta = null;
+        this.removeFilePreview();
+        this.updateSendButtonState();
+    },
+
+    // PHASE 5: Update send button enabled/disabled based on attachment status
+    updateSendButtonState() {
+        const sendBtn = document.getElementById('ai-send');
+        if (!sendBtn) return;
+        const input = document.getElementById('ai-input');
+        const hasMessage = input?.value?.trim();
+        const attachment = this.pendingAttachment;
+        const hasReadyAttachment = attachment && attachment.status === 'ready';
+        const isProcessing = attachment && attachment.status === 'processing';
+        // Disable if processing (compression in progress)
+        if (isProcessing) {
+            sendBtn.disabled = true;
+            sendBtn.style.opacity = '0.5';
+        } else if (hasMessage || hasReadyAttachment) {
+            sendBtn.disabled = false;
+            sendBtn.style.opacity = '1';
+        } else {
+            sendBtn.disabled = false;
+            sendBtn.style.opacity = '1';
+        }
     },
 
     removeFilePreview() {
@@ -589,46 +646,94 @@ const AssistantUI = {
     },
 
     // PHASE 11: Image validation + compression with preview
+    // CRITICAL FIX: This function now properly awaits ALL async operations
+    // (compression + Base64 conversion) before setting status='ready'.
+    // Previously, FileReader.readAsDataURL was not awaited, causing pendingImage
+    // to be null when the user clicked Send despite the preview showing.
     async handleFile(e) {
         const file = e.target.files?.[0];
         if (!file) return;
 
+        // PHASE 9: Race condition protection — use generation token
+        const generation = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        this._fileGeneration = generation;
+
         const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
         let compressionResult = { blob: file, originalSize: file.size, finalSize: file.size, compressed: false };
+
+        // PHASE 3: Set attachment state to 'processing' immediately
+        this.pendingAttachment = {
+            status: 'processing',
+            file: file,
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            data: null,
+            originalSize: file.size,
+            finalSize: file.size,
+            compressed: false,
+            generation: generation,
+        };
+        this.updateSendButtonState();
 
         if (file.type.startsWith('image/') && file.size > MAX_FILE_SIZE) {
             // PHASE 11: Show compression in progress
             this.showCompressionProgress(file);
             try {
                 compressionResult = await this.compressImage(file);
+                // Check if a newer file was selected (race condition)
+                if (this._fileGeneration !== generation) return; // superseded
                 this.removeCompressionProgress();
                 // If still >1MB after compression, reject
                 if (compressionResult.finalSize > MAX_FILE_SIZE) {
-                    this.removeFilePreview();
+                    this.pendingAttachment = { status: 'error', file, name: file.name, type: file.type, size: file.size, data: null, generation };
+                    this.showFilePreview(this.pendingAttachment);
                     this.appendBubble('assistant', 'حجم تصویر حتی پس از فشرده‌سازی بیشتر از ۱ مگابایت است');
                     e.target.value = '';
+                    this.updateSendButtonState();
                     return;
                 }
             } catch (err) {
+                if (this._fileGeneration !== generation) return;
                 this.removeCompressionProgress();
+                this.pendingAttachment = { status: 'error', file, name: file.name, type: file.type, size: file.size, data: null, generation };
+                this.showFilePreview(this.pendingAttachment);
                 this.appendBubble('assistant', 'خطا در پردازش تصویر');
                 e.target.value = '';
+                this.updateSendButtonState();
                 return;
             }
         } else if (file.size > MAX_FILE_SIZE && !file.type.startsWith('image/')) {
+            this.pendingAttachment = null;
             this.appendBubble('assistant', 'حجم فایل نباید بیشتر از ۱ مگابایت باشد');
             e.target.value = '';
+            this.updateSendButtonState();
             return;
         }
 
-        // PHASE 9: Show file preview card
-        this.showFilePreview(file, compressionResult);
-
-        // Store the processed file for sending
+        // PHASE 4: Convert optimized Blob to Base64 (what backend expects).
+        // CRITICAL: This MUST be awaited. Previously was async-without-await.
         if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = () => {
-                this.pendingImage = reader.result;
+            try {
+                const optimizedBlob = compressionResult.blob || file;
+                const base64Data = await this.fileToBase64(optimizedBlob);
+                // Check if a newer file was selected (race condition)
+                if (this._fileGeneration !== generation) return;
+                // PHASE 4: NOW the attachment is truly READY — data is encoded
+                this.pendingAttachment = {
+                    status: 'ready',
+                    file: file,
+                    name: file.name,
+                    type: optimizedBlob.type || file.type,
+                    size: optimizedBlob.size,
+                    data: base64Data,
+                    originalSize: compressionResult.originalSize,
+                    finalSize: compressionResult.finalSize,
+                    compressed: compressionResult.compressed,
+                    generation: generation,
+                };
+                // Keep pendingImage in sync (sendMessage reads this for backward compat)
+                this.pendingImage = base64Data;
                 this.pendingFileMeta = {
                     name: file.name,
                     type: file.type,
@@ -636,14 +741,36 @@ const AssistantUI = {
                     finalSize: compressionResult.finalSize,
                     compressed: compressionResult.compressed,
                 };
-            };
-            const readTarget = compressionResult.blob || file;
-            reader.readAsDataURL(readTarget);
+                // PHASE 6: Show preview from the REAL attachment (data is ready)
+                this.showFilePreview(this.pendingAttachment);
+                this.updateSendButtonState();
+            } catch (err) {
+                if (this._fileGeneration !== generation) return;
+                this.pendingAttachment = { status: 'error', file, name: file.name, type: file.type, size: file.size, data: null, generation };
+                this.showFilePreview(this.pendingAttachment);
+                this.appendBubble('assistant', 'آماده‌سازی تصویر انجام نشد. لطفاً دوباره تلاش کنید.');
+                this.updateSendButtonState();
+            }
         } else {
+            // Text file — no compression needed
             const reader = new FileReader();
             reader.onload = () => {
+                if (this._fileGeneration !== generation) return;
                 const text = String(reader.result).slice(0, 3000);
                 this.pendingFileText = text;
+                this.pendingAttachment = {
+                    status: 'ready',
+                    file: file,
+                    name: file.name,
+                    type: file.type,
+                    size: file.size,
+                    data: text,
+                    originalSize: file.size,
+                    finalSize: file.size,
+                    compressed: false,
+                    generation: generation,
+                };
+                this.updateSendButtonState();
             };
             reader.readAsText(file);
         }
@@ -677,7 +804,14 @@ const AssistantUI = {
         if (this.sending) return;
         const input = document.getElementById('ai-input');
         const message = input?.value?.trim();
-        if (!message && !this.pendingImage) return;
+        // PHASE 5: Check attachment status — don't send if still processing
+        const attachment = this.pendingAttachment;
+        const hasReadyAttachment = attachment && attachment.status === 'ready' && attachment.data;
+        const isProcessing = attachment && attachment.status === 'processing';
+        if (isProcessing) return; // Send disabled during compression
+        // Use attachment.data (authoritative) OR pendingImage (backward compat)
+        const imageData = hasReadyAttachment ? attachment.data : this.pendingImage;
+        if (!message && !imageData) return;
         if (!API_BASE || (typeof isGuestUserId === 'function' ? isGuestUserId(getUserId()) : String(getUserId()).startsWith('guest_'))) {
             alert(typeof t === 'function' ? t('join_guest_hint') : 'Open from Telegram');
             return;
@@ -698,14 +832,29 @@ const AssistantUI = {
         }
 
         try {
+            // PHASE 7: Payload audit — verify attachment is actually in payload
             const payload = {
                 message: fullMessage,
                 // PHASE FIX: Reduced from 6 → 4 messages (last 2 exchanges).
                 // With 4 × 2000 chars = 8000 chars max — well within all provider context windows.
                 history: this.history.slice(-4),
-                image: this.pendingImage || null,
+                image: imageData || null,
                 context: this.getContext ? this.getContext() : null
             };
+            // PHASE 7: Payload audit logging (no base64 content, just metadata)
+            console.log('[ChatAI] Payload audit:', {
+                hasMessage: !!payload.message,
+                messageLength: payload.message?.length || 0,
+                hasImage: !!payload.image,
+                imageType: attachment?.type || 'unknown',
+                imageName: attachment?.name || 'unknown',
+                imageSize: attachment?.size || 0,
+                imageDataLength: payload.image?.length || 0,
+                imageCompressed: attachment?.compressed || false,
+                attachmentStatus: attachment?.status || 'none',
+            });
+            // Clear attachment AFTER payload is built (quota only consumed on success)
+            // NOTE: We do NOT clear here — only after successful send (backend quota accounting)
             this.pendingImage = null;
 
             const data = await apiFetch('/api/assistant/chat', {
@@ -720,6 +869,8 @@ const AssistantUI = {
                 this.history.push({ role: 'user', content: userMsg });
                 this.history.push({ role: 'assistant', content: data.reply });
                 this.appendBubble('assistant', data.reply);
+                // PHASE 15: Quota consumed on success — clear attachment
+                this.clearAttachment();
             } else {
                 // ITEM 5: Better error messages for rate limiting
                 let errMsg;

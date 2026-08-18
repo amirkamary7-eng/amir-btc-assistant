@@ -726,3 +726,170 @@ test('FILE-12: No UI emoji in file handling (📎❌ replaced with SVG/text)', (
 });
 
 console.log('✅ All Phase 4-14 professional UI tests loaded.');
+
+// ============================================================================
+// PHASE 12: Attachment Pipeline Tests (FILE-13..23)
+// ============================================================================
+
+test('FILE-13: pendingAttachment state machine exists (idle/processing/ready/error)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('pendingAttachment'), 'Must have pendingAttachment state');
+  assert.ok(JS.includes("status: 'processing'"), 'Must have processing state');
+  assert.ok(JS.includes("status: 'ready'"), 'Must have ready state');
+  assert.ok(JS.includes("status: 'error'"), 'Must have error state');
+});
+
+test('FILE-14: fileToBase64 function exists (Blob → Base64 conversion)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('fileToBase64'), 'Must have fileToBase64 function');
+  // Must be awaited in handleFile
+  const handleFn = JS.indexOf('async handleFile');
+  const fnBlock = JS.slice(handleFn, handleFn + 5000);
+  assert.ok(fnBlock.includes('await this.fileToBase64'), 'handleFile must await fileToBase64');
+});
+
+test('FILE-15: handleFile awaits ALL async operations (compression + Base64)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const handleFn = JS.indexOf('async handleFile');
+  const fnBlock = JS.slice(handleFn, handleFn + 5000);
+  // Must await compressImage
+  assert.ok(fnBlock.includes('await this.compressImage'), 'Must await compressImage');
+  // Must await fileToBase64
+  assert.ok(fnBlock.includes('await this.fileToBase64'), 'Must await fileToBase64');
+  // Must NOT have the old non-awaited FileReader pattern for images
+  // (the old code did: reader.readAsDataURL(readTarget) without await)
+  assert.ok(!fnBlock.includes("reader.readAsDataURL(readTarget)"),
+    'Must NOT have old non-awaited FileReader pattern');
+});
+
+test('FILE-16: status=ready set ONLY after Base64 conversion completes', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const handleFn = JS.indexOf('async handleFile');
+  const fnBlock = JS.slice(handleFn, handleFn + 5000);
+  // Find the position where status='ready' is set
+  const readyIdx = fnBlock.indexOf("status: 'ready'");
+  // Find the position where fileToBase64 is called
+  const base64Idx = fnBlock.indexOf('await this.fileToBase64');
+  assert.ok(readyIdx > base64Idx, 'status=ready must be set AFTER fileToBase64 await');
+  // Must have the data field populated
+  assert.ok(fnBlock.includes('data: base64Data'), 'Must set data: base64Data when ready');
+});
+
+test('FILE-17: Preview built from pendingAttachment (not separate File)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // showFilePreview must accept attachment parameter
+  assert.ok(JS.includes('showFilePreview(attachment)'), 'showFilePreview must accept attachment');
+  // Must use attachment.data for thumbnail (the REAL send state)
+  assert.ok(JS.includes('attachment.data'), 'Must use attachment.data for thumbnail');
+});
+
+test('FILE-18: Send disabled when attachment status=processing', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('updateSendButtonState'), 'Must have updateSendButtonState');
+  assert.ok(JS.includes("attachment.status === 'processing'"),
+    'Must check processing status');
+  assert.ok(JS.includes('sendBtn.disabled = true'),
+    'Must disable send button during processing');
+});
+
+test('FILE-19: Send checks attachment status — blocks if processing', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 2000);
+  // Must check isProcessing and return early
+  assert.ok(fnBlock.includes('isProcessing'), 'send() must check isProcessing');
+  assert.ok(fnBlock.includes('if (isProcessing) return'),
+    'send() must return early if attachment is processing');
+  // Must use attachment.data (authoritative) for image
+  assert.ok(fnBlock.includes('attachment.data') || fnBlock.includes('imageData'),
+    'send() must use attachment.data for image payload');
+});
+
+test('FILE-20: Race condition protection (generation token)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('_fileGeneration'), 'Must have _fileGeneration token');
+  assert.ok(JS.includes('this._fileGeneration !== generation'),
+    'Must check generation token after async ops');
+  // Must return early if superseded
+  assert.ok(JS.includes('if (this._fileGeneration !== generation) return'),
+    'Must return early if superseded by newer file');
+});
+
+test('FILE-21: clearAttachment function exists (resets all state)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('clearAttachment'), 'Must have clearAttachment function');
+  // Must reset ALL state
+  const clearFn = JS.indexOf('clearAttachment()');
+  const fnBlock = JS.slice(clearFn, clearFn + 500);
+  assert.ok(fnBlock.includes('this.pendingAttachment = null'), 'Must clear pendingAttachment');
+  assert.ok(fnBlock.includes('this.pendingImage = null'), 'Must clear pendingImage');
+  assert.ok(fnBlock.includes('this.pendingFileText = null'), 'Must clear pendingFileText');
+  assert.ok(fnBlock.includes('this.pendingFileMeta = null'), 'Must clear pendingFileMeta');
+  assert.ok(fnBlock.includes('this.removeFilePreview()'), 'Must remove preview');
+});
+
+test('FILE-22: clearAttachment called on success (quota consumed)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 5000);
+  // Must call clearAttachment after success
+  const successIdx = fnBlock.indexOf("data.status === 'success'");
+  const clearIdx = fnBlock.indexOf('this.clearAttachment()');
+  assert.ok(successIdx > -1, 'must find success check');
+  assert.ok(clearIdx > -1, 'must find clearAttachment call');
+  assert.ok(clearIdx > successIdx, 'clearAttachment must be called after success');
+});
+
+test('FILE-23: clearAttachment NOT called on failure (quota preserved)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 5000);
+  // Find the error/catch block — clearAttachment should NOT be there
+  const catchIdx = fnBlock.indexOf('} catch (e) {');
+  const catchBlock = fnBlock.slice(catchIdx, catchIdx + 1000);
+  assert.ok(!catchBlock.includes('this.clearAttachment()'),
+    'clearAttachment must NOT be called on failure (quota preserved)');
+});
+
+test('FILE-24: Payload audit logging exists (no base64 content)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('[ChatAI] Payload audit:'), 'Must have payload audit log');
+  assert.ok(JS.includes('hasImage'), 'Must log hasImage');
+  assert.ok(JS.includes('imageType'), 'Must log imageType');
+  assert.ok(JS.includes('imageSize'), 'Must log imageSize');
+  assert.ok(JS.includes('imageDataLength'), 'Must log imageDataLength');
+  // Must NOT log actual base64 content
+  assert.ok(!JS.includes('console.log(payload.image)'), 'Must NOT log base64 content');
+});
+
+test('FILE-25: Error handling — status=error on compression failure', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const handleFn = JS.indexOf('async handleFile');
+  const fnBlock = JS.slice(handleFn, handleFn + 5000);
+  // Must set status=error on compression failure
+  assert.ok(fnBlock.includes("status: 'error'"), 'Must set status=error on failure');
+  // Must show error message
+  assert.ok(fnBlock.includes('آماده‌سازی تصویر انجام نشد'),
+    'Must show Persian error message');
+});
+
+test('FILE-26: Ready label shown when status=ready', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('آماده ارسال'), 'Must show "آماده ارسال" when ready');
+  assert.ok(JS.includes("status === 'ready'"), 'Must check ready status for label');
+});
+
+test('FILE-27: Backend contract — frontend sends image as Base64 string in payload', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Frontend: payload.image = base64Data (string)
+  assert.ok(JS.includes('image: imageData'), 'Frontend must send image as base64 string');
+  // Backend: validates payload.image is string
+  assert.ok(SRC.includes("typeof payload.image !== 'string'"),
+    'Backend must validate image is string');
+  // Backend: extracts base64 from data URL
+  assert.ok(SRC.includes('extractAssistantImageBase64'),
+    'Backend must have extractAssistantImageBase64');
+});
+
+console.log('✅ All Phase 12 attachment pipeline tests loaded.');
