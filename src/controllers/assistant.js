@@ -378,76 +378,211 @@ export function createAssistantHandlers(deps) {
     }
   }
 
-  // ── External Search (Phase 11) ────────────────────────────────────────────
-  // Fetches real-time external data via Wikipedia REST API (free, no key).
+  // ── External Web Search (Phase 11 — upgraded to real Web Search) ──────────
+  // Fetches real-time external data via z-ai-web-dev-sdk web_search.
+  // Falls back to Wikipedia REST API if web search fails or returns no results.
   // Used for REAL_TIME_EXTERNAL intent (politics, economy, current events, "who is").
+
+  // Authority domains — ranked: official gov/central bank > major news > Wikipedia > others
+  const AUTHORITY_DOMAINS = [
+    'federalreserve.gov', 'federalreservehistory.gov', 'whitehouse.gov', 'state.gov',
+    'sec.gov', 'treasury.gov', 'commerce.gov', 'bls.gov',
+    'ecb.europa.eu', 'bankofengland.co.uk', 'boj.or.jp', 'bis.org',
+    'imf.org', 'worldbank.org', 'oecd.org',
+    'reuters.com', 'bloomberg.com', 'wsj.com', 'ft.com', 'cnbc.com',
+    'coindesk.com', 'cointelegraph.com', 'decrypt.co', 'theblock.co',
+    'bitcoin.org', 'ethereum.org', 'ripple.com',
+  ];
+
+  // Cache TTL for search results (5 minutes — short enough for freshness, long enough to dedupe)
+  const WEB_SEARCH_CACHE_TTL = 300; // seconds
+
+  // Build a cache key from query (normalized, lowercased, truncated)
+  function buildSearchCacheKey(query) {
+    const normalized = String(query || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 100);
+    return `chat:websearch:${normalized}`;
+  }
+
+  // Rank a result by domain authority (higher = more authoritative)
+  function rankResultByAuthority(result) {
+    const host = String(result?.host_name || '').toLowerCase();
+    let score = 0;
+    for (let i = 0; i < AUTHORITY_DOMAINS.length; i++) {
+      const domain = AUTHORITY_DOMAINS[i];
+      if (host === domain || host.endsWith('.' + domain)) {
+        score = AUTHORITY_DOMAINS.length - i;
+        break;
+      }
+    }
+    if (result?.date && String(result.date).length > 3) score += 2;
+    return score;
+  }
+
+  // Sanitize a single search result (strip HTML, filter injection, limit length)
+  function sanitizeSearchResult(result) {
+    const cleanName = String(result?.name || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/\[\d+\]/g, '')
+      .slice(0, 200);
+    const cleanSnippet = String(result?.snippet || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/\[\d+\]/g, '')
+      .slice(0, 600);
+    const cleanHost = String(result?.host_name || '').slice(0, 100);
+    const cleanUrl = String(result?.url || '').slice(0, 300);
+    const cleanDate = String(result?.date || '').slice(0, 50);
+    const safeName = sanitizeText(cleanName);
+    const safeSnippet = sanitizeText(cleanSnippet);
+    return { name: safeName, snippet: safeSnippet, host: cleanHost, url: cleanUrl, date: cleanDate };
+  }
+
+  // Main web search function (returns formatted context block or null)
+  async function performWebSearch(env, query) {
+    if (!query || query.length < 3) return null;
+
+    // Check cache first (short TTL for freshness + dedup)
+    const cacheKey = buildSearchCacheKey(query);
+    if (env?.APP_CACHE && typeof env.APP_CACHE.get === 'function') {
+      try {
+        const cached = await env.APP_CACHE.get(cacheKey);
+        if (cached) {
+          console.log('[ChatAI] web_search cache HIT:', query.slice(0, 60));
+          return String(cached);
+        }
+      } catch {}
+    }
+
+    // Perform web search via z-ai-web-dev-sdk
+    let searchResults = null;
+    try {
+      const ZAI = (await import('z-ai-web-dev-sdk')).default;
+      const zai = await ZAI.create();
+      const rawResults = await zai.functions.invoke('web_search', {
+        query: query,
+        num: 8,
+      });
+      if (Array.isArray(rawResults) && rawResults.length > 0) {
+        searchResults = rawResults;
+      }
+    } catch (e) {
+      console.warn('[ChatAI] web_search error:', e?.message || String(e));
+    }
+
+    if (!searchResults || searchResults.length === 0) {
+      console.log('[ChatAI] web_search no results, will try Wikipedia fallback:', query.slice(0, 60));
+      return null;
+    }
+
+    const cleaned = searchResults.map(sanitizeSearchResult).filter(r => r.name || r.snippet);
+    const ranked = cleaned.sort((a, b) => rankResultByAuthority(b) - rankResultByAuthority(a));
+    const topResults = ranked.slice(0, 5);
+
+    if (topResults.length === 0) return null;
+
+    const parts = ['=== Verified Web Search Results (Real-Time Data) ==='];
+    parts.push('Instruction: Use ONLY this verified data. Mention source name and date when answering.');
+    parts.push('Do NOT invent information beyond what is listed here. If data is insufficient, say so.');
+    parts.push('');
+
+    for (let i = 0; i < topResults.length; i++) {
+      const r = topResults[i];
+      const authority = rankResultByAuthority(r);
+      const authLabel = authority > 0 ? `[Authority: ${authority}]` : '';
+      parts.push(`Result ${i + 1}: ${r.name}`);
+      if (r.snippet) parts.push(`  Content: ${r.snippet}`);
+      if (r.date) parts.push(`  Date: ${r.date}`);
+      parts.push(`  Source: ${r.host}`);
+      parts.push(`  URL: ${r.url}`);
+      if (authLabel) parts.push(`  ${authLabel}`);
+      parts.push('');
+    }
+    parts.push('=== End Web Search ===');
+
+    const result = parts.join('\n');
+
+    if (env?.APP_CACHE && typeof env.APP_CACHE.put === 'function') {
+      try {
+        await env.APP_CACHE.put(cacheKey, result, { expirationTtl: WEB_SEARCH_CACHE_TTL });
+      } catch {}
+    }
+
+    console.log('[ChatAI] web_search SUCCESS:', query.slice(0, 60), '| results:', topResults.length);
+    return result;
+  }
+
+  // Wikipedia fallback (for when web search returns nothing)
+  async function performWikipediaSearch(query) {
+    if (!query || query.length < 3) return null;
+    const wikiQuery = encodeURIComponent(query.slice(0, 100));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+
+    let wikiData = null;
+    try {
+      const response = await fetch(`https://fa.wikipedia.org/api/rest_v1/page/summary/${wikiQuery}`, {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'AmirBTC-Assistant/1.0' },
+        signal: controller.signal,
+      });
+      if (response.ok) {
+        wikiData = await response.json();
+      } else {
+        clearTimeout(timer);
+        const timer2 = setTimeout(() => controller.abort(), 8000);
+        const response2 = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${wikiQuery}`, {
+          headers: { 'Accept': 'application/json', 'User-Agent': 'AmirBTC-Assistant/1.0' },
+          signal: controller.signal,
+        });
+        if (response2.ok) wikiData = await response2.json();
+        clearTimeout(timer2);
+      }
+    } finally { clearTimeout(timer); }
+
+    if (!wikiData || !wikiData.extract) return null;
+
+    let extract = String(wikiData.extract)
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/\[\d+\]/g, '')
+      .slice(0, 1500);
+    extract = sanitizeText(extract);
+
+    const title = wikiData.title ? String(wikiData.title).slice(0, 200) : '';
+    const source = wikiData.content_urls?.desktop?.page ? String(wikiData.content_urls.desktop.page).slice(0, 200) : 'Wikipedia';
+
+    const parts = ['=== External Search Results (Wikipedia Fallback) ==='];
+    parts.push('Instruction: Use this verified external data. Mention source and that this may not be real-time.');
+    parts.push('');
+    parts.push(`Topic: ${title}`);
+    parts.push(`Content: ${extract}`);
+    parts.push(`Source: Wikipedia (${source})`);
+    parts.push('Note: This is encyclopedia data, NOT real-time news. For current events, check AMIRBTC News section.');
+    parts.push('=== End External Search ===');
+    return parts.join('\n');
+  }
+
   async function fetchExternalContext(env, message) {
     try {
-      // Extract the main query (remove Persian stopwords, keep key terms)
       let query = message
         .replace(/^(رئیس|چیه|کیه|کی است|چه کسی|امروز|الان|آخرین|جدیدترین|چی شد|گفت|تصمیم)\s*/gi, '')
         .replace(/[؟?؟\s]+$/g, '')
         .trim();
       if (!query || query.length < 3) return null;
 
-      // For "who is" questions, use Wikipedia REST API (free, no key needed)
-      // Try Persian Wikipedia first, then English
-      const isWhoQuestion = /رئیس|چه کسی|کیه|کی است|who is|چه شد|چی شد/i.test(message);
+      console.log('[ChatAI] REAL_TIME_EXTERNAL query:', query.slice(0, 80));
 
-      if (isWhoQuestion) {
-        // Wikipedia REST API summary endpoint
-        const wikiQuery = encodeURIComponent(query.slice(0, 100));
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 8000);
+      // Layer 1: Real Web Search (z-ai-web-dev-sdk)
+      const webResult = await performWebSearch(env, query);
+      if (webResult) return webResult;
 
-        let wikiData = null;
-        try {
-          // Try Persian Wikipedia first
-          const response = await fetch(`https://fa.wikipedia.org/api/rest_v1/page/summary/${wikiQuery}`, {
-            headers: { 'Accept': 'application/json', 'User-Agent': 'AmirBTC-Assistant/1.0' },
-            signal: controller.signal,
-          });
-          if (response.ok) {
-            wikiData = await response.json();
-          } else {
-            // Fall back to English Wikipedia
-            clearTimeout(timer);
-            const timer2 = setTimeout(() => controller.abort(), 8000);
-            const response2 = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${wikiQuery}`, {
-              headers: { 'Accept': 'application/json', 'User-Agent': 'AmirBTC-Assistant/1.0' },
-              signal: controller.signal,
-            });
-            if (response2.ok) wikiData = await response2.json();
-            clearTimeout(timer2);
-          }
-        } finally { clearTimeout(timer); }
+      // Layer 2: Wikipedia fallback
+      console.log('[ChatAI] web_search failed/empty, falling back to Wikipedia');
+      const wikiResult = await performWikipediaSearch(query);
+      if (wikiResult) return wikiResult;
 
-        if (wikiData && wikiData.extract) {
-          // Sanitize: strip HTML, limit length, apply injection filter
-          let extract = String(wikiData.extract)
-            .replace(/<[^>]*>/g, '') // strip HTML tags
-            .replace(/\[\d+\]/g, '') // strip citation brackets
-            .slice(0, 1500); // limit length
-          extract = sanitizeText(extract); // apply injection filter
-
-          const title = wikiData.title ? String(wikiData.title).slice(0, 200) : '';
-          const source = wikiData.content_urls?.desktop?.page ? String(wikiData.content_urls.desktop.page).slice(0, 200) : 'Wikipedia';
-
-          const parts = ['=== External Search Results (Wikipedia) ==='];
-          parts.push('Instruction: Use this verified external data. Mention source and that this may not be real-time.');
-          parts.push('');
-          parts.push(`Topic: ${title}`);
-          parts.push(`Content: ${extract}`);
-          parts.push(`Source: Wikipedia (${source})`);
-          parts.push('Note: This is encyclopedia data, NOT real-time news. For current events, check AMIRBTC News section.');
-          parts.push('=== End External Search ===');
-          return parts.join('\n');
-        }
-      }
-
-      // For non-"who" questions or if Wikipedia didn't return results
-      // Return freshness instruction (no fresh data available)
-      return '=== External Data Not Available ===\nNo real-time external data could be fetched for this query.\nInstruction: Tell the user "اطلاعات لحظه‌ای در دسترس نیست" and suggest they check news sources directly.\nDo NOT guess or use old knowledge for current events.\n=== End ===';
+      // Layer 3: No fresh data available
+      return '=== External Data Not Available ===\nNo real-time external data could be fetched for this query.\nInstruction: Tell the user "اطلاعات به‌روز قابل تأیید پیدا نشد — لطفاً به منابع خبری معتبر مراجعه کنید."\nDo NOT guess or use old knowledge for current events.\n=== End ===';
     } catch (e) {
       console.warn('[ChatAI] fetchExternalContext error:', e?.message || String(e));
       return null;

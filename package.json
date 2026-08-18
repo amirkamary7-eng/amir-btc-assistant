@@ -31,6 +31,7 @@
   "homepage": "https://github.com/amirkamary7-eng/amir-btc-assistant#readme",
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "z-ai-web-dev-sdk": "^0.0.18"
   }
 }
