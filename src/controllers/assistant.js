@@ -501,17 +501,43 @@ export function createAssistantHandlers(deps) {
       } catch {}
     }
 
-    // Perform web search via z-ai-web-dev-sdk
+    // Perform web search via ZAI API (direct fetch — Cloudflare Workers compatible)
+    // NOTE: z-ai-web-dev-sdk uses Node.js 'fs', 'path', 'os' modules which are NOT
+    // available in Cloudflare Workers. We replicate the SDK's HTTP call directly
+    // using native fetch() which IS available in Workers.
     let searchResults = null;
     try {
-      const ZAI = (await import('z-ai-web-dev-sdk')).default;
-      const zai = await ZAI.create();
-      const rawResults = await zai.functions.invoke('web_search', {
-        query: query,
-        num: 8,
-      });
-      if (Array.isArray(rawResults) && rawResults.length > 0) {
-        searchResults = rawResults;
+      const zaiApiKey = normalizeOptionalString(env.ZAI_API_KEY);
+      const zaiBaseUrl = normalizeOptionalString(env.ZAI_BASE_URL) || 'https://internal-api.z.ai/v1';
+      if (zaiApiKey) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        const response = await fetch(`${zaiBaseUrl}/functions/invoke`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${zaiApiKey}`,
+            'X-Z-AI-From': 'Z',
+          },
+          body: JSON.stringify({
+            function_name: 'web_search',
+            arguments: { query: query, num: 8 },
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (response.ok) {
+          const data = await response.json();
+          // SDK returns array directly or in data field
+          const rawResults = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.result) ? data.result : null));
+          if (rawResults && rawResults.length > 0) {
+            searchResults = rawResults;
+          }
+        } else {
+          console.warn('[ChatAI] web_search HTTP error:', response.status);
+        }
+      } else {
+        console.warn('[ChatAI] ZAI_API_KEY not configured — web search unavailable');
       }
     } catch (e) {
       console.warn('[ChatAI] web_search error:', e?.message || String(e));
