@@ -4593,6 +4593,7 @@ const NEWS_SUMMARY_BACKOFF_MINUTES = [5, 15, 30]; // after attempt 1, 2, 3 (fail
 // ────────────────────────────────────────────────────────────────────────────
 const NEWS_AI_PROVIDER_STATS_KEY = 'news:ai_provider_stats';
 const OPENAI_MODEL = 'gpt-4o-mini'; // cheap, fast, good for summarization
+const OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'; // free emergency fallback
 
 function isNewsProviderEnabled(env, flagName, defaultValue) {
   return isNewsFlagEnabled(env, flagName, defaultValue);
@@ -4844,7 +4845,74 @@ async function tryOpenAI(env, prompt) {
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+/**
+ * Provider 3: OpenRouter (emergency fallback 3) — free model via OpenRouter.
+ * Uses nvidia/nemotron-3-super-120b-a12b:free (120B MoE, 256K context).
+ * Called ONLY when Groq + Gemini + Workers AI all fail.
+ * OpenAI-compatible API → same response parsing as tryOpenAI.
+ * Circuit breaker key: 'openrouter' (via attemptProvider wrapper).
+ */
+async function tryOpenRouter(env, prompt) {
+  const t0 = Date.now();
+  const OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;
+  if (!OPENROUTER_API_KEY) {
+    return { provider: 'openrouter', success: false, error: 'no_api_key', errorType: 'non_retryable', duration_ms: 0 };
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'HTTP-Referer': 'https://amir-btc-assistant.pages.dev',
+        'X-Title': 'Amir BTC Assistant',
+      },
+      body: JSON.stringify({
+        model: OPENROUTER_MODEL,
+        messages: [
+          { role: 'system', content: 'You are a professional Persian crypto and financial journalist. Read the full article and write a 120-200 word analysis in fluent Farsi. Preserve all key numbers, names, and dates. Explain what happened, important details, why it matters, and market impact. Write original analysis, not translation. Do NOT invent any facts. Use blank lines between paragraphs.' },
+          { role: 'user', content: prompt.substring(0, 12000) },
+        ],
+        max_tokens: 1024,
+        temperature: 0.4,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const errorType = classifyHttpError(res.status);
+      let errorBody = '';
+      try { errorBody = (await res.text()).substring(0, 200); } catch {}
+      return { provider: 'openrouter', success: false, error: `http_${res.status}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0 };
+    }
+
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      return { provider: 'openrouter', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0 };
+    }
+
+    const text = data?.choices?.[0]?.message?.content;
+    if (text && text.trim().length >= 50) {
+      return { provider: 'openrouter', success: true, summary: text.trim(), duration_ms: Date.now() - t0 };
+    }
+    return { provider: 'openrouter', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
+  } catch (e) {
+    const isAbort = e?.name === 'AbortError';
+    return {
+      provider: 'openrouter',
+      success: false,
+      error: isAbort ? 'timeout' : 'network_error',
+      errorType: 'retryable',
+      error_detail: e?.message?.substring(0, 120),
+      duration_ms: Date.now() - t0,
+    };
+  }
+}
 // CIRCUIT BREAKER (Phase 10.5)
 // Protects against wasteful repeated calls to a failing provider.
 // State machine (per provider):
@@ -5088,9 +5156,11 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
 
   // ────────────────────────────────────────────────────────────────────────────
   // FALLBACK CHAIN (Provider Activation Phase — DeepSeek removed per user request)
-  //   1) Gemini       (primary)      — NEWS_PROVIDER_GEMINI=true (default)
-  //   2) Workers AI   (fallback 1)   — NEWS_PROVIDER_WORKERS_AI=true (default)
-  //   3) OpenAI       (fallback 2)   — NEWS_PROVIDER_OPENAI=false (opt-in, paid)
+  //   0) Groq          (primary)      — NEWS_PROVIDER_GROQ=true (default)
+  //   1) Gemini        (fallback 1)   — NEWS_PROVIDER_GEMINI=true (default)
+  //   2) Workers AI    (fallback 2)   — NEWS_PROVIDER_WORKERS_AI=true (default)
+  //   3) OpenRouter    (fallback 3)   — NEWS_PROVIDER_OPENROUTER=true (default, free emergency)
+  //   4) OpenAI        (fallback 4)   — NEWS_PROVIDER_OPENAI=false (opt-in, paid)
   //
   // Gemini is ALWAYS tried first. Workers AI is ONLY used as fallback when
   // Gemini fails (timeout, quota, invalid response, network error, etc.).
@@ -5135,7 +5205,17 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
     }
   }
 
-  // Provider 3: OpenAI (fallback 2, opt-in) — only if Gemini + Workers AI didn't succeed
+  // Provider 3: OpenRouter (fallback 2, emergency) — only if Groq + Gemini + Workers AI didn't succeed
+  if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true)) {
+    const r = await attemptProvider('openrouter', () => tryOpenRouter(env, prompt));
+    if (r.success) {
+      summary = r.summary;
+      usedProvider = 'openrouter';
+      console.log('[NEWS-AI-FALLBACK] ⚠️ OpenRouter emergency fallback succeeded');
+    }
+  }
+
+  // Provider 4: OpenAI (fallback 3, opt-in) — only if all above didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) {
     const r = await attemptProvider('openai', () => tryOpenAI(env, prompt));
     if (r.success) {
@@ -5174,6 +5254,7 @@ async function recordProviderAttempt(env, provider, success, durationMs) {
       groq: { success: 0, failed: 0, total_ms: 0 },
       gemini: { success: 0, failed: 0, total_ms: 0 },
       'workers-ai': { success: 0, failed: 0, total_ms: 0 },
+      'openrouter': { success: 0, failed: 0, total_ms: 0 },
       'openai': { success: 0, failed: 0, total_ms: 0 },
       fallback_count: 0,
       fallback_to: {},
@@ -6440,7 +6521,7 @@ async function getNewsAIMonitoring(env) {
   let avgProvider = null;
   let avgSummaryTimeMs = 0;
   if (providerStats) {
-    const providers = ['groq', 'gemini', 'workers-ai', 'openai'];
+    const providers = ['groq', 'gemini', 'workers-ai', 'openrouter', 'openai'];
     let maxSuccess = 0;
     for (const p of providers) {
       if (providerStats[p] && providerStats[p].success > maxSuccess) {
@@ -6454,7 +6535,7 @@ async function getNewsAIMonitoring(env) {
   }
 
   // ── Phase 10.5: Circuit Breaker state per provider ──
-  const providerNames = ['groq', 'gemini', 'workers-ai', 'openai'];
+  const providerNames = ['groq', 'gemini', 'workers-ai', 'openrouter', 'openai'];
   const providerStatus = {};
   let circuitOpenCount = 0;
   for (const p of providerNames) {
@@ -6507,6 +6588,7 @@ async function getNewsAIMonitoring(env) {
       NEWS_PROVIDER_GROQ: isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true),
       NEWS_PROVIDER_GEMINI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true),
       NEWS_PROVIDER_WORKERS_AI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true),
+      NEWS_PROVIDER_OPENROUTER: isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true),
       NEWS_PROVIDER_OPENAI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false),
     },
     config: {
@@ -6516,7 +6598,7 @@ async function getNewsAIMonitoring(env) {
       news_list_ttl_minutes: 30,
       // Phase 10: provider config
       openai_model: OPENAI_MODEL,
-      providers_priority: ['groq', 'gemini', 'workers-ai', 'openai'],
+      providers_priority: ['groq', 'gemini', 'workers-ai', 'openrouter', 'openai'],
       // Phase 10.5: circuit breaker config
       circuit_breaker_threshold: CIRCUIT_BREAKER_FAILURE_THRESHOLD,
       circuit_breaker_open_ms: CIRCUIT_BREAKER_OPEN_MS,
@@ -6683,9 +6765,10 @@ async function enrichNewsWithAISummaries(env, articles) {
  * Returns sentiment, impact, reason, and related coins for each article.
  *
  * FALLBACK CHAIN (Provider Activation Phase — DeepSeek removed per user request):
- *   1) Gemini       (primary)    — NEWS_PROVIDER_GEMINI=true
- *   2) Workers AI   (fallback 1) — NEWS_PROVIDER_WORKERS_AI=true
- *   3) Rule-based   (fallback 2) — no AI, uses existing sentiment
+ *   0) Groq          (primary)      — NEWS_PROVIDER_GROQ=true
+ *   1) Gemini        (fallback 1)   — NEWS_PROVIDER_GEMINI=true
+ *   2) Workers AI    (fallback 2)   — NEWS_PROVIDER_WORKERS_AI=true
+ *   3) Rule-based    (fallback 3)   — no AI, uses existing sentiment
  *
  * Gemini is ALWAYS tried first. Workers AI is ONLY used as fallback.
  * 1 AI call replaces 10 individual calls.

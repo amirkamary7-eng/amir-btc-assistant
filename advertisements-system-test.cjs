@@ -1697,3 +1697,149 @@ test('ADS-AUDIT-06: ensureSchema logs partial failures with table names', () => 
 });
 
 console.log('✅ All FULL AUDIT regression tests loaded.');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// OpenRouter Emergency Fallback — Implementation Tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+// OR-01: OPENROUTER_MODEL constant exists with correct model
+test('OR-01: OPENROUTER_MODEL constant uses nvidia/nemotron-3-super-120b-a12b:free', () => {
+  assert.ok(WORKER_SRC.includes("const OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
+    'OPENROUTER_MODEL must be nvidia/nemotron-3-super-120b-a12b:free');
+});
+
+// OR-02: tryOpenRouter function exists
+test('OR-02: tryOpenRouter function exists', () => {
+  assert.ok(WORKER_SRC.includes('async function tryOpenRouter'),
+    'tryOpenRouter function must exist');
+});
+
+// OR-03: Uses env.OPENROUTER_API_KEY
+test('OR-03: tryOpenRouter uses env.OPENROUTER_API_KEY', () => {
+  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 1000);
+  assert.ok(fnBlock.includes('env.OPENROUTER_API_KEY'),
+    'tryOpenRouter must use env.OPENROUTER_API_KEY');
+});
+
+// OR-04: Uses correct OpenRouter endpoint
+test('OR-04: tryOpenRouter uses openrouter.ai endpoint', () => {
+  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 1000);
+  assert.ok(fnBlock.includes('https://openrouter.ai/api/v1/chat/completions'),
+    'tryOpenRouter must use https://openrouter.ai/api/v1/chat/completions');
+});
+
+// OR-05: Has HTTP-Referer and X-Title headers
+test('OR-05: tryOpenRouter includes HTTP-Referer and X-Title headers', () => {
+  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 1500);
+  assert.ok(fnBlock.includes('HTTP-Referer'),
+    'tryOpenRouter must include HTTP-Referer header');
+  assert.ok(fnBlock.includes('X-Title'),
+    'tryOpenRouter must include X-Title header');
+});
+
+// OR-06: Returns provider: 'openrouter'
+test('OR-06: tryOpenRouter returns provider: openrouter', () => {
+  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2000);
+  assert.ok(fnBlock.includes("provider: 'openrouter'"),
+    'tryOpenRouter must return {provider: \'openrouter\', ...}');
+});
+
+// OR-07: Uses OpenAI-compatible response parsing (choices[0].message.content)
+test('OR-07: tryOpenRouter parses choices[0].message.content', () => {
+  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 3000);
+  assert.ok(fnBlock.includes('choices?.[0]?.message?.content'),
+    'tryOpenRouter must parse data?.choices?.[0]?.message?.content');
+});
+
+// OR-08: Uses classifyHttpError for error classification
+test('OR-08: tryOpenRouter uses classifyHttpError', () => {
+  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2000);
+  assert.ok(fnBlock.includes('classifyHttpError'),
+    'tryOpenRouter must use classifyHttpError for error classification');
+});
+
+// OR-09: Inserted in fallback chain after Workers AI, before OpenAI
+test('OR-09: OpenRouter fallback inserted after Workers AI, before OpenAI', () => {
+  const workersAiIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_WORKERS_AI', true)");
+  const openRouterIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_OPENROUTER', true)");
+  const openaiIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_OPENAI', false)");
+  assert.ok(workersAiIdx > 0 && openRouterIdx > 0 && openaiIdx > 0,
+    'all three providers must exist in fallback chain');
+  assert.ok(workersAiIdx < openRouterIdx,
+    'OpenRouter must come AFTER Workers AI in fallback chain');
+  assert.ok(openRouterIdx < openaiIdx,
+    'OpenRouter must come BEFORE OpenAI in fallback chain');
+});
+
+// OR-10: !summary guard ensures OpenRouter NOT called when Groq succeeds
+test('OR-10: !summary guard prevents OpenRouter call when previous provider succeeded', () => {
+  const openRouterIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_OPENROUTER', true)");
+  const fnBlock = WORKER_SRC.slice(openRouterIdx - 200, openRouterIdx + 200);
+  assert.ok(fnBlock.includes('!summary'),
+    'OpenRouter must be guarded by !summary (only called when all previous providers failed)');
+});
+
+// OR-11: attemptProvider wraps tryOpenRouter (circuit breaker integration)
+test('OR-11: OpenRouter uses attemptProvider wrapper for circuit breaker', () => {
+  const openRouterIdx = WORKER_SRC.indexOf("attemptProvider('openrouter'");
+  assert.ok(openRouterIdx > 0,
+    'OpenRouter must use attemptProvider("openrouter", ...) for circuit breaker');
+});
+
+// OR-12: Provider stats include openrouter
+test('OR-12: Provider stats include openrouter entry', () => {
+  assert.ok(WORKER_SRC.includes("'openrouter': { success: 0, failed: 0, total_ms: 0 }"),
+    'Provider stats must include openrouter entry');
+});
+
+// OR-13: Provider arrays include openrouter
+test('OR-13: Provider arrays include openrouter', () => {
+  assert.ok(WORKER_SRC.includes("'groq', 'gemini', 'workers-ai', 'openrouter', 'openai'"),
+    'Provider arrays must include openrouter');
+});
+
+// OR-14: Status endpoint includes NEWS_PROVIDER_OPENROUTER
+test('OR-14: Status endpoint includes NEWS_PROVIDER_OPENROUTER flag', () => {
+  assert.ok(WORKER_SRC.includes("NEWS_PROVIDER_OPENROUTER: isNewsProviderEnabled"),
+    'Status endpoint must include NEWS_PROVIDER_OPENROUTER flag');
+});
+
+// OR-15: providers_priority includes openrouter
+test('OR-15: providers_priority array includes openrouter', () => {
+  assert.ok(WORKER_SRC.includes("providers_priority: ['groq', 'gemini', 'workers-ai', 'openrouter', 'openai']"),
+    'providers_priority must include openrouter');
+});
+
+// OR-16: tryOpenRouter has 15s timeout (same as tryOpenAI)
+test('OR-16: tryOpenRouter has 15s timeout', () => {
+  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 1000);
+  assert.ok(fnBlock.includes('15000'),
+    'tryOpenRouter must have 15000ms (15s) timeout');
+});
+
+// OR-17: tryOpenRouter has no_api_key guard
+test('OR-17: tryOpenRouter returns no_api_key when key missing', () => {
+  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 500);
+  assert.ok(fnBlock.includes("error: 'no_api_key'"),
+    'tryOpenRouter must return error: no_api_key when OPENROUTER_API_KEY not set');
+});
+
+// OR-18: Does NOT modify tryOpenAI
+test('OR-18: tryOpenAI function unchanged (not modified)', () => {
+  const fnStart = WORKER_SRC.indexOf('async function tryOpenAI');
+  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 200);
+  assert.ok(fnBlock.includes("env.OPENAI_API_KEY"),
+    'tryOpenAI must still use env.OPENAI_API_KEY (unchanged)');
+  assert.ok(fnBlock.includes("'gpt-4o-mini'") || WORKER_SRC.includes("OPENAI_MODEL = 'gpt-4o-mini'"),
+    'tryOpenAI must still use gpt-4o-mini (unchanged)');
+});
+
+console.log('✅ All OpenRouter tests loaded.');
