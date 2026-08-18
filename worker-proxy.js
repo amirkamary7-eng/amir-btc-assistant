@@ -4055,7 +4055,7 @@ async function translateToFarsi(text, env) {
         ];
         const dbResult = await queryDb(env,
           `SELECT public.groq_generate($1::text, $2::jsonb, 500, 0.3) AS result`,
-          ['llama-3.3-70b-versatile', JSON.stringify(messages)]
+          ['openai/gpt-oss-120b', JSON.stringify(messages)]
         );
         const groqResult = dbResult.rows[0]?.result || {};
         if (groqResult.status_code === 200) {
@@ -4612,7 +4612,7 @@ function classifyHttpError(status) {
 
 /**
  * Provider 0: Groq (primary) — routes through Supabase EU DB gateway.
- * Uses llama-3.3-70b-versatile via OpenAI-compatible API.
+ * Uses openai/gpt-oss-120b via OpenAI-compatible API.
  * Returns { provider, success, summary?, error?, errorType, error_detail?, duration_ms }.
  */
 async function tryGroq(env, prompt, systemPrompt) {
@@ -4631,7 +4631,7 @@ async function tryGroq(env, prompt, systemPrompt) {
         1024,
         0.4
       ) AS result`,
-      ['llama-3.3-70b-versatile', JSON.stringify(messages)]
+      ['openai/gpt-oss-120b', JSON.stringify(messages)]
     );
 
     const result = dbResult.rows[0]?.result || {};
@@ -6739,7 +6739,7 @@ ${headlines}`;
 
   // Method 0: Groq via DB gateway (primary) — always tried first
   // Routes through Supabase EU to bypass geo-restriction.
-  // Model: llama-3.3-70b-versatile
+  // Model: openai/gpt-oss-120b
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
     const cbGroq = await shouldAttemptProvider(env, 'groq');
     if (cbGroq.attempt) {
@@ -6750,7 +6750,7 @@ ${headlines}`;
         ];
         const dbResult = await queryDb(env,
           `SELECT public.groq_generate($1::text, $2::jsonb, 2048, 0.2) AS result`,
-          ['llama-3.3-70b-versatile', JSON.stringify(messages)]
+          ['openai/gpt-oss-120b', JSON.stringify(messages)]
         );
         const groqResult = dbResult.rows[0]?.result || {};
         const statusCode = groqResult.status_code;
