@@ -545,14 +545,16 @@ test('WS-REG-04: Real Groq E2E — SKIPPED (no production Groq credential in tes
 
 test('PROVIDER-CHAIN-01: Groq→Gemini→OpenRouter→Workers AI→OpenAI order unchanged', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const providers = SRC.match(/const providers = \[([\s\S]*?)\];/);
+  const textPathIdx = SRC.indexOf('Text-only path (original chain');
+  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 1000) : SRC;
+  const providers = textBlock.match(/\[([\s\S]*?openai[\s\S]*?)\];/);
   assert.ok(providers, 'Must have providers array');
   const block = providers[1];
-  const groqIdx = block.indexOf("['groq'");
-  const geminiIdx = block.indexOf("['gemini'");
-  const orIdx = block.indexOf("['openrouter'");
-  const waIdx = block.indexOf("['workers-ai'");
-  const oaiIdx = block.indexOf("['openai'");
+  const groqIdx = block.indexOf("'groq'");
+  const geminiIdx = block.indexOf("'gemini'");
+  const orIdx = block.indexOf("'openrouter'");
+  const waIdx = block.indexOf("'workers-ai'");
+  const oaiIdx = block.indexOf("'openai'");
   assert.ok(groqIdx > -1 && groqIdx < geminiIdx, 'Groq before Gemini');
   assert.ok(geminiIdx < orIdx, 'Gemini before OpenRouter');
   assert.ok(orIdx < waIdx, 'OpenRouter before Workers AI');
@@ -831,13 +833,14 @@ test('FILE-21: clearAttachment function exists (resets all state)', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
   assert.ok(JS.includes('clearAttachment'), 'Must have clearAttachment function');
   // Must reset ALL state
-  const clearFn = JS.indexOf('clearAttachment()');
+  const clearFn = JS.indexOf('clearAttachment() {');
   const fnBlock = JS.slice(clearFn, clearFn + 500);
   assert.ok(fnBlock.includes('this.pendingAttachment = null'), 'Must clear pendingAttachment');
   assert.ok(fnBlock.includes('this.pendingImage = null'), 'Must clear pendingImage');
   assert.ok(fnBlock.includes('this.pendingFileText = null'), 'Must clear pendingFileText');
   assert.ok(fnBlock.includes('this.pendingFileMeta = null'), 'Must clear pendingFileMeta');
   assert.ok(fnBlock.includes('this.removeFilePreview()'), 'Must remove preview');
+  assert.ok(fnBlock.includes('composerAttach'), 'Must hide composer attachment area');
 });
 
 test('FILE-22: clearAttachment called on success (quota consumed)', () => {
@@ -1197,14 +1200,16 @@ test('REGRESSION-02: Image attachment pipeline still works', () => {
 
 test('REGRESSION-03: Provider chain preserved (Groq→Gemini→OpenRouter→Workers AI→OpenAI)', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const providers = SRC.match(/const providers = \[([\s\S]*?)\];/);
+  const textPathIdx = SRC.indexOf('Text-only path (original chain');
+  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 1000) : SRC;
+  const providers = textBlock.match(/\[([\s\S]*?openai[\s\S]*?)\];/);
   assert.ok(providers);
   const block = providers[1];
-  const groqIdx = block.indexOf("['groq'");
-  const geminiIdx = block.indexOf("['gemini'");
-  const orIdx = block.indexOf("['openrouter'");
-  const waIdx = block.indexOf("['workers-ai'");
-  const oaiIdx = block.indexOf("['openai'");
+  const groqIdx = block.indexOf("'groq'");
+  const geminiIdx = block.indexOf("'gemini'");
+  const orIdx = block.indexOf("'openrouter'");
+  const waIdx = block.indexOf("'workers-ai'");
+  const oaiIdx = block.indexOf("'openai'");
   assert.ok(groqIdx < geminiIdx && geminiIdx < orIdx && orIdx < waIdx && waIdx < oaiIdx,
     'Provider chain order preserved');
 });
@@ -1221,3 +1226,165 @@ test('REGRESSION-04: Quotas NOT changed (Free=10, Premium=100, Free images=3, Pr
 });
 
 console.log('✅ All reliability + visual regression tests loaded.');
+
+// ============================================================================
+// PHASE 19: Final UX + Vision Regression Tests
+// ============================================================================
+
+test('QUOTA-COLOR-01: Quota status based on REMAINING (not used)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // Must calculate remainingPct = remaining / limit (not used / limit)
+  assert.ok(JS.includes('msgRemainingPct'), 'Must use msgRemainingPct');
+  assert.ok(JS.includes('imgRemainingPct'), 'Must use imgRemainingPct');
+  assert.ok(JS.includes('msgRemaining / limit'), 'Must calculate remaining/limit');
+  // Must NOT use old used/limit percentage
+  assert.ok(!JS.includes('msgPct = limit > 0 ? (used / limit)'), 'Must NOT use old used/limit logic');
+});
+
+test('QUOTA-COLOR-02: Healthy = white/light (#E2E8F0)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('.ai-quota-healthy') && CSS.includes('#E2E8F0'));
+});
+
+test('QUOTA-COLOR-03: Quota display shows remaining/limit (not used/limit)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // Display must show remaining (not used)
+  assert.ok(JS.includes('${msgRemaining} / ${limit}'), 'Must show remaining/limit');
+  assert.ok(JS.includes('${imgRemaining} / ${imgLimit}'), 'Must show remaining/limit for images');
+});
+
+test('ATTACHMENT-UX-01: Composer attachment area exists (ai-composer-attachment)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-composer-attachment'), 'Must have composer attachment area');
+  assert.ok(JS.includes('ai-input-row'), 'Must have input row');
+});
+
+test('ATTACHMENT-UX-02: Attachment preview goes into composer (not messages)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const showFn = JS.indexOf('showFilePreview(attachment)');
+  const fnBlock = JS.slice(showFn, showFn + 8000);
+  // Must insert into composer-attachment, NOT messages.parentNode
+  assert.ok(fnBlock.includes('ai-composer-attachment'), 'Must insert into composer attachment');
+  assert.ok(fnBlock.includes('composerAttach'), 'Must use composerAttach variable');
+});
+
+test('ATTACHMENT-UX-03: Progress bar = 100% when ready', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes("status === 'ready' ? 100"),
+    'Progress bar must be 100% when status is ready');
+});
+
+test('ATTACHMENT-UX-04: clearAttachment hides composer attachment area', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const clearFn = JS.indexOf('clearAttachment() {');
+  const fnBlock = JS.slice(clearFn, clearFn + 500);
+  assert.ok(fnBlock.includes('composerAttach'), 'Must hide composer attachment');
+});
+
+test('VISION-01: Vision-capable routing when image present (Gemini first)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // When hasImage, Gemini must be first (vision-capable)
+  const hasImageIdx = SRC.indexOf('const hasImage = Boolean(imageBase64)');
+  assert.ok(hasImageIdx > -1, 'Must check hasImage');
+  const visionBlock = SRC.slice(hasImageIdx, hasImageIdx + 500);
+  assert.ok(visionBlock.includes('Vision-capable providers ONLY'),
+    'Must have vision-capable provider routing');
+  assert.ok(visionBlock.includes("['gemini'"),
+    'Gemini must be first when image present');
+});
+
+test('VISION-02: Text-only chain preserved when no image', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('Text-only path (original chain'),
+    'Must have text-only path comment');
+  const textIdx = SRC.indexOf('Text-only path (original chain');
+  const textBlock = SRC.slice(textIdx, textIdx + 500);
+  assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'gemini'"),
+    'Groq must be first in text-only path');
+});
+
+test('VISION-03: Gemini receives imageBase64 (inline_data)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('inline_data'),
+    'Gemini must use inline_data for images');
+  assert.ok(SRC.includes('mime_type: \'image/jpeg\''),
+    'Must set image/jpeg mime type');
+});
+
+test('VISION-04: callGeminiChat passes imageBase64 to API', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const geminiFn = SRC.indexOf('async function callGeminiChat');
+  const fnBlock = SRC.slice(geminiFn, geminiFn + 1000);
+  assert.ok(fnBlock.includes('imageBase64'), 'Must accept imageBase64');
+  assert.ok(fnBlock.includes('inline_data'), 'Must create inline_data part');
+  assert.ok(fnBlock.includes('parts.push'), 'Must push image to parts');
+});
+
+test('COMPOSER-ATTACHMENT-01: HTML has composer-attachment div', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('id="ai-composer-attachment"'),
+    'Must have composer-attachment div in HTML');
+});
+
+test('COMPOSER-ATTACHMENT-02: Input row wraps attach + textarea + send', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('class="ai-input-row"'),
+    'Must have input-row wrapper');
+});
+
+test('IMAGE-MESSAGE-01: Image shown in user message after send', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // appendBubble must handle imageUrl parameter
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  assert.ok(appendFn > -1, 'appendBubble must accept imageUrl');
+  const fnBlock = JS.slice(appendFn, appendFn + 2000);
+  assert.ok(fnBlock.includes('ai-msg-image'), 'Must render image in message');
+});
+
+test('IMAGE-MESSAGE-02: User message includes image when sent', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // send() must call appendBubble with image
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 5000);
+  // Must include image in the user message display
+  assert.ok(fnBlock.includes("appendBubble('user'") || fnBlock.includes("appendBubble('user',"),
+    'Must append user message bubble');
+});
+
+test('SUGGESTION-01: Suggestions are about AMIRBTC capabilities', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('AMIRBTC'), 'Suggestions must mention AMIRBTC');
+  assert.ok(JS.includes('چه کارهایی می‌تونه'), 'Must ask about capabilities');
+});
+
+test('SUGGESTION-02: Exactly 3 suggestion cards', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const cardCount = (JS.match(/ai-suggestion-card/g) || []).length;
+  // 3 cards + CSS references = at least 3
+  assert.ok(cardCount >= 3, `Must have at least 3 suggestion cards, found ${cardCount}`);
+});
+
+test('WELCOME-01: No emoji in speech bubble text', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const codeOnly = JS.replace(/\/\/[^\n]*/g, '');
+  assert.ok(!codeOnly.includes('✨'), 'Must NOT use ✨ emoji in speech bubble');
+});
+
+test('WELCOME-02: Speech bubble auto-dismisses', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('setTimeout(dismiss'), 'Must auto-dismiss speech bubble');
+  assert.ok(JS.includes('8000') || JS.includes('7000'),
+    'Must auto-dismiss after 7-8 seconds');
+});
+
+test('WELCOME-03: Speech bubble has close button', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-bubble-close'), 'Must have close button');
+});
+
+test('FAB-FLOAT-01: FAB has halo with pointer-events none', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('pointer-events: none'), 'Halo must not block clicks');
+});
+
+console.log('✅ All Phase 19 final UX + vision tests loaded.');

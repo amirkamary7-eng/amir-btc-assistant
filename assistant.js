@@ -114,34 +114,37 @@ const AssistantUI = {
                         <p class="ai-empty-title">دستیار هوشمند AMIRBTC</p>
                         <p class="ai-empty-subtitle">درباره بازار، ارزهای دیجیتال، اخبار و اطلاعات روز سؤال کن</p>
                         <div class="ai-suggestions">
-                            <button class="ai-suggestion-card" data-prompt="آخرین وضعیت بیت‌کوین چیه؟">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
-                                <span>آخرین وضعیت بیت‌کوین چیه؟</span>
+                            <button class="ai-suggestion-card" data-prompt="دستیار هوشمند AMIRBTC چیه و چه کارهایی می‌تونه انجام بده؟">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                <span>دستیار هوشمند AMIRBTC چیه و چه کارهایی می‌تونه انجام بده؟</span>
                             </button>
-                            <button class="ai-suggestion-card" data-prompt="امروز مهم‌ترین خبر بازار چیه؟">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6z"/></svg>
-                                <span>امروز مهم‌ترین خبر بازار چیه؟</span>
+                            <button class="ai-suggestion-card" data-prompt="با AMIRBTC چه اطلاعاتی درباره بازار و ارزها می‌تونم بگیرم؟">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+                                <span>با AMIRBTC چه اطلاعاتی درباره بازار و ارزها می‌تونم بگیرم؟</span>
                             </button>
-                            <button class="ai-suggestion-card" data-prompt="آخرین تصمیم فدرال رزرو چی بوده؟">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-                                <span>آخرین تصمیم فدرال رزرو چی بوده؟</span>
+                            <button class="ai-suggestion-card" data-prompt="چطور می‌تونم از بخش اخبار و تحلیل برای پیدا کردن فرصت‌های بازار استفاده کنم؟">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/></svg>
+                                <span>چطور می‌تونم از بخش اخبار و تحلیل برای پیدا کردن فرصت‌های بازار استفاده کنم؟</span>
                             </button>
                         </div>
                     </div>
                 </div>
                 <div class="ai-input-area">
-                    <input type="file" id="ai-file" accept="image/*" hidden>
-                    <button id="ai-attach" class="ai-attach-btn" aria-label="پیوست تصویر">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-                        </svg>
-                    </button>
-                    <textarea id="ai-input" class="ai-input" rows="1" placeholder="پیام خود را بنویسید..."></textarea>
-                    <button id="ai-send" class="ai-send-btn" aria-label="ارسال">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M5 12h14"/><path d="M12 5l7 7-7 7"/>
-                        </svg>
-                    </button>
+                    <div class="ai-composer-attachment" id="ai-composer-attachment" style="display:none;"></div>
+                    <div class="ai-input-row">
+                        <input type="file" id="ai-file" accept="image/*" hidden>
+                        <button id="ai-attach" class="ai-attach-btn" aria-label="پیوست تصویر">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                            </svg>
+                        </button>
+                        <textarea id="ai-input" class="ai-input" rows="1" placeholder="پیام خود را بنویسید..."></textarea>
+                        <button id="ai-send" class="ai-send-btn" aria-label="ارسال">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M5 12h14"/><path d="M12 5l7 7-7 7"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -297,10 +300,13 @@ const AssistantUI = {
             const isPremium = data.isPremium || false;
             const msgRemaining = limit - used;
             const imgRemaining = imgLimit - imgUsed;
-            const msgPct = limit > 0 ? (used / limit) : 1;
-            const imgPct = imgLimit > 0 ? (imgUsed / imgLimit) : 1;
-            const msgStatus = msgRemaining === 0 ? 'empty' : msgPct < 0.2 ? 'critical' : msgPct < 0.5 ? 'warning' : 'healthy';
-            const imgStatus = imgRemaining === 0 ? 'empty' : imgPct < 0.2 ? 'critical' : imgPct < 0.5 ? 'warning' : 'healthy';
+            // PHASE 1 FIX: Status based on REMAINING percentage (not used percentage).
+            // Old code used (used/limit) which was BACKWARDS — 18% used = 82% remaining = should be healthy,
+            // but old code showed 'critical' (red). Now uses remaining/limit.
+            const msgRemainingPct = limit > 0 ? (msgRemaining / limit) : 0;
+            const imgRemainingPct = imgLimit > 0 ? (imgRemaining / imgLimit) : 0;
+            const msgStatus = msgRemaining === 0 ? 'empty' : msgRemainingPct < 0.2 ? 'critical' : msgRemainingPct < 0.5 ? 'warning' : 'healthy';
+            const imgStatus = imgRemaining === 0 ? 'empty' : imgRemainingPct < 0.2 ? 'critical' : imgRemainingPct < 0.5 ? 'warning' : 'healthy';
 
             el.innerHTML = `
                 <div class="ai-quota-row">
@@ -308,7 +314,7 @@ const AssistantUI = {
                         <svg class="ai-quota-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                         </svg>
-                        <span class="ai-quota-text">${used} / ${limit}</span>
+                        <span class="ai-quota-text">${msgRemaining} / ${limit}</span>
                     </button>
                     <button class="ai-quota-pill ai-quota-${imgStatus}" data-quota-type="image" data-used="${imgUsed}" data-limit="${imgLimit}" data-premium="${isPremium}" role="button" tabindex="0" aria-expanded="false" aria-label="سهمیه تصاویر">
                         <svg class="ai-quota-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -316,7 +322,7 @@ const AssistantUI = {
                             <circle cx="8.5" cy="8.5" r="1.5"/>
                             <polyline points="21 15 16 10 5 21"/>
                         </svg>
-                        <span class="ai-quota-text">${imgUsed} / ${imgLimit}</span>
+                        <span class="ai-quota-text">${imgRemaining} / ${imgLimit}</span>
                     </button>
                 </div>
             `;
@@ -627,7 +633,8 @@ const AssistantUI = {
         const compressed = attachment.compressed || false;
         const status = attachment.status || 'idle';
         const MAX_SIZE = 1 * 1024 * 1024;
-        const sizePct = Math.min(100, (finalSize / MAX_SIZE) * 100);
+        // PHASE 6: When ready, progress bar = 100%. When processing, animated.
+        const sizePct = status === 'ready' ? 100 : Math.min(100, (finalSize / MAX_SIZE) * 100);
         // PHASE 10: Three states — healthy (<800KB), warning (800KB-1MB), critical (>1MB)
         let sizeStatus, sizeLabel, sizeColor;
         if (finalSize < 800 * 1024) {
@@ -703,9 +710,17 @@ const AssistantUI = {
         preview.querySelector('.ai-file-remove').addEventListener('click', () => {
             this.clearAttachment();
         });
-        // Insert before messages area
-        const messages = document.getElementById('ai-messages');
-        messages.parentNode.insertBefore(preview, messages);
+        // PHASE 7: Insert into composer attachment area (above input, NOT in messages)
+        const composerAttach = document.getElementById('ai-composer-attachment');
+        if (composerAttach) {
+            composerAttach.innerHTML = '';
+            composerAttach.appendChild(preview);
+            composerAttach.style.display = 'block';
+        } else {
+            // Fallback: insert before messages (shouldn't happen with correct HTML)
+            const messages = document.getElementById('ai-messages');
+            messages.parentNode.insertBefore(preview, messages);
+        }
     },
 
     // PHASE 10: Clear attachment completely (remove + reset state)
@@ -715,6 +730,9 @@ const AssistantUI = {
         this.pendingFileText = null;
         this.pendingFileMeta = null;
         this.removeFilePreview();
+        // PHASE 7: Hide composer attachment area
+        const composerAttach = document.getElementById('ai-composer-attachment');
+        if (composerAttach) composerAttach.style.display = 'none';
         this.updateSendButtonState();
     },
 
@@ -742,6 +760,12 @@ const AssistantUI = {
 
     removeFilePreview() {
         document.getElementById('ai-file-preview')?.remove();
+        // PHASE 7: Also hide composer attachment area
+        const composerAttach = document.getElementById('ai-composer-attachment');
+        if (composerAttach) {
+            composerAttach.innerHTML = '';
+            composerAttach.style.display = 'none';
+        }
     },
 
     // PHASE 11: Image validation + compression with preview
@@ -890,8 +914,16 @@ const AssistantUI = {
                 </div>
             </div>
         `;
-        const messages = document.getElementById('ai-messages');
-        messages.parentNode.insertBefore(preview, messages);
+        // PHASE 7: Insert into composer attachment area (not above messages)
+        const composerAttach = document.getElementById('ai-composer-attachment');
+        if (composerAttach) {
+            composerAttach.innerHTML = '';
+            composerAttach.appendChild(preview);
+            composerAttach.style.display = 'block';
+        } else {
+            const messages = document.getElementById('ai-messages');
+            messages.parentNode.insertBefore(preview, messages);
+        }
     },
 
     removeCompressionProgress() {
