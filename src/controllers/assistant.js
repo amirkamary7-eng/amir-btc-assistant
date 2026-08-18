@@ -197,7 +197,7 @@ export function createAssistantHandlers(deps) {
     NEWS: [
       'خبر', 'اخبار', 'news', 'مقاله', 'رویداد', 'تاثیر', 'تحلیل خبر',
       'این خبر', 'آخرین خبر', 'جدیدترین', 'اتفاق', 'افتخار', 'declaration',
-      'بیانیه', 'تصمیم', 'بنیاد', 'sec', 'etf', 'فاند', 'فارکس',
+      'بیانیه', 'بنیاد', 'sec', 'etf', 'فاند', 'فارکس',
     ],
     REAL_TIME_EXTERNAL: [
       'رئیس', 'چه کسی', 'کیه', 'کی است', 'امروز', 'الان', 'آخرین', 'جدیدترین',
@@ -205,6 +205,21 @@ export function createAssistantHandlers(deps) {
       'central bank', 'fed', 'interest rate', 'دولت', 'سیاست', 'اقتصاد',
       'جنگ', 'تحریم', 'sanction', 'war', 'election', 'انتخابات',
       'inflation', 'تورم', 'cpi', 'gdp', 'qqe', 'استراتژیست',
+    ],
+    // External entities — when present, ALWAYS trigger REAL_TIME_EXTERNAL (web search)
+    // even if "خبر/تصمیم" (NEWS keywords) are in the message.
+    // These are external political/economic entities that need real-time web data.
+    EXTERNAL_ENTITIES: [
+      'فدرال رزرو', 'فدرال', 'federal reserve', 'fed chair',
+      'ترامپ', 'بایدن', 'رئیس جمهور', 'president',
+      'بانک مرکزی', 'central bank', 'ecb', 'boj',
+      'نرخ بهره', 'interest rate', 'سیاست پولی',
+      'انتخابات', 'election', 'تحریم', 'sanction',
+      'جنگ', 'war', 'صندوق بین‌المللی پول', 'imf',
+    ],
+    // Time-sensitive keywords — "today/now/latest" indicate need for real-time data
+    TIME_SENSITIVE: [
+      'امروز', 'الان', 'اخیراً', 'به تازگی', 'right now', 'today', 'currently',
     ],
     LOCAL_APP: [
       'پرمیوم', 'premium', 'کیف پول', 'wallet', 'توکن', 'اب', 'ab token',
@@ -220,12 +235,24 @@ export function createAssistantHandlers(deps) {
     if (!msg || msg.length < 2) return 'GENERAL_KNOWLEDGE';
 
     // Priority order (most specific first):
-    // 1. NEWS — if "خبر/اخبار/news" is in message, it's a news question
-    //    (even if coin names are mentioned, the user is asking about news)
+    // 0. REAL_TIME_EXTERNAL — check EXTERNAL_ENTITIES first.
+    //    If message mentions external political/economic entities (فدرال رزرو, ترامپ, etc.),
+    //    ALWAYS use web search — even if "خبر/تصمیم" (NEWS keywords) are present.
+    //    Rationale: user is asking about external current events, not AMIRBTC's internal news.
+    for (const kw of INTENT_KEYWORDS.EXTERNAL_ENTITIES) {
+      if (msg.includes(kw.toLowerCase())) return 'REAL_TIME_EXTERNAL';
+    }
+    // 0b. REAL_TIME_EXTERNAL — check TIME_SENSITIVE keywords.
+    //     "امروز/الان" (today/now) indicates need for real-time data → web search.
+    for (const kw of INTENT_KEYWORDS.TIME_SENSITIVE) {
+      if (msg.includes(kw.toLowerCase())) return 'REAL_TIME_EXTERNAL';
+    }
+    // 1. NEWS — if "خبر/اخبار/news" is in message (and no external entity/time keyword),
+    //    it's a question about AMIRBTC's internal news articles
     for (const kw of INTENT_KEYWORDS.NEWS) {
       if (msg.includes(kw.toLowerCase())) return 'NEWS';
     }
-    // 2. REAL_TIME_EXTERNAL — "who is", "today", "latest decision" (politics/economy)
+    // 2. REAL_TIME_EXTERNAL — other real-time keywords ("رئیس", "چه کسی", etc.)
     for (const kw of INTENT_KEYWORDS.REAL_TIME_EXTERNAL) {
       if (msg.includes(kw.toLowerCase())) return 'REAL_TIME_EXTERNAL';
     }
