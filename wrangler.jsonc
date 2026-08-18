@@ -173,7 +173,8 @@
                                 "AI_DAILY_IMAGE_LIMIT": 3,
                                 "AI_COOLDOWN_SECONDS": 4,
                                 "REFERRAL_TOKENS_PER_INVITE": 3,
-                                "BOT_USERNAME": "Amir_BTC_AssistantBot"
+                                "BOT_USERNAME": "Amir_BTC_AssistantBot",
+                                "NEWS_PROVIDER_OPENROUTER": "true"
                         },
                         // Hyperdrive config — create via Cloudflare Dashboard:
                         // Workers & Pages → Hyperdrive → Create config
