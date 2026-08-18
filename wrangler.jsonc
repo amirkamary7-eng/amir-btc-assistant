@@ -2,16 +2,10 @@
         "$schema": "./node_modules/wrangler/config-schema.json",
         "name": "amir-btc-assistant-api",
         "main": "worker-proxy.js",
-        // IMPORTANT: Pin this date when upgrading nodejs_compat or Workers runtime.
-// Changing compatibility_date can break node:crypto, Pool, or other polyfilled APIs.
-// Always test with `npm test` after any compatibility_date change.
-"compatibility_date": "2026-06-27",
+        "compatibility_date": "2026-06-27",
         "compatibility_flags": [
                 "nodejs_compat"
         ],
-        // Workers AI binding — used for news translation (Phase 3)
-        // Replaces unofficial Google Translate endpoint.
-        // Model: @cf/meta/m2m100-1.2b (free, no rate limit, runs inside Worker)
         "ai": {
                 "binding": "AI"
         },
@@ -26,15 +20,6 @@
                         "*/15 * * * *"
                 ]
         },
-        // ============================================================================
-        // KV namespaces — DEVELOPMENT (default / wrangler dev)
-        // IMPORTANT: These MUST differ from production IDs to prevent cache bleed.
-        // Create with: wrangler kv namespace create "JOIN_CACHE"
-        //              wrangler kv namespace create "APP_CACHE"
-        //              wrangler kv namespace create "RATE_LIMITS"
-        //              wrangler kv namespace create "SESSION_CACHE"
-        // Then paste the output IDs here.
-        // ============================================================================
         "kv_namespaces": [
                 {
                         "binding": "JOIN_CACHE",
@@ -65,7 +50,9 @@
                 "AI_DAILY_IMAGE_LIMIT": 3,
                 "AI_COOLDOWN_SECONDS": 4,
                 "REFERRAL_TOKENS_PER_INVITE": 3,
-                "BOT_USERNAME": "Amir_BTC_AssistantBot"
+                "BOT_USERNAME": "Amir_BTC_AssistantBot",
+                "ZAI_API_KEY": "Z.ai",
+                "ZAI_BASE_URL": "https://internal-api.z.ai/v1"
         },
         "env": {
                 "staging": {
@@ -78,17 +65,6 @@
                                         "*/30 * * * *"
                                 ]
                         },
-                        // ============================================================================
-                        // KV namespaces — STAGING
-                        // IMPORTANT:
-                        // - این IDها باید با production متفاوت باشند (جلوگیری از bleed بین محیط‌ها)
-                        // - برای ساخت namespace ها (۴ تا) و گرفتن ID:
-                        //   wrangler kv namespace create "JOIN_CACHE" --env staging
-                        //   wrangler kv namespace create "APP_CACHE" --env staging
-                        //   wrangler kv namespace create "RATE_LIMITS" --env staging
-                        //   wrangler kv namespace create "SESSION_CACHE" --env staging
-                        // سپس IDهای خروجی را اینجا paste کنید.
-                        // ============================================================================
                         "kv_namespaces": [
                                 {
                                         "binding": "JOIN_CACHE",
@@ -106,7 +82,6 @@
                                         "binding": "SESSION_CACHE",
                                         "id": "6de016b566f3404e832bb98895a60e85"
                                 }
-                                
                         ],
                         "vars": {
                                 "APP_ENV": "staging",
@@ -120,10 +95,10 @@
                                 "AI_DAILY_IMAGE_LIMIT": 3,
                                 "AI_COOLDOWN_SECONDS": 4,
                                 "REFERRAL_TOKENS_PER_INVITE": 3,
-                                "BOT_USERNAME": "Amir_BTC_AssistantBot"
+                                "BOT_USERNAME": "Amir_BTC_AssistantBot",
+                                "ZAI_API_KEY": "Z.ai",
+                                "ZAI_BASE_URL": "https://internal-api.z.ai/v1"
                         },
-                        // Phase 8G.1: Staging Hyperdrive — connects to the SEPARATE staging
-                        // Supabase project (jrhlnrsydtvxmpryobcc). MUST NOT point to production.
                         "hyperdrive": [
                                 {
                                         "binding": "HYPERDRIVE",
@@ -174,13 +149,10 @@
                                 "AI_COOLDOWN_SECONDS": 4,
                                 "REFERRAL_TOKENS_PER_INVITE": 3,
                                 "BOT_USERNAME": "Amir_BTC_AssistantBot",
-                                "NEWS_PROVIDER_OPENROUTER": "true"
+                                "NEWS_PROVIDER_OPENROUTER": "true",
+                                "ZAI_API_KEY": "Z.ai",
+                                "ZAI_BASE_URL": "https://internal-api.z.ai/v1"
                         },
-                        // Hyperdrive config — create via Cloudflare Dashboard:
-                        // Workers & Pages → Hyperdrive → Create config
-                        // Name: amir-btc-supabase
-                        // Connection string: use your Supabase direct connection string (port 5432)
-                        // Then replace REPLACE_WITH_HYPERDRIVE_CONFIG_ID below with the returned config ID.
                         "hyperdrive": [
                                 {
                                         "binding": "HYPERDRIVE",
@@ -190,4 +162,3 @@
                 }
         }
 }
-
