@@ -26,60 +26,120 @@ const AssistantUI = {
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
-                <p class="ai-speech-text">چطور می‌تونم کمکتون کنم؟ سوالی دارید بپرسید ✨</p>
+                <p class="ai-speech-text">چطور می‌تونم کمکتون کنم؟ سوالی دارید بپرسید</p>
                 <span class="ai-bubble-tail"></span>
             </div>
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
-                <span class="ai-fab-glow"></span>
-                <svg class="ai-fab-icon" width="28" height="28" viewBox="0 0 24 24" fill="none">
-                    <defs>
-                        <linearGradient id="aiFabGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#FFE9A0"/>
-                            <stop offset="50%" stop-color="#F5A623"/>
-                            <stop offset="100%" stop-color="#D4881A"/>
-                        </linearGradient>
-                    </defs>
-                    <path d="M12 2.5c.9 0 1.6.7 1.6 1.6 0 .6-.3 1.1-.8 1.4v1.1h.9c3.5 0 6.3 2.8 6.3 6.3v.5c.6 0 1 .4 1 1v1.5c0 .6-.4 1-1 1h-.5c-.8 2.2-2.8 3.8-5.2 3.8H8.5c-2.4 0-4.4-1.6-5.2-3.8H3c-.6 0-1-.4-1-1V14c0-.6.4-1 1-1v-.5c0-3.5 2.8-6.3 6.3-6.3h.9V5.5c-.5-.3-.8-.8-.8-1.4 0-.9.7-1.6 1.6-1.6z" fill="url(#aiFabGrad)"/>
-                    <circle cx="9" cy="13.5" r="1.1" fill="#0d1828"/>
-                    <circle cx="15" cy="13.5" r="1.1" fill="#0d1828"/>
-                    <path d="M9.5 16.5c.8.6 1.7.9 2.5.9s1.7-.3 2.5-.9" stroke="#0d1828" stroke-width="1.2" stroke-linecap="round"/>
-                </svg>
+                <span class="ai-fab-halo"></span>
+                <span class="ai-fab-ring"></span>
+                <span class="ai-fab-surface">
+                    <svg class="ai-icon-core" width="28" height="28" viewBox="0 0 56 56" fill="none">
+                        <defs>
+                            <radialGradient id="aiCoreGrad" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" stop-color="#FFD9A0"/>
+                                <stop offset="60%" stop-color="#F5A623"/>
+                                <stop offset="100%" stop-color="#D4881A"/>
+                            </radialGradient>
+                            <linearGradient id="aiRayGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#FFE9A0"/>
+                                <stop offset="100%" stop-color="#F5A623"/>
+                            </linearGradient>
+                        </defs>
+                        <!-- Central core (digital orb) -->
+                        <circle cx="28" cy="28" r="7" fill="url(#aiCoreGrad)"/>
+                        <circle cx="28" cy="28" r="4" fill="#020611" opacity="0.4"/>
+                        <!-- 4 cardinal rays (N, E, S, W) -->
+                        <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="url(#aiRayGrad)"/>
+                        <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="url(#aiRayGrad)"/>
+                        <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="url(#aiRayGrad)"/>
+                        <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="url(#aiRayGrad)"/>
+                        <!-- 4 diagonal accents (NE, SE, SW, NW) -->
+                        <path d="M44.97 11.03 L34.5 21.5 L32.5 21.5 L34.5 19.5 Z" fill="url(#aiRayGrad)" opacity="0.7"/>
+                        <path d="M44.97 44.97 L34.5 34.5 L34.5 32.5 L36.5 34.5 Z" fill="url(#aiRayGrad)" opacity="0.7"/>
+                        <path d="M11.03 44.97 L21.5 34.5 L23.5 34.5 L21.5 36.5 Z" fill="url(#aiRayGrad)" opacity="0.7"/>
+                        <path d="M11.03 11.03 L21.5 21.5 L21.5 23.5 L19.5 21.5 Z" fill="url(#aiRayGrad)" opacity="0.7"/>
+                    </svg>
+                </span>
             </button>
             <div id="ai-panel" class="ai-panel" style="display:none;">
                 <div class="ai-panel-header">
                     <div class="ai-panel-title">
                         <div class="ai-avatar-mini">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                            <svg width="22" height="22" viewBox="0 0 56 56" fill="none">
                                 <defs>
-                                    <linearGradient id="aiAvatarGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                        <stop offset="0%" stop-color="#FFE9A0"/>
+                                    <radialGradient id="aiAvatarCore" cx="50%" cy="50%" r="50%">
+                                        <stop offset="0%" stop-color="#FFD9A0"/>
                                         <stop offset="100%" stop-color="#F5A623"/>
-                                    </linearGradient>
+                                    </radialGradient>
                                 </defs>
-                                <path d="M12 2.5c.9 0 1.6.7 1.6 1.6 0 .6-.3 1.1-.8 1.4v1.1h.9c3.5 0 6.3 2.8 6.3 6.3v.5c.6 0 1 .4 1 1v1.5c0 .6-.4 1-1 1h-.5c-.8 2.2-2.8 3.8-5.2 3.8H8.5c-2.4 0-4.4-1.6-5.2-3.8H3c-.6 0-1-.4-1-1V14c0-.6.4-1 1-1v-.5c0-3.5 2.8-6.3 6.3-6.3h.9V5.5c-.5-.3-.8-.8-.8-1.4 0-.9.7-1.6 1.6-1.6z" fill="url(#aiAvatarGrad)"/>
+                                <circle cx="28" cy="28" r="7" fill="url(#aiAvatarCore)"/>
+                                <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623"/>
+                                <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623"/>
+                                <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623"/>
+                                <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623"/>
                             </svg>
                         </div>
-                        <span data-i18n="ai_title">دستیار هوشمند</span>
+                        <div class="ai-header-text">
+                            <span class="ai-header-name" data-i18n="ai_title">دستیار هوشمند</span>
+                            <span class="ai-header-status">
+                                <span class="ai-status-dot"></span>
+                                <span class="ai-status-text">آنلاین</span>
+                            </span>
+                        </div>
                     </div>
-                    <button id="ai-close" class="ai-close-btn" aria-label="Close">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <button id="ai-close" class="ai-close-btn" aria-label="بستن">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                         </svg>
                     </button>
                 </div>
                 <div id="ai-limits" class="ai-limits" role="region" aria-label="سهمیه دستیار هوشمند"></div>
-                <div id="ai-messages" class="ai-messages"></div>
+                <div id="ai-messages" class="ai-messages">
+                    <div class="ai-empty-state" id="ai-empty-state">
+                        <div class="ai-empty-hero">
+                            <svg width="48" height="48" viewBox="0 0 56 56" fill="none" class="ai-empty-icon">
+                                <defs>
+                                    <radialGradient id="aiEmptyCore" cx="50%" cy="50%" r="50%">
+                                        <stop offset="0%" stop-color="#FFD9A0"/>
+                                        <stop offset="100%" stop-color="#F5A623"/>
+                                    </radialGradient>
+                                </defs>
+                                <circle cx="28" cy="28" r="7" fill="url(#aiEmptyCore)"/>
+                                <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623" opacity="0.8"/>
+                                <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623" opacity="0.8"/>
+                                <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623" opacity="0.8"/>
+                                <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623" opacity="0.8"/>
+                            </svg>
+                        </div>
+                        <p class="ai-empty-title">دستیار هوشمند AMIRBTC</p>
+                        <p class="ai-empty-subtitle">درباره بازار، ارزهای دیجیتال، اخبار و اطلاعات روز سؤال کن</p>
+                        <div class="ai-suggestions">
+                            <button class="ai-suggestion-card" data-prompt="آخرین وضعیت بیت‌کوین چیه؟">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+                                <span>آخرین وضعیت بیت‌کوین چیه؟</span>
+                            </button>
+                            <button class="ai-suggestion-card" data-prompt="امروز مهم‌ترین خبر بازار چیه؟">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6z"/></svg>
+                                <span>امروز مهم‌ترین خبر بازار چیه؟</span>
+                            </button>
+                            <button class="ai-suggestion-card" data-prompt="آخرین تصمیم فدرال رزرو چی بوده؟">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                                <span>آخرین تصمیم فدرال رزرو چی بوده؟</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 <div class="ai-input-area">
                     <input type="file" id="ai-file" accept="image/*" hidden>
-                    <button id="ai-attach" class="ai-attach-btn" title="Attach image">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <button id="ai-attach" class="ai-attach-btn" aria-label="پیوست تصویر">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
                         </svg>
                     </button>
                     <textarea id="ai-input" class="ai-input" rows="1" placeholder="پیام خود را بنویسید..."></textarea>
-                    <button id="ai-send" class="ai-send-btn">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                    <button id="ai-send" class="ai-send-btn" aria-label="ارسال">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M5 12h14"/><path d="M12 5l7 7-7 7"/>
                         </svg>
                     </button>
                 </div>
@@ -114,6 +174,22 @@ const AssistantUI = {
         document.getElementById('ai-file')?.addEventListener('change', (e) => this.handleFile(e));
         document.getElementById('ai-input')?.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); }
+        });
+        // PHASE 7: Suggestion card click handlers
+        document.querySelectorAll('.ai-suggestion-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const prompt = card.dataset.prompt;
+                const input = document.getElementById('ai-input');
+                if (input && prompt) {
+                    input.value = prompt;
+                    input.focus();
+                    this.hideEmptyState();
+                }
+            });
+        });
+        // Input listener to hide empty state on first type
+        document.getElementById('ai-input')?.addEventListener('input', () => {
+            this.hideEmptyState();
         });
 
         // Draggable FAB
@@ -343,19 +419,26 @@ const AssistantUI = {
     appendBubble(role, content, imageUrl) {
         const box = document.getElementById('ai-messages');
         if (!box) return;
+        // PHASE 7: Hide empty state when first message appears
+        this.hideEmptyState();
 
         const wrapper = document.createElement('div');
         wrapper.className = `ai-msg-row ai-msg-${role}`;
 
         if (role === 'assistant') {
-            // AI avatar
+            // PHASE 3: Custom AI Digital Core avatar (same icon as FAB + header)
             const avatar = document.createElement('div');
             avatar.className = 'ai-msg-avatar';
-            avatar.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <defs><linearGradient id="aiB${Date.now()}" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stop-color="#FFE9A0"/><stop offset="100%" stop-color="#F5A623"/>
-                </linearGradient></defs>
-                <path d="M12 2.5c.9 0 1.6.7 1.6 1.6 0 .6-.3 1.1-.8 1.4v1.1h.9c3.5 0 6.3 2.8 6.3 6.3v.5c.6 0 1 .4 1 1v1.5c0 .6-.4 1-1 1h-.5c-.8 2.2-2.8 3.8-5.2 3.8H8.5c-2.4 0-4.4-1.6-5.2-3.8H3c-.6 0-1-.4-1-1V14c0-.6.4-1 1-1v-.5c0-3.5 2.8-6.3 6.3-6.3h.9V5.5c-.5-.3-.8-.8-.8-1.4 0-.9.7-1.6 1.6-1.6z" fill="url(#aiB${Date.now()})"/>
+            const avatarId = 'aiAv' + Date.now() + Math.random().toString(36).slice(2, 6);
+            avatar.innerHTML = `<svg width="22" height="22" viewBox="0 0 56 56" fill="none">
+                <defs><radialGradient id="${avatarId}" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="#FFD9A0"/><stop offset="100%" stop-color="#F5A623"/>
+                </radialGradient></defs>
+                <circle cx="28" cy="28" r="7" fill="url(#${avatarId})"/>
+                <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623"/>
+                <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623"/>
+                <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623"/>
+                <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623"/>
             </svg>`;
             wrapper.appendChild(avatar);
         }
@@ -384,6 +467,17 @@ const AssistantUI = {
         });
     },
 
+    // PHASE 7: Empty state management
+    hideEmptyState() {
+        const empty = document.getElementById('ai-empty-state');
+        if (empty) empty.style.display = 'none';
+    },
+
+    showEmptyState() {
+        const empty = document.getElementById('ai-empty-state');
+        if (empty) empty.style.display = '';
+    },
+
     // ITEM 2: Typing indicator — animated dots, "در حال تحلیل..."
     showTyping() {
         const box = document.getElementById('ai-messages');
@@ -398,11 +492,16 @@ const AssistantUI = {
 
         const avatar = document.createElement('div');
         avatar.className = 'ai-msg-avatar';
-        avatar.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <defs><linearGradient id="aiTyping" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#FFE9A0"/><stop offset="100%" stop-color="#F5A623"/>
-            </linearGradient></defs>
-            <path d="M12 2.5c.9 0 1.6.7 1.6 1.6 0 .6-.3 1.1-.8 1.4v1.1h.9c3.5 0 6.3 2.8 6.3 6.3v.5c.6 0 1 .4 1 1v1.5c0 .6-.4 1-1 1h-.5c-.8 2.2-2.8 3.8-5.2 3.8H8.5c-2.4 0-4.4-1.6-5.2-3.8H3c-.6 0-1-.4-1-1V14c0-.6.4-1 1-1v-.5c0-3.5 2.8-6.3 6.3-6.3h.9V5.5c-.5-.3-.8-.8-.8-1.4 0-.9.7-1.6 1.6-1.6z" fill="url(#aiTyping)"/>
+        const typingId = 'aiTyping' + Date.now();
+        avatar.innerHTML = `<svg width="22" height="22" viewBox="0 0 56 56" fill="none">
+            <defs><radialGradient id="${typingId}" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#FFD9A0"/><stop offset="100%" stop-color="#F5A623"/>
+            </radialGradient></defs>
+            <circle cx="28" cy="28" r="7" fill="url(#${typingId})"/>
+            <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623"/>
+            <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623"/>
+            <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623"/>
+            <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623"/>
         </svg>`;
         wrapper.appendChild(avatar);
 
