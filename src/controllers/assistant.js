@@ -54,30 +54,42 @@ export function createAssistantHandlers(deps) {
   const CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free';
   const CHAT_OPENAI_MODEL = 'gpt-4o-mini';
 
-  // ── AMIRBTC App Context (static, versioned, ~200 tokens) ──────────────────
+  // ── AMIRBTC Knowledge Base (v2 — comprehensive, for Phase 10/11) ───────────
   const ASSISTANT_APP_CONTEXT =
-    '=== AMIRBTC App Context (v1) ===\n' +
-    'You are the AI Assistant inside AMIRBTC, a Telegram Mini App for crypto trading.\n' +
-    'AMIRBTC features:\n' +
-    '- Market: Live prices for 200+ cryptocurrencies (BTC, ETH, SOL, etc.)\n' +
-    '- News: Crypto news with AI-powered Persian summaries + sentiment analysis\n' +
-    '- Price Alerts: Set custom price targets, get notified when reached\n' +
-    '- Wallet: AB Token balance, daily rewards, transactions\n' +
-    '- Referral: Invite friends, earn AB Tokens\n' +
-    '- Membership: Free tier (limited features) and Premium tier (more quotas, ad control)\n' +
-    '- AI Assistant: You — helps with crypto questions, market analysis, and app guidance\n' +
+    '=== AMIRBTC Knowledge Base (v2) ===\n' +
+    'You are the AI Assistant inside AMIRBTC, a Telegram Mini App for crypto trading.\n\n' +
+    'AMIRBTC Features:\n' +
+    '1. Market (بازار): Live prices for 200+ cryptocurrencies (BTC, ETH, SOL, etc.) with 24h change, volume, market cap.\n' +
+    '2. News (اخبار): Crypto/forex/economy news with AI-powered Persian summaries, sentiment analysis (bullish/bearish/neutral), and impact rating (high/medium/low).\n' +
+    '3. Price Alerts (هشدار قیمت): Set custom price targets for any coin, get notified when reached. Premium users get more alerts.\n' +
+    '4. Wallet (کیف پول): AB Token balance, daily rewards (claim daily), transaction history. AB Token is the in-app reward token.\n' +
+    '5. Referral (رفرال): Invite friends via your referral link, earn AB Tokens when they join.\n' +
+    '6. Membership (عضویت): Free tier (limited features) and Premium tier (more quotas, ad control, advanced alerts). Premium purchased via membership section.\n' +
+    '7. AI Assistant (دستیار هوشمند): You — helps with crypto questions, market analysis, news interpretation, and app guidance.\n' +
+    '8. Calendar (تقویم اقتصادی): Economic events, holidays, and important dates affecting markets.\n\n' +
+    'How to Guide Users:\n' +
+    '- For live prices: "برای قیمت لحظه‌ای به بخش بازار مراجعه کنید"\n' +
+    '- For news: "آخرین اخبار را در بخش اخبار ببینید"\n' +
+    '- For price alerts: "در بخش هشدار قیمت، هدف خود را تعیین کنید"\n' +
+    '- For wallet/rewards: "کیف پول و پاداش روزانه در بخش کیف پول"\n' +
+    '- For premium: "برای ارتقا به Premium، به بخش عضویت مراجعه کنید"\n' +
+    '- For referral: "لینک دعوت خود را در بخش رفرال پیدا کنید"\n\n' +
+    'Rules:\n' +
+    '- Explain features clearly and guide users to correct sections.\n' +
+    '- Never invent unavailable features.\n' +
+    '- Always answer in Persian (Farsi) unless the user writes in English.\n' +
     'Platform: Telegram Mini App | Language: Persian (Farsi) primary\n' +
-    '=== End Context ===\n';
+    '=== End Knowledge Base ===\n';
 
   // ── System prompt (comprehensive, crypto-focused, AMIRBTC-aware) ───────────
   const ASSISTANT_SYSTEM_PROMPT =
     ASSISTANT_APP_CONTEXT +
-    '\nYou are Amir BTC Assistant, a professional crypto and forex trading assistant.\n' +
+    '\nYou are Amir BTC Assistant, a professional crypto and forex trading assistant with access to real-time AMIRBTC data.\n' +
     'You help users with cryptocurrency, forex, market analysis, economic events, and trading questions.\n\n' +
     'IMPORTANT RULES:\n' +
     '- Always answer in Persian (Farsi) unless the user writes in English.\n' +
     '- Be honest: if you do not know current real-time data (prices, news, live events), say so clearly. Do NOT make up data.\n' +
-    '- When market data or article context is provided in the user message, USE it. Do NOT invent prices or news.\n' +
+    '- When market data, news context, or external search results are provided in the user message, USE them. Do NOT invent prices or news.\n' +
     '- If real-time data is NOT provided and the user asks about live prices or news, say "اطلاعات لحظه‌ای در دسترس نیست — برای قیمت‌های زنده به بخش بازار مراجعه کنید."\n' +
     '- Distinguish between facts and analysis/opinion. Use phrases like "بر اساس داده‌ها" (based on data) or "در نظر من" (in my opinion).\n' +
     '- For crypto concepts, explain clearly and simply in Persian.\n' +
@@ -87,7 +99,9 @@ export function createAssistantHandlers(deps) {
     '- Focus on crypto, forex, stocks, economics, and trading strategies.\n' +
     '- When discussing risks, always remind users that trading carries risk.\n' +
     '- Format responses with clear paragraphs and bullet points when helpful.\n' +
-    '- You are part of AMIRBTC. Guide users through app features when relevant.';
+    '- You are part of AMIRBTC. Guide users through app features when relevant.\n' +
+    '- When external search results are provided, mention the source (e.g., "طبق آخرین اطلاعات از ویکیپدیا...").\n' +
+    '- Never say "I think" for factual/current data. Either you have verified data or you don\'t know.';
 
   // ── Greeting handler (conservative, avoids false positives) ────────────────
   const GREETING_PATTERNS = [
@@ -157,8 +171,288 @@ export function createAssistantHandlers(deps) {
     /developer\s+instructions/gi,
     /hidden\s+instructions/gi,
     /AMIRBTC App Context/gi,
+    /AMIRBTC Knowledge Base/gi,
     /ASSISTANT_APP_CONTEXT/gi,
+    /Market Context/gi,
+    /News Context/gi,
+    /External Search/gi,
+    /=== Verified/gi,
   ];
+
+  // ── Intent Classifier (Phase 11) ─────────────────────────────────────────
+  // Classifies user message into one of 5 intents to determine context injection.
+  // LOCAL_APP: questions about AMIRBTC features, wallet, premium, referral, etc.
+  // MARKET_DATA: questions about prices, market status, fear/greed, coins.
+  // NEWS: questions about crypto news, events, articles.
+  // REAL_TIME_EXTERNAL: questions about current events, politics, economy (external).
+  // GENERAL_KNOWLEDGE: educational questions (concepts, definitions, history).
+  const INTENT_KEYWORDS = {
+    MARKET_DATA: [
+      'چنده', 'قیمت', 'بازار', 'صعودی', 'نزولی', 'نوسان', 'تغییر', 'سهم', 'ارز',
+      'بیت‌کوین', 'بیت کوین', 'اتریوم', 'ریپل', 'سولانا', 'دوج', 'شیبا',
+      'price', 'market', 'btc', 'eth', 'sol', 'xrp', 'doge',
+      'ترس و طمع', 'فیر اند گرید', 'مارکت کپ', 'حجم', 'کف', 'سقف', 'حمایت', 'مقاومت',
+      'چطوره', 'چه وضعیتی', 'آیا', 'خرید', 'فروش', 'ترید', 'پوزیشن',
+    ],
+    NEWS: [
+      'خبر', 'اخبار', 'news', 'مقاله', 'رویداد', 'تاثیر', 'تحلیل خبر',
+      'این خبر', 'آخرین خبر', 'جدیدترین', 'اتفاق', 'افتخار', 'declaration',
+      'بیانیه', 'تصمیم', 'بنیاد', 'sec', 'etf', 'فاند', 'فارکس',
+    ],
+    REAL_TIME_EXTERNAL: [
+      'رئیس', 'چه کسی', 'کیه', 'کی است', 'امروز', 'الان', 'آخرین', 'جدیدترین',
+      'تصمیم', 'نرخ بهره', 'فدرال رزرو', 'ترامپ', 'بایدن', 'فدرال',
+      'central bank', 'fed', 'interest rate', 'دولت', 'سیاست', 'اقتصاد',
+      'جنگ', 'تحریم', 'sanction', 'war', 'election', 'انتخابات',
+      'inflation', 'تورم', 'cpi', 'gdp', 'qqe', 'استراتژیست',
+    ],
+    LOCAL_APP: [
+      'پرمیوم', 'premium', 'کیف پول', 'wallet', 'توکن', 'اب', 'ab token',
+      'رفرال', 'referral', 'هشدار', 'alert', 'اعلان', ' notification',
+      'عضویت', 'membership', 'پاداش', 'reward', 'روزانه', 'daily',
+      'چطور', 'how to', 'چگونه', 'راهنمایی', 'کمک', 'استفاده',
+      'ویژگی', 'feature', 'امکانات', 'نحوه', 'خرید پرمیوم',
+    ],
+  };
+
+  function classifyIntent(message) {
+    const msg = message.trim().toLowerCase();
+    if (!msg || msg.length < 2) return 'GENERAL_KNOWLEDGE';
+
+    // Priority order (most specific first):
+    // 1. NEWS — if "خبر/اخبار/news" is in message, it's a news question
+    //    (even if coin names are mentioned, the user is asking about news)
+    for (const kw of INTENT_KEYWORDS.NEWS) {
+      if (msg.includes(kw.toLowerCase())) return 'NEWS';
+    }
+    // 2. REAL_TIME_EXTERNAL — "who is", "today", "latest decision" (politics/economy)
+    for (const kw of INTENT_KEYWORDS.REAL_TIME_EXTERNAL) {
+      if (msg.includes(kw.toLowerCase())) return 'REAL_TIME_EXTERNAL';
+    }
+    // 3. LOCAL_APP — app feature questions (premium, wallet, referral)
+    for (const kw of INTENT_KEYWORDS.LOCAL_APP) {
+      if (msg.includes(kw.toLowerCase())) return 'LOCAL_APP';
+    }
+    // 4. MARKET_DATA — price/market questions (coin names, "how much", "market")
+    for (const kw of INTENT_KEYWORDS.MARKET_DATA) {
+      if (msg.includes(kw.toLowerCase())) return 'MARKET_DATA';
+    }
+    // 5. Default: general knowledge
+    return 'GENERAL_KNOWLEDGE';
+  }
+
+  // ── Market Context Builder (Phase 10) ─────────────────────────────────────
+  // Reads cached market data from APP_CACHE KV (no external API calls).
+  // KV keys: 'market:data:v3' (200 coins), 'market:overview:cmc' (global + F&G), 'fear-greed:cmc'.
+  async function fetchMarketContext(env, message) {
+    if (!env || !env.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return null;
+    try {
+      // Extract coin symbols from message (BTC, ETH, SOL, etc.)
+      const symbolMatches = message.match(/\b(BTC|ETH|SOL|XRP|ADA|DOGE|DOT|BNB|MATIC|AVAX|LINK|TRX|SHIB|PEPE|TON|LTC|BCH|ATOM|UNI|APT|NEAR|ARBITRUM|OP)\b/gi);
+      const requestedSymbols = symbolMatches ? [...new Set(symbolMatches.map(s => s.toUpperCase()))] : ['BTC', 'ETH'];
+
+      // Read cached market data (top 200 coins)
+      let coinsData = null;
+      try {
+        const raw = await env.APP_CACHE.get('market:data:v3');
+        if (raw) coinsData = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch {}
+
+      // Read global overview (market cap, volume, BTC dominance, F&G)
+      let globalData = null;
+      try {
+        const raw = await env.APP_CACHE.get('market:overview:cmc');
+        if (raw) globalData = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch {}
+
+      // Read Fear & Greed directly (fallback if overview doesn't have it)
+      let fearGreed = null;
+      if (!globalData || (!globalData.fearGreedValue && !globalData.fearGreed)) {
+        try {
+          const raw = await env.APP_CACHE.get('fear-greed:cmc');
+          if (raw) fearGreed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        } catch {}
+      }
+
+      if (!coinsData && !globalData) return null;
+
+      // Build context block
+      const parts = ['=== Verified Market Context (AMIRBTC Live Data) ==='];
+      parts.push('Instruction: Use ONLY this data. Do NOT invent prices. If a coin is not listed, say you don\'t have its current price.');
+      parts.push('');
+
+      // Add requested coins' prices
+      if (Array.isArray(coinsData)) {
+        const coinMap = new Map();
+        for (const coin of coinsData) {
+          if (coin && coin.symbol) coinMap.set(coin.symbol.toUpperCase(), coin);
+        }
+        // Always include BTC + ETH + any requested symbols
+        const symbolsToShow = [...new Set(['BTC', 'ETH', ...requestedSymbols])].slice(0, 8);
+        parts.push('Top Coins (cached, may be up to 5 min old):');
+        for (const sym of symbolsToShow) {
+          const coin = coinMap.get(sym);
+          if (coin) {
+            const price = coin.priceUsd != null ? `$${Number(coin.priceUsd).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : 'N/A';
+            const change = coin.changePercent24Hr != null ? `${Number(coin.changePercent24Hr).toFixed(2)}%` : 'N/A';
+            parts.push(`  ${sym}: ${price} (24h: ${change})`);
+          }
+        }
+        parts.push('');
+      }
+
+      // Add global stats
+      if (globalData) {
+        parts.push('Global Market:');
+        if (globalData.totalMarketCap) parts.push(`  Total Market Cap: $${(Number(globalData.totalMarketCap) / 1e9).toFixed(2)}B`);
+        if (globalData.totalVolume) parts.push(`  Total Volume (24h): $${(Number(globalData.totalVolume) / 1e9).toFixed(2)}B`);
+        if (globalData.btcDominance) parts.push(`  BTC Dominance: ${Number(globalData.btcDominance).toFixed(2)}%`);
+        if (globalData.ethDominance) parts.push(`  ETH Dominance: ${Number(globalData.ethDominance).toFixed(2)}%`);
+        parts.push('');
+      }
+
+      // Add Fear & Greed
+      const fgValue = globalData?.fearGreedValue || (fearGreed && fearGreed.value);
+      const fgClass = globalData?.fearGreedClassification || (fearGreed && fearGreed.classification);
+      if (fgValue != null) {
+        parts.push(`Fear & Greed Index: ${fgValue} (${fgClass || 'N/A'})`);
+        parts.push('');
+      }
+
+      parts.push('=== End Market Context ===');
+      return parts.join('\n');
+    } catch (e) {
+      console.warn('[ChatAI] fetchMarketContext error:', e?.message || String(e));
+      return null;
+    }
+  }
+
+  // ── News Context Builder (Phase 10) ──────────────────────────────────────
+  // Fetches latest news from news_articles DB table.
+  async function fetchNewsContext(env, message) {
+    if (!queryDb) return null;
+    try {
+      // Extract keywords from message for news search
+      const keywords = message.match(/(BTC|ETH|SOL|XRP|BITCOIN|ETHEREUM|CRYPTO|ETf|SEC|FED|BINANCE)/gi);
+      const category = /فارکس|forex/i.test(message) ? 'forex' : /اقتصاد|economy|تورم|cpi|gdp/i.test(message) ? 'economy' : 'crypto';
+
+      // Query latest news from DB
+      let result;
+      if (keywords && keywords.length > 0) {
+        // Search by keyword in title
+        const kw = `%${keywords[0].toLowerCase()}%`;
+        result = await queryDb(env,
+          'SELECT title, summary, sentiment, impact, coins, source, created_at FROM news_articles WHERE LOWER(title) LIKE $1 OR LOWER(summary) LIKE $1 ORDER BY created_at DESC LIMIT 3',
+          [kw]
+        );
+      } else {
+        // Latest news by category
+        result = await queryDb(env,
+          'SELECT title, summary, sentiment, impact, coins, source, created_at FROM news_articles ORDER BY created_at DESC LIMIT 3',
+          []
+        );
+      }
+
+      const rows = result?.rows;
+      if (!Array.isArray(rows) || rows.length === 0) return null;
+
+      const parts = ['=== Latest AMIRBTC News Context ==='];
+      parts.push('Instruction: Use this news data for your answer. Mention source and time when relevant.');
+      parts.push('');
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        parts.push(`News ${i + 1}:`);
+        parts.push(`  Title: ${String(row.title || '').slice(0, 200)}`);
+        if (row.summary) parts.push(`  Summary: ${String(row.summary).slice(0, 500)}`);
+        if (row.sentiment) parts.push(`  Sentiment: ${row.sentiment}`);
+        if (row.impact) parts.push(`  Impact: ${row.impact}`);
+        if (row.coins) parts.push(`  Related Coins: ${String(row.coins).slice(0, 100)}`);
+        if (row.source) parts.push(`  Source: ${row.source}`);
+        parts.push('');
+      }
+      parts.push('=== End News Context ===');
+      return parts.join('\n');
+    } catch (e) {
+      console.warn('[ChatAI] fetchNewsContext error:', e?.message || String(e));
+      return null;
+    }
+  }
+
+  // ── External Search (Phase 11) ────────────────────────────────────────────
+  // Fetches real-time external data via Wikipedia REST API (free, no key).
+  // Used for REAL_TIME_EXTERNAL intent (politics, economy, current events, "who is").
+  async function fetchExternalContext(env, message) {
+    try {
+      // Extract the main query (remove Persian stopwords, keep key terms)
+      let query = message
+        .replace(/^(رئیس|چیه|کیه|کی است|چه کسی|امروز|الان|آخرین|جدیدترین|چی شد|گفت|تصمیم)\s*/gi, '')
+        .replace(/[؟?؟\s]+$/g, '')
+        .trim();
+      if (!query || query.length < 3) return null;
+
+      // For "who is" questions, use Wikipedia REST API (free, no key needed)
+      // Try Persian Wikipedia first, then English
+      const isWhoQuestion = /رئیس|چه کسی|کیه|کی است|who is|چه شد|چی شد/i.test(message);
+
+      if (isWhoQuestion) {
+        // Wikipedia REST API summary endpoint
+        const wikiQuery = encodeURIComponent(query.slice(0, 100));
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+
+        let wikiData = null;
+        try {
+          // Try Persian Wikipedia first
+          const response = await fetch(`https://fa.wikipedia.org/api/rest_v1/page/summary/${wikiQuery}`, {
+            headers: { 'Accept': 'application/json', 'User-Agent': 'AmirBTC-Assistant/1.0' },
+            signal: controller.signal,
+          });
+          if (response.ok) {
+            wikiData = await response.json();
+          } else {
+            // Fall back to English Wikipedia
+            clearTimeout(timer);
+            const timer2 = setTimeout(() => controller.abort(), 8000);
+            const response2 = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${wikiQuery}`, {
+              headers: { 'Accept': 'application/json', 'User-Agent': 'AmirBTC-Assistant/1.0' },
+              signal: controller.signal,
+            });
+            if (response2.ok) wikiData = await response2.json();
+            clearTimeout(timer2);
+          }
+        } finally { clearTimeout(timer); }
+
+        if (wikiData && wikiData.extract) {
+          // Sanitize: strip HTML, limit length, apply injection filter
+          let extract = String(wikiData.extract)
+            .replace(/<[^>]*>/g, '') // strip HTML tags
+            .replace(/\[\d+\]/g, '') // strip citation brackets
+            .slice(0, 1500); // limit length
+          extract = sanitizeText(extract); // apply injection filter
+
+          const title = wikiData.title ? String(wikiData.title).slice(0, 200) : '';
+          const source = wikiData.content_urls?.desktop?.page ? String(wikiData.content_urls.desktop.page).slice(0, 200) : 'Wikipedia';
+
+          const parts = ['=== External Search Results (Wikipedia) ==='];
+          parts.push('Instruction: Use this verified external data. Mention source and that this may not be real-time.');
+          parts.push('');
+          parts.push(`Topic: ${title}`);
+          parts.push(`Content: ${extract}`);
+          parts.push(`Source: Wikipedia (${source})`);
+          parts.push('Note: This is encyclopedia data, NOT real-time news. For current events, check AMIRBTC News section.');
+          parts.push('=== End External Search ===');
+          return parts.join('\n');
+        }
+      }
+
+      // For non-"who" questions or if Wikipedia didn't return results
+      // Return freshness instruction (no fresh data available)
+      return '=== External Data Not Available ===\nNo real-time external data could be fetched for this query.\nInstruction: Tell the user "اطلاعات لحظه‌ای در دسترس نیست" and suggest they check news sources directly.\nDo NOT guess or use old knowledge for current events.\n=== End ===';
+    } catch (e) {
+      console.warn('[ChatAI] fetchExternalContext error:', e?.message || String(e));
+      return null;
+    }
+  }
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -250,8 +544,21 @@ export function createAssistantHandlers(deps) {
 
   // ── Prompt building (with dynamic context) ─────────────────────────────────
 
-  function buildAssistantPrompt(message, history, imageBase64, context, articleContext) {
+  function buildAssistantPrompt(message, history, imageBase64, context, articleContext, marketContext, newsContext, externalContext) {
     const parts = [];
+    // Phase 10/11: Inject verified context blocks (market, news, external search)
+    if (marketContext) {
+      parts.push(marketContext);
+      parts.push('');
+    }
+    if (newsContext) {
+      parts.push(newsContext);
+      parts.push('');
+    }
+    if (externalContext) {
+      parts.push(externalContext);
+      parts.push('');
+    }
     if (context && (context.page || context.coin)) {
       parts.push('=== User Context ===');
       if (context.page) parts.push(`Current page: ${context.page}`);
@@ -632,10 +939,24 @@ export function createAssistantHandlers(deps) {
       if (context?.article_id) {
         articleContext = await fetchArticleContext(env, context.article_id);
       }
-      const prompt = buildAssistantPrompt(message, history, imageBase64, context, articleContext);
+      // Phase 10/11: Intent classification + context injection
+      const intent = classifyIntent(message);
+      console.log(`[ChatAI] userId=${userId} intent=${intent} message="${message.slice(0, 60)}"`);
+      let marketContext = null;
+      let newsContext = null;
+      let externalContext = null;
+      if (intent === 'MARKET_DATA') {
+        marketContext = await fetchMarketContext(env, message);
+      } else if (intent === 'NEWS') {
+        newsContext = await fetchNewsContext(env, message);
+      } else if (intent === 'REAL_TIME_EXTERNAL') {
+        externalContext = await fetchExternalContext(env, message);
+      }
+      // LOCAL_APP and GENERAL_KNOWLEDGE: no extra context (knowledge base in system prompt)
+      const prompt = buildAssistantPrompt(message, history, imageBase64, context, articleContext, marketContext, newsContext, externalContext);
       // PHASE FIX: Diagnostic logging for multi-turn conversations.
       // Logs history count + prompt size so we can trace why multi-turn fails.
-      console.log(`[ChatAI] userId=${userId} historyEntries=${history.length} promptChars=${prompt.length} approxTokens=${Math.ceil(prompt.length / 3)}`);
+      console.log(`[ChatAI] userId=${userId} intent=${intent} historyEntries=${history.length} promptChars=${prompt.length} approxTokens=${Math.ceil(prompt.length / 3)}`);
       const result = await generateAssistantReply(env, prompt, imageBase64, history.length);
 
       let reply = result.reply;

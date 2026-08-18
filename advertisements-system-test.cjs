@@ -2113,3 +2113,192 @@ test('CA-24: Diagnostic logging for multi-turn conversations', () => {
 });
 
 console.log('✅ All multi-turn fix tests loaded.');
+
+// ============================================================================
+// Phase 10/11: Chat AI Real-Time Intelligence — Context Injection Tests
+// ============================================================================
+
+// RT-25: Intent classifier exists with 5 intent types
+test('RT-25: Intent classifier exists with 5 intent types', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('classifyIntent'),
+    'classifyIntent function must exist');
+  assert.ok(ASSISTANT_SRC.includes('LOCAL_APP'), 'LOCAL_APP intent type');
+  assert.ok(ASSISTANT_SRC.includes('MARKET_DATA'), 'MARKET_DATA intent type');
+  assert.ok(ASSISTANT_SRC.includes('NEWS'), 'NEWS intent type');
+  assert.ok(ASSISTANT_SRC.includes('REAL_TIME_EXTERNAL'), 'REAL_TIME_EXTERNAL intent type');
+  assert.ok(ASSISTANT_SRC.includes('GENERAL_KNOWLEDGE'), 'GENERAL_KNOWLEDGE intent type');
+});
+
+// RT-26: Market context builder exists
+test('RT-26: Market context builder exists', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('fetchMarketContext'),
+    'fetchMarketContext function must exist');
+  assert.ok(ASSISTANT_SRC.includes('market:data:v3'),
+    'Must read from KV key market:data:v3');
+  assert.ok(ASSISTANT_SRC.includes('market:overview:cmc'),
+    'Must read from KV key market:overview:cmc');
+  assert.ok(ASSISTANT_SRC.includes('fear-greed:cmc'),
+    'Must read Fear & Greed from KV key fear-greed:cmc');
+});
+
+// RT-27: News context builder exists
+test('RT-27: News context builder exists', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('fetchNewsContext'),
+    'fetchNewsContext function must exist');
+  assert.ok(ASSISTANT_SRC.includes('news_articles'),
+    'Must query news_articles table');
+  assert.ok(ASSISTANT_SRC.includes('ORDER BY created_at DESC'),
+    'Must order by latest news');
+});
+
+// RT-28: External search layer exists (Wikipedia API)
+test('RT-28: External search layer exists (Wikipedia API)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('fetchExternalContext'),
+    'fetchExternalContext function must exist');
+  assert.ok(ASSISTANT_SRC.includes('wikipedia.org'),
+    'Must use Wikipedia API for external search');
+  assert.ok(ASSISTANT_SRC.includes('اطلاعات لحظه‌ای در دسترس نیست'),
+    'Must have freshness rule message');
+});
+
+// RT-29: Expanded AMIRBTC Knowledge Base
+test('RT-29: Expanded AMIRBTC Knowledge Base (v2)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('AMIRBTC Knowledge Base (v2)'),
+    'Must have v2 knowledge base');
+  // Must include detailed feature guides
+  assert.ok(ASSISTANT_SRC.includes('Price Alerts') || ASSISTANT_SRC.includes('هشدار قیمت'),
+    'Must mention Price Alerts');
+  assert.ok(ASSISTANT_SRC.includes('Wallet') || ASSISTANT_SRC.includes('کیف پول'),
+    'Must mention Wallet');
+  assert.ok(ASSISTANT_SRC.includes('Referral') || ASSISTANT_SRC.includes('رفرال'),
+    'Must mention Referral');
+  assert.ok(ASSISTANT_SRC.includes('Membership') || ASSISTANT_SRC.includes('عضویت'),
+    'Must mention Membership');
+  // Must include how-to-guide instructions
+  assert.ok(ASSISTANT_SRC.includes('How to Guide Users'),
+    'Must have how-to guide instructions');
+});
+
+// RT-30: Intent classification wired in handlePostChat
+test('RT-30: Intent classification wired in handlePostChat', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const chatFn = ASSISTANT_SRC.indexOf('async function handlePostChat');
+  const fnBlock = ASSISTANT_SRC.slice(chatFn, chatFn + 5000);
+  assert.ok(fnBlock.includes('classifyIntent(message)'),
+    'handlePostChat must call classifyIntent');
+  assert.ok(fnBlock.includes('intent === \'MARKET_DATA\''),
+    'Must branch on MARKET_DATA intent');
+  assert.ok(fnBlock.includes('intent === \'NEWS\''),
+    'Must branch on NEWS intent');
+  assert.ok(fnBlock.includes('intent === \'REAL_TIME_EXTERNAL\''),
+    'Must branch on REAL_TIME_EXTERNAL intent');
+});
+
+// RT-31: Context blocks injected into prompt
+test('RT-31: Market/News/External context blocks injected into prompt', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const promptFn = ASSISTANT_SRC.indexOf('function buildAssistantPrompt');
+  const fnBlock = ASSISTANT_SRC.slice(promptFn, promptFn + 2000);
+  assert.ok(fnBlock.includes('marketContext'),
+    'buildAssistantPrompt must accept marketContext');
+  assert.ok(fnBlock.includes('newsContext'),
+    'buildAssistantPrompt must accept newsContext');
+  assert.ok(fnBlock.includes('externalContext'),
+    'buildAssistantPrompt must accept externalContext');
+});
+
+// RT-32: Security — external content sanitized (HTML stripped + injection filter)
+test('RT-32: External content sanitized (HTML stripped + injection filter)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const extFn = ASSISTANT_SRC.indexOf('async function fetchExternalContext');
+  const fnBlock = ASSISTANT_SRC.slice(extFn, extFn + 3000);
+  // Must strip HTML tags
+  assert.ok(fnBlock.includes('<[^>]*>') || fnBlock.includes('replace(/<'),
+    'Must strip HTML tags from external content');
+  // Must apply sanitizeText to external content
+  assert.ok(fnBlock.includes('sanitizeText'),
+    'Must apply sanitizeText to external content');
+  // Must limit content length
+  assert.ok(fnBlock.includes('slice(0, 1500)'),
+    'Must limit external content to 1500 chars');
+});
+
+// RT-33: Output leak patterns updated for new context blocks
+test('RT-33: Output leak patterns cover new context blocks', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Must redact Market Context, News Context, External Search headers
+  assert.ok(ASSISTANT_SRC.includes('/Market Context/gi'),
+    'Must redact "Market Context" from output');
+  assert.ok(ASSISTANT_SRC.includes('/News Context/gi'),
+    'Must redact "News Context" from output');
+  assert.ok(ASSISTANT_SRC.includes('/External Search/gi'),
+    'Must redact "External Search" from output');
+});
+
+// RT-34: Freshness rules — no guessing for current data
+test('RT-34: Freshness rules in system prompt', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // System prompt must have freshness rules
+  assert.ok(ASSISTANT_SRC.includes('Do NOT make up data'),
+    'Must instruct AI not to make up data');
+  assert.ok(ASSISTANT_SRC.includes('Never say "I think" for factual'),
+    'Must instruct AI not to say "I think" for factual data');
+  assert.ok(ASSISTANT_SRC.includes('mention the source'),
+    'Must instruct AI to mention source for external data');
+});
+
+// RT-35: Performance — no external search for simple/greeting questions
+test('RT-35: No external search for non-external intents', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Only REAL_TIME_EXTERNAL should trigger external search
+  const chatFn = ASSISTANT_SRC.indexOf('async function handlePostChat');
+  const fnBlock = ASSISTANT_SRC.slice(chatFn, chatFn + 5000);
+  // External context should only be fetched for REAL_TIME_EXTERNAL intent
+  assert.ok(fnBlock.includes("intent === 'REAL_TIME_EXTERNAL'"),
+    'External search only for REAL_TIME_EXTERNAL');
+  // Market context only for MARKET_DATA
+  assert.ok(fnBlock.includes("intent === 'MARKET_DATA'"),
+    'Market context only for MARKET_DATA');
+  // News context only for NEWS
+  assert.ok(fnBlock.includes("intent === 'NEWS'"),
+    'News context only for NEWS');
+});
+
+// RT-36: Provider chain UNTOUCHED (Groq→Gemini→OpenRouter→Workers AI→OpenAI)
+test('RT-36: Provider chain order unchanged', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const providers = ASSISTANT_SRC.match(/const providers = \[([\s\S]*?)\];/);
+  assert.ok(providers, 'Must have providers array');
+  const block = providers[1];
+  const groqIdx = block.indexOf("['groq'");
+  const geminiIdx = block.indexOf("['gemini'");
+  const orIdx = block.indexOf("['openrouter'");
+  const waIdx = block.indexOf("['workers-ai'");
+  const oaiIdx = block.indexOf("['openai'");
+  assert.ok(groqIdx > -1 && groqIdx < geminiIdx, 'Groq before Gemini');
+  assert.ok(geminiIdx < orIdx, 'Gemini before OpenRouter');
+  assert.ok(orIdx < waIdx, 'OpenRouter before Workers AI');
+  assert.ok(waIdx < oaiIdx, 'Workers AI before OpenAI');
+});
+
+// RT-37: News AI pipeline untouched (worker-proxy.js not modified)
+test('RT-37: worker-proxy.js NOT modified (News AI untouched)', () => {
+  // This is verified by git diff — but also check that assistant.js doesn't
+  // import any new worker-proxy functions that would require wiring
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // The deps destructuring should NOT have new entries beyond what was there
+  const depsMatch = ASSISTANT_SRC.match(/const \{([^}]*)\} = deps/);
+  assert.ok(depsMatch, 'Must have deps destructuring');
+  // Should NOT have new fetchFarsiNews or fetchGlobalStats deps
+  assert.ok(!ASSISTANT_SRC.includes('fetchFarsiNews'),
+    'Must NOT import fetchFarsiNews (uses internal KV read instead)');
+  assert.ok(!ASSISTANT_SRC.includes('fetchGlobalStats'),
+    'Must NOT import fetchGlobalStats (uses internal KV read instead)');
+});
+
+console.log('✅ All Phase 10/11 Real-Time Intelligence tests loaded.');
