@@ -8176,6 +8176,11 @@ const assistantHandlers = createAssistantHandlers({
   // PHASE 3: Tier-based AI quota
   membershipAuthority,
   entitlementConfig: ENTITLEMENT_CONFIG,
+  // Chat AI redesign: reuse News AI circuit breaker infrastructure
+  shouldAttemptProvider,
+  recordCircuitResult,
+  classifyHttpError,
+  isNewsProviderEnabled,
 });
 const analysisRepo = createAnalysisRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 const analysisHandlers = createAnalysisHandlers({

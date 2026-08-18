@@ -724,12 +724,22 @@ test('AI Chat: missing message field returns 422', async () => {
 test('AI Chat: with mocked Gemini returns reply', async () => {
   const worker = loadWorker();
   const rateLimits = createMemoryKv();
-  // Gemini now routes through DB function gemini_generate() via queryDb.
-  // The test env doesn't have a real DB, so Cloudflare AI (primary) will
-  // also fail. We need to mock the DB pool to handle gemini_generate calls.
-  // Set up _reqPool BEFORE the request so withSharedPool uses it.
+  // Chat AI now uses Groq as primary → Gemini as fallback.
+  // Mock the DB pool to handle groq_generate calls (Groq is primary).
   const mockPool = {
     query: async (sql, params) => {
+      if (sql.includes('groq_generate')) {
+        return {
+          rows: [{
+            result: {
+              status_code: 200,
+              response_body: JSON.stringify({
+                choices: [{ message: { content: 'Bitcoin is a decentralized digital currency.' } }],
+              }),
+            }
+          }]
+        };
+      }
       if (sql.includes('gemini_generate')) {
         return {
           rows: [{
@@ -753,8 +763,6 @@ test('AI Chat: with mocked Gemini returns reply', async () => {
     RATE_LIMITS: rateLimits,
     GEMINI_API_KEY: 'fake-key',
     _reqPool: mockPool,
-    // Set DATABASE_URL to empty so withSharedPool skips real pool creation
-    // and uses our mock _reqPool instead.
     DATABASE_URL: '',
   });
   const user = { id: 999888, first_name: 'Test' };
@@ -767,7 +775,8 @@ test('AI Chat: with mocked Gemini returns reply', async () => {
     });
     assert.equal(res.status, 200);
     assert.equal(res.body.status, 'success');
-    assert.equal(res.body.provider, 'gemini');
+    // Groq is now primary — should succeed via groq_generate
+    assert.equal(res.body.provider, 'groq');
     assert.ok(res.body.reply);
     assert.ok(res.body.reply.includes('Bitcoin'));
   } finally {

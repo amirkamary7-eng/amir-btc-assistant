@@ -1843,3 +1843,200 @@ test('OR-18: tryOpenAI function unchanged (not modified)', () => {
 });
 
 console.log('✅ All OpenRouter tests loaded.');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Chat AI Redesign — Implementation Tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+// CA-01: Groq is primary provider
+test('CA-01: Groq is first in Chat AI provider chain', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const groqIdx = ASSISTANT_SRC.indexOf("['groq'");
+  const geminiIdx = ASSISTANT_SRC.indexOf("['gemini'");
+  assert.ok(groqIdx > 0 && geminiIdx > 0, 'Groq and Gemini must exist in provider chain');
+  assert.ok(groqIdx < geminiIdx, 'Groq must come before Gemini');
+});
+
+// CA-02: OpenRouter uses correct model
+test('CA-02: Chat AI OpenRouter uses nvidia/nemotron-3-super-120b-a12b:free', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes("CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
+    'Chat OpenRouter must use nvidia/nemotron-3-super-120b-a12b:free');
+});
+
+// CA-03: DeepSeek removed
+test('CA-03: DeepSeek removed from Chat AI', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(!ASSISTANT_SRC.includes('callDeepSeek'),
+    'callDeepSeek function must be removed');
+  assert.ok(!ASSISTANT_SRC.includes("'deepseek-chat'"),
+    'deepseek-chat model must be removed');
+  // Comment referencing DEEPSEEK_API_KEY is OK, but no code usage
+  const codeLines = ASSISTANT_SRC.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*'));
+  const codeBlock = codeLines.join('\n');
+  assert.ok(!codeBlock.includes('DEEPSEEK_API_KEY'),
+    'DEEPSEEK_API_KEY must not be referenced in code (comments OK)');
+});
+
+// CA-04: Groq uses openai/gpt-oss-120b
+test('CA-04: Chat AI Groq uses openai/gpt-oss-120b', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes("CHAT_GROQ_MODEL = 'openai/gpt-oss-120b'"),
+    'Chat Groq must use openai/gpt-oss-120b');
+});
+
+// CA-05: Circuit breaker via attemptProvider
+test('CA-05: Chat AI uses circuit breaker (shouldAttemptProvider + recordCircuitResult)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('shouldAttemptProvider'),
+    'Chat AI must use shouldAttemptProvider for circuit breaker');
+  assert.ok(ASSISTANT_SRC.includes('recordCircuitResult'),
+    'Chat AI must use recordCircuitResult for circuit breaker');
+  assert.ok(ASSISTANT_SRC.includes('attemptChatProvider'),
+    'Chat AI must use attemptChatProvider wrapper');
+});
+
+// CA-06: Greeting handler exists
+test('CA-06: Greeting handler exists with patterns', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('handleGreeting'),
+    'handleGreeting function must exist');
+  assert.ok(ASSISTANT_SRC.includes('GREETING_PATTERNS'),
+    'GREETING_PATTERNS array must exist');
+  assert.ok(ASSISTANT_SRC.includes('سلام'),
+    'Greeting patterns must include سلام');
+  assert.ok(ASSISTANT_SRC.includes('provider: \'greeting_handler\''),
+    'Greeting responses must return provider: greeting_handler');
+});
+
+// CA-07: Greeting handler does NOT consume LLM call
+test('CA-07: Greeting handler returns before LLM call', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Find the greeting handler invocation in handlePostChat
+  const greetingIdx = ASSISTANT_SRC.indexOf('const greetingReply = handleGreeting');
+  assert.ok(greetingIdx > 0, 'Greeting handler must be called');
+  // Find the LLM invocation in handlePostChat (after greeting)
+  const llmCallIdx = ASSISTANT_SRC.indexOf('await generateAssistantReply(env, prompt', greetingIdx);
+  assert.ok(llmCallIdx > 0, 'generateAssistantReply must be called after greeting');
+  // Greeting return must come before LLM call
+  const greetingReturn = ASSISTANT_SRC.indexOf('greeting_handler', greetingIdx);
+  assert.ok(greetingReturn > 0 && greetingReturn < llmCallIdx,
+    'Greeting must return before LLM is called');
+});
+
+// CA-08: AMIRBTC app context in system prompt
+test('CA-08: ASSISTANT_APP_CONTEXT exists with AMIRBTC features', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('ASSISTANT_APP_CONTEXT'),
+    'ASSISTANT_APP_CONTEXT must exist');
+  assert.ok(ASSISTANT_SRC.includes('AMIRBTC'),
+    'Context must mention AMIRBTC');
+  assert.ok(ASSISTANT_SRC.includes('Market'),
+    'Context must mention Market feature');
+  assert.ok(ASSISTANT_SRC.includes('News'),
+    'Context must mention News feature');
+  assert.ok(ASSISTANT_SRC.includes('Wallet'),
+    'Context must mention Wallet feature');
+});
+
+// CA-09: Dynamic context support
+test('CA-09: Chat AI supports dynamic context (page, coin, article_id)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('parseContext'),
+    'parseContext function must exist');
+  assert.ok(ASSISTANT_SRC.includes('context.page'),
+    'Context must support page field');
+  assert.ok(ASSISTANT_SRC.includes('context.coin'),
+    'Context must support coin field');
+  assert.ok(ASSISTANT_SRC.includes('context.article_id'),
+    'Context must support article_id field');
+});
+
+// CA-10: Article context fetch
+test('CA-10: Chat AI fetches article context when article_id provided', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('fetchArticleContext'),
+    'fetchArticleContext function must exist');
+  assert.ok(ASSISTANT_SRC.includes('news_articles'),
+    'Must query news_articles table');
+});
+
+// CA-11: Context sanitization
+test('CA-11: Context fields are sanitized (length-limited + injection-filtered)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('sanitizeContextField'),
+    'sanitizeContextField function must exist');
+  assert.ok(ASSISTANT_SRC.includes('MAX_CONTEXT_FIELD_LENGTH'),
+    'MAX_CONTEXT_FIELD_LENGTH constant must exist');
+});
+
+// CA-12: Prompt injection filtered in current message
+test('CA-12: Current message is sanitized for injection', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const promptFn = ASSISTANT_SRC.indexOf('function buildAssistantPrompt');
+  const fnBlock = ASSISTANT_SRC.slice(promptFn, promptFn + 2000);
+  assert.ok(fnBlock.includes('sanitizeText(message)'),
+    'Current message must be sanitized via sanitizeText()');
+});
+
+// CA-13: OpenRouter has HTTP-Referer and X-Title headers
+test('CA-13: Chat AI OpenRouter has HTTP-Referer + X-Title headers', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const orFn = ASSISTANT_SRC.indexOf('async function callOpenRouterChat');
+  const fnBlock = ASSISTANT_SRC.slice(orFn, orFn + 1000);
+  assert.ok(fnBlock.includes('HTTP-Referer'),
+    'Chat OpenRouter must include HTTP-Referer header');
+  assert.ok(fnBlock.includes('X-Title'),
+    'Chat OpenRouter must include X-Title header');
+});
+
+// CA-14: Provider chain order: Groq → Gemini → OpenRouter → Workers AI → OpenAI
+test('CA-14: Provider chain order is correct', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const groqIdx = ASSISTANT_SRC.indexOf("['groq'");
+  const geminiIdx = ASSISTANT_SRC.indexOf("['gemini'");
+  const orIdx = ASSISTANT_SRC.indexOf("['openrouter'");
+  const waIdx = ASSISTANT_SRC.indexOf("['workers-ai'");
+  const oaiIdx = ASSISTANT_SRC.indexOf("['openai'");
+  assert.ok(groqIdx < geminiIdx, 'Groq before Gemini');
+  assert.ok(geminiIdx < orIdx, 'Gemini before OpenRouter');
+  assert.ok(orIdx < waIdx, 'OpenRouter before Workers AI');
+  assert.ok(waIdx < oaiIdx, 'Workers AI before OpenAI');
+});
+
+// CA-15: Workers AI is fallback (not primary)
+test('CA-15: Workers AI is fallback, not primary', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const groqIdx = ASSISTANT_SRC.indexOf("['groq'");
+  const waIdx = ASSISTANT_SRC.indexOf("['workers-ai'");
+  assert.ok(groqIdx < waIdx, 'Groq must come before Workers AI');
+});
+
+// CA-16: Output leak patterns include AMIRBTC context
+test('CA-16: Output leak patterns filter AMIRBTC context leakage', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('AMIRBTC App Context'),
+    'OUTPUT_LEAK_PATTERNS must filter "AMIRBTC App Context"');
+});
+
+// CA-17: System prompt includes honesty + data usage instructions
+test('CA-17: System prompt includes data honesty + Persian instructions', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('Do NOT make up data'),
+    'System prompt must instruct: Do NOT make up data');
+  assert.ok(ASSISTANT_SRC.includes('Distinguish between facts and analysis'),
+    'System prompt must instruct: Distinguish facts from analysis');
+  assert.ok(ASSISTANT_SRC.includes('اطلاعات لحظه‌ای در دسترس نیست'),
+    'System prompt must include Persian "no live data" fallback text');
+});
+
+// CA-18: Frontend sends context
+test('CA-18: Frontend assistant.js sends context in payload', () => {
+  const ASSISTANT_JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_JS.includes('context:'),
+    'Frontend must include context field in payload');
+  assert.ok(ASSISTANT_JS.includes('getContext'),
+    'Frontend must have getContext() method');
+});
+
+console.log('✅ All Chat AI redesign tests loaded.');
