@@ -2215,17 +2215,23 @@ test('RT-31: Market/News/External context blocks injected into prompt', () => {
 // RT-32: Security — external content sanitized (HTML stripped + injection filter)
 test('RT-32: External content sanitized (HTML stripped + injection filter)', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const extFn = ASSISTANT_SRC.indexOf('async function fetchExternalContext');
-  const fnBlock = ASSISTANT_SRC.slice(extFn, extFn + 3000);
-  // Must strip HTML tags
-  assert.ok(fnBlock.includes('<[^>]*>') || fnBlock.includes('replace(/<'),
-    'Must strip HTML tags from external content');
-  // Must apply sanitizeText to external content
-  assert.ok(fnBlock.includes('sanitizeText'),
-    'Must apply sanitizeText to external content');
-  // Must limit content length
-  assert.ok(fnBlock.includes('slice(0, 1500)'),
-    'Must limit external content to 1500 chars');
+  // Sanitization is in sanitizeSearchResult (web search) + performWikipediaSearch (fallback)
+  const sanitizeFn = ASSISTANT_SRC.indexOf('function sanitizeSearchResult');
+  const sanitizeBlock = ASSISTANT_SRC.slice(sanitizeFn, sanitizeFn + 1500);
+  assert.ok(sanitizeBlock.includes('<[^>]*>') || sanitizeBlock.includes('replace(/<'),
+    'Must strip HTML tags from web search results');
+  assert.ok(sanitizeBlock.includes('<script') || sanitizeBlock.includes('/script'),
+    'Must strip <script> blocks from web search results');
+  assert.ok(sanitizeBlock.includes('sanitizeText'),
+    'Must apply sanitizeText to web search results');
+  assert.ok(sanitizeBlock.includes('slice(0, 600)'),
+    'Must limit web search snippet to 600 chars');
+  const wikiFn = ASSISTANT_SRC.indexOf('async function performWikipediaSearch');
+  const wikiBlock = ASSISTANT_SRC.slice(wikiFn, wikiFn + 2000);
+  assert.ok(wikiBlock.includes('sanitizeText'),
+    'Wikipedia fallback must apply sanitizeText');
+  assert.ok(wikiBlock.includes('slice(0, 1500)'),
+    'Wikipedia fallback must limit content to 1500 chars');
 });
 
 // RT-33: Output leak patterns updated for new context blocks
@@ -2301,4 +2307,132 @@ test('RT-37: worker-proxy.js NOT modified (News AI untouched)', () => {
     'Must NOT import fetchGlobalStats (uses internal KV read instead)');
 });
 
-console.log('✅ All Phase 10/11 Real-Time Intelligence tests loaded.');
+
+// ============================================================================
+// RT-38..46: Web Search Upgrade (REAL_TIME_EXTERNAL → real web search)
+// ============================================================================
+
+// RT-38: Web Search provider exists (z-ai-web-dev-sdk)
+test('RT-38: Web Search provider exists (z-ai-web-dev-sdk)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes("import('z-ai-web-dev-sdk')"),
+    'Must dynamically import z-ai-web-dev-sdk for web search');
+  assert.ok(ASSISTANT_SRC.includes("zai.functions.invoke('web_search'"),
+    'Must call web_search function via SDK');
+  assert.ok(ASSISTANT_SRC.includes('async function performWebSearch'),
+    'Must have performWebSearch function');
+});
+
+// RT-39: Search result structure (url, name, snippet, host_name, date)
+test('RT-39: Search result structure includes url/name/snippet/host/date', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const performFn = ASSISTANT_SRC.indexOf('async function performWebSearch');
+  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 4000);
+  assert.ok(fnBlock.includes('r.name') || fnBlock.includes('safeName'),
+    'Must include result name/title');
+  assert.ok(fnBlock.includes('r.snippet') || fnBlock.includes('safeSnippet'),
+    'Must include result snippet/content');
+  assert.ok(fnBlock.includes('r.host') || fnBlock.includes('host_name'),
+    'Must include source host');
+  assert.ok(fnBlock.includes('r.url'),
+    'Must include result URL');
+  assert.ok(fnBlock.includes('r.date'),
+    'Must include result date');
+});
+
+// RT-40: Source authority ranking (gov/Fed/SEC/central banks)
+test('RT-40: Source authority ranking for trusted domains', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('AUTHORITY_DOMAINS'),
+    'Must have AUTHORITY_DOMAINS list');
+  assert.ok(ASSISTANT_SRC.includes('federalreserve.gov'),
+    'Must rank Federal Reserve as authoritative');
+  assert.ok(ASSISTANT_SRC.includes('whitehouse.gov'),
+    'Must rank White House as authoritative');
+  assert.ok(ASSISTANT_SRC.includes('sec.gov'),
+    'Must rank SEC as authoritative');
+  assert.ok(ASSISTANT_SRC.includes('ecb.europa.eu'),
+    'Must rank ECB (central bank) as authoritative');
+  assert.ok(ASSISTANT_SRC.includes('reuters.com') || ASSISTANT_SRC.includes('bloomberg.com'),
+    'Must rank major news outlets (Reuters/Bloomberg)');
+  assert.ok(ASSISTANT_SRC.includes('function rankResultByAuthority'),
+    'Must have rankResultByAuthority function');
+});
+
+// RT-41: Max 5 results (not whole pages)
+test('RT-41: Web search limited to 5 results max', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const performFn = ASSISTANT_SRC.indexOf('async function performWebSearch');
+  const fnBlock = ASSISTANT_SRC.slice(performFn, performFn + 4000);
+  assert.ok(fnBlock.includes('slice(0, 5)'),
+    'Must limit to top 5 results');
+  assert.ok(fnBlock.includes('num: 8'),
+    'Must fetch 8 results initially for authority ranking');
+});
+
+// RT-42: Short cache for search results (freshness preserved)
+test('RT-42: Short cache (5 min) for web search results', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('WEB_SEARCH_CACHE_TTL'),
+    'Must have WEB_SEARCH_CACHE_TTL constant');
+  assert.ok(ASSISTANT_SRC.includes('WEB_SEARCH_CACHE_TTL = 300'),
+    'Cache TTL must be 300 seconds (5 minutes)');
+  assert.ok(ASSISTANT_SRC.includes('chat:websearch:'),
+    'Must use chat:websearch: cache key prefix');
+  assert.ok(ASSISTANT_SRC.includes('cache HIT'),
+    'Must log cache hits');
+});
+
+// RT-43: Wikipedia fallback when web search fails
+test('RT-43: Wikipedia fallback when web search returns no results', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('async function performWikipediaSearch'),
+    'Must have performWikipediaSearch fallback function');
+  const extFn = ASSISTANT_SRC.indexOf('async function fetchExternalContext');
+  const fnBlock = ASSISTANT_SRC.slice(extFn, extFn + 2000);
+  assert.ok(fnBlock.includes('performWebSearch'),
+    'Must call performWebSearch first');
+  assert.ok(fnBlock.includes('performWikipediaSearch'),
+    'Must fall back to performWikipediaSearch');
+  assert.ok(fnBlock.includes('falling back to Wikipedia'),
+    'Must log fallback to Wikipedia');
+});
+
+// RT-44: No fresh data → AI must not guess
+test('RT-44: No fresh data → AI instructed not to guess', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('اطلاعات به‌روز قابل تأیید پیدا نشد'),
+    'Must have Persian "no fresh data" message');
+  assert.ok(ASSISTANT_SRC.includes('Do NOT guess or use old knowledge'),
+    'Must instruct AI not to guess');
+});
+
+// RT-45: Web search result sanitization (prompt injection protection)
+test('RT-45: Web search results sanitized (script/injection filtered)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const sanitizeFn = ASSISTANT_SRC.indexOf('function sanitizeSearchResult');
+  const fnBlock = ASSISTANT_SRC.slice(sanitizeFn, sanitizeFn + 1500);
+  assert.ok(fnBlock.includes('<script') && fnBlock.includes('/script'),
+    'Must strip <script>...</script> blocks');
+  assert.ok(fnBlock.includes('sanitizeText(cleanName)') && fnBlock.includes('sanitizeText(cleanSnippet)'),
+    'Must apply sanitizeText to both name and snippet');
+  assert.ok(fnBlock.includes('slice(0, 200)'),
+    'Must limit title to 200 chars');
+  assert.ok(fnBlock.includes('slice(0, 600)'),
+    'Must limit snippet to 600 chars');
+});
+
+// RT-46: REAL_TIME_EXTERNAL still only triggers for current-data questions
+test('RT-46: REAL_TIME_EXTERNAL not triggered for general questions', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const classifyFn = ASSISTANT_SRC.indexOf('function classifyIntent');
+  const fnBlock = ASSISTANT_SRC.slice(classifyFn, classifyFn + 1500);
+  assert.ok(fnBlock.includes("INTENT_KEYWORDS.NEWS"),
+    'Must check NEWS first');
+  assert.ok(fnBlock.includes("INTENT_KEYWORDS.REAL_TIME_EXTERNAL"),
+    'Must check REAL_TIME_EXTERNAL');
+  assert.ok(ASSISTANT_SRC.includes('رئیس') && ASSISTANT_SRC.includes('امروز') && ASSISTANT_SRC.includes('فدرال رزرو'),
+    'REAL_TIME_EXTERNAL keywords must include current-events terms');
+});
+
+console.log('✅ All Web Search upgrade tests loaded.');
