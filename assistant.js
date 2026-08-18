@@ -173,6 +173,29 @@ const AssistantUI = {
         if (this.open) { this.refreshLimits(); document.getElementById('ai-input')?.focus(); }
     },
 
+    getContext() {
+        const ctx = {};
+        // Detect current page from active nav/section
+        const activeNav = document.querySelector('.nav-tab.active, .bottom-nav-item.active');
+        if (activeNav) {
+            const section = activeNav.getAttribute('data-section') || activeNav.getAttribute('data-tab');
+            if (section) ctx.page = section;
+        }
+        // Detect selected coin from coin detail modal
+        const coinDetail = document.getElementById('coin-detail-modal');
+        if (coinDetail && coinDetail.style.display !== 'none') {
+            const coinSymbol = coinDetail.getAttribute('data-coin') || coinDetail.querySelector('[data-coin-symbol]')?.getAttribute('data-coin-symbol');
+            if (coinSymbol) ctx.coin = coinSymbol;
+        }
+        // Detect current news article if on news detail
+        const newsDetail = document.getElementById('news-detail-page');
+        if (newsDetail && newsDetail.style.display !== 'none') {
+            const articleId = newsDetail.getAttribute('data-article-id');
+            if (articleId) ctx.article_id = articleId;
+        }
+        return Object.keys(ctx).length > 0 ? ctx : null;
+    },
+
     async refreshLimits() {
         const el = document.getElementById('ai-limits');
         if (!el || !window.API_BASE || (typeof isGuestUserId === 'function' ? isGuestUserId(getUserId()) : String(getUserId()).startsWith('guest_'))) {
@@ -341,7 +364,8 @@ const AssistantUI = {
             const payload = {
                 message: fullMessage,
                 history: this.history.slice(-6),
-                image: this.pendingImage || null
+                image: this.pendingImage || null,
+                context: this.getContext ? this.getContext() : null
             };
             this.pendingImage = null;
 
