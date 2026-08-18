@@ -44,7 +44,11 @@ export function createAssistantHandlers(deps) {
   const RATE_LIMIT_MSG_PREFIX = 'ai:msgs:';
   const RATE_LIMIT_IMG_PREFIX = 'ai:imgs:';
   const ALLOWED_HISTORY_ROLES = new Set(['user', 'assistant']);
-  const MAX_HISTORY_CONTENT_LENGTH = 4000;
+  // PHASE FIX: Reduced from 4000 → 2000 chars per history entry.
+  // With 4 messages × 2000 chars = 8000 chars max history (~2000-3000 tokens).
+  // Plus system prompt (~500 tokens) + new message + max_tokens 1024 = ~4000-5500 tokens.
+  // Well within all provider context windows (8K+).
+  const MAX_HISTORY_CONTENT_LENGTH = 2000;
   const MAX_CONTEXT_FIELD_LENGTH = 200;
   const CHAT_GROQ_MODEL = 'openai/gpt-oss-120b';
   const CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free';
@@ -181,10 +185,12 @@ export function createAssistantHandlers(deps) {
     return result;
   }
 
+  // PHASE FIX: Reduced from 6 → 4 messages (last 2 exchanges).
+  // With 4 messages × 2000 chars = 8000 chars max — well within all provider context windows.
   function normalizeAssistantHistory(history) {
     if (!Array.isArray(history)) return [];
     const sanitized = [];
-    for (const entry of history.slice(-6)) {
+    for (const entry of history.slice(-4)) {
       if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
       let role = typeof entry.role === 'string' && entry.role.trim()
         ? entry.role.trim().toLowerCase() : 'user';
@@ -451,6 +457,10 @@ export function createAssistantHandlers(deps) {
     } catch (error) {
       const errorType = error?.errorType || 'retryable';
       const errorMsg = error?.message || String(error);
+      // PHASE FIX: Diagnostic logging for provider failures.
+      // Logs: provider name, error type, error message (truncated), prompt size.
+      // Helps diagnose multi-turn failures without touching provider chain logic.
+      console.warn(`[ChatAI] provider=${providerName} errorType=${errorType} error=${errorMsg.slice(0, 120)} promptChars=${prompt?.length || 0} historyEntries=${historyLen || 0}`);
       if (recordCircuitResult && errorType === 'retryable') {
         try { await recordCircuitResult(env, providerName, false, errorType, errorMsg.slice(0, 120)); } catch {}
       }
@@ -458,7 +468,7 @@ export function createAssistantHandlers(deps) {
     }
   }
 
-  async function generateAssistantReply(env, prompt, imageBase64) {
+  async function generateAssistantReply(env, prompt, imageBase64, historyLen) {
     const providers = [
       ['groq', () => callGroqChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true],
       ['gemini', () => callGeminiChat(env, prompt, imageBase64), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) : true],
@@ -481,9 +491,24 @@ export function createAssistantHandlers(deps) {
 
   async function checkRateLimits(env, userId) {
     const cooldownKey = buildRateLimitKey(RATE_LIMIT_COOLDOWN_PREFIX, userId);
-    const cooldown = await readRateLimitCache(env, cooldownKey);
+    const cooldownRaw = await readRateLimitCache(env, cooldownKey);
     const cooldownSeconds = getNumericEnv(env, 'AI_COOLDOWN_SECONDS', 4);
-    if (cooldown) return { allowed: false, reason: 'cooldown', retry_after: cooldownSeconds };
+    // PHASE FIX: Timestamp-based cooldown check (not TTL-based).
+    // Cloudflare KV has a minimum TTL of 60 seconds. Previously, the cooldown
+    // value '1' was stored with TTL=max(60, cooldownSeconds), making a 4-second
+    // cooldown effectively 60 seconds. This caused the second message in a
+    // conversation to get 429 for 60 seconds — appearing as "AI unavailable".
+    // FIX: Store the EXPIRY TIMESTAMP (Date.now() + cooldownSeconds*1000)
+    // with a cleanup TTL of 300s. Check by comparing timestamps, not by
+    // whether the KV key exists. This makes the cooldown exactly cooldownSeconds.
+    if (cooldownRaw) {
+      const expiryMs = Number(cooldownRaw);
+      if (!isNaN(expiryMs) && Date.now() < expiryMs) {
+        const remainingMs = expiryMs - Date.now();
+        const remainingSec = Math.ceil(remainingMs / 1000);
+        return { allowed: false, reason: 'cooldown', retry_after: remainingSec };
+      }
+    }
 
     let isPremium = false;
     if (membershipAuthority) {
@@ -516,7 +541,11 @@ export function createAssistantHandlers(deps) {
     const isoDate = getTodayIsoDate();
     const msgKey = buildRateLimitKey(RATE_LIMIT_MSG_PREFIX, uid, isoDate);
     const imgKey = buildRateLimitKey(RATE_LIMIT_IMG_PREFIX, uid, isoDate);
-    await writeRateLimitCache(env, buildRateLimitKey(RATE_LIMIT_COOLDOWN_PREFIX, uid), '1', cooldownSeconds);
+    // PHASE FIX: Store expiry TIMESTAMP instead of '1'.
+    // TTL is 300s (well above KV's 60s minimum) for cleanup. The actual
+    // cooldown duration is checked by timestamp comparison in checkRateLimits.
+    const cooldownExpiryMs = Date.now() + (cooldownSeconds * 1000);
+    await writeRateLimitCache(env, buildRateLimitKey(RATE_LIMIT_COOLDOWN_PREFIX, uid), String(cooldownExpiryMs), 300);
     const rawMsg = await readRateLimitCache(env, msgKey);
     const msgCount = rawMsg && /^\d+$/.test(String(rawMsg)) ? Number(rawMsg) : 0;
     await writeRateLimitCache(env, msgKey, String(msgCount + 1), 86400);
@@ -604,7 +633,10 @@ export function createAssistantHandlers(deps) {
         articleContext = await fetchArticleContext(env, context.article_id);
       }
       const prompt = buildAssistantPrompt(message, history, imageBase64, context, articleContext);
-      const result = await generateAssistantReply(env, prompt, imageBase64);
+      // PHASE FIX: Diagnostic logging for multi-turn conversations.
+      // Logs history count + prompt size so we can trace why multi-turn fails.
+      console.log(`[ChatAI] userId=${userId} historyEntries=${history.length} promptChars=${prompt.length} approxTokens=${Math.ceil(prompt.length / 3)}`);
+      const result = await generateAssistantReply(env, prompt, imageBase64, history.length);
 
       let reply = result.reply;
       if (typeof reply === 'string') {
@@ -619,7 +651,7 @@ export function createAssistantHandlers(deps) {
       }
       return jsonResponse(responseBody, {}, env);
     } catch (error) {
-      console.error('AI provider error:', error instanceof Error ? error.message : String(error));
+      console.error('[ChatAI] all_providers_failed:', error instanceof Error ? error.message : String(error));
       return jsonResponse({ status: 'error', reason: 'all_providers_failed', message: 'AI service temporarily unavailable' }, { status: 503 }, env);
     }
   }

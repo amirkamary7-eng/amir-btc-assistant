@@ -363,7 +363,9 @@ const AssistantUI = {
         try {
             const payload = {
                 message: fullMessage,
-                history: this.history.slice(-6),
+                // PHASE FIX: Reduced from 6 → 4 messages (last 2 exchanges).
+                // With 4 × 2000 chars = 8000 chars max — well within all provider context windows.
+                history: this.history.slice(-4),
                 image: this.pendingImage || null,
                 context: this.getContext ? this.getContext() : null
             };
@@ -400,8 +402,33 @@ const AssistantUI = {
             this.refreshLimits();
         } catch (e) {
             this.hideTyping();
-            this.appendBubble('assistant', typeof t === 'function' ? t('ai_error') : 'Assistant unavailable');
-            console.warn('AI send error:', e);
+            // PHASE FIX: Handle 429/503 gracefully — apiFetch throws on non-200.
+            // Previously, ALL non-200 responses (including cooldown 429) showed a
+            // generic "AI unavailable" message. Now we parse the error body and
+            // show the specific reason (cooldown, daily limit, etc.).
+            let errMsg = typeof t === 'function' ? t('ai_error') : 'Assistant unavailable';
+            if (e && e.status === 429) {
+                // Try to parse the response body from the error message
+                try {
+                    const parsed = JSON.parse(e.message);
+                    if (parsed.reason === 'cooldown') {
+                        errMsg = `⏳ ${parsed.message || 'لطفاً چند ثانیه صبر کنید'}`;
+                    } else if (parsed.reason === 'daily_message_limit') {
+                        errMsg = `📊 ${parsed.message || 'محدودیت پیام روزانه تمام شده است'}`;
+                    } else if (parsed.reason === 'daily_image_limit') {
+                        errMsg = `📊 ${parsed.message || 'محدودیت ارسال تصویر تمام شده است'}`;
+                    } else if (parsed.message) {
+                        errMsg = parsed.message;
+                    }
+                } catch (_) {
+                    // e.message is not JSON — use generic error
+                    errMsg = '⏳ لطفاً چند ثانیه صبر کنید و دوباره تلاش کنید';
+                }
+            } else if (e && e.status === 503) {
+                errMsg = typeof t === 'function' ? t('ai_error') : 'AI service temporarily unavailable';
+            }
+            this.appendBubble('assistant', errMsg);
+            console.warn('AI send error:', e.status || 'no-status', e.message?.slice(0, 100));
         } finally {
             this.sending = false;
         }
