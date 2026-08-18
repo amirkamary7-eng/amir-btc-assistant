@@ -126,8 +126,8 @@ test('PREMIUM-CHAT-03: 50→100 flicker fixed — no hardcoded 50 fallback in CO
   // Must NOT have the old hardcoded 50 fallback in actual code
   assert.ok(!codeOnly.includes('data.messages_limit ?? 50'),
     'Must NOT have hardcoded ?? 50 fallback in code (causes 50→100 flicker)');
-  // Must show loading state instead
-  assert.ok(codeOnly.includes("'...'") || codeOnly.includes("'Loading...'"),
+  // Must show loading state instead (either '...' text or ai-quota-loading class)
+  assert.ok(codeOnly.includes('ai-quota-loading') || codeOnly.includes("'...'") || codeOnly.includes("'Loading...'"),
     'Must show loading state while quota fetches');
   // Must check if limit is null/undefined
   assert.ok(codeOnly.includes('limit == null') || codeOnly.includes('limit === null'),
@@ -209,10 +209,16 @@ test('QUOTA-UI-01: refreshLimits shows image quota from backend', () => {
   assert.ok(JS.includes('images_limit'), 'Must read images_limit from backend');
 });
 
-test('QUOTA-UI-02: UI displays image count (🖼️)', () => {
+test('QUOTA-UI-02: UI displays image quota with SVG icon (no emoji)', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(JS.includes('🖼️') || JS.includes('imgLine'),
+  // Must display image quota (either via imgLine variable or ai-quota-pill with image type)
+  assert.ok(JS.includes('imgLine') || JS.includes('data-quota-type="image"') || JS.includes("'image'"),
     'Must display image quota in UI');
+  // Must NOT use emoji for image quota (professional SVG icons instead)
+  const codeOnly = JS.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  // The actual quota rendering should use SVG, not emoji
+  assert.ok(codeOnly.includes('ai-quota-pill') || codeOnly.includes('ai-quota-icon'),
+    'Must use SVG-based quota pills (not emoji)');
 });
 
 test('QUOTA-UI-03: No hardcoded quota fallbacks in CODE (50, 100, 3, 10)', () => {
@@ -561,3 +567,162 @@ test('AUDIT-02: No hardcoded secrets', () => {
 });
 
 console.log('✅ All Phase 1-12 quota/image/retention/websearch tests loaded.');
+
+// ============================================================================
+// PHASE 4-8: Professional Quota UI (SVG icons, popover, status colors)
+// ============================================================================
+
+test('QUOTA-UI-05: SVG icons used for chat quota (not emoji)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const codeOnly = JS.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  // Must have SVG icon in quota rendering
+  assert.ok(codeOnly.includes('ai-quota-icon'), 'Must use ai-quota-icon class');
+  // Must NOT use emoji for chat quota
+  assert.ok(!codeOnly.includes('💬'), 'Must NOT use 💬 emoji');
+});
+
+test('QUOTA-UI-06: SVG icons used for image quota (not emoji)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const codeOnly = JS.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!codeOnly.includes('🖼️'), 'Must NOT use 🖼️ emoji');
+  assert.ok(!codeOnly.includes('📷'), 'Must NOT use 📷 emoji');
+});
+
+test('QUOTA-UI-07: Quota pills are clickable (role=button, tabindex)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('role="button"'), 'Quota pills must have role=button');
+  assert.ok(JS.includes('tabindex="0"'), 'Quota pills must have tabindex=0');
+  assert.ok(JS.includes('showQuotaPopover'), 'Must have showQuotaPopover function');
+});
+
+test('QUOTA-UI-08: Quota popover function exists with close handlers', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('showQuotaPopover'), 'Must have showQuotaPopover');
+  assert.ok(JS.includes('hideQuotaPopover'), 'Must have hideQuotaPopover');
+  // Must handle Escape key
+  assert.ok(JS.includes("e.key === 'Escape'"), 'Must close on Escape');
+  // Must handle click outside
+  assert.ok(JS.includes('outsideHandler') || JS.includes('click'), 'Must close on click outside');
+});
+
+test('QUOTA-UI-09: Quota status colors (healthy/warning/critical/empty)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('healthy'), 'Must have healthy status');
+  assert.ok(JS.includes('warning'), 'Must have warning status');
+  assert.ok(JS.includes('critical'), 'Must have critical status');
+  assert.ok(JS.includes('empty'), 'Must have empty status');
+});
+
+test('QUOTA-UI-10: Quota popover has Persian text (dynamic, not hardcoded numbers)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('سهمیه'), 'Must have Persian quota text');
+  assert.ok(JS.includes('باقی مانده'), 'Must have Persian "remaining" text');
+  assert.ok(JS.includes('بازنشانی'), 'Must mention auto-reset');
+  // Numbers must be dynamic (template literals)
+  assert.ok(JS.includes('${remaining}'), 'Remaining count must be dynamic');
+  assert.ok(JS.includes('${limit}'), 'Limit must be dynamic');
+});
+
+test('QUOTA-UI-11: Accessibility — aria-expanded, aria-label on quota pills', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('aria-expanded'), 'Must have aria-expanded');
+  assert.ok(JS.includes('aria-label'), 'Must have aria-label');
+  assert.ok(JS.includes('بستن'), 'Close button must have Persian aria-label');
+});
+
+// ============================================================================
+// PHASE 9-14: File Preview + Compression
+// ============================================================================
+
+test('FILE-01: File preview card function exists', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('showFilePreview'), 'Must have showFilePreview function');
+  assert.ok(JS.includes('removeFilePreview'), 'Must have removeFilePreview function');
+});
+
+test('FILE-02: File preview shows thumbnail + filename + size', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-file-preview-thumb'), 'Must have thumbnail');
+  assert.ok(JS.includes('ai-file-preview-name'), 'Must show filename');
+  assert.ok(JS.includes('ai-file-size-final'), 'Must show final size');
+});
+
+test('FILE-03: File size visualization (3 states: healthy/warning/critical)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('حجم مناسب'), 'Must have healthy label');
+  assert.ok(JS.includes('نزدیک سقف حجم'), 'Must have warning label');
+  // Critical state must exist
+  assert.ok(JS.includes('800 * 1024'), 'Must check 800KB threshold');
+  assert.ok(JS.includes('MAX_FILE_SIZE'), 'Must check 1MB limit');
+});
+
+test('FILE-04: Compression shows original → final size', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('originalSize'), 'Must track original size');
+  assert.ok(JS.includes('finalSize'), 'Must track final size');
+  assert.ok(JS.includes('compressed'), 'Must track compressed flag');
+  // Must show arrow between original and final
+  assert.ok(JS.includes('ai-file-size-original'), 'Must show original size');
+});
+
+test('FILE-05: Compression in progress state shown', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('showCompressionProgress'), 'Must have showCompressionProgress');
+  assert.ok(JS.includes('در حال بهینه‌سازی'), 'Must show Persian "optimizing" text');
+  assert.ok(JS.includes('ai-file-compressing'), 'Must have compression CSS class');
+});
+
+test('FILE-06: Progressive quality reduction (0.85, 0.75, 0.65, 0.55)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('0.85'), 'Must try quality 0.85');
+  assert.ok(JS.includes('0.75'), 'Must try quality 0.75');
+  assert.ok(JS.includes('0.65'), 'Must try quality 0.65');
+  assert.ok(JS.includes('0.55'), 'Must try quality 0.55');
+});
+
+test('FILE-07: PNG transparency handling (keeps PNG format)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('image/png'), 'Must check for PNG type');
+  assert.ok(JS.includes('isPng'), 'Must detect PNG');
+  // Must use PNG mime type when preserving transparency
+  assert.ok(JS.includes("isPng ? 'image/png' : 'image/jpeg'"), 'Must keep PNG for transparency');
+});
+
+test('FILE-08: File remove button exists (no quota consumed on remove)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-file-remove'), 'Must have remove button');
+  // Remove must clear pendingImage WITHOUT calling backend (no quota consumed)
+  assert.ok(JS.includes('this.pendingImage = null'), 'Remove must clear pendingImage');
+});
+
+test('FILE-09: Quota NOT consumed on file select (only on successful send)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // handleFile must NOT call recordRateLimitUsage or similar
+  // It should only set pendingImage
+  const handleFn = JS.indexOf('async handleFile');
+  const fnBlock = JS.slice(handleFn, handleFn + 3000);
+  assert.ok(!fnBlock.includes('recordRateLimitUsage'), 'handleFile must NOT record quota usage');
+  assert.ok(!fnBlock.includes('refreshLimits'), 'handleFile must NOT refresh limits (quota not consumed)');
+});
+
+test('FILE-10: Max dimension 1280px for resize', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('MAX_DIMENSION = 1280'), 'Must have MAX_DIMENSION = 1280');
+});
+
+test('FILE-11: Backend image validation (1.4MB base64)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('1400000'), 'Backend must validate <=1.4MB base64');
+  assert.ok(SRC.includes('image_too_large'), 'Must return image_too_large error');
+});
+
+test('FILE-12: No UI emoji in file handling (📎❌ replaced with SVG/text)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const codeOnly = JS.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  // Must NOT use emoji in UI chrome (file preview, error messages)
+  assert.ok(!codeOnly.includes('❌'), 'Must NOT use ❌ emoji in UI');
+  // Error messages should be plain Persian text
+  assert.ok(codeOnly.includes('حجم تصویر حتی پس از فشرده‌سازی'), 'Must have Persian error text');
+});
+
+console.log('✅ All Phase 4-14 professional UI tests loaded.');
