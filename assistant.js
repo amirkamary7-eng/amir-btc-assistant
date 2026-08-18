@@ -67,7 +67,7 @@ const AssistantUI = {
                         </svg>
                     </button>
                 </div>
-                <div id="ai-limits" class="ai-limits"></div>
+                <div id="ai-limits" class="ai-limits" role="region" aria-label="سهمیه دستیار هوشمند"></div>
                 <div id="ai-messages" class="ai-messages"></div>
                 <div class="ai-input-area">
                     <input type="file" id="ai-file" accept="image/*" hidden>
@@ -199,37 +199,144 @@ const AssistantUI = {
     async refreshLimits() {
         const el = document.getElementById('ai-limits');
         if (!el || !window.API_BASE || (typeof isGuestUserId === 'function' ? isGuestUserId(getUserId()) : String(getUserId()).startsWith('guest_'))) {
-            if (el) el.innerText = '';
+            if (el) el.innerHTML = '';
             return;
         }
-        // PHASE 2 FIX: Show loading state instead of hardcoded 50 fallback.
-        // Previously: data.messages_limit ?? 50 caused 50↔100 flicker when
-        // the async fetch hadn't resolved yet. Now show loading until real
-        // quota arrives from backend.
-        if (el) el.innerText = typeof t === 'function' ? '...' : 'Loading...';
+        // PHASE 3: Loading state — no hardcoded fallback (prevents 50↔100 flicker)
+        el.innerHTML = '<span class="ai-quota-loading">...</span>';
+        el.classList.add('ai-quota-loading-state');
         try {
             const data = await apiFetch(`/api/assistant/limits?user_id=${encodeURIComponent(getUserId())}`);
+            el.classList.remove('ai-quota-loading-state');
             const used = data.messages_used ?? 0;
             const limit = data.messages_limit;
-            // PHASE 2 FIX: If limit is undefined/null, show loading — NOT a hardcoded fallback.
+            // PHASE 3: If limit is null/undefined, stay in loading state
             if (limit == null) {
-                el.innerText = typeof t === 'function' ? '...' : 'Loading...';
+                el.innerHTML = '<span class="ai-quota-loading">...</span>';
                 return;
             }
-            // PHASE 5: Show both message quota AND image quota from authoritative backend.
+            // PHASE 4-5: Professional SVG icons + status colors
             const imgUsed = data.images_used ?? 0;
-            const imgLimit = data.images_limit;
-            const msgLine = typeof t === 'function'
-                ? `💬 ${used}/${limit} ${t('ai_messages_today')}`
-                : `💬 ${used}/${limit} messages today`;
-            const imgLine = (imgLimit != null)
-                ? (typeof t === 'function' ? `🖼️ ${imgUsed}/${imgLimit}` : `🖼️ ${imgUsed}/${imgLimit} images`)
-                : '';
-            el.innerText = imgLine ? `${msgLine}  ${imgLine}` : msgLine;
+            const imgLimit = data.images_limit ?? 0;
+            const isPremium = data.isPremium || false;
+            const msgRemaining = limit - used;
+            const imgRemaining = imgLimit - imgUsed;
+            const msgPct = limit > 0 ? (used / limit) : 1;
+            const imgPct = imgLimit > 0 ? (imgUsed / imgLimit) : 1;
+            const msgStatus = msgRemaining === 0 ? 'empty' : msgPct < 0.2 ? 'critical' : msgPct < 0.5 ? 'warning' : 'healthy';
+            const imgStatus = imgRemaining === 0 ? 'empty' : imgPct < 0.2 ? 'critical' : imgPct < 0.5 ? 'warning' : 'healthy';
+
+            el.innerHTML = `
+                <div class="ai-quota-row">
+                    <button class="ai-quota-pill ai-quota-${msgStatus}" data-quota-type="chat" data-used="${used}" data-limit="${limit}" data-premium="${isPremium}" role="button" tabindex="0" aria-expanded="false" aria-label="سهمیه پیام‌های هوش مصنوعی">
+                        <svg class="ai-quota-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="ai-quota-text">${used} / ${limit}</span>
+                    </button>
+                    <button class="ai-quota-pill ai-quota-${imgStatus}" data-quota-type="image" data-used="${imgUsed}" data-limit="${imgLimit}" data-premium="${isPremium}" role="button" tabindex="0" aria-expanded="false" aria-label="سهمیه تصاویر">
+                        <svg class="ai-quota-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                        <span class="ai-quota-text">${imgUsed} / ${imgLimit}</span>
+                    </button>
+                </div>
+            `;
+            // PHASE 6-8: Bind popover events
+            el.querySelectorAll('.ai-quota-pill').forEach(pill => {
+                pill.addEventListener('click', (e) => this.showQuotaPopover(pill));
+                pill.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.showQuotaPopover(pill); }
+                });
+            });
         } catch (_) {
-            // PHASE 2 FIX: On error, show nothing (not a hardcoded fallback).
-            if (el) el.innerText = '';
+            // PHASE 3: On error, show nothing (not a fake number)
+            el.classList.remove('ai-quota-loading-state');
+            el.innerHTML = '';
         }
+    },
+
+    // PHASE 6-8: Quota popover
+    showQuotaPopover(pill) {
+        // Close existing popover
+        this.hideQuotaPopover();
+        const type = pill.dataset.quotaType;
+        const used = parseInt(pill.dataset.used) || 0;
+        const limit = parseInt(pill.dataset.limit) || 0;
+        const isPremium = pill.dataset.premium === 'true';
+        const remaining = limit - used;
+
+        let title, body, remainingLabel;
+        if (type === 'chat') {
+            title = isPremium ? 'سهمیه پیام‌های Premium' : 'سهمیه پیام‌های هوش مصنوعی';
+            body = isPremium
+                ? 'با عضویت Premium می‌توانید روزانه تا ۱۰۰ پیام با دستیار هوش مصنوعی گفتگو کنید.'
+                : 'این سهمیه تعداد پیام‌هایی را نشان می‌دهد که امروز می‌توانید با دستیار هوش مصنوعی ارسال کنید.';
+            remainingLabel = `${remaining} از ${limit} پیام باقی مانده`;
+        } else {
+            title = isPremium ? 'سهمیه تصاویر Premium' : 'سهمیه تصاویر';
+            body = isPremium
+                ? 'شما می‌توانید روزانه تا ۱۰ تصویر برای Chat AI ارسال کنید.'
+                : 'این سهمیه تعداد تصاویری را نشان می‌دهد که امروز می‌توانید برای Chat AI ارسال کنید.';
+            remainingLabel = `${remaining} از ${limit} تصویر باقی مانده`;
+        }
+
+        const popover = document.createElement('div');
+        popover.className = 'ai-quota-popover';
+        popover.id = 'ai-quota-popover';
+        popover.setAttribute('role', 'dialog');
+        popover.setAttribute('aria-label', title);
+        popover.innerHTML = `
+            <div class="ai-quota-popover-header">
+                <span class="ai-quota-popover-title">${title}</span>
+                <button class="ai-quota-popover-close" aria-label="بستن" type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <p class="ai-quota-popover-body">${body}</p>
+            <div class="ai-quota-popover-remaining">${remainingLabel}</div>
+            ${type === 'image' ? '<div class="ai-quota-popover-note">حداکثر حجم هر تصویر: ۱ MB — تصاویر بزرگ‌تر به‌صورت خودکار فشرده می‌شوند.</div>' : ''}
+            <div class="ai-quota-popover-reset">سهمیه هر ۲۴ ساعت به‌صورت خودکار بازنشانی می‌شود.</div>
+        `;
+        // Position relative to pill
+        const rect = pill.getBoundingClientRect();
+        document.body.appendChild(popover);
+        const popRect = popover.getBoundingClientRect();
+        let left = rect.left + rect.width / 2 - popRect.width / 2;
+        left = Math.max(8, Math.min(window.innerWidth - popRect.width - 8, left));
+        let top = rect.bottom + 8;
+        // If not enough space below, show above
+        if (top + popRect.height > window.innerHeight - 8) {
+            top = rect.top - popRect.height - 8;
+        }
+        popover.style.left = left + 'px';
+        popover.style.top = top + 'px';
+        pill.setAttribute('aria-expanded', 'true');
+
+        // Close handlers
+        popover.querySelector('.ai-quota-popover-close').addEventListener('click', () => this.hideQuotaPopover());
+        const escHandler = (e) => { if (e.key === 'Escape') { this.hideQuotaPopover(); document.removeEventListener('keydown', escHandler); } };
+        document.addEventListener('keydown', escHandler);
+        // Click outside to close
+        setTimeout(() => {
+            const outsideHandler = (e) => {
+                if (!popover.contains(e.target) && !pill.contains(e.target)) {
+                    this.hideQuotaPopover();
+                    document.removeEventListener('click', outsideHandler);
+                }
+            };
+            document.addEventListener('click', outsideHandler);
+        }, 10);
+    },
+
+    hideQuotaPopover() {
+        const existing = document.getElementById('ai-quota-popover');
+        if (existing) existing.remove();
+        document.querySelectorAll('.ai-quota-pill').forEach(p => p.setAttribute('aria-expanded', 'false'));
     },
 
     // ITEM 1: Premium chat bubbles — user right, AI left with avatar
@@ -323,16 +430,20 @@ const AssistantUI = {
 
     pendingImage: null,
     pendingFileText: null,
+    pendingFileMeta: null, // PHASE 14: tracks {name, type, originalSize, finalSize, compressed}
 
-    // PHASE 4: Client-side image compression before upload.
-    // Reduces image to <=1MB by resizing + JPEG compression.
-    // This avoids Worker CPU/memory consumption for large images.
+    // PHASE 12: Client-side image compression with progressive quality reduction.
+    // Handles PNG transparency by keeping PNG format when needed.
+    // Returns { blob, originalSize, finalSize, compressed }.
     async compressImage(file) {
         const MAX_SIZE = 1 * 1024 * 1024; // 1MB target
-        const MAX_DIMENSION = 1280; // max width/height
+        const MAX_DIMENSION = 1280;
+        const originalSize = file.size;
 
         // If already small enough, return as-is
-        if (file.size <= MAX_SIZE) return file;
+        if (file.size <= MAX_SIZE) {
+            return { blob: file, originalSize, finalSize: file.size, compressed: false };
+        }
 
         return new Promise((resolve, reject) => {
             const img = new Image();
@@ -340,92 +451,226 @@ const AssistantUI = {
             reader.onload = () => {
                 img.src = reader.result;
                 img.onload = () => {
-                    // Calculate new dimensions (preserve aspect ratio)
                     let { width, height } = img;
                     if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
                         const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
                         width = Math.round(width * ratio);
                         height = Math.round(height * ratio);
                     }
-
-                    // Draw to canvas at reduced size
                     const canvas = document.createElement('canvas');
                     canvas.width = width;
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
 
-                    // Try decreasing JPEG quality until <=1MB
-                    let quality = 0.85;
-                    let blob = canvas.toBlob((b) => {
-                        if (!b) { resolve(file); return; }
-                        if (b.size <= MAX_SIZE || quality <= 0.3) {
-                            resolve(b);
-                        } else {
-                            // Reduce quality further
-                            quality = 0.6;
-                            canvas.toBlob((b2) => {
-                                resolve(b2 || file);
-                            }, 'image/jpeg', quality);
+                    // PHASE 13: Check if PNG with transparency — keep PNG if so
+                    const isPng = file.type === 'image/png';
+                    const qualities = [0.85, 0.75, 0.65, 0.55];
+                    let attempt = 0;
+
+                    const tryCompress = () => {
+                        if (attempt >= qualities.length) {
+                            // All attempts failed — return the last result anyway
+                            resolve({ blob: file, originalSize, finalSize: file.size, compressed: false });
+                            return;
                         }
-                    }, 'image/jpeg', quality);
+                        const quality = qualities[attempt];
+                        const mimeType = isPng ? 'image/png' : 'image/jpeg';
+                        canvas.toBlob((blob) => {
+                            if (!blob) {
+                                attempt++;
+                                tryCompress();
+                                return;
+                            }
+                            if (blob.size <= MAX_SIZE) {
+                                resolve({ blob, originalSize, finalSize: blob.size, compressed: true });
+                            } else {
+                                attempt++;
+                                tryCompress();
+                            }
+                        }, mimeType, quality);
+                    };
+                    tryCompress();
                 };
-                img.onerror = () => resolve(file); // fallback to original
+                img.onerror = () => resolve({ blob: file, originalSize, finalSize: file.size, compressed: false });
             };
             reader.onerror = () => reject(new Error('FileReader error'));
             reader.readAsDataURL(file);
         });
     },
 
-    // ITEM 6: Image validation — max 1MB before upload (with compression)
+    // PHASE 9-10: File preview card with size visualization
+    showFilePreview(file, compressionResult) {
+        // Remove existing preview
+        this.removeFilePreview();
+        const originalSize = compressionResult.originalSize || file.size;
+        const finalSize = compressionResult.finalSize || file.size;
+        const compressed = compressionResult.compressed || false;
+        const MAX_SIZE = 1 * 1024 * 1024;
+        const sizePct = Math.min(100, (finalSize / MAX_SIZE) * 100);
+        // PHASE 10: Three states — healthy (<800KB), warning (800KB-1MB), critical (>1MB)
+        let sizeStatus, sizeLabel, sizeColor;
+        if (finalSize < 800 * 1024) {
+            sizeStatus = 'healthy';
+            sizeLabel = 'حجم مناسب';
+            sizeColor = '#22c55e';
+        } else if (finalSize <= MAX_SIZE) {
+            sizeStatus = 'warning';
+            sizeLabel = 'نزدیک سقف حجم';
+            sizeColor = '#F5A623';
+        } else {
+            sizeStatus = 'critical';
+            sizeLabel = 'بیش از حد مجاز';
+            sizeColor = '#ef4444';
+        }
+
+        const formatSize = (bytes) => {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        };
+
+        const preview = document.createElement('div');
+        preview.id = 'ai-file-preview';
+        preview.className = 'ai-file-preview';
+        preview.innerHTML = `
+            <div class="ai-file-preview-header">
+                <div class="ai-file-preview-thumb"></div>
+                <div class="ai-file-preview-info">
+                    <div class="ai-file-preview-name">${file.name}</div>
+                    <div class="ai-file-preview-size-row">
+                        ${compressed ? `<span class="ai-file-size-original">${formatSize(originalSize)}</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg> <span class="ai-file-size-final">${formatSize(finalSize)}</span>` : `<span class="ai-file-size-final">${formatSize(finalSize)}</span>`}
+                    </div>
+                </div>
+            </div>
+            <div class="ai-file-size-bar">
+                <div class="ai-file-size-bar-fill ai-file-size-${sizeStatus}" style="width:${sizePct}%"></div>
+            </div>
+            <div class="ai-file-preview-status">
+                <span class="ai-file-status-text" style="color:${sizeColor}">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        ${sizeStatus === 'healthy' ? '<polyline points="20 6 9 17 4 12"/>' : sizeStatus === 'warning' ? '<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>' : '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>'}
+                    </svg>
+                    ${sizeLabel}
+                </span>
+                <div class="ai-file-preview-actions">
+                    <button class="ai-file-remove" type="button" aria-label="حذف فایل">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                        حذف
+                    </button>
+                </div>
+            </div>
+        `;
+        // Load thumbnail
+        if (file.type.startsWith('image/')) {
+            const thumbReader = new FileReader();
+            thumbReader.onload = () => {
+                const thumb = preview.querySelector('.ai-file-preview-thumb');
+                thumb.style.backgroundImage = `url(${thumbReader.result})`;
+            };
+            thumbReader.readAsDataURL(compressionResult.blob || file);
+        }
+        // Remove button
+        preview.querySelector('.ai-file-remove').addEventListener('click', () => {
+            this.pendingImage = null;
+            this.pendingFileText = null;
+            this.pendingFileMeta = null;
+            this.removeFilePreview();
+        });
+        // Insert before messages area
+        const messages = document.getElementById('ai-messages');
+        messages.parentNode.insertBefore(preview, messages);
+    },
+
+    removeFilePreview() {
+        document.getElementById('ai-file-preview')?.remove();
+    },
+
+    // PHASE 11: Image validation + compression with preview
     async handleFile(e) {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        // PHASE 4: Client-side compression for images >1MB
         const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
-        let processedFile = file;
+        let compressionResult = { blob: file, originalSize: file.size, finalSize: file.size, compressed: false };
 
         if (file.type.startsWith('image/') && file.size > MAX_FILE_SIZE) {
+            // PHASE 11: Show compression in progress
+            this.showCompressionProgress(file);
             try {
-                processedFile = await this.compressImage(file);
+                compressionResult = await this.compressImage(file);
+                this.removeCompressionProgress();
                 // If still >1MB after compression, reject
-                if (processedFile.size > MAX_FILE_SIZE) {
-                    this.appendBubble('assistant', '❌ حجم تصویر حتی پس از فشرده‌سازی بیشتر از ۱ مگابایت است');
+                if (compressionResult.finalSize > MAX_FILE_SIZE) {
+                    this.removeFilePreview();
+                    this.appendBubble('assistant', 'حجم تصویر حتی پس از فشرده‌سازی بیشتر از ۱ مگابایت است');
                     e.target.value = '';
                     return;
                 }
             } catch (err) {
-                this.appendBubble('assistant', '❌ خطا در پردازش تصویر');
+                this.removeCompressionProgress();
+                this.appendBubble('assistant', 'خطا در پردازش تصویر');
                 e.target.value = '';
                 return;
             }
         } else if (file.size > MAX_FILE_SIZE && !file.type.startsWith('image/')) {
-            // Non-image files: reject if >1MB (no compression)
-            this.appendBubble('assistant', '❌ حجم فایل نباید بیشتر از ۱ مگابایت باشد');
+            this.appendBubble('assistant', 'حجم فایل نباید بیشتر از ۱ مگابایت باشد');
             e.target.value = '';
             return;
         }
 
+        // PHASE 9: Show file preview card
+        this.showFilePreview(file, compressionResult);
+
+        // Store the processed file for sending
         if (file.type.startsWith('image/')) {
             const reader = new FileReader();
             reader.onload = () => {
                 this.pendingImage = reader.result;
-                this.appendBubble('user', '', reader.result);
+                this.pendingFileMeta = {
+                    name: file.name,
+                    type: file.type,
+                    originalSize: compressionResult.originalSize,
+                    finalSize: compressionResult.finalSize,
+                    compressed: compressionResult.compressed,
+                };
             };
-            // Read the compressed file if available
-            const readTarget = (processedFile !== file) ? processedFile : file;
+            const readTarget = compressionResult.blob || file;
             reader.readAsDataURL(readTarget);
         } else {
             const reader = new FileReader();
             reader.onload = () => {
                 const text = String(reader.result).slice(0, 3000);
                 this.pendingFileText = text;
-                this.appendBubble('user', `📎 ${file.name}\n${text.slice(0, 200)}...`);
             };
             reader.readAsText(file);
         }
         e.target.value = '';
+    },
+
+    showCompressionProgress(file) {
+        this.removeFilePreview();
+        const preview = document.createElement('div');
+        preview.id = 'ai-file-preview';
+        preview.className = 'ai-file-preview ai-file-compressing';
+        preview.innerHTML = `
+            <div class="ai-file-preview-header">
+                <div class="ai-file-preview-thumb ai-file-preview-thumb-loading"></div>
+                <div class="ai-file-preview-info">
+                    <div class="ai-file-preview-name">${file.name}</div>
+                    <div class="ai-file-compressing-text">در حال بهینه‌سازی تصویر...</div>
+                </div>
+            </div>
+        `;
+        const messages = document.getElementById('ai-messages');
+        messages.parentNode.insertBefore(preview, messages);
+    },
+
+    removeCompressionProgress() {
+        // Same as removeFilePreview — just removes the element
+        this.removeFilePreview();
     },
 
     async send() {
@@ -479,13 +724,13 @@ const AssistantUI = {
                 // ITEM 5: Better error messages for rate limiting
                 let errMsg;
                 if (data.reason === 'cooldown') {
-                    errMsg = `⏳ ${data.message || 'لطفاً چند ثانیه صبر کنید'}`;
+                    errMsg = data.message || 'لطفاً چند ثانیه صبر کنید';
                 } else if (data.reason === 'daily_message_limit') {
-                    errMsg = `📊 ${data.message || 'محدودیت پیام روزانه تمام شده است'}`;
+                    errMsg = data.message || 'محدودیت پیام روزانه تمام شده است';
                 } else if (data.reason === 'image_too_large') {
-                    errMsg = `❌ ${data.message || 'حجم تصویر زیاد است'}`;
+                    errMsg = data.message || 'حجم تصویر زیاد است';
                 } else if (data.reason === 'daily_image_limit') {
-                    errMsg = `📊 ${data.message || 'محدودیت ارسال تصویر تمام شده است'}`;
+                    errMsg = data.message || 'محدودیت ارسال تصویر تمام شده است';
                 } else {
                     errMsg = data.message || data.detail || (typeof t === 'function' ? t('ai_error') : 'Error');
                 }
@@ -504,17 +749,17 @@ const AssistantUI = {
                 try {
                     const parsed = JSON.parse(e.message);
                     if (parsed.reason === 'cooldown') {
-                        errMsg = `⏳ ${parsed.message || 'لطفاً چند ثانیه صبر کنید'}`;
+                        errMsg = parsed.message || 'لطفاً چند ثانیه صبر کنید';
                     } else if (parsed.reason === 'daily_message_limit') {
-                        errMsg = `📊 ${parsed.message || 'محدودیت پیام روزانه تمام شده است'}`;
+                        errMsg = parsed.message || 'محدودیت پیام روزانه تمام شده است';
                     } else if (parsed.reason === 'daily_image_limit') {
-                        errMsg = `📊 ${parsed.message || 'محدودیت ارسال تصویر تمام شده است'}`;
+                        errMsg = parsed.message || 'محدودیت ارسال تصویر تمام شده است';
                     } else if (parsed.message) {
                         errMsg = parsed.message;
                     }
                 } catch (_) {
                     // e.message is not JSON — use generic error
-                    errMsg = '⏳ لطفاً چند ثانیه صبر کنید و دوباره تلاش کنید';
+                    errMsg = 'لطفاً چند ثانیه صبر کنید و دوباره تلاش کنید';
                 }
             } else if (e && e.status === 503) {
                 errMsg = typeof t === 'function' ? t('ai_error') : 'AI service temporarily unavailable';
