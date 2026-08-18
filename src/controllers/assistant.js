@@ -995,7 +995,22 @@ export function createAssistantHandlers(deps) {
   }
 
   async function generateAssistantReply(env, prompt, imageBase64, historyLen) {
-    const providers = [
+    // PHASE 10: Vision-capable routing — when an image is attached, skip text-only
+    // providers (Groq, OpenRouter text, Workers AI) and go directly to Gemini
+    // (the only vision-capable provider in the chain via inline_data).
+    // OpenAI (gpt-4o-mini) also supports vision but is opt-in (disabled by default).
+    // Text-only path: Groq → Gemini → OpenRouter → Workers AI → OpenAI (unchanged).
+    const hasImage = Boolean(imageBase64);
+    const providers = hasImage ? [
+      // Vision-capable providers ONLY when image is present
+      ['gemini', () => callGeminiChat(env, prompt, imageBase64), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) : true],
+      ['openai', () => callOpenAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false) : false],
+      // Fall back to text-only if vision providers fail (image will be ignored)
+      ['groq', () => callGroqChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true],
+      ['openrouter', () => callOpenRouterChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true) : true],
+      ['workers-ai', () => callWorkersAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true) : true],
+    ] : [
+      // Text-only path (original chain — unchanged)
       ['groq', () => callGroqChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true],
       ['gemini', () => callGeminiChat(env, prompt, imageBase64), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) : true],
       ['openrouter', () => callOpenRouterChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true) : true],

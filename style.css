@@ -3487,12 +3487,21 @@ strong.down { color: var(--red); }
 
 /* ═══ Input area — Premium ═══ */
 .ai-input-area {
-    display: flex; align-items: flex-end; gap: 8px;
     padding: 10px 14px;
     border-top: 1px solid rgba(245, 166, 35, 0.08);
     background: rgba(8, 21, 38, 0.6);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+}
+
+/* PHASE 7: Composer attachment area (above input) */
+.ai-composer-attachment {
+    margin-bottom: 8px;
+}
+.ai-composer-attachment:empty { display: none !important; }
+
+.ai-input-row {
+    display: flex; align-items: flex-end; gap: 8px;
 }
 
 .ai-input {

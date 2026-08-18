@@ -1849,12 +1849,15 @@ console.log('✅ All OpenRouter tests loaded.');
 // ═══════════════════════════════════════════════════════════════════════════
 
 // CA-01: Groq is primary provider
-test('CA-01: Groq is first in Chat AI provider chain', () => {
+test('CA-01: Groq is first in TEXT-ONLY Chat AI provider chain', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const groqIdx = ASSISTANT_SRC.indexOf("['groq'");
-  const geminiIdx = ASSISTANT_SRC.indexOf("['gemini'");
-  assert.ok(groqIdx > 0 && geminiIdx > 0, 'Groq and Gemini must exist in provider chain');
-  assert.ok(groqIdx < geminiIdx, 'Groq must come before Gemini');
+  // Check text-only path (after 'Text-only path' comment) where Groq is primary
+  const textPathIdx = ASSISTANT_SRC.indexOf('Text-only path (original chain');
+  const textBlock = textPathIdx > -1 ? ASSISTANT_SRC.slice(textPathIdx, textPathIdx + 1000) : ASSISTANT_SRC;
+  const groqIdx = textBlock.indexOf("['groq'");
+  const geminiIdx = textBlock.indexOf("['gemini'");
+  assert.ok(groqIdx > 0 && geminiIdx > 0, 'Groq and Gemini must exist in text-only provider chain');
+  assert.ok(groqIdx < geminiIdx, 'Groq must come before Gemini in text-only path');
 });
 
 // CA-02: OpenRouter uses correct model
@@ -1991,17 +1994,19 @@ test('CA-13: Chat AI OpenRouter has HTTP-Referer + X-Title headers', () => {
 });
 
 // CA-14: Provider chain order: Groq → Gemini → OpenRouter → Workers AI → OpenAI
-test('CA-14: Provider chain order is correct', () => {
+test('CA-14: Provider chain order is correct (text-only path)', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const groqIdx = ASSISTANT_SRC.indexOf("['groq'");
-  const geminiIdx = ASSISTANT_SRC.indexOf("['gemini'");
-  const orIdx = ASSISTANT_SRC.indexOf("['openrouter'");
-  const waIdx = ASSISTANT_SRC.indexOf("['workers-ai'");
-  const oaiIdx = ASSISTANT_SRC.indexOf("['openai'");
-  assert.ok(groqIdx < geminiIdx, 'Groq before Gemini');
-  assert.ok(geminiIdx < orIdx, 'Gemini before OpenRouter');
-  assert.ok(orIdx < waIdx, 'OpenRouter before Workers AI');
-  assert.ok(waIdx < oaiIdx, 'Workers AI before OpenAI');
+  const textPathIdx = ASSISTANT_SRC.indexOf('Text-only path (original chain');
+  const textBlock = textPathIdx > -1 ? ASSISTANT_SRC.slice(textPathIdx, textPathIdx + 1000) : ASSISTANT_SRC;
+  const groqIdx = textBlock.indexOf("['groq'");
+  const geminiIdx = textBlock.indexOf("['gemini'");
+  const orIdx = textBlock.indexOf("['openrouter'");
+  const waIdx = textBlock.indexOf("['workers-ai'");
+  const oaiIdx = textBlock.indexOf("['openai'");
+  assert.ok(groqIdx > -1 && groqIdx < geminiIdx, 'Groq before Gemini');
+  assert.ok(geminiIdx > -1 && geminiIdx < orIdx, 'Gemini before OpenRouter');
+  assert.ok(orIdx > -1 && orIdx < waIdx, 'OpenRouter before Workers AI');
+  assert.ok(waIdx > -1 && waIdx < oaiIdx, 'Workers AI before OpenAI');
 });
 
 // CA-15: Workers AI is fallback (not primary)
@@ -2278,14 +2283,16 @@ test('RT-35: No external search for non-external intents', () => {
 // RT-36: Provider chain UNTOUCHED (Groq→Gemini→OpenRouter→Workers AI→OpenAI)
 test('RT-36: Provider chain order unchanged', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const providers = ASSISTANT_SRC.match(/const providers = \[([\s\S]*?)\];/);
+  const textPathIdx = ASSISTANT_SRC.indexOf('Text-only path (original chain');
+  const textBlock = textPathIdx > -1 ? ASSISTANT_SRC.slice(textPathIdx, textPathIdx + 1000) : ASSISTANT_SRC;
+  const providers = textBlock.match(/\[([\s\S]*?openai[\s\S]*?)\];/);
   assert.ok(providers, 'Must have providers array');
   const block = providers[1];
-  const groqIdx = block.indexOf("['groq'");
-  const geminiIdx = block.indexOf("['gemini'");
-  const orIdx = block.indexOf("['openrouter'");
-  const waIdx = block.indexOf("['workers-ai'");
-  const oaiIdx = block.indexOf("['openai'");
+  const groqIdx = block.indexOf("'groq'");
+  const geminiIdx = block.indexOf("'gemini'");
+  const orIdx = block.indexOf("'openrouter'");
+  const waIdx = block.indexOf("'workers-ai'");
+  const oaiIdx = block.indexOf("'openai'");
   assert.ok(groqIdx > -1 && groqIdx < geminiIdx, 'Groq before Gemini');
   assert.ok(geminiIdx < orIdx, 'Gemini before OpenRouter');
   assert.ok(orIdx < waIdx, 'OpenRouter before Workers AI');
