@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const WORKER_PATH = '/home/z/my-project/amir-btc-assistant/worker-proxy.js';
+const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
 function getWorkerSource() { return fs.readFileSync(WORKER_PATH, 'utf8'); }
 
 function loadWorker(pgOverride) {
