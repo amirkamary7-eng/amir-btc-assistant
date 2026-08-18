@@ -2040,3 +2040,76 @@ test('CA-18: Frontend assistant.js sends context in payload', () => {
 });
 
 console.log('✅ All Chat AI redesign tests loaded.');
+
+// ============================================================================
+// CA-19..24: Multi-turn conversation fix (cooldown timestamp + history limits)
+// ============================================================================
+
+// CA-19: Cooldown stores expiry timestamp (not '1')
+test('CA-19: Cooldown stores expiry timestamp instead of static value', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // recordRateLimitUsage must store a timestamp (Date.now() + cooldownSeconds*1000)
+  assert.ok(ASSISTANT_SRC.includes('cooldownExpiryMs'),
+    'recordRateLimitUsage must compute cooldownExpiryMs');
+  assert.ok(ASSISTANT_SRC.includes("String(cooldownExpiryMs)"),
+    'Cooldown value must be stored as String(timestamp)');
+  // The writeRateLimitCache call for cooldown must use String(cooldownExpiryMs), not '1'
+  const cooldownWriteLine = ASSISTANT_SRC.match(/writeRateLimitCache\(env,\s*buildRateLimitKey\(RATE_LIMIT_COOLDOWN_PREFIX,\s*uid\),\s*([^,]+),/);
+  assert.ok(cooldownWriteLine, 'Must have writeRateLimitCache call for cooldown');
+  assert.equal(cooldownWriteLine[1].trim(), 'String(cooldownExpiryMs)',
+    'Cooldown write must use String(cooldownExpiryMs), not a static value');
+});
+
+// CA-20: checkRateLimits uses timestamp comparison (not truthy check)
+test('CA-20: checkRateLimits compares timestamp with Date.now()', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const checkFn = ASSISTANT_SRC.indexOf('async function checkRateLimits');
+  const fnBlock = ASSISTANT_SRC.slice(checkFn, checkFn + 1500);
+  assert.ok(fnBlock.includes('Date.now() < expiryMs'),
+    'checkRateLimits must compare Date.now() with stored expiry timestamp');
+  assert.ok(fnBlock.includes('Number(cooldownRaw)'),
+    'checkRateLimits must parse stored value as Number');
+});
+
+// CA-21: History limited to 4 messages (not 6)
+test('CA-21: History limited to last 4 messages (reduced from 6)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('history.slice(-4)'),
+    'Backend must slice history to last 4 messages');
+  const ASSISTANT_JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_JS.includes('this.history.slice(-4)'),
+    'Frontend must slice history to last 4 messages');
+});
+
+// CA-22: MAX_HISTORY_CONTENT_LENGTH reduced to 2000
+test('CA-22: MAX_HISTORY_CONTENT_LENGTH is 2000 (reduced from 4000)', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(ASSISTANT_SRC.includes('MAX_HISTORY_CONTENT_LENGTH = 2000'),
+    'MAX_HISTORY_CONTENT_LENGTH must be 2000');
+});
+
+// CA-23: Frontend catch block handles 429 with cooldown message
+test('CA-23: Frontend catch block shows cooldown message on 429', () => {
+  const ASSISTANT_JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // Catch block must check e.status === 429
+  assert.ok(ASSISTANT_JS.includes("e.status === 429"),
+    'Frontend catch block must check for 429 status');
+  assert.ok(ASSISTANT_JS.includes("parsed.reason === 'cooldown'"),
+    'Frontend must parse cooldown reason from error body');
+});
+
+// CA-24: Diagnostic logging for multi-turn debugging
+test('CA-24: Diagnostic logging for multi-turn conversations', () => {
+  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Must log history count + prompt size
+  assert.ok(ASSISTANT_SRC.includes('[ChatAI]'),
+    'Must have [ChatAI] diagnostic logging');
+  assert.ok(ASSISTANT_SRC.includes('historyEntries'),
+    'Must log historyEntries count');
+  assert.ok(ASSISTANT_SRC.includes('promptChars'),
+    'Must log promptChars count');
+  assert.ok(ASSISTANT_SRC.includes('errorType'),
+    'Must log errorType on provider failure');
+});
+
+console.log('✅ All multi-turn fix tests loaded.');

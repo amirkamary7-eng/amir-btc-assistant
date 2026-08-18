@@ -684,7 +684,9 @@ test('AI Chat: no AI provider configured returns 503', async () => {
 
 test('AI Chat: rate limited by cooldown returns 429', async () => {
   const rateLimits = createMemoryKv();
-  await rateLimits.put('ai:cooldown:999888', '1');
+  // PHASE FIX: Cooldown now stores an expiry TIMESTAMP (not '1').
+  // Set expiry to 10 seconds in the future → cooldown active.
+  await rateLimits.put('ai:cooldown:999888', String(Date.now() + 10000));
   const worker = loadWorker();
   const env = createEnv({ RATE_LIMITS: rateLimits });
   const user = { id: 999888, first_name: 'Test' };
@@ -695,6 +697,24 @@ test('AI Chat: rate limited by cooldown returns 429', async () => {
   });
   assert.equal(res.status, 429);
   assert.equal(res.body.reason, 'cooldown');
+  // retry_after should be ~10 seconds (ceil)
+  assert.ok(res.body.retry_after >= 1 && res.body.retry_after <= 10, 'retry_after should be 1-10 seconds');
+});
+
+test('AI Chat: expired cooldown allows message (timestamp-based)', async () => {
+  const rateLimits = createMemoryKv();
+  // PHASE FIX: Expired cooldown (timestamp in the past) should ALLOW the message.
+  await rateLimits.put('ai:cooldown:999888', String(Date.now() - 1000));
+  const worker = loadWorker();
+  const env = createEnv({ RATE_LIMITS: rateLimits });
+  const user = { id: 999889, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'Hello' },
+    initData,
+  });
+  // Should NOT be 429 — cooldown expired, should proceed to LLM or 503 if no provider
+  assert.notEqual(res.status, 429, 'expired cooldown should not block');
 });
 
 test('AI Chat: empty message returns 422', async () => {
