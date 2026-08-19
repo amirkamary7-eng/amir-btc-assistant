@@ -318,11 +318,16 @@ async function adminApiFetch(path, options = {}) {
                 let detail = '';
                 try { detail = await res.text(); } catch (_) {}
                 let errMsg = detail || `HTTP ${res.status}`;
-                try { const j = JSON.parse(detail); if (j.detail) errMsg = j.detail; } catch (_) {}
+                let errorBody = null;
+                try { const j = JSON.parse(detail); errorBody = j; if (j.detail) errMsg = j.detail; if (j.message) errMsg = j.message; } catch (_) {}
                 const err = new Error(errMsg);
                 err.status = res.status;
-                // Don't retry on 401/403/422 — these are auth/validation errors
-                if (res.status === 401 || res.status === 403 || res.status === 422) {
+                err.body = errorBody;
+                // Don't retry on 401/403/422 — auth/validation errors
+                // Don't retry on 404 — resource already deleted (double-click)
+                // Don't retry on 409 — conflict (CAMPAIGN_RECENTLY_SENT, already exists)
+                // These are permanent client errors — retrying won't help.
+                if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 404 || res.status === 409) {
                     throw err;
                 }
                 // Retry on 500/502/503/504 and network errors
@@ -337,8 +342,8 @@ async function adminApiFetch(path, options = {}) {
             }
         } catch (e) {
             lastError = e;
-            // Don't retry on auth errors
-            if (e.status === 401 || e.status === 403 || e.status === 422) {
+            // Don't retry on auth/validation/client errors
+            if (e.status === 401 || e.status === 403 || e.status === 422 || e.status === 404 || e.status === 409) {
                 throw e;
             }
             // Last attempt — throw
@@ -3562,17 +3567,26 @@ window.saveAdChannel = saveAdChannel;
 
 async function deleteAdChannel(channelId) {
     if (!confirm('از حذف این کانال مطمئن هستید؟')) return;
+    var delBtn = document.querySelector('button[onclick*="deleteAdChannel(\'' + channelId + '\')"]');
+    var cardEl = delBtn ? delBtn.closest('.ads-item-card') : null;
+    if (delBtn) { delBtn.disabled = true; }
     try {
         var data = await adminApiFetch('/api/admin/advertisements/channels/' + encodeURIComponent(channelId), { method: 'DELETE' });
         if (data && data.status === 'success') {
             adminToast('کانال حذف شد', 'success');
-            loadAdChannels();
+            if (cardEl && cardEl.parentNode) { cardEl.parentNode.removeChild(cardEl); }
+            if (typeof _adsChannelCache !== 'undefined' && Array.isArray(_adsChannelCache)) {
+                _adsChannelCache = _adsChannelCache.filter(function(c) { return String(c.id) !== String(channelId); });
+            }
+            loadAdChannels().catch(function() {});
         } else {
             adminToast((data && data.message) || 'خطا در حذف', 'error');
+            if (delBtn) { delBtn.disabled = false; }
         }
     } catch (e) {
         console.error('deleteAdChannel:', e);
         adminToast('خطا در حذف', 'error');
+        if (delBtn) { delBtn.disabled = false; }
     }
 }
 window.deleteAdChannel = deleteAdChannel;
@@ -3777,17 +3791,30 @@ window.saveAdPopup = saveAdPopup;
 
 async function deleteAdPopup(popupId) {
     if (!confirm('از حذف این پاپ‌آپ مطمئن هستید؟')) return;
+    // Find the card element to remove optimistically after API success
+    var delBtn = document.querySelector('button[onclick*="deleteAdPopup(\'' + popupId + '\')"]');
+    var cardEl = delBtn ? delBtn.closest('.ads-item-card') : null;
+    if (delBtn) { delBtn.disabled = true; }
     try {
         var data = await adminApiFetch('/api/admin/advertisements/popups/' + encodeURIComponent(popupId), { method: 'DELETE' });
         if (data && data.status === 'success') {
             adminToast('پاپ‌آپ حذف شد', 'success');
-            loadAdPopups();
+            // Optimistic removal: remove the card from DOM immediately
+            if (cardEl && cardEl.parentNode) { cardEl.parentNode.removeChild(cardEl); }
+            // Also remove from in-memory cache
+            if (typeof _adsPopupCache !== 'undefined' && Array.isArray(_adsPopupCache)) {
+                _adsPopupCache = _adsPopupCache.filter(function(p) { return String(p.id) !== String(popupId); });
+            }
+            // Background refresh for synchronization (non-blocking)
+            loadAdPopups().catch(function() {});
         } else {
             adminToast((data && data.message) || 'خطا در حذف', 'error');
+            if (delBtn) { delBtn.disabled = false; }
         }
     } catch (e) {
         console.error('deleteAdPopup:', e);
         adminToast('خطا در حذف', 'error');
+        if (delBtn) { delBtn.disabled = false; }
     }
 }
 window.deleteAdPopup = deleteAdPopup;
@@ -4011,17 +4038,26 @@ window.saveAdMessage = saveAdMessage;
 
 async function deleteAdMessage(messageId) {
     if (!confirm('از حذف این پیام مطمئن هستید؟')) return;
+    var delBtn = document.querySelector('button[onclick*="deleteAdMessage(\'' + messageId + '\')"]');
+    var cardEl = delBtn ? delBtn.closest('.ads-item-card') : null;
+    if (delBtn) { delBtn.disabled = true; }
     try {
         var data = await adminApiFetch('/api/admin/advertisements/messages/' + encodeURIComponent(messageId), { method: 'DELETE' });
         if (data && data.status === 'success') {
             adminToast('پیام حذف شد', 'success');
-            loadAdMessages();
+            if (cardEl && cardEl.parentNode) { cardEl.parentNode.removeChild(cardEl); }
+            if (typeof _adsMessageCache !== 'undefined' && Array.isArray(_adsMessageCache)) {
+                _adsMessageCache = _adsMessageCache.filter(function(m) { return String(m.id) !== String(messageId); });
+            }
+            loadAdMessages().catch(function() {});
         } else {
             adminToast((data && data.message) || 'خطا در حذف', 'error');
+            if (delBtn) { delBtn.disabled = false; }
         }
     } catch (e) {
         console.error('deleteAdMessage:', e);
         adminToast('خطا در حذف', 'error');
+        if (delBtn) { delBtn.disabled = false; }
     }
 }
 window.deleteAdMessage = deleteAdMessage;
@@ -4076,7 +4112,16 @@ async function sendAdMessage(messageId) {
         }
     } catch (e) {
         console.error('sendAdMessage:', e);
-        adminToast('خطا در ارسال: ' + (e.message || ''), 'error');
+        // Read retry_after from 409 error body if available
+        var retryAfter = e.body && e.body.retry_after_seconds ? e.body.retry_after_seconds : null;
+        var errorCode = e.body && e.body.code ? e.body.code : null;
+        if (errorCode === 'CAMPAIGN_RECENTLY_SENT' && retryAfter) {
+            adminToast('این کمپین اخیراً ارسال شده. ' + retryAfter + ' ثانیه صبر کنید.', 'error');
+        } else if (e.status === 409 && retryAfter) {
+            adminToast('عملیات تکراری. ' + retryAfter + ' ثانیه صبر کنید.', 'error');
+        } else {
+            adminToast('خطا در ارسال: ' + (e.message || ''), 'error');
+        }
     } finally {
         // Re-enable the send button (only if campaign is still active — loadAdMessages may re-render)
         if (sendBtn && sendBtn.dataset._origText) {
