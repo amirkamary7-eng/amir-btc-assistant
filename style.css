@@ -15346,3 +15346,12 @@ body.jl-locked .cd-fullscreen {
         transition: none !important;
     }
 }
+
+/* ═══ Welcome Message (deterministic, no API call) ═══ */
+.ai-welcome-row { animation: ai-msg-in 0.3s ease both; }
+.ai-welcome-bubble {
+    background: rgba(245, 166, 35, 0.04);
+    border-inline-start: 2px solid rgba(245, 166, 35, 0.3);
+    color: #C5D0E0;
+    font-size: 13px; line-height: 1.6;
+}

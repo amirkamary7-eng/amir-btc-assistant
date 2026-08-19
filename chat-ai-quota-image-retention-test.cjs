@@ -1683,3 +1683,108 @@ test('VISION-PROD-10: Gemini vision request logging (safe, no base64 content)', 
 });
 
 console.log('✅ All production vision regression tests loaded.');
+
+// ============================================================================
+// PHASE 4: Welcome Message + Vision Diagnostic Tests
+// ============================================================================
+
+test('WELCOME-MSG-01: showWelcomeIfEmpty function exists', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('showWelcomeIfEmpty'), 'Must have showWelcomeIfEmpty function');
+});
+
+test('WELCOME-MSG-02: Welcome shows only when history is empty', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const fnIdx = JS.indexOf('showWelcomeIfEmpty()');
+  const fnBlock = JS.slice(fnIdx, fnIdx + 500);
+  assert.ok(fnBlock.includes('this.history.length > 0'),
+    'Must check history.length > 0 before showing welcome');
+  assert.ok(fnBlock.includes('return'),
+    'Must return early if history has messages');
+});
+
+test('WELCOME-MSG-03: Welcome does NOT make AI API call', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const fnIdx = JS.indexOf('showWelcomeIfEmpty()');
+  const fnBlock = JS.slice(fnIdx, fnIdx + 2000);
+  // Must NOT call apiFetch or generateAssistantReply or send()
+  assert.ok(!fnBlock.includes('apiFetch'), 'Welcome must NOT call API');
+  assert.ok(!fnBlock.includes('generateAssistantReply'), 'Welcome must NOT call AI');
+  // Must use deterministic text
+  assert.ok(fnBlock.includes('welcomeText'), 'Must use deterministic text');
+});
+
+test('WELCOME-MSG-04: Welcome has Persian text', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('سلام، خوش اومدی'), 'Must have Persian welcome text');
+  assert.ok(JS.includes('دستیار هوش مصنوعی'), 'Must mention AI assistant');
+});
+
+test('WELCOME-MSG-05: Welcome has English text', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('Welcome! I am your AI Assistant'), 'Must have English welcome text');
+});
+
+test('WELCOME-MSG-06: Welcome shows on toggle (chat open)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const toggleFn = JS.indexOf('toggle(show)');
+  const fnBlock = JS.slice(toggleFn, toggleFn + 800);
+  assert.ok(fnBlock.includes('showWelcomeIfEmpty'),
+    'toggle() must call showWelcomeIfEmpty when opening');
+});
+
+test('WELCOME-MSG-07: Welcome removed when user sends first message', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  const fnBlock = JS.slice(appendFn, appendFn + 500);
+  // appendBubble must hide empty state (welcome is part of empty state replacement)
+  assert.ok(fnBlock.includes('this.hideEmptyState()'),
+    'appendBubble must hide empty state (replaces welcome)');
+});
+
+test('VISION-DIAG-01: Gemini call logs DB gateway errors', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('Gemini DB gateway error'),
+    'Must log DB gateway errors for Gemini');
+  assert.ok(SRC.includes('dbErr'),
+    'Must capture DB error details');
+});
+
+test('VISION-DIAG-02: Gemini call logs response status + body length', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('Gemini response: status='),
+    'Must log Gemini response status');
+  assert.ok(SRC.includes('bodyLen='),
+    'Must log Gemini response body length');
+});
+
+test('VISION-DIAG-03: Gemini error logs actual error message from API', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('Gemini HTTP'),
+    'Must log Gemini HTTP error code');
+  assert.ok(SRC.includes('errorDetail'),
+    'Must extract and log actual error detail from response');
+});
+
+test('VISION-DIAG-04: Circuit breaker state logged', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('circuit OPEN'),
+    'Must log when circuit is OPEN');
+  assert.ok(SRC.includes('circuit CLOSED'),
+    'Must log when circuit is CLOSED');
+  assert.ok(SRC.includes('cb.state'),
+    'Must log circuit breaker state');
+});
+
+test('VISION-DIAG-05: Gemini error includes detail in thrown exception', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // The thrown error must include the actual Gemini error detail
+  const geminiFn = SRC.indexOf('async function callGeminiChat');
+  const fnBlock = SRC.slice(geminiFn, geminiFn + 2000);
+  assert.ok(fnBlock.includes('errorDetail'),
+    'Must include errorDetail in thrown exception');
+  assert.ok(fnBlock.includes('Gemini failed: HTTP'),
+    'Must include HTTP status in error');
+});
+
+console.log('✅ All welcome + vision diagnostic tests loaded.');

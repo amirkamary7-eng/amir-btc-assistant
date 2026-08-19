@@ -249,7 +249,53 @@ const AssistantUI = {
         if (panel) panel.style.display = this.open ? 'flex' : 'none';
         if (fab) fab.classList.toggle('ai-fab-hidden', this.open);
         if (bubble && this.open) { bubble.classList.add('ai-speech-hidden'); localStorage.setItem('ai_speech_dismissed', '1'); }
-        if (this.open) { this.refreshLimits(); document.getElementById('ai-input')?.focus(); }
+        if (this.open) {
+            this.refreshLimits();
+            this.showWelcomeIfEmpty();
+            document.getElementById('ai-input')?.focus();
+        }
+    },
+
+    // PHASE 4: Deterministic welcome message (no AI API call consumed)
+    // Shows on first chat entry when no messages exist in history.
+    // Does NOT appear if conversation already has messages.
+    showWelcomeIfEmpty() {
+        if (this.history.length > 0) return; // Already has conversation — don't show
+        const messages = document.getElementById('ai-messages');
+        if (!messages) return;
+        // Check if welcome already exists
+        if (document.getElementById('ai-welcome-message')) return;
+        const welcome = document.createElement('div');
+        welcome.id = 'ai-welcome-message';
+        welcome.className = 'ai-msg-row ai-msg-assistant ai-welcome-row';
+        const avatar = document.createElement('div');
+        avatar.className = 'ai-msg-avatar';
+        const avatarId = 'aiWelcome_' + Date.now();
+        avatar.innerHTML = `<svg width="22" height="22" viewBox="0 0 56 56" fill="none">
+            <defs><radialGradient id="${avatarId}" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#FFD9A0"/><stop offset="100%" stop-color="#F5A623"/>
+            </radialGradient></defs>
+            <circle cx="28" cy="28" r="7" fill="url(#${avatarId})"/>
+            <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623"/>
+            <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623"/>
+            <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623"/>
+            <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623"/>
+        </svg>`;
+        welcome.appendChild(avatar);
+        const bubble_el = document.createElement('div');
+        bubble_el.className = 'ai-msg-bubble ai-msg-bubble-assistant ai-welcome-bubble';
+        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'fa');
+        const welcomeText = lang === 'en'
+            ? 'Welcome! I am your AI Assistant. Feel free to ask me anything about the market, news, crypto, or how to use AMIRBTC.'
+            : 'سلام، خوش اومدی! من دستیار هوش مصنوعی شما هستم. هر سوالی داری می‌تونی ازم بپرسی. می‌تونم در تحلیل بازار، اخبار، اطلاعات کریپتو و امکانات AMIRBTC کمکت کنم.';
+        bubble_el.textContent = welcomeText;
+        welcome.appendChild(bubble_el);
+        // Insert at the top of messages (before empty state if it exists)
+        const emptyState = document.getElementById('ai-empty-state');
+        if (emptyState) {
+            emptyState.style.display = 'none'; // Hide empty state when welcome shows
+        }
+        messages.appendChild(welcome);
     },
 
     getContext() {
