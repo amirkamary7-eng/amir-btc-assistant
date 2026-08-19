@@ -4001,7 +4001,11 @@ async function sendAdMessage(messageId) {
         if (data && data.status === 'success') {
             var delivered = adminFormatNumber(data.delivered || 0);
             var skipped = adminFormatNumber(data.skipped || 0);
-            adminToast('ارسال شد — تحویل: ' + delivered + ' / رد شده: ' + skipped, 'success');
+            if (Number(delivered) === 0) {
+                adminToast('هیچ کاربری پیام را دریافت نکرد. تحویل: 0 / رد شده: ' + skipped + '. ممکن است تنظیمات اعلان کاربران مانع ارسال باشد.', 'error');
+            } else {
+                adminToast('ارسال شد — تحویل: ' + delivered + ' / رد شده: ' + skipped, 'success');
+            }
             loadAdMessages();
         } else {
             adminToast((data && data.message) || 'خطا در ارسال', 'error');
