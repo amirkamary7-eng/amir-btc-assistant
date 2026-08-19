@@ -1919,3 +1919,117 @@ test('NEWS-REGRESSION-07: Shared env vars not modified by Chat AI', () => {
 });
 
 console.log('✅ All circuit breaker isolation + news regression tests loaded.');
+
+// ============================================================================
+// PHASE: "prompt is not defined" fix + Gemini 429 regression
+// ============================================================================
+
+test('PROMPT-SCOPE-01: attemptChatProvider does NOT reference out-of-scope variables', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const fnIdx = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(fnIdx, fnIdx + 1500);
+  // Strip comments before checking (comments may reference 'prompt' to explain the fix)
+  const codeOnly = fnBlock.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  // Must NOT reference 'prompt' in actual code (it's in generateAssistantReply's scope)
+  assert.ok(!codeOnly.includes('prompt?.length'),
+    'Must NOT reference prompt?.length in code (out of scope → ReferenceError)');
+  assert.ok(!codeOnly.includes('promptChars'),
+    'Must NOT reference promptChars in code (derived from out-of-scope prompt)');
+  assert.ok(!codeOnly.includes('historyLen'),
+    'Must NOT reference historyLen in code (out of scope)');
+});
+
+test('PROMPT-SCOPE-02: error log in attemptChatProvider only uses in-scope variables', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const fnIdx = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(fnIdx, fnIdx + 1500);
+  // The console.warn in catch block must only use providerName + errorMsg + errorType
+  const warnLine = fnBlock.match(/console\.warn\([^)]+\)/);
+  if (warnLine) {
+    const warn = warnLine[0];
+    assert.ok(warn.includes('providerName'), 'Must log providerName (in scope)');
+    assert.ok(warn.includes('errorType'), 'Must log errorType (in scope)');
+    assert.ok(warn.includes('errorMsg'), 'Must log errorMsg (in scope)');
+    assert.ok(!warn.includes('prompt'), 'Must NOT reference prompt');
+    assert.ok(!warn.includes('historyLen'), 'Must NOT reference historyLen');
+  }
+});
+
+test('GEMINI-429-01: Gemini 429 returns clean error (no ReferenceError)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // callGeminiChat must classify 429 as retryable
+  const geminiFn = SRC.indexOf('async function callGeminiChat');
+  const fnBlock = SRC.slice(geminiFn, geminiFn + 2000);
+  assert.ok(fnBlock.includes('classifyHttpError'),
+    'Must classify HTTP errors');
+  // classifyHttpError(429) returns 'retryable' (verified in worker-proxy.js)
+});
+
+test('GEMINI-429-02: Image request with Gemini 429 does NOT fall back to text-only', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Vision path must only have Gemini (no text-only fallback)
+  const hasImageIdx = SRC.indexOf('const hasImage = Boolean(imageBase64)');
+  const visionBlock = SRC.slice(hasImageIdx, hasImageIdx + 300);
+  assert.ok(visionBlock.includes('VISION-ONLY'),
+    'Must have VISION-ONLY path');
+  assert.ok(!visionBlock.includes("'groq'"),
+    'Must NOT have Groq in vision path');
+});
+
+test('GEMINI-429-03: Vision failure returns clean Persian error (not 503)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // When hasImage and all providers fail, must return Persian vision error
+  assert.ok(SRC.includes('سرویس تحلیل تصویر در حال حاضر در دسترس نیست'),
+    'Must return Persian vision error');
+  // The catch block in handlePostChat must NOT throw ReferenceError
+  const postChatFn = SRC.indexOf('async function handlePostChat');
+  const fnBlock = SRC.slice(postChatFn, postChatFn + 5000);
+  const catchIdx = fnBlock.indexOf('} catch (error) {');
+  const catchBlock = fnBlock.slice(catchIdx, catchIdx + 500);
+  // Must NOT reference 'prompt' in the catch block
+  assert.ok(!catchBlock.includes('prompt?.'),
+    'Catch block must NOT reference prompt (would cause ReferenceError)');
+});
+
+test('GEMINI-429-04: Text-only chat still works (Groq primary)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const textPathIdx = SRC.indexOf('Text-only path (original chain');
+  const textBlock = SRC.slice(textPathIdx, textPathIdx + 500);
+  assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'gemini'"),
+    'Groq must be first in text-only path');
+  assert.ok(textBlock.indexOf("'gemini'") < textBlock.indexOf("'openrouter'"),
+    'Gemini before OpenRouter in text-only path');
+});
+
+test('GEMINI-ERROR-01: Gemini 400 handled as non_retryable', () => {
+  // classifyHttpError(400) = non_retryable — verified in worker-proxy.js
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes('status === 400'),
+    'classifyHttpError must handle 400');
+});
+
+test('GEMINI-ERROR-02: Gemini 500 handled as retryable', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes('status >= 500'),
+    'classifyHttpError must handle 5xx as retryable');
+});
+
+test('GEMINI-ERROR-03: Gemini timeout handled as retryable', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes('status === 408'),
+    'classifyHttpError must handle 408 timeout as retryable');
+});
+
+test('CIRCUIT-OPEN-01: Circuit breaker open returns circuit_skipped (not ReferenceError)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const fnIdx = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(fnIdx, fnIdx + 1500);
+  assert.ok(fnBlock.includes('circuit_skipped: true'),
+    'Must return circuit_skipped when circuit is open');
+  // Strip comments before checking
+  const codeOnly = fnBlock.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!codeOnly.includes('prompt?.'),
+    'Must NOT reference prompt in code (would cause ReferenceError on circuit open path too)');
+});
+
+console.log('✅ All prompt scope + Gemini 429 regression tests loaded.');

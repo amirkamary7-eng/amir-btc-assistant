@@ -1002,7 +1002,11 @@ export function createAssistantHandlers(deps) {
     } catch (error) {
       const errorType = error?.errorType || 'retryable';
       const errorMsg = error?.message || String(error);
-      console.warn(`[ChatAI] provider=${providerName} errorType=${errorType} error=${errorMsg.slice(0, 120)} promptChars=${prompt?.length || 0} historyEntries=${historyLen || 0}`);
+      // FIX: 'prompt' and 'historyLen' are NOT in scope in this function.
+      // They are parameters of generateAssistantReply(), not attemptChatProvider().
+      // Previously: `prompt?.length` → ReferenceError: prompt is not defined
+      // Now: only log provider name + error (which IS in scope)
+      console.warn(`[ChatAI] provider=${providerName} errorType=${errorType} error=${errorMsg.slice(0, 120)}`);
       if (recordCircuitResult && errorType === 'retryable') {
         try { await recordCircuitResult(env, chatCircuitKey, false, errorType, errorMsg.slice(0, 120)); } catch {}
       }
