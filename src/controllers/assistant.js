@@ -1190,8 +1190,9 @@ export function createAssistantHandlers(deps) {
       const prompt = buildAssistantPrompt(message, history, imageBase64, context, articleContext, marketContext, newsContext, externalContext);
       // PHASE FIX: Diagnostic logging for multi-turn conversations.
       // Logs history count + prompt size so we can trace why multi-turn fails.
-      console.log(`[ChatAI] userId=${userId} intent=${intent} historyEntries=${history.length} promptChars=${prompt.length} approxTokens=${Math.ceil(prompt.length / 3)}`);
+      console.log(`[ChatAI] userId=${userId} intent=${intent} historyEntries=${history.length} promptChars=${prompt.length} approxTokens=${Math.ceil(prompt.length / 3)} hasImage=${hasImage} imageBase64Len=${imageBase64?.length || 0} providerRouting=${hasImage ? 'vision' : 'text'}`);
       const result = await generateAssistantReply(env, prompt, imageBase64, history.length);
+      console.log(`[ChatAI] responseReceived provider=${result.provider} replyLen=${result.reply?.length || 0} attachmentCleared=${hasImage}`);
 
       let reply = result.reply;
       if (typeof reply === 'string') {

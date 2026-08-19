@@ -3145,6 +3145,7 @@ strong.down { color: var(--red); }
     user-select: none;
     -webkit-user-select: none;
     will-change: transform;
+    animation: ai-fab-float 4s ease-in-out infinite;
 }
 .ai-fab:active { cursor: grabbing; transform: scale(0.92); }
 .ai-fab:active .ai-fab-surface { transform: scale(0.95); }
@@ -3208,8 +3209,13 @@ strong.down { color: var(--red); }
 }
 
 @keyframes ai-halo-pulse {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 0.65; }
+    0%, 100% { opacity: 0.5; transform: scale(1); }
+    50% { opacity: 0.75; transform: scale(1.04); }
+}
+
+@keyframes ai-fab-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
 }
 
 @keyframes ai-bubble-in {
@@ -3584,7 +3590,7 @@ strong.down { color: var(--red); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .ai-fab-halo, .ai-status-dot, .ai-empty-icon, .ai-typing-dot { animation: none !important; }
+    .ai-fab-halo, .ai-status-dot, .ai-empty-icon, .ai-typing-dot, .ai-fab { animation: none !important; }
     .ai-msg-row, .ai-empty-state { animation: none !important; }
 }
 
