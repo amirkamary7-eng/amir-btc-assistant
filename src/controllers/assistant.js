@@ -845,23 +845,33 @@ export function createAssistantHandlers(deps) {
     const parts = [{ text: prompt }];
     if (imageBase64) {
       parts.push({ inline_data: { mime_type: 'image/jpeg', data: imageBase64 } });
-      // PHASE 7: Vision diagnostic logging (safe — no base64 content logged)
       console.log(`[ChatAI] Gemini vision request: hasImage=true imageBase64Len=${imageBase64.length} partsCount=${parts.length} model=gemini-3.5-flash`);
     }
     const contents = [{ parts }];
     const systemInstruction = { parts: [{ text: ASSISTANT_SYSTEM_PROMPT }] };
-    const dbResult = await queryDb(env,
-      `SELECT public.gemini_generate($1::text, $2::jsonb, $3::jsonb, $4::jsonb) AS result`,
-      ['gemini-3.5-flash', JSON.stringify(contents),
-       JSON.stringify({ temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 }),
-       JSON.stringify(systemInstruction)]
-    );
+    let dbResult;
+    try {
+      dbResult = await queryDb(env,
+        `SELECT public.gemini_generate($1::text, $2::jsonb, $3::jsonb, $4::jsonb) AS result`,
+        ['gemini-3.5-flash', JSON.stringify(contents),
+         JSON.stringify({ temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 }),
+         JSON.stringify(systemInstruction)]
+      );
+    } catch (dbErr) {
+      console.error(`[ChatAI] Gemini DB gateway error: ${dbErr?.message || String(dbErr)?.slice(0, 200)}`);
+      throw { message: `Gemini DB gateway error: ${dbErr?.message || 'unknown'}`, errorType: 'retryable', _isProviderError: true };
+    }
     const geminiResult = dbResult.rows[0]?.result || {};
     const statusCode = geminiResult.status_code;
     const responseBody = geminiResult.response_body || '';
+    console.log(`[ChatAI] Gemini response: status=${statusCode} bodyLen=${responseBody?.length || 0} hasImage=${Boolean(imageBase64)}`);
     if (statusCode !== 200) {
+      // Log the actual error from Gemini for debugging
+      let errorDetail = responseBody;
+      try { errorDetail = typeof responseBody === 'string' ? JSON.parse(responseBody)?.error?.message || responseBody.slice(0, 200) : responseBody; } catch {}
+      console.error(`[ChatAI] Gemini HTTP ${statusCode}: ${String(errorDetail).slice(0, 200)}`);
       const errorType = classifyHttpError(statusCode || 500);
-      throw { message: `Gemini failed: HTTP ${statusCode}`, errorType, _isProviderError: true };
+      throw { message: `Gemini failed: HTTP ${statusCode} — ${String(errorDetail).slice(0, 100)}`, errorType, _isProviderError: true };
     }
     let data;
     try { data = typeof responseBody === 'string' ? JSON.parse(responseBody) : responseBody; }
@@ -973,8 +983,10 @@ export function createAssistantHandlers(deps) {
     if (shouldAttemptProvider) {
       const cb = await shouldAttemptProvider(env, providerName);
       if (!cb.attempt) {
+        console.log(`[ChatAI] provider=${providerName} SKIPPED — circuit OPEN (state=${cb.state} retry_after=${cb.retry_after})`);
         return { success: false, error: 'circuit_open', errorType: 'retryable', circuit_skipped: true };
       }
+      console.log(`[ChatAI] provider=${providerName} circuit CLOSED — proceeding`);
     }
     try {
       const reply = await providerCall();
