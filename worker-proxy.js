@@ -12665,27 +12665,26 @@ export default {
       }
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
-      // Rate-limited to prevent abuse: max 1 check per 3 seconds per user.
+      // Rate limiting is now handled INSIDE the Membership Gateway (smart rate gate):
+      //   - In-memory 5s gate: prevents Telegram spam (per-isolate)
+      //   - KV-based Telegram backoff: respects Telegram 429 retry_after (cross-isolate)
+      // The old jl:{userId} KV with 60s TTL blocked post-join re-verification.
+      // Now: user can re-verify within 5s of joining (not 60s).
       if (request.method === 'POST' && url.pathname === '/api/users/check-join') {
         const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
         const _joinUserId = String(authState.user.id);
-        // Rate limit: 3s cooldown between checks
-        if (env.RATE_LIMITS && typeof env.RATE_LIMITS.get === 'function') {
-          try {
-            const _rlKey = `jl:${_joinUserId}`;
-            const _existing = await env.RATE_LIMITS.get(_rlKey);
-            if (_existing) {
-              return jsonResponse({ status: 'error', message: 'Too many requests. Please wait 60 seconds before trying again.', code: 'RATE_LIMITED', retry_after: 60 }, { status: 429 }, env);
-            }
-            // Cloudflare KV requires expirationTtl >= 60 seconds.
-            // Was 3s → caused "KV PUT failed: Invalid expiration_ttl" on every request.
-            // Cooldown is now 60s (acceptable: user who clicked Verify can wait 1 min to re-check).
-            await env.RATE_LIMITS.put(_rlKey, '1', { expirationTtl: 60 });
-          } catch { /* non-fatal */ }
-        }
         const membership = await membershipGateway.check(env, _joinUserId, { forceRefresh: true });
-        return jsonResponse({ status: 'success', channel_joined: Boolean(membership?.joined) }, {}, env);
+        // Preserve API contract: { status: 'success', channel_joined: boolean }
+        // If Gateway returned rate_limited or telegram_rate_limited, we still
+        // return the result with channel_joined (which is the last-known state,
+        // NOT a 429). The retry_after field is included for frontend UX.
+        return jsonResponse({
+          status: 'success',
+          channel_joined: Boolean(membership?.joined),
+          ...(membership?.retry_after ? { retry_after: membership.retry_after } : {}),
+          ...(membership?.reason === 'telegram_rate_limited' ? { telegram_rate_limited: true } : {}),
+        }, {}, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/watchlist') {

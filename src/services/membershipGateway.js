@@ -91,6 +91,103 @@ export function createMembershipGateway(deps) {
   const _inFlightChecks = new Map();
 
   // ==========================================================================
+  // Per-user smart rate gate (in-memory, per-isolate).
+  //
+  // Key: `${telegramId}`
+  // Value: { result: MembershipResult, ts: number }
+  // TTL: 5 seconds
+  //
+  // PURPOSE: Prevent Telegram API spam from rapid sequential Verify clicks.
+  // If the user clicked Verify < 5s ago, we return the LAST KNOWN result
+  // instead of making another Telegram call. This is a SOFT gate — it does
+  // NOT block the user (no 429), it just returns the cached result with a
+  // retry_after hint so the frontend can show a countdown.
+  //
+  // MULTI-ISOLATE ANALYSIS:
+  // This Map is per-isolate. If a user's requests land on different isolates
+  // within 5s, each isolate may make a Telegram call. This is ACCEPTABLE because:
+  // 1. Telegram's rate limit is 30 req/s — a few extra calls from different
+  //    isolates won't trigger 429.
+  // 2. The in-flight dedup (also per-isolate) prevents duplicate calls WITHIN
+  //    the same isolate.
+  // 3. The KV-based Telegram backoff (below) handles REAL Telegram 429s
+  //    across all isolates.
+  // 4. A cross-isolate rate gate would require KV on every request, adding
+  //    latency that defeats the purpose of the fast in-memory cache.
+  //
+  // This gate is NOT a security mechanism. It's a Telegram API protection.
+  // The fail-closed behavior on Telegram error is the security mechanism.
+  // ==========================================================================
+  const _RATE_GATE_TTL_MS = 5 * 1000;
+  const _lastTelegramCall = new Map(); // key: telegramId → { result, ts }
+
+  function _getRateGate(telegramId) {
+    const entry = _lastTelegramCall.get(telegramId);
+    if (!entry) return null;
+    if (Date.now() - entry.ts > _RATE_GATE_TTL_MS) {
+      _lastTelegramCall.delete(telegramId);
+      return null;
+    }
+    return entry;
+  }
+
+  function _setRateGate(telegramId, result) {
+    _lastTelegramCall.set(telegramId, { result, ts: Date.now() });
+    if (_lastTelegramCall.size > 1000) {
+      const keys = _lastTelegramCall.keys();
+      for (let i = 0; i < 100; i++) {
+        const k = keys.next().value;
+        if (k) _lastTelegramCall.delete(k);
+      }
+    }
+  }
+
+  // ==========================================================================
+  // Telegram 429 backoff (KV-based, cross-isolate).
+  //
+  // Key: `tgbackoff:{userId}` in APP_CACHE KV
+  // Value: JSON string { retryAfter: number, expiresAt: number }
+  // TTL: min(retryAfter, 300) seconds (capped at 5 min)
+  //
+  // PURPOSE: When Telegram returns 429 with retry_after, store it in KV so
+  // ALL isolates respect it. Subsequent requests read this KV BEFORE calling
+  // Telegram. If active backoff exists, return last-known result + retry_after
+  // (fail-closed if no last-known result).
+  //
+  // This is SEPARATE from the in-memory rate gate:
+  // - In-memory 5s gate: protects against user spam (soft, per-isolate)
+  // - KV backoff: respects Telegram's actual rate limit (hard, cross-isolate)
+  //
+  // SECURITY: If Telegram is in backoff AND we have no last-known result,
+  // we fail-CLOSED (return joined:false with reason='telegram_rate_limited').
+  // This prevents a user from bypassing the check during a Telegram outage.
+  // ==========================================================================
+  async function _getTelegramBackoff(env, telegramId) {
+    if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return null;
+    try {
+      const raw = await env.APP_CACHE.get(`tgbackoff:${telegramId}`).catch(() => null);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.expiresAt) return null;
+      if (Date.now() > parsed.expiresAt) return null;
+      return parsed;
+    } catch { return null; }
+  }
+
+  async function _setTelegramBackoff(env, telegramId, retryAfterSeconds) {
+    if (!env?.APP_CACHE || typeof env.APP_CACHE.put !== 'function') return;
+    try {
+      const cappedRetryAfter = Math.min(Math.max(retryAfterSeconds || 1, 1), 300);
+      const value = {
+        retryAfter: cappedRetryAfter,
+        expiresAt: Date.now() + (cappedRetryAfter * 1000),
+      };
+      await env.APP_CACHE.put(`tgbackoff:${telegramId}`, JSON.stringify(value), {
+        expirationTtl: cappedRetryAfter, // KV TTL = retry_after (auto-expires)
+      }).catch(() => {});
+    } catch { /* non-fatal */ }
+  }
+
   // In-memory session cache (per-isolate).
   //
   // Key: `session:${telegramId}`
@@ -240,6 +337,36 @@ export function createMembershipGateway(deps) {
       }
     }
 
+    // ── Smart rate gate: check Telegram backoff + in-memory rate gate ──
+    // These protect Telegram from being spammed with getChatMember calls.
+    // They are SEPARATE from the membership cache above (which is about
+    // not re-checking when we already KNOW the answer).
+
+    // 1. KV-based Telegram backoff (cross-isolate)
+    // If Telegram returned 429 with retry_after recently, respect it.
+    const backoff = await _getTelegramBackoff(env, uid);
+    if (backoff) {
+      // Telegram is in backoff — return last-known result if available,
+      // otherwise fail-closed with reason='telegram_rate_limited'.
+      const gate = _getRateGate(uid);
+      if (gate) {
+        // We have a recent result — return it with retry_after hint
+        return { ...gate.result, reason: 'telegram_rate_limited', retry_after: backoff.retryAfter, elapsed_ms: Date.now() - t0 };
+      }
+      // No recent result — fail-closed
+      return { joined: false, reason: 'telegram_rate_limited', retry_after: backoff.retryAfter, channels: { checked: 0, failed: [] }, admin: false, cached: false, elapsed_ms: Date.now() - t0 };
+    }
+
+    // 2. In-memory rate gate (per-isolate, 5s)
+    // If we called Telegram for this user < 5s ago, return last-known result.
+    // This is a SOFT gate — it returns the result (not 429) so the user
+    // sees the correct state, just without a fresh Telegram call.
+    const rateGate = _getRateGate(uid);
+    if (rateGate) {
+      const remainingMs = _RATE_GATE_TTL_MS - (Date.now() - rateGate.ts);
+      return { ...rateGate.result, reason: 'rate_limited', retry_after: Math.ceil(remainingMs / 1000), elapsed_ms: Date.now() - t0 };
+    }
+
     // ── Fresh Telegram check — PARALLEL: primary + required channels ──
     // ROOT-CAUSE FIX (ISSUE-003): previously sequential (5s + 5s = 10s).
     // Now Promise.allSettled runs them in parallel (max 5s).
@@ -277,14 +404,32 @@ export function createMembershipGateway(deps) {
         await persistDbUserJoinState(env, uid, true).catch(() => {});
       }
       _setSessionCache(uid, true);
-      return { joined: true, reason: 'member', channels: { checked: 1 + (extraResult.channels || 0), failed: [] }, admin: false, cached: false, elapsed_ms: Date.now() - t0 };
+      const result = { joined: true, reason: 'member', channels: { checked: 1 + (extraResult.channels || 0), failed: [] }, admin: false, cached: false, elapsed_ms: Date.now() - t0 };
+      _setRateGate(uid, result);
+      return result;
     }
 
     // ── Not joined — classify the reason ──
     let reason = 'not_member';
     if (primaryResult.reason === 'api_error' || extraResult.reason === 'api_error') {
       // Fail-closed on Telegram error
-      return { joined: false, reason: 'api_error', channels: { checked: 1 + (extraResult.channels || 0), failed: failedChannels }, admin: false, cached: false, elapsed_ms: Date.now() - t0 };
+      // Check if the error is a 429 (rate limited) — if so, extract retry_after
+      // and store in KV for cross-isolate backoff.
+      // The error detail from checkChannelMembership contains the Telegram
+      // error description (e.g., "429 Too Many Requests: retry after 5").
+      const errorDetail = String(primaryResult.detail || extraResult.detail || '');
+      const retryAfterMatch = errorDetail.match(/retry\s*after\s*(\d+)/i);
+      if (retryAfterMatch) {
+        const retryAfter = parseInt(retryAfterMatch[1], 10);
+        // Store backoff in KV (cross-isolate)
+        await _setTelegramBackoff(env, uid, retryAfter);
+        // Fail-closed with telegram_rate_limited reason
+        return { joined: false, reason: 'telegram_rate_limited', retry_after: retryAfter, channels: { checked: 1 + (extraResult.channels || 0), failed: failedChannels }, admin: false, cached: false, elapsed_ms: Date.now() - t0 };
+      }
+      // Generic api_error (timeout, 500, etc.) — fail-closed, set rate gate
+      const result = { joined: false, reason: 'api_error', channels: { checked: 1 + (extraResult.channels || 0), failed: failedChannels }, admin: false, cached: false, elapsed_ms: Date.now() - t0 };
+      _setRateGate(uid, result);
+      return result;
     }
     if (primaryResult.reason === 'bot_not_in_channel' || extraResult.reason === 'bot_not_in_channel') {
       reason = 'bot_not_in_channel';
@@ -302,7 +447,9 @@ export function createMembershipGateway(deps) {
       await persistDbUserJoinState(env, uid, false).catch(() => {});
     }
     _setSessionCache(uid, false);
-    return { joined: false, reason, channels: { checked: 1 + (extraResult.channels || 0), failed: failedChannels }, admin: false, cached: false, elapsed_ms: Date.now() - t0 };
+    const result = { joined: false, reason, channels: { checked: 1 + (extraResult.channels || 0), failed: failedChannels }, admin: false, cached: false, elapsed_ms: Date.now() - t0 };
+    _setRateGate(uid, result);
+    return result;
   }
 
   return { check };
