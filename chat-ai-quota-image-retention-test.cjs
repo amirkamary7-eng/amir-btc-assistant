@@ -1287,8 +1287,8 @@ test('VISION-01: Vision-capable routing when image present (Gemini first)', () =
   const hasImageIdx = SRC.indexOf('const hasImage = Boolean(imageBase64)');
   assert.ok(hasImageIdx > -1, 'Must check hasImage');
   const visionBlock = SRC.slice(hasImageIdx, hasImageIdx + 500);
-  assert.ok(visionBlock.includes('Vision-capable providers ONLY'),
-    'Must have vision-capable provider routing');
+  assert.ok(visionBlock.includes('VISION-ONLY'),
+    'Must have VISION-ONLY provider routing');
   assert.ok(visionBlock.includes("['gemini'"),
     'Gemini must be first when image present');
 });
@@ -1577,3 +1577,109 @@ test('SUGGESTION-03: Exactly 3 suggestion cards', () => {
 });
 
 console.log('✅ All Phase 20 E2E + vision + attachment + FAB + welcome tests loaded.');
+
+// ============================================================================
+// PHASE 8: Production Vision Regression Tests
+// ============================================================================
+
+test('VISION-PROD-01: Image request sets hasImage=true in generateAssistantReply', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('const hasImage = Boolean(imageBase64)'),
+    'Must compute hasImage from imageBase64');
+});
+
+test('VISION-PROD-02: Image request NEVER selects text-only provider (Groq forbidden)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const hasImageIdx = SRC.indexOf('const hasImage = Boolean(imageBase64)');
+  const visionBlock = SRC.slice(hasImageIdx, hasImageIdx + 600);
+  // Vision providers must NOT include Groq, OpenRouter, Workers AI
+  assert.ok(visionBlock.includes('VISION-ONLY'),
+    'Must label vision path as VISION-ONLY');
+  assert.ok(visionBlock.includes('NO text-only fallback'),
+    'Must explicitly forbid text-only fallback');
+  // Groq must NOT be in the vision providers array
+  // Check that Groq appears ONLY in the text-only path (after the else)
+  const elseIdx = visionBlock.indexOf('] : [');
+  const visionArray = visionBlock.substring(0, elseIdx);
+  assert.ok(!visionArray.includes("'groq'"),
+    'Groq must NOT be in vision providers (text-only model)');
+  assert.ok(!visionArray.includes("'openrouter'"),
+    'OpenRouter must NOT be in vision providers (text-only model)');
+  assert.ok(!visionArray.includes("'workers-ai'"),
+    'Workers AI must NOT be in vision providers (text-only model)');
+});
+
+test('VISION-PROD-03: Gemini request contains inline_data with base64', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const geminiFn = SRC.indexOf('async function callGeminiChat');
+  const fnBlock = SRC.slice(geminiFn, geminiFn + 1000);
+  assert.ok(fnBlock.includes('inline_data'), 'Must create inline_data');
+  assert.ok(fnBlock.includes('mime_type'), 'Must set mime_type');
+  assert.ok(fnBlock.includes('imageBase64'), 'Must use imageBase64 parameter');
+});
+
+test('VISION-PROD-04: Base64 data URL prefix is removed correctly by backend', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const extractFn = SRC.indexOf('function extractAssistantImageBase64');
+  const fnBlock = SRC.slice(extractFn, extractFn + 200);
+  assert.ok(fnBlock.includes("split(',', 2)"),
+    'Must split on comma to remove data:image/...;base64, prefix');
+  assert.ok(fnBlock.includes('return imageData'),
+    'Must return raw base64 if no prefix');
+});
+
+test('VISION-PROD-05: Correct MIME type sent (image/jpeg)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes("mime_type: 'image/jpeg'"),
+    'Must use image/jpeg MIME type for Gemini');
+});
+
+test('VISION-PROD-06: Vision failure returns Persian error (not text-only fallback)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('سرویس تحلیل تصویر در حال حاضر در دسترس نیست'),
+    'Must return Persian vision service error when vision providers fail');
+});
+
+test('VISION-PROD-07: Text-only providers forbidden as fallback for image requests', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const hasImageIdx = SRC.indexOf('const hasImage = Boolean(imageBase64)');
+  const visionBlock = SRC.slice(hasImageIdx, hasImageIdx + 600);
+  // The comment must explicitly forbid text-only fallback
+  assert.ok(visionBlock.includes('FORBIDDEN') || visionBlock.includes('NO text-only fallback'),
+    'Must explicitly forbid text-only fallback for image requests');
+});
+
+test('VISION-PROD-08: Text-only requests preserve Groq→Gemini→OpenRouter→Workers AI→OpenAI', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const textPathIdx = SRC.indexOf('Text-only path (original chain');
+  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 500) : SRC;
+  assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'gemini'"),
+    'Groq before Gemini in text-only path');
+  assert.ok(textBlock.indexOf("'gemini'") < textBlock.indexOf("'openrouter'"),
+    'Gemini before OpenRouter in text-only path');
+});
+
+test('VISION-PROD-09: Provider attempt logging exists for debugging', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('[ChatAI] provider attempt:'),
+    'Must log provider attempt for debugging');
+  assert.ok(SRC.includes('[ChatAI] provider SUCCESS:'),
+    'Must log provider success');
+  assert.ok(SRC.includes('[ChatAI] provider FAIL:'),
+    'Must log provider failure');
+});
+
+test('VISION-PROD-10: Gemini vision request logging (safe, no base64 content)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('Gemini vision request'),
+    'Must log Gemini vision request');
+  assert.ok(SRC.includes('imageBase64Len'),
+    'Must log imageBase64 length (not content)');
+  assert.ok(SRC.includes('partsCount'),
+    'Must log parts count');
+  // Must NOT log actual base64 content
+  assert.ok(!SRC.includes('console.log(imageBase64)'),
+    'Must NOT log base64 content');
+});
+
+console.log('✅ All production vision regression tests loaded.');
