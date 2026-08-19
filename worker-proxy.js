@@ -11171,6 +11171,66 @@ export default {
         return jsonResponse(result, {}, env);
       }
 
+      // ── GET /api/admin-diag — Admin detection diagnostic (read-only) ──
+      // PURPOSE: Diagnose why a user may not be recognized as admin in Mini App.
+      // The root cause audit found that `isAdminTelegramId` checks BOTH
+      // ADMIN_TELEGRAM_ID and ADMIN_TELEGRAM_IDS env vars, while `isSuperAdmin`
+      // (used by requireAdmin) checks ONLY ADMIN_TELEGRAM_ID. This endpoint
+      // reveals which env vars are configured WITHOUT exposing their values.
+      //
+      // SECURITY: Returns only booleans + counts. NO actual ID values are exposed.
+      // Auth: public (same as /api/start-diag, /api/cron-monitor) — no secrets
+      // are returned, so no auth needed.
+      if (request.method === 'GET' && url.pathname === '/api/admin-diag') {
+        const adminIds = getAdminIds(env);
+        const primaryRaw = String(env.ADMIN_TELEGRAM_ID || '').trim();
+        const extraRaw = String(env.ADMIN_TELEGRAM_IDS || '').trim();
+        const extraCount = extraRaw ? extraRaw.split(',').filter(s => s.trim()).length : 0;
+
+        // Test consistency: for each admin ID in the Set, check whether
+        // isSuperAdmin would ALSO return true. If any returns false, that's a
+        // BUG-1 trigger — the user is recognized as admin by bootstrap but
+        // NOT by requireAdmin (admin panel routes).
+        const inconsistencies = [];
+        for (const id of adminIds) {
+          // Simulate isSuperAdmin check: does String(env.ADMIN_TELEGRAM_ID) === id?
+          const isSuperAdminResult = (primaryRaw && String(primaryRaw) === String(id));
+          if (!isSuperAdminResult) {
+            inconsistencies.push({
+              admin_id_suffix: id.length > 4 ? '…' + id.slice(-4) : id,
+              recognized_by_bootstrap: true,   // isAdminTelegramId → yes
+              recognized_by_requireAdmin: false, // isSuperAdmin → no
+              bug: 'BUG-1: this ID is in ADMIN_TELEGRAM_IDS but not ADMIN_TELEGRAM_ID — admin panel will 403',
+            });
+          }
+        }
+
+        return jsonResponse({
+          status: 'success',
+          server_time: new Date().toISOString(),
+          config: {
+            has_admin_telegram_id: Boolean(primaryRaw),
+            admin_telegram_id_count: primaryRaw ? 1 : 0,
+            has_admin_telegram_ids: Boolean(extraRaw),
+            admin_telegram_ids_count: extraCount,
+            total_admin_ids: adminIds.size,
+          },
+          consistency_check: {
+            all_admins_recognized_consistently: inconsistencies.length === 0,
+            inconsistent_count: inconsistencies.length,
+            inconsistent_ids: inconsistencies,
+          },
+          functions_used: {
+            bootstrap_admin_check: 'isAdminTelegramId (checks BOTH env vars)',
+            require_admin_panel: 'isSuperAdmin (checks ONLY ADMIN_TELEGRAM_ID)',
+            channel_join_bypass: 'isAdminTelegramId (checks BOTH env vars)',
+          },
+          note: inconsistencies.length > 0
+            ? `BUG-1 TRIGGERED: ${inconsistencies.length} admin ID(s) are recognized by bootstrap but NOT by admin panel routes. This is the root cause of "admin not recognized in Mini App".`
+            : 'All admin IDs are consistently recognized by both functions. BUG-1 is NOT the cause of the reported issue.',
+        }, {}, env);
+      }
+
       // ── Calendar Reminders (per-user, stored in PostgreSQL) ──
       // POST   /api/calendar/reminders      — create/update
       // GET    /api/calendar/reminders      — list user's reminders
