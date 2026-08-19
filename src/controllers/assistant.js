@@ -845,6 +845,8 @@ export function createAssistantHandlers(deps) {
     const parts = [{ text: prompt }];
     if (imageBase64) {
       parts.push({ inline_data: { mime_type: 'image/jpeg', data: imageBase64 } });
+      // PHASE 7: Vision diagnostic logging (safe — no base64 content logged)
+      console.log(`[ChatAI] Gemini vision request: hasImage=true imageBase64Len=${imageBase64.length} partsCount=${parts.length} model=gemini-3.5-flash`);
     }
     const contents = [{ parts }];
     const systemInstruction = { parts: [{ text: ASSISTANT_SYSTEM_PROMPT }] };
@@ -995,20 +997,22 @@ export function createAssistantHandlers(deps) {
   }
 
   async function generateAssistantReply(env, prompt, imageBase64, historyLen) {
-    // PHASE 10: Vision-capable routing — when an image is attached, skip text-only
-    // providers (Groq, OpenRouter text, Workers AI) and go directly to Gemini
-    // (the only vision-capable provider in the chain via inline_data).
-    // OpenAI (gpt-4o-mini) also supports vision but is opt-in (disabled by default).
-    // Text-only path: Groq → Gemini → OpenRouter → Workers AI → OpenAI (unchanged).
+    // PHASE 3: Capability-aware routing.
+    // When an image is attached, ONLY vision-capable providers are used.
+    // Text-only providers (Groq, OpenRouter text, Workers AI) are FORBIDDEN
+    // for image requests — they would succeed with a text-only response
+    // saying "I cannot read images" which is worse than a clear error.
+    //
+    // Vision-capable providers:
+    //   - Gemini (via DB gateway, inline_data format)
+    //   - OpenAI gpt-4o-mini (opt-in, disabled by default — does NOT currently pass image)
+    //
+    // Text-only path (NO image): Groq → Gemini → OpenRouter → Workers AI → OpenAI (unchanged)
     const hasImage = Boolean(imageBase64);
     const providers = hasImage ? [
-      // Vision-capable providers ONLY when image is present
+      // VISION-ONLY providers when image is present
+      // NO text-only fallback — if vision fails, return clear error
       ['gemini', () => callGeminiChat(env, prompt, imageBase64), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) : true],
-      ['openai', () => callOpenAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false) : false],
-      // Fall back to text-only if vision providers fail (image will be ignored)
-      ['groq', () => callGroqChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true],
-      ['openrouter', () => callOpenRouterChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true) : true],
-      ['workers-ai', () => callWorkersAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true) : true],
     ] : [
       // Text-only path (original chain — unchanged)
       ['groq', () => callGroqChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true],
@@ -1018,11 +1022,18 @@ export function createAssistantHandlers(deps) {
       ['openai', () => callOpenAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false) : false],
     ];
 
-    let lastError = 'No AI provider configured';
+    let lastError = hasImage
+      ? 'سرویس تحلیل تصویر در حال حاضر در دسترس نیست.'
+      : 'No AI provider configured';
     for (const [providerName, providerCall, enabled] of providers) {
       if (!enabled) continue;
+      console.log(`[ChatAI] provider attempt: ${providerName} hasImage=${hasImage}`);
       const result = await attemptChatProvider(env, providerName, providerCall);
-      if (result.success) return { provider: providerName, reply: result.reply };
+      if (result.success) {
+        console.log(`[ChatAI] provider SUCCESS: ${providerName} hasImage=${hasImage}`);
+        return { provider: providerName, reply: result.reply };
+      }
+      console.log(`[ChatAI] provider FAIL: ${providerName} error=${result.error?.slice(0, 80)}`);
       lastError = result.error || lastError;
     }
     throw new Error(lastError);
