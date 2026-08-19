@@ -490,24 +490,37 @@ function diagLogSync(env, entry) { /* no-op */ }
 // At ~10-50 /start invocations/day → 20-100 KV ops/day (well under 1,000/day).
 async function logStartE2E(env, entry) {
   if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
+  // ROOT-CAUSE FIX (bootstrap-hang): wrap KV operations in a timeout race so
+  // they can NEVER hang the request. Previously, `await env.APP_CACHE.get/put`
+  // could hang indefinitely if KV had a transient issue, causing the entire
+  // /start handler to hang → "code had hung" 500 error.
+  // Now: max 500ms per log call. If KV is slow, we drop the log entry (acceptable
+  // for diagnostics — losing a log is better than hanging the request).
   try {
     const key = 'start:e2e_log';
-    const raw = await env.APP_CACHE.get(key).catch(() => null);
-    let arr = [];
-    if (raw) {
-      try { arr = JSON.parse(raw) || []; } catch { arr = []; }
-    }
-    const sanitized = { ts: new Date().toISOString(), ...entry };
-    // Reduce userId to a 4-char correlation suffix (no PII)
-    if (sanitized.userId) {
-      const uid = String(sanitized.userId);
-      sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
-      delete sanitized.userId;
-    }
-    arr.push(sanitized);
-    if (arr.length > 20) arr = arr.slice(-20);
-    await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
-  } catch { /* non-fatal — diagnostics must never break /start */ }
+    const work = (async () => {
+      const raw = await env.APP_CACHE.get(key).catch(() => null);
+      let arr = [];
+      if (raw) {
+        try { arr = JSON.parse(raw) || []; } catch { arr = []; }
+      }
+      const sanitized = { ts: new Date().toISOString(), ...entry };
+      // Reduce userId to a 4-char correlation suffix (no PII)
+      if (sanitized.userId) {
+        const uid = String(sanitized.userId);
+        sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
+        delete sanitized.userId;
+      }
+      arr.push(sanitized);
+      if (arr.length > 20) arr = arr.slice(-20);
+      await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
+    })();
+    // Race against 500ms timeout — if KV hangs, we abandon the log write
+    await Promise.race([
+      work,
+      new Promise(resolve => setTimeout(resolve, 500)),
+    ]).catch(() => {});
+  } catch { /* non-fatal */ }
 }
 
 // ============================================================================
@@ -518,25 +531,39 @@ async function logStartE2E(env, entry) {
 // Read via GET /api/bootstrap-diag (public, same as /api/start-diag).
 //
 // SECURITY: userId reduced to 4-char suffix. No tokens, no PII.
+//
+// ROOT-CAUSE FIX (bootstrap-hang): This function MUST be called fire-and-forget
+// (void logBootstrapE2E(...)) — NOT awaited. Each call does 2 KV operations
+// (read + write). With 12 calls per bootstrap, that's 24 KV operations. If
+// awaited, a transient KV slowdown hangs the ENTIRE bootstrap request →
+// "code had hung" 500 error. Fire-and-forget + internal 500ms timeout race
+// ensures diagnostics can NEVER block the request path.
 async function logBootstrapE2E(env, entry) {
   if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
   try {
     const key = 'bootstrap:e2e_log';
-    const raw = await env.APP_CACHE.get(key).catch(() => null);
-    let arr = [];
-    if (raw) {
-      try { arr = JSON.parse(raw) || []; } catch { arr = []; }
-    }
-    const sanitized = { ts: new Date().toISOString(), ...entry };
-    // Reduce userId to a 4-char correlation suffix (no PII)
-    if (sanitized.userId) {
-      const uid = String(sanitized.userId);
-      sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
-      delete sanitized.userId;
-    }
-    arr.push(sanitized);
-    if (arr.length > 30) arr = arr.slice(-30);
-    await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
+    const work = (async () => {
+      const raw = await env.APP_CACHE.get(key).catch(() => null);
+      let arr = [];
+      if (raw) {
+        try { arr = JSON.parse(raw) || []; } catch { arr = []; }
+      }
+      const sanitized = { ts: new Date().toISOString(), ...entry };
+      // Reduce userId to a 4-char correlation suffix (no PII)
+      if (sanitized.userId) {
+        const uid = String(sanitized.userId);
+        sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
+        delete sanitized.userId;
+      }
+      arr.push(sanitized);
+      if (arr.length > 30) arr = arr.slice(-30);
+      await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
+    })();
+    // Race against 500ms timeout — if KV hangs, we abandon the log write
+    await Promise.race([
+      work,
+      new Promise(resolve => setTimeout(resolve, 500)),
+    ]).catch(() => {});
   } catch { /* non-fatal — diagnostics must never break bootstrap */ }
 }
 
@@ -9548,7 +9575,7 @@ async function handleTelegramWebhook(request, env) {
     if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
       // Not a /start command — silent 200 (Telegram expects 200 for all webhooks)
       if (messageContext) {
-        await logStartE2E(env, { phase: 'not_start_command', userId: messageContext.userId, text_preview: String(messageContext.text || '').slice(0, 30) });
+        void logStartE2E(env, { phase: 'not_start_command', userId: messageContext.userId, text_preview: String(messageContext.text || '').slice(0, 30) });
       }
       return new Response(null, {
         status: 200,
@@ -9557,7 +9584,7 @@ async function handleTelegramWebhook(request, env) {
     }
 
     // [START-E2E] /start command detected
-    await logStartE2E(env, {
+    void logStartE2E(env, {
       phase: 'command_detected',
       userId: messageContext.userId,
       has_chat_id: messageContext.chatId != null,
@@ -9567,7 +9594,7 @@ async function handleTelegramWebhook(request, env) {
 
     if (!isBotConfigured(env)) {
       // [START-E2E] Bot not configured — this is the silent-abort point
-      await logStartE2E(env, { phase: 'bot_not_configured', userId: messageContext.userId });
+      void logStartE2E(env, { phase: 'bot_not_configured', userId: messageContext.userId });
       return new Response(null, {
         status: 200,
         headers: withCors({}, env),
@@ -9581,7 +9608,7 @@ async function handleTelegramWebhook(request, env) {
     // Now forceRefresh:true forces a real Telegram API call every time.
     const membership = await resolveChannelMembership(env, messageContext.userId, { forceRefresh: true });
     // [START-E2E] Membership resolved
-    await logStartE2E(env, {
+    void logStartE2E(env, {
       phase: 'membership_resolved',
       userId: messageContext.userId,
       joined: Boolean(membership?.joined),
@@ -9610,7 +9637,7 @@ async function handleTelegramWebhook(request, env) {
     // [START-E2E] Reply payload built
     const finalWebAppUrl = (replyPayload.reply_markup && replyPayload.reply_markup.inline_keyboard && replyPayload.reply_markup.inline_keyboard[0] && replyPayload.reply_markup.inline_keyboard[0][0] && replyPayload.reply_markup.inline_keyboard[0][0].web_app) ? replyPayload.reply_markup.inline_keyboard[0][0].web_app.url : null;
     const hasWebAppButton = Boolean(finalWebAppUrl);
-    await logStartE2E(env, {
+    void logStartE2E(env, {
       phase: 'reply_built',
       userId: messageContext.userId,
       is_member: Boolean(membership?.joined),
@@ -9620,12 +9647,12 @@ async function handleTelegramWebhook(request, env) {
     });
 
     // [START-E2E] sendMessage started
-    await logStartE2E(env, { phase: 'sendMessage_started', userId: messageContext.userId });
+    void logStartE2E(env, { phase: 'sendMessage_started', userId: messageContext.userId });
     let sendMessageResult = null;
     try {
       sendMessageResult = await sendTelegramMessage(env, replyPayload);
       // [START-E2E] sendMessage succeeded
-      await logStartE2E(env, {
+      void logStartE2E(env, {
         phase: 'sendMessage_completed',
         userId: messageContext.userId,
         telegram_ok: true,
@@ -9635,7 +9662,7 @@ async function handleTelegramWebhook(request, env) {
       // [START-E2E] sendMessage FAILED — capture the real Telegram error
       // sendTelegramMessage throws with the error_code + description in the message
       const errMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
-      await logStartE2E(env, {
+      void logStartE2E(env, {
         phase: 'sendMessage_failed',
         userId: messageContext.userId,
         telegram_ok: false,
@@ -9653,19 +9680,19 @@ async function handleTelegramWebhook(request, env) {
     // It's fast (~100ms) and idempotent, so blocking is acceptable.
     try {
       await syncMenuButton(env);
-      await logStartE2E(env, { phase: 'syncMenuButton_done', userId: messageContext.userId });
+      void logStartE2E(env, { phase: 'syncMenuButton_done', userId: messageContext.userId });
     } catch (menuErr) {
       // syncMenuButton has its own internal try/catch (swallows errors silently).
       // This catch is a safety net — it should never fire.
-      await logStartE2E(env, { phase: 'syncMenuButton_error', userId: messageContext.userId, error: String(menuErr?.message || menuErr).slice(0, 200) });
+      void logStartE2E(env, { phase: 'syncMenuButton_error', userId: messageContext.userId, error: String(menuErr?.message || menuErr).slice(0, 200) });
     }
 
     // [START-E2E] Handler completed successfully
-    await logStartE2E(env, { phase: 'handler_complete', userId: messageContext.userId });
+    void logStartE2E(env, { phase: 'handler_complete', userId: messageContext.userId });
   } catch (error) {
     console.error(safeError('telegram-webhook-error', error));
     // [START-E2E] Handler error — capture which step failed
-    await logStartE2E(env, {
+    void logStartE2E(env, {
       phase: 'handler_error',
       userId: messageContext?.userId,
       error: String(error?.message || error).slice(0, 300),
@@ -9678,14 +9705,14 @@ async function handleTelegramWebhook(request, env) {
           chat_id: messageContext.chatId,
           text: '⚠️ خطای موقت در پردازش درخواست. لطفاً دوباره /start را بزنید.',
         });
-        await logStartE2E(env, {
+        void logStartE2E(env, {
           phase: 'error_notification_sent',
           userId: messageContext.userId,
           telegram_ok: Boolean(notifyResult?.ok),
         });
       } catch (notifyErr) {
         console.error(safeError('start-error-notify-failed', notifyErr));
-        await logStartE2E(env, {
+        void logStartE2E(env, {
           phase: 'error_notification_failed',
           userId: messageContext.userId,
           error: String(notifyErr?.message || notifyErr).slice(0, 200),
