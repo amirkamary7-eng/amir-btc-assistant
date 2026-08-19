@@ -3155,15 +3155,27 @@ async function checkAdditionalRequiredChannels(env, userId, { forceRefresh = fal
   }
 
   // Fresh check: call Telegram getChatMember for each channel.
-  for (const ch of channels) {
-    const chatId = ch.username.startsWith('-') ? ch.username : `@${ch.username}`;
-    const result = await _checkSingleTelegramChannel(env, chatId, uid);
+  // ROOT-CAUSE FIX (AUDIT-P1-JOINCHECK / Bug #4): parallelize the per-channel
+  // Telegram getChatMember calls. The previous sequential `for` loop took up to
+  // N×5s (e.g., 25s for 5 channels), which exceeded the Worker 30s wall-clock
+  // limit and the frontend apiFetch 15s timeout — causing "loading forever"
+  // symptoms. With Promise.all, the total is bounded at 5s regardless of N.
+  // Each _checkSingleTelegramChannel has its own 5s AbortController, so the
+  // overall worst-case latency is ~5s (the slowest channel), not 5N seconds.
+  const channelResults = await Promise.all(
+    channels.map(ch => {
+      const chatId = ch.username.startsWith('-') ? ch.username : `@${ch.username}`;
+      return _checkSingleTelegramChannel(env, chatId, uid);
+    })
+  );
+  for (let i = 0; i < channels.length; i++) {
+    const result = channelResults[i];
     if (!result.joined) {
       // Cache negative result (jittered TTL) — avoids hammering Telegram for known-not-members.
       if (env.RATE_LIMITS && typeof env.RATE_LIMITS.put === 'function') {
         try { await env.RATE_LIMITS.put(cacheKey, '0', { expirationTtl: _ttlNeg }); } catch { /* non-fatal */ }
       }
-      return { joined: false, channels: channels.length, reason: result.reason || 'not_member', channel: ch.username };
+      return { joined: false, channels: channels.length, reason: result.reason || 'not_member', channel: channels[i].username };
     }
   }
 
@@ -3267,29 +3279,26 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false, ski
     }
 
     if (result.reason === 'api_error') {
-      if (isDatabaseConfigured(env)) {
-        const dbUser = await getDbUserJoinState(env, uid);
-        if (dbUser?.channel_joined) {
-          // PHASE 2: even on api_error fallback, enforce DB channels.
-          const extra = await checkAdditionalRequiredChannels(env, uid);
-          if (!extra.joined) {
-            return { joined: false, reason: 'additional_channel_required', channel: extra.channel };
-          }
-          return { joined: true, from_db_fallback: true, reason: result.reason };
-        }
-      }
-
-      const cached = await getCachedJoinStatus(env, uid);
-      if (cached === true) {
-        // PHASE 2: even on cached fallback, enforce DB channels.
-        const extra = await checkAdditionalRequiredChannels(env, uid);
-        if (!extra.joined) {
-          return { joined: false, reason: 'additional_channel_required', channel: extra.channel };
-        }
-        return { joined: true, cached_fallback: true, reason: result.reason };
-      }
-
-      return { ...result, joined: false };
+      // ROOT-CAUSE FIX (AUDIT-P1-JOINCHECK / Bug #7): FAIL-CLOSED on Telegram
+      // api_error instead of falling back to stale DB/KV cache.
+      //
+      // Previously, when Telegram getChatMember returned an api_error (timeout,
+      // 429, 500, network failure), the code fell back to the DB
+      // users.channel_joined column or the KV join:{userId} cache — both of
+      // which could be STALE (e.g., a user who left the channel but whose DB
+      // row still says channel_joined=true). This created a security bypass:
+      // if Telegram was temporarily unavailable, stale "joined" users got in.
+      //
+      // The user's requirement is explicit: "نباید باعث bypass شود" (must not
+      // cause bypass). So we now return joined:false on api_error. The user
+      // will see the Join Lock and can retry (check-join has a 60s rate limit
+      // which is acceptable for retry-after-error scenarios).
+      //
+      // Trade-off: during a real Telegram outage, all users see the lock.
+      // This is acceptable — it's safer to temporarily lock everyone than to
+      // bypass the join requirement for stale members. The lock shows a
+      // "⚠️ خطای موقت در بررسی عضویت" message via the reason field.
+      return { joined: false, reason: 'api_error', detail: result.detail || 'Telegram API temporarily unavailable' };
     }
 
     await setCachedJoinStatus(env, uid, false);

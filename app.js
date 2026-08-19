@@ -1001,8 +1001,37 @@ async function saveLangToServer() {
  * اطلاعات اولیه کاربر، زبان و واچ‌لیست را بین فرانت‌اند و سرور همگام‌سازی می‌کند.
  * ورودی: بدون ورودی.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
+ *
+ * ROOT-CAUSE FIX (AUDIT-P1-JOINCHECK / Bug #1): Added in-flight dedup.
+ * Previously, bootstrapUser() was called directly at multiple sites:
+ *   - DOMContentLoaded handler (app.js:12953) — bypassed _bootstrapPromise
+ *   - tryLateBootstrap() (app.js:1215) — used _bootstrapPromise
+ *   - _bootstrapLongTimer / _bootPollInterval / _bootObserver / visibilitychange
+ * This caused 2+ concurrent POST /api/users/bootstrap requests on cold open,
+ * leading to race conditions (old slow response overwriting new fast response,
+ * UI flicker between joined/not-joined, double Telegram API calls hitting 429).
+ *
+ * FIX: bootstrapUser() now deduplicates concurrent calls via a shared
+ * _bootstrapUserInFlight promise. The FIRST caller executes the real logic;
+ * all subsequent callers await the same promise and receive the same result.
+ * The promise is cleared in the finally block so a new bootstrap can run
+ * after the current one completes (success or failure).
  */
+let _bootstrapUserInFlight = null;
 async function bootstrapUser() {
+    // Deduplicate concurrent calls — only ONE POST /api/users/bootstrap at a time.
+    // This is SEPARATE from tryLateBootstrap's _bootstrapPromise (which only
+    // deduped its own retry calls, not direct bootstrapUser() invocations).
+    if (_bootstrapUserInFlight) {
+        return _bootstrapUserInFlight;
+    }
+    _bootstrapUserInFlight = (async () => {
+        await _bootstrapUserImpl();
+    })().finally(() => { _bootstrapUserInFlight = null; });
+    return _bootstrapUserInFlight;
+}
+
+async function _bootstrapUserImpl() {
     currentLang = loadLangFromStorage();
     loadWatchlistFromStorage();
 

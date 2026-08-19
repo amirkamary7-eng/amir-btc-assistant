@@ -101,14 +101,25 @@ test('ADS-CH-02: checkAdditionalRequiredChannels function exists in worker-proxy
     'checkAdditionalRequiredChannels must be defined');
 });
 
-test('ADS-CH-03: resolveChannelMembership calls checkAdditionalRequiredChannels at every joined:true path (>=4 calls)', () => {
+test('ADS-CH-03: resolveChannelMembership calls checkAdditionalRequiredChannels at every joined:true path (>=3 calls)', () => {
+  // ROOT-CAUSE FIX (AUDIT-P1-JOINCHECK / Bug #7): the api_error fallback
+  // path was removed (fail-closed instead of fail-open via DB/KV fallback).
+  // This reduced the call count from 4 to 3. The 3 remaining call sites are:
+  //   1. KV cache hit joined:true → enforce DB channels
+  //   2. DB cache hit channel_joined=true → enforce DB channels
+  //   3. Fresh check joined:true → enforce DB channels
+  // The api_error path now returns joined:false immediately (fail-closed),
+  // so it no longer needs to call checkAdditionalRequiredChannels.
   const fnStart = WORKER_SRC.indexOf('async function resolveChannelMembership');
   assert.ok(fnStart >= 0, 'resolveChannelMembership must exist');
-  // Slice a generous block to capture the whole function.
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 5000);
+  // Use the full function body (not a fixed-size slice) — the function grew
+  // after the AUDIT-P1 fix comments were added.
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 5000);
   const calls = fnBlock.match(/checkAdditionalRequiredChannels\s*\(/g) || [];
-  assert.ok(calls.length >= 4,
-    `resolveChannelMembership must call checkAdditionalRequiredChannels >=4 times (got ${calls.length})`);
+  assert.ok(calls.length >= 3,
+    `resolveChannelMembership must call checkAdditionalRequiredChannels >=3 times (got ${calls.length}). ` +
+    `The api_error path was removed (fail-closed fix), reducing from 4 to 3.`);
 });
 
 test('ADS-CH-04: buildStartReplyPayloadAsync exists and merges DB channels', () => {
@@ -702,7 +713,10 @@ test('ADS-PERF-05: getUserChannelPreference (notification_platform) has per-user
 
 test('ADS-PERF-06: checkAdditionalRequiredChannels uses per-user KV cache (jittered TTL 55-95s, audit H3 fix) to avoid repeated Telegram calls', () => {
   const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 3000);
+  // Use the full function body (not a fixed-size slice) — the function grew
+  // after the AUDIT-P1 Promise.all fix comments were added.
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
   // KV cache read
   assert.ok(fnBlock.includes('env.RATE_LIMITS.get(cacheKey)'),
     'checkAdditionalRequiredChannels must read per-user KV cache');

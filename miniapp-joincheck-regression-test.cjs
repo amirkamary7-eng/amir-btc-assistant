@@ -236,3 +236,70 @@ test('NOREGRESS-004: JOINED_STATUSES still contains restricted (isJoinedMember h
   assert.ok(WORKER_SRC.includes("new Set(['creator', 'administrator', 'member', 'restricted'])"),
     'JOINED_STATUSES must still contain restricted (isJoinedMember handles is_member)');
 });
+
+// ============================================================================
+// Section 6: AUDIT-P1-JOINCHECK new fixes — parallel Telegram calls, dedup, fail-closed
+// ============================================================================
+
+// BUG #4: Parallel Telegram getChatMember calls (was sequential N×5s)
+test('BUG4-001: checkAdditionalRequiredChannels uses Promise.all (not sequential for-await)', () => {
+  // The fresh-check loop must use Promise.all to parallelize per-channel Telegram calls.
+  // This bounds latency at 5s regardless of channel count (was 5N seconds).
+  const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
+  assert.ok(fnBlock.includes('Promise.all'),
+    'checkAdditionalRequiredChannels must use Promise.all to parallelize Telegram calls');
+  assert.ok(fnBlock.includes('channels.map(ch =>'),
+    'Promise.all must map over channels');
+  // Must NOT use sequential `for (const ch of channels)` with `await` inside
+  // (the old pattern that caused N×5s latency).
+  assert.ok(!/for\s*\(const\s+ch\s+of\s+channels\)\s*\{[^}]*await\s+_checkSingleTelegramChannel/s.test(fnBlock),
+    'must NOT use sequential for-await loop for Telegram calls');
+});
+
+// BUG #1: bootstrapUser dedup (was called concurrently from multiple sites)
+test('BUG1-NEW-001: bootstrapUser has in-flight dedup', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.ok(APP_SRC.includes('_bootstrapUserInFlight'),
+    'bootstrapUser must use _bootstrapUserInFlight for dedup');
+  assert.ok(APP_SRC.includes('if (_bootstrapUserInFlight)'),
+    'bootstrapUser must check _bootstrapUserInFlight before executing');
+  assert.ok(APP_SRC.includes('async function _bootstrapUserImpl()'),
+    'bootstrapUser must delegate to _bootstrapUserImpl (separated for dedup)');
+});
+
+test('BUG1-NEW-002: bootstrapUser dedup clears on completion (finally block)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.ok(APP_SRC.includes(".finally(() => { _bootstrapUserInFlight = null; })"),
+    'bootstrapUser must clear _bootstrapUserInFlight in finally block');
+});
+
+// BUG #7: Fail-closed on Telegram api_error (was fail-open via DB/KV fallback)
+test('BUG7-001: resolveChannelMembership returns joined=false on api_error (fail-closed)', () => {
+  // The old code fell back to DB users.channel_joined or KV cache on api_error.
+  // The new code returns joined:false immediately — fail-closed, no bypass.
+  const fnStart = WORKER_SRC.indexOf('async function resolveChannelMembership');
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 4000);
+  const apiErrorSection = fnBlock.slice(fnBlock.indexOf("result.reason === 'api_error'"));
+  // Must NOT fall back to DB on api_error
+  assert.ok(!apiErrorSection.includes('from_db_fallback'),
+    'resolveChannelMembership must NOT fall back to DB on api_error (was fail-open)');
+  // Must NOT fall back to KV cache on api_error
+  assert.ok(!apiErrorSection.includes('cached_fallback'),
+    'resolveChannelMembership must NOT fall back to KV cache on api_error (was fail-open)');
+  // Must return joined:false
+  assert.ok(apiErrorSection.includes("joined: false"),
+    'resolveChannelMembership must return joined:false on api_error (fail-closed)');
+});
+
+// NO-REGRESSION: existing valid-member path still works (env channel joined + DB channels joined)
+test('NOREGRESS-005: resolveChannelMembership still returns joined:true for valid members', () => {
+  const fnStart = WORKER_SRC.indexOf('async function resolveChannelMembership');
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 4000);
+  // The valid-member path (result.joined + extra.joined) must still return { joined: true }
+  assert.ok(fnBlock.includes('return result;') && fnBlock.includes('setCachedJoinStatus(env, uid, true)'),
+    'resolveChannelMembership must still cache + return joined:true for valid members');
+});
