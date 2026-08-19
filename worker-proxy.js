@@ -1075,6 +1075,36 @@ const JOIN_CACHE_PREFIX = 'join:';
 const JOINED_STATUSES = new Set(['creator', 'administrator', 'member', 'restricted']);
 // dbPools removed — using neon() stateless client instead
 
+/**
+ * Determine whether a Telegram `getChatMember` result represents an ACTIVE member.
+ *
+ * ROOT-CAUSE FIX (audit/start-join-check): `ChatMemberRestricted` objects carry an
+ * `is_member` boolean field — `true` if the user is still in the chat (restricted
+ * but present), `false` if the user was kicked/restricted AND LEFT the chat. The
+ * previous implementation used `JOINED_STATUSES.has(status)` blindly, which
+ * treated ALL `restricted` users as joined — including those who had already
+ * left. This allowed a restricted-and-left user to bypass the channel-join gate.
+ *
+ * Behavior:
+ *   - creator / administrator / member → joined (as before)
+ *   - restricted + is_member === false → NOT joined (the bug fix)
+ *   - restricted + is_member === true  → joined (still in chat)
+ *   - restricted + is_member undefined → joined (safe default; older API versions
+ *     may omit the field — preserve backward-compat by treating as joined)
+ *   - left / kicked / unknown          → NOT joined
+ *
+ * @param {object|null|undefined} result — the `result` field of Telegram's getChatMember response
+ * @returns {boolean}
+ */
+function isJoinedMember(result) {
+  if (!result) return false;
+  const status = result.status || '';
+  if (status === 'restricted') {
+    return result.is_member !== false;
+  }
+  return JOINED_STATUSES.has(status);
+}
+
 function resolveDatabaseUrl(env) {
   let url = String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
   if (!url) return '';
@@ -2912,8 +2942,11 @@ async function getChatMemberDebugPayload(userId, env) {
       const telegramResponse = await fetch(telegramUrl, { signal: tgController.signal });
       const data = await telegramResponse.json();
       payload.telegram_response = data;
-      const status = data?.result?.status || '';
-      payload.joined = Boolean(data?.ok && JOINED_STATUSES.has(status));
+      // ROOT-CAUSE FIX (audit/start-join-check): use isJoinedMember() instead of
+      // JOINED_STATUSES.has(status) so that `restricted` + `is_member: false`
+      // (user was restricted AND has left the channel) is correctly treated as
+      // NOT joined. Previously, all `restricted` users were treated as joined.
+      payload.joined = Boolean(data?.ok && isJoinedMember(data?.result));
 
       return payload;
     } finally {
@@ -2943,20 +2976,27 @@ async function checkChannelMembership(userId, env) {
       return { joined: false, reason: 'bot_not_configured' };
     }
     if (telegramResponse.ok) {
-      const status = telegramResponse?.result?.status || '';
-      return { joined: JOINED_STATUSES.has(status) };
+      // ROOT-CAUSE FIX (audit/start-join-check): use isJoinedMember() so that
+      // `restricted` + `is_member: false` is correctly NOT joined.
+      return { joined: isJoinedMember(telegramResponse?.result) };
     }
 
     const description = String(telegramResponse.description || '');
     const lowerDescription = description.toLowerCase();
+    // ROOT-CAUSE FIX (audit/start-join-check): check `bot is not a member` BEFORE
+    // `not a member`, because Telegram's error string 'Bad Request: bot is not a
+    // member of the channel chat' CONTAINS the substring 'not a member'. With the
+    // previous ordering, every bot_not_in_channel case was misclassified as
+    // not_member — meaning the admin saw 'user is not a member' instead of the
+    // correct 'bot is not in channel' system-error message.
+    if (lowerDescription.includes('bot is not a member') || lowerDescription.includes('need administrator')) {
+      return { joined: false, reason: 'bot_not_in_channel', detail: description };
+    }
     if (lowerDescription.includes('user not found') || lowerDescription.includes('not a member')) {
       return { joined: false, reason: 'not_member', detail: description };
     }
     if (lowerDescription.includes('chat not found')) {
       return { joined: false, reason: 'channel_not_found', detail: description };
-    }
-    if (lowerDescription.includes('bot is not a member') || lowerDescription.includes('need administrator')) {
-      return { joined: false, reason: 'bot_not_in_channel', detail: description };
     }
     if (telegramResponse.http_error || telegramResponse.exception) {
       return { joined: false, reason: 'api_error', detail: JSON.stringify(telegramResponse) };
@@ -3023,8 +3063,10 @@ async function _checkSingleTelegramChannel(env, chatId, userId) {
     const r = await fetch(url, { signal: controller.signal });
     const data = await r.json();
     if (data?.ok) {
-      const status = data?.result?.status || '';
-      return { joined: JOINED_STATUSES.has(status) };
+      // ROOT-CAUSE FIX (audit/start-join-check): use isJoinedMember() so that
+      // `restricted` + `is_member: false` is correctly NOT joined (same fix as
+      // the primary channel check).
+      return { joined: isJoinedMember(data?.result) };
     }
     return { joined: false, reason: 'api_error', detail: data?.description || '' };
   } catch (e) {
