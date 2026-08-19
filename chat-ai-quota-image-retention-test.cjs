@@ -1803,3 +1803,119 @@ test('VISION-DIAG-05: Gemini error includes detail in thrown exception', () => {
 });
 
 console.log('✅ All welcome + vision diagnostic tests loaded.');
+
+// ============================================================================
+// PHASE 5: Circuit Breaker Isolation + News Regression Tests
+// ============================================================================
+
+test('CB-ISOLATION-01: Chat AI uses separate circuit breaker key (chat-{provider})', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('chatCircuitKey'), 'Must compute chatCircuitKey');
+  assert.ok(SRC.includes('`chat-${providerName}`'), 'Must use chat- prefix for circuit key');
+});
+
+test('CB-ISOLATION-02: Chat AI does NOT use bare provider name for circuit breaker', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const attemptFn = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(attemptFn, attemptFn + 1500);
+  // Must use chatCircuitKey, NOT providerName directly
+  assert.ok(fnBlock.includes('chatCircuitKey'), 'Must use chatCircuitKey variable');
+  // Should NOT use providerName directly in shouldAttemptProvider or recordCircuitResult
+  assert.ok(!fnBlock.includes("shouldAttemptProvider(env, providerName)"),
+    'Must NOT call shouldAttemptProvider with bare providerName');
+  assert.ok(!fnBlock.includes("recordCircuitResult(env, providerName"),
+    'Must NOT call recordCircuitResult with bare providerName');
+});
+
+test('CB-ISOLATION-03: News AI circuit breaker key unchanged (bare provider name)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  // News AI must still use bare 'gemini' key (NOT 'chat-gemini')
+  const newsGeminiCalls = SRC.match(/shouldAttemptProvider\(env,\s*'gemini'\)/g);
+  assert.ok(newsGeminiCalls && newsGeminiCalls.length > 0,
+    'News AI must still use bare gemini key');
+  // Must NOT use chat-gemini
+  assert.ok(!SRC.includes("shouldAttemptProvider(env, 'chat-gemini')"),
+    'News AI must NOT use chat- prefix');
+});
+
+test('CB-ISOLATION-04: Chat AI vision failure does NOT affect News AI circuit', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Verify: when Gemini fails in Chat AI, it records on 'chat-gemini' not 'gemini'
+  const attemptFn = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(attemptFn, attemptFn + 1500);
+  assert.ok(fnBlock.includes('recordCircuitResult(env, chatCircuitKey'),
+    'Must record on chatCircuitKey (not bare provider name)');
+});
+
+test('NEWS-REGRESSION-01: News AI tryGemini unchanged (text-only, no inline_data)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  const tryGeminiFn = SRC.indexOf('async function tryGemini(');
+  const fnBlock = SRC.slice(tryGeminiFn, tryGeminiFn + 2000);
+  // Must still build text-only contents
+  assert.ok(fnBlock.includes('parts: [{ text: prompt }]'),
+    'News AI must still use text-only parts');
+  // Must NOT have inline_data
+  assert.ok(!fnBlock.includes('inline_data'),
+    'News AI must NOT have inline_data');
+});
+
+test('NEWS-REGRESSION-02: Translation circuit breaker key separate (translation-workers-ai)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes("'translation-workers-ai'"),
+    'Translation must use separate circuit key');
+  // Must NOT use 'chat-translation-workers-ai'
+  assert.ok(!SRC.includes("'chat-translation-workers-ai'"),
+    'Translation key must NOT have chat- prefix');
+});
+
+test('NEWS-REGRESSION-03: News AI uses gemini_generate() with text-only contents', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  // News AI must build contents with text-only parts
+  const tryGeminiBlock = SRC.indexOf('async function tryGemini(');
+  const fnBlock = SRC.slice(tryGeminiBlock, tryGeminiBlock + 2000);
+  assert.ok(fnBlock.includes('gemini_generate'),
+    'News AI must use gemini_generate() DB function');
+  assert.ok(fnBlock.includes('contents: [{ parts: [{ text: prompt }] }]'),
+    'News AI must send text-only contents to gemini_generate()');
+});
+
+test('NEWS-REGRESSION-04: worker-proxy.js NOT modified by Chat AI changes', () => {
+  // This is verified by git diff — if worker-proxy.js has 0 changes, News AI is untouched
+  const { execSync } = require('child_process');
+  const diff = execSync('git diff main -- worker-proxy.js', { encoding: 'utf8' });
+  assert.equal(diff.trim(), '',
+    'worker-proxy.js must NOT be modified (News AI untouched)');
+});
+
+test('NEWS-REGRESSION-05: News pipeline functions intact', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  // All key News AI functions must exist
+  assert.ok(SRC.includes('async function fetchAllNewsRss'), 'fetchAllNewsRss intact');
+  assert.ok(SRC.includes('async function translateToFarsi'), 'translateToFarsi intact');
+  assert.ok(SRC.includes('async function generateSummaryWithFallback'), 'generateSummaryWithFallback intact');
+  assert.ok(SRC.includes('async function processOneArticleSummary'), 'processOneArticleSummary intact');
+  assert.ok(SRC.includes('async function processNewsAIBatch'), 'processNewsAIBatch intact');
+  assert.ok(SRC.includes('function publishArticleToFarsiNews'), 'publishArticleToFarsiNews intact');
+});
+
+test('NEWS-REGRESSION-06: News cache keys unchanged', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes("'news:farsi'"), 'news:farsi cache key intact');
+  assert.ok(SRC.includes("'news:ai:'"), 'news:ai: cache key prefix intact');
+  assert.ok(SRC.includes("'news:summary_queue'"), 'news:summary_queue intact');
+});
+
+test('NEWS-REGRESSION-07: Shared env vars not modified by Chat AI', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Chat AI must NOT modify env vars — only read them
+  // Check for any assignments to env properties (would indicate modification)
+  const envAssignments = SRC.match(/env\.\w+\s*=/g);
+  if (envAssignments) {
+    // Only _reqPool assignment is allowed (shared pool pattern from withSharedPool)
+    const nonPoolAssignments = envAssignments.filter(a => a !== 'env._reqPool =');
+    assert.equal(nonPoolAssignments.length, 0,
+      `Chat AI must NOT modify env vars (found: ${nonPoolAssignments.join(', ')})`);
+  }
+});
+
+console.log('✅ All circuit breaker isolation + news regression tests loaded.');

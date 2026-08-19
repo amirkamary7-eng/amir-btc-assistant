@@ -978,31 +978,33 @@ export function createAssistantHandlers(deps) {
   }
 
   // ── Provider fallback chain with circuit breaker ──────────────────────────
+  // PHASE 5: Chat AI uses SEPARATE circuit breaker keys ('chat-{provider}')
+  // to isolate Chat AI failures from News AI.
+  // Without this, Chat AI vision failures on 'gemini' key would OPEN the
+  // circuit for News AI's tryGemini(), breaking news summarization.
 
   async function attemptChatProvider(env, providerName, providerCall) {
+    const chatCircuitKey = `chat-${providerName}`;
     if (shouldAttemptProvider) {
-      const cb = await shouldAttemptProvider(env, providerName);
+      const cb = await shouldAttemptProvider(env, chatCircuitKey);
       if (!cb.attempt) {
-        console.log(`[ChatAI] provider=${providerName} SKIPPED — circuit OPEN (state=${cb.state} retry_after=${cb.retry_after})`);
+        console.log(`[ChatAI] provider=${providerName} SKIPPED — circuit OPEN (key=${chatCircuitKey} state=${cb.state})`);
         return { success: false, error: 'circuit_open', errorType: 'retryable', circuit_skipped: true };
       }
-      console.log(`[ChatAI] provider=${providerName} circuit CLOSED — proceeding`);
+      console.log(`[ChatAI] provider=${providerName} circuit CLOSED (key=${chatCircuitKey}) — proceeding`);
     }
     try {
       const reply = await providerCall();
       if (recordCircuitResult) {
-        try { await recordCircuitResult(env, providerName, true); } catch {}
+        try { await recordCircuitResult(env, chatCircuitKey, true); } catch {}
       }
       return { success: true, reply };
     } catch (error) {
       const errorType = error?.errorType || 'retryable';
       const errorMsg = error?.message || String(error);
-      // PHASE FIX: Diagnostic logging for provider failures.
-      // Logs: provider name, error type, error message (truncated), prompt size.
-      // Helps diagnose multi-turn failures without touching provider chain logic.
       console.warn(`[ChatAI] provider=${providerName} errorType=${errorType} error=${errorMsg.slice(0, 120)} promptChars=${prompt?.length || 0} historyEntries=${historyLen || 0}`);
       if (recordCircuitResult && errorType === 'retryable') {
-        try { await recordCircuitResult(env, providerName, false, errorType, errorMsg.slice(0, 120)); } catch {}
+        try { await recordCircuitResult(env, chatCircuitKey, false, errorType, errorMsg.slice(0, 120)); } catch {}
       }
       return { success: false, error: errorMsg, errorType };
     }
