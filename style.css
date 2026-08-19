@@ -3051,7 +3051,10 @@ strong.down { color: var(--red); }
 }
 
 .ai-speech-bubble {
-    position: relative;
+    position: absolute;
+    bottom: calc(100% + 10px);
+    inset-inline-end: 0;
+    width: min(260px, calc(100vw - 88px));
     max-width: min(260px, calc(100vw - 88px));
     padding: 12px 14px 12px 12px;
     border-radius: 18px;

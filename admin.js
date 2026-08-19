@@ -212,6 +212,17 @@ function adminFormatNumber(n) {
     return Number(n).toLocaleString('en-US');
 }
 
+function _formatCooldownHuman(seconds) {
+    seconds = Number(seconds) || 0;
+    if (seconds <= 0) return 'بدون کوپل‌داون';
+    var hours = Math.floor(seconds / 3600);
+    var days = Math.floor(hours / 24);
+    if (days >= 7) return (days / 7) + ' هفته';
+    if (days >= 1) return days + ' روز';
+    if (hours >= 1) return hours + ' ساعت';
+    return seconds + ' ثانیه';
+}
+
 /**
  * @deprecated Use adminToast() instead. Kept as a thin alias so legacy call
  *   sites (admin settings, tickets, broadcasts) keep working without edits.
@@ -2218,7 +2229,7 @@ async function loadRcWheelConfig() {
                         <div class="rc-field"><label>نسخه</label><input type="text" id="rc-wc-version" value="${adminEscapeHtml(c.version||'1.0.0')}"></div>
                         <div class="rc-field"><label>تم</label><input type="text" id="rc-wc-theme" value="${adminEscapeHtml(c.theme||'default')}"></div>
                         <div class="rc-field"><label>حداکثر اسپین/کاربر</label><input type="number" id="rc-wc-maxspins" value="${c.max_spins_per_user||1}" min="1"></div>
-                        <div class="rc-field"><label>کوپل‌داون (ثانیه)</label><input type="number" id="rc-wc-cooldown" value="${c.cooldown_seconds||0}" min="0"></div>
+                        <div class="rc-field"><label>کوپل‌داون</label><select id="rc-wc-cooldown" onchange="document.getElementById('rc-wc-cooldown-custom').style.display = this.value === 'custom' ? '' : 'none'"><option value="0">بدون کوپل‌داون</option><option value="3600">۱ ساعت</option><option value="21600">۶ ساعت</option><option value="43200">۱۲ ساعت</option><option value="86400">۲۴ ساعت</option><option value="151200">۴۲ ساعت</option><option value="259200">۷۲ ساعت</option><option value="604800">هفتگی</option><option value="custom">سفارشی</option></select><input type="number" id="rc-wc-cooldown-custom" style="display:none;" placeholder="ثانیه" min="60"></div>
                         <div class="rc-field"><label>حداکثر پاداش/روز</label><input type="number" id="rc-wc-maxreward" value="${c.max_reward_per_day||1000}" min="0"></div>
                     </div>
                     <button class="adm-btn adm-btn-primary" onclick="saveRcWheelConfig()" style="margin-top:12px;">ذخیره تنظیمات</button>
@@ -2247,7 +2258,11 @@ async function saveRcWheelConfig() {
         version: document.getElementById('rc-wc-version')?.value,
         theme: document.getElementById('rc-wc-theme')?.value,
         max_spins_per_user: Number(document.getElementById('rc-wc-maxspins')?.value || 1),
-        cooldown_seconds: Number(document.getElementById('rc-wc-cooldown')?.value || 0),
+        cooldown_seconds: (() => {
+            const sel = document.getElementById('rc-wc-cooldown')?.value || '0';
+            if (sel === 'custom') return Number(document.getElementById('rc-wc-cooldown-custom')?.value || 0);
+            return Number(sel);
+        })(),
         max_reward_per_day: Number(document.getElementById('rc-wc-maxreward')?.value || 1000),
     };
     try {
@@ -3538,7 +3553,7 @@ async function loadAdPopups() {
             var rows = data.popups.map(function (p) {
                 var title = p.title ? adminEscapeHtml(p.title) : '—';
                 var statusBadge = _adStatusBadge(p.campaign_status || p.status || 'draft');
-                var cooldown = p.cooldown_seconds ? adminFormatNumber(p.cooldown_seconds) + 's' : '—';
+                var cooldown = p.cooldown_seconds ? _formatCooldownHuman(p.cooldown_seconds) : '—';
                 var updated = p.updated_at ? adminFormatDate(p.updated_at) : '—';
                 var statusSelect = _adStatusSelect('setAdPopupStatus', p.id, p.campaign_status || p.status || 'draft');
                 return '<tr>' +
@@ -3596,7 +3611,16 @@ function _adsPopupFormHtml(p) {
     var btnLabel   = isEdit ? adminEscapeHtml(p.button_label || '') : '';
     var btnUrl     = isEdit ? adminEscapeHtml(p.button_url || '') : '';
     var orderVal   = isEdit ? adminFormatNumber(p.display_order || 0) : '0';
-    var cooldown   = isEdit ? adminFormatNumber(p.cooldown_seconds || 86400) : '86400';
+    var cooldown   = isEdit ? (p.cooldown_seconds || 86400) : 86400;
+    var cooldownOpts = '<option value="3600">۱ ساعت</option><option value="21600">۶ ساعت</option><option value="43200">۱۲ ساعت</option><option value="86400">۲۴ ساعت</option><option value="151200">۴۲ ساعت</option><option value="259200">۷۲ ساعت</option><option value="604800">هفتگی</option><option value="custom">سفارشی</option>';
+    var cooldownMatch = false;
+    var cooldownOptsHtml = cooldownOpts.replace(/value="(\d+)"/g, function(m, val) {
+        if (Number(val) === Number(cooldown)) { cooldownMatch = true; return m + ' selected'; }
+        return m;
+    });
+    if (!cooldownMatch && cooldown > 0) {
+        cooldownOptsHtml = '<option value="' + cooldown + '" selected>' + _formatCooldownHuman(cooldown) + '</option>' + cooldownOptsHtml;
+    }
     var activeChk  = isEdit ? (p.is_active ? 'checked' : '') : 'checked';
     var imgUrl     = isEdit ? (p.image_url || '') : '';
     // Image preview — show if URL exists
@@ -3611,7 +3635,7 @@ function _adsPopupFormHtml(p) {
             '<div class="rc-field"><label>متن دکمه</label><input type="text" id="ads-pp-btnlabel" value="' + btnLabel + '" placeholder="مشاهده"></div>' +
             '<div class="rc-field"><label>لینک دکمه</label><input type="text" id="ads-pp-btnurl" value="' + btnUrl + '" placeholder="https://..." dir="ltr"></div>' +
             '<div class="rc-field"><label>ترتیب نمایش</label><input type="number" id="ads-pp-order" value="' + orderVal + '" min="0"></div>' +
-            '<div class="rc-field"><label>کوئل‌داون (ثانیه)</label><input type="number" id="ads-pp-cooldown" value="' + cooldown + '" min="0"></div>' +
+            '<div class="rc-field"><label>کوپل‌داون</label><select id="ads-pp-cooldown" onchange="document.getElementById(\'ads-pp-cooldown-custom\').style.display = this.value === \'custom\' ? \'\' : \'none\'">' + cooldownOptsHtml + '</select><input type="number" id="ads-pp-cooldown-custom" style="display:none;" placeholder="ثانیه" min="60"></div>' +
             '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-pp-status">' +
                 '<option value="draft"' + (currentStatus === 'draft' ? ' selected' : '') + '>پیش‌نویس</option>' +
                 '<option value="active"' + (currentStatus === 'active' ? ' selected' : '') + '>فعال</option>' +
@@ -3656,7 +3680,11 @@ async function saveAdPopup(popupId) {
         button_url:       (document.getElementById('ads-pp-btnurl') ? document.getElementById('ads-pp-btnurl').value : '').trim(),
         image_url:        (document.getElementById('ads-pp-imgurl') ? document.getElementById('ads-pp-imgurl').value : '').trim(),
         display_order:    Number(document.getElementById('ads-pp-order') ? document.getElementById('ads-pp-order').value : 0) || 0,
-        cooldown_seconds: Number(document.getElementById('ads-pp-cooldown') ? document.getElementById('ads-pp-cooldown').value : 86400) || 0,
+        cooldown_seconds: (() => {
+            const sel = document.getElementById('ads-pp-cooldown')?.value || '86400';
+            if (sel === 'custom') return Number(document.getElementById('ads-pp-cooldown-custom')?.value || 86400);
+            return Number(sel);
+        })(),
         is_active:        document.getElementById('ads-pp-active') ? document.getElementById('ads-pp-active').checked : false,
         status:           document.getElementById('ads-pp-status') ? document.getElementById('ads-pp-status').value : 'draft',
     };
