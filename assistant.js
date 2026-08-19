@@ -26,7 +26,7 @@ const AssistantUI = {
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
-                <p class="ai-speech-text">سلام، خوش اومدی! سوالی داری؟</p>
+                <p class="ai-speech-text" data-i18n-fa="سلام، خوش اومدی! سوالی داری؟" data-i18n-en="Welcome! Got a question?">سلام، خوش اومدی! سوالی داری؟</p>
                 <span class="ai-bubble-tail"></span>
             </div>
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
@@ -156,17 +156,48 @@ const AssistantUI = {
         const bubble = document.getElementById('ai-speech-bubble');
         const closeBtn = document.getElementById('ai-bubble-close');
         if (!bubble) return;
-        if (localStorage.getItem('ai_speech_dismissed') === '1') {
+        if (sessionStorage.getItem('ai_welcome_shown') === '1') {
             bubble.classList.add('ai-speech-hidden');
             return;
         }
+        // Update text based on language
+        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'fa');
+        const textEl = bubble.querySelector('.ai-speech-text');
+        if (textEl) {
+            textEl.textContent = lang === 'en' ? 'Welcome! Got a question?' : 'سلام، خوش اومدی! سوالی داری؟';
+        }
+        // Play subtle notification sound
+        this.playWelcomeSound();
         const dismiss = () => {
             if (bubble.classList.contains('ai-speech-hidden')) return;
             bubble.classList.add('ai-speech-hidden');
-            localStorage.setItem('ai_speech_dismissed', '1');
+            sessionStorage.setItem('ai_welcome_shown', '1');
         };
         closeBtn?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); dismiss(); });
-        window.setTimeout(dismiss, 5000);
+        const timer = window.setTimeout(dismiss, 5000);
+        // Store timer so we can cancel if user closes early
+        bubble._dismissTimer = timer;
+    },
+
+    // PHASE 1: Subtle notification sound for welcome bubble
+    // Uses Web Audio API to generate a short, premium notification tone.
+    // Fails silently if browser autoplay policy blocks it.
+    playWelcomeSound() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            if (ctx.state === 'suspended') ctx.resume();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.frequency.setValueAtTime(880, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1100, ctx.currentTime + 0.08);
+            gain.gain.setValueAtTime(0, ctx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.06, ctx.currentTime + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.3);
+        } catch(e) { /* Silent fail — autoplay policy or unsupported */ }
     },
 
     bindEvents() {
@@ -251,52 +282,14 @@ const AssistantUI = {
         if (bubble && this.open) { bubble.classList.add('ai-speech-hidden'); localStorage.setItem('ai_speech_dismissed', '1'); }
         if (this.open) {
             this.refreshLimits();
-            this.showWelcomeIfEmpty();
+            // Welcome bubble is OUTSIDE chat — it's a UI notification, not a conversation message
             document.getElementById('ai-input')?.focus();
         }
     },
 
-    // PHASE 4: Deterministic welcome message (no AI API call consumed)
-    // Shows on first chat entry when no messages exist in history.
-    // Does NOT appear if conversation already has messages.
-    showWelcomeIfEmpty() {
-        if (this.history.length > 0) return; // Already has conversation — don't show
-        const messages = document.getElementById('ai-messages');
-        if (!messages) return;
-        // Check if welcome already exists
-        if (document.getElementById('ai-welcome-message')) return;
-        const welcome = document.createElement('div');
-        welcome.id = 'ai-welcome-message';
-        welcome.className = 'ai-msg-row ai-msg-assistant ai-welcome-row';
-        const avatar = document.createElement('div');
-        avatar.className = 'ai-msg-avatar';
-        const avatarId = 'aiWelcome_' + Date.now();
-        avatar.innerHTML = `<svg width="22" height="22" viewBox="0 0 56 56" fill="none">
-            <defs><radialGradient id="${avatarId}" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stop-color="#FFD9A0"/><stop offset="100%" stop-color="#F5A623"/>
-            </radialGradient></defs>
-            <circle cx="28" cy="28" r="7" fill="url(#${avatarId})"/>
-            <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623"/>
-            <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623"/>
-            <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623"/>
-            <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623"/>
-        </svg>`;
-        welcome.appendChild(avatar);
-        const bubble_el = document.createElement('div');
-        bubble_el.className = 'ai-msg-bubble ai-msg-bubble-assistant ai-welcome-bubble';
-        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'fa');
-        const welcomeText = lang === 'en'
-            ? 'Welcome! I am your AI Assistant. Feel free to ask me anything about the market, news, crypto, or how to use AMIRBTC.'
-            : 'سلام، خوش اومدی! من دستیار هوش مصنوعی شما هستم. هر سوالی داری می‌تونی ازم بپرسی. می‌تونم در تحلیل بازار، اخبار، اطلاعات کریپتو و امکانات AMIRBTC کمکت کنم.';
-        bubble_el.textContent = welcomeText;
-        welcome.appendChild(bubble_el);
-        // Insert at the top of messages (before empty state if it exists)
-        const emptyState = document.getElementById('ai-empty-state');
-        if (emptyState) {
-            emptyState.style.display = 'none'; // Hide empty state when welcome shows
-        }
-        messages.appendChild(welcome);
-    },
+    // Welcome is now a floating UI bubble (ai-speech-bubble) that appears
+    // next to the FAB, NOT inside chat history. See initSpeechBubble().
+    // This ensures: (1) no AI API call, (2) not in conversation, (3) auto-dismiss 5s.
 
     getContext() {
         const ctx = {};
