@@ -458,7 +458,11 @@ test('ADS-NS-05: Message campaigns use category=promotions which maps to ch_prom
 
 test('ADS-SEP-01: Channel Join (ad_channels) does NOT go through ch_promotions (uses checkAdditionalRequiredChannels + Telegram getChatMember)', () => {
   const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2000);
+  // Use the full function body (not a fixed-size slice) — the function grew
+  // after the AUDIT-P1 forceRefresh-propagation fix, so a 2000-char window
+  // no longer captures the whole function. Extract until the next `async function`.
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
   // Must use Telegram getChatMember (via _checkSingleTelegramChannel)
   assert.ok(fnBlock.includes('_checkSingleTelegramChannel'),
     'checkAdditionalRequiredChannels must use Telegram getChatMember via _checkSingleTelegramChannel');
@@ -881,7 +885,11 @@ test('ADS-FIX-H2: Safety cap is 1000 (not 5000) to fit Workers CPU limit', () =>
 // FIX H3: Jittered TTL for cache stampede prevention
 test('ADS-FIX-H3: checkAdditionalRequiredChannels uses jittered TTL (55-95s)', () => {
   const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2500);
+  // Use the full function body (not a fixed-size slice) — the function grew
+  // after the AUDIT-P1 forceRefresh-propagation fix, so a 2500-char window
+  // no longer captures the jitter logic. Extract until the next `async function`.
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
   assert.ok(fnBlock.includes('_jitterSeed'),
     'must use a jitter seed (per-user + hash) for consistent TTL');
   assert.ok(fnBlock.includes('_ttlJitter'),

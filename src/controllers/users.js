@@ -144,27 +144,26 @@ export function createUserHandlers(deps) {
           if (membership?.joined) {
             channelJoined = true;
           } else {
-            // PHASE 2 SAFE OPTIMIZATION: Only call resolveChannelMembership(forceRefresh:true)
-            // if the DB row doesn't already say channel_joined=true. If the user already
-            // joined (per bootstrap() RETURNING), there's no need to re-check Telegram API
-            // — the user is joined, we just have a stale KV/DB cache.
+            // ROOT-CAUSE FIX (AUDIT-P1 / Bug #1):
+            // The previous "PHASE 2 SAFE OPTIMIZATION" trusted freshUserRow.channel_joined
+            // (a DB column from bootstrap() RETURNING) to skip the forceRefresh:true call.
+            // This was WRONG: freshUserRow.channel_joined reflects the user's join state
+            // AT SOME POINT IN THE PAST — it does NOT reflect channels that were added by
+            // an admin AFTER the user last joined. When admin adds a new required channel,
+            // the user's users.channel_joined column is still 'true' (stale), so bootstrap
+            // incorrectly returned channel_joined=true → frontend skipped Join Lock → user
+            // entered Mini App → API calls 403'd.
             //
-            // Side effects of 2nd call that we SKIP when freshUserRow.channel_joined=true:
-            //   - Telegram API fetch (unnecessary — we know user joined)
-            //   - persistDbUserJoinState (unnecessary — already set)
-            //   - processPendingReferralReward (already handled by processReferralOnBootstrap
-            //     at line 103, OR will be caught by retryFailedReferralRewards cron)
-            //
-            // When freshUserRow.channel_joined=false, we MUST do the 2nd call — the user
-            // may have just joined the channel and the DB hasn't been updated yet.
-            if (freshUserRow?.channel_joined) {
-              channelJoined = true;
-            } else {
-              membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: true });
-              channelJoined = Boolean(membership?.joined);
-            }
+            // FIX: Always do a forceRefresh:true check when forceRefresh:false returns
+            // joined:false. The cost is +1 Telegram getChatMember call per bootstrap when
+            // the cache says not-joined (rare — only when KV '0' or DB channel_joined=false).
+            // This is acceptable: bootstrap runs once per Mini App open, not per API call.
+            membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: true });
+            channelJoined = Boolean(membership?.joined);
           }
         } catch (e) {
+          // On error, fall back to the DB row (best-effort). This is safe because
+          // requireChannelJoin middleware will re-check on every protected API call.
           channelJoined = Boolean(freshUserRow?.channel_joined);
         }
       } else {

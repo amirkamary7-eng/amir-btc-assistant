@@ -3118,7 +3118,7 @@ async function _checkSingleTelegramChannel(env, chatId, userId) {
  * Uses per-user KV cache (60s TTL) keyed by channel-set hash for instant
  * invalidation when admin changes the channel list.
  */
-async function checkAdditionalRequiredChannels(env, userId) {
+async function checkAdditionalRequiredChannels(env, userId, { forceRefresh = false } = {}) {
   const uid = String(userId);
   const channels = await _getActiveAdChannels(env);
   if (channels.length === 0) {
@@ -3140,8 +3140,13 @@ async function checkAdditionalRequiredChannels(env, userId) {
   const _ttlPos = Math.floor(55 + _ttlJitter); // 55-95s for positive (joined)
   const _ttlNeg = Math.floor(55 + _ttlJitter); // 55-95s for negative (not joined)
 
-  // Check per-user KV cache (jittered TTL).
-  if (env.RATE_LIMITS && typeof env.RATE_LIMITS.get === 'function') {
+  // ROOT-CAUSE FIX (AUDIT-P1 / Bug #2): respect forceRefresh — skip the KV
+  // cache when the caller explicitly requested a fresh check (e.g., /start,
+  // /api/users/check-join, bootstrap after a not-joined result). This ensures
+  // that even if the per-isolate _campaignCache returns a stale channel list,
+  // we still do a FRESH Telegram getChatMember call for each channel in that
+  // list rather than trusting a potentially-stale '1' from the KV cache.
+  if (!forceRefresh && env.RATE_LIMITS && typeof env.RATE_LIMITS.get === 'function') {
     try {
       const cached = await env.RATE_LIMITS.get(cacheKey);
       if (cached === '1') return { joined: true, channels: channels.length, cached: true };
@@ -3221,7 +3226,10 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false, ski
     const result = await checkChannelMembership(uid, env);
     if (result.joined) {
       // PHASE 2: primary env channel joined — now check admin-configured DB channels.
-      const extra = await checkAdditionalRequiredChannels(env, uid);
+      // ROOT-CAUSE FIX (AUDIT-P1 / Bug #2): propagate forceRefresh so that when
+      // the caller explicitly requested a fresh check, the DB-channel check also
+      // skips its KV cache and does a real Telegram getChatMember call.
+      const extra = await checkAdditionalRequiredChannels(env, uid, { forceRefresh });
       if (!extra.joined) {
         // Primary channel joined but a DB channel is not → treat as not-joined.
         await setCachedJoinStatus(env, uid, false);
