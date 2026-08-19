@@ -26,6 +26,8 @@ export function createUserHandlers(deps) {
     watchlistRepo,
     adminRepo,
     diagLog,
+    // [BOOTSTRAP-E2E] diagnostic logging — traces admin detection + join check
+    logBootstrapE2E,
     // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap
     fireDailyLoginMission,
   } = deps;
@@ -77,9 +79,13 @@ export function createUserHandlers(deps) {
         }
       }
       if (!userId) {
+        await logBootstrapE2E(env, { phase: 'auth_failed', userId: payload.user_id, authError: auth.error ? 'present' : 'absent' });
         return auth.error;
       }
     }
+
+    // [BOOTSTRAP-E2E] Log auth success
+    await logBootstrapE2E(env, { phase: 'auth_ok', userId, authMethod: auth.authMethod || 'initData', has_tg_user: Boolean(tgUser) });
 
     payload.user_id = userId;
     try {
@@ -140,7 +146,11 @@ export function createUserHandlers(deps) {
       let channelJoined = false;
       if (tgUser?.id) {
         try {
+          // [BOOTSTRAP-E2E] Log membership check start
+          await logBootstrapE2E(env, { phase: 'membership_check_start', userId, forceRefresh: false });
           let membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: false });
+          // [BOOTSTRAP-E2E] Log membership check result (forceRefresh:false)
+          await logBootstrapE2E(env, { phase: 'membership_check_1', userId, joined: Boolean(membership?.joined), reason: membership?.reason || null, admin: Boolean(membership?.admin) });
           if (membership?.joined) {
             channelJoined = true;
           } else {
@@ -160,24 +170,34 @@ export function createUserHandlers(deps) {
             // This is acceptable: bootstrap runs once per Mini App open, not per API call.
             membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: true });
             channelJoined = Boolean(membership?.joined);
+            // [BOOTSTRAP-E2E] Log membership check result (forceRefresh:true)
+            await logBootstrapE2E(env, { phase: 'membership_check_2', userId, joined: channelJoined, reason: membership?.reason || null });
           }
         } catch (e) {
           // On error, fall back to the DB row (best-effort). This is safe because
           // requireChannelJoin middleware will re-check on every protected API call.
           channelJoined = Boolean(freshUserRow?.channel_joined);
+          // [BOOTSTRAP-E2E] Log membership check error
+          await logBootstrapE2E(env, { phase: 'membership_error', userId, error: String(e?.message || e).slice(0, 200), fallback_channel_joined: channelJoined });
         }
       } else {
         channelJoined = Boolean(freshUserRow?.channel_joined);
+        await logBootstrapE2E(env, { phase: 'no_tg_user_id', userId, fallback_channel_joined: channelJoined });
       }
 
+      // [BOOTSTRAP-E2E] Log admin check start
       let isUserAdmin = isAdminTelegramId(env, userId);
+      await logBootstrapE2E(env, { phase: 'admin_env_check', userId, is_admin_env: isUserAdmin });
       if (!isUserAdmin && isDatabaseConfigured(env) && adminRepo) {
         try {
           await adminRepo.ensureSchema(env).catch(() => {});
           const dbAdmin = await adminRepo.getAdminByTelegramId(env, userId);
           if (dbAdmin && dbAdmin.active) isUserAdmin = true;
+          // [BOOTSTRAP-E2E] Log admin DB check result
+          await logBootstrapE2E(env, { phase: 'admin_db_check', userId, db_admin_found: Boolean(dbAdmin), db_admin_active: Boolean(dbAdmin?.active), is_admin_final: isUserAdmin });
         } catch (e) {
           console.warn('[BOOTSTRAP] Admin DB check failed:', e?.message);
+          await logBootstrapE2E(env, { phase: 'admin_db_error', userId, error: String(e?.message || e).slice(0, 200) });
         }
       }
 
@@ -196,6 +216,8 @@ export function createUserHandlers(deps) {
         }
       }
 
+      // [BOOTSTRAP-E2E] Log final response
+      await logBootstrapE2E(env, { phase: 'response', userId, channel_joined: channelJoined, is_admin: isUserAdmin });
       return jsonResponse({
         status: 'success',
         user: userRepo.normalizeRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
@@ -203,6 +225,8 @@ export function createUserHandlers(deps) {
       }, {}, env);
     } catch (error) {
       console.warn(safeError('bootstrap-user', error));
+      // [BOOTSTRAP-E2E] Log bootstrap failure
+      await logBootstrapE2E(env, { phase: 'handler_error', userId, error: String(error?.message || error).slice(0, 300), error_type: error?.constructor?.name || 'Error' });
       return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, env);
     }
   }

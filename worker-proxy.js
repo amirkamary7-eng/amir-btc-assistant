@@ -511,6 +511,36 @@ async function logStartE2E(env, entry) {
 }
 
 // ============================================================================
+// [BOOTSTRAP-E2E] Diagnostic logging — bootstrap handler + join check tracing
+// ============================================================================
+// PURPOSE: Trace the bootstrap + admin detection + join check flow end-to-end.
+// Stored in APP_CACHE KV under key 'bootstrap:e2e_log' (rolling last 30, TTL 1800s).
+// Read via GET /api/bootstrap-diag (public, same as /api/start-diag).
+//
+// SECURITY: userId reduced to 4-char suffix. No tokens, no PII.
+async function logBootstrapE2E(env, entry) {
+  if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
+  try {
+    const key = 'bootstrap:e2e_log';
+    const raw = await env.APP_CACHE.get(key).catch(() => null);
+    let arr = [];
+    if (raw) {
+      try { arr = JSON.parse(raw) || []; } catch { arr = []; }
+    }
+    const sanitized = { ts: new Date().toISOString(), ...entry };
+    // Reduce userId to a 4-char correlation suffix (no PII)
+    if (sanitized.userId) {
+      const uid = String(sanitized.userId);
+      sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
+      delete sanitized.userId;
+    }
+    arr.push(sanitized);
+    if (arr.length > 30) arr = arr.slice(-30);
+    await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
+  } catch { /* non-fatal — diagnostics must never break bootstrap */ }
+}
+
+// ============================================================================
 // MAINTENANCE MODE — System-wide maintenance state stored in APP_CACHE KV
 // with in-memory fallback for when KV writes fail (free-plan daily limit).
 // ============================================================================
@@ -8237,6 +8267,8 @@ const userHandlers = createUserHandlers({
   watchlistRepo,
   adminRepo,
   diagLog,
+  // [BOOTSTRAP-E2E] diagnostic logging — traces admin detection + join check
+  logBootstrapE2E,
   // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap.
   // walletHandlers is created above (line ~6809) so it's in scope here.
   fireDailyLoginMission: (...args) => walletHandlers.fireDailyLoginMission(...args),
@@ -11228,6 +11260,30 @@ export default {
           note: inconsistencies.length > 0
             ? `BUG-1 TRIGGERED: ${inconsistencies.length} admin ID(s) are recognized by bootstrap but NOT by admin panel routes. This is the root cause of "admin not recognized in Mini App".`
             : 'All admin IDs are consistently recognized by both functions. BUG-1 is NOT the cause of the reported issue.',
+        }, {}, env);
+      }
+
+      // ── GET /api/bootstrap-diag — read [BOOTSTRAP-E2E] diagnostic logs ──
+      // Public (no auth) — same as /api/start-diag, /api/admin-diag.
+      // Returns the last 30 bootstrap flow entries from APP_CACHE KV.
+      // Each entry has: phase, uid (4-char suffix), timestamp, and step-specific
+      // data (joined, reason, is_admin_env, is_admin_final, error, etc.)
+      if (request.method === 'GET' && url.pathname === '/api/bootstrap-diag') {
+        let entries = [];
+        try {
+          const raw = await env.APP_CACHE?.get('bootstrap:e2e_log').catch(() => null);
+          if (raw) {
+            entries = JSON.parse(raw) || [];
+          }
+        } catch (e) {
+          entries = [{ error: `Failed to read bootstrap:e2e_log: ${e instanceof Error ? e.message : String(e)}` }];
+        }
+        return jsonResponse({
+          status: 'success',
+          server_time: new Date().toISOString(),
+          count: entries.length,
+          entries: entries.slice(-30),
+          note: 'These logs are written by the bootstrap handler (POST /api/users/bootstrap). Open the Mini App to generate fresh entries. Each entry has a 4-char uid suffix for correlation across phases within a single bootstrap flow.',
         }, {}, env);
       }
 
