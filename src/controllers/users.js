@@ -25,7 +25,6 @@ export function createUserHandlers(deps) {
     userRepo,
     watchlistRepo,
     adminRepo,
-    diagLog,
     // [BOOTSTRAP-E2E] diagnostic logging — traces admin detection + join check
     logBootstrapE2E,
     // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap

@@ -469,7 +469,10 @@ async function writeAppCache(env, key, value, expirationTtl) {
 // functions that ran JSON.stringify + console.log + KV write on EVERY referral
 // flow step (15+ calls per bootstrap). Each call costs ~0.5-1ms CPU.
 // 15 calls × 1ms = 15ms CPU → exceededResources.
-// These are now no-ops. All call sites remain for code structure but do nothing.
+// These were no-op stubs (bodies removed in Phase-12), and all 21 call sites
+// were removed in the performance audit cleanup. The definitions remain here
+// only to avoid breaking any external imports, but are never called.
+// (Kept as safety stub — if any code path still references them, they no-op.)
 async function diagLog(env, entry) { /* no-op: diagnostic logging removed */ }
 async function flushDiagLog(env) { /* no-op */ }
 function diagLogSync(env, entry) { /* no-op */ }
@@ -2371,7 +2374,6 @@ async function ensureUserRow(env, userId) {
  * an existing referral gets its channel verification + reward in one go).
  */
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
-  await diagLog(env, { scope: 'diag-creditReferralWithReward', inviterId, referralId, inviteeId, amount, alsoVerifyChannel });
   try {
     // REFACTOR: use Economy Layer (Reward Engine) instead of direct creditTokens.
     // This ensures all rewards go through rule validation + event system.
@@ -2385,7 +2387,6 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       auditInfo: { actor: 'system' },
       env,
     });
-    await diagLog(env, { scope: 'diag-creditReferralWithReward-SUCCESS', newBalance: result.newBalance, txId: result.txId });
 
     // Mark referral as rewarded
     // ROOT CAUSE FIX (R-2.4): Added `AND rewarded = FALSE` condition.
@@ -2486,15 +2487,12 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
           reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined,
         },
       });
-      await diagLog(env, { scope: 'diag-referral-reward-message-ENQUEUED', inviterId, inviteeId, amount, newBalance });
     } catch (msgErr) {
       // Non-fatal — the reward was credited, just the message failed to enqueue
       console.warn('[REFERRAL] Reward message enqueue failed (non-fatal):', msgErr?.message);
-      await diagLog(env, { scope: 'diag-referral-reward-message-FAILED', error: msgErr?.message });
     }
   }
   } catch (err) {
-    await diagLog(env, { scope: 'diag-creditReferralWithReward-ERROR', error: err?.message, stack: err?.stack });
     throw err;
   }
 }
@@ -2826,30 +2824,12 @@ async function retryFailedMissionRewards(env) {
  *   → Insert → Reward → Final Result
  */
 async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined, isNewUser) {
-  // ── DEBUG: Step 1 — Log entry point with all parameters ──
-  await diagLog(env, {
-    scope: 'diag-referral-STEP1-ENTRY',
-    inviteeId,
-    referrerId,
-    channelJoined,
-    isNewUser,
-    note: 'processReferralOnBootstrap called'
-  });
-
   const normalizedReferrerId = normalizeOptionalString(referrerId);
 
-  // ── DEBUG: Step 2 — Validate referrer_id (M-R4: must be numeric, not self) ──
+  // ── Step 2 — Validate referrer_id (M-R4: must be numeric, not self) ──
   if (!normalizedReferrerId || !/^\d{1,20}$/.test(normalizedReferrerId) || normalizedReferrerId === String(inviteeId)) {
-    await diagLog(env, {
-      scope: 'diag-referral-STEP2-REJECTED',
-      reason: 'M-R4-invalid-or-self',
-      normalizedReferrerId,
-      inviteeId,
-      referrerIdRaw: referrerId
-    });
     return null;
   }
-  await diagLog(env, { scope: 'diag-referral-STEP2-VALID', normalizedReferrerId, inviteeId });
 
   // ── ANTI-ABUSE: Check 15-day referral cooldown for deleted accounts ──
   // If this user previously deleted their account, they are in a 15-day
@@ -2859,47 +2839,25 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   if (typeof userRepo?.checkReferralCooldown === 'function') {
     const cooldown = await userRepo.checkReferralCooldown(env, inviteeId);
     if (cooldown.inCooldown) {
-      await diagLog(env, {
-        scope: 'diag-referral-STEP2b-COOLDOWN-REJECTED',
-        inviteeId,
-        reason: cooldown.reason,
-        cooldownUntil: cooldown.cooldownUntil,
-        deletedAt: cooldown.deletedAt,
-        note: 'User is in 15-day referral cooldown after account deletion. Referral REJECTED. User can still use the app.'
-      });
-            return { referral_id: null, rejected: true, reason: cooldown.reason, cooldownUntil: cooldown.cooldownUntil };
+      return { referral_id: null, rejected: true, reason: cooldown.reason, cooldownUntil: cooldown.cooldownUntil };
     }
-    await diagLog(env, { scope: 'diag-referral-STEP2b-COOLDOWN-PASS', inviteeId, note: 'Not in cooldown — proceeding' });
   }
 
   // ── ROOT-CAUSE FIX: `isNewUser` gate REMOVED ──
   // The "first inviter wins" rule (existing referral check + ON CONFLICT)
   // is sufficient to prevent abuse. See function docstring for full rationale.
-  // We still log isNewUser for debugging/observability.
-  await diagLog(env, {
-    scope: 'diag-referral-STEP3-NEWUSER-CHECK',
-    isNewUser,
-    note: isNewUser ? 'Brand new user — proceeding' : 'Existing user — proceeding (isNewUser gate removed, first-inviter-wins applies)'
-  });
 
-  // ── DEBUG: Step 4 — Verify inviter exists in users table ──
+  // ── Step 4 — Verify inviter exists in users table ──
   const inviterResult = await queryDb(
     env,
     'SELECT telegram_id FROM users WHERE telegram_id = $1 LIMIT 1',
     [normalizedReferrerId],
   );
   if (!inviterResult.rows[0]) {
-    await diagLog(env, {
-      scope: 'diag-referral-STEP4-REJECTED',
-      reason: 'inviter-not-found',
-      normalizedReferrerId,
-      note: 'The referrer does not have a user row in the DB'
-    });
     return null;
   }
-  await diagLog(env, { scope: 'diag-referral-STEP4-INVITER-FOUND', inviterId: normalizedReferrerId });
 
-  // ── DEBUG: Step 5 — Check for existing referral (first inviter wins) ──
+  // ── Step 5 — Check for existing referral (first inviter wins) ──
   const existingResult = await queryDb(
     env,
     `
@@ -2913,13 +2871,6 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   const existing = existingResult.rows[0] || null;
 
   if (existing) {
-    await diagLog(env, {
-      scope: 'diag-referral-STEP5-EXISTING',
-      referral_id: existing.id,
-      existing_inviter: existing.inviter_id,
-      rewarded: existing.rewarded,
-      note: 'First inviter wins — keeping original attribution'
-    });
     // Race: another concurrent bootstrap already inserted the referral.
     // Delegate reward processing (idempotent — won't double-reward).
     // PHASE 2 SAFE OPTIMIZATION: Skip processPendingReferralReward when channelJoined=false.
@@ -2933,12 +2884,10 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     if (channelJoined) {
       await processPendingReferralReward(env, inviteeId, channelJoined);
     }
-    await diagLog(env, { scope: 'diag-referral-FINAL', result: 'already_exists', referral_id: existing.id });
     return { referral_id: existing.id, already_exists: true };
   }
-  await diagLog(env, { scope: 'diag-referral-STEP5-NO-EXISTING', note: 'No prior referral — will insert' });
 
-  // ── DEBUG: Step 6 — INSERT referral row (H-R3: ON CONFLICT DO NOTHING — race-safe) ──
+  // ── Step 6 — INSERT referral row (H-R3: ON CONFLICT DO NOTHING — race-safe) ──
   const insertResult = await queryDb(
     env,
     `
@@ -2950,21 +2899,12 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     [normalizedReferrerId, String(inviteeId)],
   );
   const createdReferral = insertResult.rows[0] || null;
-  await diagLog(env, {
-    scope: 'diag-referral-STEP6-INSERT',
-    createdReferral,
-    rowCount: insertResult.rowCount,
-    inviter: normalizedReferrerId,
-    invitee: inviteeId
-  });
   if (!createdReferral) {
     // Race lost — another request already inserted the referral.
-    await diagLog(env, { scope: 'diag-referral-STEP6-race-lost', note: 'Another concurrent request won the INSERT race' });
     return { referral_id: null, already_exists: true, race_won: false };
   }
 
-  // ── DEBUG: Step 7 — Delegate reward processing (idempotent) ──
-  await diagLog(env, { scope: 'diag-referral-STEP7-REWARD-CALL', referral_id: createdReferral.id, channelJoined });
+  // ── Step 7 — Delegate reward processing (idempotent) ──
   // PHASE 2 SAFE OPTIMIZATION: Same as above — skip when channelJoined=false.
   // processPendingReferralReward would early-return anyway, but we save 3 queryDb calls.
   // Reward will be credited by resolveChannelMembership(forceRefresh:true) if user just joined,
@@ -2973,11 +2913,9 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   if (channelJoined) {
     rewardResult = await processPendingReferralReward(env, inviteeId, channelJoined);
   }
-  await diagLog(env, { scope: 'diag-referral-STEP7-REWARD-RESULT', rewardResult });
 
-  // ── DEBUG: Step 8 — Final result ──
+  // ── Step 8 — Final result ──
   const finalResult = { referral_id: createdReferral.id, rewarded: Boolean(rewardResult?.rewarded) };
-  await diagLog(env, { scope: 'diag-referral-STEP8-FINAL', result: finalResult, inviteeId, inviterId: normalizedReferrerId });
   return finalResult;
 }
 
@@ -8293,7 +8231,6 @@ const userHandlers = createUserHandlers({
   userRepo,
   watchlistRepo,
   adminRepo,
-  diagLog,
   // [BOOTSTRAP-E2E] diagnostic logging — traces admin detection + join check
   logBootstrapE2E,
   // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap.
@@ -8391,7 +8328,6 @@ const adminHandlers = createAdminHandlers({
   notificationRepo,
   notificationPlatformRepo,
   notificationService,
-  diagLog,
   // A-3 FIX: Rate limiting for admin mutations
   isUserRateLimited,
 });
@@ -9539,7 +9475,6 @@ async function handleTelegramWebhook(request, env) {
           callbackWebAppUrl = url.toString();
         }
 
-        await diagLog(env, { scope: 'diag-callback-join-verify-SUCCESS', user_id: userId, webAppUrl: callbackWebAppUrl, had_pending_ref: Boolean(pendingRef) });
         await answerTelegramCallbackQuery(env, callbackQuery.id, '✅ عضویت تأیید شد! مینی‌اپ را باز کنید.', false);
         await editTelegramMessageReplyMarkup(env, chatId, messageId, {
           inline_keyboard: [
