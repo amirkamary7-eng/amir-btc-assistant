@@ -3196,6 +3196,67 @@ function _adsErrorState(message, retryFn) {
     '</div>';
 }
 
+// ════════════════════════════════════════════════════════════════════
+// PHASE 2 UI FIX — Compact card-based layout for advertisement items.
+// Replaces the old table layout (status badge in own column, text falling
+// below each other, excessive whitespace, no hierarchy).
+//
+// Card structure:
+//   ┌───────────────────────────────────────────────────────┐
+//   │ [icon] Title                    [STATUS BADGE]         │  ← header
+//   │ @username · destination · cooldown                    │  ← meta
+//   │ ───────────────────────────────────────────────────── │  ← divider
+//   │ [Edit] [Send] [Status▾] [Delete]                      │  ← actions
+//   └───────────────────────────────────────────────────────┘
+//
+// CSS classes: .ads-item-card, .ads-item-head, .ads-item-title,
+// .ads-item-meta, .ads-item-divider, .ads-item-actions
+// ════════════════════════════════════════════════════════════════════
+function _adsItemCard(opts) {
+    // opts: { icon, title, titleIcon, statusBadge, metaParts (array), actions (html), thumbnail }
+    var metaHtml = (opts.metaParts && opts.metaParts.filter(Boolean).length > 0)
+        ? '<div class="ads-item-meta">' + opts.metaParts.filter(Boolean).join(' <span class="ads-meta-sep">·</span> ') + '</div>'
+        : '';
+    var thumbHtml = opts.thumbnail
+        ? '<img class="ads-item-thumb" src="' + adminEscapeHtml(opts.thumbnail) + '" alt="">'
+        : '';
+    var iconHtml = opts.titleIcon
+        ? '<span class="ads-item-icon">' + _adsIcon(opts.titleIcon, 'ads-item-svg') + '</span>'
+        : '';
+    return '<div class="ads-item-card">' +
+        '<div class="ads-item-head">' +
+            '<div class="ads-item-title-wrap">' +
+                thumbHtml + iconHtml +
+                '<div class="ads-item-title-group">' +
+                    '<div class="ads-item-title">' + (opts.title || '—') + '</div>' +
+                    (opts.subtitle ? '<div class="ads-item-subtitle">' + opts.subtitle + '</div>' : '') +
+                '</div>' +
+            '</div>' +
+            (opts.statusBadge ? '<div class="ads-item-status">' + opts.statusBadge + '</div>' : '') +
+        '</div>' +
+        metaHtml +
+        (opts.actions ? '<div class="ads-item-divider"></div><div class="ads-item-actions">' + opts.actions + '</div>' : '') +
+    '</div>';
+}
+
+// Build a compact status dropdown styled as a small pill button (not a raw select)
+function _adsStatusPill(setterFnName, id, currentStatus) {
+    var meta = _adStatusMeta(currentStatus);
+    var opts = [
+        { value: 'draft', label: 'پیش‌نویس' },
+        { value: 'active', label: 'فعال' },
+        { value: 'paused', label: 'متوقف' },
+        { value: 'archived', label: 'بایگانی' },
+    ];
+    var html = '<select class="ads-status-pill ads-status-' + meta.color + '" onchange="' + adminEscapeHtml(setterFnName) +
+        '(\'' + adminEscapeJsId(String(id)) + '\', this.value)" title="تغییر وضعیت">';
+    opts.forEach(function (o) {
+        html += '<option value="' + adminEscapeHtml(o.value) + '"' + (currentStatus === o.value ? ' selected' : '') + '>' + adminEscapeHtml(o.label) + '</option>';
+    });
+    html += '</select>';
+    return html;
+}
+
 // FIX (audit H3): Submit button loading state to prevent double-clicks.
 // Disables the button + shows "..." text during the API call. Re-enables on
 // completion (success or error). Used by saveAdChannel/saveAdPopup/saveAdMessage.
@@ -3354,34 +3415,34 @@ window.uploadAdImage = uploadAdImage;
 async function loadAdChannels() {
     var section = document.getElementById('ads-channels-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty"><span class="ads-spinner"></span> در حال بارگذاری...</div>';
     var token = _adminLoadToken;
     try {
         var data = await adminApiFetch('/api/admin/advertisements/channels');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.channels)) {
             _adsChannelCache = data.channels;
-            var rows = data.channels.map(function (c) {
+            var cards = data.channels.map(function (c) {
                 var username = c.channel_username ? '@' + adminEscapeHtml(c.channel_username) : '—';
                 var title = c.channel_title ? adminEscapeHtml(c.channel_title) : '—';
-                var statusBadge = _adStatusBadge(c.campaign_status || c.status || 'draft');
-                var activeBadge = c.is_active
-                    ? '<span class="admin-badge admin-badge-green">بله</span>'
-                    : '<span class="admin-badge admin-badge-gray">خیر</span>';
-                var statusSelect = _adStatusSelect('setAdChannelStatus', c.id, c.campaign_status || c.status || 'draft');
-                return '<tr>' +
-                    '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
-                        '<div style="font-size:11px;color:#7a8499;margin-top:2px;">' + username + '</div>' +
-                        '<div style="font-size:10px;color:#5a6378;margin-top:2px;direction:ltr;text-align:right;">' + adminEscapeHtml(c.join_url || '') + '</div></td>' +
-                    '<td>' + statusBadge + '</td>' +
-                    '<td>' + activeBadge + '</td>' +
-                    '<td>' + adminFormatNumber(c.display_order || 0) + '</td>' +
-                    '<td style="white-space:normal;">' +
-                        '<button class="adm-btn-sm" onclick="showAdChannelForm(\'' + adminEscapeJsId(String(c.id)) + '\')">ویرایش</button> ' +
-                        statusSelect + ' ' +
-                        '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdChannel(\'' + adminEscapeJsId(String(c.id)) + '\')">حذف</button>' +
-                    '</td>' +
-                '</tr>';
+                var status = c.campaign_status || c.status || 'draft';
+                var statusBadge = _adStatusBadge(status);
+                var isActive = c.is_active ? '<span class="ads-meta-tag">نمایش: بله</span>' : '<span class="ads-meta-tag muted">نمایش: خیر</span>';
+                var order = '<span class="ads-meta-tag">ترتیب: ' + adminFormatNumber(c.display_order || 0) + '</span>';
+                var joinUrl = c.join_url ? '<span class="ads-meta-tag ltr">' + adminEscapeHtml(c.join_url) + '</span>' : '';
+                var statusPill = _adsStatusPill('setAdChannelStatus', c.id, status);
+                var actions =
+                    '<button class="adm-btn-sm" onclick="showAdChannelForm(\'' + adminEscapeJsId(String(c.id)) + '\')">' + _adsIcon('edit', 'adm-btn-icon') + 'ویرایش</button>' +
+                    statusPill +
+                    '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdChannel(\'' + adminEscapeJsId(String(c.id)) + '\')">' + _adsIcon('trash', 'adm-btn-icon') + 'حذف</button>';
+                return _adsItemCard({
+                    titleIcon: 'link',
+                    title: title,
+                    subtitle: username,
+                    statusBadge: statusBadge,
+                    metaParts: [isActive, order, joinUrl],
+                    actions: actions
+                });
             }).join('');
             section.innerHTML =
                 '<div class="ads-help-banner">' +
@@ -3389,14 +3450,13 @@ async function loadAdChannels() {
                     '<span>این کانال‌ها به عنوان کانال‌های موردنیاز عضویت تنظیم می‌شوند. کاربر باید عضو همه کانال‌های فعال باشد.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
-                    '<h4 class="rc-card-title">' + _adsIcon('link', 'rc-card-icon') + 'کانال‌های عضویت</h4>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="showAdChannelForm(null)" style="margin-bottom:12px;">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن کانال</button>' +
+                    '<div class="ads-card-head-row">' +
+                        '<h4 class="rc-card-title">' + _adsIcon('link', 'rc-card-icon') + 'کانال‌های عضویت</h4>' +
+                        '<button class="adm-btn adm-btn-primary" onclick="showAdChannelForm(null)">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن کانال</button>' +
+                    '</div>' +
                     '<div id="ads-channel-form" style="display:none;margin-bottom:14px;"></div>' +
-                    '<div class="adm-table-wrap">' +
-                        '<table class="adm-table">' +
-                            '<thead><tr><th>کانال</th><th>وضعیت</th><th>نمایش</th><th>ترتیب</th><th>عملیات</th></tr></thead>' +
-                            '<tbody>' + (rows || '<tr><td colspan="5">' + _adsEmptyState('link', 'هنوز کانالی اضافه نشده است', 'showAdChannelForm(null)', 'افزودن اولین کانال') + '</td></tr>') + '</tbody>' +
-                        '</table>' +
+                    '<div class="ads-item-list">' +
+                        (cards || _adsEmptyState('link', 'هنوز کانالی اضافه نشده است', 'showAdChannelForm(null)', 'افزودن اولین کانال')) +
                     '</div>' +
                 '</div>';
         } else {
@@ -3543,33 +3603,36 @@ window.setAdChannelStatus = setAdChannelStatus;
 async function loadAdPopups() {
     var section = document.getElementById('ads-popups-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty"><span class="ads-spinner"></span> در حال بارگذاری...</div>';
     var token = _adminLoadToken;
     try {
         var data = await adminApiFetch('/api/admin/advertisements/popups');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.popups)) {
             _adsPopupCache = data.popups;
-            var rows = data.popups.map(function (p) {
+            var cards = data.popups.map(function (p) {
                 var title = p.title ? adminEscapeHtml(p.title) : '—';
-                var statusBadge = _adStatusBadge(p.campaign_status || p.status || 'draft');
+                var status = p.campaign_status || p.status || 'draft';
+                var statusBadge = _adStatusBadge(status);
                 var cooldown = p.cooldown_seconds ? _formatCooldownHuman(p.cooldown_seconds) : '—';
                 var updated = p.updated_at ? adminFormatDate(p.updated_at) : '—';
-                var statusSelect = _adStatusSelect('setAdPopupStatus', p.id, p.campaign_status || p.status || 'draft');
-                return '<tr>' +
-                    '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
-                        '<div style="font-size:10px;color:#5a6378;margin-top:2px;">#' + adminEscapeHtml(p.id) + '</div>' +
-                        (p.image_url ? '<div style="margin-top:4px;"><img src="' + adminEscapeHtml(p.image_url) + '" style="width:36px;height:36px;border-radius:6px;object-fit:cover;" alt=""></div>' : '') +
-                    '</td>' +
-                    '<td>' + statusBadge + '</td>' +
-                    '<td>' + cooldown + '</td>' +
-                    '<td>' + adminEscapeHtml(updated) + '</td>' +
-                    '<td style="white-space:normal;">' +
-                        '<button class="adm-btn-sm" onclick="showAdPopupForm(\'' + adminEscapeJsId(String(p.id)) + '\')">ویرایش</button> ' +
-                        statusSelect + ' ' +
-                        '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdPopup(\'' + adminEscapeJsId(String(p.id)) + '\')">حذف</button>' +
-                    '</td>' +
-                '</tr>';
+                var statusPill = _adsStatusPill('setAdPopupStatus', p.id, status);
+                var cooldownTag = '<span class="ads-meta-tag">کوئل‌داون: ' + adminEscapeHtml(cooldown) + '</span>';
+                var updatedTag = '<span class="ads-meta-tag muted">آخرین تغییر: ' + adminEscapeHtml(updated) + '</span>';
+                var idTag = '<span class="ads-meta-tag muted ltr">#' + adminEscapeHtml(p.id) + '</span>';
+                var actions =
+                    '<button class="adm-btn-sm" onclick="showAdPopupForm(\'' + adminEscapeJsId(String(p.id)) + '\')">' + _adsIcon('edit', 'adm-btn-icon') + 'ویرایش</button>' +
+                    statusPill +
+                    '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdPopup(\'' + adminEscapeJsId(String(p.id)) + '\')">' + _adsIcon('trash', 'adm-btn-icon') + 'حذف</button>';
+                return _adsItemCard({
+                    titleIcon: 'layout',
+                    title: title,
+                    subtitle: idTag,
+                    statusBadge: statusBadge,
+                    thumbnail: p.image_url || null,
+                    metaParts: [cooldownTag, updatedTag],
+                    actions: actions
+                });
             }).join('');
             section.innerHTML =
                 '<div class="ads-help-banner">' +
@@ -3577,14 +3640,13 @@ async function loadAdPopups() {
                     '<span>قالب پاپ‌آپ ثابت است: تصویر ← عنوان ← متن ← دکمه. فقط محتوا قابل تغییر است. کوئل‌داون به معنای مدت زمانی است که پس از نمایش پاپ‌آپ به یک کاربر، تا آن مدت دوباره نمایش داده نمی‌شود.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
-                    '<h4 class="rc-card-title">' + _adsIcon('layout', 'rc-card-icon') + 'پاپ‌آپ مینی‌اپ</h4>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="showAdPopupForm(null)" style="margin-bottom:12px;">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پاپ‌آپ</button>' +
+                    '<div class="ads-card-head-row">' +
+                        '<h4 class="rc-card-title">' + _adsIcon('layout', 'rc-card-icon') + 'پاپ‌آپ مینی‌اپ</h4>' +
+                        '<button class="adm-btn adm-btn-primary" onclick="showAdPopupForm(null)">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پاپ‌آپ</button>' +
+                    '</div>' +
                     '<div id="ads-popup-form" style="display:none;margin-bottom:14px;"></div>' +
-                    '<div class="adm-table-wrap">' +
-                        '<table class="adm-table">' +
-                            '<thead><tr><th>عنوان</th><th>وضعیت</th><th>کوئل‌داون (۲۴ ساعت)</th><th>آخرین تغییر</th><th>عملیات</th></tr></thead>' +
-                            '<tbody>' + (rows || '<tr><td colspan="5">' + _adsEmptyState('layout', 'هنوز پاپ‌آپی ساخته نشده است', 'showAdPopupForm(null)', 'افزودن اولین پاپ‌آپ') + '</td></tr>') + '</tbody>' +
-                        '</table>' +
+                    '<div class="ads-item-list">' +
+                        (cards || _adsEmptyState('layout', 'هنوز پاپ‌آپی ساخته نشده است', 'showAdPopupForm(null)', 'افزودن اولین پاپ‌آپ')) +
                     '</div>' +
                 '</div>';
         } else {
@@ -3772,39 +3834,42 @@ function _adsAudienceBadge(aud) {
 async function loadAdMessages() {
     var section = document.getElementById('ads-messages-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty"><span class="ads-spinner"></span> در حال بارگذاری...</div>';
     var token = _adminLoadToken;
     try {
         var data = await adminApiFetch('/api/admin/advertisements/messages');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.messages)) {
             _adsMessageCache = data.messages;
-            var rows = data.messages.map(function (m) {
+            var cards = data.messages.map(function (m) {
                 var title = m.title ? adminEscapeHtml(m.title) : '—';
+                var status = m.campaign_status || m.status || 'draft';
                 var destBadge = _adsDestinationBadge(m.destinations);
                 var audBadge = _adsAudienceBadge(m.target_audience);
-                var statusBadge = _adStatusBadge(m.campaign_status || m.status || 'draft');
+                var statusBadge = _adStatusBadge(status);
                 var createdAt = m.created_at ? adminFormatDate(m.created_at) : '—';
-                var statusSelect = _adStatusSelect('setAdMessageStatus', m.id, m.campaign_status || m.status || 'draft');
-                var sendBtn = (m.campaign_status === 'active' || m.status === 'active')
-                    ? '<button class="adm-btn-sm" onclick="sendAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">' + _adsIcon('send', 'adm-btn-icon') + 'ارسال</button>'
+                var statusPill = _adsStatusPill('setAdMessageStatus', m.id, status);
+                var sendBtn = (status === 'active')
+                    ? '<button class="adm-btn-sm adm-btn-primary" onclick="sendAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">' + _adsIcon('send', 'adm-btn-icon') + 'ارسال</button>'
                     : '';
-                return '<tr>' +
-                    '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
-                        '<div style="font-size:10px;color:#5a6378;margin-top:2px;">#' + adminEscapeHtml(m.id) + '</div>' +
-                        (m.image_url ? '<div style="margin-top:4px;"><img src="' + adminEscapeHtml(m.image_url) + '" style="width:36px;height:36px;border-radius:6px;object-fit:cover;" alt=""></div>' : '') +
-                    '</td>' +
-                    '<td>' + destBadge + '</td>' +
-                    '<td>' + audBadge + '</td>' +
-                    '<td>' + statusBadge + '</td>' +
-                    '<td>' + adminEscapeHtml(createdAt) + '</td>' +
-                    '<td style="white-space:normal;">' +
-                        sendBtn + ' ' +
-                        '<button class="adm-btn-sm" onclick="showAdMessageForm(\'' + adminEscapeJsId(String(m.id)) + '\')">ویرایش</button> ' +
-                        statusSelect + ' ' +
-                        '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">حذف</button>' +
-                    '</td>' +
-                '</tr>';
+                var destTag = '<span class="ads-meta-tag">' + destBadge + '</span>';
+                var audTag = '<span class="ads-meta-tag">' + audBadge + '</span>';
+                var dateTag = '<span class="ads-meta-tag muted">' + adminEscapeHtml(createdAt) + '</span>';
+                var idTag = '<span class="ads-meta-tag muted ltr">#' + adminEscapeHtml(m.id) + '</span>';
+                var actions =
+                    sendBtn +
+                    '<button class="adm-btn-sm" onclick="showAdMessageForm(\'' + adminEscapeJsId(String(m.id)) + '\')">' + _adsIcon('edit', 'adm-btn-icon') + 'ویرایش</button>' +
+                    statusPill +
+                    '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">' + _adsIcon('trash', 'adm-btn-icon') + 'حذف</button>';
+                return _adsItemCard({
+                    titleIcon: 'mail',
+                    title: title,
+                    subtitle: idTag,
+                    statusBadge: statusBadge,
+                    thumbnail: m.image_url || null,
+                    metaParts: [destTag, audTag, dateTag],
+                    actions: actions
+                });
             }).join('');
             section.innerHTML =
                 '<div class="ads-help-banner">' +
@@ -3812,14 +3877,13 @@ async function loadAdMessages() {
                     '<span>فقط کمپین‌های فعال ارسال می‌شوند. Draft/Paused/Archived ارسال نمی‌شوند. دکمه «ارسال» پیام را به مخاطبان هدف (بر اساس کانال و مخاطب انتخابی) تحویل می‌دهد. کاربران رایگان فقط در صورت انتخاب «همه» یا «رایگان» پیام را دریافت می‌کنند.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
-                    '<h4 class="rc-card-title">' + _adsIcon('mail', 'rc-card-icon') + 'پیام‌های تبلیغاتی</h4>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="showAdMessageForm(null)" style="margin-bottom:12px;">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پیام</button>' +
+                    '<div class="ads-card-head-row">' +
+                        '<h4 class="rc-card-title">' + _adsIcon('mail', 'rc-card-icon') + 'پیام‌های تبلیغاتی</h4>' +
+                        '<button class="adm-btn adm-btn-primary" onclick="showAdMessageForm(null)">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پیام</button>' +
+                    '</div>' +
                     '<div id="ads-message-form" style="display:none;margin-bottom:14px;"></div>' +
-                    '<div class="adm-table-wrap">' +
-                        '<table class="adm-table">' +
-                            '<thead><tr><th>کمپین</th><th>مقصد</th><th>مخاطب</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead>' +
-                            '<tbody>' + (rows || '<tr><td colspan="6">' + _adsEmptyState('mail', 'هنوز پیامی ساخته نشده است', 'showAdMessageForm(null)', 'افزودن اولین پیام') + '</td></tr>') + '</tbody>' +
-                        '</table>' +
+                    '<div class="ads-item-list">' +
+                        (cards || _adsEmptyState('mail', 'هنوز پیامی ساخته نشده است', 'showAdMessageForm(null)', 'افزودن اولین پیام')) +
                     '</div>' +
                 '</div>';
         } else {
