@@ -26,7 +26,7 @@ const AssistantUI = {
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
-                <p class="ai-speech-text">چطور می‌تونم کمکتون کنم؟ سوالی دارید بپرسید</p>
+                <p class="ai-speech-text">سلام، خوش اومدی! سوالی داری؟</p>
                 <span class="ai-bubble-tail"></span>
             </div>
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
@@ -166,7 +166,7 @@ const AssistantUI = {
             localStorage.setItem('ai_speech_dismissed', '1');
         };
         closeBtn?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); dismiss(); });
-        window.setTimeout(dismiss, 8000);
+        window.setTimeout(dismiss, 5000);
     },
 
     bindEvents() {
@@ -949,7 +949,12 @@ const AssistantUI = {
         }
 
         const userMsg = message || '[تصویر]';
-        if (message) this.appendBubble('user', message);
+        // PHASE 5: Show image + text in user message bubble BEFORE sending
+        if (imageData) {
+            this.appendBubble('user', message || '', imageData);
+        } else if (message) {
+            this.appendBubble('user', message);
+        }
         if (input) input.value = '';
         this.sending = true;
 
@@ -984,9 +989,8 @@ const AssistantUI = {
                 imageCompressed: attachment?.compressed || false,
                 attachmentStatus: attachment?.status || 'none',
             });
-            // Clear attachment AFTER payload is built (quota only consumed on success)
-            // NOTE: We do NOT clear here — only after successful send (backend quota accounting)
-            this.pendingImage = null;
+            // PHASE 6: Do NOT clear pendingImage here — only after success
+            // Old code cleared pendingImage before API call, breaking retry on failure
 
             const data = await apiFetch('/api/assistant/chat', {
                 method: 'POST',
@@ -1000,7 +1004,7 @@ const AssistantUI = {
                 this.history.push({ role: 'user', content: userMsg });
                 this.history.push({ role: 'assistant', content: data.reply });
                 this.appendBubble('assistant', data.reply);
-                // PHASE 15: Quota consumed on success — clear attachment
+                // PHASE 6: Quota consumed on success — clear attachment + composer
                 this.clearAttachment();
             } else {
                 // ITEM 5: Better error messages for rate limiting

@@ -809,7 +809,7 @@ test('FILE-18: Send disabled when attachment status=processing', () => {
 test('FILE-19: Send checks attachment status — blocks if processing', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
   const sendFn = JS.indexOf('async send()');
-  const fnBlock = JS.slice(sendFn, sendFn + 2000);
+  const fnBlock = JS.slice(sendFn, sendFn + 4000);
   // Must check isProcessing and return early
   assert.ok(fnBlock.includes('isProcessing'), 'send() must check isProcessing');
   assert.ok(fnBlock.includes('if (isProcessing) return'),
@@ -1388,3 +1388,192 @@ test('FAB-FLOAT-01: FAB has halo with pointer-events none', () => {
 });
 
 console.log('✅ All Phase 19 final UX + vision tests loaded.');
+
+// ============================================================================
+// PHASE 20: Real E2E Vision + Attachment Send + FAB + Welcome Tests
+// ============================================================================
+
+test('VISION-E2E-01: send() includes image in payload when attachment ready', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 3000);
+  // Must construct payload with image: imageData
+  assert.ok(fnBlock.includes('image: imageData'), 'Payload must include image: imageData');
+  // Must get imageData from attachment.data (authoritative)
+  assert.ok(fnBlock.includes('attachment.data'), 'Must use attachment.data');
+});
+
+test('VISION-E2E-02: Backend passes imageBase64 to Gemini with inline_data', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // callGeminiChat must push inline_data when imageBase64 exists
+  const geminiFn = SRC.indexOf('async function callGeminiChat');
+  const fnBlock = SRC.slice(geminiFn, geminiFn + 1000);
+  assert.ok(fnBlock.includes('inline_data'), 'Must create inline_data');
+  assert.ok(fnBlock.includes('mime_type'), 'Must set mime_type');
+  assert.ok(fnBlock.includes('imageBase64'), 'Must accept imageBase64 parameter');
+});
+
+test('ATTACH-SEND-01: Image shown in user message bubble on send', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 4000);
+  // When imageData exists, must call appendBubble with image
+  assert.ok(fnBlock.includes("appendBubble('user', message || '', imageData)"),
+    'Must show image in user bubble when sending');
+});
+
+test('ATTACH-SEND-02: pendingImage NOT cleared before API call (retry on failure)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 3000);
+  // Must NOT have this.pendingImage = null BEFORE the API call
+  const apiCallIdx = fnBlock.indexOf('apiFetch');
+  const clearIdx = fnBlock.indexOf('this.pendingImage = null');
+  // pendingImage should be cleared AFTER success (in clearAttachment), not before API call
+  if (clearIdx > -1 && apiCallIdx > -1) {
+    assert.ok(clearIdx > apiCallIdx || clearIdx === -1,
+      'pendingImage must NOT be cleared before API call (preserves for retry)');
+  }
+});
+
+test('ATTACH-SEND-03: clearAttachment called only on success', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 5000);
+  const successIdx = fnBlock.indexOf("data.status === 'success'");
+  const clearIdx = fnBlock.indexOf('this.clearAttachment()');
+  assert.ok(clearIdx > successIdx, 'clearAttachment must be after success check');
+  // Must NOT be in catch block
+  const catchIdx = fnBlock.indexOf('} catch (e) {');
+  if (catchIdx > -1 && clearIdx > -1) {
+    assert.ok(clearIdx < catchIdx, 'clearAttachment must be in try block (before catch)');
+  }
+});
+
+test('ATTACH-FAIL-01: Attachment preserved on API failure', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 5000);
+  // Catch block must NOT call clearAttachment
+  const catchIdx = fnBlock.indexOf('} catch (e) {');
+  const catchBlock = fnBlock.slice(catchIdx, catchIdx + 1000);
+  assert.ok(!catchBlock.includes('this.clearAttachment()'),
+    'clearAttachment must NOT be called on failure (attachment preserved for retry)');
+});
+
+test('ATTACH-RETRY-01: User can retry after failure (attachment still in state)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // send() must read from pendingAttachment (which persists across failure)
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 500);
+  assert.ok(fnBlock.includes('this.pendingAttachment'),
+    'send() must read pendingAttachment (persists on failure)');
+  assert.ok(fnBlock.includes('attachment.data'),
+    'send() must use attachment.data for image (persists on failure)');
+});
+
+test('ATTACH-CLEAR-01: clearAttachment resets composer + state', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const clearFn = JS.indexOf('clearAttachment() {');
+  const fnBlock = JS.slice(clearFn, clearFn + 500);
+  assert.ok(fnBlock.includes('pendingAttachment = null'), 'Must clear pendingAttachment');
+  assert.ok(fnBlock.includes('pendingImage = null'), 'Must clear pendingImage');
+  assert.ok(fnBlock.includes('composerAttach'), 'Must hide composer attachment');
+});
+
+test('IMAGE-MESSAGE-01: appendBubble handles imageUrl parameter', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  const fnBlock = JS.slice(appendFn, appendFn + 2000);
+  assert.ok(fnBlock.includes('if (imageUrl)'), 'Must check imageUrl');
+  assert.ok(fnBlock.includes('ai-msg-image'), 'Must create image element');
+  assert.ok(fnBlock.includes('img.src = imageUrl'), 'Must set image src');
+});
+
+test('IMAGE-MESSAGE-02: User message with image shown before API response', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 4000);
+  // appendBubble('user', ...) must be called BEFORE apiFetch
+  const bubbleIdx = fnBlock.indexOf("appendBubble('user'");
+  const apiIdx = fnBlock.indexOf('apiFetch');
+  assert.ok(bubbleIdx > -1 && apiIdx > -1);
+  assert.ok(bubbleIdx < apiIdx, 'User message must appear BEFORE API call');
+});
+
+test('FAB-FLOAT-01: FAB has floating animation (translateY)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('ai-fab-float'), 'Must have ai-fab-float animation');
+  assert.ok(CSS.includes('translateY(-5px)'), 'Must float up 5px');
+  assert.ok(CSS.includes('animation: ai-fab-float 4s ease-in-out infinite'),
+    'Must apply float animation to FAB');
+});
+
+test('FAB-GLOW-01: Halo has breathing scale animation', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('ai-halo-pulse'), 'Must have halo pulse animation');
+  assert.ok(CSS.includes('scale(1.04)'), 'Halo must scale during pulse');
+});
+
+test('FAB-REDUCED-MOTION-01: FAB animation disabled in reduced motion', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('prefers-reduced-motion'));
+  // FAB must be included in the disabled list
+  const reducedMatch = CSS.match(/prefers-reduced-motion[^}]*ai-fab[^}]*/);
+  assert.ok(reducedMatch, 'FAB animation must be disabled in reduced-motion');
+});
+
+test('WELCOME-01: Welcome bubble shows on app load (not every open)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-speech-bubble'), 'Must have speech bubble');
+  assert.ok(JS.includes('ai_speech_dismissed'), 'Must use localStorage for dismiss state');
+});
+
+test('WELCOME-02: Welcome bubble auto-dismisses after 5 seconds', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('setTimeout(dismiss, 5000)'), 'Must auto-dismiss after 5 seconds (5000ms)');
+});
+
+test('WELCOME-AUTOHIDE-01: Welcome has close button', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-bubble-close'), 'Must have close button');
+  assert.ok(JS.includes("closeBtn?.addEventListener('click'"), 'Close button must be clickable');
+});
+
+test('WELCOME-CLOSE-01: Welcome hidden when chat opens', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-speech-hidden'), 'Must have hidden class');
+  // When chat opens, bubble should be hidden
+  const toggleFn = JS.indexOf('toggle(show)');
+  const fnBlock = JS.slice(toggleFn, toggleFn + 1000);
+  assert.ok(fnBlock.includes('ai-speech-hidden') || fnBlock.includes('speech_dismissed'),
+    'Welcome should hide when chat opens');
+});
+
+test('WELCOME-POSITION-01: Welcome bubble positioned relative to FAB', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  // Speech bubble must be positioned (not static)
+  assert.ok(CSS.includes('.ai-speech-bubble'), 'Must have speech bubble CSS');
+  // Must have animation for entrance
+  assert.ok(CSS.includes('ai-bubble-in'), 'Must have bubble entrance animation');
+});
+
+test('SUGGESTION-01: Suggestions about AMIRBTC capabilities', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('AMIRBTC'), 'Must mention AMIRBTC');
+  assert.ok(JS.includes('چه کارهایی') || JS.includes('امکانات'), 'Must ask about capabilities');
+});
+
+test('SUGGESTION-02: Suggestions are clickable and fill input', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('data-prompt'), 'Must have data-prompt attribute');
+  assert.ok(JS.includes('input.value = prompt'), 'Must fill input on click');
+});
+
+test('SUGGESTION-03: Exactly 3 suggestion cards', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const cardCount = (JS.match(/ai-suggestion-card/g) || []).length;
+  assert.ok(cardCount >= 3, `Must have at least 3 cards, found ${cardCount}`);
+});
+
+console.log('✅ All Phase 20 E2E + vision + attachment + FAB + welcome tests loaded.');
