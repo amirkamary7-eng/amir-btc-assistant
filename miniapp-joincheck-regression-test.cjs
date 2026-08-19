@@ -141,50 +141,31 @@ test('BUG2-003: with forceRefresh=false (default), KV cache read STILL happens (
 // Section 2: Bug #1 — Bootstrap stale-DB-row override REMOVED
 // ============================================================================
 
-test('BUG1-001: users.js bootstrap NO LONGER trusts freshUserRow.channel_joined to skip forceRefresh', () => {
-  // The stale-DB-row optimization must be REMOVED from the else branch.
-  // The old code had (inside else): `if (freshUserRow?.channel_joined) { channelJoined = true; } else { ... forceRefresh:true ... }`
-  // The new code has (inside else): `membership = await resolveChannelMembership(..., { forceRefresh: true }); channelJoined = Boolean(membership?.joined);`
-  // We verify by checking that the else branch does NOT contain `channelJoined = true`
-  // before the forceRefresh:true call.
-  const forceRefreshFalsePos = USERS_CTRL_SRC.indexOf('{ forceRefresh: false }');
-  assert.ok(forceRefreshFalsePos > -1, 'forceRefresh:false call must exist');
-  const elsePos = USERS_CTRL_SRC.indexOf('} else {', forceRefreshFalsePos);
-  assert.ok(elsePos > -1, 'else branch must exist after forceRefresh:false call');
-  const forceRefreshTruePos = USERS_CTRL_SRC.indexOf('{ forceRefresh: true }', elsePos);
-  assert.ok(forceRefreshTruePos > -1, 'forceRefresh:true must exist in else branch');
-  const betweenSection = USERS_CTRL_SRC.slice(elsePos, forceRefreshTruePos);
-  assert.ok(!betweenSection.includes('channelJoined = true'),
-    'else branch must NOT set channelJoined = true (stale override removed). ' +
-    'Between else and forceRefresh:true: ' + JSON.stringify(betweenSection.slice(0, 300)));
+test('BUG1-001: users.js bootstrap uses MembershipGateway (single call, no stale DB override)', () => {
+  // STEP 5 migration: bootstrap now uses a single membershipGateway.check() call
+  // instead of TWO sequential resolveChannelMembership calls. The stale-DB-row
+  // override (freshUserRow.channel_joined) must NOT be used to skip the check.
+  assert.ok(USERS_CTRL_SRC.includes('membershipGateway.check'),
+    'bootstrap must use membershipGateway.check');
+  assert.ok(!USERS_CTRL_SRC.includes('if (freshUserRow?.channel_joined)'),
+    'bootstrap must NOT use freshUserRow.channel_joined to skip membership check');
 });
 
-test('BUG1-002: users.js bootstrap ALWAYS calls forceRefresh:true when forceRefresh:false returns not-joined', () => {
-  // The new code path must be:
-  //   let membership = await resolveChannelMembership(..., { forceRefresh: false });
-  //   if (membership?.joined) { channelJoined = true; }
-  //   else {
-  //     membership = await resolveChannelMembership(..., { forceRefresh: true });
-  //     channelJoined = Boolean(membership?.joined);
-  //   }
-  assert.ok(USERS_CTRL_SRC.includes('ROOT-CAUSE FIX (AUDIT-P1 / Bug #1)'),
-    'Bug #1 fix comment must be present');
-  assert.ok(USERS_CTRL_SRC.includes('{ forceRefresh: false }'),
-    'First call must use forceRefresh: false');
-  assert.ok(USERS_CTRL_SRC.includes('{ forceRefresh: true }'),
-    'Second call must use forceRefresh: true');
-  // Verify the else branch directly calls forceRefresh:true
-  // (no stale `if (freshUserRow?.channel_joined)` override in between)
-  const forceRefreshFalsePos = USERS_CTRL_SRC.indexOf('{ forceRefresh: false }');
-  const elsePos = USERS_CTRL_SRC.indexOf('} else {', forceRefreshFalsePos);
-  const forceRefreshTruePos = USERS_CTRL_SRC.indexOf('{ forceRefresh: true }', elsePos);
-  assert.ok(forceRefreshTruePos > elsePos, 'forceRefresh:true must be after else');
-  // Check for the SPECIFIC stale-override code pattern (not just the string 'channel_joined'
-  // which appears in comments describing the old behavior)
-  const betweenSection = USERS_CTRL_SRC.slice(elsePos, forceRefreshTruePos);
-  assert.ok(!betweenSection.includes('if (freshUserRow?.channel_joined)'),
-    'else branch must NOT contain `if (freshUserRow?.channel_joined)` override. ' +
-    'Between else and forceRefresh:true: ' + JSON.stringify(betweenSection.slice(0, 300)));
+test('BUG1-002: users.js bootstrap makes a SINGLE membership call (no duplicate forceRefresh)', () => {
+  // STEP 5 migration: the old code called resolveChannelMembership TWICE
+  // (forceRefresh:false then forceRefresh:true if first not-joined).
+  // The new code calls membershipGateway.check ONCE with forceRefresh:false.
+  // The Gateway internally handles cache miss → fresh Telegram check.
+  assert.ok(USERS_CTRL_SRC.includes('membershipGateway.check'),
+    'bootstrap must use membershipGateway.check');
+  // Must NOT have a second resolveChannelMembership call with forceRefresh:true
+  const firstCheckPos = USERS_CTRL_SRC.indexOf('membershipGateway.check');
+  assert.ok(firstCheckPos > -1, 'membershipGateway.check call must exist');
+  // The old duplicate pattern (resolveChannelMembership + forceRefresh:true in else)
+  // must be GONE:
+  const stalePattern = /resolveChannelMembership\(.*forceRefresh:\s*true/s;
+  assert.ok(!stalePattern.test(USERS_CTRL_SRC.slice(firstCheckPos, firstCheckPos + 2000)),
+    'bootstrap must NOT have a second resolveChannelMembership(forceRefresh:true) call');
 });
 
 test('BUG1-003: error fallback still uses freshUserRow.channel_joined (safe best-effort)', () => {
@@ -200,15 +181,19 @@ test('BUG1-003: error fallback still uses freshUserRow.channel_joined (safe best
 // Section 3: /start handler still uses forceRefresh:true (no regression)
 // ============================================================================
 
-test('NOREGRESS-001: /start handler still calls resolveChannelMembership with forceRefresh: true', () => {
-  // Verify /start (in worker-proxy.js) still uses forceRefresh:true
-  assert.ok(WORKER_SRC.includes('resolveChannelMembership(env, messageContext.userId, { forceRefresh: true })'),
-    '/start must still call resolveChannelMembership with forceRefresh: true');
+test('NOREGRESS-001: /start handler uses MembershipGateway with forceRefresh: true', () => {
+  // STEP 4 of Membership Gateway migration: /start now calls membershipGateway.check()
+  assert.ok(WORKER_SRC.includes('membershipGateway.check(env, messageContext.userId, { forceRefresh: true })'),
+    '/start must call membershipGateway.check with forceRefresh: true');
 });
 
-test('NOREGRESS-002: /api/users/check-join still calls resolveChannelMembership with forceRefresh: true', () => {
-  assert.ok(WORKER_SRC.includes("resolveChannelMembership(env, _joinUserId, { forceRefresh: true })"),
-    '/api/users/check-join must still call resolveChannelMembership with forceRefresh: true');
+test('NOREGRESS-002: /api/users/check-join uses MembershipGateway with forceRefresh: true', () => {
+  // STEP 2 of Membership Gateway migration: check-join now calls membershipGateway.check()
+  // instead of resolveChannelMembership directly. The Gateway wraps the same logic
+  // (parallel Telegram, dedup, fail-closed) but preserves the response shape:
+  // { status: 'success', channel_joined: boolean }
+  assert.ok(WORKER_SRC.includes("membershipGateway.check(env, _joinUserId, { forceRefresh: true })"),
+    '/api/users/check-join must call membershipGateway.check with forceRefresh: true');
 });
 
 // ============================================================================
