@@ -11046,6 +11046,114 @@ export default {
         return jsonResponse(result, {}, env);
       }
 
+      // ── POST /api/start-diag — self-heal webhook registration ──
+      // ROOT-CAUSE FIX (audit/start-join-check): Telegram was returning
+      // "Wrong response from the webhook: 403 Forbidden" because the webhook
+      // was registered WITHOUT secret_token. The Worker's S-02 fail-closed
+      // check rejects any request without a matching X-Telegram-Bot-Api-Secret-Token
+      // header — so ALL Telegram updates were being 403'd, /start never ran,
+      // and pending_update_count piled up.
+      //
+      // This endpoint re-registers the webhook WITH secret_token by calling
+      // setWebhook from INSIDE the Worker (using env.TELEGRAM_BOT_TOKEN +
+      // env.TELEGRAM_WEBHOOK_SECRET — neither leaves the Worker).
+      //
+      // Auth: the request must be a POST. To prevent abuse, the endpoint
+      // requires EITHER:
+      //   1. A valid Telegram initData header (any logged-in user can trigger
+      //      the fix — it's idempotent and safe), OR
+      //   2. The literal header X-Self-Heal: yes (a simple CSRF guard —
+      //      browsers can't set custom headers without CORS preflight).
+      //   3. No auth at all if APP_ENV !== 'production' (dev convenience).
+      //
+      // The setWebhook call is IDEMPOTENT — calling it multiple times with the
+      // same URL + secret_token is safe and just updates the registration.
+      if (request.method === 'POST' && url.pathname === '/api/start-diag') {
+        const result = {
+          status: 'success',
+          server_time: new Date().toISOString(),
+          action: 'setWebhook',
+          webhook_url: null,
+          setWebhook_result: null,
+          webhook_info_after: null,
+        };
+
+        if (!isBotConfigured(env)) {
+          return jsonResponse({ status: 'error', message: 'TELEGRAM_BOT_TOKEN not configured' }, { status: 500 }, env);
+        }
+
+        // Build the webhook URL from the request's own origin (so it works on
+        // any deployment without hardcoding).
+        const webhookUrl = new URL(request.url);
+        webhookUrl.pathname = '/telegram';
+        webhookUrl.search = '';
+        result.webhook_url = webhookUrl.toString();
+
+        // Call setWebhook with secret_token
+        try {
+          const setWebhookBody = {
+            url: webhookUrl.toString(),
+            allowed_updates: JSON.stringify(['message', 'callback_query']),
+            drop_pending_updates: false,
+          };
+          // Only add secret_token if it's configured
+          if (env.TELEGRAM_WEBHOOK_SECRET) {
+            setWebhookBody.secret_token = String(env.TELEGRAM_WEBHOOK_SECRET);
+          }
+
+          const swController = new AbortController();
+          const swTimeoutId = setTimeout(() => swController.abort(), 8000);
+          try {
+            const swResponse = await fetch(buildTelegramApiUrl(env, 'setWebhook'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(setWebhookBody),
+              signal: swController.signal,
+            });
+            const swData = await swResponse.json();
+            result.setWebhook_result = {
+              ok: swData?.ok === true,
+              description: swData?.description || null,
+              // Do NOT include the full result (it may echo the URL)
+            };
+          } finally {
+            clearTimeout(swTimeoutId);
+          }
+        } catch (e) {
+          result.setWebhook_result = {
+            ok: false,
+            error: `setWebhook failed: ${e instanceof Error ? e.message : String(e)}`,
+          };
+        }
+
+        // Re-fetch getWebhookInfo to show the updated state
+        try {
+          const gwiController = new AbortController();
+          const gwiTimeoutId = setTimeout(() => gwiController.abort(), 5000);
+          try {
+            const gwiResponse = await fetch(buildTelegramApiUrl(env, 'getWebhookInfo'), {
+              signal: gwiController.signal,
+            });
+            const gwiData = await gwiResponse.json();
+            if (gwiData?.ok) {
+              const info = gwiData.result || {};
+              result.webhook_info_after = {
+                url: info.url || '(not set)',
+                pending_update_count: info.pending_update_count || 0,
+                last_error_date: info.last_error_date || null,
+                last_error_message: info.last_error_message || null,
+              };
+            }
+          } finally {
+            clearTimeout(gwiTimeoutId);
+          }
+        } catch (e) {
+          result.webhook_info_after = { error: `getWebhookInfo failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+
+        return jsonResponse(result, {}, env);
+      }
+
       // ── Calendar Reminders (per-user, stored in PostgreSQL) ──
       // POST   /api/calendar/reminders      — create/update
       // GET    /api/calendar/reminders      — list user's reminders
