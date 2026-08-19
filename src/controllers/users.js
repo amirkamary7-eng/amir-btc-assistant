@@ -27,6 +27,8 @@ export function createUserHandlers(deps) {
     adminRepo,
     // [BOOTSTRAP-E2E] diagnostic logging — traces admin detection + join check
     logBootstrapE2E,
+    // MembershipGateway — central membership decision authority (Step 5 migration)
+    membershipGateway,
     // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap
     fireDailyLoginMission,
   } = deps;
@@ -146,13 +148,19 @@ export function createUserHandlers(deps) {
       if (tgUser?.id) {
         try {
           // [BOOTSTRAP-E2E] Log membership check start
-          void logBootstrapE2E(env, { phase: 'membership_check_start', userId, forceRefresh: false });
-          let membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: false });
-          // [BOOTSTRAP-E2E] Log membership check result (forceRefresh:false)
-          void logBootstrapE2E(env, { phase: 'membership_check_1', userId, joined: Boolean(membership?.joined), reason: membership?.reason || null, admin: Boolean(membership?.admin) });
-          if (membership?.joined) {
-            channelJoined = true;
-          } else {
+          void logBootstrapE2E(env, { phase: 'membership_check_start', userId });
+          // STEP 5: single Gateway call replaces TWO sequential resolveChannelMembership calls.
+          const membership = await membershipGateway.check(env, String(tgUser?.id || userId), { forceRefresh: false });
+          channelJoined = Boolean(membership?.joined);
+          void logBootstrapE2E(env, { phase: 'membership_check_1', userId, joined: channelJoined, reason: membership?.reason || null, admin: Boolean(membership?.admin) });
+        } catch (e) {
+          // On error, fall back to the DB row (best-effort). This is safe because
+          // requireChannelJoin middleware will re-check on every protected API call.
+          channelJoined = Boolean(freshUserRow?.channel_joined);
+          void logBootstrapE2E(env, { phase: 'membership_error', userId, error: String(e?.message || e).slice(0, 200), fallback_channel_joined: channelJoined });
+        }
+      } else {
+        channelJoined = Boolean(freshUserRow?.channel_joined);
             // ROOT-CAUSE FIX (AUDIT-P1 / Bug #1):
             // The previous "PHASE 2 SAFE OPTIMIZATION" trusted freshUserRow.channel_joined
             // (a DB column from bootstrap() RETURNING) to skip the forceRefresh:true call.
@@ -167,20 +175,7 @@ export function createUserHandlers(deps) {
             // joined:false. The cost is +1 Telegram getChatMember call per bootstrap when
             // the cache says not-joined (rare — only when KV '0' or DB channel_joined=false).
             // This is acceptable: bootstrap runs once per Mini App open, not per API call.
-            membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: true });
-            channelJoined = Boolean(membership?.joined);
-            // [BOOTSTRAP-E2E] Log membership check result (forceRefresh:true)
-            void logBootstrapE2E(env, { phase: 'membership_check_2', userId, joined: channelJoined, reason: membership?.reason || null });
-          }
-        } catch (e) {
-          // On error, fall back to the DB row (best-effort). This is safe because
-          // requireChannelJoin middleware will re-check on every protected API call.
-          channelJoined = Boolean(freshUserRow?.channel_joined);
-          // [BOOTSTRAP-E2E] Log membership check error
-          void logBootstrapE2E(env, { phase: 'membership_error', userId, error: String(e?.message || e).slice(0, 200), fallback_channel_joined: channelJoined });
-        }
-      } else {
-        channelJoined = Boolean(freshUserRow?.channel_joined);
+
         void logBootstrapE2E(env, { phase: 'no_tg_user_id', userId, fallback_channel_joined: channelJoined });
       }
 

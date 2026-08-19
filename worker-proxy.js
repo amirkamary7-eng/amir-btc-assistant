@@ -28,6 +28,7 @@ import { createCalendarReminderRepository } from './src/repositories/calendar_re
 import { createCalendarReminderHandlers } from './src/controllers/calendar_reminders.js';
 import { createAdminRepository } from './src/repositories/admin.js';
 import { createAdminHandlers } from './src/controllers/admin.js';
+import { createMembershipGateway } from './src/services/membershipGateway.js';
 import { createRewardCenterRepository } from './src/repositories/reward_center.js';
 import { createRewardCenterHandlers } from './src/controllers/reward_center.js';
 import { createNotificationPlatformRepository, setEnvSendTelegramMessage } from './src/repositories/notification_platform.js';
@@ -1114,11 +1115,12 @@ async function requireChannelJoin(user, env) {
   if (!user || !user.id) {
     return jsonResponse({ detail: 'Authentication required' }, { status: 401 }, env);
   }
-  if (isAdminTelegramId(env, user.id)) {
-    return null; // Admin always passes
-  }
+  // STEP 6 (Membership Gateway migration): middleware now uses Gateway.
+  // The Gateway's in-memory session cache (30s TTL) makes this fast path
+  // for repeated requests within the same isolate — no KV read needed.
+  // Admin bypass is handled inside the Gateway (isAdminTelegramId early exit).
   try {
-    const membership = await resolveChannelMembership(env, String(user.id), { forceRefresh: false, skipRewardProcessing: true });
+    const membership = await membershipGateway.check(env, String(user.id), { forceRefresh: false, skipSessionCache: false });
     if (membership?.joined) {
       return null; // Member — allowed
     }
@@ -8215,6 +8217,26 @@ const userRepo = createUserRepository({ queryDb, queryDbTransaction, normalizeOp
 // adminRepo must be created BEFORE userHandlers because userHandlers (bootstrap)
 // checks the DB admins table to detect DB-added admins (not just env super admin).
 const adminRepo = createAdminRepository({ queryDb, normalizeOptionalString });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MembershipGateway — central membership decision authority.
+// Created here (after all helper functions are defined) so it can wire to:
+//   isAdminTelegramId, getCachedJoinStatus, setCachedJoinStatus, getDbUserJoinState,
+//   persistDbUserJoinState, checkChannelMembership, checkAdditionalRequiredChannels,
+//   isDatabaseConfigured, safeError.
+// All callers (bootstrap, check-join, /start, middleware) funnel through this.
+// ═══════════════════════════════════════════════════════════════════════════
+const membershipGateway = createMembershipGateway({
+  isAdminTelegramId,
+  getCachedJoinStatus,
+  setCachedJoinStatus,
+  getDbUserJoinState,
+  persistDbUserJoinState,
+  checkChannelMembership,
+  checkAdditionalRequiredChannels,
+  isDatabaseConfigured,
+  safeError,
+});
 const userHandlers = createUserHandlers({
   jsonResponse,
   optionalTelegramAuth,
@@ -8233,6 +8255,8 @@ const userHandlers = createUserHandlers({
   adminRepo,
   // [BOOTSTRAP-E2E] diagnostic logging — traces admin detection + join check
   logBootstrapE2E,
+  // MembershipGateway — central membership authority (Step 5 migration)
+  membershipGateway,
   // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap.
   // walletHandlers is created above (line ~6809) so it's in scope here.
   fireDailyLoginMission: (...args) => walletHandlers.fireDailyLoginMission(...args),
@@ -9459,7 +9483,7 @@ async function handleTelegramWebhook(request, env) {
       }
 
       // Check channel membership
-      const membership = await resolveChannelMembership(env, userId, { forceRefresh: true });
+      const membership = await membershipGateway.check(env, userId, { forceRefresh: true });
       
       if (membership?.joined) {
         // User is a member → show WebApp button, answer callback with success
@@ -9541,7 +9565,7 @@ async function handleTelegramWebhook(request, env) {
     // trusted stale KV cache / DB values — a user who LEFT the channel
     // still got the "member" response and the Mini App button.
     // Now forceRefresh:true forces a real Telegram API call every time.
-    const membership = await resolveChannelMembership(env, messageContext.userId, { forceRefresh: true });
+    const membership = await membershipGateway.check(env, messageContext.userId, { forceRefresh: true });
     // [START-E2E] Membership resolved
     void logStartE2E(env, {
       phase: 'membership_resolved',
@@ -12660,7 +12684,7 @@ export default {
             await env.RATE_LIMITS.put(_rlKey, '1', { expirationTtl: 60 });
           } catch { /* non-fatal */ }
         }
-        const membership = await resolveChannelMembership(env, _joinUserId, { forceRefresh: true });
+        const membership = await membershipGateway.check(env, _joinUserId, { forceRefresh: true });
         return jsonResponse({ status: 'success', channel_joined: Boolean(membership?.joined) }, {}, env);
       }
 
