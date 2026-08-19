@@ -475,6 +475,42 @@ async function flushDiagLog(env) { /* no-op */ }
 function diagLogSync(env, entry) { /* no-op */ }
 
 // ============================================================================
+// [START-E2E] Diagnostic logging — /start-specific
+// ============================================================================
+// PURPOSE: Trace the complete /start path from webhook entry to sendMessage
+// result. Stored in APP_CACHE KV under a single rolling key (last 20 entries,
+// TTL 1800s) so it can be read via GET /api/start-diag WITHOUT wrangler tail.
+//
+// SECURITY: No tokens, no PII. userId is reduced to a 4-char correlation suffix
+// (last 4 digits) — enough to correlate entries within a single /start flow
+// without exposing the real Telegram ID. Telegram error descriptions are
+// passed through as-is (they contain no secrets).
+//
+// COST: 1 KV read + 1 KV write per /start invocation = 2 subrequests.
+// At ~10-50 /start invocations/day → 20-100 KV ops/day (well under 1,000/day).
+async function logStartE2E(env, entry) {
+  if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
+  try {
+    const key = 'start:e2e_log';
+    const raw = await env.APP_CACHE.get(key).catch(() => null);
+    let arr = [];
+    if (raw) {
+      try { arr = JSON.parse(raw) || []; } catch { arr = []; }
+    }
+    const sanitized = { ts: new Date().toISOString(), ...entry };
+    // Reduce userId to a 4-char correlation suffix (no PII)
+    if (sanitized.userId) {
+      const uid = String(sanitized.userId);
+      sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
+      delete sanitized.userId;
+    }
+    arr.push(sanitized);
+    if (arr.length > 20) arr = arr.slice(-20);
+    await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
+  } catch { /* non-fatal — diagnostics must never break /start */ }
+}
+
+// ============================================================================
 // MAINTENANCE MODE — System-wide maintenance state stored in APP_CACHE KV
 // with in-memory fallback for when KV writes fail (free-plan daily limit).
 // ============================================================================
@@ -7984,6 +8020,13 @@ function handleHealth(env) {
     bot_configured: isBotConfigured(env),
     database_ready: isDatabaseConfigured(env),
     cache_ready: isCacheLayerConfigured(env),
+    // [START-E2E] Added for /start diagnostics — booleans only, no values exposed.
+    // If webapp_url_set=false, the /start MEMBER reply has an empty web_app url
+    // → Telegram rejects sendMessage with 400 → user sees nothing.
+    webapp_url_set: Boolean(env.WEBAPP_URL && String(env.WEBAPP_URL).trim()),
+    // If required_channel is the default 'amir_btc_2024', the channel may not be
+    // configured for this deployment (getChatMember will fail → user treated as non-member).
+    required_channel_set: Boolean(resolveRequiredChannel(env) && resolveRequiredChannel(env) !== 'amir_btc_2024'),
   }, {}, env);
 }
 
@@ -9453,14 +9496,29 @@ async function handleTelegramWebhook(request, env) {
 
     // ── Handle /start command ───────────────────────────────────────────────
     messageContext = extractTelegramMessageContext(updatePayload);
-        if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
+    if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
+      // Not a /start command — silent 200 (Telegram expects 200 for all webhooks)
+      if (messageContext) {
+        await logStartE2E(env, { phase: 'not_start_command', userId: messageContext.userId, text_preview: String(messageContext.text || '').slice(0, 30) });
+      }
       return new Response(null, {
         status: 200,
         headers: withCors({}, env),
       });
     }
 
+    // [START-E2E] /start command detected
+    await logStartE2E(env, {
+      phase: 'command_detected',
+      userId: messageContext.userId,
+      has_chat_id: messageContext.chatId != null,
+      has_start_param: Boolean(messageContext.startParam),
+      start_param: messageContext.startParam ? 'present' : 'absent',
+    });
+
     if (!isBotConfigured(env)) {
+      // [START-E2E] Bot not configured — this is the silent-abort point
+      await logStartE2E(env, { phase: 'bot_not_configured', userId: messageContext.userId });
       return new Response(null, {
         status: 200,
         headers: withCors({}, env),
@@ -9473,7 +9531,13 @@ async function handleTelegramWebhook(request, env) {
     // still got the "member" response and the Mini App button.
     // Now forceRefresh:true forces a real Telegram API call every time.
     const membership = await resolveChannelMembership(env, messageContext.userId, { forceRefresh: true });
-        await diagLog(env, { scope: 'diag-start-handler', userId: messageContext.userId, startParam: messageContext.startParam, text: messageContext.text });
+    // [START-E2E] Membership resolved
+    await logStartE2E(env, {
+      phase: 'membership_resolved',
+      userId: messageContext.userId,
+      joined: Boolean(membership?.joined),
+      reason: membership?.reason || null,
+    });
 
     // Store pending referral in KV so check_join callback can retrieve it later
     if (messageContext.startParam && env.JOIN_CACHE && typeof env.JOIN_CACHE.put === 'function') {
@@ -9482,7 +9546,6 @@ async function handleTelegramWebhook(request, env) {
       } catch (e) {
         console.warn('JOIN_CACHE put pending_ref failed:', e.message || e);
       }
-      await diagLog(env, { scope: 'diag-start-stored-pending-ref', userId: messageContext.userId, startParam: messageContext.startParam });
     }
 
     // If no startParam in current /start, check KV for a previously stored one
@@ -9491,15 +9554,47 @@ async function handleTelegramWebhook(request, env) {
       const storedRef = await env.JOIN_CACHE.get(`pending_ref:${messageContext.userId}`);
       if (storedRef) {
         effectiveStartParam = storedRef;
-        await diagLog(env, { scope: 'diag-start-recovered-pending-ref', userId: messageContext.userId, storedRef });
       }
     }
 
     const replyPayload = await buildStartReplyPayloadAsync(env, messageContext.chatId, Boolean(membership?.joined), effectiveStartParam);
+    // [START-E2E] Reply payload built
+    const finalWebAppUrl = (replyPayload.reply_markup && replyPayload.reply_markup.inline_keyboard && replyPayload.reply_markup.inline_keyboard[0] && replyPayload.reply_markup.inline_keyboard[0][0] && replyPayload.reply_markup.inline_keyboard[0][0].web_app) ? replyPayload.reply_markup.inline_keyboard[0][0].web_app.url : null;
+    const hasWebAppButton = Boolean(finalWebAppUrl);
+    await logStartE2E(env, {
+      phase: 'reply_built',
+      userId: messageContext.userId,
+      is_member: Boolean(membership?.joined),
+      has_webapp_button: hasWebAppButton,
+      webapp_url_present: Boolean(finalWebAppUrl && finalWebAppUrl.length > 0),
+      chat_id_present: replyPayload.chat_id != null,
+    });
 
-    const finalWebAppUrl = (replyPayload.reply_markup && replyPayload.reply_markup.inline_keyboard && replyPayload.reply_markup.inline_keyboard[0] && replyPayload.reply_markup.inline_keyboard[0][0] && replyPayload.reply_markup.inline_keyboard[0][0].web_app) ? replyPayload.reply_markup.inline_keyboard[0][0].web_app.url : 'no-webapp-button';
-    await diagLog(env, { scope: 'diag-start-reply-url', webAppUrl: finalWebAppUrl });
-    await sendTelegramMessage(env, replyPayload);
+    // [START-E2E] sendMessage started
+    await logStartE2E(env, { phase: 'sendMessage_started', userId: messageContext.userId });
+    let sendMessageResult = null;
+    try {
+      sendMessageResult = await sendTelegramMessage(env, replyPayload);
+      // [START-E2E] sendMessage succeeded
+      await logStartE2E(env, {
+        phase: 'sendMessage_completed',
+        userId: messageContext.userId,
+        telegram_ok: true,
+        message_id: sendMessageResult?.messageId || null,
+      });
+    } catch (sendErr) {
+      // [START-E2E] sendMessage FAILED — capture the real Telegram error
+      // sendTelegramMessage throws with the error_code + description in the message
+      const errMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+      await logStartE2E(env, {
+        phase: 'sendMessage_failed',
+        userId: messageContext.userId,
+        telegram_ok: false,
+        error: errMsg.slice(0, 300),
+      });
+      // Re-throw so the outer catch block can send an error notification to the user
+      throw sendErr;
+    }
 
     // ROOT-CAUSE FIX: syncMenuButton was called fire-and-forget (no await),
     // which caused "A promise was resolved from a different request context"
@@ -9507,18 +9602,45 @@ async function handleTelegramWebhook(request, env) {
     // response was sent, resolving in a dead request context.
     // FIX: await it so it completes BEFORE the response is returned.
     // It's fast (~100ms) and idempotent, so blocking is acceptable.
-    await syncMenuButton(env);
+    try {
+      await syncMenuButton(env);
+      await logStartE2E(env, { phase: 'syncMenuButton_done', userId: messageContext.userId });
+    } catch (menuErr) {
+      // syncMenuButton has its own internal try/catch (swallows errors silently).
+      // This catch is a safety net — it should never fire.
+      await logStartE2E(env, { phase: 'syncMenuButton_error', userId: messageContext.userId, error: String(menuErr?.message || menuErr).slice(0, 200) });
+    }
+
+    // [START-E2E] Handler completed successfully
+    await logStartE2E(env, { phase: 'handler_complete', userId: messageContext.userId });
   } catch (error) {
     console.error(safeError('telegram-webhook-error', error));
+    // [START-E2E] Handler error — capture which step failed
+    await logStartE2E(env, {
+      phase: 'handler_error',
+      userId: messageContext?.userId,
+      error: String(error?.message || error).slice(0, 300),
+      error_type: error?.constructor?.name || 'Error',
+    });
     // Attempt to notify the user that something went wrong
     if (messageContext?.chatId) {
       try {
-        await sendTelegramMessage(env, {
+        const notifyResult = await sendTelegramMessage(env, {
           chat_id: messageContext.chatId,
           text: '⚠️ خطای موقت در پردازش درخواست. لطفاً دوباره /start را بزنید.',
         });
+        await logStartE2E(env, {
+          phase: 'error_notification_sent',
+          userId: messageContext.userId,
+          telegram_ok: Boolean(notifyResult?.ok),
+        });
       } catch (notifyErr) {
         console.error(safeError('start-error-notify-failed', notifyErr));
+        await logStartE2E(env, {
+          phase: 'error_notification_failed',
+          userId: messageContext.userId,
+          error: String(notifyErr?.message || notifyErr).slice(0, 200),
+        });
       }
     }
   }
@@ -10840,6 +10962,88 @@ export default {
           console.warn('[news-ai-pending] error:', e?.message);
           return jsonResponse({ status: 'error', message: 'Failed to load diagnostics' }, { status: 500 }, env);
         }
+      }
+
+      // ── /api/start-diag — [START-E2E] diagnostic endpoint ──
+      // Public (no auth) — same policy as /api/cron-monitor, /api/news-ai-monitor.
+      // PURPOSE: Trace the /start path end-to-end WITHOUT wrangler tail.
+      //
+      // Returns:
+      //   1. Telegram getWebhookInfo — called from INSIDE the Worker using
+      //      env.TELEGRAM_BOT_TOKEN (token NEVER leaves the Worker).
+      //      Shows: webhook URL, pending_update_count, last_error_date,
+      //      last_error_message (THE key diagnostic — if Telegram is getting
+      //      403 from the webhook, this shows it).
+      //   2. Config booleans: bot_configured, webapp_url_set, required_channel_set
+      //      (booleans only — NO values exposed).
+      //   3. [START-E2E] log entries (last 20) from APP_CACHE KV.
+      //      Shows the actual /start handler flow: command_detected →
+      //      membership_resolved → reply_built → sendMessage_started →
+      //      sendMessage_completed/failed → handler_complete/error.
+      if (request.method === 'GET' && url.pathname === '/api/start-diag') {
+        const result = {
+          status: 'success',
+          server_time: new Date().toISOString(),
+          config: {
+            bot_configured: isBotConfigured(env),
+            webapp_url_set: Boolean(env.WEBAPP_URL && String(env.WEBAPP_URL).trim()),
+            required_channel_set: Boolean(resolveRequiredChannel(env) && resolveRequiredChannel(env) !== 'amir_btc_2024'),
+            webhook_secret_set: Boolean(env.TELEGRAM_WEBHOOK_SECRET),
+          },
+          webhook_info: null,
+          e2e_log: [],
+        };
+
+        // 1. Call Telegram getWebhookInfo from INSIDE the Worker (no token exposure)
+        if (isBotConfigured(env)) {
+          try {
+            const tgController = new AbortController();
+            const tgTimeoutId = setTimeout(() => tgController.abort(), 5000);
+            try {
+              const tgResponse = await fetch(buildTelegramApiUrl(env, 'getWebhookInfo'), {
+                signal: tgController.signal,
+              });
+              const tgData = await tgResponse.json();
+              if (tgData?.ok) {
+                // Return ONLY safe fields — no secrets
+                const info = tgData.result || {};
+                result.webhook_info = {
+                  url: info.url || '(not set)',
+                  has_custom_certificate: Boolean(info.has_custom_certificate),
+                  pending_update_count: info.pending_update_count || 0,
+                  last_error_date: info.last_error_date || null,
+                  last_error_message: info.last_error_message || null,
+                  max_connections: info.max_connections || null,
+                  ip_address: info.ip_address || null,
+                  // Note: getWebhookInfo does NOT return secret_token (write-only).
+                  // If last_error_message mentions 403, the webhook secret is
+                  // likely misconfigured (secret set in Worker but webhook
+                  // registered without secret_token).
+                };
+              } else {
+                result.webhook_info = { error: tgData?.description || 'Telegram API returned ok:false' };
+              }
+            } finally {
+              clearTimeout(tgTimeoutId);
+            }
+          } catch (e) {
+            result.webhook_info = { error: `Failed to call getWebhookInfo: ${e instanceof Error ? e.message : String(e)}` };
+          }
+        } else {
+          result.webhook_info = { error: 'TELEGRAM_BOT_TOKEN not configured — cannot call getWebhookInfo' };
+        }
+
+        // 2. Read [START-E2E] log entries from KV
+        try {
+          const raw = await env.APP_CACHE?.get('start:e2e_log').catch(() => null);
+          if (raw) {
+            result.e2e_log = JSON.parse(raw) || [];
+          }
+        } catch (e) {
+          result.e2e_log = [{ error: `Failed to read e2e log: ${e instanceof Error ? e.message : String(e)}` }];
+        }
+
+        return jsonResponse(result, {}, env);
       }
 
       // ── Calendar Reminders (per-user, stored in PostgreSQL) ──
