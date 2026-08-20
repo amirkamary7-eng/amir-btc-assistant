@@ -331,6 +331,36 @@ window.addEventListener('hashchange', () => {
 let ADMIN_ID = null; // Set dynamically from bootstrap API response
 let isCurrentUserAdmin = false; // SECURITY: Only set from server bootstrap response
 let BOT_USERNAME = 'Amir_BTC_AssistantBot'; // Fallback — overridden by bootstrap API (H-R4)
+// WATCHLIST PREMIUM LIMIT FIX (Problem A):
+// Previously hard-coded `const MAX_WATCHLIST = 7` — premium users still hit
+// the Free limit at 7 because the frontend gate (toggleWatchlist at ~line 5560)
+// blocked the PUT request before the backend (which correctly supports 20 for
+// premium) was ever reached. The backend limit is correct
+// (src/controllers/watchlist.js:_getEffectiveMaxWatchlist → entitlement_config
+// .watchlist.normal_max=7, premium_max=20), but the frontend pre-empted it.
+//
+// FIX: getMaxWatchlist() returns the effective limit based on the cached
+// premium status from MembershipApp. Safe fallback is 7 (Free) when
+// MembershipApp hasn't loaded yet (e.g. early-session, before profile open).
+// Once the user opens their profile, MembershipApp.loadCard() populates the
+// cache and subsequent toggleWatchlist calls see the premium limit (20).
+//
+// NOTE: the backend remains the authoritative enforcer. Even if a premium
+// user's frontend cache is stale (still thinks Free), the PUT will succeed on
+// the backend up to 20 — the frontend only uses this for UX (show/hide the
+// "+Add" card, disable coin-picker items, gate the toggle). If a Free user
+// somehow bypasses the frontend gate, the backend will still reject at 7+1.
+function getMaxWatchlist() {
+    try {
+        if (window.MembershipApp && typeof window.MembershipApp.isPremiumCached === 'function'
+            && window.MembershipApp.isPremiumCached()) {
+            return 20; // entitlement_config.watchlist.premium_max
+        }
+    } catch (_) { /* ignore — fall through to Free limit */ }
+    return 7; // entitlement_config.watchlist.normal_max
+}
+// Kept for backward-compat with any code/tests that still reference MAX_WATCHLIST
+// directly. Returns the Free limit (7) — the dynamic value is via getMaxWatchlist().
 const MAX_WATCHLIST = 7;
 const PROXY = 'https://proxyserveramirbtc.amirkamary7.workers.dev/?url=';
 const API_BASE = (window.API_BASE || '').replace(/\/$/, '');
@@ -913,11 +943,11 @@ function loadWatchlistFromStorage() {
     if (!stored.length) {
         const legacy = JSON.parse(localStorage.getItem('watchlist') || '[]');
         if (legacy.length) {
-            stored = legacy.slice(0, MAX_WATCHLIST);
+            stored = legacy.slice(0, getMaxWatchlist());
             localStorage.setItem(key, JSON.stringify(stored));
         }
     }
-    watchlist = stored.slice(0, MAX_WATCHLIST);
+    watchlist = stored.slice(0, getMaxWatchlist());
 }
 
 /**
@@ -1078,7 +1108,7 @@ async function _bootstrapUserImpl() {
         }
         if (Array.isArray(data.watchlist)) {
             if (data.watchlist.length) {
-                watchlist = data.watchlist.slice(0, MAX_WATCHLIST);
+                watchlist = data.watchlist.slice(0, getMaxWatchlist());
             } else if (watchlist.length) {
                 await persistWatchlist();
             }
@@ -1098,6 +1128,16 @@ async function _bootstrapUserImpl() {
         if (data.user?.id) {
             ADMIN_ID = String(data.user.id);
             localStorage.setItem('admin_id', ADMIN_ID);
+        }
+
+        // Watchlist premium fix: eagerly populate MembershipApp's premium cache
+        // from the bootstrap is_premium flag so getMaxWatchlist() returns the
+        // correct limit (7 vs 20) from the FIRST render — no waiting for the
+        // lazy loadCard() call on profile open. This is the authoritative
+        // signal from the backend (membershipAuthority.isPremium).
+        if (typeof data.is_premium === 'boolean' && window.MembershipApp
+            && typeof window.MembershipApp.setPremiumFromBootstrap === 'function') {
+            window.MembershipApp.setPremiumFromBootstrap(data.is_premium);
         }
 
         // ── Membership lock gate ──
@@ -5557,12 +5597,25 @@ function toggleWatchlist(symbol, event) {
     const idx = watchlist.indexOf(symbol);
     const isAdding = idx === -1;
     if (isAdding) {
-        if (watchlist.length >= MAX_WATCHLIST) {
-            getTg()?.showPopup?.({
-                title: t('watchlist'),
-                message: t('watchlist_limit'),
-                buttons: [{ type: 'ok' }]
-            }) || alert(t('watchlist_limit'));
+        if (watchlist.length >= getMaxWatchlist()) {
+            // Premium upsell: if the user is NOT premium and has hit the Free
+            // limit (7), point them to the upgrade flow instead of a generic
+            // "limit reached" popup. Premium users (limit 20) won't reach this
+            // branch until 20.
+            const _isPremium = (() => {
+                try { return !!(window.MembershipApp && typeof window.MembershipApp.isPremiumCached === 'function' && window.MembershipApp.isPremiumCached()); }
+                catch (_) { return false; }
+            })();
+            if (!_isPremium && window.MembershipApp && typeof window.MembershipApp.open === 'function') {
+                // Premium upgrade flow
+                window.MembershipApp.open();
+            } else {
+                getTg()?.showPopup?.({
+                    title: t('watchlist'),
+                    message: t('watchlist_limit'),
+                    buttons: [{ type: 'ok' }]
+                }) || alert(t('watchlist_limit'));
+            }
             return;
         }
         watchlist.push(symbol);
@@ -6117,7 +6170,7 @@ function renderWatchlist() {
             ? `<img loading="lazy" src="${escapeHtml(icon)}" onerror="iconFallback(this)" class="watch-card-icon" data-symbol="${safeSymbol}" alt="${safeSymbol}">`
             : `<div class="watch-card-icon forex-icon-fallback" data-symbol="${safeSymbol}">${safeSymbol.slice(0,3)}</div>`;
         return `
-        <div class="watch-card${isForex ? ' watch-card-forex' : ''}" data-symbol="${safeSymbol}" onclick="openCoinDetail(this.dataset.symbol)">
+        <div class="watch-card${isForex ? ' watch-card-forex' : ''}" data-symbol="${safeSymbol}" onclick="${isForex ? 'openForexDetail' : 'openCoinDetail'}(this.dataset.symbol)">
             <div class="watch-card-header">
                 ${iconHtml}
                 <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" aria-label="Remove">
@@ -6132,8 +6185,10 @@ function renderWatchlist() {
         </div>`;
     }).join('');
 
-    // Append "Add Coin" card (only if under global MAX_WATCHLIST limit)
-    if (watchlist.length < MAX_WATCHLIST) {
+    // Append "Add Coin" card (only if under the effective watchlist limit).
+    // Uses getMaxWatchlist() so Premium users (limit 20) see the add-card up
+    // to 19 items, while Free users (limit 7) see it up to 6.
+    if (watchlist.length < getMaxWatchlist()) {
         html += buildAddCoinCardHTML();
     }
 
@@ -6176,7 +6231,7 @@ function populateCoinModal() {
     if (!allCoins.length) return;
     list.innerHTML = allCoins.map(c => {
         const inList = watchlist.includes(c.symbol);
-        const atLimit = !inList && watchlist.length >= MAX_WATCHLIST;
+        const atLimit = !inList && watchlist.length >= getMaxWatchlist();
         const safeSymbol = escapeHtml(c.symbol);
         const safeName = escapeHtml(c.name);
         return `
@@ -8250,6 +8305,20 @@ function parseBtcPairSymbol(symbol) {
 }
 
 async function openCoinDetail(symbol) {
+    // DEFENSE-IN-DEPTH (Watchlist Detail/Chart fix): if this symbol is actually
+    // a forex/metal/stock pair (in allForexPairs), route to openForexDetail
+    // instead. This catches forex symbols that reach openCoinDetail via any
+    // legacy caller or stale DOM that didn't use the isForex-aware routing at
+    // render time (app.js:6120). openForexDetail uses pair.tvSymbol directly
+    // (no /api/charts/resolve backend waterfall) and shows the modal FIRST
+    // (fast path). Without this guard, forex symbols routed through openCoinDetail
+    // hit resolveChartSymbol → /api/charts/resolve → resolveChartExchange which
+    // builds nonsensical candidates (BINANCE:EURUSDUSDT) and runs a 4-24s
+    // waterfall, then shows "chart unavailable".
+    if (Array.isArray(allForexPairs) && allForexPairs.some(f => f.symbol === symbol)) {
+        return openForexDetail(symbol);
+    }
+
     // Increment token to invalidate any in-flight older calls
     const token = ++_detailLoadToken;
 

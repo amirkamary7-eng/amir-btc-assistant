@@ -1248,6 +1248,27 @@
     closeRulesModal: closeRulesModal,
     // Phase 8: Exposed for hero banner — check cached Premium status
     isPremiumCached: function () { return _cache ? isPremium(_cache) : false; },
+    // Watchlist premium fix: eagerly set the premium cache from the bootstrap
+    // response so getMaxWatchlist() returns the correct limit (7 vs 20) from
+    // the FIRST render — no waiting for the lazy loadCard() call on profile open.
+    // The bootstrap is_premium flag comes from the authoritative backend
+    // (membershipAuthority.isPremium). loadCard() will later refresh with the
+    // full DTO (level, status, expireAt, etc.) when the user opens their profile.
+    setPremiumFromBootstrap: function (isPremiumFlag) {
+      if (isPremiumFlag) {
+        // Set a cache shape that isPremium() returns true for.
+        // isPremium(s): s.level !== 'FREE' && s.status === 'APPROVED'
+        _cache = _cache || {};
+        _cache.level = _cache.level || 'PREMIUM';
+        _cache.status = 'APPROVED';
+      } else if (!_cache) {
+        // Only seed the Free cache if we don't already have one — a real
+        // loadCard() result is authoritative and shouldn't be overwritten by
+        // a bootstrap "not premium" (which could be stale if membership was
+        // just upgraded between bootstrap and loadCard).
+        _cache = { level: 'FREE', status: 'APPROVED' };
+      }
+    },
     refresh: function () { _cache = null; _requirement = null; _rules = null; _rulesAcceptedVersion = null; return loadCard(); },
   };
 

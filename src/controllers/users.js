@@ -31,6 +31,11 @@ export function createUserHandlers(deps) {
     membershipGateway,
     // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap
     fireDailyLoginMission,
+    // PHASE 3 (Watchlist premium fix): central premium authority — used to
+    // include an is_premium flag in the bootstrap response so the frontend
+    // (getMaxWatchlist()) can use the correct watchlist limit (7 vs 20) from
+    // the very first render, without waiting for MembershipApp.loadCard().
+    membershipAuthority,
   } = deps;
 
   /**
@@ -212,10 +217,22 @@ export function createUserHandlers(deps) {
 
       // [BOOTSTRAP-E2E] Log final response
       void logBootstrapE2E(env, { phase: 'response', userId, channel_joined: channelJoined, is_admin: isUserAdmin });
+      // Watchlist premium fix: resolve is_premium from the central authority
+      // (membershipAuthority) so the frontend can use the correct watchlist
+      // limit (7 vs 20) from the first render. Non-fatal: defaults to false on
+      // any error so bootstrap still succeeds even if the membership DB is down.
+      let isPremiumUser = false;
+      if (membershipAuthority && typeof membershipAuthority.isPremium === 'function') {
+        try { isPremiumUser = await membershipAuthority.isPremium(env, String(userId)); }
+        catch (e) { /* non-fatal — default false */ }
+      }
       return jsonResponse({
         status: 'success',
         user: userRepo.normalizeRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
         watchlist, bot_username: String(env.BOT_USERNAME || ''), channel_joined: channelJoined, is_admin: isUserAdmin,
+        // Watchlist premium fix: frontend reads this to set MembershipApp cache
+        // eagerly (no waiting for lazy loadCard() on profile open).
+        is_premium: isPremiumUser,
       }, {}, env);
     } catch (error) {
       console.warn(safeError('bootstrap-user', error));
