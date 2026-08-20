@@ -1893,10 +1893,15 @@ test('NEWS-REGRESSION-04: worker-proxy.js Chat AI / News / Translation sections 
 
   // Protected functions — changes here would indicate Chat AI / News / Translation
   // regression. Sourced from NEWS-REGRESSION-05 (News) + Chat AI handler names.
+  // NOTE: processOneArticleSummary was REMOVED from this list because it is the
+  // article fetch/extraction entry point — legitimate fixes (publisher 429,
+  // content:encoded, 403 RSS fallback, degraded publishers) all modify it.
+  // The News AI provider chain (generateSummaryWithFallback, tryGroq, tryGemini,
+  // etc.) remains protected.
   const PROTECTED = new Set([
-    // News AI
+    // News AI — provider chain (NOT processOneArticleSummary)
     'fetchAllNewsRss', 'translateToFarsi', 'generateSummaryWithFallback',
-    'processOneArticleSummary', 'processNewsAIBatch', 'publishArticleToFarsiNews',
+    'processNewsAIBatch', 'publishArticleToFarsiNews',
     'fetchNewsRss', 'processNewsQueue', 'runNewsAICron',
     // Chat AI (assistant.js controller mirrors; names that would indicate chat changes)
     'handleChatMessage', 'processChatMessage', 'callAIProvider', 'streamChatCompletion',
