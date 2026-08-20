@@ -6095,6 +6095,19 @@ async function processOneArticleSummary(env, pool = null) {
     };
   }
 
+  // ── STEP 0: Check content:encoded from RSS (Phase 11 fix) ──
+  // If the RSS item has <content:encoded> with enough text, use it directly
+  // instead of fetching the article URL. This avoids publisher 429/403 entirely
+  // for feeds that provide full article content.
+  let html = null;
+  let contentSource = 'article';
+
+  if (article.contentEncoded && article.contentEncoded.trim().length >= 200) {
+    // content:encoded is available and long enough — use it as article HTML
+    html = article.contentEncoded;
+    contentSource = 'content_encoded';
+    console.log('[NEWS] Using content:encoded from RSS (length=' + html.length + ') — skipping article fetch');
+  } else {
   // ── STEP 1: Fetch article HTML ──
   // NEWSSEC-011 FIX: Validate the article URL scheme before fetching. The URL
   // comes from RSS <link> content (untrusted). Cloudflare Workers already
@@ -6112,8 +6125,6 @@ async function processOneArticleSummary(env, pool = null) {
     articleHostname = new URL(article.url).hostname;
   } catch {}
 
-  let html = null;
-  let contentSource = 'article';
   try {
     const fetchController = new AbortController();
     const fetchTimeout = setTimeout(() => fetchController.abort(), 8000);
@@ -6182,6 +6193,7 @@ async function processOneArticleSummary(env, pool = null) {
     console.warn(`[NEWS] Article fetch error: host=${articleHostname} error=${e?.message?.substring(0, 80) || 'unknown'}`);
     return requeueWithRetry('fetch_error', e?.message?.substring(0, 120));
   }
+  } // end of else (article fetch when content:encoded unavailable)
 
   // ── STEP 2: Extract readable article text ──
   // Fallback chain: <article> → <main> → all <p> tags → RSS description (last resort)
