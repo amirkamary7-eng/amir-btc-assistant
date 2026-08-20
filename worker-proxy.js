@@ -4351,7 +4351,7 @@ async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTr
     const titlesToTranslate = limitedItems.map((item) => item.title || 'بدون عنوان');
 
     titleTranslations = [];
-    const TRANSLATION_BATCH_SIZE = 3;
+    const TRANSLATION_BATCH_SIZE = 1; // FIX: was 3 (parallel) → 1 (sequential) to reduce Groq RPM burst
     for (let i = 0; i < titlesToTranslate.length; i += TRANSLATION_BATCH_SIZE) {
       const batch = titlesToTranslate.slice(i, i + TRANSLATION_BATCH_SIZE);
       const batchResults = await Promise.all(
